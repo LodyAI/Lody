@@ -1,6 +1,7 @@
 import { readSessionHistory } from '@lody/shared/session-data';
 import { readLatestTurn } from '@lody/shared/session-data';
 import {
+  type AcpModelControls,
   type ACPSessionId,
   type AgentConfigId,
   type AgentConfigCliType,
@@ -36,6 +37,8 @@ import {
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
   getSessionRoomId,
+  type AcpCapabilityCacheEntry,
+  decideAcpCapabilityRefreshCache,
   getServerNow,
   SessionCreateRequestValidated,
   SessionHistoryInput,
@@ -62,7 +65,7 @@ import {
   serializeCustomAcpLaunchSpec,
 } from '@lody/shared';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ModelInfo } from '@lody/shared';
 import { Cause, Data, Effect, Exit, Fiber, type Scope } from 'effect';
 import {
@@ -103,7 +106,10 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
 import { captureCli } from '@/lib/analytics/posthog';
-import type { SessionActivePresencePhase } from '@/lib/loro/session-active-presence';
+import type {
+  SessionActivePresencePhase,
+  SessionInitializationStall,
+} from '@/lib/loro/session-active-presence';
 import type { SessionConfig } from './types';
 import type { ISession, SessionManager } from './session-manager';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
@@ -190,7 +196,6 @@ type TurnFinalizationEffects = {
   finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
   persistCodeCollabTurnDiffs?: (sessionId: SessionId, turnId: string) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
-  syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
   updateSessionDiffStats: (
     sessionId: SessionId,
     session: ISession,
@@ -303,6 +308,14 @@ type TurnRuntimeState = {
   /** Serialized ancillary finalization for yielded logical turns. */
   yieldedFinalization: Promise<void>;
   pendingSession?: Promise<ISession>;
+  /**
+   * Latched when the initialization stall watchdog halted this turn. The halt is
+   * a FAILURE, not a cancellation, so the scope finalizer takes
+   * `finalizeStalledInitializationEffect` instead of
+   * `finalizeCancelledTurnEffect` — the race interrupts the losing body fiber,
+   * which would otherwise read as a user cancellation.
+   */
+  initializationStalled: boolean;
   fiber?: Fiber.RuntimeFiber<unknown, unknown>;
 };
 
@@ -450,6 +463,20 @@ class SessionTurnCancelled extends Data.TaggedError('SessionTurnCancelled')<{
   turnId: string;
 }> {}
 
+/**
+ * User-visible copy for a turn stopped by the initialization stall watchdog.
+ * Names the stage that went silent and how long it was given, so the message is
+ * actionable rather than a bare "initialization failed".
+ */
+const formatInitializationStallMessage = (stall: SessionInitializationStall): string => {
+  const seconds = (ms: number) => Math.round(ms / 1000);
+  return (
+    `Session initialization stopped making progress while ${stall.description}: ` +
+    `no change for ${seconds(stall.stalledMs)}s (limit ${seconds(stall.budgetMs)}s). ` +
+    'The turn was stopped instead of waiting indefinitely; send it again to retry.'
+  );
+};
+
 class SessionTurnHalted extends Data.TaggedError('SessionTurnHalted')<{
   sessionId: SessionId;
   reason: ChatFailedReason;
@@ -567,6 +594,7 @@ export type SessionExecutionServiceDeps = {
     modelInfo: ModelInfo | undefined,
     userTurnId?: string
   ) => Promise<void>;
+  syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
   turnFinalization: TurnFinalizationEffects;
   recordChatFailure: (
     sessionDoc: SessionDocument,
@@ -613,10 +641,24 @@ export type SessionExecutionServiceDeps = {
     availableCommands?: AcpCommandSummary[];
     sessionFork: boolean;
     acknowledgedSteer: boolean;
+    sessionTitle?: boolean;
     goalActions?: SessionGoalAction[];
     modelReasoningEfforts?: Record<string, string[]>;
+    modelCapabilities?: Record<string, AcpModelControls>;
     capabilitySourceVersion?: string;
   }>;
+  /**
+   * The `capabilitySourceVersion` a probe would stamp right now, resolved without
+   * starting an agent. `undefined` when it cannot be known without that work, in
+   * which case the persisted entry is never reused.
+   */
+  resolveAcpCapabilitySourceVersion: (input: {
+    cliType: AgentConfigCliType;
+    agentType: string;
+    customAcp?: CustomAcpLaunchSpec;
+    runtimeOverrides?: BuiltinRuntimeOverrides;
+    env?: Record<string, string>;
+  }) => Promise<string | undefined>;
   /** Evict idle sessions if system memory is under pressure */
   evictForMemoryPressure: (excludeSessionId?: SessionId) => Promise<MemoryPressureEvictionResult>;
 };
@@ -693,7 +735,10 @@ type AcpAuthenticationOptions = {
 };
 
 type ResolvedMachineAcpCapabilitiesRefreshRequest = MachineAcpCapabilitiesRefreshRequestValidated &
-  Pick<AgentConfigMeta, 'cliType' | 'agentType' | 'customAcp' | 'runtimeOverrides' | 'env'>;
+  Pick<
+    AgentConfigMeta,
+    'cliType' | 'agentType' | 'customAcp' | 'runtimeOverrides' | 'env' | 'codexAuth'
+  >;
 
 const summarizeAcpAuthMethod = (method: unknown): MachineAcpAuthMethodSummary => {
   const record =
@@ -751,6 +796,15 @@ export class SessionExecutionService {
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
+  /**
+   * One waiter per session while a visible turn is initializing; see
+   * {@link awaitInitializationStall}. Registered for the whole turn because the
+   * watchdog only ever fires while the published status is `initializing`.
+   */
+  private readonly initializationStallWaiters = new Map<
+    SessionId,
+    (stall: SessionInitializationStall) => void
+  >();
   private readonly rewriteBarrierSessions = new Set<SessionId>();
   private readonly rewriteConflictLeaseSessions = new Set<SessionId>();
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
@@ -775,6 +829,14 @@ export class SessionExecutionService {
   // a fresh CLI subprocess and wait a few seconds; running it twice in parallel
   // doubles process cost and races the final `updateAcpCapabilities` write.
   private readonly inFlightAcpRefresh = new Map<string, InFlightAcpRefreshEntry>();
+  /**
+   * Fingerprint of the launch inputs — env included — behind each capability
+   * entry this process wrote. Memory only, on purpose: the entry itself lives in
+   * the Machine Flock document, which syncs to the cloud, and even a hash of a
+   * token is a credential derivative a low-entropy token can be recovered from.
+   * An empty map after restart just means each config probes once.
+   */
+  private readonly acpCapabilityLaunchInputFingerprints = new Map<AgentConfigId, string>();
 
   // Coalesce concurrent install requests for the same agent so the user clicking
   // "download" twice (or a refresh racing an install) triggers a single download.
@@ -1696,6 +1758,14 @@ export class SessionExecutionService {
           requesterUserId: options.userId,
           inputConfig: options.inputConfig,
         };
+        const githubSession =
+          runtime.session ?? this.deps.sessionManager.getSession(options.sessionId);
+        if (githubSession)
+          await this.deps.sessionManager.refreshGhTokenForSession(
+            githubSession,
+            undefined,
+            options.userId
+          );
         // Provider acceptance hands the original dispatch forward. A later
         // user-owned steer turn must not cancel or reopen that responsibility.
         await this.settleVisibleTurn(runtime, 'handled', { force: true });
@@ -2061,6 +2131,7 @@ export class SessionExecutionService {
       cancelFinalized: false,
       interruptRequested: false,
       terminateSessionOnCancel: false,
+      initializationStalled: false,
       ...(options.onTurnSettled
         ? { settlement: { callback: options.onTurnSettled, completed: false } }
         : {}),
@@ -2242,6 +2313,58 @@ export class SessionExecutionService {
       });
   }
 
+  /**
+   * Release what a stalled initialization was holding.
+   *
+   * The stall is a failure, not a cancellation, so it must not go through
+   * `finalizeCancelledTurnEffect` — that would mark the user's turn cancelled.
+   * But that finalizer also owned the pending-create cleanup, and the stall is
+   * the first halt that can land WHILE `SessionManager.createSession` is still
+   * in flight, so the release has to happen here instead.
+   *
+   * Detaching matters more than terminating: the create is cached in
+   * `pendingSessionCreates` keyed by session id, so leaving it there hands the
+   * user's retry the very same wedged promise and stalls it again — the
+   * documented retry path would not actually recover. Nothing here awaits the
+   * wedged promise; if it ever settles, the manager's reaper terminates the
+   * Session it produced.
+   */
+  private finalizeStalledInitializationEffect(
+    runtime: TurnRuntimeState
+  ): Effect.Effect<void, never, never> {
+    const self = this;
+    return Effect.gen(function* () {
+      self.deps.clearActiveTurnId(runtime.sessionId, runtime.turnId);
+
+      // A Session that already materialized is owned by this turn and nobody
+      // else will stop it.
+      const session = runtime.session;
+      if (session) {
+        yield* self.ignoreWithWarning(
+          runtime.sessionId,
+          'Failed to terminate session after initialization stalled',
+          self.tryPromise(() => session.terminate(true))
+        );
+        return;
+      }
+
+      const detached = self.deps.sessionManager.abandonPendingSessionCreate(
+        runtime.sessionId,
+        'initialization-stalled'
+      );
+      if (detached || !runtime.pendingSession) {
+        return;
+      }
+      // The pending promise did not come from the dedupe map (nothing to
+      // detach), so reap it directly rather than leaving a possible orphan.
+      self.terminatePendingSessionWhenReady({
+        sessionId: runtime.sessionId,
+        turnId: runtime.turnId,
+        pendingSession: runtime.pendingSession,
+      });
+    });
+  }
+
   private drainCancelledPrompt(session: ISession, runtime?: TurnRuntimeState): Promise<void> {
     if (runtime?.cancellationDrain) return runtime.cancellationDrain;
     const requests = () =>
@@ -2307,6 +2430,67 @@ export class SessionExecutionService {
       ).pipe(Effect.asVoid),
       release,
     };
+  }
+
+  /**
+   * Fail a visible turn whose initialization stopped making progress.
+   *
+   * Called by `SessionActivePresenceController`'s stall watchdog. Resolving the
+   * waiter makes {@link awaitInitializationStall} win its race against the turn
+   * body, which records a user-visible `session_init_failed` and closes the turn
+   * scope — releasing presence, the ACP replay suppression, and the runtime
+   * registration that would otherwise keep the session un-collectable forever.
+   */
+  notifyInitializationStalled(sessionId: SessionId, stall: SessionInitializationStall): void {
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (runtime) {
+      runtime.initializationStalled = true;
+    }
+    const waiter = this.initializationStallWaiters.get(sessionId);
+    if (!waiter) {
+      // Presence is only ever started inside a visible turn, so this means the
+      // turn settled between the watchdog tick and this call. Nothing to fail.
+      this.deps.logger.debug(
+        `[${sessionId}] Initialization stall reported with no owning turn; ignoring`
+      );
+      return;
+    }
+    waiter(stall);
+  }
+
+  /**
+   * Never completes unless the initialization stall watchdog fires, at which
+   * point it records the user-visible failure and halts the turn. Raced against
+   * the turn body so a dependency that never returns — the observed case was a
+   * cloud identity lookup that hung for 1h51m — cannot pin the turn open.
+   */
+  private awaitInitializationStall(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    runtime: TurnRuntimeState
+  ): Effect.Effect<never, unknown, never> {
+    return Effect.async<SessionInitializationStall, never>((resume) => {
+      const waiter = (stall: SessionInitializationStall): void => {
+        resume(Effect.succeed(stall));
+      };
+      this.initializationStallWaiters.set(sessionId, waiter);
+      return Effect.sync(() => {
+        // A newer turn may already own the slot; only retract our own waiter.
+        if (this.initializationStallWaiters.get(sessionId) === waiter) {
+          this.initializationStallWaiters.delete(sessionId);
+        }
+      });
+    }).pipe(
+      Effect.flatMap((stall) =>
+        this.recordKnownChatFailureAndHaltEffect({
+          sessionId,
+          sessionDoc,
+          userTurnId: runtime.userTurnId,
+          reason: 'session_init_failed',
+          message: formatInitializationStallMessage(stall),
+        })
+      )
+    );
   }
 
   private acquireSessionActivePresence(
@@ -2645,6 +2829,10 @@ export class SessionExecutionService {
       );
     }
 
+    if (options.runtime.session) {
+      // A best-effort observation must not delay publishing the turn failure.
+      void this.deps.syncSessionBranchName(options.sessionId, options.runtime.session);
+    }
     this.deps.logger.error(options.describe(options.error), options.error);
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
@@ -2904,6 +3092,7 @@ export class SessionExecutionService {
       runtime.workspaceGitStateSynced = true;
     }
     await this.runTurnFinalizationStage(sessionId, turnId, 'syncWorkspaceGitState', async () => {
+      await this.deps.syncSessionBranchName(sessionId, session);
       await this.deps.turnFinalization.syncWorkspaceGitState(sessionId, session);
     });
   }
@@ -3016,25 +3205,24 @@ export class SessionExecutionService {
       return;
     }
 
-    let branchName: string | null = null;
     let preferredStatsBaseBranch = project?.branch;
     if (project?.kind === 'local') {
       preferredStatsBaseBranch =
         (await sessionDoc.getMetaState())?.baseBranch?.trim() || preferredStatsBaseBranch;
     }
 
+    const branchName = await this.runTurnFinalizationStage(
+      sessionId,
+      turnId,
+      'syncSessionBranchName',
+      async () => await this.deps.syncSessionBranchName(sessionId, session)
+    );
+
+    if (await stopIfTurnCancelled('branch synchronization')) {
+      return;
+    }
+
     if (githubProject) {
-      branchName = await this.runTurnFinalizationStage(
-        sessionId,
-        turnId,
-        'syncSessionBranchName',
-        async () => await this.deps.turnFinalization.syncSessionBranchName(sessionId, session)
-      );
-
-      if (await stopIfTurnCancelled('branch synchronization')) {
-        return;
-      }
-
       try {
         const detectedPr = await this.runTurnFinalizationStage(
           sessionId,
@@ -3204,7 +3392,9 @@ export class SessionExecutionService {
             turnRuntime.cancelRequested ||
             self.isTurnCancelled(sessionId, turnRuntime.turnId) ||
             wasInterrupted;
-          if (wasCancelled) {
+          if (turnRuntime.initializationStalled) {
+            yield* self.finalizeStalledInitializationEffect(turnRuntime);
+          } else if (wasCancelled) {
             yield* self.finalizeCancelledTurnEffect({
               sessionId,
               sessionDoc,
@@ -3229,7 +3419,13 @@ export class SessionExecutionService {
               effectiveErrorContext = context;
             };
 
+            let branchObservedSession: ISession | undefined;
             const bindSession = (nextSession: ISession): void => {
+              if (branchObservedSession !== nextSession) {
+                branchObservedSession = nextSession;
+                // Presentation metadata never gates the first agent prompt.
+                void self.deps.syncSessionBranchName(sessionId, nextSession);
+              }
               runtime.session = nextSession;
               runtime.pendingSession = undefined;
             };
@@ -3447,16 +3643,23 @@ export class SessionExecutionService {
                 return undefined;
               });
 
-            yield* body({
-              turnId: runtime.turnId,
-              runtime,
-              setUnhandledErrorContext,
-              bindSession,
-              trackPendingSession,
-              abortIfCancelled,
-              openAssistantEntry,
-              prompt,
-            });
+            // Bound the whole turn against the initialization stall watchdog.
+            // The watchdog only ever fires while the published presence status
+            // is `initializing`, so a turn that reaches `running` races against
+            // an effect that never completes and pays nothing.
+            yield* Effect.raceFirst(
+              body({
+                turnId: runtime.turnId,
+                runtime,
+                setUnhandledErrorContext,
+                bindSession,
+                trackPendingSession,
+                abortIfCancelled,
+                openAssistantEntry,
+                prompt,
+              }),
+              self.awaitInitializationStall(sessionId, sessionDoc, runtime)
+            );
           })
         )
       )
@@ -4228,6 +4431,8 @@ export class SessionExecutionService {
         const restoreBranch = project?.branch?.trim() || undefined;
         const restoreConfig: SessionConfig = {
           sessionId,
+          agentConfigId: meta?.agentConfigId,
+          codexAuth: storedLaunchConfig.config?.codexAuth,
           workspaceId: message.workspaceId,
           agentCliType: acpSessionConfig.cliType,
           agentType: acpSessionConfig.agentType,
@@ -4447,13 +4652,20 @@ export class SessionExecutionService {
         let baseCommitHash: string | null = null;
         let turnStartWorkingTreeDiff: GitWorkingTreeDiffBaseline | null = null;
 
+        // A requester switch re-derives commit identity for this turn only;
+        // the policy lookup never blocks the turn (falls back to owner rules).
+        const gitIdentityOptions = yield* self.tryPromise(async () => {
+          try {
+            return await self.deps.sessionManager.resolveGitIdentityOptions(message.userId);
+          } catch {
+            return { preferMachineIdentity: message.userId === self.deps.userId };
+          }
+        });
         const bindReadySession = (nextSession: ISession): void => {
           activeSession = nextSession;
           session = nextSession;
           ctx.bindSession(nextSession);
-          nextSession.updateGitIdentity(userName, userEmail, message.userId, {
-            preferMachineIdentity: message.userId === self.deps.userId,
-          });
+          nextSession.updateGitIdentity(userName, userEmail, message.userId, gitIdentityOptions);
         };
 
         const sessionInputBlocks = normalizeSessionInputBlocks(
@@ -4560,9 +4772,6 @@ export class SessionExecutionService {
               project = self.resolveProjectFromMeta(meta, message.project?.branch);
             }
             const githubRepo = resolveProjectGitHubRepo(project);
-            if (!githubRepo) {
-              return undefined;
-            }
             yield* self.tryPromise(() =>
               traceAsync(
                 self.deps.logger,
@@ -5112,16 +5321,6 @@ export class SessionExecutionService {
     );
     const startSessionStartedAtMs = getServerNow();
 
-    void this.deps.maybeGenerateAndStoreSessionTitle(
-      sessionId,
-      sessionConfig.agentCliType,
-      sessionConfig.agentType,
-      agentConfig.prompt,
-      env,
-      acpSessionConfig.customAcp,
-      acpSessionConfig.runtimeOverrides
-    );
-
     const self = this;
     const turnErrorContext: VisibleSessionTurnUnhandledErrorContext = {
       code: 'session_create_failed',
@@ -5274,6 +5473,18 @@ export class SessionExecutionService {
           bindSession(session);
           self.scheduleCreatedSessionCapabilityUpdate(session, sessionConfig);
           yield* abortIfCancelled({ terminateSession: true });
+          // Use the live initialize result, including on the first uncached launch.
+          if (session.getAcpCapabilities?.()?.sessionTitle !== true) {
+            void self.deps.maybeGenerateAndStoreSessionTitle(
+              sessionId,
+              sessionConfig.agentCliType,
+              sessionConfig.agentType,
+              agentConfig.prompt,
+              env,
+              acpSessionConfig.customAcp,
+              acpSessionConfig.runtimeOverrides
+            );
+          }
           // First-turn attachments are materialized under the session workspace.
           // Start this as soon as createSession has registered the workspace, but
           // do not start it earlier or attachments fall back to "unavailable".
@@ -5774,7 +5985,22 @@ export class SessionExecutionService {
         sourceVersion,
         capabilities.modelReasoningEfforts,
         capabilities.acknowledgedSteer,
-        capabilities.goalActions
+        capabilities.goalActions,
+        {
+          sessionTitle: capabilities.sessionTitle,
+          modelCapabilities: capabilities.modelCapabilities,
+        }
+      );
+      this.acpCapabilityLaunchInputFingerprints.set(
+        agentConfigId,
+        fingerprintAcpLaunchInputs({
+          configId: agentConfigId,
+          cliType: config.agentCliType,
+          agentType: config.agentType,
+          env: config.env,
+          customAcp: config.customAcp,
+          runtimeOverrides: config.runtimeOverrides,
+        })
       );
     })().catch((error: unknown) => {
       this.deps.logger.debug(
@@ -5847,6 +6073,8 @@ export class SessionExecutionService {
       };
     }
     const resolvedBase = { ...base, agentType: config.agentType };
+    const profileStore = getCodexProfileStore();
+    const codexProfile = await profileStore.resolve(this.deps.workspaceId, config, true);
 
     const onProgress = (event: AcpAuthenticationProgressEvent): void => {
       if (event.status === 'auth-methods') {
@@ -5877,6 +6105,52 @@ export class SessionExecutionService {
       runtimeOverrides: config.runtimeOverrides,
       env: config.env,
       onProgress,
+      codexProfile,
+      authenticateManagedProfile:
+        codexProfile?.profile.mode === 'api-key'
+          ? async ({ signal, requestInput }) => {
+              const frozenBinding = JSON.stringify(config.codexAuth);
+              const input = await requestInput(
+                {
+                  title: 'Codex API Key',
+                  description: `Confirm the destination: ${codexProfile.profile.mode === 'api-key' ? codexProfile.profile.baseUrl : ''}. The key is stored only on this machine.`,
+                  fields: [{ id: 'apiKey', type: 'secret', label: 'API Key', required: true }],
+                },
+                `Enter an API Key for ${codexProfile.profile.mode === 'api-key' ? codexProfile.profile.baseUrl : ''}`
+              );
+              const assertCurrent = async () => {
+                signal.throwIfAborted();
+                const current = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+                  config.id,
+                  this.deps.machineId
+                );
+                if (!current || JSON.stringify(current.codexAuth) !== frozenBinding)
+                  throw new Error('Provider changed during authentication; try again');
+                assertManagedCodexProfileConfig(current);
+              };
+              await assertCurrent();
+              await profileStore.withApiKeyCandidate(
+                codexProfile,
+                String(input.apiKey ?? ''),
+                async (candidateKey) => {
+                  await this.deps.fetchAcpCapabilities(
+                    config.cliType,
+                    config.agentType,
+                    config.env,
+                    config.customAcp,
+                    config.runtimeOverrides,
+                    {
+                      signal,
+                      codexProfile: { profile: codexProfile, candidateKey },
+                      verifyCodexCredential: true,
+                    }
+                  );
+                  await assertCurrent();
+                },
+                signal
+              );
+            }
+          : undefined,
     });
     if (result.success && result.disposition === 'authenticated') {
       const refreshController = new AbortController();
@@ -5902,6 +6176,12 @@ export class SessionExecutionService {
             customAcp: config.customAcp,
             runtimeOverrides: config.runtimeOverrides,
             env: config.env,
+            codexAuth: config.codexAuth,
+            // Authentication changes what the agent will advertise (models and
+            // config options gated on the account), and the persisted entry was
+            // stamped with the same launch inputs, so only a real probe can tell
+            // the caller whether the new credentials actually work.
+            force: true,
           },
           { signal: refreshController.signal }
         );
@@ -5976,6 +6256,7 @@ export class SessionExecutionService {
         customAcp: config.customAcp,
         runtimeOverrides: config.runtimeOverrides,
         env: config.env,
+        codexAuth: config.codexAuth,
       },
       options
     );
@@ -6020,10 +6301,26 @@ export class SessionExecutionService {
     );
 
     this.deps.logger.debug(
-      `[acp-capabilities] Refresh requested (cliType=${message.cliType} agentType=${message.agentType})`
+      `[acp-capabilities] Refresh requested (cliType=${message.cliType} agentType=${message.agentType} force=${message.force === true})`
     );
     if (options.signal?.aborted) {
       throw createAcpRefreshAbortError();
+    }
+
+    if (message.force !== true) {
+      let cached: AcpCapabilityCacheEntry | undefined;
+      try {
+        cached = await this.readFreshAcpCapabilityCacheEntry(message);
+      } catch (error) {
+        // Reading the entry opens the same Machine Flock document the probe would
+        // write back to, so a failure here is a failed refresh, reported the same
+        // way. Probing anyway would hide a broken document behind a process spawn.
+        return this.buildFailedAcpRefreshResponse(message, error);
+      }
+      if (cached) {
+        options.signal?.throwIfAborted();
+        return buildAcpCapabilitiesRefreshResponseFromCache(this.deps.machineId, message, cached);
+      }
     }
 
     let entry = this.inFlightAcpRefresh.get(dedupeKey);
@@ -6091,12 +6388,72 @@ export class SessionExecutionService {
     });
   }
 
+  /**
+   * The persisted entry when it still describes what a probe would return.
+   *
+   * A hit requires the exact `capabilitySourceVersion` the current launch inputs
+   * would produce, and that this process wrote the entry from the same launch
+   * inputs — env included, which the source version mostly does not cover — so
+   * editing a runtime override, a custom command, or any env value misses.
+   * Lookup failures propagate to the
+   * caller, which reports them as a failed refresh rather than probing: a broken
+   * Machine Flock document would fail the probe's write-back too.
+   */
+  private async readFreshAcpCapabilityCacheEntry(
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest
+  ): Promise<AcpCapabilityCacheEntry | undefined> {
+    const expectedSourceVersion = await this.deps.resolveAcpCapabilitySourceVersion({
+      cliType: message.cliType,
+      agentType: message.agentType,
+      customAcp: message.customAcp,
+      runtimeOverrides: message.runtimeOverrides,
+      env: message.env,
+    });
+    const recordedFingerprint = this.acpCapabilityLaunchInputFingerprints.get(message.configId);
+    const decision = decideAcpCapabilityRefreshCache({
+      entry: await this.deps.workspaceDocument.getAcpCapabilities(
+        this.deps.machineId,
+        message.configId
+      ),
+      expectedSourceVersion,
+      launchInputs:
+        recordedFingerprint === undefined
+          ? 'unknown'
+          : recordedFingerprint === fingerprintAcpLaunchInputs(message)
+            ? 'matching'
+            : 'changed',
+      nowMs: getServerNow(),
+    });
+    if (!decision.hit) {
+      this.deps.logger.debug(
+        `[acp-capabilities] Cache miss (cliType=${message.cliType} agentType=${message.agentType} reason=${decision.reason})`
+      );
+      return undefined;
+    }
+    this.deps.logger.debug(
+      `[acp-capabilities] Served from cache without starting the agent (cliType=${message.cliType} agentType=${message.agentType} sourceVersion=${expectedSourceVersion})`
+    );
+    return decision.entry;
+  }
+
   private async executeAcpRefresh(
     message: ResolvedMachineAcpCapabilitiesRefreshRequest,
     options: AcpBinaryProgressOptions = {}
   ): Promise<MachineAcpCapabilitiesRefreshResponse> {
     try {
       options.signal?.throwIfAborted();
+      let codexProfile: ResolvedCodexProfile | undefined;
+      if (message.codexAuth) {
+        const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+          message.configId,
+          this.deps.machineId
+        );
+        if (!config || JSON.stringify(config.codexAuth) !== JSON.stringify(message.codexAuth))
+          throw new Error('Provider changed during verification');
+        codexProfile = await getCodexProfileStore().resolve(this.deps.workspaceId, config, true);
+        if (!codexProfile || !(await getCodexProfileStore().isReady(codexProfile)))
+          throw new AcpAuthenticationRequiredError([]);
+      }
       await this.emitBuiltinRuntimeStatusForRefresh(message, options.onAcpBinaryProgress);
       options.signal?.throwIfAborted();
       const {
@@ -6106,8 +6463,10 @@ export class SessionExecutionService {
         availableCommands,
         sessionFork,
         acknowledgedSteer,
+        sessionTitle,
         goalActions,
         modelReasoningEfforts,
+        modelCapabilities,
         capabilitySourceVersion,
       } = await this.deps.fetchAcpCapabilities(
         message.cliType,
@@ -6117,6 +6476,7 @@ export class SessionExecutionService {
         message.runtimeOverrides,
         {
           signal: options.signal,
+          codexProfile: codexProfile ? { profile: codexProfile } : undefined,
           onManagedRuntimeProgress: (event) => {
             if (options.signal?.aborted) return;
             options.onAcpBinaryProgress?.(
@@ -6148,7 +6508,11 @@ export class SessionExecutionService {
         modelReasoningEfforts,
         acknowledgedSteer,
         goalActions,
-        { signal: options.signal }
+        { signal: options.signal, sessionTitle, modelCapabilities }
+      );
+      this.acpCapabilityLaunchInputFingerprints.set(
+        message.configId,
+        fingerprintAcpLaunchInputs(message)
       );
 
       return {
@@ -6170,26 +6534,33 @@ export class SessionExecutionService {
         availableCommands,
       };
     } catch (error) {
-      const errorMessage = formatErrorMessage(error);
-      this.deps.logger.debug(
-        `[acp-capabilities] Refresh failed (cliType=${message.cliType} agentType=${message.agentType}): ${errorMessage}`
-      );
-      return {
-        type: 'machine/acp-capabilities-refresh_response',
-        machineId: this.deps.machineId,
-        configId: message.configId,
-        cliType: message.cliType,
-        agentType: message.agentType,
-        success: false,
-        ...(error instanceof AcpAuthenticationRequiredError
-          ? {
-              authRequired: true,
-              authMethods: error.authMethods.map(summarizeAcpAuthMethod),
-            }
-          : {}),
-        error: errorMessage,
-      };
+      return this.buildFailedAcpRefreshResponse(message, error);
     }
+  }
+
+  private buildFailedAcpRefreshResponse(
+    message: ResolvedMachineAcpCapabilitiesRefreshRequest,
+    error: unknown
+  ): MachineAcpCapabilitiesRefreshResponse {
+    const errorMessage = formatErrorMessage(error);
+    this.deps.logger.debug(
+      `[acp-capabilities] Refresh failed (cliType=${message.cliType} agentType=${message.agentType}): ${errorMessage}`
+    );
+    return {
+      type: 'machine/acp-capabilities-refresh_response',
+      machineId: this.deps.machineId,
+      configId: message.configId,
+      cliType: message.cliType,
+      agentType: message.agentType,
+      success: false,
+      ...(error instanceof AcpAuthenticationRequiredError
+        ? {
+            authRequired: true,
+            authMethods: error.authMethods.map(summarizeAcpAuthMethod),
+          }
+        : {}),
+      error: errorMessage,
+    };
   }
 
   private async emitBuiltinRuntimeStatusForRefresh(
@@ -6504,12 +6875,76 @@ export class SessionExecutionService {
   }
 }
 
+/**
+ * The refresh response a cache hit returns.
+ *
+ * It repeats the persisted entry rather than re-deriving anything, so a caller
+ * cannot tell a hit from a probe except by how fast it answered: the renderer
+ * writes `capability` straight into its Machine Flock rows either way.
+ */
+const buildAcpCapabilitiesRefreshResponseFromCache = (
+  machineId: MachineId,
+  message: ResolvedMachineAcpCapabilitiesRefreshRequest,
+  capability: AcpCapabilityCacheEntry
+): MachineAcpCapabilitiesRefreshResponse => ({
+  type: 'machine/acp-capabilities-refresh_response',
+  machineId,
+  configId: message.configId,
+  cliType: message.cliType,
+  agentType: message.agentType,
+  success: true,
+  modes: capability.modes.map((mode) => ({
+    id: mode.id,
+    name: mode.name,
+    description: mode.description ?? undefined,
+  })),
+  models: capability.models.map((model) => ({
+    modelId: model.modelId,
+    name: model.name ?? undefined,
+    description: model.description ?? undefined,
+  })),
+  configOptions: capability.configOptions?.map((option) => ({
+    id: option.id,
+    name: option.name,
+    category: option.category,
+    optionCount: option.options.length,
+  })),
+  capability,
+  availableCommands: capability.availableCommands,
+});
+
 const findRegistryAcpAgent = (agentType: string): RegistryAcpAgent | undefined =>
   REGISTRY_ACP_AGENTS.find((agent) => agent.id === agentType);
 
 // NUL separates field segments and \x01 separates env pairs so equivalent
 // env maps produce identical keys and ambiguous separators in values can't
 // collide. Env vars on POSIX cannot contain either control character.
+/**
+ * In-memory identity of everything a capability probe is launched with. Hashed
+ * only so the long-lived map does not retain another plaintext copy of the env;
+ * it is never persisted, synced, or logged.
+ */
+const fingerprintAcpLaunchInputs = (inputs: {
+  configId: AgentConfigId;
+  cliType: AgentConfigCliType;
+  agentType: string;
+  env?: Record<string, string>;
+  customAcp?: CustomAcpLaunchSpec;
+  runtimeOverrides?: BuiltinRuntimeOverrides;
+}): string =>
+  createHash('sha256')
+    .update(
+      computeAcpRefreshDedupeKey(
+        inputs.configId,
+        inputs.cliType,
+        inputs.agentType,
+        inputs.env,
+        inputs.customAcp,
+        inputs.runtimeOverrides
+      )
+    )
+    .digest('hex');
+
 const computeAcpRefreshDedupeKey = (
   configId: AgentConfigId,
   cliType: AgentConfigCliType,
@@ -6534,3 +6969,5 @@ const computeAcpRefreshDedupeKey = (
     : '';
   return `${configId}\x00${cliType}\x00${agentType}\x00${envSerialized}\x00${customSerialized}\x00${runtimeOverrideSerialized}`;
 };
+import { getCodexProfileStore, type ResolvedCodexProfile } from '../agent/codex-profile-store';
+import { assertManagedCodexProfileConfig } from '@lody/shared';

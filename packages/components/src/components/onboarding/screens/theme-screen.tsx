@@ -1,15 +1,43 @@
 import { useTranslation } from 'react-i18next';
 import { Check, Monitor, Moon, Sun } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { useTheme, type Theme } from '../../../theme-provider';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
+import { onboardingSurface as surface } from './surface';
+
+const styles = stylex.create({
+  options: {
+    display: 'grid',
+    gridTemplateColumns: { default: '1fr', '@media (min-width: 640px)': 'repeat(3, 1fr)' },
+    gap: space[2],
+  },
+  option: {
+    position: 'relative',
+    justifyContent: 'center',
+    gap: space[2],
+    paddingInline: space[4],
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  check: {
+    position: 'absolute',
+    insetBlockStart: space[2],
+    insetInlineEnd: space[2],
+    width: '14px',
+    height: '14px',
+  },
+  checkGlyph: { width: '10px', height: '10px' },
+});
 
 interface ModeOption {
   value: Theme;
   labelKey: string;
   labelDefault: string;
-  Icon: (props: { className?: string }) => React.JSX.Element;
+  Icon: (props: { className?: string; style?: React.CSSProperties }) => React.JSX.Element;
 }
 
 const MODE_OPTIONS: ModeOption[] = [
@@ -54,42 +82,38 @@ export function ThemeScreenView({ mode, onModeChange, onBack, onNext }: ThemeScr
       secondaryAction={<OnboardingBackButton onClick={onBack} />}
       primaryAction={<OnboardingNextButton onClick={onNext} />}
     >
-      <div className="space-y-2">
-        <div className="text-xs font-medium tracking-wider text-muted-foreground/80">
-          {t('onboarding.theme.modeHeading', 'Mode')}
-        </div>
-        <div role="radiogroup" className="grid gap-2 sm:grid-cols-3">
+      <div {...stylex.props(surface.stackTight)}>
+        <div {...stylex.props(surface.groupLabel)}>{t('onboarding.theme.modeHeading', 'Mode')}</div>
+        <div role="radiogroup" {...stylex.props(styles.options)}>
           {MODE_OPTIONS.map((option) => {
             const selected = mode === option.value;
             return (
-              <motion.button
+              <button
                 key={option.value}
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                whileTap={{ scale: 0.98 }}
                 onClick={() => onModeChange(option.value)}
-                className={cn(
-                  'group relative flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition-all',
-                  'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-                  selected
-                    ? 'border-primary/60 bg-primary/[0.06] text-foreground shadow-[0_0_0_3px_hsl(var(--primary)/0.08)]'
-                    : 'border-border/60 bg-card/40 text-muted-foreground hover:bg-card/70 hover:text-foreground'
+                {...stylex.props(
+                  surface.tile,
+                  surface.tileHover,
+                  styles.option,
+                  selected && surface.tileSelected
                 )}
               >
                 <option.Icon
-                  className={cn(
-                    'h-4 w-4 transition-colors',
-                    selected ? 'text-primary' : 'text-muted-foreground'
+                  {...stylex.props(
+                    surface.icon16,
+                    selected ? surface.iconAccent : surface.iconMuted
                   )}
                 />
                 <span>{t(option.labelKey, option.labelDefault)}</span>
                 {selected ? (
-                  <span className="absolute right-2 top-2 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                    <Check className="h-2.5 w-2.5" />
+                  <span {...stylex.props(surface.selectedMark, styles.check)}>
+                    <Check {...stylex.props(styles.checkGlyph)} />
                   </span>
                 ) : null}
-              </motion.button>
+              </button>
             );
           })}
         </div>

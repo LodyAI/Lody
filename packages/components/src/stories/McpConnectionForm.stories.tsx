@@ -38,9 +38,10 @@ const meta = {
   args: { onSubmit: () => undefined, onCancel: () => undefined, className: 'min-h-0 flex-1' },
   decorators: [
     // Mirrors the settings dialog that hosts the form: a fixed-height panel the
-    // form's own scroll body and sticky footer size themselves against.
+    // form's own scroll body and sticky footer size themselves against. The
+    // panel pads its content; the form has no padding of its own.
     (Story) => (
-      <div className="mx-auto flex h-[620px] w-[620px] flex-col overflow-hidden rounded-lg border bg-background">
+      <div className="mx-auto flex h-[620px] w-[620px] flex-col gap-4 overflow-hidden rounded-lg border bg-background p-4">
         <Story />
       </div>
     ),

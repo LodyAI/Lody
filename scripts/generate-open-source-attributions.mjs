@@ -28,6 +28,19 @@ const VENDORED_ATTRIBUTIONS = [
     noticePath: 'packages/components/src/components/mentions/vscode-fuzzy-score.LICENSE.txt',
   },
   {
+    id: 'vendored-virtua',
+    kind: 'vendored',
+    scope: 'vendored-source',
+    name: 'Virtua',
+    license: 'MIT',
+    homepage: 'https://github.com/inokawa/virtua/tree/0.52.7',
+    author: 'inokawa',
+    description:
+      'Keyed list layout from Virtua, adapted for the conversation scroll engine (packages/components/src/lib/conversation-scroll/keyed-layout).',
+    assets: ['Virtua list layout and size cache'],
+    noticePath: 'packages/components/src/lib/conversation-scroll/keyed-layout/LICENSE',
+  },
+  {
     id: 'bundled-theme-vscode-defaults',
     kind: 'vendored',
     scope: 'bundled-theme',

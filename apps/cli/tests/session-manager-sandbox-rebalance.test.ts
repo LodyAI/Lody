@@ -1,7 +1,7 @@
 import os from 'os';
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import type { SessionId, WorkspaceId } from '@lody/shared';
+import type { LocalProjectId, SessionId, WorkspaceId } from '@lody/shared';
 
 import { SessionManager, type ISession } from '../src/session/session-manager';
 import type { SessionConfig } from '../src/session/types';
@@ -9,9 +9,10 @@ import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { Logger } from '../src/utils/logger';
 import type { SessionSandbox, SessionSandboxLimits } from '../src/session/session-sandbox';
 import type { GitHubTokenManager } from '../src/lib/github-token-manager';
-import type { GitCredentialBroker } from '../src/lib/git-credential-broker';
-import { LODY_GIT_CRED_CONTEXT_TOKEN_ENV } from '../src/lib/git-credential-broker';
-import { LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '../src/lib/gh-token-injector';
+import {
+  GitCredentialBroker,
+  LODY_GIT_CRED_CONTEXT_TOKEN_ENV,
+} from '../src/lib/git-credential-broker';
 import { createTestCloudPort } from './test-cloud-port';
 
 const GIB = 1024 * 1024 * 1024;
@@ -29,6 +30,7 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
@@ -61,6 +63,7 @@ const createConfig = (sessionId: string): SessionConfig => ({
   machineId: 'machine-1',
   agentCliType: 'builtin',
   agentType: 'codex',
+  mcpServerIds: [],
   sessionId: sessionId as SessionId,
   userName: 'test-user',
   userEmail: 'test@example.com',
@@ -136,7 +139,7 @@ describe('SessionManager sandbox rebalance', () => {
     expect(manager.getSession('session-2' as SessionId)).toBe(sessionTwo);
   });
 
-  it('clears stale managed GH_TOKEN when requester token refresh fails', async () => {
+  it('rotates command context without minting or injecting session-wide tokens', async () => {
     const manager = new SessionManager(
       createSilentLogger(),
       'token',
@@ -151,35 +154,103 @@ describe('SessionManager sandbox rebalance', () => {
         throw new Error('requester denied');
       }),
     } as unknown as GitHubTokenManager;
-    const broker = {
-      activateSessionContext: vi.fn(() => 'context-token-2'),
-    } as unknown as GitCredentialBroker;
+    const broker = new GitCredentialBroker({ tokenManager, logger: createSilentLogger() });
+    const originalToken = broker.activateSessionContext({
+      sessionId: 'session-1',
+      requesterUserId: 'user-1',
+      machineId: 'machine-1',
+    });
     Object.assign(manager as unknown as Record<string, unknown>, {
       githubTokenManager: tokenManager,
       gitCredentialBroker: broker,
     });
 
-    const updateEnv = vi.fn();
+    const env: Record<string, string | undefined> = {};
+    const updateEnv = (next: Record<string, string | undefined>) => Object.assign(env, next);
     const session = {
       sessionId: 'session-1' as SessionId,
-      ghTokenInjected: true,
       updateEnv,
     } as unknown as ISession;
 
     await manager.refreshGhTokenForSession(session, 'owner/repo', 'user-2');
 
-    expect(tokenManager.invalidate).toHaveBeenCalledWith('owner/repo', {
-      requesterUserId: 'user-2',
-    });
-    expect(tokenManager.getWriteTokenForRepo).toHaveBeenCalledWith('owner/repo', {
-      requesterUserId: 'user-2',
+    const rotatedToken = env[LODY_GIT_CRED_CONTEXT_TOKEN_ENV];
+    expect(rotatedToken).toEqual(expect.any(String));
+    expect(rotatedToken).not.toBe(originalToken);
+    expect(env).toEqual({ [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: rotatedToken });
+    expect(
+      broker.refreshSessionContext({
+        sessionId: 'session-1',
+        requesterUserId: 'user-2',
+        machineId: 'machine-1',
+      })
+    ).toBe(rotatedToken);
+  });
+
+  it.each([false, true])('keeps local project native credentials (worktree=%s)', async (useWorktree) => {
+    const manager = new SessionManager(
+      createSilentLogger(),
+      'token',
+      'machine-1',
+      'workspace-1',
+      createWorkspaceDocument(),
+      { cloudPort: createTestCloudPort() }
+    );
+    const tokenManager = {
+      retainRepoOwner: () => {
+        throw new Error('Local projects must not use managed tokens');
+      },
+    } as unknown as GitHubTokenManager;
+    const broker = new GitCredentialBroker({ tokenManager, logger: createSilentLogger() });
+    // Another managed session already exists in this workspace.
+    broker.activateSessionContext({
+      sessionId: 'github-session',
+      requesterUserId: 'user-1',
       machineId: 'machine-1',
     });
-    expect(updateEnv).toHaveBeenLastCalledWith({
-      [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: 'context-token-2',
-      GH_TOKEN: undefined,
-      GITHUB_TOKEN: undefined,
-      [LODY_MANAGED_GH_TOKEN_SHA256_ENV]: undefined,
-    });
+    Object.assign(manager, { githubTokenManager: tokenManager, gitCredentialBroker: broker });
+    const nativeEnv = {
+      GH_TOKEN: 'synthetic-local-gh-token',
+      GITHUB_TOKEN: 'synthetic-local-github-token',
+      PATH: '/native/bin',
+      BASH_ENV: '/native/bashenv',
+      ZDOTDIR: '/native/zsh',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'credential.helper',
+      GIT_CONFIG_VALUE_0: 'native-helper',
+      GIT_SSH_COMMAND: 'ssh -i /native/key',
+    };
+    const config: SessionConfig = {
+      ...createConfig('local-session'),
+      project: {
+        kind: 'local',
+        localProjectId: 'local-project' as LocalProjectId,
+        useWorktree,
+        githubRepoFullName: 'owner/repo',
+      },
+      githubRepo: 'owner/repo',
+      githubRepoUrl: 'git@github.com:owner/repo.git',
+      env: { ...nativeEnv },
+    };
+    const prepare = manager as unknown as {
+      prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void>;
+    };
+    await prepare.prepareGitHubRepoSessionConfig(config);
+    expect(config.env).toEqual(nativeEnv);
+    expect(config.githubCredentialPolicy).toBeUndefined();
+    expect(config.githubRepoUrl).toBe('git@github.com:owner/repo.git');
+    const session = {
+      sessionId: config.sessionId,
+      updateEnv: (env: Record<string, string | undefined>) => Object.assign(config.env ?? {}, env),
+    } as ISession;
+    await manager.refreshGhTokenForSession(session, 'owner/repo', 'user-2');
+    expect(config.env).toEqual(nativeEnv);
+    expect(
+      broker.refreshSessionContext({
+        sessionId: 'local-session',
+        requesterUserId: 'user-2',
+        machineId: 'machine-1',
+      })
+    ).toBeUndefined();
   });
 });

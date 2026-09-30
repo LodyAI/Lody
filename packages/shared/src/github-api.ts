@@ -2109,6 +2109,38 @@ export async function githubCreatePRIssueComment(
   );
 }
 
+/**
+ * Keep only the newest attempt of each check. A re-run (or a second trigger on
+ * the same SHA) adds another check run with the same app and name; the earlier
+ * attempt is history, so a failure that was later re-run green must not keep
+ * the commit red. Check run ids are allocated monotonically, so the highest id
+ * is the latest attempt.
+ */
+export function selectLatestCheckRuns(runs: readonly GitHubCheckRun[]): GitHubCheckRun[] {
+  const latest = new Map<string, GitHubCheckRun>();
+  for (const run of runs) {
+    const key = `${run.appName ?? ''}\u0000${run.name}`;
+    const current = latest.get(key);
+    if (!current || run.id > current.id) latest.set(key, run);
+  }
+  return [...latest.values()];
+}
+
+function summarizeLatestCheckRuns(runs: readonly GitHubCheckRun[]): GitHubCheckRunsSummary {
+  return summarizeCheckRuns(
+    selectLatestCheckRuns(runs).sort((a, b) => a.name.localeCompare(b.name))
+  );
+}
+
+/**
+ * Re-derive a summary under the current rules. Summaries persisted by older
+ * builds (e.g. the PR tab's IndexedDB cache) may still list superseded
+ * attempts and a verdict computed from them.
+ */
+export function normalizeCheckRunsSummary(summary: GitHubCheckRunsSummary): GitHubCheckRunsSummary {
+  return summarizeLatestCheckRuns(summary.runs);
+}
+
 function summarizeCheckRuns(runs: GitHubCheckRun[]): GitHubCheckRunsSummary {
   if (runs.length === 0) {
     return { status: 'none', conclusion: null, total: 0, runs };
@@ -2123,13 +2155,20 @@ function summarizeCheckRuns(runs: GitHubCheckRun[]): GitHubCheckRunsSummary {
 
   let conclusion: GitHubCheckRunConclusion = null;
   if (status === 'completed') {
-    if (runs.some((run) => run.conclusion === 'failure' || run.conclusion === 'timed_out')) {
+    // Cancelled/stale runs were aborted, not judged: they decide the verdict
+    // only when nothing else ran.
+    const decisive = runs.filter(
+      (run) => run.conclusion !== 'cancelled' && run.conclusion !== 'stale'
+    );
+    if (decisive.some((run) => run.conclusion === 'failure' || run.conclusion === 'timed_out')) {
       conclusion = 'failure';
-    } else if (runs.some((run) => run.conclusion === 'action_required')) {
+    } else if (decisive.some((run) => run.conclusion === 'action_required')) {
       conclusion = 'action_required';
-    } else if (runs.some((run) => run.conclusion === 'cancelled')) {
+    } else if (decisive.length === 0) {
       conclusion = 'cancelled';
-    } else if (runs.every((run) => run.conclusion === 'success' || run.conclusion === 'skipped')) {
+    } else if (
+      decisive.every((run) => run.conclusion === 'success' || run.conclusion === 'skipped')
+    ) {
       conclusion = 'success';
     } else {
       conclusion = 'neutral';
@@ -2349,6 +2388,5 @@ export async function githubFetchCheckRuns(
     throw new Error(`GitHub API error: ${res.status} ${text}`);
   }
   const payload = GithubCheckRunsResponseSchema.parse(JSON.parse(text) as unknown);
-  const runs = [...payload.check_runs].sort((a, b) => a.name.localeCompare(b.name));
-  return summarizeCheckRuns(runs);
+  return summarizeLatestCheckRuns(payload.check_runs);
 }

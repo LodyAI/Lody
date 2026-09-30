@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FolderOpen, FolderPlus, Github, MessageCircle } from 'lucide-react';
-import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tabs } from '@lody/ui/tabs';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { ChatLandingTone } from './chat-landing-view';
 
@@ -67,12 +67,12 @@ export function ContextSwitch({
   );
 
   return (
-    <Tabs
+    <Tabs.Root
       value={value}
       onValueChange={(v) => onChange(v as SessionContextType)}
       className={cn('w-full max-w-xs sm:max-w-sm', className)}
     >
-      <TabsList
+      <Tabs.List
         className={cn(
           'flex h-10 w-full rounded-lg p-1',
           isDark ? 'bg-card/70 border border-border/70' : 'bg-muted border border-border/40'
@@ -88,9 +88,9 @@ export function ContextSwitch({
             tone={tone}
           />
         ) : (
-          <TabsTrigger value="local" className={triggerClassName}>
+          <Tabs.Tab value="local" className={triggerClassName}>
             <TabFace icon={<FolderOpen className={iconClassName} />} label={localLabel} />
-          </TabsTrigger>
+          </Tabs.Tab>
         )}
         {githubDisabled ? (
           <DisabledTab
@@ -102,15 +102,15 @@ export function ContextSwitch({
             tone={tone}
           />
         ) : (
-          <TabsTrigger value="github" className={triggerClassName}>
+          <Tabs.Tab value="github" className={triggerClassName}>
             <TabFace icon={<Github className={iconClassName} />} label={githubLabel} />
-          </TabsTrigger>
+          </Tabs.Tab>
         )}
-        <TabsTrigger value="chat" className={triggerClassName}>
+        <Tabs.Tab value="chat" className={triggerClassName}>
           <TabFace icon={<MessageCircle className={iconClassName} />} label={chatLabel} />
-        </TabsTrigger>
-      </TabsList>
-    </Tabs>
+        </Tabs.Tab>
+      </Tabs.List>
+    </Tabs.Root>
   );
 }
 
@@ -165,9 +165,8 @@ function DisabledTab({
 
   if (!overlay.onClick) {
     return (
-      <Tooltip open={tooltipOpen} delayDuration={200}>
-        <TooltipTrigger asChild>
-          <button
+      <Tooltip.Root open={tooltipOpen}>
+        <Tooltip.Trigger delay={200} render={<button
             ref={triggerRef}
             type="button"
             onClick={handleClick}
@@ -179,9 +178,8 @@ function DisabledTab({
             )}
           >
             <TabFace icon={icon} label={label} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent
+          </button>}/>
+        <Tooltip.Content
           ref={contentRef}
           side="bottom"
           sideOffset={8}
@@ -189,8 +187,8 @@ function DisabledTab({
           onPointerLeave={handlePointerLeave}
         >
           {overlay.label}
-        </TooltipContent>
-      </Tooltip>
+        </Tooltip.Content>
+      </Tooltip.Root>
     );
   }
 

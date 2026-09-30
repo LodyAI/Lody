@@ -1,3 +1,4 @@
+import { snapshotAttachmentDrafts } from '@/lib/session-attachment-draft';
 import { useCallback, useMemo } from 'react';
 import {
   SESSION_FILE_MAX_COUNT,
@@ -7,33 +8,22 @@ import {
   type SessionInputBlock,
   type WorkspaceId,
 } from '@lody/shared';
-import { useAtom, useAtomValue } from 'jotai';
-import { toast } from 'sonner';
+import { useAtom } from 'jotai';
+import { toast } from '@/lib/toast';
 import { useTranslation } from 'react-i18next';
 import { chatLandingPendingFilesAtomFamily, type PendingFile } from '@/atoms/chat-landing-draft';
-import { localMachineIdAtom } from '@/atoms/local-probe';
 import { formatFileSize } from '@/lib/session-file-presentation';
 import {
-  canUseElectronLocalFileSend,
-  sendSessionFileToLocalRuntime,
-} from '@/lib/electron-session-file-sender';
-import {
   SESSION_FILE_MAX_SIZE_MB,
-  computeSha256Hex,
-  computeTextPreviewable,
-  isUploadAbortedError,
-  isSessionFileTransferPhase,
-  uploadSessionFile,
   validateSessionFile,
   type SessionFileTransferPhase,
-  type SessionFileUploadProgress,
 } from '@/lib/session-file-upload';
 
 export type ChatLandingFileDraftItem = {
   id: string;
   name: string;
   sizeLabel: string;
-  status: SessionFileTransferPhase | 'uploaded' | 'failed';
+  status: SessionFileTransferPhase | 'draft' | 'uploaded' | 'failed';
   progress: number;
   error?: string;
 };
@@ -83,31 +73,8 @@ export function useChatLandingFileDraft(args: {
   ensureSessionId: () => SessionId;
 }) {
   const { t } = useTranslation();
-  const {
-    draftKey,
-    workspaceId,
-    authToken,
-    machineId,
-    sessionId: draftSessionId,
-    ensureSessionId,
-  } = args;
-  const localMachineId = useAtomValue(localMachineIdAtom);
+  const { draftKey, ensureSessionId } = args;
   const [pendingFiles, setPendingFiles] = useAtom(chatLandingPendingFilesAtomFamily(draftKey));
-
-  // Desktop local-transport fast path: available only when the selected machine
-  // is this machine's local CLI and the Electron preload bridge exposes the
-  // handoff API. Otherwise file attachments take the cloud-upload path.
-  const canSendFileLocally =
-    !!localMachineId &&
-    !!machineId &&
-    localMachineId === machineId &&
-    canUseElectronLocalFileSend();
-
-  const fileUploadFailedLabel = t('sessions.fileUploadFailed', 'File upload failed');
-  const fileUploadMissingAuthLabel = t(
-    'sessions.fileUploadMissingAuth',
-    'Missing workspace or auth token'
-  );
 
   const clearPendingFiles = useCallback(() => {
     setPendingFiles((prev) => {
@@ -123,141 +90,6 @@ export function useChatLandingFileDraft(args: {
   // the atom, so returning shows the finished attachment rather than an entry
   // aborted on the way out. Aborting stays tied to the user's own actions —
   // removing one file, or clearing the draft (send accepted / draft reset).
-
-  const updatePendingFile = useCallback(
-    (localId: string, updater: (file: PendingFile) => PendingFile) => {
-      setPendingFiles((prev) =>
-        prev.map((entry) => (entry.localId === localId ? updater(entry) : entry))
-      );
-    },
-    [setPendingFiles]
-  );
-
-  const startUpload = useCallback(
-    async (localId: string, file: File, sessionId: SessionId) => {
-      if (!workspaceId) {
-        updatePendingFile(localId, (entry) => ({
-          ...entry,
-          status: 'failed',
-          progress: 0,
-          error: fileUploadMissingAuthLabel,
-        }));
-        return;
-      }
-
-      // Desktop local-transport fast path: hand bytes straight to the local CLI
-      // (zero relay round trip). The CLI returns a transport:'local' block that
-      // drops into `uploaded` exactly like a cloud upload. On any failure we fall
-      // through to the cloud path below.
-      if (canSendFileLocally && machineId) {
-        try {
-          const outcome = await sendSessionFileToLocalRuntime({
-            workspaceId,
-            sessionId,
-            machineId,
-            file,
-          });
-          if (outcome?.ok && outcome.files[0]) {
-            updatePendingFile(localId, (entry) => ({
-              ...entry,
-              status: 'uploaded',
-              progress: 100,
-              uploaded: outcome.files[0],
-              error: undefined,
-              abort: undefined,
-            }));
-            return;
-          }
-        } catch {
-          // Local handoff threw; fall back to the cloud upload path.
-        }
-      }
-
-      if (!authToken) {
-        updatePendingFile(localId, (entry) => ({
-          ...entry,
-          status: 'failed',
-          progress: 0,
-          error: fileUploadMissingAuthLabel,
-        }));
-        return;
-      }
-
-      const abort = new AbortController();
-      updatePendingFile(localId, (entry) => ({
-        ...entry,
-        status: 'preparing',
-        progress: 0,
-        error: undefined,
-        abort,
-      }));
-
-      try {
-        // Compute the integrity hash + text-previewability once before upload;
-        // both ride along to the server and the latter pre-fills the block.
-        const [sha256, textPreview] = await Promise.all([
-          computeSha256Hex(file, {
-            signal: abort.signal,
-            onProgress: (progress) => {
-              updatePendingFile(localId, (entry) => ({
-                ...entry,
-                status: progress.phase,
-                progress: progress.percent,
-              }));
-            },
-          }),
-          computeTextPreviewable(file),
-        ]);
-        const uploaded = await uploadSessionFile({
-          workspaceId,
-          sessionId,
-          token: authToken,
-          file,
-          sha256,
-          textPreview,
-          signal: abort.signal,
-          onProgress: (progress: SessionFileUploadProgress) => {
-            updatePendingFile(localId, (entry) => ({
-              ...entry,
-              status: progress.phase,
-              progress: progress.percent,
-            }));
-          },
-        });
-        updatePendingFile(localId, (entry) => ({
-          ...entry,
-          status: 'uploaded',
-          progress: 100,
-          uploaded,
-          error: undefined,
-          abort: undefined,
-        }));
-      } catch (error) {
-        if (isUploadAbortedError(error)) {
-          // Removal/clearing aborts in-flight uploads; the entry is already
-          // gone, so leave state untouched.
-          return;
-        }
-        const errorMessage = error instanceof Error ? error.message : fileUploadFailedLabel;
-        updatePendingFile(localId, (entry) => ({
-          ...entry,
-          status: 'failed',
-          progress: 0,
-          error: errorMessage,
-          abort: undefined,
-        }));
-      }
-    },
-    [
-      authToken,
-      canSendFileLocally,
-      fileUploadFailedLabel,
-      fileUploadMissingAuthLabel,
-      machineId,
-      updatePendingFile,
-      workspaceId,
-    ]
-  );
 
   const handleAddFiles = useCallback(
     (files: File[]) => {
@@ -295,7 +127,7 @@ export function useChatLandingFileDraft(args: {
         nextEntries.push({
           localId: createLocalFileId(),
           file,
-          status: 'preparing',
+          status: 'draft',
           progress: 0,
         });
         currentCount += 1;
@@ -309,13 +141,10 @@ export function useChatLandingFileDraft(args: {
         return;
       }
 
-      const sessionId = ensureSessionId();
+      ensureSessionId();
       setPendingFiles((prev) => [...prev, ...nextEntries]);
-      for (const entry of nextEntries) {
-        void startUpload(entry.localId, entry.file, sessionId);
-      }
     },
-    [ensureSessionId, pendingFiles.length, setPendingFiles, startUpload, t]
+    [ensureSessionId, pendingFiles.length, setPendingFiles, t]
   );
 
   const handleRemoveFile = useCallback(
@@ -331,25 +160,17 @@ export function useChatLandingFileDraft(args: {
 
   const handleRetryFile = useCallback(
     (localId: string) => {
-      const target = pendingFiles.find((entry) => entry.localId === localId);
-      if (!target) {
-        return;
-      }
-      const uploadSessionId = draftSessionId ?? ensureSessionId();
-      void startUpload(localId, target.file, uploadSessionId);
+      setPendingFiles((previous) =>
+        previous.map((item) =>
+          item.localId === localId ? { ...item, status: 'draft', error: undefined } : item
+        )
+      );
     },
-    [draftSessionId, ensureSessionId, pendingFiles, startUpload]
+    [setPendingFiles]
   );
 
-  const hasBlockingFiles = useMemo(
-    () => pendingFiles.some((entry) => isSessionFileTransferPhase(entry.status)),
-    [pendingFiles]
-  );
-
-  const hasUploadedFiles = useMemo(
-    () => pendingFiles.some((entry) => entry.status === 'uploaded' && !!entry.uploaded),
-    [pendingFiles]
-  );
+  const hasBlockingFiles = false;
+  const hasUploadedFiles = pendingFiles.length > 0;
 
   const fileItems = useMemo<ChatLandingFileDraftItem[]>(
     () =>
@@ -375,6 +196,7 @@ export function useChatLandingFileDraft(args: {
   );
 
   return {
+    attachments: snapshotAttachmentDrafts([], pendingFiles),
     fileItems,
     hasBlockingFiles,
     hasUploadedFiles,

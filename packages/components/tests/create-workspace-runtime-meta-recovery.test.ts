@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getSessionRoomId, type MachineId, type SessionId, type WorkspaceId } from '@lody/shared';
+import {
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  getMachineRoomId,
+  getSessionRoomId,
+  type MachineId,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
 
 const mocks = vi.hoisted(() => {
@@ -16,9 +23,19 @@ const mocks = vi.hoisted(() => {
   const destroy = vi.fn(async () => {});
   const reconnect = vi.fn(async () => {});
   const listDoc = vi.fn(async (): ReturnType<LoroRepo['listDoc']> => []);
+  const getDocMeta = vi.fn(
+    async (_docId: string): Promise<{ meta?: unknown } | undefined> => undefined
+  );
   const watch = vi.fn(() => ({ unsubscribe: vi.fn() }));
   const joinMetaRoom = vi.fn();
   const remoteCursorDelete = vi.fn(async () => {});
+  const metaFlock = {};
+  const metaCheckpointDelete = vi.fn(async (_streamUrl: string) => {});
+  const getReplicaCheckpointStore = vi.fn((_target: { kind: string; flock: unknown }) => ({
+    load: vi.fn(async () => null),
+    save: vi.fn(async () => {}),
+    delete: metaCheckpointDelete,
+  }));
   const tokenProviderInvalidate = vi.fn();
   const presenceStart = vi.fn();
   const presenceStop = vi.fn(async () => {});
@@ -64,9 +81,13 @@ const mocks = vi.hoisted(() => {
     destroy,
     reconnect,
     listDoc,
+    getDocMeta,
     watch,
     joinMetaRoom,
     remoteCursorDelete,
+    metaFlock,
+    metaCheckpointDelete,
+    getReplicaCheckpointStore,
     tokenProviderInvalidate,
     presenceStart,
     presenceStop,
@@ -181,7 +202,10 @@ vi.mock('loro-repo', () => ({
       destroy: mocks.destroy,
       reconnect: mocks.reconnect,
       listDoc: mocks.listDoc,
+      getDocMeta: mocks.getDocMeta,
       watch: mocks.watch,
+      getMeta: () => mocks.metaFlock,
+      getReplicaCheckpointStore: mocks.getReplicaCheckpointStore,
     })),
   },
 }));
@@ -193,6 +217,10 @@ vi.mock('loro-repo/storage/indexeddb', () => ({
 }));
 
 vi.mock('loro-repo/transport/streams', () => ({
+  createRepoStreamsPersistence: (_repo: unknown, options: object) => ({
+    mode: 'replica-bound',
+    ...options,
+  }),
   StreamsTransportAdapter: class StreamsTransportAdapter {
     constructor(readonly options: unknown) {
       mocks.streamsTransportConstructors(options);
@@ -210,7 +238,10 @@ vi.mock('loro-repo/transport/streams', () => ({
 }));
 
 vi.mock('@loro-dev/streams-crdt/loro', () => ({
-  StreamsCrdt: class StreamsCrdt {},
+  StreamsCrdt: class StreamsCrdt {
+    createStream = vi.fn(async () => ({ ok: true }));
+    close = vi.fn(async () => {});
+  },
   createLoroDocAdapter: vi.fn(() => ({})),
 }));
 
@@ -356,6 +387,7 @@ import {
   createWorkspaceRuntime,
   resolveWorkspaceRuntimeCacheIdentity,
 } from '../src/providers/create-workspace-runtime';
+import { META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX } from '../src/lib/clear-local-cache';
 
 describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   beforeEach(() => {
@@ -374,9 +406,13 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.reconnect.mockClear();
     mocks.listDoc.mockReset();
     mocks.listDoc.mockResolvedValue([]);
+    mocks.getDocMeta.mockReset();
+    mocks.getDocMeta.mockResolvedValue(undefined);
     mocks.watch.mockClear();
     mocks.joinMetaRoom.mockReset();
     mocks.remoteCursorDelete.mockClear();
+    mocks.metaCheckpointDelete.mockClear();
+    mocks.getReplicaCheckpointStore.mockClear();
     mocks.tokenProviderInvalidate.mockClear();
     mocks.presenceStart.mockClear();
     mocks.presenceStop.mockClear();
@@ -432,6 +468,9 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
       }),
     });
     vi.stubGlobal('navigator', { onLine: true });
+    // The runtime reads `globalThis.localStorage`; without this, a Meta cursor
+    // bypass marker written by one test leaks into every later one.
+    vi.stubGlobal('localStorage', localStorage);
   });
 
   afterEach(() => {
@@ -467,6 +506,433 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expect(runtime.workspaceId).toBe('workspace-1');
     expect(mocks.presenceStart).toHaveBeenCalledTimes(1);
     expectNoPresenceStopAfterStart();
+    // The suspect Meta progress is the replica-bound checkpoint of this window's
+    // own meta Flock; the LoroDoc cursor store never holds Meta progress.
+    await vi.waitFor(() => expect(mocks.metaCheckpointDelete).toHaveBeenCalledTimes(1));
+    expect(mocks.getReplicaCheckpointStore).toHaveBeenCalledWith({
+      kind: 'meta',
+      flock: mocks.metaFlock,
+    });
+    expect(mocks.metaCheckpointDelete.mock.calls[0]?.[0]).toMatch(/\/workspace-1%3Ameta$/);
+    expect(mocks.remoteCursorDelete).not.toHaveBeenCalled();
+
+    await runtime.dispose();
+  });
+
+  const markerKey = `${META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX}:workspace-1`;
+  const markSuspectMetaCheckpoint = () =>
+    window.localStorage.setItem(markerKey, JSON.stringify({ reason: 'previous timeout' }));
+  const cloudAttachCalls = () =>
+    mocks.addTransport.mock.calls.filter(([transportId]) => transportId === 'cloud');
+
+  const createWebRuntimeWithSuspectMetaCheckpoint = async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    markSuspectMetaCheckpoint();
+    mocks.metaCheckpointDelete.mockRejectedValueOnce(
+      new Error('The database connection is closing.')
+    );
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    // Resuming from the undeleted checkpoint could skip Meta history for good.
+    await expect(runtime.setAuthToken('auth-token-1')).rejects.toThrow('connection is closing');
+    expect(cloudAttachCalls()).toEqual([]);
+    expect(window.localStorage.getItem(markerKey)).not.toBeNull();
+    return runtime;
+  };
+
+  const expectDeleteThenAttach = () => {
+    expect(mocks.metaCheckpointDelete).toHaveBeenCalledTimes(2);
+    expect(mocks.metaCheckpointDelete.mock.calls[1]?.[0]).toMatch(/\/workspace-1%3Ameta$/);
+    expect(cloudAttachCalls()).toHaveLength(1);
+    expect(mocks.metaCheckpointDelete.mock.invocationCallOrder[1]).toBeLessThan(
+      mocks.addTransport.mock.invocationCallOrder.at(-1) ?? 0
+    );
+  };
+
+  it('retries a web attach blocked by a suspect Meta checkpoint when the same token is announced again', async () => {
+    const runtime = await createWebRuntimeWithSuspectMetaCheckpoint();
+
+    // No token rotation: the unchanged token alone must retry delete-then-attach.
+    await runtime.setAuthToken('auth-token-1');
+    await flushPromises();
+    await flushPromises();
+    expectDeleteThenAttach();
+    await flushPromises();
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
+
+    await runtime.dispose();
+  });
+
+  it('retries a web attach blocked by a suspect Meta checkpoint on its own backoff', async () => {
+    const runtime = await createWebRuntimeWithSuspectMetaCheckpoint();
+
+    // No further setAuthToken call at all: only the retry loop's backoff runs.
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flushPromises();
+    expectDeleteThenAttach();
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
+
+    await runtime.dispose();
+  });
+
+  it('retries a web attach blocked by a suspect Meta checkpoint when the network comes back', async () => {
+    const runtime = await createWebRuntimeWithSuspectMetaCheckpoint();
+
+    // No token replay and no backoff wait: the ordinary online edge alone.
+    dispatchWindowEvent('online');
+    await flushPromises();
+    await flushPromises();
+    expectDeleteThenAttach();
+
+    await runtime.dispose();
+  });
+
+  it('attaches the new token, not the superseded one, when the token rotates during a blocked delete', async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    markSuspectMetaCheckpoint();
+    const blockedDelete = Promise.withResolvers<void>();
+    mocks.metaCheckpointDelete.mockImplementationOnce(async () => await blockedDelete.promise);
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+
+    const firstToken = runtime.setAuthToken('auth-token-1');
+    await vi.waitFor(() => expect(mocks.metaCheckpointDelete).toHaveBeenCalledTimes(1));
+    // The rotation tears down token-1's provider and does not wait for its
+    // still-blocked delete: token-2 attaches on its own right away.
+    await runtime.setAuthToken('auth-token-2');
+    expect(mocks.tokenProviderInvalidate).toHaveBeenCalled();
+    expect(cloudAttachCalls()).toHaveLength(1);
+    expect(mocks.metaCheckpointDelete).toHaveBeenCalledTimes(2);
+
+    blockedDelete.resolve();
+    await firstToken;
+    await flushPromises();
+    // The superseded attach publishes nothing when it finally unblocks.
+    expect(cloudAttachCalls()).toHaveLength(1);
+    await expect(runtime.ensureDocStream('session-after-rotation')).resolves.toBeUndefined();
+
+    await runtime.dispose();
+  });
+
+  it.each(['dispose', 'sign-out'] as const)(
+    'does not attach once the runtime is torn down (%s) during a blocked delete',
+    async (teardown) => {
+      mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+      markSuspectMetaCheckpoint();
+      const blockedDelete = Promise.withResolvers<void>();
+      mocks.metaCheckpointDelete.mockImplementationOnce(async () => await blockedDelete.promise);
+      const runtime = await createWorkspaceRuntime({
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+      });
+
+      const attach = runtime.setAuthToken('auth-token-1');
+      await vi.waitFor(() => expect(mocks.metaCheckpointDelete).toHaveBeenCalledTimes(1));
+      if (teardown === 'dispose') {
+        await runtime.dispose();
+      } else {
+        await runtime.setAuthToken(null);
+      }
+      blockedDelete.resolve();
+      await attach;
+      await flushPromises();
+      // Nothing built from the old credentials may reach the repo afterwards:
+      // no cloud transport, no Meta join, and no retry wakes up later.
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      expect(cloudAttachCalls()).toEqual([]);
+      expect(mocks.joinMetaRoom).not.toHaveBeenCalled();
+      expect(mocks.metaCheckpointDelete).toHaveBeenCalledTimes(1);
+      if (teardown === 'sign-out') {
+        await runtime.dispose();
+      }
+    }
+  );
+
+  const cloudRemovals = () =>
+    mocks.removeTransport.mock.calls.filter(([transportId]) => transportId === 'cloud');
+
+  it.each(['dispose', 'sign-out'] as const)(
+    'removes an in-flight web transport before %s returns',
+    async (teardown) => {
+      mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+      markSuspectMetaCheckpoint();
+      // loro-repo registers the transport when addTransport starts; the promise
+      // resolves only after routing live rooms, which is held here.
+      const blockedAdd = Promise.withResolvers<void>();
+      mocks.addTransport.mockImplementationOnce(async () => await blockedAdd.promise);
+      const runtime = await createWorkspaceRuntime({
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+      });
+
+      const attach = runtime.setAuthToken('auth-token-1');
+      await vi.waitFor(() => expect(cloudAttachCalls()).toHaveLength(1));
+      if (teardown === 'dispose') {
+        await runtime.dispose();
+      } else {
+        await runtime.setAuthToken(null);
+      }
+      // Already unregistered when sign-out/dispose returns, before the add ends.
+      expect(cloudRemovals()).toHaveLength(1);
+
+      blockedAdd.resolve();
+      await attach;
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(120_000);
+      // The late add neither re-removes nor joins, retries or clears the marker.
+      expect(cloudRemovals()).toHaveLength(1);
+      expect(mocks.joinMetaRoom).not.toHaveBeenCalled();
+      expect(cloudAttachCalls()).toHaveLength(1);
+      expect(window.localStorage.getItem(markerKey)).not.toBeNull();
+      if (teardown === 'sign-out') {
+        await runtime.dispose();
+      }
+    }
+  );
+
+  it("does not remove the next token's transport when a superseded add finishes late", async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    const blockedAdd = Promise.withResolvers<void>();
+    mocks.addTransport.mockImplementationOnce(async () => await blockedAdd.promise);
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+
+    const firstToken = runtime.setAuthToken('auth-token-1');
+    await vi.waitFor(() => expect(cloudAttachCalls()).toHaveLength(1));
+    await runtime.setAuthToken('auth-token-2');
+    // Token-1's transport was removed before token-2's was added.
+    expect(cloudRemovals()).toHaveLength(1);
+    expect(cloudAttachCalls()).toHaveLength(2);
+    expect(mocks.removeTransport.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      mocks.addTransport.mock.invocationCallOrder.at(-1) ?? 0
+    );
+
+    blockedAdd.resolve();
+    await firstToken;
+    await flushPromises();
+    expect(cloudRemovals()).toHaveLength(1);
+    await expect(runtime.ensureDocStream('session-after-rotation')).resolves.toBeUndefined();
+
+    await runtime.dispose();
+  });
+
+  it('still removes a later in-flight add after an older superseded add finishes first', async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    markSuspectMetaCheckpoint();
+    const firstAdd = Promise.withResolvers<void>();
+    const secondAdd = Promise.withResolvers<void>();
+    mocks.addTransport
+      .mockImplementationOnce(async () => await firstAdd.promise)
+      .mockImplementationOnce(async () => await secondAdd.promise);
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+
+    const firstToken = runtime.setAuthToken('auth-token-1');
+    await vi.waitFor(() => expect(cloudAttachCalls()).toHaveLength(1));
+    const secondToken = runtime.setAuthToken('auth-token-2');
+    await vi.waitFor(() => expect(cloudAttachCalls()).toHaveLength(2));
+    expect(cloudRemovals()).toHaveLength(1);
+
+    // The older add finishing must not hide that token-2's add is still live.
+    firstAdd.resolve();
+    await firstToken;
+    await runtime.setAuthToken(null);
+    expect(cloudRemovals()).toHaveLength(2);
+
+    secondAdd.resolve();
+    await secondToken;
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(cloudRemovals()).toHaveLength(2);
+    expect(cloudAttachCalls()).toHaveLength(2);
+    expect(mocks.joinMetaRoom).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(markerKey)).not.toBeNull();
+
+    await runtime.dispose();
+  });
+
+  it.each(['delete', 'add'] as const)(
+    'ignores a superseded attach whose %s fails after the next token attached',
+    async (stage) => {
+      mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+      markSuspectMetaCheckpoint();
+      const blocked = Promise.withResolvers<void>();
+      if (stage === 'delete') {
+        mocks.metaCheckpointDelete.mockImplementationOnce(async () => await blocked.promise);
+      } else {
+        mocks.addTransport.mockImplementationOnce(async () => await blocked.promise);
+      }
+      const runtime = await createWorkspaceRuntime({
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+      });
+
+      const firstToken = runtime.setAuthToken('auth-token-1');
+      await vi.waitFor(() =>
+        expect(
+          stage === 'delete' ? mocks.metaCheckpointDelete.mock.calls : cloudAttachCalls()
+        ).toHaveLength(1)
+      );
+      await runtime.setAuthToken('auth-token-2');
+      const attachedCloudCalls = cloudAttachCalls().length;
+      const presenceStops = mocks.presenceStop.mock.calls.length;
+      const deletes = mocks.metaCheckpointDelete.mock.calls.length;
+
+      // Token-1's stuck step now fails with an ordinary error.
+      blocked.reject(new Error('The database connection is closing.'));
+      await firstToken;
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(120_000);
+
+      // It must not stop token-2's presence, nor schedule a retry for itself.
+      expect(mocks.presenceStop.mock.calls.length).toBe(presenceStops);
+      expect(mocks.metaCheckpointDelete.mock.calls.length).toBe(deletes);
+      expect(cloudAttachCalls()).toHaveLength(attachedCloudCalls);
+      await expect(runtime.ensureDocStream('session-after-rotation')).resolves.toBeUndefined();
+
+      await runtime.dispose();
+    }
+  );
+
+  it('does not start a retry attach while a token-change teardown is still running', async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    markSuspectMetaCheckpoint();
+    mocks.metaCheckpointDelete.mockRejectedValueOnce(
+      new Error('The database connection is closing.')
+    );
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+    // Token-1's attach fails and leaves a pending retry; stay offline so it
+    // does not run on its own.
+    (navigator as { onLine: boolean }).onLine = false;
+    await expect(runtime.setAuthToken('auth-token-1')).rejects.toThrow('connection is closing');
+
+    // Token-2's teardown is held inside its first await (presence stop).
+    const heldStop = Promise.withResolvers<void>();
+    mocks.presenceStop.mockImplementationOnce(async () => await heldStop.promise);
+    const heldAdd = Promise.withResolvers<void>();
+    mocks.addTransport.mockImplementationOnce(async () => await heldAdd.promise);
+    const secondToken = runtime.setAuthToken('auth-token-2');
+    await flushPromises();
+
+    // A wake edge during that window must not start an attach on the provider
+    // the teardown is about to invalidate.
+    (navigator as { onLine: boolean }).onLine = true;
+    dispatchWindowEvent('online');
+    await flushPromises();
+    expect(cloudAttachCalls()).toEqual([]);
+
+    heldStop.resolve();
+    await vi.waitFor(() => expect(cloudAttachCalls()).toHaveLength(1));
+    heldAdd.resolve();
+    await secondToken;
+    await flushPromises();
+
+    expect(cloudAttachCalls()).toHaveLength(1);
+    await expect(runtime.ensureDocStream('session-after-rotation')).resolves.toBeUndefined();
+
+    await runtime.dispose();
+  });
+
+  it('stops a pending web attach retry when the runtime is disposed', async () => {
+    const runtime = await createWebRuntimeWithSuspectMetaCheckpoint();
+
+    // The failed attach armed a retry wait; dispose must cancel it, not leave a
+    // timer that later wakes a torn-down runtime.
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    await runtime.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mocks.metaCheckpointDelete).toHaveBeenCalledTimes(1);
+    expect(cloudAttachCalls()).toEqual([]);
+  });
+
+  it('does not attach the cloud plane in dual mode until a suspect Meta checkpoint is really deleted', async () => {
+    mocks.joinMetaRoom.mockResolvedValue(createMetaSub(Promise.resolve()));
+    enableElectronLocalDataPlane();
+    markSuspectMetaCheckpoint();
+    mocks.metaCheckpointDelete.mockRejectedValueOnce(
+      new Error('The database connection is closing.')
+    );
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+
+    await expect(runtime.setAuthToken('auth-token')).rejects.toThrow('connection is closing');
+    expect(cloudAttachCalls()).toEqual([]);
+    expect(window.localStorage.getItem(markerKey)).not.toBeNull();
+
+    // Same path as the cloud reconnect loop: attach while not attached.
+    await runtime.setAuthToken('auth-token');
+    expect(mocks.metaCheckpointDelete).toHaveBeenCalledTimes(2);
+    expect(cloudAttachCalls()).toHaveLength(1);
+    expect(mocks.metaCheckpointDelete.mock.invocationCallOrder[1]).toBeLessThan(
+      mocks.addTransport.mock.invocationCallOrder.at(-1) ?? 0
+    );
+    // The local Meta binding synced long before; only the cloud binding's first
+    // sync after the delete ends the episode. A kept marker would delete the
+    // then-valid cloud checkpoint again on every later attach.
+    await flushPromises();
+    expect(window.localStorage.getItem(markerKey)).toBeNull();
+
+    await runtime.dispose();
+  });
+
+  it('does not let a replaced cloud Meta session clear the marker in dual mode', async () => {
+    const cloudFirstSync = Promise.withResolvers<void>();
+    const metaSub = createMetaSub(Promise.resolve());
+    const bindingFor = metaSub.subscription;
+    metaSub.subscription = vi.fn((transportId: string) => {
+      const binding = bindingFor(transportId) as object;
+      return transportId === 'cloud'
+        ? { ...binding, firstSyncedWithRemote: cloudFirstSync.promise }
+        : binding;
+    });
+    mocks.joinMetaRoom.mockResolvedValue(metaSub);
+    enableElectronLocalDataPlane();
+    markSuspectMetaCheckpoint();
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+    });
+
+    await runtime.setAuthToken('auth-token');
+    expect(mocks.metaCheckpointDelete).toHaveBeenCalledTimes(1);
+    expect(cloudAttachCalls()).toHaveLength(1);
+
+    // That cloud session goes away before its first sync, and the next attach
+    // cannot delete the checkpoint yet.
+    await runtime.setAuthToken(null);
+    mocks.metaCheckpointDelete.mockRejectedValueOnce(
+      new Error('The database connection is closing.')
+    );
+    await expect(runtime.setAuthToken('auth-token')).rejects.toThrow('connection is closing');
+
+    cloudFirstSync.resolve();
+    await flushPromises();
+    expect(window.localStorage.getItem(markerKey)).not.toBeNull();
 
     await runtime.dispose();
   });
@@ -536,8 +1002,7 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     });
 
     const initialAttach = runtime.setAuthToken('auth-token-1');
-    await flushPromises();
-    expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1));
 
     const overlappingRotation = runtime.setAuthToken('auth-token-2');
     await flushPromises();
@@ -760,6 +1225,35 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await runtime.dispose();
   });
 
+  it('takes startup capability candidates from the ready doc-meta projection', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    mocks.listDoc.mockResolvedValue([{ docId: 'machine-scanned', meta: {}, exists: true }]);
+    let candidates: MachineId[] = [];
+    mocks.startupAcpCapabilitiesRefresh.mockImplementationOnce(async (ports) => {
+      candidates = await ports.listMachineIds();
+    });
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+      getAuthorizedMachineIds: () => new Set(['cached', 'scanned'] as MachineId[]),
+      readDocMetaCache: (repo) =>
+        repo === runtime.repo
+          ? { sessions: {}, machines: { 'machine-cached': { name: 'cached' } } }
+          : null,
+    });
+
+    await flushPromises();
+    publishPresenceSyncState('synced');
+    mocks.startupCapabilityCooldowns.at(-1)?.run();
+    await flushPromises();
+
+    expect(candidates).toEqual(['cached']);
+    await runtime.dispose();
+  });
+
   it('uses the Electron local data plane without attaching Loro Streams', async () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
     enableElectronLocalDataPlane();
@@ -777,6 +1271,62 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expect(mocks.addTransport).toHaveBeenCalledWith('local', expect.anything());
     expect(mocks.joinMetaRoom).toHaveBeenCalledTimes(1);
 
+    await runtime.dispose();
+  });
+
+  it('reuses a machine capability read across local file previews', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    const machineId = 'local-machine' as MachineId;
+    const preview = {
+      status: 'error' as const,
+      code: 'file_not_found' as const,
+      message: 'synthetic missing file',
+      path: 'notes.md',
+      retryable: false,
+    };
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'loro.isConnected') return true;
+      if (channel === 'machineRpc.previewFile') return preview;
+      return undefined;
+    });
+    Object.assign(window, {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke,
+        on: vi.fn(() => () => {}),
+        send: vi.fn(),
+      },
+    });
+    mocks.getDocMeta.mockImplementation(async (docId) =>
+      docId === getMachineRoomId(machineId)
+        ? { meta: { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES } }
+        : undefined
+    );
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      syncMode: 'local',
+    });
+
+    await expect(
+      runtime.requestFilePreview(machineId, {
+        sessionId: 'session-1' as SessionId,
+        path: 'notes.md',
+      })
+    ).resolves.toMatchObject({ status: 'error', code: 'file_not_found' });
+    await expect(
+      runtime.requestFilePreview(machineId, {
+        sessionId: 'session-1' as SessionId,
+        path: 'other.md',
+      })
+    ).resolves.toMatchObject({ status: 'error', code: 'file_not_found' });
+
+    expect(mocks.getDocMeta).toHaveBeenCalledTimes(1);
+    expect(
+      invoke.mock.calls.filter(([channel]) => channel === 'machineRpc.previewFile')
+    ).toHaveLength(2);
     await runtime.dispose();
   });
 

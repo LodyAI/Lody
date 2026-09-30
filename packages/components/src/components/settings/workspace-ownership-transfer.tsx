@@ -1,19 +1,22 @@
-import { useId, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { ConvexError } from 'convex/values';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Dialog } from '@/ui/dialog';
+import { Select } from '@lody/ui/select';
 import type { AccountMember } from './account-setting-pure';
+import { CompactRow } from './compact-layout';
+
+const styles = stylex.create({
+  form: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
+  error: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.destructive },
+});
 
 const errorKeys: Record<string, string> = {
   workspace_transfer_not_owner: 'workspace.transfer.errors.notOwner',
@@ -49,6 +52,18 @@ export function WorkspaceOwnershipTransfer({
       member.userId !== currentUserId && ['member', 'admin'].includes(member.role) && member.user
   );
   const target = candidates.find((member) => member.id === targetId);
+  // `Select.Value` reads the label of the current value from `items`, not from
+  // the rows, so the list is stated once and drives both.
+  const memberOptions = useMemo(
+    () =>
+      candidates.map((member) => ({
+        value: member.id,
+        label:
+          `${member.user?.name || member.user?.email}` +
+          (member.user?.name && member.user?.email ? ` (${member.user.email})` : ''),
+      })),
+    [candidates]
+  );
   const canConfirm = Boolean(target) && confirmation === workspaceName && !busy;
   const changeOpen = (value: boolean) => {
     if (inFlight.current) return;
@@ -81,55 +96,59 @@ export function WorkspaceOwnershipTransfer({
     }
   };
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3">
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-normal">{t('workspace.transfer.title')}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {t(candidates.length ? 'workspace.transfer.description' : 'workspace.transfer.noMembers')}
-        </p>
-      </div>
+    // One line of the danger zone's card: the same row as leaving or deleting.
+    <CompactRow
+      label={t('workspace.transfer.title')}
+      helper={t(
+        candidates.length ? 'workspace.transfer.description' : 'workspace.transfer.noMembers'
+      )}
+    >
       <Button
-        variant="outline"
-        size="sm"
+        variant="secondary"
+        size="small"
+        tone="destructive"
         disabled={!candidates.length}
         onClick={() => changeOpen(true)}
       >
         {t('workspace.transfer.button')}
       </Button>
-      <Dialog open={open} onOpenChange={changeOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('workspace.transfer.title')}</DialogTitle>
-            <DialogDescription>{t('workspace.transfer.warning')}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor={`${id}-member`}>{t('workspace.transfer.newOwner')}</Label>
-              <Select
+      <Dialog.Root open={open} onOpenChange={changeOpen}>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>{t('workspace.transfer.title')}</Dialog.Title>
+            <Dialog.Description>{t('workspace.transfer.warning')}</Dialog.Description>
+          </Dialog.Header>
+          <div {...stylex.props(styles.form)}>
+            <div {...stylex.props(styles.field)}>
+              <UiField.Label htmlFor={`${id}-member`}>
+                {t('workspace.transfer.newOwner')}
+              </UiField.Label>
+              <Select.Root
+                items={memberOptions}
                 value={targetId}
                 onValueChange={(value) => {
+                  if (value == null) return;
                   setTargetId(value);
                   setError(null);
                 }}
                 disabled={busy}
               >
-                <SelectTrigger id={`${id}-member`}>
-                  <SelectValue placeholder={t('workspace.transfer.selectMember')} />
-                </SelectTrigger>
-                <SelectContent>
-                  {candidates.map((member) => (
-                    <SelectItem key={member.id} value={member.id}>
-                      {member.user?.name || member.user?.email}
-                      {member.user?.name && member.user?.email ? ` (${member.user.email})` : ''}
-                    </SelectItem>
+                <Select.Trigger id={`${id}-member`}>
+                  <Select.Value placeholder={t('workspace.transfer.selectMember')} />
+                </Select.Trigger>
+                <Select.Content>
+                  {memberOptions.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
                   ))}
-                </SelectContent>
-              </Select>
+                </Select.Content>
+              </Select.Root>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor={`${id}-confirm`}>
+            <div {...stylex.props(styles.field)}>
+              <UiField.Label htmlFor={`${id}-confirm`}>
                 {t('workspace.transfer.confirmLabel', { workspace: workspaceName })}
-              </Label>
+              </UiField.Label>
               <Input
                 id={`${id}-confirm`}
                 value={confirmation}
@@ -139,21 +158,21 @@ export function WorkspaceOwnershipTransfer({
               />
             </div>
             {error ? (
-              <p role="alert" className="text-sm text-destructive">
+              <p role="alert" {...stylex.props(styles.error)}>
                 {t(error)}
               </p>
             ) : null}
           </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" disabled={busy} onClick={() => changeOpen(false)}>
+          <Dialog.Footer>
+            <Button variant="secondary" disabled={busy} onClick={() => changeOpen(false)}>
               {t('common.cancel')}
             </Button>
             <Button variant="destructive" disabled={!canConfirm} onClick={() => void submit()}>
               {t(busy ? 'workspace.transfer.transferring' : 'workspace.transfer.confirm')}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
+    </CompactRow>
   );
 }

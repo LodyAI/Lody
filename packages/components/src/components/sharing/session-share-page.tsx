@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Moon, Sun, PanelLeft, Languages } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import {
   SessionRowLeadingSlot,
   buildSessionRowOpenedByTreeSlot,
 } from '../session-row-leading-slot';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { buildConversationMarkdown, type SessionId } from '@lody/shared';
 import {
   openStaticShare,
@@ -36,10 +39,11 @@ import {
   type ShareAttachmentAccess,
 } from './share-attachments';
 import { SessionShareErrorBoundary } from './session-share-error-boundary';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { TabPillStrip, TAB_PILL_ACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
-import { Sheet, SheetContent, SheetTitle } from '@/ui/sheet';
+import { Drawer } from '@lody/ui/drawer';
 import { cn } from '@/lib/utils';
+import { shareSurface } from './surface';
 import { clamp } from '@/lib/clamp';
 import { useTheme } from '@/theme-provider';
 import { SessionShareActions } from './session-share-actions';
@@ -49,6 +53,182 @@ import {
   resolveShareAppOrigin,
   type ShareViewer,
 } from './session-share-identity';
+
+/** Wide enough for the tree to sit beside the transcript rather than over it. */
+const WIDE = '@media (min-width: 640px)';
+const REDUCED_MOTION = '@media (prefers-reduced-motion: reduce)';
+
+/** The foreground tinted into whatever the tree sits on, for a title box. */
+const tint = (percent: number) => `color-mix(in oklab, transparent, ${colors.label} ${percent}%)`;
+/** The resize handle's 2px line, centred in its 12px grab area. */
+const handleLine = (percent: number) =>
+  `linear-gradient(to right, transparent 5px, ${tint(percent)} 5px, ${tint(percent)} 7px, transparent 7px)`;
+
+const styles = stylex.create({
+  pane: { display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0, minWidth: 0 },
+  /** The pane is named by its tab; the strip sits on the page with no rule under it. */
+  tabs: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1],
+    paddingInline: space[2],
+    paddingBlock: space[1.5],
+  },
+  tabStrip: { minWidth: 0, overflowX: 'auto' },
+  tabItem: { flexShrink: 0, maxWidth: '224px' },
+  paneNote: {
+    margin: 0,
+    padding: space[8],
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  paneNoteCentered: { textAlign: 'center' },
+  stream: { flexGrow: 1, minHeight: 0 },
+  files: { display: 'flex', flexDirection: 'column', gap: space[2] },
+
+  /** A whole-window state: the share could not be opened, or is on its way. */
+  state: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100dvh',
+    padding: space[8],
+    textAlign: 'center',
+    backgroundColor: colors.background,
+    color: colors.label,
+  },
+  stateTitle: {
+    margin: 0,
+    fontSize: text.titleSize,
+    lineHeight: text.titleLeading,
+    fontWeight: 600,
+  },
+  stateDetail: {
+    margin: 0,
+    marginTop: space[2],
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  stateLoading: { fontSize: text.bodySize, color: colors.secondaryLabel },
+
+  page: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100dvh',
+    minHeight: 0,
+    backgroundColor: colors.background,
+    color: colors.label,
+  },
+  /** The reader's chrome is on the page itself: no band, no rule under it. */
+  header: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingInline: space[4],
+    paddingBlock: space[2],
+  },
+  headerStart: { display: 'flex', minWidth: 0, alignItems: 'center', gap: space[1] },
+  headerEnd: { display: 'flex', alignItems: 'center', gap: space[2] },
+  /** CSS picks the tree's toggle: the sidebar's on wide layouts, the drawer's on narrow. */
+  wideOnly: { display: { default: 'none', [WIDE]: 'contents' } },
+  narrowOnly: { display: { default: 'contents', [WIDE]: 'none' } },
+  glyph: { width: '16px', height: '16px' },
+
+  layout: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: { default: 'column', [WIDE]: 'row' },
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  /** A drag must not select the titles it passes over. */
+  layoutResizing: { userSelect: 'none' },
+  /**
+   * The tree toggles by width so it can animate; a drag drops the transition,
+   * since animating every pointer move would trail the cursor.
+   */
+  treeClip: {
+    display: { default: 'none', [WIDE]: 'block' },
+    flexShrink: 0,
+    overflow: 'hidden',
+    transitionProperty: { default: 'width', [REDUCED_MOTION]: 'none' },
+    transitionDuration: duration.regular,
+    transitionTimingFunction: ease.standard,
+  },
+  treeClipResizing: { transitionProperty: 'none' },
+  /** The sidebar is the region rung: a step off the page, and no rule beside it. */
+  treeColumn: {
+    boxSizing: 'border-box',
+    height: '100%',
+    overflowY: 'auto',
+    padding: space[2],
+    backgroundColor: colors.secondaryBackground,
+  },
+  treeRows: { display: 'flex', flexDirection: 'column', gap: '1px' },
+  treeRow: { display: 'flex', alignItems: 'center' },
+  /**
+   * The title box alone takes the tint, never the connector gutter beside it:
+   * the trunk passes through rows it does not belong to, and a chip across it
+   * would cut the line in two.
+   */
+  treeTitle: {
+    flexGrow: 1,
+    minWidth: 0,
+    margin: 0,
+    paddingInline: space[2],
+    paddingBlock: space[1],
+    borderWidth: 0,
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textAlign: 'start',
+    fontFamily: 'inherit',
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 400,
+    color: colors.secondaryLabel,
+    backgroundColor: { default: 'transparent', ':hover': tint(5) },
+    cursor: 'pointer',
+    transitionProperty: 'background-color, color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  treeTitleActive: {
+    color: colors.label,
+    backgroundColor: { default: tint(10), ':hover': tint(10) },
+  },
+  /**
+   * A 12px grab area straddling the tree's edge, with a 2px line as the visible
+   * affordance. Absolute, so the columns keep their widths.
+   */
+  handle: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    zIndex: 20,
+    display: { default: 'none', [WIDE]: 'block' },
+    width: '12px',
+    transform: 'translateX(-50%)',
+    cursor: 'col-resize',
+    outlineStyle: 'none',
+    backgroundImage: {
+      default: 'none',
+      ':hover': handleLine(20),
+      ':focus-visible': handleLine(40),
+    },
+  },
+  handleResizing: {
+    backgroundImage: { default: handleLine(30), ':focus-visible': handleLine(40) },
+  },
+  main: { display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0, minWidth: 0 },
+});
 
 function ShareLanguageToggle() {
   const { t, i18n } = useTranslation();
@@ -60,8 +240,7 @@ function ShareLanguageToggle() {
     <Button
       type="button"
       variant="ghost"
-      size="icon"
-      className="h-8 w-8 shrink-0 text-muted-foreground"
+      icon
       aria-label={label}
       title={label}
       onClick={() => {
@@ -73,7 +252,7 @@ function ShareLanguageToggle() {
         }
       }}
     >
-      <Languages className="h-4 w-4" aria-hidden="true" />
+      <Languages {...stylex.props(styles.glyph)} aria-hidden="true" />
     </Button>
   );
 }
@@ -95,17 +274,16 @@ function ShareThemeToggle() {
     <Button
       type="button"
       variant="ghost"
-      size="icon"
-      className="h-8 w-8 shrink-0 text-muted-foreground"
+      icon
       aria-label={label}
       aria-pressed={dark}
       title={label}
       onClick={() => setTheme(dark ? 'light' : 'dark')}
     >
       {dark ? (
-        <Moon className="h-4 w-4" aria-hidden="true" />
+        <Moon {...stylex.props(styles.glyph)} aria-hidden="true" />
       ) : (
-        <Sun className="h-4 w-4" aria-hidden="true" />
+        <Sun {...stylex.props(styles.glyph)} aria-hidden="true" />
       )}
     </Button>
   );
@@ -143,7 +321,7 @@ function ShareConversationPane({
         <SharedImage key={entry.key} entry={entry} access={attachmentAccess} />
       ),
       renderFiles: (files: Parameters<typeof SharedFile>[0]['file'][]) => (
-        <div className="space-y-2">
+        <div {...stylex.props(styles.files)}>
           {files.map((file) =>
             file.transport === 'r2' ? (
               <SharedFile key={file.fileId} file={file} access={attachmentAccess} />
@@ -192,33 +370,35 @@ function ShareConversationPane({
     }
   };
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={title}>
+    <section {...stylex.props(styles.pane)} aria-label={title}>
       {/* The app names a conversation with its tab, not a second title bar, so
           a single conversation and a set of child Tabs read identically here. */}
-      <h1 className="sr-only">{title}</h1>
-      <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+      <h1 {...stylex.props(shareSurface.visuallyHidden)}>{title}</h1>
+      <div {...stylex.props(styles.tabs)}>
         {tabs.length > 1 ? (
           <TabPillStrip
             items={tabs.map((tab) => ({ key: tab.id, label: tab.title }))}
             activeKey={conversationId}
             onSelect={onSelect}
             ariaLabel={t('sharing.conversations', 'Shared conversations')}
-            className="min-w-0 overflow-x-auto"
-            itemClassName="max-w-56 shrink-0"
+            className={stylex.props(styles.tabStrip).className}
+            itemClassName={stylex.props(styles.tabItem).className}
           />
         ) : (
+          // A solo conversation is the strip's own active pill, so it keeps the
+          // strip's classes (still Tailwind in `tab-pill-strip.tsx`) to match it.
           <span
             className={cn(
-              'flex h-8 min-w-0 items-center rounded-md border border-transparent px-3 text-[13px] font-medium',
+              'flex h-8 min-w-0 items-center rounded-md border border-transparent px-3 text-[0.9em] font-medium',
               TAB_PILL_ACTIVE_CLASS
             )}
           >
-            <span className="min-w-0 truncate">{title}</span>
+            <span {...stylex.props(shareSurface.buttonLabel)}>{title}</span>
           </span>
         )}
       </div>
       {snapshot.status === 'unavailable' ? (
-        <p role="status" className="p-8 text-sm text-muted-foreground">
+        <p role="status" {...stylex.props(styles.paneNote)}>
           {t('sharing.unavailable', 'This share is unavailable')}
         </p>
       ) : (
@@ -228,12 +408,12 @@ function ShareConversationPane({
               key={conversationId}
               sessionId={conversationId as SessionId}
               items={stream.items}
-              className="min-h-0 flex-1"
+              className={stylex.props(styles.stream).className}
               renderMessageRow={renderRow}
               lastAssistantMessageId={stream.lastAssistantMessageId}
               lastCompletedAssistantMessageId={stream.lastCompletedAssistantMessageId}
               emptyState={
-                <p role="status" className="p-8 text-center text-sm text-muted-foreground">
+                <p role="status" {...stylex.props(styles.paneNote, styles.paneNoteCentered)}>
                   {snapshot.status === 'loading'
                     ? t('sharing.loading', 'Loading shared conversation…')
                     : t('sharing.empty', 'No messages yet')}
@@ -332,12 +512,12 @@ export function SessionShareSurface(props: {
   }, [fitTreeWidth, status]);
   if (status === 'unavailable')
     return (
-      <main className="flex min-h-dvh items-center justify-center p-8 text-center">
+      <main {...stylex.props(styles.state)}>
         <div>
-          <h1 className="text-lg font-medium">
+          <h1 {...stylex.props(styles.stateTitle)}>
             {t('sharing.unavailable', 'This share is unavailable')}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p {...stylex.props(styles.stateDetail)}>
             {t('sharing.unavailableDetail', 'The link may be incomplete, reset, or revoked.')}
           </p>
         </div>
@@ -345,10 +525,7 @@ export function SessionShareSurface(props: {
     );
   if (!manifest || !sessionId)
     return (
-      <main
-        role="status"
-        className="flex min-h-dvh items-center justify-center text-sm text-muted-foreground"
-      >
+      <main role="status" {...stylex.props(styles.state, styles.stateLoading)}>
         {t('sharing.loading', 'Loading shared conversation…')}
       </main>
     );
@@ -371,13 +548,13 @@ export function SessionShareSurface(props: {
     // one 30px row plus the list's 1px gap. Rows here are that box — `py-1` and a
     // 20px title line — so a trunk ends where the next one starts and the tree
     // reads as one line instead of a dash per row.
-    <div className="flex flex-col gap-px">
+    <div {...stylex.props(styles.treeRows)}>
       {tree.map((node) => {
         // A child Tab is named by the tab strip, so the tree marks the root the
         // main pane belongs to — selecting a Tab keeps its conversation lit.
         const active = node.id === panes.root.id;
         return (
-          <div key={node.id} className="flex items-center">
+          <div key={node.id} {...stylex.props(styles.treeRow)}>
             <SessionRowLeadingSlot
               menuLabel=""
               openedByTree={buildSessionRowOpenedByTreeSlot(node, t, () =>
@@ -396,18 +573,9 @@ export function SessionShareSurface(props: {
                 setTreeSheetOpen(false);
               }}
               aria-current={active ? 'page' : undefined}
-              className={cn(
-                // Selection and hover paint the title box only, never the slot
-                // beside it: the trunk and elbow pass through rows they do not
-                // belong to, and a tinted chip across that gutter cuts the line
-                // in two. Not `bg-accent` either — `--accent` is not one of this
-                // project's theme tokens, so that utility painted nothing at all.
-                // Tint the reader's own foreground, as the app's sidebar does.
-                'min-w-0 flex-1 truncate rounded-md border px-2 py-1 text-left text-sm transition-colors',
-                active
-                  ? 'border-foreground/10 bg-foreground/10 font-medium text-foreground'
-                  : 'border-transparent text-muted-foreground hover:border-foreground/5 hover:bg-foreground/5'
-              )}
+              // Tint the reader's own foreground, as the app's sidebar does — not
+              // the accent, which is for live state.
+              {...stylex.props(styles.treeTitle, active && styles.treeTitleActive)}
             >
               {title(node.item.title)}
             </button>
@@ -417,52 +585,47 @@ export function SessionShareSurface(props: {
     </div>
   );
   return (
-    <main className="flex h-dvh min-h-0 flex-col bg-background text-foreground">
-      <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-        <div className="flex min-w-0 items-center gap-1">
+    <main {...stylex.props(styles.page)}>
+      <header {...stylex.props(styles.header)}>
+        <div {...stylex.props(styles.headerStart)}>
           <ShareBrandLink appOrigin={appOrigin} />
           {hasTree && (
             <>
               {/* Two buttons rather than a viewport hook: the wide layout keeps
                   the tree in place, the narrow one has no room and opens it as
                   a drawer. CSS decides, so neither can flash the wrong one. */}
-              <Button
-                size="icon"
-                variant="ghost"
-                className="hidden h-8 w-8 sm:inline-flex"
-                aria-expanded={treeVisible}
-                aria-label={t('sharing.toggleTree', 'Toggle conversation tree')}
-                onClick={() => setTreeVisible((value) => !value)}
-              >
-                <PanelLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-8 w-8 sm:hidden"
-                aria-expanded={treeSheetOpen}
-                aria-label={t('sharing.toggleTree', 'Toggle conversation tree')}
-                onClick={() => setTreeSheetOpen(true)}
-              >
-                <PanelLeft className="h-4 w-4" />
-              </Button>
+              <span {...stylex.props(styles.wideOnly)}>
+                <Button
+                  icon
+                  variant="ghost"
+                  aria-expanded={treeVisible}
+                  aria-label={t('sharing.toggleTree', 'Toggle conversation tree')}
+                  onClick={() => setTreeVisible((value) => !value)}
+                >
+                  <PanelLeft {...stylex.props(styles.glyph)} />
+                </Button>
+              </span>
+              <span {...stylex.props(styles.narrowOnly)}>
+                <Button
+                  icon
+                  variant="ghost"
+                  aria-expanded={treeSheetOpen}
+                  aria-label={t('sharing.toggleTree', 'Toggle conversation tree')}
+                  onClick={() => setTreeSheetOpen(true)}
+                >
+                  <PanelLeft {...stylex.props(styles.glyph)} />
+                </Button>
+              </span>
             </>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div {...stylex.props(styles.headerEnd)}>
           <ShareThemeToggle />
           <ShareLanguageToggle />
           <ShareViewerIdentity viewer={viewer} />
         </div>
       </header>
-      <div
-        ref={layoutRef}
-        className={cn(
-          'relative flex min-h-0 flex-1 flex-col sm:flex-row',
-          // A drag must not select the titles it passes over.
-          resizingTree && 'select-none'
-        )}
-      >
+      <div ref={layoutRef} {...stylex.props(styles.layout, resizingTree && styles.layoutResizing)}>
         {hasTree && (
           // The toggle animates width rather than mounting and unmounting: a
           // conditional element cannot transition, so the tree used to blink in
@@ -473,72 +636,60 @@ export function SessionShareSurface(props: {
           <nav
             aria-label={t('sharing.conversationTree', 'Conversation tree')}
             inert={!treeVisible || undefined}
+            {...stylex.props(styles.treeClip, resizingTree && styles.treeClipResizing)}
             style={{ width: treeVisible ? treeWidth : 0 }}
-            className={cn(
-              'hidden shrink-0 overflow-hidden sm:block',
-              resizingTree
-                ? 'transition-none'
-                : 'transition-[width] duration-200 ease-out motion-reduce:transition-none'
-            )}
           >
-            <div
-              style={{ width: treeWidth }}
-              className="h-full overflow-y-auto border-r border-border bg-muted/20 p-2"
-            >
+            <div {...stylex.props(styles.treeColumn)} style={{ width: treeWidth }}>
               {treeRows()}
             </div>
           </nav>
         )}
-        {hasTree && treeVisible && (
-          // A 12px grab area straddling the tree's border, with a 2px line as the
-          // visible affordance. Absolute, so the columns keep their own widths and
-          // the handle cannot claim layout space of its own. Arrow keys step it for
-          // a visitor who is not dragging anything.
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={t('sharing.resizeTree', 'Resize the conversation tree')}
-            aria-valuenow={treeWidth}
-            aria-valuemin={TREE_MIN_WIDTH}
-            aria-valuemax={treeMaxWidth}
-            tabIndex={0}
-            style={{ left: treeWidth }}
-            className={cn(
-              'absolute inset-y-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize sm:block',
-              'after:absolute after:inset-y-0 after:left-[5px] after:w-[2px] after:transition-colors',
-              'focus-visible:outline-hidden focus-visible:after:bg-foreground/40',
-              resizingTree ? 'after:bg-foreground/30' : 'hover:after:bg-foreground/20'
-            )}
-            onPointerDown={(event) => {
-              if (event.button !== 0) return;
-              event.preventDefault();
-              try {
-                event.currentTarget.setPointerCapture(event.pointerId);
-              } catch {
-                // Capture is unavailable in some environments; the drag still tracks moves.
-              }
-              resizeRef.current = {
-                pointerId: event.pointerId,
-                startX: event.clientX,
-                startWidth: treeWidth,
-              };
-              setResizingTree(true);
-            }}
-            onPointerMove={(event) => {
-              const { pointerId, startX, startWidth } = resizeRef.current;
-              if (pointerId !== event.pointerId) return;
-              fitTreeWidth(startWidth + (event.clientX - startX));
-            }}
-            onPointerUp={(event) => endTreeResize(event.currentTarget, event.pointerId)}
-            onPointerCancel={(event) => endTreeResize(event.currentTarget, event.pointerId)}
-            onKeyDown={(event) => {
-              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-              event.preventDefault();
-              fitTreeWidth(treeWidth + (event.key === 'ArrowLeft' ? -16 : 16));
-            }}
-          />
-        )}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {hasTree &&
+          treeVisible && (
+            // A 12px grab area straddling the tree's edge, with a 2px line as the
+            // visible affordance. Absolute, so the columns keep their own widths and
+            // the handle cannot claim layout space of its own. Arrow keys step it for
+            // a visitor who is not dragging anything.
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t('sharing.resizeTree', 'Resize the conversation tree')}
+              aria-valuenow={treeWidth}
+              aria-valuemin={TREE_MIN_WIDTH}
+              aria-valuemax={treeMaxWidth}
+              tabIndex={0}
+              {...stylex.props(styles.handle, resizingTree && styles.handleResizing)}
+              style={{ left: treeWidth }}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                try {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                } catch {
+                  // Capture is unavailable in some environments; the drag still tracks moves.
+                }
+                resizeRef.current = {
+                  pointerId: event.pointerId,
+                  startX: event.clientX,
+                  startWidth: treeWidth,
+                };
+                setResizingTree(true);
+              }}
+              onPointerMove={(event) => {
+                const { pointerId, startX, startWidth } = resizeRef.current;
+                if (pointerId !== event.pointerId) return;
+                fitTreeWidth(startWidth + (event.clientX - startX));
+              }}
+              onPointerUp={(event) => endTreeResize(event.currentTarget, event.pointerId)}
+              onPointerCancel={(event) => endTreeResize(event.currentTarget, event.pointerId)}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                fitTreeWidth(treeWidth + (event.key === 'ArrowLeft' ? -16 : 16));
+              }}
+            />
+          )}
+        <div {...stylex.props(styles.main)}>
           <ShareConversationPane
             key={panes.main.id}
             conversationId={panes.main.id}
@@ -554,18 +705,16 @@ export function SessionShareSurface(props: {
         </div>
       </div>
       {hasTree && (
-        <Sheet open={treeSheetOpen} onOpenChange={setTreeSheetOpen}>
-          <SheetContent
-            side="left"
+        <Drawer.Root side="start" open={treeSheetOpen} onOpenChange={setTreeSheetOpen}>
+          <Drawer.Content
+            side="start"
             aria-label={t('sharing.conversationTree', 'Conversation tree')}
-            className="w-72 overflow-y-auto p-2 pt-12 sm:max-w-xs"
           >
-            <SheetTitle className="sr-only">
-              {t('sharing.conversationTree', 'Conversation tree')}
-            </SheetTitle>
+            {/* The drawer's own heading, beside its close cross. */}
+            <Drawer.Title>{t('sharing.conversationTree', 'Conversation tree')}</Drawer.Title>
             {treeRows()}
-          </SheetContent>
-        </Sheet>
+          </Drawer.Content>
+        </Drawer.Root>
       )}
     </main>
   );

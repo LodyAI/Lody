@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { AgentConfigMeta } from '@lody/shared';
 
 import { AgentIcon } from '@/components/icons/agent-icon';
-import { DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 
 /**
  * "Recently used" run configurations, rendered at the top of
@@ -75,17 +75,17 @@ export function RecentRunConfigMenuGroup({
 
   return (
     <>
-      <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+      <Menu.GroupLabel className="text-xs font-normal text-muted-foreground">
         {t('chat.runConfig.recentLabel', 'Recently used')}
-      </DropdownMenuLabel>
+      </Menu.GroupLabel>
       {items.map((item) => (
-        <DropdownMenuItem
+        <Menu.Item
           key={item.id}
           // The row is assembled from several spans, so give Radix an explicit
           // string for typeahead and screen readers instead of the DOM soup.
-          textValue={describeItem(item, planLabel, fastLabel)}
+          label={describeItem(item, planLabel, fastLabel)}
           title={describeItem(item, planLabel, fastLabel)}
-          onSelect={() => onSelect(item.id)}
+          onClick={() => onSelect(item.id)}
           // A recent entry must never set the menu's width: a long agent name
           // would otherwise stretch the whole dropdown and drag the Agent /
           // Model / Reasoning values out to the far edge. Past this cap the
@@ -136,9 +136,9 @@ export function RecentRunConfigMenuGroup({
               <Zap className="h-3.5 w-3.5 text-primary" strokeWidth={1.8} aria-hidden="true" />
             ) : null}
           </span>
-        </DropdownMenuItem>
+        </Menu.Item>
       ))}
-      <DropdownMenuSeparator />
+      <Menu.Separator />
     </>
   );
 }

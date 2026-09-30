@@ -67,10 +67,10 @@ const DiffStats = ({ add, del }: { add?: number; del?: number }) => {
 
   return (
     <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums">
-      <span className={add === undefined ? 'text-muted-foreground/60' : 'text-code-added'}>
+      <span className={add === undefined ? 'text-muted-foreground/60' : 'text-github-addition'}>
         +{add ?? '—'}
       </span>
-      <span className={del === undefined ? 'text-muted-foreground/60' : 'text-code-removed'}>
+      <span className={del === undefined ? 'text-muted-foreground/60' : 'text-github-deletion'}>
         -{del ?? '—'}
       </span>
     </span>

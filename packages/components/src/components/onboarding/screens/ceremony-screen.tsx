@@ -1,6 +1,19 @@
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import lodyIcon from '@/assets/lody-icon.png';
 import { OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
+
+const styles = stylex.create({
+  stage: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '208px',
+    paddingBlock: space[6],
+  },
+  mark: { width: '112px', height: '112px', objectFit: 'contain' },
+});
 
 export function CeremonyScreen({ onNext }: { onNext: () => void }) {
   const { t } = useTranslation();
@@ -20,8 +33,8 @@ export function CeremonyScreen({ onNext }: { onNext: () => void }) {
         />
       }
     >
-      <div className="flex min-h-52 items-center justify-center py-6">
-        <img src={lodyIcon} alt="" className="size-28 object-contain" />
+      <div {...stylex.props(styles.stage)}>
+        <img src={lodyIcon} alt="" {...stylex.props(styles.mark)} />
       </div>
     </OnboardingShell>
   );

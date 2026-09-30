@@ -86,7 +86,8 @@ describe('AgentRoleRow', () => {
     const view = await render();
     expect(view.textContent).toContain('Code Reviewer');
     expect(view.textContent).toContain('🔍');
-    expect(view.textContent).toContain('Private');
+    // Private is the default: only a Role the workspace can use is marked.
+    expect(view.textContent).not.toContain('Private');
     expect(view.textContent).toContain('gpt-5.6-sol · high');
     // The mention token is derived from this very name, so printing both would
     // say one thing twice; the machine leads the group instead of each row.

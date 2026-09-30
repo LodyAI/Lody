@@ -19,6 +19,8 @@ export type ScriptedAcpEvent = {
   event: string;
   sessionId?: string;
   mode?: string;
+  /** `[MARK:<value>]` carried by the user prompt, when present. */
+  marker?: string;
   stopReason?: string;
 };
 

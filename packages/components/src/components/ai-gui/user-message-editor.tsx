@@ -1,12 +1,18 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
-import { Button } from '@/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { conversationTextFontSizeStyle } from './conversation-font-size-classes';
+import { CombinedMentionTextarea } from '@/components/mentions/combined-mention-textarea';
+import { getComposerMentionChip } from '@/components/mentions/mention-chips';
+import { isImeComposingKeyboardEvent } from '@/lib/ime';
+import type { Mention as MentionRange } from '@/ui/mention/index';
+import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
+import type { SkillMentionAgent } from '@/components/mentions/mention-skill-source';
+import type { AcpCommandSummary } from '@lody/shared';
 
 /** Grows with the text instead of reserving a fixed empty block. */
 const MAX_TEXTAREA_HEIGHT_PX = 320;
@@ -15,19 +21,29 @@ export type UserMessageEditorProps = {
   value: string;
   onChange: (value: string) => void;
   onCancel: () => void;
-  onSave: () => void;
+  /** Receives the expanded text plus the committed mention ranges; the caller
+   *  turns those into transcript spans the same way a send does. */
+  onSave: (payload: { text: string; mentions: readonly MentionRange[] }) => void;
   isSaving: boolean;
   conversationFontSize: ConversationFontSize;
+  /** Same source object the session composer resolves; wires `@` file/session/
+   *  role/issue candidates into the editor. Undefined disables the tree. */
+  mentionSource?: MentionProjectSource;
+  /** `/` command candidates for the agent that owns this session. */
+  availableCommands?: AcpCommandSummary[];
+  /** Selected provider, narrowing `$` to its skill directories. */
+  skillAgent?: SkillMentionAgent;
+  /** Excludes the session being edited from `@session` candidates. */
+  currentSessionId?: string;
 };
 
 /**
  * In-place editor that takes the last user bubble's spot when resending.
  *
- * One surface only: the card carries the border, and the field inside is
- * transparent and chrome-free — the shared `Textarea` is what suppresses the
- * global `:focus-visible` inset ring (`@layer base` in tailwind/index.css) that
- * would otherwise draw a second rectangle around the text. Send matches the
- * composer's black pill so the two writing surfaces read as the same control.
+ * The card owns the editor's focus edge. Inside it sits the same
+ * `CombinedMentionTextarea` the composer uses, so `@`, `$` and `/` behave
+ * identically to a fresh send — including the before-send expansion, which the
+ * caller applies through `useMentionPromptExpansion` over the reported ranges.
  */
 export function UserMessageEditor({
   value,
@@ -36,9 +52,16 @@ export function UserMessageEditor({
   onSave,
   isSaving,
   conversationFontSize,
+  mentionSource,
+  availableCommands,
+  skillAgent,
+  currentSessionId,
 }: UserMessageEditorProps) {
   const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Live ranges the before-send rewrite needs; they only leave the component
+  // on save, alongside the text they were measured against.
+  const mentionRangesRef = useRef<MentionRange[]>([]);
   const canSave = value.trim().length > 0 && !isSaving;
 
   // Auto-size to the content: reset first so the box can also shrink when text
@@ -61,6 +84,11 @@ export function UserMessageEditor({
     el.setSelectionRange(el.value.length, el.value.length);
   }, []);
 
+  const handleSave = useCallback(() => {
+    if (!canSave) return;
+    onSave({ text: value, mentions: mentionRangesRef.current });
+  }, [canSave, onSave, value]);
+
   return (
     <div
       className={cn(
@@ -72,13 +100,33 @@ export function UserMessageEditor({
       )}
       aria-busy={isSaving || undefined}
     >
-      <Textarea
+      <CombinedMentionTextarea
         ref={focusAtEnd}
+        // Bare textarea inside the editor card — the card is the well.
+        appearance="bare"
+        resize="none"
         value={value}
+        onValueChange={onChange}
         rows={1}
         readOnly={isSaving}
-        onChange={(event) => onChange(event.target.value)}
+        mentionSource={mentionSource}
+        availableCommands={availableCommands}
+        skillAgent={skillAgent}
+        currentSessionId={currentSessionId}
+        mentionSurface="session_chat"
+        // The editor lives mid-conversation, so the menu follows the caret and
+        // flips above the line when there is no room below.
+        // The <640px docked strip is built for a bottom composer above the
+        // keyboard; with no bottom composer it would open clipped off-screen
+        // above the editor, so mobile keeps the floating popover too.
+        menuAnchor="caret"
+        menuMobileDocked={false}
+        onMentionRangesChange={(ranges) => {
+          mentionRangesRef.current = ranges;
+        }}
+        getMentionChip={getComposerMentionChip}
         onKeyDown={(event) => {
+          if (isImeComposingKeyboardEvent(event)) return;
           if (event.key === 'Escape') {
             event.preventDefault();
             if (!isSaving) onCancel();
@@ -86,12 +134,14 @@ export function UserMessageEditor({
           }
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
             event.preventDefault();
-            if (canSave) onSave();
+            handleSave();
           }
         }}
         className={cn(
-          'input-scrollbar resize-none rounded-none border-transparent bg-transparent p-0',
-          'leading-relaxed text-foreground',
+          // The card carries the focus edge; the textarea itself must not draw
+          // a second outline/ring inside it (MentionInput is a bare primitive,
+          // not the styled Textarea).
+          'input-scrollbar leading-relaxed focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
           isSaving && 'text-muted-foreground'
         )}
         style={conversationTextFontSizeStyle(conversationFontSize)}
@@ -101,24 +151,20 @@ export function UserMessageEditor({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="small"
+          shape="pill"
           disabled={isSaving}
           onClick={onCancel}
-          className="h-7 rounded-full px-3 text-xs font-normal text-muted-foreground hover:text-foreground"
         >
           {t('common.cancel', 'Cancel')}
         </Button>
         <Button
           type="button"
-          variant="ghost"
-          size="sm"
+          variant="primary"
+          size="small"
+          shape="pill"
           disabled={!canSave}
-          onClick={onSave}
-          className={cn(
-            'h-7 rounded-full px-3.5 text-xs font-medium shadow-xs transition-all',
-            'bg-foreground text-background hover:bg-foreground/90 hover:text-background',
-            'active:translate-y-[1px]'
-          )}
+          onClick={handleSave}
         >
           {isSaving ? <Spinner className="h-3.5 w-3.5" /> : null}
           {t('sessions.send', 'Send')}

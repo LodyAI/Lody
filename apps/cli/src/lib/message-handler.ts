@@ -1,6 +1,7 @@
 import { listMcpTools } from '@/mcp/list-mcp-tools';
 import { readSessionHistory } from '@lody/shared/session-data';
 import { readLatestTurn } from '@lody/shared/session-data';
+import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -170,6 +171,7 @@ import {
   type LodyOperationItemResult,
   type StoredLodyOperation,
   hasPendingUserTurnActivation,
+  getDeviceTimeZone,
 } from '@lody/shared';
 import { getHostMachineProtocolCapabilities } from '../agent/managed-agent-runtime';
 import { ISession, SessionManager } from '../session/session-manager';
@@ -277,6 +279,7 @@ import {
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
 import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
+import { resolveExpectedAcpCapabilitySourceVersion } from '@/agent/setting';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
 import {
@@ -293,6 +296,11 @@ import {
   type SessionEditAndResendInput,
 } from '@/session/session-edit-and-resend-service';
 import { LodyOperationCoordinator } from '@/orchestration/operation-coordinator';
+import {
+  createLocalSessionCommandEnvironment,
+  getSessionCommandEnvironment,
+  runWithSessionCommandEnvironment,
+} from './session-command-environment';
 import { getLodyOperationStorePath, LodyOperationStore } from '@/orchestration/operation-store';
 import {
   createSessionResult,
@@ -307,6 +315,7 @@ import {
   type AuthContext,
 } from '@/lib/command-runtime';
 import { makeSessionAccessPolicy } from '@/session/session-access-policy';
+import { WorkspaceGitService } from '@/session/workspace-git-service';
 import { TurnPostProcessingService } from '@/session/turn-post-processing-service';
 import {
   applyAcpSessionRunConfig,
@@ -494,7 +503,11 @@ function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
     if (parsed?.kind === 'deleteLocalProjectCommand') {
       deleteLocalProject = true;
     }
-    if (parsed?.kind === 'providerSetup' || parsed?.kind === 'providerSetupCancellation') {
+    if (
+      parsed?.kind === 'providerSetup' ||
+      parsed?.kind === 'providerSetupCancellation' ||
+      parsed?.kind === 'agentConfig'
+    ) {
       providerSetup = true;
     }
   }
@@ -771,6 +784,7 @@ export class MessageHandler {
   private readonly cloudPort: CloudPort;
   private notificationService: CloudNotificationsPort | null;
   private usageTrackingService: CloudUsagePort | null;
+  private readonly turnTokenUsage = new TurnTokenUsageLedger();
   // Backstop bound on how long turn finalization waits for a cloud side
   // effect once it has been allowed to run (see runTurnCloudSideEffect —
   // known-offline skips entirely; this bound covers half-open networks the
@@ -1060,6 +1074,41 @@ export class MessageHandler {
     await this.runTurnCloudSideEffect(sessionId, 'session usage flush', async () => {
       await usageTrackingService.flushSessionUsage(sessionId);
     });
+  }
+
+  /**
+   * Attribute a usage delta to the assistant entry that owns ACP output now. A
+   * live turn's usage is written once at finalization; a late report (background
+   * work after the turn ended) is added to the finished entry immediately.
+   */
+  private recordTurnTokenUsage(
+    sessionId: SessionId,
+    update: SessionUsageUpdate
+  ): Promise<void> | undefined {
+    const usage = turnTokenUsageFromUpdate(update);
+    const target = usage && this.store.getCurrentACPUpdateTarget(sessionId);
+    if (!usage || !target) return undefined;
+    this.turnTokenUsage.add(sessionId, target.assistantEntryId, usage);
+    return target.source === 'finalized_turn'
+      ? this.flushTurnTokenUsage(sessionId, target.assistantEntryId)
+      : undefined;
+  }
+
+  private async flushTurnTokenUsage(sessionId: SessionId, assistantEntryId: string) {
+    const usage = this.turnTokenUsage.take(sessionId, assistantEntryId);
+    if (!usage) return;
+    try {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      await sessionDoc.sessionData.commands.applyHistoryAction({
+        kind: 'assistant-token-usage',
+        turnId: assistantEntryId,
+        add: usage,
+      });
+    } catch (error) {
+      this.logger.debug(
+        `[${sessionId}] Failed to record turn token usage: ${formatErrorMessage(error)}`
+      );
+    }
   }
 
   private async handleUsageUpdate(
@@ -2722,7 +2771,7 @@ export class MessageHandler {
       throw new Error(`Operation ${operation.operationId} item ${index} has no prompt.`);
     }
 
-    const auth: AuthContext = {
+    const auth: AuthContext = getSessionCommandEnvironment()?.auth ?? {
       token: this.token,
       userId: this.userId,
       userName: this.userId,
@@ -2847,7 +2896,13 @@ export class MessageHandler {
     this.sessionActivePresence = new SessionActivePresenceController(
       this.workspaceDocument,
       this.machineId,
-      this.logger
+      this.logger,
+      {
+        // Late-bound: the execution service is constructed further down this
+        // constructor, and the watchdog can only fire once a turn is running.
+        onInitializationStalled: (sessionId, stall) =>
+          this.executionService.notifyInitializationStalled(sessionId, stall),
+      }
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
@@ -2870,7 +2925,14 @@ export class MessageHandler {
     this.usageTrackingService = this.cloudPort.usage;
     this.localProjectControlService = new LocalProjectControlService(this.logger);
     this.codeCollabV2DiffStore = new CodeCollabV2DiffStore(this.workspaceId);
+    const workspaceGitService = new WorkspaceGitService({
+      logger: this.logger,
+      workspaceDocument: this.workspaceDocument,
+    });
     this.codeCollabV2Service = new CodeCollabV2Service({
+      observeWorkspaceGit: async ({ ownerSessionId, workspaceRoot }) => {
+        await workspaceGitService.syncLocalWorkspace(ownerSessionId, workspaceRoot);
+      },
       resolveWorkspace: this.resolveCodeCollabV2Workspace,
       diffStore: this.codeCollabV2DiffStore,
       workspaceId: this.workspaceId,
@@ -3001,14 +3063,14 @@ export class MessageHandler {
           modelInfo,
           userTurnId
         ),
+      syncSessionBranchName: (sessionId, session) =>
+        workspaceGitService.syncSession(sessionId, session),
       turnFinalization: {
         finalizeACPState: async (sessionId, turnId) =>
           await this.finalizeACPState(sessionId, turnId),
         persistCodeCollabTurnDiffs: async (sessionId, turnId) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
-        syncSessionBranchName: async (sessionId, session) =>
-          await this.turnPostProcessingService.syncSessionBranchName(sessionId, session),
         updateSessionDiffStats: async (sessionId, session, options) =>
           await this.turnPostProcessingService.updateSessionDiffStats(sessionId, session, options),
         refreshCodeCollabSharedState: async (sessionId) =>
@@ -3055,6 +3117,8 @@ export class MessageHandler {
           runtimeOverrides,
           options
         ),
+      resolveAcpCapabilitySourceVersion: async (input) =>
+        await resolveExpectedAcpCapabilitySourceVersion(input),
       evictForMemoryPressure: async (excludeSessionId) =>
         await this.evictForMemoryPressureFn(excludeSessionId),
     });
@@ -3101,8 +3165,8 @@ export class MessageHandler {
       machineId: this.machineId,
       workspaceId: this.workspaceId,
       userId: this.userId,
-      authToken: () => this.token,
-      remoteGatewayUrl: this.cloudPort.remotePreview?.gatewayBaseUrl ?? null,
+      runtimeBaseUrl: this.cloudPort.runtimeArtifacts.baseUrl,
+      remotePreview: this.cloudPort.remotePreview,
     });
     const streamsTokens = this.cloudPort.streamsTokens;
     if (streamsTokens) {
@@ -3139,6 +3203,12 @@ export class MessageHandler {
             machineId: this.machineId,
             workspaceId: this.workspaceId,
           }),
+        getPreviewControl: async () => ({
+          type: 'machine/preview-control_response',
+          machineId: this.machineId,
+          success: true,
+          runtimeNonce: this.previewService.controlAuthority.runtimeNonce,
+        }),
         pingMachine: async ({ requestId }) =>
           await this.executionService.pingMachine({
             type: 'machine/ping',
@@ -3164,13 +3234,14 @@ export class MessageHandler {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
         },
-        refreshMachineAcpCapabilities: async ({ configId, onAcpBinaryProgress, signal }) =>
+        refreshMachineAcpCapabilities: async ({ configId, force, onAcpBinaryProgress, signal }) =>
           await this.executionService.refreshMachineAcpCapabilities(
             {
               type: 'machine/acp-capabilities-refresh',
               machineId: this.machineId,
               workspaceId: this.workspaceId,
               configId,
+              force,
             },
             { onAcpBinaryProgress, signal }
           ),
@@ -3328,32 +3399,48 @@ export class MessageHandler {
           await this.codeCollabV2Service.initDirectory(request),
         getCodeCollabLspDefinition: async () => await this.codeCollabV2Service.lspDefinition(),
         getCodeCollabLspReferences: async () => await this.codeCollabV2Service.lspReferences(),
-        createSessionPreview: async ({
-          sessionId,
-          requestedByUserId,
-          target,
-          approval,
-          replaceExisting,
-        }) =>
-          await this.previewService.createPreview({
+        getSessionPreviewStatus: async ({ proof, ...request }) => {
+          await this.previewService.authorizeRemoteControl(
+            request.sessionId,
+            request.requestedByUserId,
+            { action: 'status', renewEndpointId: request.renewEndpointId },
+            proof
+          );
+          return this.previewService.getStatus({
+            ...request,
+            type: 'session/preview-status',
+            machineId: this.machineId,
+            workspaceId: this.workspaceId,
+          });
+        },
+        createSessionPreview: async ({ proof, ...request }) => {
+          await this.previewService.authorizeRemoteControl(
+            request.sessionId,
+            request.requestedByUserId,
+            { action: 'create', target: request.target, restart: request.restart ?? false },
+            proof
+          );
+          return this.previewService.createPreview({
+            ...request,
             type: 'session/preview-create',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
-            sessionId,
-            requestedByUserId,
-            target,
-            approval,
-            replaceExisting,
-          }),
-        revokeSessionPreview: async ({ sessionId, requestedByUserId, reason }) =>
-          await this.previewService.revokePreview({
+          });
+        },
+        revokeSessionPreview: async ({ proof, ...request }) => {
+          await this.previewService.authorizeRemoteControl(
+            request.sessionId,
+            request.requestedByUserId,
+            { action: 'revoke' },
+            proof
+          );
+          return this.previewService.revokePreview({
+            ...request,
             type: 'session/preview-revoke',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
-            sessionId,
-            requestedByUserId,
-            reason,
-          }),
+          });
+        },
         getLocalProjectGitState: async ({ localProjectId, requestedByUserId }) =>
           await this.getLocalProjectGitStateForRpc({
             localProjectId,
@@ -3460,8 +3547,17 @@ export class MessageHandler {
       dispatchWatcher: this.sessionDispatchWatcher,
       userResolver: this.sessionUserResolver,
       logger: this.logger,
+      ...(this.cloudPort.kind === 'local'
+        ? {
+            confirmTargetReadable: async () => {
+              await this.workspaceDocument.repo.flush();
+            },
+          }
+        : {}),
       materializeTarget: async (operation, item, index) =>
-        await this.materializeOperationTarget(operation, item, index),
+        await this.withSessionCommandEnvironment(() =>
+          this.materializeOperationTarget(operation, item, index)
+        ),
     });
 
     this.setupSessionEventHandlers();
@@ -3505,6 +3601,7 @@ export class MessageHandler {
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : undefined,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: getHostMachineProtocolCapabilities(),
+        timeZone: getDeviceTimeZone(),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: [],
       });
@@ -3582,6 +3679,7 @@ export class MessageHandler {
     });
 
     this.sessionManager.on('onUsageUpdate', ({ sessionId, acpSessionId, usage, accountingId }) => {
+      void this.recordTurnTokenUsage(sessionId, usage);
       const promise = this.handleUsageUpdate(sessionId, accountingId ?? acpSessionId, usage);
       const usageState = this.store.get(sessionId);
       usageState.pendingUsageHandlers.add(promise);
@@ -3596,8 +3694,13 @@ export class MessageHandler {
 
     this.sessionManager.on(
       'onRateLimitUpdate',
-      (machineId: MachineId, cliType: CliType, limits: RateLimit) => {
-        void this.workspaceDocument.updateRateLimits(machineId, cliType, limits);
+      (
+        machineId: MachineId,
+        agentConfigId: AgentConfigId | undefined,
+        cliType: CliType,
+        limits: RateLimit
+      ) => {
+        void this.workspaceDocument.updateRateLimits(machineId, agentConfigId, cliType, limits);
       }
     );
 
@@ -4693,6 +4796,7 @@ export class MessageHandler {
       if (notifications.length === 0) {
         return;
       }
+      const lateEvidenceOwners = new Set<string>();
       try {
         await appendACPNotificationsToAssistantEntry(
           args.sessionDoc,
@@ -4700,15 +4804,19 @@ export class MessageHandler {
           args.assistantEntryId,
           {
             logger: this.logger,
-            editCallback: async (edits) => {
+            editCallback: async (edits, assistantEntryId) => {
               // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
               // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
               // them into the diff store (old text chained from the prior recorded state),
               // keeping the turn-diff badge and its clickable content from the same source.
-              this.collectCodeCollabEditEvidence(args.sessionId, args.turnId, edits);
+              const ownerTurnId = assistantEntryId ?? args.turnId;
+              this.collectCodeCollabEditEvidence(args.sessionId, ownerTurnId, edits);
+              if (ownerTurnId !== args.turnId) lateEvidenceOwners.add(ownerTurnId);
             },
-            standardDiffCallback: async (diffs) => {
-              await this.collectCodeCollabStandardDiffs(args.sessionId, args.turnId, diffs);
+            standardDiffCallback: async (diffs, assistantEntryId) => {
+              const ownerTurnId = assistantEntryId ?? args.turnId;
+              await this.collectCodeCollabStandardDiffs(args.sessionId, ownerTurnId, diffs);
+              if (ownerTurnId !== args.turnId) lateEvidenceOwners.add(ownerTurnId);
             },
           },
           args.modelInfo
@@ -4733,6 +4841,9 @@ export class MessageHandler {
       await this.markACPNotificationsUnread(args.sessionId, args.sessionDoc, notifications);
       if (args.targetSource === 'finalized_turn') {
         await this.persistLateCodeCollabTurnDiffs(args.sessionId, args.turnId);
+      }
+      for (const ownerTurnId of lateEvidenceOwners) {
+        await this.persistLateCodeCollabTurnDiffs(args.sessionId, ownerTurnId);
       }
     };
 
@@ -4830,13 +4941,20 @@ export class MessageHandler {
     state.acpFlushCountInTurn += 1;
     const notifications = queue.map((item) => item.notification);
     const groups = this.groupBufferedACPUpdates(queue);
-    const span = startTraceSpan(this.logger, 'acp.flush_updates_batch', {
-      sessionId,
-      turnId: this.store.getTurnId(sessionId),
-      updates: notifications.length,
-      groups: groups.length,
-      flushCount: state.acpFlushCountInTurn,
-    });
+    // One span per streamed-token batch: kept out of the default file sink, but
+    // still reported at debug when the flush fails or runs long.
+    const span = startTraceSpan(
+      this.logger,
+      'acp.flush_updates_batch',
+      {
+        sessionId,
+        turnId: this.store.getTurnId(sessionId),
+        updates: notifications.length,
+        groups: groups.length,
+        flushCount: state.acpFlushCountInTurn,
+      },
+      { hot: true }
+    );
 
     const session = this.sessionManager.getSession(sessionId);
     const modelInfo = session?.agentClient?.currentModel;
@@ -5459,12 +5577,18 @@ export class MessageHandler {
         endedAt,
         permissionWaitMs,
       });
+      if (finalizedTarget) {
+        await this.flushTurnTokenUsage(sessionId, finalizedTarget.assistantEntryId);
+      }
       await sessionDoc.waitUntilSynced();
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
     } finally {
       if (finalizedTarget) {
         this.store.rememberFinalizedTurnForLateACPUpdates(sessionId, finalizedTarget);
+        // Usage that arrived after the flush above but before this late-target
+        // switch is still pending for the entry; later reports flush on arrival.
+        void this.flushTurnTokenUsage(sessionId, finalizedTarget.assistantEntryId);
       }
       if (turnId) {
         this.clearConversationTurnIfMatches(sessionId, turnId);
@@ -5642,6 +5766,9 @@ export class MessageHandler {
       return;
     }
     const turn = state.turn;
+    // Runs ahead of every ACP flush, so it is as hot as the flush span itself: a
+    // healthy open gate stays out of the default file sink, while a wait that
+    // fails or runs long still reports at debug.
     await traceAsync(
       this.logger,
       'history.turn_gate_wait',
@@ -5650,7 +5777,8 @@ export class MessageHandler {
         ...(turn.phase === 'idle' ? {} : { turnId: turn.turnId }),
         ...(turn.phase === 'idle' || !turn.userTurnId ? {} : { userTurnId: turn.userTurnId }),
       },
-      async () => await gate.waitUntilOpen()
+      async () => await gate.waitUntilOpen(),
+      { hot: true }
     );
   }
 
@@ -5732,6 +5860,7 @@ export class MessageHandler {
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : machineMeta?.rpcVersion,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
         protocolCapabilities: getHostMachineProtocolCapabilities(),
+        timeZone: getDeviceTimeZone(),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: machineMeta?.sessions ?? [],
       });
@@ -6159,6 +6288,65 @@ export class MessageHandler {
     return requester === ownerUserId || requester === this.userId;
   }
 
+  private withSessionCommandEnvironment<T>(run: () => T): T {
+    if (this.cloudPort.kind !== 'local') return run();
+    return runWithSessionCommandEnvironment(
+      createLocalSessionCommandEnvironment({
+        manager: this.workspaceDocument,
+        workspaceId: this.workspaceId,
+        machineId: this.machineId,
+        machineName: this.machineName,
+        userId: this.userId,
+        host: {
+          readInvocation: (sessionId) => {
+            const invocation = this.executionService.getActiveInvocationContext(sessionId);
+            return invocation
+              ? {
+                  type: 'session/active-invocation-context',
+                  sessionId,
+                  active: true,
+                  ...invocation,
+                }
+              : { type: 'session/active-invocation-context', sessionId, active: false };
+          },
+          readLiveStatus: async (sessionId) => {
+            const live = resolveSessionLiveStatus({
+              presence: this.sessionActivePresence.getStatus(sessionId),
+              execution: this.executionService.getExecutionSnapshot(sessionId),
+              hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+            });
+            return {
+              sessionId,
+              machineOnline: true,
+              fresh: true,
+              state: live.state,
+              observedAt: getServerNow(),
+            };
+          },
+          cancelSession: async (sessionId, turnId) => {
+            const targetTurnId =
+              turnId ?? this.executionService.getExecutionSnapshot(sessionId).activeTurnId;
+            if (!targetTurnId) return { success: false, error: 'Session has no active turn' };
+            return this.executionService.cancelSession(
+              {
+                type: 'session/cancel',
+                machineId: this.machineId,
+                workspaceId: this.workspaceId,
+                sessionId,
+                turnId: targetTurnId,
+              },
+              { pendingInput: 'promote', prePromptSession: 'discard' }
+            );
+          },
+          dispatchSession: async (sessionId) => {
+            void this.sessionDispatchWatcher.enqueueSessionCheck(sessionId);
+          },
+        },
+      }),
+      run
+    );
+  }
+
   async handleLocalMachineRpc(
     request: LocalMachineRpcRequestValidated
   ): Promise<LocalMachineRpcResponse> {
@@ -6193,6 +6381,31 @@ export class MessageHandler {
     switch (request.method) {
       case 'mcp/list-tools':
         return await listMcpTools(request.params.server);
+      case 'session/call-tool': {
+        if (this.cloudPort.kind !== 'local')
+          throw new Error('Daemon Session tools require a local workspace');
+        const { sessionId, name, arguments: args } = request.params;
+        if (
+          request.workspaceId !== this.workspaceId ||
+          request.machineId !== this.machineId ||
+          request.ownerSessionId !== sessionId
+        )
+          throw new Error('Session tool scope mismatch');
+        const { executeDaemonSessionTool } = await import('@/mcp/daemon-session-tools');
+        return this.withSessionCommandEnvironment(() =>
+          executeDaemonSessionTool(
+            {
+              machineId: this.machineId,
+              workspaceId: this.workspaceId,
+              sessionId,
+              localControlSocketPath: undefined,
+              workdir: process.cwd(),
+            },
+            name,
+            args
+          )
+        );
+      }
       case 'code-collab/get-file-index':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.getFileIndex(request.params);
@@ -6308,6 +6521,27 @@ export class MessageHandler {
           sessionId: request.params.sessionId as SessionId,
           requestedByUserId: request.params.requestedByUserId,
           target: request.params.target,
+        });
+      case 'session/preview-create':
+        return this.previewService.createPreview({
+          ...request.params,
+          type: request.method,
+          machineId: request.machineId as MachineId,
+          workspaceId: request.workspaceId as WorkspaceId,
+        });
+      case 'session/preview-revoke':
+        return this.previewService.revokePreview({
+          ...request.params,
+          type: request.method,
+          machineId: request.machineId as MachineId,
+          workspaceId: request.workspaceId as WorkspaceId,
+        });
+      case 'session/preview-status':
+        return this.previewService.getStatus({
+          ...request.params,
+          type: request.method,
+          machineId: request.machineId as MachineId,
+          workspaceId: request.workspaceId as WorkspaceId,
         });
       case 'session/preview-endpoint-release':
         return await this.previewService.releaseEndpoint({
@@ -6460,6 +6694,9 @@ export class MessageHandler {
       case 'session/preview-revoke':
         await this.handlePreviewRevoke(message, context);
         break;
+      case 'session/preview-status':
+        context.send(await this.previewService.getStatus(message));
+        break;
     }
   }
 
@@ -6476,7 +6713,11 @@ export class MessageHandler {
     dispatchContext: MessageDispatchContext
   ): Promise<void> {
     this.touchSession(message.sessionId);
-    const response = await this.previewService.reportCandidate(message);
+    const invokingUserId =
+      dispatchContext.source === 'local'
+        ? this.executionService.getActiveInvocationContext(message.sessionId)?.requesterUserId
+        : undefined;
+    const response = await this.previewService.reportCandidate(message, invokingUserId);
     dispatchContext.send(response);
   }
 
@@ -8667,7 +8908,23 @@ export class MessageHandler {
       this.logger.debug(`[${sessionId}] Generating session title because title is missing`);
       const resolvedTitleConfig =
         titleConfig ?? (await this.resolveTitleConfig(sessionId, meta?.agentConfigId));
+      const provider = meta?.agentConfigId
+        ? await this.workspaceDocument.getAgentConfigById(meta.agentConfigId, this.machineId)
+        : null;
+      if (meta?.agentConfigId && !provider) return null;
+      if (
+        provider &&
+        !provider.codexAuth &&
+        (await getCodexProfileStore().list(this.workspaceId)).some(
+          (profile) => profile.configId === provider.id && profile.machineId === this.machineId
+        )
+      )
+        return null;
+      const codexProfile = provider?.codexAuth
+        ? await getCodexProfileStore().resolve(this.workspaceId, provider)
+        : undefined;
       const title = await generateTitleIsolated({
+        codexProfile: codexProfile ? { profile: codexProfile } : undefined,
         cliType,
         agentType,
         customAcp,
@@ -9564,6 +9821,19 @@ export class MessageHandler {
     return this.store.sessionIds();
   }
 
+  /** Host-local admission snapshot; durable pending input is checked by its caller. */
+  hasAutomationSessionWork(sessionId: SessionId): boolean {
+    const execution = this.executionService.getExecutionSnapshot(sessionId);
+    return (
+      execution.hasActiveTurn ||
+      execution.hasBlockingPendingCreate ||
+      execution.hasRewriteBarrier ||
+      this.operationCoordinator.hasPendingWorkForRequester(sessionId) ||
+      this.hasSessionActivePresence(sessionId) ||
+      this.sessionDispatchWatcher.hasPendingDispatch(sessionId)
+    );
+  }
+
   /**
    * Check if a session has an active turn (prompting or finalizing).
    */
@@ -9624,3 +9894,4 @@ export class MessageHandler {
     this.logger.debug(`[GC] Session ${sessionId} cleaned`);
   }
 }
+import { getCodexProfileStore } from '@/agent/codex-profile-store';

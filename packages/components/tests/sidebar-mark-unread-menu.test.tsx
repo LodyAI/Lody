@@ -10,7 +10,7 @@ import { LocalProjectItem } from '../src/components/loro-app-sidebar';
 import { SessionList } from '../src/components/session-list';
 import { SidebarUpdatedSessionList } from '../src/components/sidebar-updated-session-list';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 describe('desktop sidebar mark-unread menus', () => {
   let root: Root | undefined;
@@ -179,7 +179,7 @@ describe('desktop sidebar mark-unread menus', () => {
 
     flushSync(() => {
       root?.render(
-        <TooltipProvider>
+        <Tooltip.Provider>
           <LocalProjectItem
             machineId={machineId}
             machineName="This device"
@@ -210,7 +210,7 @@ describe('desktop sidebar mark-unread menus', () => {
             onToggleFullList={() => undefined}
             onRequestRemoval={() => undefined}
           />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
 

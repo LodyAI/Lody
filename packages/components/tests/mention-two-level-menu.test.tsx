@@ -4,20 +4,23 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Mention, MentionInput, useMentionContext } from '../src/ui/mention';
+import { Mention, MentionContent, MentionInput, useMentionContext } from '../src/ui/mention';
+import { MentionMobilePanel } from '../src/ui/mention/mention-mobile-content';
 import type { Mention as MentionRange } from '../src/ui/mention/mention-root';
 import {
+  matchedRuns,
   MentionTwoLevelMenuBody,
+  splitPathTail,
   useMentionCategoryActivation,
 } from '../src/components/mentions/mention-two-level-menu';
 import {
-  selectMentionMenuView,
   selectMentionMenuViewForTrigger,
   toSkillCandidate,
   type MentionCandidate,
   type MentionCandidateDetail,
   type MentionCategory,
 } from '../src/components/mentions/mention-registry';
+import { initI18n } from '../src/i18n';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -67,7 +70,6 @@ function makeCategories(): MentionCategory[] {
             kind: 'dir' as const,
             icon: 'dir' as const,
             title: 'src/',
-            mono: true,
           },
         ].filter((entry) => entry.value.includes(term)),
     },
@@ -97,10 +99,11 @@ function Harness({
   const [value, setValue] = React.useState(initialValue);
   const [mentions, setMentions] = React.useState<MentionRange[]>([]);
   const [selected, setSelected] = React.useState<string[]>([]);
-  const view = selectMentionMenuView(categories, value.slice(1));
+  const view = selectMentionMenuViewForTrigger(categories, value[0] ?? '@', value.slice(1));
 
   return (
     <Mention
+      trigger={value[0] === '/' || value[0] === '、' ? value[0] : '@'}
       defaultOpen
       inputValue={value}
       onInputValueChange={setValue}
@@ -113,13 +116,15 @@ function Harness({
     >
       <Probe />
       <MentionInput value={value} onChange={() => {}} />
-      <MentionTwoLevelMenuBody
-        view={view}
-        onBack={() => {}}
-        showBack
-        onCategoryNavigate={(category) => category.activation?.activate()}
-        detail={detail}
-      />
+      {view ? (
+        <MentionTwoLevelMenuBody
+          view={view}
+          onBack={() => {}}
+          showBack
+          onCategoryNavigate={(category) => category.activation?.activate()}
+          detail={detail}
+        />
+      ) : null}
     </Mention>
   );
 }
@@ -172,7 +177,9 @@ describe('MentionTwoLevelMenuBody', () => {
   let container: HTMLDivElement | undefined;
   let originalRequestAnimationFrame: typeof requestAnimationFrame | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // The menu's copy interpolates (a typed term, a category name).
+    await initI18n('en');
     originalRequestAnimationFrame = globalThis.requestAnimationFrame;
     globalThis.requestAnimationFrame = ((callback) => {
       callback(0);
@@ -357,6 +364,58 @@ describe('MentionTwoLevelMenuBody', () => {
     expect(titles.some((title) => title.startsWith('src/'))).toBe(false);
   });
 
+  it('renders a typed slash query as ranked rows with their sources', () => {
+    const shortcuts: MentionCategory = {
+      id: 'prompt_shortcut',
+      namespace: 'shortcut',
+      directTrigger: '/',
+      label: 'Prompt Shortcuts',
+      icon: 'prompt_shortcut',
+      status: 'ready',
+      getCandidates: () =>
+        ['create-intro-video', 'videoer'].map((name) => ({
+          value: `prompt-shortcut:${name}`,
+          label: name,
+          insertText: `/${name}`,
+          kind: 'prompt_shortcut' as const,
+          icon: 'prompt_shortcut' as const,
+          title: `/${name}`,
+        })),
+    };
+    const command: MentionCategory = {
+      id: 'command',
+      namespace: 'cmd',
+      directTrigger: '/',
+      label: 'Agent Commands',
+      icon: 'command',
+      status: 'ready',
+      getCandidates: () => [
+        {
+          value: 'acp-command:video',
+          label: 'video',
+          insertText: '/video',
+          kind: 'command',
+          icon: 'command',
+          title: '/video',
+        },
+      ],
+    };
+
+    render('/video', [shortcuts, command]);
+    expect(rowTitles()).toEqual([
+      '/videoAgent Commands',
+      '/videoerPrompt Shortcuts',
+      '/create-intro-videoPrompt Shortcuts',
+    ]);
+
+    const rows = container?.querySelectorAll<HTMLElement>('[data-slot="mention-item"]');
+    act(() => rows?.[1]?.click());
+    expect(latest.inputValue).toBe('/videoer ');
+    expect(latest.mentions).toEqual([
+      { value: 'prompt-shortcut:videoer', start: 0, end: 8, kind: 'prompt_shortcut' },
+    ]);
+  });
+
   it('renders a category message instead of rows when the source cannot answer', () => {
     const categories = makeCategories();
     const issue = categories.find((entry) => entry.id === 'issue');
@@ -374,7 +433,7 @@ describe('MentionTwoLevelMenuBody', () => {
   it('renders the detail panel beside the rows when one is supplied', () => {
     render('@issue:', makeCategories(), {
       title: 'code-collab-debug',
-      badges: ['project', 'v2'],
+      meta: ['project', 'v2'],
       description: 'Diagnose Code Collab diffs.',
       rows: [{ label: 'Path', value: '.claude/skills/x/SKILL.md', mono: true }],
     });
@@ -386,11 +445,69 @@ describe('MentionTwoLevelMenuBody', () => {
     expect(text).toContain('.claude/skills/x/SKILL.md');
     // The rows are still there beside it.
     expect(rowTitles()).toEqual(['Broken menu#3312', 'Slow switch#3298']);
-    const detailTitle = Array.from(container?.querySelectorAll('p') ?? []).find(
-      (entry) => entry.textContent === 'code-collab-debug'
-    );
-    expect(detailTitle?.parentElement?.classList).toContain('[scrollbar-gutter:stable]');
-    expect(detailTitle?.parentElement?.classList).toContain('h-[320px]');
+    // The pane is beside the rows, not one of them: it cannot be highlighted or picked.
+    const pane = container?.querySelector('[data-mention-detail]');
+    expect(pane?.textContent).toContain('Diagnose Code Collab diffs.');
+    expect(pane?.closest('[data-slot="mention-item"]')).toBeNull();
+  });
+
+  it('states when a session was last active', () => {
+    const categories = makeCategories();
+    categories.push({
+      id: 'session',
+      namespace: 'session',
+      label: 'Sessions',
+      icon: 'session',
+      status: 'ready',
+      getCandidates: () => [
+        {
+          value: 'session-1',
+          label: 'parser-work',
+          insertText: '@parser-work',
+          kind: 'session',
+          icon: 'session',
+          title: 'Parser work',
+          // Half an hour clear of the boundary, so the label cannot tick over.
+          activityAt: Date.now() - 150 * 60_000,
+        },
+      ],
+    });
+
+    render('@session:', categories);
+    expect(rowTitles()).toEqual(['Parser work2h']);
+  });
+
+  it('marks a folder as a row that opens', () => {
+    render('@file:');
+    const folder = container?.querySelector('[data-slot="mention-item"]');
+    expect(folder?.querySelector('.lucide-chevron-right')).not.toBeNull();
+  });
+
+  it('gives a row that inserts no opening mark', () => {
+    render('@issue:');
+    const issue = container?.querySelector('[data-slot="mention-item"]');
+    expect(issue?.querySelector('.lucide-chevron-right')).toBeNull();
+  });
+
+  it('says nothing matched instead of keeping the list', () => {
+    render('@issue:zzz');
+
+    expect(rowTitles()).toEqual([]);
+    expect(container?.textContent).toContain('Nothing matches “zzz”');
+  });
+
+  it("drops a row's glyph when it only repeats the level's heading", () => {
+    // Every issue row would print the Issues glyph under "Issues".
+    render('@issue:');
+    const issue = container?.querySelector('[data-slot="mention-item"]');
+    expect(issue?.querySelector('[aria-hidden="true"]')).toBeNull();
+  });
+
+  it('keeps a glyph that says something about its own row', () => {
+    // A folder is not a file: the Files level keeps the row's mark.
+    render('@file:');
+    const folder = container?.querySelector('[data-slot="mention-item"]');
+    expect(folder?.querySelector('[aria-hidden="true"]')).not.toBeNull();
   });
 
   it('omits the detail panel when the candidate has none', () => {
@@ -486,7 +603,7 @@ describe('skill candidate detail', () => {
 
     expect(candidate.insertText).toBe('$code-collab-debug');
     expect(candidate.detail?.title).toBe('Code Collab Debug');
-    expect(candidate.detail?.badges).toEqual(['Project', 'v2', 'symlink']);
+    expect(candidate.detail?.meta).toEqual(['Project', 'v2', 'symlink']);
     expect(candidate.detail?.rows).toEqual([
       { label: 'Author', value: 'zx' },
       { label: 'Path', value: '.claude/skills/code-collab-debug/SKILL.md', mono: true },
@@ -505,7 +622,234 @@ describe('skill candidate detail', () => {
       labels
     );
 
-    expect(candidate.detail?.badges).toEqual(['Global']);
+    expect(candidate.detail?.meta).toEqual(['Global']);
     expect(candidate.detail?.rows).toEqual([{ label: 'Path', value: 'a/SKILL.md', mono: true }]);
+  });
+});
+
+describe('splitPathTail', () => {
+  it('keeps the file and its folder whole, and lets the folders before give way', () => {
+    expect(splitPathTail('~/.codex/skills/.system/imagegen/SKILL.md')).toEqual({
+      head: '~/.codex/skills/.system/',
+      tail: 'imagegen/SKILL.md',
+    });
+  });
+
+  it('keeps only the file when its folder would make the tail too long', () => {
+    expect(splitPathTail('.claude/skills/a-very-long-skill-folder-name-indeed/SKILL.md')).toEqual({
+      head: '.claude/skills/a-very-long-skill-folder-name-indeed/',
+      tail: 'SKILL.md',
+    });
+  });
+
+  it('leaves a bare name alone', () => {
+    expect(splitPathTail('SKILL.md')).toEqual({ head: '', tail: 'SKILL.md' });
+  });
+});
+
+describe('matchedRuns', () => {
+  it('lights the letters the term matched, in order', () => {
+    expect(matchedRuns('mention-root.tsx', 'mroot')).toEqual([
+      { text: 'm', matched: true },
+      { text: 'ention-', matched: false },
+      { text: 'root', matched: true },
+      { text: '.tsx', matched: false },
+    ]);
+  });
+
+  it('matches a path term by its last segment, since a file row shows the name', () => {
+    expect(matchedRuns('registry.ts', 'mentions/reg')?.[0]).toEqual({
+      text: 'reg',
+      matched: true,
+    });
+  });
+
+  it('claims nothing when the title is not where the term matched', () => {
+    // An issue found by its number keeps its title whole.
+    expect(matchedRuns('Broken menu', '3312')).toBeNull();
+    expect(matchedRuns('Broken menu', '')).toBeNull();
+  });
+});
+
+describe('composer placement', () => {
+  // jsdom lays nothing out, so the composer's frame states where it is. The
+  // window is jsdom's 1024x768.
+  let frameTop = 0;
+  const FRAME_HEIGHT = 100;
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  let restoreRect: (() => void) | undefined;
+
+  beforeEach(() => {
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this.hasAttribute('data-mention-frame')) {
+        return DOMRect.fromRect({ x: 200, y: frameTop, width: 600, height: FRAME_HEIGHT });
+      }
+      return original.call(this);
+    };
+    restoreRect = () => {
+      HTMLElement.prototype.getBoundingClientRect = original;
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    if (root) act(() => root?.unmount());
+    root = undefined;
+    container?.remove();
+    container = undefined;
+    restoreRect?.();
+  });
+
+  function Composer({
+    open,
+    rows,
+    side,
+  }: {
+    open: boolean;
+    rows: number;
+    side?: 'top' | 'bottom';
+  }) {
+    return (
+      <div data-mention-frame="">
+        <Mention
+          open={open}
+          inputValue="@"
+          onInputValueChange={() => {}}
+          mentions={[]}
+          onMentionsChange={() => {}}
+          value={[]}
+          onValueChange={() => {}}
+          onFilter={(options) => options}
+          autoCloseOnEmpty={false}
+        >
+          <MentionInput value="@" onChange={() => {}} />
+          <MentionContent
+            positionAnchor="composer"
+            side={side}
+            sideOffset={8}
+            style={{ overflowY: 'auto' }}
+          >
+            {Array.from({ length: rows }, (_, index) => (
+              <div key={index}>row {index}</div>
+            ))}
+          </MentionContent>
+        </Mention>
+      </div>
+    );
+  }
+
+  function show(open: boolean, rows = 2, side?: 'top' | 'bottom') {
+    act(() => root?.render(<Composer open={open} rows={rows} side={side} />));
+  }
+
+  /** The popup's height cap: the room on the side it chose, less the gap. */
+  function cap() {
+    return document.querySelector<HTMLElement>('[data-slot="mention-content"]')?.style.maxHeight;
+  }
+
+  it('opens above a composer with room there, capped to that room', () => {
+    frameTop = 600;
+    show(true);
+    // 600 above the frame, less the 16px window margin and the 8px gap.
+    expect(cap()).toBe('576px');
+    expect(
+      document.querySelector<HTMLElement>('[data-slot="mention-content"]')?.style.overflowY
+    ).toBe('auto');
+  });
+
+  it('keeps its side through a level change and a moved composer', async () => {
+    frameTop = 600;
+    show(true, 2);
+    show(true, 9);
+    expect(cap()).toBe('576px');
+
+    // The composer rises to the top; the open menu stays above it rather than
+    // flipping, and only its cap follows the room left there.
+    frameTop = 40;
+    await act(() => window.dispatchEvent(new Event('resize')));
+    expect(cap()).toBe('16px');
+  });
+
+  it('opens below only when there is no room above, choosing again on each open', () => {
+    frameTop = 600;
+    show(true);
+    show(false);
+
+    frameTop = 40;
+    show(true);
+    // 768 - 140 below the frame, less the window margin and the gap.
+    expect(cap()).toBe('604px');
+  });
+
+  it('keeps an explicit side even when the room below is larger', () => {
+    // 24px above the frame, 612px below: the room pick would open it below.
+    frameTop = 40;
+    show(true, 2, 'top');
+    // Pinned above, capped to the 24px room there less the gap.
+    expect(cap()).toBe('16px');
+  });
+});
+
+describe('mobile mention placement', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+  let frameTop = 300;
+  let restoreRect: (() => void) | undefined;
+
+  beforeEach(() => {
+    frameTop = 300;
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (this.hasAttribute('data-mention-frame')) {
+        return DOMRect.fromRect({ x: 100, y: frameTop, width: 400, height: 120 });
+      }
+      if (this.tagName === 'TEXTAREA') {
+        return DOMRect.fromRect({ x: 100, y: frameTop + 40, width: 400, height: 80 });
+      }
+      return original.call(this);
+    };
+    restoreRect = () => {
+      HTMLElement.prototype.getBoundingClientRect = original;
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    if (root) act(() => root?.unmount());
+    root = undefined;
+    container?.remove();
+    container = undefined;
+    restoreRect?.();
+  });
+
+  it('docks above the whole frame and caps itself to visible room', async () => {
+    function MobileHarness() {
+      const inputRef = React.useRef<HTMLTextAreaElement>(null);
+      return (
+        <div data-mention-frame="">
+          <button type="button">Actions</button>
+          <textarea ref={inputRef} />
+          <MentionMobilePanel open anchorRef={inputRef}>
+            <div>Item</div>
+          </MentionMobilePanel>
+        </div>
+      );
+    }
+
+    await act(async () => root?.render(<MobileHarness />));
+    const panel = document.body.querySelector<HTMLElement>('[role="listbox"]');
+    expect(panel?.style.bottom).toBe('476px');
+    expect(panel?.style.maxHeight).toBe('220px');
+
+    frameTop = 80;
+    await act(async () => window.dispatchEvent(new Event('resize')));
+    expect(panel?.style.bottom).toBe('696px');
+    expect(panel?.style.maxHeight).toBe('16px');
   });
 });

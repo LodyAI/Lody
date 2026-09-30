@@ -17,7 +17,6 @@ import {
   type SessionMentionItem,
 } from '@/components/mentions/mention-session-source';
 import {
-  buildAgentRoleMentionContext,
   buildAgentRoleMentionRewrites,
   useAgentRoleMentionItems,
   type AgentRoleMentionItem,
@@ -163,13 +162,9 @@ export function useMentionPromptExpansion({
   currentSessionId?: string | null;
 }): MentionPromptExpansion {
   const skillRewrites = useSkillMentionRewrites(source, skillAgent, promptValue);
-  const agentRoleContext = React.useMemo(
-    () => buildAgentRoleMentionContext({ mentionSource: source }),
-    [source]
-  );
   // Same owner as the composer menu, by module: both read the shared catalog
   // room, so the list the user picked from is the list this authorizes against.
-  const agentRoleItems = useAgentRoleMentionItems(agentRoleContext);
+  const agentRoleItems = useAgentRoleMentionItems();
   const sessionItems = useSessionMentionItems(currentSessionId);
 
   const getRewrites = React.useCallback(

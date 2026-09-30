@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, Wrench } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useGithubProjectWorktreeAdmin } from '@/hooks/use-github-project-worktree-admin';
 import type { ProjectSkillsSource } from '@/hooks/use-project-skills';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';

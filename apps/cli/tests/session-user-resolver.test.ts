@@ -9,6 +9,7 @@ const WORKSPACE_ID = 'workspace_1' as WorkspaceId;
 const testLogger = (): Logger =>
   ({
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),

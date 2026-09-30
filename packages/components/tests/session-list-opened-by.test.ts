@@ -323,7 +323,7 @@ describe('SessionList opened-by rendering', () => {
     expect(openerSlot?.querySelector('[data-session-row-indicator]')).toBeNull();
 
     const openerEnd = opener?.querySelector('[data-session-row-end-slot]');
-    expect(openerEnd?.querySelector('[data-session-working-spinner]')).not.toBeNull();
+    expect(openerEnd?.querySelector('[data-session-working-indicator]')).not.toBeNull();
   });
 
   it('keeps collapse reachable from the context menu while the opener is working', () => {
@@ -368,7 +368,7 @@ describe('SessionList opened-by rendering', () => {
     }
 
     expect(endOf('opened-1')?.querySelector('[data-session-row-indicator]')).toBeNull();
-    expect(endOf('opened-2')?.querySelector('[data-session-working-spinner]')).not.toBeNull();
+    expect(endOf('opened-2')?.querySelector('[data-session-working-indicator]')).not.toBeNull();
     expect(endOf('opened-3')?.querySelector('[data-session-row-indicator] span')).not.toBeNull();
   });
 
@@ -412,7 +412,7 @@ describe('SessionList opened-by rendering', () => {
 
     expect(endOf('idle')?.textContent).not.toContain('+12');
     expect(endOf('busy')?.textContent).not.toContain('+12');
-    expect(endOf('busy')?.querySelector('[data-session-working-spinner]')).not.toBeNull();
+    expect(endOf('busy')?.querySelector('[data-session-working-indicator]')).not.toBeNull();
   });
 
   it('renders an active opened session as the selected row', () => {
@@ -437,6 +437,6 @@ describe('SessionList opened-by rendering', () => {
 
     const row = container?.querySelector('[data-sidebar-session-id="opened-2"]');
     expect(row?.className).toContain('bg-sidebar-selection');
-    expect(row?.querySelector('[data-session-working-spinner]')).not.toBeNull();
+    expect(row?.querySelector('[data-session-working-indicator]')).not.toBeNull();
   });
 });

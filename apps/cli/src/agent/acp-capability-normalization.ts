@@ -1,5 +1,7 @@
 import {
   deriveModelReasoningEffortsFromLegacyModelIds,
+  readAcpModelCapabilitiesMeta,
+  type AcpModelControls,
   type AcpCommandSummary,
   type AcpConfigOptionSummary,
   type SessionGoalAction,
@@ -15,8 +17,11 @@ export type AcpCapabilitiesResult = {
   availableCommands?: AcpCommandSummary[];
   sessionFork: boolean;
   acknowledgedSteer: boolean;
+  sessionTitle?: boolean;
   goalActions?: SessionGoalAction[];
   modelReasoningEfforts?: Record<string, string[]>;
+  /** Every model's controls, from the adapter's `_meta.lody.modelCapabilities`. */
+  modelCapabilities?: Record<string, AcpModelControls>;
 };
 
 function isSelectGroup(item: unknown): item is SessionConfigSelectGroup {
@@ -192,6 +197,7 @@ export function normalizeAcpSessionCapabilities(
   lifecycleCapabilities: {
     sessionFork?: boolean;
     acknowledgedSteer?: boolean;
+    sessionTitle?: boolean;
     goalActions?: SessionGoalAction[];
     /** The agent that answered; decides whether legacy `model[effort]` ids apply. */
     agent?: { cliType: string; agentType: string };
@@ -212,6 +218,7 @@ export function normalizeAcpSessionCapabilities(
   const legacyModels = readLegacySessionModelState(sessionResponse)?.availableModels ?? [];
   const models = modelsFromConfigOptions.length > 0 ? modelsFromConfigOptions : legacyModels;
   const availableCommands = readSessionAvailableCommands(sessionResponse);
+  const modelCapabilities = readAcpModelCapabilitiesMeta(sessionResponse);
   // `configOptions` only describes the model that is current right now — agents
   // rebuild the effort/fast options on every model switch. Two sources expose
   // the model-independent view: the legacy `model[effort]` list (Codex) and the
@@ -230,9 +237,11 @@ export function normalizeAcpSessionCapabilities(
     availableCommands,
     sessionFork: lifecycleCapabilities.sessionFork === true,
     acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,
+    sessionTitle: lifecycleCapabilities.sessionTitle === true,
     ...(lifecycleCapabilities.goalActions?.length
       ? { goalActions: lifecycleCapabilities.goalActions }
       : {}),
     ...(Object.keys(modelReasoningEfforts).length > 0 ? { modelReasoningEfforts } : {}),
+    ...(modelCapabilities ? { modelCapabilities } : {}),
   };
 }

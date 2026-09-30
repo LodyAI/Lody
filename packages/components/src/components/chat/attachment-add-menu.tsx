@@ -2,19 +2,9 @@ import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Paperclip, Plug, Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { describeMcpConnection, type McpServerId, type WorkspaceMcpServerMeta } from '@lody/shared';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import { MCP_TRANSPORT_LABELS } from '@/components/shared/mcp-transport';
 
 /** Per-turn MCP selection, surfaced as a second level of the "+" menu. */
@@ -89,7 +79,7 @@ export function AttachmentAddMenu({
       : t('session.mcp.loadNone');
 
   return (
-    <DropdownMenu
+    <Menu.Root
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
@@ -98,11 +88,10 @@ export function AttachmentAddMenu({
         if (!nextOpen) setView('root');
       }}
     >
-      <DropdownMenuTrigger asChild>
-        <Button
+      <Menu.Trigger render={<Button
           type="button"
           variant="ghost"
-          size="icon"
+          icon
           disabled={disabled}
           aria-label={triggerLabel}
           className={cn(
@@ -110,15 +99,29 @@ export function AttachmentAddMenu({
             // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
             // `bg-accent`/`bg-muted`) because those equal the background in the
             // dark theme and paint nothing.
-            'rounded-full text-foreground transition-colors',
-            'hover:bg-hover hover:text-foreground',
+            'data-[state=open]:bg-hover data-[state=open]:text-foreground'
+          )}
+        >
+          <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+        </Button>}>
+        <Button
+          type="button"
+          variant="ghost"
+          icon
+          disabled={disabled}
+          aria-label={triggerLabel}
+          className={cn(
+            triggerSize,
+            // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
+            // `bg-accent`/`bg-muted`) because those equal the background in the
+            // dark theme and paint nothing.
             'data-[state=open]:bg-hover data-[state=open]:text-foreground'
           )}
         >
           <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
+      </Menu.Trigger>
+      <Menu.Content
         align="start"
         side="top"
         /* Size to the widest item (`w-max`) so short attachment labels don't
@@ -135,64 +138,60 @@ export function AttachmentAddMenu({
           // Keyed so the panel swap replays the slide: the pushed level enters
           // from the right, the root returns from the left.
           <div key="mcp" className="animate-in fade-in-0 slide-in-from-right-2 duration-150">
-            <DropdownMenuItem
+            <Menu.Item
               className={cn(itemClass, 'gap-2 font-medium')}
-              onSelect={(event) => {
-                event.preventDefault();
-                setView('root');
-              }}
+              closeOnClick={false}
+              onClick={() => setView('root')}
             >
               <ChevronLeft className={iconClass} />
               {t('session.mcp.title')}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            </Menu.Item>
+            <Menu.Separator />
             <McpServerItems mcp={mcp} isMobile={isMobile} />
           </div>
         ) : (
           <div key="root" className="animate-in fade-in-0 slide-in-from-left-2 duration-150">
             {onAddAttachment ? (
-              <DropdownMenuItem
-                onSelect={onAddAttachment}
+              <Menu.Item
+                onClick={onAddAttachment}
                 disabled={attachmentDisabled}
                 className={itemClass}
               >
                 <Paperclip className={iconClass} />
                 {triggerLabel}
-              </DropdownMenuItem>
+              </Menu.Item>
             ) : null}
             {hasMcp && mcp ? (
               <>
-                {onAddAttachment ? <DropdownMenuSeparator /> : null}
+                {onAddAttachment ? <Menu.Separator /> : null}
                 {isMobile ? (
-                  <DropdownMenuItem
+                  <Menu.Item
                     className={itemClass}
                     disabled={mcp.disabled}
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      setView('mcp');
-                    }}
+                    closeOnClick={false}
+                    onClick={() => setView('mcp')}
                   >
                     <Plug className={iconClass} />
                     <span className="min-w-0 flex-1 truncate">{mcpLabel}</span>
                     <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 ) : (
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger className={itemClass} disabled={mcp.disabled}>
+                  <Menu.Submenu>
+                    <Menu.SubmenuTrigger className={itemClass} disabled={mcp.disabled}>
                       <Plug className={iconClass} />
                       <span className="min-w-0 flex-1 truncate">{mcpLabel}</span>
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="w-[min(20rem,calc(100vw-2rem))]">
+                    </Menu.SubmenuTrigger>
+                    <Menu.Content className="w-[min(20rem,calc(100vw-2rem))]">
                       <McpServerItems mcp={mcp} isMobile={isMobile} />
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
+                    </Menu.Content>
+                  </Menu.Submenu>
                 )}
               </>
             ) : null}
           </div>
         )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 
@@ -217,7 +216,7 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
           describeMcpConnection(server.connection) ??
           MCP_TRANSPORT_LABELS[server.transport];
         return (
-          <DropdownMenuCheckboxItem
+          <Menu.CheckboxItem
             key={server.id}
             checked={selected.has(server.id)}
             disabled={mcp.disabled}
@@ -225,7 +224,7 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
             // indicator is absolutely positioned from its static spot, so the row's
             // own alignment is what centers it against the two-line label.
             className={cn(isMobile && 'py-2.5')}
-            onSelect={(event) => event.preventDefault()}
+            closeOnClick={false}
             onCheckedChange={(checked) => toggle(server.id, checked === true)}
           >
             <span className="flex min-w-0 flex-1 flex-col">
@@ -239,7 +238,7 @@ function McpServerItems({ mcp, isMobile }: { mcp: AttachmentAddMenuMcp; isMobile
                 {detail}
               </span>
             </span>
-          </DropdownMenuCheckboxItem>
+          </Menu.CheckboxItem>
         );
       })}
       {mcp.existingSession ? (

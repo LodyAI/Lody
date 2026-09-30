@@ -29,6 +29,7 @@
 | `pages/session-goal-page.ts`                         | Goal state machine, Session isolation, revisit, Archive, and wire evidence |
 | `pages/settings-appearance-page.ts`                  | Theme commit, live preview, cancellation, and persisted state              |
 | `pages/shortcut-page.ts`                             | Default shortcuts, cross-window rebinding, renderer reload, and digit tabs |
+| `pages/sidebar-footer.ts`                            | Opening Archive through the sidebar footer's More menu                     |
 | `pages/sidebar-search-page.ts`                       | Query variants, rename reindexing, UI revisit, Archive, and cleanup        |
 | `pages/text-attachment-page.ts`                      | Picker cancel, multi-turn history, UI revisit, Archive, and isolation      |
 | `fixtures/work-session-fixture.ts`                   | Synthetic Git workspace and scripted ACP evidence                          |
@@ -47,7 +48,7 @@
 | `fixtures/session-read-state-fixture.ts`             | Two UI-created Session identities and deterministic ACP command            |
 | `fixtures/session-queue-fixture.ts`                  | File-signaled queue ACP event and release evidence                         |
 | `fixtures/session-queue-scripted-acp.mjs`            | Deterministic held and completed queue turns                               |
-| `fixtures/session-fork-fixture.ts`                   | Synthetic Git repository and shared fork-process evidence                  |
+| `fixtures/session-fork-fixture.ts`                   | Synthetic Git repository and retained per-scenario fork ACP events         |
 | `fixtures/session-fork-acp.mjs`                      | Fork-capable deterministic ACP provider                                    |
 | `fixtures/session-goal-fixture.ts`                   | Two-Session goal capability, controls, prompt metadata, and snapshots      |
 | `fixtures/session-goal-scripted-acp.mjs`             | Deterministic goal state machine and Session-isolated ACP evidence         |

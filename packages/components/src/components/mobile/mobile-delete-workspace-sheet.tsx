@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { cn } from '@/lib/utils';
 
 export type MobileDeleteWorkspaceSheetProps = {
@@ -128,7 +128,7 @@ export function MobileDeleteWorkspaceSheet({
                 'shadow-[0_0_0_3px_hsl(var(--destructive)/0.04)]'
               )}
             >
-              <Label
+              <UiField.Label
                 htmlFor="mobile-delete-workspace-confirm"
                 className="text-[0.78rem] font-medium text-foreground"
               >
@@ -136,7 +136,7 @@ export function MobileDeleteWorkspaceSheet({
                   workspace: workspaceName,
                   defaultValue: 'Type "{{workspace}}" to confirm',
                 })}
-              </Label>
+              </UiField.Label>
               <Input
                 id="mobile-delete-workspace-confirm"
                 value={confirmText}
@@ -173,7 +173,7 @@ export function MobileDeleteWorkspaceSheet({
           >
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               className="flex-1"
               onClick={() => onOpenChange(false)}
               disabled={isDeleting}

@@ -4,39 +4,20 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Conversation scrolling
 
+- The scroll engine owns the viewport: [its rules](../lib/conversation-scroll/AGENTS.md).
 - Only viewport/tail/selection render bodies; other reads keep placeholders.
-- Reveal when data and measured destination agree; ignore early range reports.
-  Reapply cached offsets until reveal; navigation supersedes them.
-  Key readiness/window by `factSource ?? view`; new sources reset both.
-  Restore before paint; hydration follows DOM extent only with the follow lock.
-- Correct content measurements in ResizeObserver before paint, even with unchanged
-  row counts; no RAF deferral. Correct Virtua spacer-height commits in MutationObserver
-  before deferred resize delivery. Observe spacer height and mounted row geometry
-  (which may overflow it), never message subtrees/text or scroll pointer styles. Respect the live follow
-  lock and explicit jump suppression.
-- Virtua owns rows, measurement and index navigation; `use-sticky-scroll.ts` adapts
-  `use-stick-to-bottom` to its viewport/content. No content-token effects or upward
-  distance thresholds: real upward wheel, touch, selection or scrollbar movement
-  releases streaming follow immediately.
-- Bind through the viewport's React callback ref on Virtua's public `Virtualizer`;
-  detach on unmount, including empty-to-populated transitions. Never recover it from
-  a `VList` handle, DOM query, item-count effect, observer retry or timer.
-- Follow-lock truth is `state.isAtBottom`: the returned `isAtBottom` includes tolerance;
-  `escapedFromLock` records escape history and survives explicit re-locking.
-- Handle viewport HEIGHT changes through ResizeObserver; ignore width-only records.
-  No resize-event pumps, guessed transition durations or stop timers. Before a composer
-  inline-height write, set a one-shot ref consumed only by the next viewport height
-  resize, without `scrollToRealBottom`; keep it separate from jump suppression.
-- Group toggles never scroll. Observer deliveries must never re-arm the follow
-  lock — only scroll events may — so the content ResizeObserver releases a
-  same-delivery re-lock while the commit-time snapshot says not-following. No
-  frame retries/settle timers.
-- Preserve per-session restoration, search/expansion suppression and viewport resizing
-  for keyboards and terminal docks.
+- Key readiness/window by the view; a new view resets both. Before the
+  first viewport report the window is the tail plus the restored anchor's turn;
+  ignore reports until the initial window is ready.
+- A cached session renders in the frame after its click: no promise tick,
+  effect-only state or deferred setState before its first cycle.
 
 ## Session, auth, and app shell
 
 - History uses SessionData commands.
+- Held-send config is a session/runtime-scoped input to selection, never a stored
+  resolved selection. Keep its logical Turn fence across history/queue handoff;
+  next-draft edits win and attachment progress does not rebuild the catalog.
 - A proven-undelivered steer (`no-active-turn` or `promotion-failed`) repairs ordinary
   dispatch for pending/seen entries even if CLI already changed their status. Never
   repair active, terminal, removed, or delivery-unknown turns.
@@ -109,15 +90,14 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   `resolveAppStoreReviewBlockReason`, plus missing bridge, text entry, interaction
   cancel, hidden app) and is deduplicated per user AND per reason for the process
   lifetime. Keep both bounds when adding a gate.
-- `use-lody-live-activity.ts` throttles the summary INPUT; the bridge debounce cannot do
-  that job. EVERY summary input goes through one leading-edge throttle whose trailing
-  deadline is anchored to the last EMIT; one input left outside it restores starvation.
+- `use-lody-live-activity.ts` throttles the summary INPUT (the bridge debounce cannot):
+  EVERY summary input goes through one leading-edge throttle whose trailing deadline
+  is anchored to the last EMIT; one input left outside it restores starvation.
 - Nothing reaching the payload memo may carry a per-render identity: depend on the
-  permission candidate's key and title, not on the object.
+  permission candidate's key and title.
 - Keep the 250ms bridge debounce.
 - Scan a pending permission request from the UNTHROTTLED list and flush the window, so
-  the alert ships promptly with a summary that contains it; `shownPermissionAlertKeysRef`
-  still shows one alert per candidate key.
+  the alert ships promptly with it; `shownPermissionAlertKeysRef` shows one per key.
 - Compute nothing when the feature is off: `iosLiveActivitiesEnabledAtom` and the
   native iOS shell are BOTH required and are not equivalent. Derive the activity id
   separately from that gate so the disable and unmount paths can still end an activity

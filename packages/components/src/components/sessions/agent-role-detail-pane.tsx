@@ -176,7 +176,7 @@ export function AgentRoleDetailPane({
 
       {/* Only the values scroll. The header says WHICH Role and the footer is
           how to change it — both stay put however long the instruction runs. */}
-      <div className="scrollbar-pro min-h-0 flex-1 overflow-y-auto border-t border-border/60 [scrollbar-gutter:stable]">
+      <div className="scrollbar-pro min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <dl className="flex flex-col gap-2 px-4 py-3">
           {modelId ? (
             <DetailRow

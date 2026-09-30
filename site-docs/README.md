@@ -7,17 +7,16 @@ builds to `site-docs/out/client`. Binding rules live in
 
 ## Directory map
 
-| Directory | Owns | Rules |
-| --- | --- | --- |
-| `app/` | CSS only: reading theme, landing, pricing | [`app/AGENTS.md`](app/AGENTS.md) |
-| `components/` | Landing, marketing, and product-replica React components | [`components/AGENTS.md`](components/AGENTS.md) |
-| `content/` | MDX SSOT for docs, blog, changelog, legal | [`content/AGENTS.md`](content/AGENTS.md) |
-| `context/` | Landing demo sequencing and screenshot notes | — |
-| `lib/` | Server-only content lookups, metadata, browser-safe helpers | [`lib/AGENTS.md`](lib/AGENTS.md) |
-| `public/` | Static assets, `.well-known/`, generated SEO files | [`public/AGENTS.md`](public/AGENTS.md) |
-| `scripts/` | Path enumeration and SEO/content generators | [`scripts/AGENTS.md`](scripts/AGENTS.md) |
-| `src/` | Router, file routes, page adapters | [`src/AGENTS.md`](src/AGENTS.md) |
-| `types/` | Hand-written declarations for `@/*` app components | — |
+| Directory     | Owns                                                        | Rules                                          |
+| ------------- | ----------------------------------------------------------- | ---------------------------------------------- |
+| `app/`        | CSS only: reading theme, landing, pricing                   | [`app/AGENTS.md`](app/AGENTS.md)               |
+| `components/` | Landing, marketing, and product-replica React components    | [`components/AGENTS.md`](components/AGENTS.md) |
+| `content/`    | MDX SSOT for docs, blog, changelog, legal                   | [`content/AGENTS.md`](content/AGENTS.md)       |
+| `context/`    | Landing demo sequencing and screenshot notes                | —                                              |
+| `lib/`        | Server-only content lookups, metadata, browser-safe helpers | [`lib/AGENTS.md`](lib/AGENTS.md)               |
+| `public/`     | Static assets, `.well-known/`, generated SEO files          | [`public/AGENTS.md`](public/AGENTS.md)         |
+| `scripts/`    | Path enumeration and SEO/content generators                 | [`scripts/AGENTS.md`](scripts/AGENTS.md)       |
+| `src/`        | Router, file routes, page adapters                          | [`src/AGENTS.md`](src/AGENTS.md)               |
 
 ## Component responsibilities
 
@@ -28,19 +27,26 @@ builds to `site-docs/out/client`. Binding rules live in
   desktop cursor interaction.
 - `components/landing-feature-tabs.tsx` — the onboarding indicator above the app
   (`.underwater-tabs`) with auto-advancing progress bars.
-- `components/landing-app-preview.tsx` — the live product replica on the stage.
+- `components/landing-app-preview.tsx` — the product stage: scripted ghost-cursor
+  demos and their state, rendered with the replica below.
+- `components/landing-replica/` — display-only replicas of the app's shell,
+  conversation, composer, diff, browser, mobile, and usage/PR views. They take demo
+  data as props and import nothing from the app; `scripts/app-boundary.mjs` checks
+  that in `test`.
+- `components/landing-preview-data.ts` — demo copy, session rows, the scripted
+  conversations, and the mock diff.
 - `components/marketing-atmosphere.tsx` — the shared marketing ambient field,
   hosted once by `components/site-root-provider.tsx`.
 - `components/pricing-page.tsx` — pricing table, plans, and FAQ.
-- `components/app-preview-shims/` — build shims for modules that cannot run in the
-  public-site bundle. `use-online-machines-shim.ts` is the machine source for
-  `DesktopRunConfigMenu` (the real hook needs an installed platform); the preview
-  seeds its `landingPreviewMachinesAtom` alongside `agentConfigMetaCacheAtom` in
-  `previewStore`.
+- `components/coding-agent-pages.tsx` — English GUI and remote-control workflow pages,
+  shared integration cards, and native FAQs. `app/coding-agent.css` owns their layout.
+  The pages reuse real public product screenshots and the marketing shell; they do
+  not imply feature parity or certification across runtimes. Agent setup remains in
+  `content/docs/{en,zh}/(core-concepts)/agents.mdx`.
 
 Demo sequencing and screenshot notes live in
 [context/landing-demos.md](context/landing-demos.md). Measurements, history, and
-the replicated session shell's current shape are in
+the product replica's recorded shape are in
 [landing and marketing internals](../.agents/docs/site-landing-and-marketing.md).
 
 ## Changing landing visuals
@@ -57,6 +63,14 @@ Chromium. There is no second legacy site tree.
 
 The dev server runs on port 3002. Use
 `pnpm --filter @lody/site-docs preview:static` to emulate the static host.
+
+## Canonical page URLs
+
+`lib/site-url.mjs` is shared by metadata, sitemap generation, and rendered links.
+Known pages always use directory URLs, including dotted changelog versions.
+`SiteAnchor` and the Fumadocs link adapter apply the same policy to navigation;
+TanStack Router retains the trailing slash after hydration. Files, downloads,
+app routes, and external destinations keep their own URL semantics.
 
 ## Static content and client startup
 
@@ -87,7 +101,7 @@ The suite starts its own loopback static host and blocks all external requests.
 It checks every published HTML page with JavaScript disabled, internal link targets,
 404 behavior, actual desktop/mobile navigation, and route/article/static-data failure
 recovery on real landing, blog, and Fumadocs pages. Healthy pages must also respond
-to a theme change. `STATIC_TEST_PHASE=scan|faults|navigation` selects a focused phase;
+to a theme change. `STATIC_TEST_PHASE=scan|faults|navigation|agent-pages` selects a focused phase;
 the default runs all phases. JSON results and screenshots go to `out/static-verification`.
 
 The mobile menu is a native disclosure so navigation remains usable when client

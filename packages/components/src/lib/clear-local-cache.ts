@@ -45,11 +45,23 @@ const CACHE_CLEAR_FLAG = 'lody:clearCacheOnBoot';
 const CACHE_CLEAR_VALUE = '1';
 /** Flag value for the full local wipe. */
 const HARD_RESET_VALUE = 'all';
+/**
+ * Legacy flag values written by builds that kept a durable session-send journal
+ * (`force-cache` / `force-all` meant "clear even if sends are pending"). Every
+ * clear is unconditional now, so they are read as their plain modes, which lets
+ * a clear armed by such a build still complete on the first boot after upgrade.
+ * Nothing writes them any more; drop them after one release.
+ */
+const LEGACY_FORCED_CACHE_CLEAR_VALUE = 'force-cache';
+const LEGACY_FORCED_HARD_RESET_VALUE = 'force-all';
 
 export type PendingLocalClearMode = 'cache' | 'hard';
 
 /** IndexedDB databases created with static names (not suffixed per workspace). */
 const KNOWN_INDEXEDDB_NAMES = [
+  // Durable session-send journal of earlier builds; no longer written, but an
+  // upgraded install may still hold it, and a cache clear should remove it.
+  'lody-session-send-v1',
   EAGER_SYNC_HIGH_WATER_DB_NAME,
   EAGER_SYNC_CACHE_DB,
   'lody:repo-file-paths',
@@ -395,8 +407,8 @@ export function readPendingLocalClearMode(): PendingLocalClearMode | null {
   } catch {
     return null;
   }
-  if (raw === HARD_RESET_VALUE) return 'hard';
-  if (raw === CACHE_CLEAR_VALUE) return 'cache';
+  if (raw === HARD_RESET_VALUE || raw === LEGACY_FORCED_HARD_RESET_VALUE) return 'hard';
+  if (raw === CACHE_CLEAR_VALUE || raw === LEGACY_FORCED_CACHE_CLEAR_VALUE) return 'cache';
   return null;
 }
 

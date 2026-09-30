@@ -8,6 +8,7 @@ import {
 import type { VisibleTurnRange } from '@/components/ai-gui/view';
 import type { ConversationView } from '@/lib/conversation-view';
 import { LRUCache } from '@/lib/lru-cache';
+import { scrollDebug } from './scroll-debug-log';
 import { useConversationVersion, useTurnRange } from './use-conversation-view';
 
 /** Per-turn render items survive a tab switch; 20 sessions is the working set. */
@@ -60,21 +61,38 @@ export type ConversationStreamItems = BuildChatStreamItemsResult & {
  */
 export function useConversationStreamItems(
   view: ConversationView | null,
-  sessionId: SessionId
+  sessionId: SessionId,
+  options: {
+    /**
+     * The turn a restored reading position is in (the scroll engine's saved
+     * anchor). Until the viewport first reports, the window is loaded around
+     * it as well as the tail, so the restored position opens on real rows.
+     */
+    initialFocusTurnId?: string | null;
+  } = {}
 ): ConversationStreamItems {
   const version = useConversationVersion(view);
   const turnCount = view?.turnCount ?? 0;
 
-  // Projection wrappers change as accepted turns reconcile. Only replacing the
-  // underlying conversation starts a new initial load or resets its read window.
-  const source = view?.factSource ?? view;
+  // Replacing the conversation view starts a new initial load and resets its
+  // read window; history changes within the same view do neither.
+  const source = view;
   const initialRef = useRef({ source, ready: false });
   if (initialRef.current.source !== source) initialRef.current = { source, ready: false };
   const [visible, setVisibleRange] = useState<{
     source: ConversationView;
     range: VisibleTurnRange;
   } | null>(null);
-  const visibleRange = visible?.source === source ? visible.range : null;
+  const reportedRange = visible?.source === source ? visible.range : null;
+  const focusIndex =
+    !reportedRange && options.initialFocusTurnId && view
+      ? view.indexOf(options.initialFocusTurnId)
+      : -1;
+  const focusRange = useMemo(
+    () => (focusIndex >= 0 ? { from: focusIndex, to: focusIndex + 1 } : null),
+    [focusIndex]
+  );
+  const visibleRange = reportedRange ?? focusRange;
   const onVisibleTurnRangeChange = useCallback(
     (next: VisibleTurnRange) => {
       if (!source || !initialRef.current.ready) return;
@@ -109,6 +127,28 @@ export function useConversationStreamItems(
   );
   if (tailReady && (!visibleRange || rangeReady)) initialRef.current.ready = true;
   const initialWindowReady = !!view && initialRef.current.ready;
+  useEffect(() => {
+    scrollDebug('hydration-window', {
+      sessionId,
+      turnCount,
+      from: hydrationWindow.from,
+      to: hydrationWindow.to,
+      tailFrom,
+      visible: visibleRange,
+      tailReady,
+      rangeReady,
+      initialWindowReady,
+    });
+  }, [
+    hydrationWindow,
+    initialWindowReady,
+    rangeReady,
+    sessionId,
+    tailFrom,
+    tailReady,
+    turnCount,
+    visibleRange,
+  ]);
 
   const [retained, setRetained] = useState<{
     source: ConversationView;

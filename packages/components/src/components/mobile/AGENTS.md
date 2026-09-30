@@ -126,3 +126,5 @@ before touching gestures.
   in `from`. Nested Back returns to the settings list; top-level Back restores
   that validated source path (including the Projects Local/GitHub query),
   falling back to context-free Chat only on direct entry.
+- Keyboard shortcuts is desktop-only: the mobile catalog hides `desktopOnly`
+  tabs, and its route redirects back to the settings list.

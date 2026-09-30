@@ -207,7 +207,7 @@ describe('AcpAuthenticationAuthorizationView', () => {
 
     expect(container.querySelectorAll('input')[0]?.type).toBe('text');
     expect(container.querySelectorAll('input')[1]?.type).toBe('password');
-    expect(container.querySelector('select')?.value).toBe('work');
+    expect(container.querySelector('[role="combobox"]')?.textContent).toBe('Work');
     const continueButton = Array.from(container.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('Continue')
     );

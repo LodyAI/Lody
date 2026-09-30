@@ -99,6 +99,20 @@ device scale factor 乘进 layout zoom，所以 DPR 2 下每个 `<svg>` 的 effe
 只会让这些调用点失声。「转发用的包装组件必须自带默认值」这条约束已写入 `src/ui/AGENTS.md`
 和属性本身的注释。其余九处转发传的是比较表达式或必填布尔值，已确认不受影响。
 
+## 后续：调用方 class 撑大了 `@lody/ui` Spinner 的旋转盒
+
+`@lody/ui` 迁移把同一条约束带进了第二个实现，却在 API 边界上弄丢了：那个 `Spinner`
+把调用方的 `className` 转发到了动画 wrapper 内部的 `<svg>` 上。调用方加的任何外边距
+——接受邀请页的 `mb-4`、二十多处按钮文字旁的 `mr-2`——都并入了旋转盒，`transform-origin:
+50% 50%` 于是落在图标中心之外，圆环不再原地旋转而是绕卡片公转。`ml-auto` 与 `absolute`
+的情形则错在另一头：它们在 wrapper 内部解析，而不是在外层排布这个标记。
+
+现在 `className` 和尺寸样式落在 wrapper 本体上，图标声明 100% ——这正是本包其余图标
+已有的约定。同一处改动一并修好了所有带外边距的调用点，调用方的 class 再也进不了
+旋转盒内部。规则写进了 `packages/ui/AGENTS.md` 和 `feedback` surface；
+`packages/ui/test/feedback.test.tsx` 断言调用方的 class 只留在 span 上、图标只保留
+自己的 class，因此把它们放回 svg 的回归会测试失败。
+
 ## 验证
 
 - 在本工作区的 Electron 39.5.1 / Chromium 142.0.7444.265、主显示器 scale factor 2 上，

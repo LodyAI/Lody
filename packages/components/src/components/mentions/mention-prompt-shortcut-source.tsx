@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { compareSlashMatchRanks, rankSlashMatch } from '@/lib/command-slash-search';
 import {
   getShortcutEmoji,
   resolveShortcutAvailability,
@@ -75,14 +76,11 @@ export function selectPromptShortcutCandidates(
       )
         return [];
       const exact = query !== '' && (entry.slug === query || entry.name.toLowerCase() === query);
-      if (
-        query &&
-        !exact &&
-        ![entry.slug, entry.name, entry.description ?? ''].some((field) =>
-          field.toLowerCase().includes(query)
-        )
-      )
-        return [];
+      const slashRank = rankSlashMatch(
+        { token: entry.slug, name: entry.name, description: entry.description ?? undefined },
+        query
+      );
+      if (!slashRank) return [];
       const availability = input.loading
         ? { kind: 'unknown' as const, reason: 'context_loading' }
         : resolveShortcutAvailability({
@@ -108,7 +106,8 @@ export function selectPromptShortcutCandidates(
           // header already says these are Prompt Shortcuts.
           iconEmoji: getShortcutEmoji(entry),
           title: `/${entry.slug}`,
-          subtitle: entry.description,
+          hint: entry.description,
+          slashRank,
           trailing: visibility,
           disabled: availability.kind !== 'available',
           disabledReason: shortcutAvailabilityMessage(availability, t) || undefined,
@@ -117,7 +116,9 @@ export function selectPromptShortcutCandidates(
     })
     .sort(
       (a, b) =>
-        Number(b.label === query) - Number(a.label === query) || a.label.localeCompare(b.label)
+        Number(Boolean(a.disabled)) - Number(Boolean(b.disabled)) ||
+        (query ? compareSlashMatchRanks(a.slashRank!, b.slashRank!) : 0) ||
+        a.label.localeCompare(b.label)
     )
     .slice(0, limit);
 }

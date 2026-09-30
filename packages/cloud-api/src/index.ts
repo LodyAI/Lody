@@ -67,6 +67,7 @@ export type WorkspaceRepository = {
 };
 
 export type GitHubTokenErrorCode =
+  | 'personal_unavailable'
   | 'unauthorized'
   | 'not_a_member'
   | 'repo_not_linked'
@@ -521,9 +522,16 @@ export type CloudApi = {
       { state: string }
     >;
     getPersonalOperationSettings: Query<{ workspaceId: string }, PersonalOperationSettings>;
+    resolveLegacyPrRepositoryIdentity: Mutation<
+      { workspaceId: string; repoFullName: string; prNumber: number; sessionId: string },
+      { resolved: boolean }
+    >;
     getPrCacheVersions: Query<
-      { workspaceId: string; repoFullName: string; prNumber: number },
+      { workspaceId: string; repoFullName: string; prNumber: number; sessionId?: string },
       {
+        repoFullName?: string;
+        repositoryId?: number;
+        identityPending?: boolean;
         prDetailsUpdatedAt: number | null;
         reviewCommentsUpdatedAt: number | null;
         reviewsUpdatedAt: number | null;
@@ -581,8 +589,13 @@ export type CloudApi = {
       { workspaceId: string; repoFullName: string; cliToken: string },
       BasicGitHubTokenResult
     >;
+    getCredentialPolicyForCli: Action<
+      { cliToken: string; workspaceId: string; requesterUserId: string; machineId: string },
+      { personalEnabled: boolean }
+    >;
     getOperationAccessTokenByRepoNameForCli: Action<
       {
+        credentialSource?: 'personal' | 'app';
         machineId?: string;
         requesterUserId?: string;
         forceAppFallback?: boolean;
@@ -663,6 +676,25 @@ export type CloudApi = {
       { success: true; existing: boolean; sharedWithTeam: boolean }
     >;
     canUseMachineFromCliToken: Query<
+      {
+        localProjectId?: string;
+        workspaceId: string;
+        machineId: string;
+        cliToken: string;
+        requesterUserId: string;
+      },
+      | { allowed: true }
+      | {
+          allowed: false;
+          reason:
+            | 'requester_not_member'
+            | 'machine_not_registered'
+            | 'not_visible'
+            | 'project_not_shared';
+        }
+    >;
+    /** Both the token user and `requesterUserId` must be able to use the target. */
+    canDelegateMachineUseFromCliToken: Query<
       {
         localProjectId?: string;
         workspaceId: string;

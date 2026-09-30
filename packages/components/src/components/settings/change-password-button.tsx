@@ -2,20 +2,16 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { toast } from 'sonner';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { toast } from '@/lib/toast';
 import { validateNewPassword } from '@lody/shared';
-import { Button } from '@/ui/button';
-import { Label } from '@/ui/label';
-import { PasswordInput } from '@/ui/password-input';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Button } from '@lody/ui/button';
+import { Field as UiField } from '@lody/ui/field';
+import { PasswordInput } from '@lody/ui/password-input';
+import { Dialog } from '@/ui/dialog';
 import { formatPasswordValidationFailure } from '@/lib/password-validation';
 
 interface ChangePasswordButtonProps {
@@ -36,6 +32,15 @@ interface ChangePasswordButtonProps {
   onSetupPassword: () => Promise<void>;
   disabled?: boolean;
 }
+
+const styles = stylex.create({
+  /** Clips the step sliding out while the next one slides in. */
+  steps: { position: 'relative', overflow: 'hidden', paddingBlock: space[1] },
+  field: { display: 'flex', flexDirection: 'column', gap: space[1.5] },
+  fields: { display: 'flex', flexDirection: 'column', gap: space[3] },
+  error: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.destructive },
+  icon: { width: '14px', height: '14px', flexShrink: 0 },
+});
 
 const slideVariants = {
   enter: (direction: number) => ({ x: direction > 0 ? 28 : -28, opacity: 0 }),
@@ -155,31 +160,25 @@ export function ChangePasswordButton({
 
   return (
     <>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="bg-foreground/[0.06] font-normal hover:bg-foreground/[0.1]"
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-      >
+      <Button variant="secondary" size="small" disabled={disabled} onClick={() => setOpen(true)}>
         {hasPassword
           ? t('settings.profile.password.changeButton')
           : t('settings.profile.password.setupButton')}
       </Button>
 
-      <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent>
+      <Dialog.Root open={open} onOpenChange={handleOpenChange}>
+        <Dialog.Content>
           {hasPassword ? (
             <>
-              <DialogHeader>
-                <DialogTitle>{t('settings.profile.password.dialogTitle')}</DialogTitle>
-                <DialogDescription>
+              <Dialog.Header>
+                <Dialog.Title>{t('settings.profile.password.dialogTitle')}</Dialog.Title>
+                <Dialog.Description>
                   {step === 0
                     ? t('settings.profile.password.currentStepHint')
                     : t('settings.profile.password.newStepHint')}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="relative overflow-hidden py-2">
+                </Dialog.Description>
+              </Dialog.Header>
+              <div {...stylex.props(styles.steps)}>
                 <AnimatePresence mode="wait" custom={direction} initial={false}>
                   {step === 0 ? (
                     <motion.div
@@ -190,11 +189,11 @@ export function ChangePasswordButton({
                       animate="center"
                       exit="exit"
                       transition={{ duration: 0.2, ease: 'easeInOut' }}
-                      className="space-y-1.5"
+                      className={stylex.props(styles.field).className}
                     >
-                      <Label htmlFor="current-password">
+                      <UiField.Label htmlFor="current-password">
                         {t('settings.profile.password.currentLabel')}
-                      </Label>
+                      </UiField.Label>
                       <PasswordInput
                         id="current-password"
                         autoComplete="current-password"
@@ -209,7 +208,7 @@ export function ChangePasswordButton({
                         autoFocus
                       />
                       {error ? (
-                        <p role="alert" className="text-[11px] text-destructive">
+                        <p role="alert" {...stylex.props(styles.error)}>
                           {error}
                         </p>
                       ) : null}
@@ -223,12 +222,12 @@ export function ChangePasswordButton({
                       animate="center"
                       exit="exit"
                       transition={{ duration: 0.2, ease: 'easeInOut' }}
-                      className="space-y-3"
+                      className={stylex.props(styles.fields).className}
                     >
-                      <div className="space-y-1.5">
-                        <Label htmlFor="new-password">
+                      <div {...stylex.props(styles.field)}>
+                        <UiField.Label htmlFor="new-password">
                           {t('settings.profile.password.newLabel')}
-                        </Label>
+                        </UiField.Label>
                         <PasswordInput
                           id="new-password"
                           autoComplete="new-password"
@@ -237,10 +236,10 @@ export function ChangePasswordButton({
                           autoFocus
                         />
                       </div>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="confirm-password">
+                      <div {...stylex.props(styles.field)}>
+                        <UiField.Label htmlFor="confirm-password">
                           {t('settings.profile.password.confirmLabel')}
-                        </Label>
+                        </UiField.Label>
                         <PasswordInput
                           id="confirm-password"
                           autoComplete="new-password"
@@ -255,7 +254,7 @@ export function ChangePasswordButton({
                         />
                       </div>
                       {error ? (
-                        <p role="alert" className="text-[11px] text-destructive">
+                        <p role="alert" {...stylex.props(styles.error)}>
                           {error}
                         </p>
                       ) : null}
@@ -263,80 +262,85 @@ export function ChangePasswordButton({
                   )}
                 </AnimatePresence>
               </div>
-              <DialogFooter>
+              <Dialog.Footer>
                 {step === 0 ? (
                   <>
                     <Button
-                      variant="outline"
-                      size="sm"
+                      variant="secondary"
+                      size="small"
                       onClick={() => handleOpenChange(false)}
                       disabled={isVerifying}
                     >
                       {t('common.cancel')}
                     </Button>
                     <Button
-                      size="sm"
+                      size="small"
                       onClick={() => {
                         void goToNewStep();
                       }}
                       disabled={!currentPassword || isVerifying}
                     >
-                      {isVerifying ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
+                      {isVerifying ? <Spinner size="small" /> : null}
                       {t('settings.profile.password.continueButton')}
                     </Button>
                   </>
                 ) : (
                   <>
-                    <Button variant="outline" size="sm" onClick={goBack} disabled={isSubmitting}>
-                      <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      onClick={goBack}
+                      disabled={isSubmitting}
+                    >
+                      <ArrowLeft {...stylex.props(styles.icon)} />
                       {t('common.back')}
                     </Button>
                     <Button
-                      size="sm"
+                      size="small"
                       onClick={() => {
                         void handleSubmit();
                       }}
                       disabled={isSubmitting || !newPassword || !confirmPassword}
                     >
-                      {isSubmitting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
+                      {isSubmitting ? <Spinner size="small" /> : null}
                       {t('settings.profile.password.submitButton')}
                     </Button>
                   </>
                 )}
-              </DialogFooter>
+              </Dialog.Footer>
             </>
           ) : (
             <>
-              <DialogHeader>
-                <DialogTitle>{t('settings.profile.password.setupDialogTitle')}</DialogTitle>
-                <DialogDescription>
+              <Dialog.Header>
+                <Dialog.Title>{t('settings.profile.password.setupDialogTitle')}</Dialog.Title>
+                <Dialog.Description>
                   {t('settings.profile.password.setupDialogDescription')}
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
+                </Dialog.Description>
+              </Dialog.Header>
+              <Dialog.Footer>
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   onClick={() => handleOpenChange(false)}
                   disabled={isSubmitting}
                 >
                   {t('common.cancel')}
                 </Button>
                 <Button
-                  size="sm"
+                  size="small"
                   onClick={() => {
                     void handleSetup();
                   }}
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
+                  {isSubmitting ? <Spinner size="small" /> : null}
                   {t('settings.profile.password.setupSubmitButton')}
                 </Button>
-              </DialogFooter>
+              </Dialog.Footer>
             </>
           )}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 }

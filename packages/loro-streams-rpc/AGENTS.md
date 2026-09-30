@@ -45,7 +45,7 @@ and the `file/preview` namespace are in
   shared per-machine request stream. Handlers must be safe to run concurrently; one that
   needs read-check-write atomicity serializes in its own service layer (Code Collab
   `save-text` per absolute path in `code-collab-v2-service.ts`), not in the request loop.
-- Control-plane methods (`machine/status`, `machine/ping`, `session/cancel`,
+- Control-plane methods (`machine/status`, `machine/preview-control`, `machine/ping`, `session/cancel`,
   `session/live-status`, `session/steer`, `session/terminate`, `machine/restart`,
   `machine/upgrade`, `session/dispatch-turn`)
   bypass the shared semaphore and run on a small dedicated lane

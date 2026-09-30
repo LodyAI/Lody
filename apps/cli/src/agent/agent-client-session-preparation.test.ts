@@ -21,6 +21,7 @@ vi.mock('@agentclientprotocol/sdk', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@agentclientprotocol/sdk')>()),
   PROTOCOL_VERSION: 1,
   ClientSideConnection: class {
+    readonly signal = new AbortController().signal;
     readonly initialize = connectionMocks.initialize;
     readonly newSession = connectionMocks.newSession;
     readonly loadSession = connectionMocks.loadSession;
@@ -48,6 +49,7 @@ function deferred<T>() {
 function createLogger(): Logger {
   const logger: Logger = {
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
@@ -593,6 +595,28 @@ describe('AgentClient session preparation gate', () => {
         },
       },
     });
+  });
+
+  it('resumes builtin Pi sessions without replaying them through loadSession', async () => {
+    connectionMocks.initialize.mockResolvedValue({
+      agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
+    });
+    connectionMocks.resumeSession.mockResolvedValue({});
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'session-pi-resume' as SessionId,
+      terminalManager: {} as never,
+      agentConfig: { cliType: 'builtin', agentType: 'pi' },
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+
+    await client.startSession({} as never, '/workdir', '/pi/session.jsonl' as never);
+
+    expect(connectionMocks.resumeSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: '/pi/session.jsonl', cwd: '/workdir' })
+    );
+    expect(connectionMocks.loadSession).not.toHaveBeenCalled();
   });
 
   it('injects Lody MCP into DeepSeek Harness sessions', async () => {

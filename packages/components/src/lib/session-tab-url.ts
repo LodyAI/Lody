@@ -4,10 +4,22 @@ const SESSION_TAB_SEARCH_PREFIX = 'session:';
 const DRAFT_TAB_SEARCH_PREFIX = 'draft:';
 export const EMPTY_SESSION_TAB_ID = 'empty';
 
-export const isSessionTabClosed = (meta: {
-  isArchived?: boolean;
-  isTabClosed?: boolean;
-}): boolean => meta.isArchived === true || meta.isTabClosed === true;
+/**
+ * Tab closure is independent of archive. An archived workspace keeps the tabs
+ * it had open, so reviewing it shows the conversation. Inside a live workspace
+ * an archived child is out of the tab strip until it is explicitly restored;
+ * the root session is always its own workspace, so only its close flag counts.
+ */
+export const isSessionTabClosed = (
+  meta: { isArchived?: boolean; isTabClosed?: boolean },
+  workspaceArchived: boolean
+): boolean => meta.isTabClosed === true || (meta.isArchived === true && !workspaceArchived);
+
+/** An archived child listed from a live workspace: its action is Restore, not Reopen. */
+export const isArchivedOutsideWorkspace = (
+  meta: { isArchived?: boolean },
+  workspaceArchived: boolean
+): boolean => meta.isArchived === true && !workspaceArchived;
 
 /** Keep closed ids in the order so remote closes choose the same neighbour as local closes. */
 export function getSessionTabFallback(

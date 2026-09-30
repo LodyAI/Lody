@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PhotoSlider } from 'react-photo-view';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   isMacOSElectronRenderer,
@@ -241,9 +241,11 @@ function OpenZoomableImageViewer({
   const isElectronFullscreen = useElectronFullscreen();
   useImagePreviewContextMenu(images);
 
-  // Native window controls are drawn ABOVE web content, so the top bar has to
-  // leave room for them or the counter lands behind the macOS traffic lights /
-  // the Windows caption buttons. Both hide themselves in native fullscreen.
+  // Native window controls are drawn ABOVE web content, so the top bar clears
+  // them horizontally and centers its own controls on their line (the y=23
+  // traffic-light row on macOS, the 36px caption strip on Windows — see the
+  // `--mac-controls`/`--win-controls` rules in the CSS). Both hide themselves
+  // in native fullscreen.
   const reservesWindowControls = !isElectronFullscreen;
   const sliderClassName = cn(
     'lody-photo-slider',
@@ -263,7 +265,14 @@ function OpenZoomableImageViewer({
       index={index}
       {...(onIndexChange ? { onIndexChange } : {})}
       maskClosable
-      photoClosable
+      // The photo itself is the pan/zoom surface. Letting a tap close it makes
+      // a second click after opening race with the source thumbnail and can
+      // reopen the viewer; the toolbar and backdrop remain explicit exits.
+      photoClosable={false}
+      // A vertical drag should pan the image, not turn into PhotoView's
+      // pull-to-dismiss animation. That animation is what makes a zoomed
+      // desktop image appear to float away from the pointer.
+      pullClosable={false}
       {...(isMobile ? {} : { maskOpacity: DESKTOP_MASK_OPACITY })}
       photoClassName="lody-photo-slider-image"
       photoWrapClassName="lody-photo-slider-photo-wrap"

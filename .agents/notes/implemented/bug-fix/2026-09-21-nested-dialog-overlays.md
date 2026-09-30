@@ -15,6 +15,13 @@ covered CSS stacking; application interaction remains unverified without depende
 
 ## Decision and evidence
 
+Correction 2026-09-25: the mechanism below described the Radix-era
+`DialogOverlay` adapter. Under Base UI a nested root mounts no backdrop at all,
+so the per-caller overlay classes silently stopped working; ownership moved to
+the primitive — see
+[2026-09-25-modal-nested-backdrop](2026-09-25-modal-nested-backdrop.md). The
+shared-z-rung invariant this note established still holds.
+
 [DialogOverlay](../../../../packages/components/src/ui/dialog.tsx) owns the fix for
 both content variants. Sharing `--z-dialog` avoids a separate nesting counter and
 preserves caller overrides, animations, and Radix focus/dismissal handling. Existing

@@ -9,6 +9,7 @@ import {
 } from '@lody/shared';
 import {
   deleteMachineAgentConfig,
+  findSoleMachineAgentConfig,
   readMachineAgentConfigs,
   readMachineBuiltinAgentOptOuts,
   upsertMachineAgentConfig,
@@ -44,6 +45,7 @@ function createFakeRepo() {
   const repo = {
     openFlockDoc: vi.fn(async () => ({ flock, syncOnce: vi.fn(async () => {}) })),
     getDocMeta: vi.fn(async () => null),
+    getMeta: vi.fn(() => undefined),
     deleteDoc: vi.fn(async () => {}),
     flush: vi.fn(async () => {}),
   } as unknown as LoroRepo;
@@ -127,5 +129,25 @@ describe('machine flock agent config opt-out', () => {
     expect(await readMachineBuiltinAgentOptOuts(repo, workspaceId, machineId)).toEqual(
       new Set(['kimi'])
     );
+  });
+});
+
+describe('findSoleMachineAgentConfig', () => {
+  const find = (repo: LoroRepo) =>
+    findSoleMachineAgentConfig(repo, workspaceId, machineId, 'builtin', 'kimi');
+
+  it('returns the only provider of a type and none when absent or ambiguous', async () => {
+    const { repo } = createFakeRepo();
+    expect(await find(repo)).toBeUndefined();
+
+    await upsertMachineAgentConfig(repo, workspaceId, kimiConfig);
+    await upsertMachineAgentConfig(repo, workspaceId, customConfig);
+    expect((await find(repo))?.id).toBe(kimiConfig.id);
+
+    await upsertMachineAgentConfig(repo, workspaceId, {
+      ...kimiConfig,
+      id: 'agent-config-kimi-2',
+    } as AgentConfigMeta);
+    expect(await find(repo)).toBeUndefined();
   });
 });

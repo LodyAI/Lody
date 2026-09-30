@@ -33,6 +33,7 @@ const require = createRequire(import.meta.url)
 // strict layout exposes transitive deps only next to the package that
 // declares them (.pnpm/<pkg>/node_modules/<dep>), not under apps/cli.
 const CLI_RUNTIME_PACKAGE_CHAIN = [
+  { name: '@napi-rs/keyring', from: 'cli' },
   { name: 'better-sqlite3', from: 'cli' },
   { name: 'loro-crdt', from: 'cli' },
   { name: '@lydell/node-pty', from: 'cli' },
@@ -77,6 +78,37 @@ export function stagedSqliteBindingPath(target) {
 /** Sibling package @lydell/node-pty requires the binding from, keyed by target. */
 export function nodePtyBinaryPackageName({ platform, arch }) {
   return `@lydell/node-pty-${platform}-${arch}`
+}
+
+export function keyringBinaryPackageName({ platform, arch }) {
+  return `@napi-rs/keyring-${platform}-${arch}${platform === 'linux' ? '-gnu' : platform === 'win32' ? '-msvc' : ''}`
+}
+
+export function installEmbeddedKeyringBinding(target) {
+  const packageName = keyringBinaryPackageName(target)
+  const wrapper = resolvePackageDir('@napi-rs/keyring', cliAppRoot)
+  const metadata = JSON.parse(fs.readFileSync(path.join(wrapper, 'package.json'), 'utf8'))
+  const version = metadata.optionalDependencies?.[packageName]
+  if (!version)
+    throw new Error(`No system credential backend for ${target.platform}-${target.arch}`)
+  const scope = path.join(stagedNodeModulesDir, '@napi-rs')
+  fs.mkdirSync(scope, { recursive: true })
+  for (const entry of fs.readdirSync(scope)) {
+    if (entry.startsWith('keyring-'))
+      fs.rmSync(path.join(scope, entry), { recursive: true, force: true })
+  }
+  const sibling = path.join(path.dirname(wrapper), packageName.slice('@napi-rs/'.length))
+  const installed = fs.existsSync(path.join(sibling, 'package.json')) ? sibling : undefined
+  const downloaded = installed ? undefined : fetchNodePtyBinaryPackage(packageName, version)
+  try {
+    copyPackageDir(
+      installed ?? downloaded.packageDir,
+      path.join(stagedNodeModulesDir, ...packageName.split('/')),
+      { isTopLevel: false }
+    )
+  } finally {
+    downloaded?.cleanup()
+  }
 }
 
 export function stagedNodePtyBinaryDir({ platform, arch }) {

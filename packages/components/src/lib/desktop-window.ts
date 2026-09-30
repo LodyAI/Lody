@@ -120,13 +120,17 @@ export function useWorkspaceWindowOwner(workspace: string | null): boolean {
     const controller = new AbortController();
     let release: (() => void) | undefined;
     void navigator.locks
-      .request(`lody:workspace-window:${eligibleWorkspace}`, { signal: controller.signal }, async () => {
-        if (controller.signal.aborted) return;
-        setOwnedWorkspace(eligibleWorkspace);
-        await new Promise<void>((resolve) => {
-          release = resolve;
-        });
-      })
+      .request(
+        `lody:workspace-window:${eligibleWorkspace}`,
+        { signal: controller.signal },
+        async () => {
+          if (controller.signal.aborted) return;
+          setOwnedWorkspace(eligibleWorkspace);
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+      )
       .catch((error: unknown) => {
         if (!controller.signal.aborted) console.error(error);
       });
@@ -136,16 +140,25 @@ export function useWorkspaceWindowOwner(workspace: string | null): boolean {
       setOwnedWorkspace(null);
     };
   }, [eligibleWorkspace]);
-  return !preparing && (!isElectronRenderer() || (workspace !== null && ownedWorkspace === workspace));
+  return (
+    !preparing && (!isElectronRenderer() || (workspace !== null && ownedWorkspace === workspace))
+  );
 }
 
 /** A cancellation token only releases its own source-window request. */
 export function prepareDesktopWindow(sessionId: string): () => void {
   const services = getIpcServices();
   const workspace = jotaiStore.get(currentWorkspaceSlugAtom);
-  if (!isMacOSElectronRenderer() || !services || !workspace || jotaiStore.get(windowPreparationAtom))
+  if (
+    !isMacOSElectronRenderer() ||
+    !services ||
+    !workspace ||
+    jotaiStore.get(windowPreparationAtom)
+  )
     return () => {};
   const requestId = crypto.randomUUID();
   void services.app.prepareWindow({ workspace, sessionId }, requestId).catch(console.error);
-  return () => { void services.app.cancelPreparedWindow(requestId).catch(console.error); };
+  return () => {
+    void services.app.cancelPreparedWindow(requestId).catch(console.error);
+  };
 }

@@ -27,6 +27,13 @@ conversation, and focus its composer once. The sidebar can be expanded.
 Workspace windows retain full navigation. Navigation, draft tabs, and panel state
 are independent per window.
 
+A desktop window — the desktop app or a desktop browser — can be resized below
+the mobile layout breakpoint and keeps the desktop layout in a compact
+presentation instead. The navigation sidebar and a Session's side panel stop
+taking columns and float over the content until dismissed, and widening the
+window restores them. Mobile devices keep the breakpoint: the mobile layout
+below it, and the desktop layout when the viewport is wide enough.
+
 The optional developer window warm-up prepares the shell and, in local mode, the
 implicit workspace runtime, Repo, and metadata sync before a target is selected.
 A matching claim retains that runtime, including initialization still in flight.
@@ -80,11 +87,26 @@ windows; execution acts only in the window receiving the key. The original windo
 retains existing close/tray behavior; other workspace windows are not automatically
 restored.
 
-Hiding the sidebar unmounts its content and pauses Session prefetch; data required
-by the current conversation and Tasks page continues syncing. Only one window per
-workspace runs notifications, badges, and background status checks, handing off
-on exit. Cache clearing and logout are application-wide and close other windows
-to release connections.
+In the full-width desktop layout, hiding the sidebar keeps its view and scroll
+position mounted but pauses sidebar-driven Session prefetch; reopening it does
+not remount the list. The sidebar and adjacent content pane animate together
+between their open and closed widths, except when reduced motion is requested.
+Compact presentation and settings navigation may unmount
+the sidebar, restoring its scroll position for that workspace on return. Data
+required by the current conversation and Tasks page continues syncing. Only one
+window per workspace runs notifications, badges, and background status checks,
+handing off on exit. Cache clearing and logout are application-wide and close
+other windows to release connections.
+
+The Dock badge is an absolute snapshot of owned, non-archived sidebar rows that
+have unread output or a live permission request, including contained conversations.
+Each row contributes at most one; waiting takes precedence over unread. Closed
+conversations suppress unread as defined in [tab closure](session-tab-closure.md).
+The elected renderer publishes changes immediately and reasserts the full snapshot,
+including zero, every 30 seconds and on focus/visibility restoration. Background
+timer throttling or system sleep can delay the interval. Main replaces each window's
+contribution and discards it on renderer crash, document navigation, or window close;
+routine reconciliation must not repeat a permission bounce.
 
 Workspace windows use the existing platform directory; the public desktop still
 has one local workspace. Shared UI multi-workspace entries must not change other

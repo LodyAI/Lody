@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { SubagentTaskPanel, type SubagentTask } from '@/components/ai-gui/subagent-task-panel';
+import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 
 const running: SubagentTask[] = [
   {
@@ -124,6 +125,168 @@ const backgroundCommands: SubagentTask[] = [
   },
 ];
 
+type Run = NonNullable<SubagentTask['run']>;
+const support = (
+  cancel: boolean,
+  stream: Run['snapshot']['support']['stream'] = ['text', 'thought', 'tool', 'plan']
+) => ({
+  stream,
+  progress: true,
+  outputRead: 'none' as const,
+  cancel,
+});
+
+/** Runs streamed through subagent events: each row follows its latest step. */
+const streamedRuns: SubagentTask[] = [
+  {
+    type: 'subagent_task',
+    taskId: 'run-1',
+    taskKind: 'subagent',
+    status: 'in_progress',
+    actor: 'Explore',
+    description: 'Map the ACP capability refresh path',
+    startedAtEpochSeconds: Math.floor(Date.now() / 1000) - 83,
+    run: {
+      sessionId: 'root-acp',
+      snapshot: { state: 'running', support: support(true) },
+      progress: { totalTokens: 12_400, toolCallCount: 4 },
+      items: [
+        { type: 'thought', text: 'Start from where the daemon reads capabilities.' },
+        {
+          type: 'tool_call',
+          toolCallId: 'c1',
+          title: 'Read apps/cli/src/agent/acp-capabilities.ts',
+          kind: 'read',
+          status: 'completed',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'c2',
+          title: 'Grep "refreshCapabilities"',
+          kind: 'search',
+          status: 'in_progress',
+        },
+      ],
+    },
+  },
+  {
+    type: 'subagent_task',
+    taskId: 'run-2',
+    taskKind: 'subagent',
+    status: 'in_progress',
+    parentTaskId: 'run-1',
+    actor: 'Explore',
+    description: 'Check the version probe',
+    run: {
+      sessionId: 'root-acp',
+      snapshot: { state: 'running', parentRunId: 'run-1', support: support(true) },
+      items: [{ type: 'text', text: 'The probe runs once per start.\n\nChecking the cache next' }],
+    },
+  },
+  {
+    type: 'subagent_task',
+    taskId: 'run-3',
+    taskKind: 'subagent',
+    status: 'in_progress',
+    actor: 'Plan',
+    description: 'Draft the migration plan',
+    run: {
+      sessionId: 'root-acp',
+      snapshot: { state: 'running', support: support(false, []) },
+      progress: { summary: 'Comparing the two storage layouts' },
+      items: [],
+    },
+  },
+];
+
+/** How settled runs end when it was not well: cancelled, lost, and lossy. */
+const settledRuns: SubagentTask[] = [
+  {
+    type: 'subagent_task',
+    taskId: 'run-c',
+    taskKind: 'subagent',
+    status: 'failed',
+    actor: 'Explore',
+    description: 'Search the archive',
+    run: {
+      sessionId: 'root-acp',
+      snapshot: { state: 'cancelled', support: support(false) },
+      items: [],
+    },
+  },
+  {
+    type: 'subagent_task',
+    taskId: 'run-u',
+    taskKind: 'subagent',
+    status: 'in_progress',
+    actor: 'Explore',
+    description: 'Profile the renderer',
+    run: {
+      sessionId: 'root-acp',
+      snapshot: { state: 'unknown', reason: { code: 'disconnected' }, support: support(false) },
+      items: [],
+    },
+  },
+  {
+    type: 'subagent_task',
+    taskId: 'run-f',
+    taskKind: 'subagent',
+    status: 'failed',
+    actor: 'general-purpose',
+    description: 'Run the integration suite',
+    error: 'Process exited with code 1',
+    run: {
+      sessionId: 'root-acp',
+      snapshot: { state: 'failed', outputIncomplete: true, support: support(false) },
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'f1',
+          title: 'pnpm test',
+          kind: 'execute',
+          status: 'failed',
+        },
+      ],
+    },
+  },
+];
+
+/** A run long enough to reach the dialog's height cap and scroll inside it. */
+const longRun: SubagentTask[] = [
+  {
+    type: 'subagent_task',
+    taskId: 'run-long',
+    taskKind: 'subagent',
+    status: 'in_progress',
+    actor: 'Explore',
+    description: 'Audit every settings tab for spacing drift',
+    startedAtEpochSeconds: Math.floor(Date.now() / 1000) - 412,
+    run: {
+      sessionId: 'root-acp',
+      snapshot: { state: 'running', support: support(true) },
+      progress: { totalTokens: 48_900, toolCallCount: 40 },
+      items: Array.from({ length: 40 }, (_, index) => ({
+        type: 'tool_call' as const,
+        toolCallId: `long-${index}`,
+        title: `Read packages/components/src/components/settings/tab-${index + 1}.tsx`,
+        kind: 'read' as const,
+        status: index === 39 ? ('in_progress' as const) : ('completed' as const),
+      })),
+    },
+  },
+];
+
+/** Storybook stand-in for the conversation renderers `view.tsx` passes in. */
+const renderHistory = (task: SubagentTask) => (
+  <ol className="m-0 flex list-none flex-col gap-1 p-0 text-[12.5px] text-muted-foreground">
+    {task.run?.items.map((item, index) => (
+      <li key={index}>
+        {item.type === 'tool_call' ? item.title : 'text' in item ? item.text : item.type}
+      </li>
+    ))}
+  </ol>
+);
+
 const meta = {
   title: 'Sessions/SubagentTaskPanel',
   component: SubagentTaskPanel,
@@ -155,3 +318,30 @@ export const Mixed: Story = { args: { tasks: mixed } };
 export const SingleRunning: Story = { args: { tasks: [running[0] as SubagentTask] } };
 export const ManyCompleted: Story = { args: { tasks: many } };
 export const BackgroundCommands: Story = { args: { tasks: backgroundCommands } };
+export const StreamedRuns: Story = {
+  args: { tasks: streamedRuns, renderHistory, runCancellation: true, onCancel: async () => {} },
+};
+export const SettledRuns: Story = { args: { tasks: settledRuns, renderHistory } };
+export const LongRun: Story = { args: { tasks: longRun, renderHistory } };
+
+/**
+ * Mounted the way the mobile session is: inside an open, right-hand Vaul
+ * drawer whose content is `data-vaul-no-drag`. The task dialog has to scroll by
+ * touch here without dragging the drawer.
+ */
+export const InMobileDrawer: Story = {
+  args: { tasks: longRun, renderHistory },
+  parameters: { layout: 'fullscreen', viewport: { defaultViewport: 'mobile1' } },
+  decorators: [
+    (Story) => (
+      <Drawer open direction="right">
+        <DrawerContent className="w-full! max-w-none! inset-0 rounded-none">
+          <DrawerTitle className="sr-only">Conversation</DrawerTitle>
+          <div data-vaul-no-drag="" className="p-4">
+            <Story />
+          </div>
+        </DrawerContent>
+      </Drawer>
+    ),
+  ],
+};

@@ -4,11 +4,17 @@ import React from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LocalProjectMeta, MachineId, SessionId, SessionMeta } from '@lody/shared';
+import type {
+  LocalProjectMeta,
+  MachineId,
+  SessionId,
+  SessionMeta,
+  SessionStatus,
+} from '@lody/shared';
 
 import { LocalProjectItem } from '../src/components/loro-app-sidebar';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 // A project hosted on a machine a teammate shared with the workspace. The row
 // must behave exactly like one on this user's own device: clicking it steers the
@@ -19,6 +25,23 @@ const project = {
   name: 'Lody',
   rootPath: '/workspace/lody',
 } as LocalProjectMeta;
+
+const NO_LIVE_STATUSES: ReadonlyMap<string, SessionStatus> = new Map();
+
+function localSession(id: string, fields: Partial<SessionMeta> = {}): SessionMeta {
+  return {
+    id: id as SessionId,
+    machineId,
+    createdAt: '2026-09-17T00:00:00.000Z',
+    lastMessageAt: 10,
+    lastReadAt: 10,
+    userId: 'user-1',
+    cliType: 'builtin',
+    agentType: 'codex',
+    title: id,
+    ...fields,
+  } as SessionMeta;
+}
 
 describe('sidebar local project row', () => {
   let root: Root | undefined;
@@ -61,10 +84,12 @@ describe('sidebar local project row', () => {
     sessions?: SessionMeta[];
     whetherShowFullList?: boolean;
     onToggleFullList?: (groupKey: string) => void;
+    collapsed?: boolean;
+    liveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
   }) {
     flushSync(() => {
       root?.render(
-        <TooltipProvider>
+        <Tooltip.Provider>
           <LocalProjectItem
             machineId={machineId}
             machineName="Teammate's Mac"
@@ -72,12 +97,12 @@ describe('sidebar local project row', () => {
             // Removal stays owner-only; navigation does not depend on it.
             canRemoveProject={false}
             removalState={options.removalState ?? null}
-            collapsed={false}
+            collapsed={options.collapsed ?? false}
             whetherShowFullList={options.whetherShowFullList ?? false}
             isSelected={false}
             sessionsForProject={options.sessions ?? []}
             childSessionsByParent={new Map()}
-            liveSessionStatuses={new Map()}
+            liveSessionStatuses={options.liveSessionStatuses ?? NO_LIVE_STATUSES}
             formattedPath={project.rootPath}
             defaultSessionTitle="New session"
             selectedSessionId={null}
@@ -98,7 +123,7 @@ describe('sidebar local project row', () => {
             onToggleFullList={options.onToggleFullList ?? (() => undefined)}
             onRequestRemoval={() => undefined}
           />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
     return container?.querySelector<HTMLElement>(`[data-id="project:${machineId}:${project.id}"]`);
@@ -168,5 +193,82 @@ describe('sidebar local project row', () => {
     render({ ...baseOptions, whetherShowFullList: true });
     expect(container?.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(7);
     expect(container?.querySelector('[data-sidebar-show-more]')?.textContent).toBe('Show less');
+  });
+
+  it('keeps the status of the Sessions a folded project hides on its header', () => {
+    const sessions = [
+      localSession('waiting'),
+      localSession('running'),
+      localSession('finished', { lastMessageAt: 20, lastReadAt: 10 }),
+      localSession('idle'),
+    ];
+    const liveSessionStatuses = new Map<string, SessionStatus>([
+      ['waiting', { type: 'requestPermission' }],
+      ['running', { type: 'running' }],
+    ]);
+    const base = {
+      onNavigateProject: vi.fn(),
+      onNewChatInProject: vi.fn(),
+      sessions,
+      liveSessionStatuses,
+    };
+
+    // Expanded: the rows carry their own marks; the header adds nothing.
+    let row = render({ ...base, collapsed: false });
+    expect(row?.querySelector('[data-sidebar-group-activity]')).toBeNull();
+    expect(container?.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(4);
+
+    // Folded: one mark at the header's trailing edge, by the rows' own priority —
+    // a Session waiting on the user outranks the running and unread ones.
+    row = render({ ...base, collapsed: true });
+    expect(container?.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(0);
+    const mark = row?.querySelector('[data-sidebar-group-activity]');
+    expect(mark?.querySelectorAll('[data-session-row-indicator]')).toHaveLength(1);
+    expect(mark?.querySelector('.lucide-hand')).not.toBeNull();
+    // The counts are one hover (or one screen-reader announcement) away.
+    expect(row?.getAttribute('aria-label')).toBe(
+      "Lody · Teammate's Mac · /workspace/lody · 1 waiting for approval · 1 working · 1 unread"
+    );
+
+    // The permission is answered: the running Sessions now lead.
+    row = render({
+      ...base,
+      collapsed: true,
+      liveSessionStatuses: new Map<string, SessionStatus>([
+        ['waiting', { type: 'running' }],
+        ['running', { type: 'running' }],
+      ]),
+    });
+    expect(row?.querySelector('[data-sidebar-group-activity] [data-working-grid]')).not.toBeNull();
+    expect(row?.getAttribute('aria-label')).toContain('2 working · 1 unread');
+
+    // Both finish with new output: the folded header rests on the unread dot
+    // (jsdom has no Web Animations, so the done transition completes at once).
+    row = render({
+      ...base,
+      sessions: [
+        localSession('waiting', { lastMessageAt: 30, lastReadAt: 10 }),
+        localSession('running', { lastMessageAt: 30, lastReadAt: 10 }),
+        localSession('finished', { lastMessageAt: 20, lastReadAt: 10 }),
+        localSession('idle'),
+      ],
+      collapsed: true,
+      liveSessionStatuses: NO_LIVE_STATUSES,
+    });
+    expect(row?.querySelector('[data-sidebar-group-activity] [data-working-grid]')).toBeNull();
+    expect(
+      row?.querySelector('[data-sidebar-group-activity] [data-session-unread-dot]')
+    ).not.toBeNull();
+    expect(row?.getAttribute('aria-label')).toContain('3 unread');
+
+    // Everything read: a folded, quiet project draws nothing.
+    row = render({
+      ...base,
+      sessions: [localSession('idle')],
+      collapsed: true,
+      liveSessionStatuses: NO_LIVE_STATUSES,
+    });
+    expect(row?.querySelector('[data-session-row-indicator]')).toBeNull();
+    expect(row?.getAttribute('aria-label')).toBe("Lody · Teammate's Mac · /workspace/lody");
   });
 });

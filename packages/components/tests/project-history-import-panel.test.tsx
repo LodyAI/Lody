@@ -15,7 +15,7 @@ import {
   type ProjectSettingsRow,
 } from '../src/components/settings/project-settings';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -92,9 +92,9 @@ describe('ProjectHistoryImportPanel empty states', () => {
     const row = makeRow(state);
     await act(async () => {
       root.render(
-        <TooltipProvider>
+        <Tooltip.Provider>
           <ProjectHistoryImportPanel row={row} state={state} onSyncHistory={async () => {}} />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
   }
@@ -105,6 +105,13 @@ describe('ProjectHistoryImportPanel empty states', () => {
       return label ? [label] : [];
     });
   }
+
+  it('identifies the selected configuration instead of collapsing it to the agent family', async () => {
+    await renderState({ ...makeState(null), providerLabel: 'Codex work account' });
+    expect(container.textContent).toContain(
+      "Find this project's conversations in Codex work account"
+    );
+  });
 
   it('guides the first sync without showing list actions', async () => {
     await renderState(makeState(null));

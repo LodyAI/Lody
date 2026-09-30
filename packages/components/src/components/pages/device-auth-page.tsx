@@ -1,12 +1,11 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
-import { Alert, AlertDescription } from '@/ui/alert';
-import { Button } from '@/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
-import { Input } from '@/ui/input';
+import { Alert } from '@lody/ui/alert';
+import { Button } from '@lody/ui/button';
+import { Card } from '@lody/ui/card';
+import { Input } from '@lody/ui/input';
 
 export interface DeviceAuthPageProps {
   userLabel: string;
@@ -35,23 +34,20 @@ export function DeviceAuthPage({
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle id="device-auth-title" as="h1" className="text-2xl">
+      <Card.Root className="w-full max-w-md">
+        <Card.Header className="text-center">
+          <Card.Title id="device-auth-title" as="h1">
             {t('device.title')}
-          </CardTitle>
-          <CardDescription>{t('device.description')}</CardDescription>
-        </CardHeader>
+          </Card.Title>
+          <Card.Description>{t('device.description')}</Card.Description>
+        </Card.Header>
 
-        <CardContent>
+        <div>
           {success ? (
             <div className="space-y-4">
-              <Alert className="border-status-success/30 bg-status-success/[0.08] text-status-success">
-                <CheckCircle2 className="h-4 w-4 text-status-success" aria-hidden="true" />
-                <AlertDescription className="text-status-success">
-                  {t('device.success')}
-                </AlertDescription>
-              </Alert>
+              <Alert.Root tone="success">
+                <Alert.Description>{t('device.success')}</Alert.Description>
+              </Alert.Root>
 
               <div className="text-center text-sm text-muted-foreground">
                 {t('device.windowHint')}
@@ -93,10 +89,9 @@ export function DeviceAuthPage({
                 </div>
 
                 {error ? (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" aria-hidden="true" />
-                    <AlertDescription id="device-auth-error">{error}</AlertDescription>
-                  </Alert>
+                  <Alert.Root tone="danger">
+                    <Alert.Description id="device-auth-error">{error}</Alert.Description>
+                  </Alert.Root>
                 ) : null}
 
                 <Button type="submit" className="w-full" disabled={!canSubmit || isVerifying}>
@@ -112,8 +107,8 @@ export function DeviceAuthPage({
               </form>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Card.Root>
     </div>
   );
 }

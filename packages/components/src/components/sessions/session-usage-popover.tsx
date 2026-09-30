@@ -3,17 +3,21 @@ import { useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
-import { getServerNow, type SessionContextWindowUsage } from '@lody/shared';
-import { Spinner } from '@/ui/spinner';
+import {
+  getServerNow,
+  type AgentConfigId,
+  type SessionContextWindowUsage,
+} from '@lody/shared';
+import { Spinner } from '@lody/ui/spinner';
 
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   CodexResetForecastDialogHost,
   CodexResetForecastUsageRow,
 } from '@/components/codex-reset/codex-reset-forecast-entry';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { Progress } from '@/ui/progress';
-import { Separator } from '@/ui/separator';
+import { Popover } from '@lody/ui/popover';
+import { Progress } from '@lody/ui/progress';
+import { Separator } from '@lody/ui/separator';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
@@ -32,6 +36,7 @@ export type SessionUsagePopoverProps = {
   contextWindowUsage?: SessionContextWindowUsage | null;
   rateLimits?: MachineRateLimits | null;
   agentType: string;
+  agentConfigId?: AgentConfigId | null;
   modelId?: string | null;
   modelLabel?: string | null;
   isContextCompacting?: boolean;
@@ -50,6 +55,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
   contextWindowUsage,
   rateLimits,
   agentType,
+  agentConfigId,
   modelId,
   modelLabel,
   isContextCompacting = false,
@@ -62,7 +68,12 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
   const locale: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
   const intlLocale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const context = getContextWindowUsageData(contextWindowUsage);
-  const rateLimit = resolveAgentRateLimitForModel({ rateLimits, agentType, modelId });
+  const rateLimit = resolveAgentRateLimitForModel({
+    rateLimits,
+    agentType,
+    agentConfigId,
+    modelId,
+  });
   const rateLimitWindows = rateLimit
     ? getAgentRateLimitWindows(rateLimit.limits).sort(
         (left, right) => (right.windowDurationSeconds ?? 0) - (left.windowDurationSeconds ?? 0)
@@ -120,33 +131,37 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
 
   return (
     <>
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className={cn(
-              'h-7 select-none gap-1 rounded-md px-1.5 font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring',
-              className
-            )}
-            aria-label={triggerLabel}
-            title={triggerLabel}
-          >
-            {isContextCompacting ? (
-              <>
-                <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="text-[11px]">{t('sessions.usage.compacting', 'Compacting')}</span>
-              </>
-            ) : (
-              <>
-                <UsageRing value={triggerValue ?? 0} />
-                <span className="font-mono text-[11px] tabular-nums">{roundedTriggerValue}%</span>
-              </>
-            )}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
+      <Popover.Root>
+        <Popover.Trigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              className={cn(
+                'select-none focus-visible:ring-1 focus-visible:ring-ring',
+                className
+              )}
+              aria-label={triggerLabel}
+              title={triggerLabel}
+            >
+              {isContextCompacting ? (
+                <>
+                  <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="text-[11px]">
+                    {t('sessions.usage.compacting', 'Compacting')}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <UsageRing value={triggerValue ?? 0} />
+                  <span className="font-mono text-[11px] tabular-nums">{roundedTriggerValue}%</span>
+                </>
+              )}
+            </Button>
+          }
+        />
+        <Popover.Content
           side="top"
           align="start"
           sideOffset={8}
@@ -175,7 +190,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
           ) : null}
 
           {(context || isContextCompacting) && hasRateLimitDetails ? (
-            <Separator className="my-2.5 bg-border/60" />
+            <Separator className="my-2.5" />
           ) : null}
 
           {hasRateLimitDetails ? (
@@ -240,8 +255,8 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
             enabled={showCodexResetForecast}
             onOpen={() => setIsForecastOpen(true)}
           />
-        </PopoverContent>
-      </Popover>
+        </Popover.Content>
+      </Popover.Root>
       {/* Hosted outside the popover on purpose: opening the dialog dismisses the
           popover, which would unmount a dialog rendered inside its content. */}
       <CodexResetForecastDialogHost
@@ -319,8 +334,9 @@ function UsageMeter({
       </div>
       <Progress
         value={value}
+        tone="neutral"
         aria-label={`${label}: ${valueLabel}`}
-        className="mt-1 h-1 bg-foreground/10 [&>div]:bg-foreground/55"
+        className="mt-1"
       />
       {detail ? (
         <div className="mt-1 truncate text-[10px] leading-3.5 text-muted-foreground/75">

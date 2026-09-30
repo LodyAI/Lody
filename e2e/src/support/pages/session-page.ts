@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { type ScriptedAcpEvent, WorkSessionFixture } from '../fixtures/work-session-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const PROVIDER_NAME = 'Deterministic E2E Agent';
 const HELD_RESPONSE = 'Synthetic response started.';
@@ -75,6 +76,75 @@ export class SessionPage {
     return completed.at(-1)!;
   }
 
+  /**
+   * Sends one prompt in the open, idle Session and waits until the agent has
+   * finished that exact prompt. A send that never dispatches fails the wait.
+   */
+  async sendFollowUpAndAwaitReply(marker: string, sessionId: string): Promise<ScriptedAcpEvent> {
+    const prompt = `Continue the deterministic conversation [MARK:${marker}]`;
+    const composer = this.page.locator('[data-keyboard-nav="composer"]');
+    // The provider can finish before the UI settles the Turn; sending then
+    // could queue. This journey covers direct dispatch to an idle Session.
+    await this.expectIdle();
+    await expect(composer).toBeEditable({ timeout: 30_000 });
+    await composer.fill(prompt);
+    await this.page.getByRole('button', { name: /^(Send|发送)$/u }).click();
+    const completed = await this.waitForMarkedEvent('prompt-end', marker, sessionId);
+    await this.expectIdle();
+    return completed;
+  }
+
+  async expectIdle(): Promise<void> {
+    await expect(this.page.getByRole('button', { name: /^(Stop|停止)$/u })).toBeHidden({
+      timeout: 30_000,
+    });
+    // Unretired send-journal records; a delivered send leaves none behind.
+    await expect(this.page.getByLabel(/^(Pending messages|待发送消息)/u)).toHaveCount(0, {
+      timeout: 30_000,
+    });
+  }
+
+  /**
+   * Latest Turn event carrying `marker`. Title generation quotes the user
+   * prompt, so it is excluded; `sessionId` scopes the wait to one ACP session.
+   */
+  async waitForMarkedEvent(
+    event: string,
+    marker: string,
+    sessionId?: string
+  ): Promise<ScriptedAcpEvent> {
+    let match: ScriptedAcpEvent | undefined;
+    await expect
+      .poll(
+        () => {
+          match = this.markedTurnEvents(event, sessionId)
+            .filter((entry) => entry.marker === marker)
+            .at(-1);
+          return match !== undefined;
+        },
+        { timeout: 30_000, intervals: [50, 100, 250, 500] }
+      )
+      .toBe(true);
+    return match!;
+  }
+
+  /** Markers of every user prompt the agent started in one ACP session, in arrival order. */
+  markedPromptStarts(sessionId: string): string[] {
+    return this.markedTurnEvents('prompt-start', sessionId).map((entry) => entry.marker!);
+  }
+
+  private markedTurnEvents(event: string, sessionId?: string): ScriptedAcpEvent[] {
+    return this.fixture
+      .readAcpEvents()
+      .filter(
+        (entry) =>
+          entry.event === event &&
+          entry.mode !== 'title' &&
+          entry.marker !== undefined &&
+          (sessionId === undefined || entry.sessionId === sessionId)
+      );
+  }
+
   async stopHeldSession(waiting: ScriptedAcpEvent): Promise<void> {
     await this.page.getByRole('button', { name: /^(Stop|停止)$/u }).click();
     await this.waitForSessionEvent('session-cancel', waiting);
@@ -100,7 +170,7 @@ export class SessionPage {
     if (!match?.[1]) throw new Error(`Expected a Session route, received ${this.page.url()}`);
     const sessionId = decodeURIComponent(match[1]);
     await this.archiveSessionAndWaitForRuntimeExit(waiting);
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
     const archivedRow = this.page.locator(`[data-id="archive-session:${sessionId}"]`);
     await expect(archivedRow).toBeVisible({ timeout: 30_000 });

@@ -9,6 +9,7 @@ import {
   checkoutLocalProjectBranchAtRootPath,
   createLocalProjectId,
   getLocalProjectGitStateAtRootPath,
+  getLocalProjectGitHubRepoAtRootPath,
   getLocalProjectWorkingTreeAtRootPath,
   normalizeLocalProjectRootPath,
   parseLocalProjectBranchRefAtRootPath,
@@ -22,12 +23,14 @@ const require = createRequire(import.meta.url);
 const {
   checkoutLocalProjectBranchAtRootPath: checkoutLocalProjectBranchAtRootPathCjs,
   getLocalProjectGitStateAtRootPath: getLocalProjectGitStateAtRootPathCjs,
+  getLocalProjectGitHubRepoAtRootPath: getLocalProjectGitHubRepoAtRootPathCjs,
   resolveLocalProjectBranchAtRootPath: resolveLocalProjectBranchAtRootPathCjs,
   parseLocalProjectBranchRefAtRootPath: parseLocalProjectBranchRefAtRootPathCjs,
   resolveLocalProjectBranchRefAtRootPath: resolveLocalProjectBranchRefAtRootPathCjs,
   resolveLocalProjectLegacyBaseBranchAtRootPath: resolveLocalProjectLegacyBaseBranchAtRootPathCjs,
   selectLocalProjectBranchSelector: selectLocalProjectBranchSelectorCjs,
 } = require('../src/node/local-project.cjs') as {
+  getLocalProjectGitHubRepoAtRootPath: typeof getLocalProjectGitHubRepoAtRootPath;
   checkoutLocalProjectBranchAtRootPath: (
     rootPath: string,
     branchName: string
@@ -1233,6 +1236,7 @@ describe('local-project helpers', () => {
       expect(gitState.git).toBe(true);
       if (gitState.git) {
         expect(gitState.githubRepoFullName).toBe('loro-dev/lody');
+        expect(await getLocalProjectGitHubRepoAtRootPath(projectDir)).toBe('loro-dev/lody');
       }
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -1246,6 +1250,7 @@ describe('local-project helpers', () => {
         { name: 'origin', url: 'git@github.com:loro-dev/lody.git' },
       ]);
 
+      expect(await getLocalProjectGitHubRepoAtRootPathCjs(projectDir)).toBe('loro-dev/lody');
       expect(await getLocalProjectGitStateAtRootPathCjs(projectDir)).toMatchObject({
         git: true,
         githubRepoFullName: 'loro-dev/lody',

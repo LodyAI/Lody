@@ -6,6 +6,8 @@ PR: https://github.com/LodyAI/Lody/pull/499
 
 [English](2026-09-07-ci-affected-tests.md) | 中文
 
+后续：[CI 测试分组与 pnpm store 缓存](2026-09-26-ci-test-groups-and-pnpm-store-cache.zh.md) 把 `Tests` 拆成按 runner 划分的几组，必需检查名不变。
+
 ## 摘要
 
 当前 `CI` 对每个 PR 都跑完整 typecheck、`check:quick` 和 `pnpm test:ci`。这对 `main` 和枢纽包改动是对的，但文档 PR 和叶子包 PR 会浪费大量时间。本方案已落地：可单测的选择器 `.github/scripts/select-ci-scope.mjs`，把 PR 分成 `skip-tests`、`affected`、`full`。纯文档/notes/specs 跳过 Tests（含该 job 的 `pnpm install`）以及 Static 里的 typecheck/`check:quick`；其余 PR 只跑改动包及其传递 dependents。`main` 与 `workflow_dispatch` 仍全量。必填 check 名保持 `Static checks` 和 `Tests`。跳过必须保守：YAML 只在输出字面量 `false` 且 allowlist 未强制全量时才跳过；选择器算不清就全量。完整实现细节以英文稿为准，中文翻译尚未补齐。

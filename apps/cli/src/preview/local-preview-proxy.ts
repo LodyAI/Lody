@@ -1,9 +1,13 @@
 import http, { type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'http';
 import { Buffer } from 'buffer';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
+import type { Socket } from 'net';
 import type { Duplex } from 'stream';
 import {
   DEFAULT_PREVIEW_RESOURCE_LIMITS,
+  PREVIEW_ACCESS_TOKEN_QUERY_PARAM,
+  PREVIEW_ACCESS_TOKEN_COOKIE,
+  applyPreviewEmbeddingHeaders,
   getServerNow,
   removePreviewQueryParamFromSearch,
   sanitizePreviewProxyResponseHeaders,
@@ -17,20 +21,28 @@ import {
 import { WebSocket as LocalWebSocket, WebSocketServer, type RawData } from 'ws';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { PREVIEW_PROBE_HEADER } from './preview-tunnel-readiness';
+import { createPreviewTargetTransport, fetchPreviewTarget } from './preview-target-transport';
 import {
   buildInjectedHtmlHeaders,
   buildLocalPreviewRequestHeaders,
   buildLocalWebSocketUrl,
   headersToEntries,
-  headersToNodeRecord,
   maybeInjectVisualAnnotationRuntime,
   stripLocalWebSocketHeaders,
-} from './preview-tunnel-client';
+  assertRelativePreviewPath,
+} from './preview-http';
 
 type LocalPreviewProxyRecord = {
+  transport: ReturnType<typeof createPreviewTargetTransport>;
   endpoint: SessionPreviewEndpoint;
   token: string;
-  unlocked: boolean;
+  active: boolean;
+  remote: boolean;
+  onActivity?: (renew: boolean) => boolean;
+  sockets: Set<Socket>;
+  requests: Set<AbortController>;
+  upstreamSockets: Set<LocalWebSocket>;
   proxyOrigin: URL;
   localOrigin: URL;
   server: http.Server;
@@ -45,12 +57,15 @@ type LocalPreviewProxyManagerDeps = {
 type AcquireLocalPreviewEndpointOptions = {
   sessionId: SessionId;
   target: PreviewTarget;
+  connectionAddress?: string;
   shareUrl?: string;
   resourceLimits?: PreviewResourceLimits;
+  remote?: boolean;
+  onActivity?: (renew: boolean) => boolean;
 };
 
-const LOCAL_PREVIEW_TOKEN_QUERY_PARAM = '__lody_local_preview_token';
-const LOCAL_PREVIEW_TOKEN_COOKIE = '__lody_local_preview';
+const LOCAL_PREVIEW_TOKEN_QUERY_PARAM = PREVIEW_ACCESS_TOKEN_QUERY_PARAM;
+const LOCAL_PREVIEW_TOKEN_COOKIE = PREVIEW_ACCESS_TOKEN_COOKIE;
 
 const toUrlHost = (host: string): string => (host.includes(':') ? `[${host}]` : host);
 
@@ -73,23 +88,6 @@ const resolveResourceLimits = (
 
 const sameTargetOrigin = (left: PreviewTarget, right: PreviewTarget): boolean =>
   left.protocol === right.protocol && left.host === right.host && left.port === right.port;
-
-const headersToNodeResponseHeaders = (
-  entries: HeaderEntry[]
-): Record<string, string | string[]> => {
-  const result: Record<string, string | string[]> = {};
-  for (const [name, value] of entries) {
-    const existing = result[name];
-    if (existing === undefined) {
-      result[name] = value;
-    } else if (Array.isArray(existing)) {
-      existing.push(value);
-    } else {
-      result[name] = [existing, value];
-    }
-  }
-  return result;
-};
 
 const incomingHeadersToEntries = (headers: IncomingHttpHeaders): HeaderEntry[] => {
   const entries: HeaderEntry[] = [];
@@ -120,7 +118,7 @@ const parseCookieHeader = (value: string | undefined): Map<string, string> => {
     if (!name) {
       continue;
     }
-    cookies.set(name, decodeURIComponent(rawValue));
+    cookies.set(name, rawValue);
   }
   return cookies;
 };
@@ -175,6 +173,33 @@ export class LocalPreviewProxyManager {
 
   constructor(private readonly deps: LocalPreviewProxyManagerDeps) {}
 
+  bindViewerOrigin(sessionId: SessionId, origin: string): SessionPreviewEndpoint {
+    const record = this.records.get(sessionId);
+    if (!record || !record.active || !record.remote) {
+      throw new Error('Remote preview endpoint is not active.');
+    }
+    const viewer = new URL(origin);
+    if (
+      viewer.protocol !== 'https:' ||
+      viewer.username ||
+      viewer.password ||
+      viewer.port ||
+      !/^[a-z0-9-]+\.trycloudflare\.com$/.test(viewer.hostname) ||
+      viewer.pathname !== '/' ||
+      viewer.search ||
+      viewer.hash
+    ) {
+      throw new Error('Invalid Quick Tunnel origin.');
+    }
+    record.proxyOrigin = viewer;
+    record.endpoint = {
+      ...record.endpoint,
+      kind: 'quick-tunnel',
+      viewerUrl: buildLocalViewerUrl(record.endpoint.target?.path, viewer, record.token),
+    };
+    return record.endpoint;
+  }
+
   async acquire(options: AcquireLocalPreviewEndpointOptions): Promise<SessionPreviewEndpoint> {
     const existing = this.records.get(options.sessionId);
     if (
@@ -220,45 +245,70 @@ export class LocalPreviewProxyManager {
 
   async closeAll(reason: string): Promise<void> {
     const entries = [...this.records.entries()];
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       entries.map(async ([sessionId, record]) => {
         await this.closeRecord(sessionId, record, reason);
       })
     );
+    const failures = results.filter((result) => result.status === 'rejected');
+    if (failures.length)
+      throw new AggregateError(
+        failures.map((result) => result.reason),
+        'Preview cleanup failed'
+      );
   }
 
   private async createRecord(
     options: AcquireLocalPreviewEndpointOptions
   ): Promise<LocalPreviewProxyRecord> {
     const endpointId = randomUUID();
-    const token = randomUUID();
+    const token = randomBytes(32).toString('base64url');
     const localOrigin = buildLocalOrigin(options.target);
+    const transport = createPreviewTargetTransport(options.target, options.connectionAddress);
     const resourceLimits = resolveResourceLimits(options.resourceLimits);
     const server = http.createServer();
-    const webSocketServer = new WebSocketServer({ noServer: true });
+    const webSocketServer = new WebSocketServer({
+      noServer: true,
+      maxPayload: resourceLimits.maxRequestBodyBytes,
+    });
+    const sockets = new Set<Socket>();
+    server.on('connection', (socket) => {
+      sockets.add(socket);
+      socket.once('close', () => sockets.delete(socket));
+    });
     const recordRef: { current: LocalPreviewProxyRecord | null } = { current: null };
 
     server.on('request', (request, response) => {
+      for (const [name, value] of applyPreviewEmbeddingHeaders(new Headers()))
+        response.setHeader(name, value);
+      response.setHeader('cache-control', 'no-store');
       const record = recordRef.current;
       if (!record) {
         response.writeHead(503).end('Preview endpoint is not ready.');
         return;
       }
       void this.handleHttpRequest(record, resourceLimits, request, response).catch((error) => {
-        if (!response.headersSent) {
-          response.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+        if (response.headersSent) {
+          response.destroy();
+          return;
         }
+        response.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
         response.end(`Preview proxy error: ${formatErrorMessage(error)}`);
       });
     });
 
     server.on('upgrade', (request, socket, head) => {
       const record = recordRef.current;
-      if (!record || !this.isAuthorized(record, request)) {
-        socket.destroy();
+      if (!record) {
+        socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
         return;
       }
-      this.handleWebSocketUpgrade(record, request, socket, head);
+      void this.handleWebSocketUpgrade(record, resourceLimits, request, socket, head).catch(
+        (error) => {
+          this.deps.logger.debug(`Preview WebSocket upgrade failed: ${formatErrorMessage(error)}`);
+          socket.end('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n');
+        }
+      );
     });
 
     const port = await new Promise<number>((resolve, reject) => {
@@ -272,6 +322,10 @@ export class LocalPreviewProxyManager {
         }
         resolve(address.port);
       });
+    }).catch(async (error: unknown) => {
+      webSocketServer.close();
+      await transport.dispatcher.destroy();
+      throw error;
     });
 
     const proxyOrigin = new URL(`http://127.0.0.1:${port}`);
@@ -289,9 +343,15 @@ export class LocalPreviewProxyManager {
       createdAt: now,
     };
     const record: LocalPreviewProxyRecord = {
+      transport,
       endpoint,
       token,
-      unlocked: false,
+      active: true,
+      remote: options.remote ?? false,
+      onActivity: options.onActivity,
+      sockets,
+      requests: new Set(),
+      upstreamSockets: new Set(),
       proxyOrigin,
       localOrigin,
       server,
@@ -308,38 +368,62 @@ export class LocalPreviewProxyManager {
     response: ServerResponse
   ): Promise<void> {
     const authorizedByQuery = this.isAuthorized(record, request, { queryOnly: true });
-    if (!authorizedByQuery && !this.isAuthorized(record, request)) {
+    if (
+      (!authorizedByQuery && !this.isAuthorized(record, request)) ||
+      record.onActivity?.(request.headers[PREVIEW_PROBE_HEADER] !== '1') === false
+    ) {
       response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
       response.end('Preview endpoint token is missing or invalid.');
       return;
     }
 
     const requestUrl = this.resolveProxyRequestUrl(record, request);
+    if (record.requests.size + record.upstreamSockets.size >= 200) {
+      response.writeHead(429).end('Preview concurrent request limit exceeded.');
+      return;
+    }
     const headers = buildLocalPreviewRequestHeaders(incomingHeadersToEntries(request.headers), {
       localOrigin: record.localOrigin,
       previewOrigin: record.proxyOrigin,
       localPreviewTokenQueryParam: LOCAL_PREVIEW_TOKEN_QUERY_PARAM,
     });
     const method = request.method ?? 'GET';
-    const body =
-      method === 'GET' || method === 'HEAD'
-        ? undefined
-        : await this.readRequestBody(request, resourceLimits.maxRequestBodyBytes);
-    const requestBody = body === undefined ? undefined : Uint8Array.from(body);
     const controller = new AbortController();
+    record.requests.add(controller);
+    const cancel = () => {
+      if (!response.writableFinished) controller.abort(new Error('Preview viewer disconnected'));
+    };
+    response.once('close', cancel);
     const timeout = setTimeout(
       () => controller.abort(new Error('Local preview proxy request timed out')),
       resourceLimits.maxRequestDurationMs
     );
     timeout.unref?.();
+    const abortRequest = () => request.destroy();
+    controller.signal.addEventListener('abort', abortRequest, { once: true });
     try {
-      const localResponse = await fetch(requestUrl, {
+      const body =
+        method === 'GET' || method === 'HEAD'
+          ? undefined
+          : await this.readRequestBody(request, resourceLimits.maxRequestBodyBytes);
+      const requestBody = body === undefined ? undefined : Uint8Array.from(body);
+      const localResponse = await fetchPreviewTarget(requestUrl, {
         method,
-        headers,
+        headers: [...headers.entries()],
         body: requestBody,
         redirect: 'manual',
         signal: controller.signal,
+        dispatcher: record.transport.dispatcher,
       });
+      if (
+        record.remote &&
+        localResponse.headers.get('content-type')?.toLowerCase().includes('text/event-stream')
+      ) {
+        await localResponse.body?.cancel();
+        throw new Error(
+          'Quick Tunnels do not support Server-Sent Events. Use local preview for this endpoint.'
+        );
+      }
       const injectedHtml = await maybeInjectVisualAnnotationRuntime(
         localResponse,
         method,
@@ -378,82 +462,95 @@ export class LocalPreviewProxyManager {
       await this.writeResponseBody(response, localResponse, resourceLimits.maxResponseBodyBytes);
     } finally {
       clearTimeout(timeout);
+      record.requests.delete(controller);
+      controller.signal.removeEventListener('abort', abortRequest);
+      response.off('close', cancel);
     }
   }
 
-  private handleWebSocketUpgrade(
+  private async handleWebSocketUpgrade(
     record: LocalPreviewProxyRecord,
+    limits: PreviewResourceLimits,
     request: IncomingMessage,
     socket: Duplex,
     head: Buffer
-  ): void {
-    record.webSocketServer.handleUpgrade(request, socket, head, (browserSocket) => {
-      this.connectLocalWebSocket(record, request, browserSocket);
-    });
-  }
-
-  private connectLocalWebSocket(
-    record: LocalPreviewProxyRecord,
-    request: IncomingMessage,
-    browserSocket: LocalWebSocket
-  ): void {
+  ): Promise<void> {
+    if (!this.isAuthorized(record, request) || record.onActivity?.(true) === false) {
+      socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      return;
+    }
     const targetUrl = this.resolveProxyRequestUrl(record, request);
-    const protocols = this.getWebSocketProtocols(request);
-    const localSocket = new LocalWebSocket(
+    if (record.requests.size + record.upstreamSockets.size >= 200) {
+      socket.end('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n');
+      return;
+    }
+    const headers = buildLocalPreviewRequestHeaders(incomingHeadersToEntries(request.headers), {
+      localOrigin: record.localOrigin,
+      previewOrigin: record.proxyOrigin,
+      localPreviewTokenQueryParam: LOCAL_PREVIEW_TOKEN_QUERY_PARAM,
+    });
+    const upstream = new LocalWebSocket(
       buildLocalWebSocketUrl(record.localOrigin, `${targetUrl.pathname}${targetUrl.search}`),
-      protocols,
+      this.getWebSocketProtocols(request),
       {
-        headers: headersToNodeRecord(
-          stripLocalWebSocketHeaders(incomingHeadersToEntries(request.headers))
-        ),
+        lookup: record.transport.lookup,
+        headers: Object.fromEntries(stripLocalWebSocketHeaders([...headers.entries()])),
+        maxPayload: limits.maxResponseBodyBytes,
+        handshakeTimeout: Math.min(limits.maxRequestDurationMs, 10_000),
       }
     );
-    const queuedBrowserFrames: Array<{ data: RawData; isBinary: boolean }> = [];
-    let localOpen = false;
-
-    browserSocket.on('message', (data, isBinary) => {
-      if (localOpen && localSocket.readyState === LocalWebSocket.OPEN) {
-        localSocket.send(rawDataToBuffer(data), { binary: isBinary });
-      } else {
-        queuedBrowserFrames.push({ data, isBinary });
-      }
+    record.upstreamSockets.add(upstream);
+    upstream.once('close', () => record.upstreamSockets.delete(upstream));
+    const cancel = () => upstream.terminate();
+    socket.once('close', cancel);
+    // Do not acknowledge the viewer before the actual upstream accepts its protocol.
+    // Pause the upstream while awaiting the browser handshake so early frames are not lost.
+    await new Promise<void>((resolve, reject) => {
+      upstream.once('open', () => {
+        upstream.pause();
+        resolve();
+      });
+      upstream.on('error', reject);
+      upstream.once('close', () => reject(new Error('Preview WebSocket closed during handshake')));
     });
-    browserSocket.on('close', (code, reason) => {
-      mirrorWebSocketClose(localSocket, code, reason);
-    });
-    browserSocket.on('error', () => {
-      localSocket.terminate();
-    });
-
-    localSocket.once('open', () => {
-      localOpen = true;
-      for (const frame of queuedBrowserFrames.splice(0)) {
-        localSocket.send(rawDataToBuffer(frame.data), { binary: frame.isBinary });
-      }
-    });
-    localSocket.on('message', (data, isBinary) => {
-      if (browserSocket.readyState === LocalWebSocket.OPEN) {
-        browserSocket.send(rawDataToBuffer(data), { binary: isBinary });
-      }
-    });
-    localSocket.on('close', (code, reason) => {
-      mirrorWebSocketClose(browserSocket, code, reason);
-    });
-    localSocket.on('error', (error) => {
-      this.deps.logger.debug(`Local preview WebSocket failed: ${formatErrorMessage(error)}`);
-      if (localOpen) {
-        // `ws` always follows an error on an established connection with a close event,
-        // and that close carries what the browser should observe. Reporting 1011 here
-        // would replace an abnormal close with a clean one.
-        return;
-      }
-      if (browserSocket.readyState === LocalWebSocket.OPEN) {
-        browserSocket.close(1011, 'Local preview WebSocket failed');
-      }
+    if (!record.active || socket.destroyed) {
+      upstream.terminate();
+      return;
+    }
+    if (upstream.protocol) request.headers['sec-websocket-protocol'] = upstream.protocol;
+    else delete request.headers['sec-websocket-protocol'];
+    record.webSocketServer.handleUpgrade(request, socket, head, (browser) => {
+      socket.off('close', cancel);
+      const forward = (source: LocalWebSocket, peer: LocalWebSocket) => {
+        source.on('message', (data, isBinary) => {
+          if (record.onActivity?.(true) === false) {
+            source.terminate();
+            peer.terminate();
+            return;
+          }
+          if (peer.readyState !== LocalWebSocket.OPEN) return;
+          source.pause();
+          peer.send(rawDataToBuffer(data), { binary: isBinary }, (error) => {
+            if (error) {
+              source.terminate();
+              peer.terminate();
+            } else if (source.readyState === LocalWebSocket.OPEN) source.resume();
+          });
+        });
+        source.on('close', (code, reason) => mirrorWebSocketClose(peer, code, reason));
+        // ws emits close after error; close owns propagation of 1005/1006.
+        source.on('error', (error) => {
+          this.deps.logger.debug(`Preview WebSocket failed: ${formatErrorMessage(error)}`);
+        });
+      };
+      forward(browser, upstream);
+      forward(upstream, browser);
+      upstream.resume();
     });
   }
 
   private resolveProxyRequestUrl(record: LocalPreviewProxyRecord, request: IncomingMessage): URL {
+    assertRelativePreviewPath(request.url ?? '/');
     const incoming = new URL(request.url ?? '/', record.proxyOrigin);
     incoming.search = removePreviewQueryParamFromSearch(
       incoming.search,
@@ -467,9 +564,9 @@ export class LocalPreviewProxyManager {
     request: IncomingMessage,
     options?: { queryOnly?: boolean }
   ): boolean {
+    if (!record.active) return false;
     const incoming = new URL(request.url ?? '/', record.proxyOrigin);
     if (incoming.searchParams.get(LOCAL_PREVIEW_TOKEN_QUERY_PARAM) === record.token) {
-      record.unlocked = true;
       return true;
     }
     if (options?.queryOnly) {
@@ -478,14 +575,12 @@ export class LocalPreviewProxyManager {
     if (
       parseCookieHeader(request.headers.cookie).get(LOCAL_PREVIEW_TOKEN_COOKIE) === record.token
     ) {
-      record.unlocked = true;
       return true;
     }
     if (this.isAuthorizedByTokenReferer(record, request)) {
-      record.unlocked = true;
       return true;
     }
-    return record.unlocked && this.isSameProxyOriginNavigation(record, request);
+    return false;
   }
 
   private isAuthorizedByTokenReferer(
@@ -508,46 +603,30 @@ export class LocalPreviewProxyManager {
     }
   }
 
-  private isSameProxyOriginNavigation(
-    record: LocalPreviewProxyRecord,
-    request: IncomingMessage
-  ): boolean {
-    return (
-      this.isSameProxyOriginUrl(record, request.headers.referer) ||
-      this.isSameProxyOriginUrl(record, request.headers.origin)
-    );
-  }
-
-  private isSameProxyOriginUrl(
-    record: LocalPreviewProxyRecord,
-    value: string | string[] | undefined
-  ): boolean {
-    if (typeof value !== 'string') {
-      return false;
-    }
-
-    try {
-      return new URL(value).origin === record.proxyOrigin.origin;
-    } catch {
-      return false;
-    }
-  }
-
   private buildResponseHeaders(
     record: LocalPreviewProxyRecord,
     headers: HeaderEntry[],
     setTokenCookie: boolean
-  ): Record<string, string | string[]> {
-    const sanitized = sanitizePreviewProxyResponseHeaders(headers);
+  ): Record<string, string> {
+    const sanitized = sanitizePreviewProxyResponseHeaders(headers).filter(
+      ([name]) =>
+        !['cache-control', 'cross-origin-embedder-policy', 'cross-origin-resource-policy'].includes(
+          name.toLowerCase()
+        )
+    );
+    sanitized.push(['cache-control', 'no-store']);
+    sanitized.push(...applyPreviewEmbeddingHeaders(new Headers()).entries());
     if (setTokenCookie) {
       sanitized.push([
         'set-cookie',
         `${LOCAL_PREVIEW_TOKEN_COOKIE}=${encodeURIComponent(
           record.token
-        )}; Path=/; HttpOnly; SameSite=Lax`,
+        )}; Path=/; HttpOnly; ${record.remote ? 'Secure; SameSite=None; Partitioned' : 'SameSite=Lax'}`,
       ]);
     }
-    return headersToNodeResponseHeaders(sanitized);
+    // Fetch Headers already combined repeated names; upstream cookies were
+    // stripped by headersToEntries, and only our capability cookie is added here.
+    return Object.fromEntries(sanitized);
   }
 
   private async readRequestBody(
@@ -595,6 +674,11 @@ export class LocalPreviewProxyManager {
         });
       }
       response.end();
+    } catch (error) {
+      // Releasing the reader lock does not stop the origin. A size-limit failure
+      // must cancel the body before the outer boundary closes the viewer socket.
+      await reader.cancel(error);
+      throw error;
     } finally {
       reader.releaseLock();
     }
@@ -617,19 +701,26 @@ export class LocalPreviewProxyManager {
     reason: string
   ): Promise<void> {
     this.records.delete(sessionId);
+    record.active = false;
+    for (const controller of record.requests)
+      controller.abort(new Error(`Preview endpoint closed: ${reason}`));
+    for (const socket of record.upstreamSockets) socket.terminate();
     for (const client of record.webSocketServer.clients) {
-      client.close(1001, reason);
+      client.terminate();
     }
+    for (const socket of record.sockets) socket.destroy();
     record.webSocketServer.close();
-    await new Promise<void>((resolve) => {
-      record.server.close((error) => {
-        if (error) {
-          this.deps.logger.debug(
-            `Failed to close local preview proxy: ${formatErrorMessage(error)}`
-          );
-        }
-        resolve();
-      });
-    });
+    await Promise.all([
+      record.transport.dispatcher.destroy(),
+      new Promise<void>((resolve, reject) => {
+        record.server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      }),
+    ]);
   }
 }

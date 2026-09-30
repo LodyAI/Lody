@@ -165,8 +165,9 @@ describe('machine Flock machine meta overlay', () => {
 
   it('merges rate limit rows and filters legacy plan-name entries', () => {
     const machineId = 'machine-1' as MachineId;
+    const configId = 'config-codex' as AgentConfigId;
     const legacyPlanKey = getRateLimitEntryKey('codex', 'pro');
-    const currentKey = getRateLimitEntryKey('codex', 'codex_bengalfox');
+    const currentKey = getRateLimitEntryKey('codex', 'codex_bengalfox', configId);
     const machine: MachineViewMeta = {
       id: machineId,
       name: 'Machine',
@@ -180,7 +181,7 @@ describe('machine Flock machine meta overlay', () => {
       },
     };
     const row = {
-      key: machineFlockKeys.rateLimit('codex', 'codex_bengalfox'),
+      key: machineFlockKeys.rateLimit(configId, 'codex', 'codex_bengalfox'),
       value: {
         limitId: 'codex_bengalfox',
         used: 4,

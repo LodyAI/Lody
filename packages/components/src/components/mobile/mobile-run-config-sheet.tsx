@@ -1,4 +1,5 @@
 import { useMemo, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { ListChecks, Plus, ShieldAlert, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { getAllAgentConfigAtom } from '@/atoms';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { getModeIcon as getPermissionModeIcon } from '@/components/chat/chat-landing-selectors';
+import { composerSurface } from '@/components/shared/composer-surface';
 import {
   resolveConfigOptionValue,
   resolveOnOffConfigOptionEnabled,
@@ -33,7 +35,9 @@ import { openExternalUrl } from '@/lib/native-browser';
 import { useKeyboardAwareSheet } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { cn } from '@/lib/utils';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import {
   classifyPermissionModeFace,
   getAgentRoleEmoji,
@@ -46,6 +50,85 @@ import {
   MobileInlinePickerRowSlot,
   type MobileInlinePickerOption,
 } from './mobile-inline-picker';
+
+const styles = stylex.create({
+  header: { paddingInline: space[4], paddingTop: space[2], paddingBottom: space[1] },
+  title: {
+    margin: 0,
+    userSelect: 'none',
+    textAlign: 'center',
+    color: colors.label,
+    fontSize: text.headlineSize,
+    lineHeight: text.headlineLeading,
+    fontWeight: 600,
+    letterSpacing: text.controlTracking,
+  },
+  scroll: {
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingInline: space[4],
+    paddingTop: space[2],
+  },
+  rows: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  /**
+   * One labelled setting: the card rung, so the sheet's rows lift off the modal
+   * the way a settings card does. Picker rows drop their inline expansion
+   * directly below the card.
+   */
+  row: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    minWidth: 0,
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.card,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+  },
+  /** A fixed label column, sentence case: about the value, so secondary. */
+  label: {
+    flexShrink: 0,
+    alignSelf: 'center',
+    width: '5rem',
+    color: colors.secondaryLabel,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 600,
+  },
+  control: { flexGrow: 1, minWidth: 0 },
+  toggleControl: {
+    display: 'flex',
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minWidth: 0,
+  },
+  toggleMark: { display: 'flex', alignItems: 'center', color: colors.secondaryLabel },
+  toggleMarkOn: { color: colors.label },
+  emoji: { flexShrink: 0, fontSize: text.headlineSize, lineHeight: 1 },
+  /** The mark a picker's value carries: an icon at rest, so a little quieter. */
+  valueMark: { opacity: 0.8 },
+  /** A warning about the pick: a tint and a mark, never a fill or a border. */
+  warning: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[2],
+    paddingInline: space[3],
+    paddingBlock: '10px',
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+    backgroundColor: {
+      default: `color-mix(in oklab, ${colors.warning} 8%, transparent)`,
+      ':active': `color-mix(in oklab, ${colors.warning} 14%, transparent)`,
+    },
+    color: colors.label,
+    textDecoration: 'none',
+  },
+});
 
 /**
  * Expanded "run config" bottom sheet for the mobile composer. Opened by
@@ -129,16 +212,10 @@ export function MobileRunConfigSheet({
       >
         <DrawerTitle className="sr-only">{title}</DrawerTitle>
         <DrawerDescription className="sr-only">{title}</DrawerDescription>
-        <header className="px-4 pb-1 pt-2">
-          <h2 className="select-none text-center text-[0.95rem] font-semibold tracking-tight">
-            {title}
-          </h2>
+        <header {...stylex.props(styles.header)}>
+          <h2 {...stylex.props(styles.title)}>{title}</h2>
         </header>
-        <div
-          ref={keyboard.scrollRef}
-          className="min-h-0 flex-1 overflow-y-auto px-4 pt-2"
-          style={keyboard.scrollStyle}
-        >
+        <div ref={keyboard.scrollRef} {...stylex.props(styles.scroll)} style={keyboard.scrollStyle}>
           <MobileInlinePickerCoordinator>
             <MobileRunConfigSheetRows {...contentProps} />
           </MobileInlinePickerCoordinator>
@@ -155,7 +232,12 @@ export function MobileRunConfigSheet({
 function permissionModeIcon(modeId: string | null): ReactNode {
   const face = classifyPermissionModeFace(modeId);
   if (face.kind !== 'hidden' && face.tone === 'warning') {
-    return <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-status-warning" />;
+    return (
+      <ShieldAlert
+        {...stylex.props(composerSurface.glyph14, composerSurface.faceWarning)}
+        aria-hidden="true"
+      />
+    );
   }
   return getPermissionModeIcon(modeId);
 }
@@ -240,7 +322,7 @@ function MobileRunConfigSheetRows({
           label: role.name,
           searchText: role.name,
           icon: (
-            <span className="text-base leading-none" aria-hidden="true">
+            <span {...stylex.props(styles.emoji)} aria-hidden="true">
               {getAgentRoleEmoji(role)}
             </span>
           ),
@@ -254,7 +336,7 @@ function MobileRunConfigSheetRows({
               value: ROLE_CREATE_VALUE,
               label: t('chat.runConfig.roles.create', 'New role'),
               searchText: t('chat.runConfig.roles.create', 'New role'),
-              icon: <Plus className="h-3.5 w-3.5" aria-hidden="true" />,
+              icon: <Plus {...stylex.props(composerSurface.glyph14)} aria-hidden="true" />,
             },
           ]
         : []),
@@ -280,7 +362,7 @@ function MobileRunConfigSheetRows({
           agentType={cfg.agentType}
           brandId={cfg.brandId}
           env={cfg.env}
-          className="h-4 w-4"
+          className={stylex.props(composerSurface.glyph16).className}
         />
       ),
     }));
@@ -442,7 +524,7 @@ function MobileRunConfigSheetRows({
   const fastRowLabel = t('chat.runConfig.fastLabel', 'Fast');
 
   return (
-    <div className="flex flex-col gap-1">
+    <div {...stylex.props(styles.rows)}>
       {/* Rendered whenever the caller offers Roles at all, even with none to
           list: the row then reads `None` and its list is the way to make the
           first one, which is what the desktop row does too. */}
@@ -468,11 +550,13 @@ function MobileRunConfigSheetRows({
                     past an empty box. The OPTIONS keep the slot, because there
                     the labels are read as a column. */}
                 {selectedRole ? (
-                  <span className="text-base leading-none" aria-hidden="true">
+                  <span {...stylex.props(styles.emoji)} aria-hidden="true">
                     {getAgentRoleEmoji(selectedRole)}
                   </span>
                 ) : null}
-                <span className="truncate">{selectedRole?.name ?? roleNoneLabel}</span>
+                <span {...stylex.props(composerSurface.truncate)}>
+                  {selectedRole?.name ?? roleNoneLabel}
+                </span>
               </>
             }
           />
@@ -505,10 +589,12 @@ function MobileRunConfigSheetRows({
                     agentType={selectedAgentConfig.agentType}
                     brandId={selectedAgentConfig.brandId}
                     env={selectedAgentConfig.env}
-                    className="h-4 w-4 shrink-0 opacity-80"
+                    className={stylex.props(composerSurface.glyph16, styles.valueMark).className}
                   />
                 ) : null}
-                <span className="truncate">{selectedAgentConfig?.name ?? agentLabel}</span>
+                <span {...stylex.props(composerSurface.truncate)}>
+                  {selectedAgentConfig?.name ?? agentLabel}
+                </span>
               </>
             }
           />
@@ -543,7 +629,11 @@ function MobileRunConfigSheetRows({
               ariaLabel={selector.label}
               searchable={shouldOfferOptionSearch(pickerOptions.length)}
               disabled={locked}
-              triggerContent={<span className="truncate">{selectedLabel ?? selector.label}</span>}
+              triggerContent={
+                <span {...stylex.props(composerSurface.truncate)}>
+                  {selectedLabel ?? selector.label}
+                </span>
+              }
             />
           </RunConfigRow>
         );
@@ -570,7 +660,9 @@ function MobileRunConfigSheetRows({
             searchAnalyticsPicker="model"
             searchPlaceholder={modelSearchPlaceholder}
             emptyText={modelSearchEmptyLabel}
-            triggerContent={<span className="truncate">{modelLabel ?? modelRowLabel}</span>}
+            triggerContent={
+              <span {...stylex.props(composerSurface.truncate)}>{modelLabel ?? modelRowLabel}</span>
+            }
           />
         </RunConfigRow>
       ) : null}
@@ -584,7 +676,7 @@ function MobileRunConfigSheetRows({
             event.preventDefault();
             void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
           }}
-          className="flex items-start gap-2 rounded-xl border border-status-warning/30 bg-status-warning/[0.08] px-3 py-2.5 active:bg-status-warning/[0.14]"
+          {...stylex.props(styles.warning)}
         >
           <DeepSeekDelegationWarningContent />
         </a>
@@ -601,7 +693,9 @@ function MobileRunConfigSheetRows({
             options={interactionOptions}
             ariaLabel={interactionSelector.label}
             triggerContent={
-              <span className="truncate">{interactionLabel ?? interactionSelector.label}</span>
+              <span {...stylex.props(composerSurface.truncate)}>
+                {interactionLabel ?? interactionSelector.label}
+              </span>
             }
           />
         </RunConfigRow>
@@ -617,7 +711,11 @@ function MobileRunConfigSheetRows({
             }
             options={thinkingOptions}
             ariaLabel={reasoningLabel}
-            triggerContent={<span className="truncate">{thinkingLabel ?? reasoningLabel}</span>}
+            triggerContent={
+              <span {...stylex.props(composerSurface.truncate)}>
+                {thinkingLabel ?? reasoningLabel}
+              </span>
+            }
           />
         </RunConfigRow>
       ) : null}
@@ -639,10 +737,12 @@ function MobileRunConfigSheetRows({
             ariaLabel={permissionRowLabel}
             triggerContent={
               <>
-                <span className="flex h-4 w-4 shrink-0 items-center justify-center opacity-80">
+                <span {...stylex.props(composerSurface.glyph, styles.valueMark)}>
                   {permissionModeIcon(permissionValue ?? null)}
                 </span>
-                <span className="truncate">{permissionLabel ?? permissionRowLabel}</span>
+                <span {...stylex.props(composerSurface.truncate)}>
+                  {permissionLabel ?? permissionRowLabel}
+                </span>
               </>
             }
           />
@@ -651,7 +751,13 @@ function MobileRunConfigSheetRows({
 
       {planSelector ? (
         <ToggleRow
-          icon={<ListChecks className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />}
+          icon={
+            <ListChecks
+              {...stylex.props(composerSurface.glyph16)}
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+          }
           label={planRowLabel}
           checked={planOn}
           ariaLabel={planSelector.label}
@@ -666,7 +772,9 @@ function MobileRunConfigSheetRows({
 
       {fastSelector ? (
         <ToggleRow
-          icon={<Zap className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />}
+          icon={
+            <Zap {...stylex.props(composerSurface.glyph16)} strokeWidth={1.8} aria-hidden="true" />
+          }
           label={fastRowLabel}
           checked={fastOn}
           ariaLabel={fastSelector.label}
@@ -685,19 +793,16 @@ function MobileRunConfigSheetRows({
   );
 }
 
-/* Labelled card row — mirrors the new-chat sheet's `Row` chrome
-   (`bg-card` + `ring-border/60`, fixed label column) so the two sheets
-   read as the same family. Labels are sentence case, not uppercase.
+/* Labelled card row — the card rung with a fixed label column, so the sheet
+   reads as a settings surface. Labels are sentence case, not uppercase.
    Picker rows wrap in `MobileInlinePickerRowSlot` so the picker's inline
    expansion drops directly below the card (the coordinator keeps one open
    at a time). */
 function RunConfigRow({ label, children }: { label: ReactNode; children: ReactNode }) {
   const inner = (
-    <div className="flex min-w-0 items-center gap-3 rounded-xl bg-card px-3 py-2 ring-1 ring-border/60">
-      <span className="w-20 shrink-0 self-center text-[0.72rem] font-semibold text-muted-foreground">
-        {label}
-      </span>
-      <div className="min-w-0 flex-1">{children}</div>
+    <div {...stylex.props(styles.row)}>
+      <span {...stylex.props(styles.label)}>{label}</span>
+      <div {...stylex.props(styles.control)}>{children}</div>
     </div>
   );
   return <MobileInlinePickerRowSlot>{inner}</MobileInlinePickerRowSlot>;
@@ -720,16 +825,10 @@ function ToggleRow({
   onCheckedChange: () => void;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-3 rounded-xl bg-card px-3 py-2 ring-1 ring-border/60">
-      <span className="w-20 shrink-0 self-center text-[0.72rem] font-semibold text-muted-foreground">
-        {label}
-      </span>
-      <div className="flex min-w-0 flex-1 items-center justify-between">
-        <span
-          className={cn('flex items-center', checked ? 'text-foreground' : 'text-muted-foreground')}
-        >
-          {icon}
-        </span>
+    <div {...stylex.props(styles.row)}>
+      <span {...stylex.props(styles.label)}>{label}</span>
+      <div {...stylex.props(styles.toggleControl)}>
+        <span {...stylex.props(styles.toggleMark, checked && styles.toggleMarkOn)}>{icon}</span>
         <Switch
           checked={checked}
           onCheckedChange={onCheckedChange}

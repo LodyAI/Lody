@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { deferredPostHog } from '@/lib/deferred-posthog';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MobileSettingsSection } from './mobile-settings-row';
@@ -92,7 +92,7 @@ export function MobileAppIconSettings({
           return (
             <Button
               key={icon.name}
-              variant="outline"
+              variant="secondary"
               className="h-auto min-w-24 flex-col gap-2 p-3"
               aria-pressed={selected}
               disabled={!state || pending}

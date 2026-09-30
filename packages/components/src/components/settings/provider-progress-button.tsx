@@ -1,7 +1,30 @@
 import type { ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 
-import { Button } from '@/ui/button';
-import { cn } from '@/lib/utils';
+import { Button } from '@lody/ui/button';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { duration, ease } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
+
+const styles = stylex.create({
+  /** Layout only: the button keeps its own material, and the fill is clipped to it. */
+  button: { position: 'relative', minWidth: '4.5rem', overflow: 'hidden' },
+  /** Work in flight is live state, so the fill is a film of the accent with no edge. */
+  fill: {
+    position: 'absolute',
+    insetBlock: 0,
+    insetInlineStart: 0,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.accent} 20%)`,
+    transitionProperty: 'width',
+    transitionDuration: duration.slow,
+    transitionTimingFunction: ease.standard,
+    pointerEvents: 'none',
+  },
+  fillWidth: (percent: number) => ({ width: `${percent}%` }),
+  layer: { position: 'relative', zIndex: 1 },
+  icon: { display: 'flex', flexShrink: 0, alignItems: 'center' },
+  label: { fontVariantNumeric: 'tabular-nums' },
+});
 
 export function ProviderProgressButton({
   label,
@@ -31,30 +54,23 @@ export function ProviderProgressButton({
   return (
     <Button
       type="button"
-      variant="outline"
-      size="sm"
+      variant="secondary"
+      size="small"
       disabled={!onClick}
       aria-label={ariaLabel}
       title={title}
       onClick={onClick}
-      className={cn(
-        'relative min-w-[4.5rem] gap-1 overflow-hidden px-2 disabled:opacity-100',
-        className
-      )}
+      className={withClassName(stylex.props(styles.button), className).className}
     >
       {boundedPercent !== null ? (
-        <span
-          aria-hidden="true"
-          className="absolute inset-y-0 left-0 border-r border-primary/30 bg-primary/20 transition-[width] duration-300"
-          style={{ width: `${boundedPercent}%` }}
-        />
+        <span aria-hidden="true" {...stylex.props(styles.fill, styles.fillWidth(boundedPercent))} />
       ) : null}
       {icon !== undefined ? (
-        <span aria-hidden="true" className="relative z-10 flex shrink-0 items-center">
+        <span aria-hidden="true" {...stylex.props(styles.layer, styles.icon)}>
           {icon}
         </span>
       ) : null}
-      <span className="relative z-10 tabular-nums">{label}</span>
+      <span {...stylex.props(styles.layer, styles.label)}>{label}</span>
     </Button>
   );
 }

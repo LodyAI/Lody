@@ -3,7 +3,7 @@ import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { ChevronRight } from 'lucide-react';
 import { cva } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 // VSCode-inspired tree layout constants
 // Row height: 22px (VSCode standard for file explorer items)
@@ -151,7 +151,7 @@ const TreeView = React.forwardRef<HTMLDivElement, TreeProps>(
     }, [data, expandAll, initialSelectedItemId]);
 
     return (
-      <TooltipProvider delayDuration={500}>
+      <Tooltip.Provider delay={500}>
         <div className={cn('relative p-2 overflow-hidden', className)}>
           <TreeItem
             data={data}
@@ -175,7 +175,7 @@ const TreeView = React.forwardRef<HTMLDivElement, TreeProps>(
             }}
           ></div>
         </div>
-      </TooltipProvider>
+      </Tooltip.Provider>
     );
   }
 );
@@ -593,12 +593,12 @@ const TreeItemLabel = ({ name, className }: { name: string; className?: string }
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{label}</TooltipTrigger>
-      <TooltipContent side="top" align="start">
+    <Tooltip.Root>
+      <Tooltip.Trigger render={label}/>
+      <Tooltip.Content side="top" align="start">
         {name}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 };
 

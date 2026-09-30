@@ -373,6 +373,50 @@ describe('machine Flock helpers', () => {
     });
   });
 
+  it('attaches declared per-model controls only for the matching source version', () => {
+    const flock = new FakeMachineFlock();
+    const configId = 'config-1' as AgentConfigId;
+    const capability = {
+      cliType: 'builtin',
+      agentType: 'codex',
+      cacheVersion: 2,
+      sourceVersion: 'v1',
+      modes: [],
+      models: [],
+      fetchedAt: 1,
+    } as const;
+    const models = { 'gpt-6': { effortValues: ['low', 'max'], fastMode: true } };
+    writeMachineFlockRowToFlock(flock, {
+      key: machineFlockKeys.acpCapability(configId),
+      value: capability,
+    });
+    writeMachineFlockRowToFlock(flock, {
+      key: machineFlockKeys.acpModelCapability(configId),
+      value: { version: 1, sourceVersion: 'v1', models },
+    });
+    const key = getAcpCapabilityCacheKey(configId);
+
+    expect(
+      getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(flock))[key]
+        ?.declaredModelControls
+    ).toEqual(models);
+    // The stored capability row itself never carries the per-model controls.
+    expect(
+      getMachineFlockAcpCapabilities(
+        readMachineFlockRowsFromFlock(flock, { families: ['acpCapability'] })
+      )[key]?.declaredModelControls
+    ).toBeUndefined();
+
+    writeMachineFlockRowToFlock(flock, {
+      key: machineFlockKeys.acpModelCapability(configId),
+      value: { version: 1, sourceVersion: 'v0', models },
+    });
+    expect(
+      getMachineFlockAcpCapabilities(readMachineFlockRowsFromFlock(flock))[key]
+        ?.declaredModelControls
+    ).toBeUndefined();
+  });
+
   it('extracts agent config rows', () => {
     const agentConfigId = 'config-1' as AgentConfigId;
     const row = {
@@ -539,8 +583,9 @@ describe('machine Flock helpers', () => {
   });
 
   it('extracts rate limit rows', () => {
+    const configId = 'config-codex' as AgentConfigId;
     const row = {
-      key: machineFlockKeys.rateLimit('codex', 'codex_bengalfox'),
+      key: machineFlockKeys.rateLimit(configId, 'codex', 'codex_bengalfox'),
       value: {
         limitId: 'codex_bengalfox',
         used: 10,
@@ -553,7 +598,7 @@ describe('machine Flock helpers', () => {
         [serializeMachineFlockKey(row.key)]: row,
       })
     ).toEqual({
-      [getRateLimitEntryKey('codex', 'codex_bengalfox')]: row.value,
+      [getRateLimitEntryKey('codex', 'codex_bengalfox', configId)]: row.value,
     });
   });
 
@@ -636,6 +681,32 @@ describe('machine Flock helpers', () => {
       expect(optOuts(flock)).toEqual(new Set());
     });
 
+    it('deleting a provider removes only its scoped rate limits', () => {
+      const flock = new FakeMachineFlock();
+      const first = kimi('a');
+      const second = kimi('b');
+      writeAgentConfigToFlock(flock, first);
+      writeAgentConfigToFlock(flock, second);
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.rateLimit(first.id, 'kimi', 'kimi'),
+        value: { limitId: 'kimi', scope: { providerId: 'kimi' }, windows: [] },
+      });
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.rateLimit(second.id, 'kimi', 'kimi'),
+        value: { limitId: 'kimi', scope: { providerId: 'kimi' }, windows: [] },
+      });
+
+      deleteAgentConfigFromFlock(flock, first, 1700);
+
+      expect(getMachineFlockRateLimits(readMachineFlockRowsFromFlock(flock))).toEqual({
+        [getRateLimitEntryKey('kimi', 'kimi', second.id)]: {
+          limitId: 'kimi',
+          scope: { providerId: 'kimi' },
+          windows: [],
+        },
+      });
+    });
+
     it('does not rewrite an existing opt-out on repeated deletes', () => {
       // The opt-out carries a timestamp, so a rewrite broadcasts a change to every peer; with
       // the row already gone and the opt-out already there, nothing must change.
@@ -673,7 +744,12 @@ describe('machine Flock helpers', () => {
       // Cancelling a published setup is also removing the provider; without the opt-out the CLI
       // adds it back on the next startup.
       const flock = new FakeMachineFlock();
-      writeAgentConfigToFlock(flock, kimi('setup-1'));
+      const config = kimi('setup-1');
+      writeAgentConfigToFlock(flock, config);
+      writeMachineFlockRowToFlock(flock, {
+        key: machineFlockKeys.rateLimit(config.id, 'kimi', 'kimi'),
+        value: { limitId: 'kimi', scope: { providerId: 'kimi' }, windows: [] },
+      });
 
       applyProviderSetupCancellationToFlock(flock, {
         v: 1,
@@ -683,6 +759,7 @@ describe('machine Flock helpers', () => {
       });
 
       expect(getMachineFlockAgentConfigs(readMachineFlockRowsFromFlock(flock))).toEqual({});
+      expect(getMachineFlockRateLimits(readMachineFlockRowsFromFlock(flock))).toEqual({});
       expect(optOuts(flock)).toEqual(new Set(['kimi']));
     });
 

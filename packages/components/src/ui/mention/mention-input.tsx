@@ -224,75 +224,70 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
     input.setSelectionRange(start, end);
   }, [inputRef, inputValue, onPendingSelectionFromRootChange, pendingSelectionFromRoot]);
 
-  const getTextWidth = React.useCallback((text: string, input: InputElement) => {
+  const calculatePosition = React.useCallback((input: InputElement, cursorPosition: number) => {
+    const rect = input.getBoundingClientRect();
     const style = window.getComputedStyle(input);
-    const measureSpan = document.createElement('span');
-    measureSpan.style.cssText = `
-        position: absolute;
-        visibility: hidden;
-        white-space: pre;
-        font: ${style.font};
-        letter-spacing: ${style.letterSpacing};
-        text-transform: ${style.textTransform};
-      `;
-    measureSpan.textContent = text;
-    document.body.appendChild(measureSpan);
-    const width = measureSpan.offsetWidth;
-    document.body.removeChild(measureSpan);
-    return width;
+    // A textarea wraps at word and glyph boundaries, not at multiples of a
+    // measured line width. Mirror its layout so the anchor stays on the real
+    // caret after soft wraps, scroll, font changes and fractional zoom.
+    const mirror = document.createElement('div');
+    mirror.style.position = 'fixed';
+    mirror.style.top = '0';
+    mirror.style.left = '0';
+    mirror.style.visibility = 'hidden';
+    mirror.style.pointerEvents = 'none';
+    mirror.style.boxSizing = 'border-box';
+    mirror.style.width = `${
+      (input.clientWidth || rect.width) +
+      Number.parseFloat(style.borderLeftWidth || '0') +
+      Number.parseFloat(style.borderRightWidth || '0')
+    }px`;
+    mirror.style.padding = style.padding;
+    mirror.style.borderStyle = style.borderStyle;
+    mirror.style.borderWidth = style.borderWidth;
+    mirror.style.font = style.font;
+    mirror.style.letterSpacing = style.letterSpacing;
+    mirror.style.textTransform = style.textTransform;
+    mirror.style.textIndent = style.textIndent;
+    mirror.style.textAlign = style.textAlign;
+    mirror.style.lineHeight = style.lineHeight;
+    mirror.style.tabSize = style.tabSize;
+    mirror.style.wordBreak = style.wordBreak;
+    mirror.style.overflowWrap = style.overflowWrap;
+    mirror.style.whiteSpace = input.wrap === 'off' ? 'pre' : 'pre-wrap';
+    mirror.style.direction = style.direction;
+    mirror.textContent = input.value.slice(0, cursorPosition);
+    const marker = document.createElement('span');
+    marker.textContent = '\u200b';
+    mirror.appendChild(marker);
+    // Measure outside zoomed/transformed app containers; the scale below
+    // then maps the unscaled mirror back into the textarea's viewport rect.
+    document.documentElement.appendChild(mirror);
+    const markerRect = marker.getBoundingClientRect();
+    const mirrorRect = mirror.getBoundingClientRect();
+    mirror.remove();
+
+    const scaleX = input.offsetWidth ? rect.width / input.offsetWidth : 1;
+    const scaleY = input.offsetHeight ? rect.height / input.offsetHeight : 1;
+    const lineHeight =
+      (Number.parseFloat(style.lineHeight) || markerRect.height || input.offsetHeight) * scaleY;
+    const x = rect.left + (markerRect.left - mirrorRect.left - input.scrollLeft) * scaleX;
+    const y = rect.top + (markerRect.top - mirrorRect.top - input.scrollTop) * scaleY;
+
+    return {
+      width: 0,
+      height: lineHeight,
+      x,
+      y,
+      top: y,
+      right: x,
+      bottom: y + lineHeight,
+      left: x,
+      toJSON() {
+        return this;
+      },
+    } satisfies DOMRect;
   }, []);
-
-  const getLineHeight = React.useCallback((input: InputElement) => {
-    const style = window.getComputedStyle(input);
-    return Number.parseInt(style.lineHeight, 10) ?? input.offsetHeight;
-  }, []);
-
-  const calculatePosition = React.useCallback(
-    (input: InputElement, cursorPosition: number) => {
-      const rect = input.getBoundingClientRect();
-      const textBeforeCursor = input.value.slice(0, cursorPosition);
-      const lines = textBeforeCursor.split('\n');
-      const currentLine = lines.length - 1;
-      const currentLineText = lines[currentLine] ?? '';
-      const textWidth = getTextWidth(currentLineText, input);
-
-      const style = window.getComputedStyle(input);
-      const lineHeight = getLineHeight(input);
-      const paddingLeft = Number.parseFloat(style.getPropertyValue('padding-left') ?? '0');
-      const paddingRight = Number.parseFloat(style.getPropertyValue('padding-right') ?? '0');
-      const paddingTop = Number.parseFloat(style.getPropertyValue('padding-top') ?? '0');
-
-      const containerWidth = input.clientWidth - paddingLeft - paddingRight;
-      const wrappedLines = Math.floor(textWidth / containerWidth);
-      const totalLines = currentLine + wrappedLines;
-
-      const scrollTop = input.scrollTop;
-      const scrollLeft = input.scrollLeft;
-
-      const effectiveTextWidth = textWidth % containerWidth;
-      const isRTL = context.dir === 'rtl';
-      const x = isRTL
-        ? Math.min(rect.right - paddingRight - effectiveTextWidth + scrollLeft, rect.right - 10)
-        : Math.min(rect.left + paddingLeft + effectiveTextWidth - scrollLeft, rect.right - 10);
-
-      const y = rect.top + paddingTop + (totalLines * lineHeight - scrollTop);
-
-      return {
-        width: 0,
-        height: lineHeight,
-        x,
-        y,
-        top: y,
-        right: x,
-        bottom: y + lineHeight,
-        left: x,
-        toJSON() {
-          return this;
-        },
-      } satisfies DOMRect;
-    },
-    [context.dir, getLineHeight, getTextWidth]
-  );
 
   const createVirtualElement = React.useCallback(
     (element: InputElement, cursorPosition: number) => {
@@ -305,6 +300,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       }
 
       const virtualElement: VirtualElement = {
+        contextElement: element,
         getBoundingClientRect() {
           return calculatePosition(element, cursorPosition);
         },
@@ -397,7 +393,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
             context.onTriggerChange(trigger);
           }
 
-          createVirtualElement(element, lastTriggerIndex);
+          createVirtualElement(element, currentPosition);
           context.onOpenChange(true);
           context.filterStore.search = isImmediatelyAfterTrigger ? '' : textAfterTrigger;
           requestAnimationFrame(() => context.onItemsFilter());
@@ -658,6 +654,11 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       }
 
       if (!context.open) return;
+
+      // A modified Enter belongs to the input, not the menu: Cmd/Ctrl+Enter is
+      // the owner's send/save, Shift+Enter is a literal newline. Bail before the
+      // preventDefault below so neither selects a menu item.
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey || event.shiftKey)) return;
 
       const isNavigationKey = [
         'ArrowDown',

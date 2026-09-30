@@ -12,6 +12,7 @@ import {
   githubFetchProjectSkillsAtCommit,
   githubFetchPullRequestDetails,
   githubFetchPullRequestReviews,
+  normalizeCheckRunsSummary,
 } from '../src/github-api';
 
 describe('GitHub PR live reads', () => {
@@ -62,6 +63,104 @@ describe('GitHub PR live reads', () => {
       'reload',
       'reload',
     ]);
+  });
+});
+
+describe('githubFetchCheckRuns', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function apiRun(id: number, name: string, conclusion: string, appName = 'GitHub Actions') {
+    return { id, name, status: 'completed', conclusion, app: { name: appName } };
+  }
+
+  it('judges each check by its latest attempt only', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              check_runs: [
+                apiRun(12, 'test', 'success'),
+                apiRun(10, 'test', 'failure'),
+                apiRun(11, 'lint', 'success'),
+                apiRun(9, 'lint', 'failure', 'Other CI'),
+              ],
+            })
+          )
+      )
+    );
+
+    const summary = await githubFetchCheckRuns('token', 'owner/repo', 'head-sha');
+
+    expect(summary.runs.map((run) => [run.name, run.appName, run.conclusion])).toEqual([
+      ['lint', 'GitHub Actions', 'success'],
+      ['lint', 'Other CI', 'failure'],
+      ['test', 'GitHub Actions', 'success'],
+    ]);
+    expect(summary.conclusion).toBe('failure');
+  });
+
+  it('turns green once a failed check is re-run successfully', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              check_runs: [apiRun(10, 'test', 'failure'), apiRun(12, 'test', 'success')],
+            })
+          )
+      )
+    );
+
+    const summary = await githubFetchCheckRuns('token', 'owner/repo', 'head-sha');
+
+    expect(summary.total).toBe(1);
+    expect(summary.conclusion).toBe('success');
+  });
+
+  it('does not let a cancelled check turn an otherwise green commit into a failure', async () => {
+    const summarize = async (runs: ReturnType<typeof apiRun>[]) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(JSON.stringify({ check_runs: runs })))
+      );
+      return (await githubFetchCheckRuns('token', 'owner/repo', 'head-sha')).conclusion;
+    };
+
+    expect(await summarize([apiRun(1, 'test', 'success'), apiRun(2, 'deploy', 'cancelled')])).toBe(
+      'success'
+    );
+    expect(await summarize([apiRun(1, 'test', 'failure'), apiRun(2, 'deploy', 'cancelled')])).toBe(
+      'failure'
+    );
+    expect(await summarize([apiRun(2, 'deploy', 'cancelled')])).toBe('cancelled');
+  });
+
+  it('re-derives summaries persisted with superseded attempts', () => {
+    const run = (id: number, conclusion: 'success' | 'failure') => ({
+      id,
+      name: 'test',
+      status: 'completed' as const,
+      conclusion,
+      htmlUrl: null,
+      startedAt: null,
+      completedAt: null,
+      appName: 'GitHub Actions',
+    });
+
+    const summary = normalizeCheckRunsSummary({
+      status: 'completed',
+      conclusion: 'failure',
+      total: 2,
+      runs: [run(10, 'failure'), run(12, 'success')],
+    });
+
+    expect(summary.runs.map((item) => item.id)).toEqual([12]);
+    expect(summary.conclusion).toBe('success');
   });
 });
 

@@ -65,11 +65,10 @@ const UnderwaterPointCloudBackground = lazy(() => {
   });
 });
 
-// The product stage sits below the 100dvh hero, but `landing-app-preview` is the
-// landing's single heaviest module: it mounts REAL product UI and drags the chat
-// composer, markdown renderer and katex in behind it. Statically imported it
-// landed in the landing's critical chunk and delayed the hero's LCP for UI the
-// visitor cannot even see yet. Lazy + armed on approach instead.
+// The product stage sits below the 100dvh hero, and `landing-app-preview` (the
+// product replica plus its diff highlighter) is UI the visitor cannot see yet.
+// Statically imported it landed in the landing's critical chunk and delayed the
+// hero's LCP. Lazy + armed on approach instead.
 //
 // Unlike three.js above, this one is NOT module-eval — the fetch is deferred to
 // `armPreview()` so the hero copy gets first-paint bandwidth. Arming waits

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import en from '../../../locales/en.json';
+import zh from '../../../locales/zh_CN.json';
 
+import { formatDurationCompact, getDurationUnitLabels } from '../src/lib/format-duration';
 import {
   resolveLiveSessionHistoryDurationMs,
   resolveSessionHistoryDurationMs,
@@ -37,6 +40,29 @@ describe('resolveSessionHistoryDurationMs', () => {
         permissionWaitMs: 12_000,
       })
     ).toBe(0);
+  });
+});
+
+describe('localized compact durations', () => {
+  const labels = (locale: Record<string, string>) =>
+    getDurationUnitLabels((key, fallback) => locale[key] ?? fallback);
+
+  it('joins Chinese duration units and the surrounding wording without spaces', () => {
+    const units = labels(zh);
+    expect(formatDurationCompact(445_000, units)).toBe('7分25秒');
+    expect(formatDurationCompact(3_625_000, units)).toBe('1时00分25秒');
+    expect(formatDurationCompact(25_000, units)).toBe('25秒');
+    const duration = formatDurationCompact(445_000, units);
+    expect(zh['sessions.workedFor'].replace('{{duration}}', duration)).toBe('工作了7分25秒');
+    expect(
+      zh['sessions.activityWithDuration']
+        .replace('{{label}}', '工作中')
+        .replace('{{duration}}', duration)
+    ).toBe('工作中（工作了7分25秒）');
+  });
+
+  it('keeps English compact units attached to their numbers', () => {
+    expect(formatDurationCompact(445_000, labels(en))).toBe('7m 25s');
   });
 });
 

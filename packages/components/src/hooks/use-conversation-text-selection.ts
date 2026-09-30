@@ -8,7 +8,6 @@ import {
   type RefObject,
 } from 'react';
 import { flushSync } from 'react-dom';
-import type { VirtualizerHandle } from 'virtua';
 import type { ConversationRange, ConversationView } from '@/lib/conversation-view';
 import { useLatestRef } from './use-latest-ref';
 
@@ -49,7 +48,8 @@ export function useConversationTextSelection<T>({
   sessionId: string;
   view?: ConversationView | null;
   viewport: HTMLElement | null;
-  virtualizer: RefObject<VirtualizerHandle | null>;
+  /** The conversation list: `findItemIndex` maps a scroll offset to a list index. */
+  virtualizer: RefObject<{ findItemIndex(offset: number): number } | null>;
   rows: readonly SelectableConversationRow[];
   leadingRowCount: number;
   captureTurn: (id: string) => T;
@@ -71,7 +71,6 @@ export function useConversationTextSelection<T>({
   });
 
   const reconcile = useRef<(() => void) | undefined>(undefined);
-  const source = view?.factSource ?? view;
   useLayoutEffect(() => {
     if (!viewport) return undefined;
     const doc = viewport.ownerDocument;
@@ -126,11 +125,10 @@ export function useConversationTextSelection<T>({
       const epoch = generation;
       for (const id of ids) {
         const previous = retained.current.get(id);
-        const history = source;
-        const index = history?.indexOf(id) ?? -1;
+        const index = view?.indexOf(id) ?? -1;
         if (previous && !previous.failed && (previous.lease || index < 0)) continue;
         // acquireRange pins synchronously, before a viewport lease can evict this body.
-        const lease = index >= 0 ? history?.acquireRange(index, index + 1) : undefined;
+        const lease = index >= 0 ? view?.acquireRange(index, index + 1) : undefined;
         const held = {
           snapshot: previous?.snapshot ?? current.current.captureTurn(id),
           lease,
@@ -225,6 +223,10 @@ export function useConversationTextSelection<T>({
     };
     const onScroll = (event: Event) => {
       if (event.target !== viewport) return;
+      // Nothing is held: any live range was already retained by selectionchange
+      // (or the mount-time sync), so a plain scroll must not read the Selection
+      // or force a synchronous React flush on every scroll event.
+      if (!activeRef.current && retained.current.size === 0) return;
       const range = selectionRange();
       if (range) {
         // Commit keepMounted before Virtua's bubble-phase scroll listener.
@@ -265,7 +267,7 @@ export function useConversationTextSelection<T>({
       if (
         [...retained.current].some(([id, held]) =>
           held.lease
-            ? (source?.indexOf(id) ?? -1) < 0
+            ? (view?.indexOf(id) ?? -1) < 0
             : current.current.view
               ? current.current.view.indexOf(id) < 0
               : !current.current.rows.some((row) => row.turnId === id)
@@ -279,7 +281,7 @@ export function useConversationTextSelection<T>({
       }
     };
     reconcile.current = reconcileRetained;
-    const unsubscribe = source?.subscribe((change) => {
+    const unsubscribe = view?.subscribe((change) => {
       if (change.kind === 'structure') reconcileRetained();
     });
     doc.addEventListener('pointerdown', onPointerDown, true);
@@ -304,7 +306,7 @@ export function useConversationTextSelection<T>({
       viewport.removeEventListener('scroll', onScroll, true);
       release();
     };
-  }, [sessionId, source, viewport, virtualizer, current, activeRef]);
+  }, [sessionId, view, viewport, virtualizer, current, activeRef]);
 
   useLayoutEffect(() => {
     reconcile.current?.();

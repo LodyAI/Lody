@@ -9,7 +9,7 @@ import {
   YAxis,
 } from 'recharts';
 import { cn } from '@/lib/utils';
-import { Skeleton } from '../../ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 
 export type StackedAreaSeriesValue = {
   id: string;
@@ -266,8 +266,10 @@ function ChartLoadingPlaceholder({ chartHeight }: { chartHeight: number }) {
         {/* Same footprint as the real chart: a full-height plot with layered
            area silhouettes, gridlines, and axis tick placeholders. */}
         <Skeleton
-          className="relative w-full overflow-hidden rounded-md bg-primary/[0.06]"
-          style={{ height: chartHeight }}
+          shape="block"
+          width="100%"
+          height={chartHeight}
+          className="relative overflow-hidden bg-primary/[0.06]"
         >
           <svg
             aria-hidden="true"
@@ -297,7 +299,7 @@ function ChartLoadingPlaceholder({ chartHeight }: { chartHeight: number }) {
           </svg>
           <div className="absolute inset-x-14 bottom-1.5 flex justify-between">
             {Array.from({ length: 8 }).map((_, index) => (
-              <Skeleton key={index} className="h-2 w-6 rounded-sm" />
+              <Skeleton key={index} width={24} height={8} />
             ))}
           </div>
         </Skeleton>
@@ -305,7 +307,7 @@ function ChartLoadingPlaceholder({ chartHeight }: { chartHeight: number }) {
       <div className="border-t border-border/60 px-4 pb-3 pt-2">
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
           {LEGEND_PLACEHOLDER_WIDTHS.map((width) => (
-            <Skeleton key={width} className="h-4 rounded-sm" style={{ width }} />
+            <Skeleton key={width} height={16} width={width} />
           ))}
         </div>
       </div>

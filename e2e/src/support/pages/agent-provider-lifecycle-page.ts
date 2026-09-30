@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { AgentProviderLifecycleFixture } from '../fixtures/agent-provider-lifecycle-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 type ProviderInput = { name: string; command: string; prompt: string };
 
@@ -228,9 +229,7 @@ export class AgentProviderLifecyclePage {
     ]) {
       await expect(settings.getByText(providerName, { exact: true })).toHaveCount(0);
     }
-    await expect(
-      settings.getByText(/^(No providers on this machine yet\.|此机器还没有 Provider。)$/u)
-    ).toBeVisible();
+    await expect(settings.getByText(/^(No agents on .+ yet|.+ 上还没有 Agent)$/u)).toBeVisible();
     await this.closeSettings(settings);
     await this.openHome();
     await expect(this.page.locator('#chat-prompt')).toBeEditable();
@@ -262,7 +261,9 @@ export class AgentProviderLifecyclePage {
     const settings = this.settingsDialog();
     await expect(settings).toBeVisible();
     await settings.locator('[data-settings-tab-id="agents"]').click();
-    await expect(settings.getByText('Agent Provider', { exact: true })).toBeVisible();
+    await expect(
+      settings.getByRole('button', { name: /^(Add provider|添加 Provider)$/u }).first()
+    ).toBeEnabled();
     return settings;
   }
 
@@ -417,7 +418,7 @@ export class AgentProviderLifecyclePage {
 
   private async openArchive(): Promise<void> {
     if (!/#\/local\/archive(?:\?.*)?$/u.test(this.page.url())) {
-      await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+      await openSidebarArchive(this.page);
     }
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
   }

@@ -8,7 +8,7 @@ This list covers shipped production dependencies plus vendored third-party asset
 
 ## Summary
 
-- Bundled assets: 13
+- Bundled assets: 14
 - Production dependencies: 963
 - Unique license expressions: 22
 
@@ -77,6 +77,13 @@ This list covers shipped production dependencies plus vendored third-party asset
 - Assets: Vesper
 - Notice file: `packages/components/src/lib/vscode-theme/bundled/themes/vesper/LICENSE.md`
 - Notes: Bundled VSCode color theme.
+### Virtua
+- License: MIT
+- Author: inokawa
+- Source: https://github.com/inokawa/virtua/tree/0.52.7
+- Assets: Virtua list layout and size cache
+- Notice file: `packages/components/src/lib/conversation-scroll/keyed-layout/LICENSE`
+- Notes: Keyed list layout from Virtua, adapted for the conversation scroll engine (packages/components/src/lib/conversation-scroll/keyed-layout).
 ### Visual Studio Code fuzzy scorer
 - License: MIT
 - Author: Microsoft Corporation
@@ -949,7 +956,6 @@ This list covers shipped production dependencies plus vendored third-party asset
 - `@radix-ui/react-focus-guards @ 1.1.3` — https://radix-ui.com/primitives
 - `@radix-ui/react-focus-scope @ 1.1.7` — https://radix-ui.com/primitives
 - `@radix-ui/react-id @ 1.1.1, 1.1.2` — https://radix-ui.com/primitives
-- `@radix-ui/react-label @ 2.1.8` — https://radix-ui.com/primitives
 - `@radix-ui/react-menu @ 2.1.16` — https://radix-ui.com/primitives
 - `@radix-ui/react-menubar @ 1.1.16` — https://radix-ui.com/primitives
 - `@radix-ui/react-popover @ 1.1.15` — https://radix-ui.com/primitives

@@ -1,7 +1,59 @@
 import { AtSign, Paperclip } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 
-import { cn } from '@/lib/utils';
+const styles = stylex.create({
+  root: {
+    pointerEvents: 'none',
+    position: 'absolute',
+    inset: 0,
+    zIndex: 50,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: space[4],
+  },
+  backdrop: {
+    position: 'absolute',
+    inset: space[3],
+    borderWidth: '2px',
+    borderStyle: 'dashed',
+    // The app may force a theme independently of the OS preference.
+    borderColor: {
+      default: `color-mix(in oklab, ${colors.accent} 55%, transparent)`,
+      ':is(.dark *)': `color-mix(in oklab, ${colors.accent} 45%, transparent)`,
+    },
+    borderRadius: '16px',
+    backgroundColor: {
+      default: `color-mix(in oklab, ${colors.accent} 12%, transparent)`,
+      ':is(.dark *)': `color-mix(in oklab, ${colors.accent} 16%, transparent)`,
+    },
+    backdropFilter: 'blur(2px)',
+  },
+  label: {
+    position: 'relative',
+    display: 'flex',
+    maxWidth: 'min(100%, 20rem)',
+    alignItems: 'center',
+    gap: space[2],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: `color-mix(in oklab, ${colors.accent} 25%, transparent)`,
+    borderRadius: radius.full,
+    backgroundColor: `color-mix(in oklab, ${colors.background} 90%, transparent)`,
+    paddingInline: space[4],
+    paddingBlock: space[2],
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 500,
+    color: colors.label,
+    boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
+  },
+  icon: { width: '16px', height: '16px', flexShrink: 0, color: colors.accent },
+  text: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+});
 
 /**
  * Full-surface drop mask for a conversation page or the chat landing.
@@ -37,24 +89,12 @@ function ConversationDropOverlayPaint({ kind }: { kind: ConversationDropKind }) 
       data-drop-kind={kind}
       role="status"
       aria-live="polite"
-      className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center p-4"
+      {...stylex.props(styles.root)}
     >
-      <div
-        className={cn(
-          'absolute inset-3 rounded-2xl border-2 border-dashed',
-          'border-primary/55 bg-primary/12 backdrop-blur-[2px]',
-          'dark:border-primary/45 dark:bg-primary/16'
-        )}
-      />
-      <div
-        className={cn(
-          'relative flex max-w-[min(100%,20rem)] items-center gap-2 rounded-full',
-          'border border-primary/25 bg-background/90 px-4 py-2',
-          'text-sm font-medium text-foreground shadow-sm'
-        )}
-      >
-        <Icon className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-        <span className="truncate">{label}</span>
+      <div {...stylex.props(styles.backdrop)} />
+      <div {...stylex.props(styles.label)}>
+        <Icon {...stylex.props(styles.icon)} aria-hidden />
+        <span {...stylex.props(styles.text)}>{label}</span>
       </div>
     </div>
   );

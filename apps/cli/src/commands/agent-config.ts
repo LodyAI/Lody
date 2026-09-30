@@ -1,10 +1,12 @@
 import { Command } from 'commander';
+import { discoveryListCommand, discoveryGetCommand } from './discovery';
 import { promises as fs } from 'node:fs';
 import { v4 as uuidV4 } from 'uuid';
 import { z } from 'zod';
 import {
   MachineAcpCapabilitiesRefreshResponseSchema,
   isMachineDocRoomId,
+  negotiatedAcpCapabilitiesRefreshForce,
   type AgentConfigCliType,
   type AgentConfigId,
   type AgentConfigMeta,
@@ -27,6 +29,7 @@ import {
   withWorkspaceManager,
   type CommonCommandOptions,
 } from '@/lib/command-runtime';
+import { toAgentConfigOutput, type AgentConfigOutput } from './agent-config-output';
 import { renderTerminalTable } from '@/lib/terminal-table';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
@@ -36,10 +39,7 @@ import {
 } from '@/lib/agent-config-machine-flock';
 
 type AgentConfigCommandOptions = CommonCommandOptions;
-
-type AgentConfigListOptions = AgentConfigCommandOptions & {
-  machine?: string;
-};
+type AgentConfigShowOptions = AgentConfigCommandOptions & { showSecrets?: boolean };
 
 type AgentConfigCreateOptions = AgentConfigCommandOptions & {
   name?: string;
@@ -159,18 +159,18 @@ export function inferAgentConfigCliType(agentType: string): AgentConfigCliType {
 
 export function parseEnvAssignments(entries: string[] | undefined): Record<string, string> {
   const parsed: Record<string, string> = {};
-  for (const entry of entries ?? []) {
+  for (const [index, entry] of (entries ?? []).entries()) {
     const normalizedEntry = normalizeCliValue(entry);
     if (!normalizedEntry) {
       continue;
     }
     const separatorIndex = normalizedEntry.indexOf('=');
     if (separatorIndex <= 0) {
-      throw new Error(`Invalid --env entry: ${entry}. Expected KEY=VALUE.`);
+      throw new Error(`Invalid assignment at entry ${index + 1}. Expected KEY=VALUE.`);
     }
     const key = normalizedEntry.slice(0, separatorIndex).trim();
     if (!key) {
-      throw new Error(`Invalid --env entry: ${entry}. Expected KEY=VALUE.`);
+      throw new Error(`Invalid assignment at entry ${index + 1}. Expected KEY=VALUE.`);
     }
     parsed[key] = normalizedEntry.slice(separatorIndex + 1);
   }
@@ -179,7 +179,7 @@ export function parseEnvAssignments(entries: string[] | undefined): Record<strin
 
 export function parseEnvFileText(text: string): Record<string, string> {
   const parsed: Record<string, string> = {};
-  for (const rawLine of text.split(/\r?\n/)) {
+  for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) {
       continue;
@@ -187,12 +187,12 @@ export function parseEnvFileText(text: string): Record<string, string> {
 
     const separatorIndex = line.indexOf('=');
     if (separatorIndex <= 0) {
-      throw new Error(`Invalid env file entry: ${rawLine}. Expected KEY=VALUE.`);
+      throw new Error(`Invalid env file entry at line ${index + 1}. Expected KEY=VALUE.`);
     }
 
     const key = line.slice(0, separatorIndex).trim();
     if (!key) {
-      throw new Error(`Invalid env file entry: ${rawLine}. Expected KEY=VALUE.`);
+      throw new Error(`Invalid env file entry at line ${index + 1}. Expected KEY=VALUE.`);
     }
 
     parsed[key] = line.slice(separatorIndex + 1);
@@ -271,13 +271,6 @@ async function readStdinText(): Promise<string | undefined> {
   return normalizeCliValue(raw);
 }
 
-type AgentConfigOutput = Omit<AgentConfigMeta, 'cliType'>;
-
-function toAgentConfigOutput(config: AgentConfigMeta): AgentConfigOutput {
-  const { cliType: _cliType, ...rest } = config;
-  return rest;
-}
-
 type RefreshCapabilitiesOutput = Omit<
   z.infer<typeof MachineAcpCapabilitiesRefreshResponseSchema>,
   'cliType'
@@ -290,21 +283,18 @@ function toRefreshCapabilitiesOutput(
   return rest;
 }
 
-function printHumanAgentConfig(config: AgentConfigMeta): void {
+function printHumanAgentConfig(config: AgentConfigOutput): void {
   console.log(`id: ${config.id}`);
   console.log(`name: ${config.name}`);
   console.log(`agentType: ${config.agentType}`);
   console.log(`description: ${normalizeCliValue(config.description) ?? '-'}`);
   console.log(`prompt: ${normalizeCliValue(config.prompt) ?? '-'}`);
-  const envEntries = Object.entries(config.env).sort(([left], [right]) =>
-    left.localeCompare(right)
-  );
-  if (envEntries.length === 0) {
+  if (config.envKeys.length === 0) {
     console.log('env: -');
   } else {
     console.log('env:');
-    for (const [key, value] of envEntries) {
-      console.log(`  ${key}=${value}`);
+    for (const key of config.envKeys) {
+      console.log(`  ${key}=${config.env ? config.env[key] : '[configured]'}`);
     }
   }
 
@@ -443,68 +433,16 @@ function buildTitleGenerationConfig(options: {
   return { configOptionValues };
 }
 
-const agentConfigListCommand = new Command('list')
-  .description('List agent configs in a workspace')
-  .option('--workspace <selector>', 'Target workspace id, slug, or name')
-  .option('--machine <idOrName>', 'Only include configs for one machine')
-  .option('--json', 'Print JSON output')
-  .option('--debug', 'Enable debug output')
-  .action(async (options: AgentConfigListOptions) => {
-    await runOneShotCommand('agent-config', options, async () => {
-      const auth = getAuthContextOrThrow('agent-config');
-      const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
-
-      await withWorkspaceManager(auth, workspace, 'agent-config', async (manager) => {
-        const machineSelector = normalizeCliValue(options.machine);
-        let machineId: MachineId | undefined;
-        if (machineSelector) {
-          const machine = resolveMachineOrThrow(await listMachineMetasForWorkspace(manager), {
-            selector: machineSelector,
-            authMachineId: auth.machineId,
-          });
-          machineId = machine.id;
-        }
-        const configs = (
-          await listAgentConfigsForWorkspace(manager, workspace.id as WorkspaceId)
-        ).filter((config) => machineId === undefined || config.machineId === machineId);
-
-        if (options.json) {
-          printJson({
-            ok: true,
-            workspaceId: workspace.id,
-            ...(machineId ? { machineId } : {}),
-            agentConfigs: configs.map(toAgentConfigOutput),
-          });
-          return;
-        }
-
-        if (configs.length === 0) {
-          console.log('No agent configs found.');
-          return;
-        }
-
-        console.log(
-          renderTerminalTable(
-            [
-              { header: 'ID' },
-              { header: 'Name' },
-              { header: 'Agent Type' },
-              { header: 'Description' },
-            ],
-            configs.map((config) => [config.id, config.name, config.agentType, config.description])
-          )
-        );
-      });
-    });
-  });
+const agentConfigListCommand = discoveryListCommand('agent_config');
 
 const agentConfigShowCommand = new Command('show')
-  .description('Show an agent config')
+  .description('Show an agent config; environment values are hidden by default')
+  .option('--show-secrets', 'Include raw environment values in output; may expose credentials')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option('--json', 'Print JSON output')
   .option('--debug', 'Enable debug output')
   .argument('[idOrName]', 'Agent config id or name; falls back to LODY_AGENT_CONFIG_ID')
-  .action(async (selector: string | undefined, options: AgentConfigCommandOptions) => {
+  .action(async (selector: string | undefined, options: AgentConfigShowOptions) => {
     await runOneShotCommand('agent-config', options, async () => {
       const auth = getAuthContextOrThrow('agent-config');
       const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
@@ -518,16 +456,17 @@ const agentConfigShowCommand = new Command('show')
           }
         );
 
+        const output = toAgentConfigOutput(config, options.showSecrets === true);
         if (options.json) {
           printJson({
             ok: true,
             workspaceId: workspace.id,
-            agentConfig: toAgentConfigOutput(config),
+            agentConfig: output,
           });
           return;
         }
 
-        printHumanAgentConfig(config);
+        printHumanAgentConfig(output);
       });
     });
   });
@@ -580,6 +519,11 @@ const agentConfigRefreshCapabilitiesCommand = new Command('refresh-capabilities'
             machineId: machine.id,
             workspaceId: workspace.id as WorkspaceId,
             configId: config.id,
+            // This command exists to pick up changes Lody cannot see in the launch
+            // inputs, so it must start the agent instead of accepting the stored
+            // entry. Negotiated because the CLI binary can be newer than the
+            // running daemon, which would reject an unknown field outright.
+            ...negotiatedAcpCapabilitiesRefreshForce(machine, true),
           })
         );
 
@@ -689,7 +633,16 @@ const agentConfigCreateCommand = new Command('create')
           printJson({
             ok: true,
             workspaceId: workspace.id,
-            agentConfig: toAgentConfigOutput(config),
+            agentConfigId: config.id,
+            changedFields: [
+              'name',
+              'agentType',
+              'machineId',
+              'env',
+              ...(config.description !== undefined ? ['description'] : []),
+              ...(config.prompt !== undefined ? ['prompt'] : []),
+              ...(config.titleGeneration !== undefined ? ['titleGeneration'] : []),
+            ],
           });
           return;
         }
@@ -801,7 +754,14 @@ const agentConfigUpdateCommand = new Command('update')
           printJson({
             ok: true,
             workspaceId: workspace.id,
-            agentConfig: toAgentConfigOutput(nextConfig),
+            agentConfigId: nextConfig.id,
+            changedFields: [
+              ...(requestedNameUpdate ? ['name'] : []),
+              ...(requestedDescriptionUpdate ? ['description'] : []),
+              ...(requestedEnvUpdate ? ['env'] : []),
+              ...(requestedPromptUpdate ? ['prompt'] : []),
+              ...(requestedTitleUpdate ? ['titleGeneration'] : []),
+            ],
           });
           return;
         }
@@ -851,6 +811,7 @@ const agentConfigDeleteCommand = new Command('delete')
 export const agentConfigCommand = new Command('agent-config')
   .description('Manage agent configs')
   .addCommand(agentConfigListCommand)
+  .addCommand(discoveryGetCommand('agent_config'))
   .addCommand(agentConfigShowCommand)
   .addCommand(agentConfigRefreshCapabilitiesCommand)
   .addCommand(agentConfigCreateCommand)

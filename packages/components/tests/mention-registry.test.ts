@@ -1,18 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { TFunction } from 'i18next';
+import type { PromptShortcutIndexEntry } from '@lody/shared/prompt-shortcuts';
 
 import {
   buildCommandCandidates,
   buildFileCandidates,
   buildIssuePrCandidates,
   buildMentionFileIndex,
+  buildSkillCandidates,
   getCategoryNavigateText,
+  getMentionViewCandidates,
   selectMentionMenuView,
   selectMentionMenuViewForTrigger,
   toFileCandidate,
   toIssuePrCandidate,
+  toSessionCandidate,
   type MentionCandidate,
   type MentionCategory,
 } from '../src/components/mentions/mention-registry';
+import type { SessionMentionItem } from '../src/components/mentions/mention-session-source';
+import { buildSkillMentionItems } from '../src/components/mentions/mention-skill-source';
+import { rankSlashMatch } from '../src/lib/command-slash-search';
+import { selectPromptShortcutCandidates } from '../src/components/mentions/mention-prompt-shortcut-source';
 
 function makeCandidate(value: string): MentionCandidate {
   return {
@@ -150,6 +159,52 @@ describe('selectMentionMenuView', () => {
     ).toEqual(['/review', '@review-template']);
   });
 
+  it.each(['/', '、'])('ranks typed %s results across command sources', (trigger) => {
+    const shortcut: MentionCategory = {
+      id: 'prompt_shortcut',
+      namespace: 'shortcut',
+      directTrigger: '/',
+      label: 'Prompt Shortcuts',
+      icon: 'prompt_shortcut',
+      status: 'ready',
+      getCandidates: () =>
+        ['create-intro-video', 'videoer', 'video'].map((name) => ({
+          value: `prompt-shortcut:${name}`,
+          label: name,
+          insertText: `/${name}`,
+          kind: 'prompt_shortcut' as const,
+          icon: 'prompt_shortcut' as const,
+          title: `/${name}`,
+          disabled: name === 'video',
+          slashRank: rankSlashMatch({ token: name }, 'video')!,
+        })),
+    };
+    const command: MentionCategory = {
+      id: 'command',
+      namespace: 'cmd',
+      directTrigger: '/',
+      label: 'Agent Commands',
+      icon: 'command',
+      status: 'ready',
+      getCandidates: (term, limit) =>
+        buildCommandCandidates([{ name: 'video', description: 'Record a video' }], term, limit),
+    };
+
+    const view = selectMentionMenuViewForTrigger([shortcut, command], trigger, 'video');
+    if (view?.level !== 'aggregate') throw new Error('expected aggregate');
+    expect(getMentionViewCandidates(view).map((candidate) => candidate.insertText)).toEqual([
+      '/video',
+      '/videoer',
+      '/create-intro-video',
+      '/video',
+    ]);
+
+    const bare = selectMentionMenuViewForTrigger([shortcut, command], trigger, '');
+    if (bare?.level !== 'aggregate') throw new Error('expected aggregate');
+    expect(bare.rankedCandidates).toBeUndefined();
+    expect(bare.groups.map((group) => group.category.id)).toEqual(['prompt_shortcut', 'command']);
+  });
+
   it('opens skills directly from the retained $ trigger', () => {
     const skill = makeCategory('skill', 'skill', 'Skills', ['review']);
     skill.directTrigger = '$';
@@ -160,6 +215,65 @@ describe('selectMentionMenuView', () => {
     if (view?.level !== 'category') throw new Error('expected category');
     expect(view.category.id).toBe('skill');
     expect(view.candidates.map((entry) => entry.value)).toEqual(['review']);
+  });
+});
+
+describe('skill category filtering', () => {
+  // A machine's system skills: every path runs through `~/.codex/skills/.system`.
+  const items = buildSkillMentionItems([
+    {
+      scope: 'system',
+      dir: '~/.codex/skills/.system',
+      skills: [
+        'imagegen',
+        'openai-docs',
+        'plugin-creator',
+        'review-agent',
+        'skill-creator',
+        'skill-installer',
+      ].map((name) => ({
+        id: name,
+        name,
+        relativePath: `~/.codex/skills/.system/${name}/SKILL.md`,
+        isSymlink: false,
+      })),
+    },
+  ]);
+  const labels = {
+    author: 'Author',
+    path: 'Path',
+    linksTo: 'Links to',
+    symlink: 'symlink',
+    scope: { project: 'Project', global: 'Global', system: 'System' },
+  };
+  const skills: MentionCategory = {
+    id: 'skill',
+    namespace: 'skill',
+    directTrigger: '$',
+    label: 'Skills',
+    icon: 'skill',
+    status: 'ready',
+    getCandidates: (term, limit) => buildSkillCandidates(items, term, null, labels, limit),
+  };
+
+  it('answers a term that names no skill with no rows, not the whole list', () => {
+    // `sy` is in `.system`, which every one of these paths shares.
+    for (const view of [
+      selectMentionMenuView([skills], 'skill:sy'),
+      selectMentionMenuViewForTrigger([skills], '$', 'sy'),
+    ]) {
+      if (view?.level !== 'category') throw new Error('expected the skill level');
+      expect(view.candidates).toEqual([]);
+    }
+  });
+
+  it('matches the skill, not the skills directory around it', () => {
+    const view = selectMentionMenuView([skills], 'skill:skill');
+    if (view.level !== 'category') throw new Error('expected the skill level');
+    expect(view.candidates.map((candidate) => candidate.title)).toEqual([
+      'skill-creator',
+      'skill-installer',
+    ]);
   });
 });
 
@@ -174,6 +288,25 @@ describe('candidate insertion semantics', () => {
     expect(candidate.navigateText).toBe('@src/components/');
     expect(candidate.insertText).toBe('@src/components');
     expect(candidate.kind).toBe('dir');
+    // The row reads the folder's own name, then where it sits.
+    expect(candidate.title).toBe('components/');
+    expect(candidate.hint).toBe('src');
+  });
+
+  it('shows a path as its name then its folder, while committing the whole path', () => {
+    const nested = toFileCandidate({
+      kind: 'file',
+      path: 'src/ui/mention/mention-root.tsx',
+      token: 'src/ui/mention/mention-root.tsx',
+    });
+    expect(nested.title).toBe('mention-root.tsx');
+    expect(nested.hint).toBe('src/ui/mention');
+    expect(nested.insertText).toBe('@src/ui/mention/mention-root.tsx');
+
+    // A file at the root has no folder to name.
+    const top = toFileCandidate({ kind: 'file', path: 'README.md', token: 'README.md' });
+    expect(top.title).toBe('README.md');
+    expect(top.hint).toBeUndefined();
   });
 
   it('commits a file with no navigation step', () => {
@@ -197,10 +330,119 @@ describe('candidate insertion semantics', () => {
     expect(candidate.title).toBe('Broken menu');
   });
 
+  it("carries a session's last activity for the row to state", () => {
+    const candidate = toSessionCandidate(
+      {
+        slug: 'parser-work',
+        sessionId: 'session-1' as SessionMentionItem['sessionId'],
+        title: 'Parser work',
+        activityAt: 1_700_000_000_000,
+        projectKey: 'chat',
+      },
+      { untitled: 'Untitled session' }
+    );
+    expect(candidate.activityAt).toBe(1_700_000_000_000);
+
+    const unknown = toSessionCandidate(
+      {
+        slug: 'x',
+        sessionId: 'session-2' as SessionMentionItem['sessionId'],
+        title: '',
+        activityAt: 0,
+        projectKey: 'chat',
+      },
+      { untitled: 'Untitled session' }
+    );
+    // No timestamp is no time at all, not "56y".
+    expect(unknown.activityAt).toBeUndefined();
+    expect(unknown.title).toBe('Untitled session');
+  });
+
   it('keeps the slash form for commands', () => {
     const [candidate] = buildCommandCandidates([{ name: 'review', description: 'Review' }], '');
 
     expect(candidate?.insertText).toBe('/review');
+    // The description rides on the name's line rather than a second one.
+    expect(candidate?.hint).toBe('Review');
+    expect(candidate?.subtitle).toBeUndefined();
+  });
+
+  it('keeps command-name matches ahead of description-only matches', () => {
+    const commands = [
+      { name: 'clip', description: 'Video summary' },
+      { name: 'v-i-d-e-o', description: '' },
+      { name: 'myvideotool', description: '' },
+      { name: 'create-intro-video', description: '' },
+      { name: 'videoer', description: '' },
+      { name: 'video', description: '' },
+    ];
+    expect(buildCommandCandidates(commands, 'video').map((entry) => entry.insertText)).toEqual([
+      '/video',
+      '/videoer',
+      '/create-intro-video',
+      '/myvideotool',
+      '/v-i-d-e-o',
+      '/clip',
+    ]);
+  });
+});
+
+describe('Prompt Shortcut discovery', () => {
+  const translate = ((_: string, fallback: string) => fallback) as TFunction;
+  const context = { workspaceId: 'workspace-1', userId: 'user-1', scope: {} };
+
+  function shortcut(
+    slug: string,
+    overrides: Partial<PromptShortcutIndexEntry> = {}
+  ): PromptShortcutIndexEntry {
+    return {
+      v: 1,
+      id: slug,
+      workspaceId: context.workspaceId,
+      ownerUserId: context.userId,
+      visibility: 'private',
+      name: slug,
+      slug,
+      scope: {},
+      revision: 'revision-1',
+      createdAt: 0,
+      updatedAt: 0,
+      bodyDocId: `body-${slug}`,
+      dependencySummary: [],
+      ...overrides,
+    };
+  }
+
+  it('ranks visible, executable shortcuts while retaining only an unavailable exact match', () => {
+    const entries = [
+      shortcut('create-intro-video'),
+      shortcut('videoer'),
+      shortcut('video', { scope: { machineId: 'another-machine' } }),
+      shortcut('video-remote', { scope: { machineId: 'another-machine' } }),
+      shortcut('video-private', { ownerUserId: 'another-user' }),
+      shortcut('video-foreign', { workspaceId: 'another-workspace' }),
+    ];
+
+    const candidates = selectPromptShortcutCandidates({ entries, context }, 'VIDEO', translate);
+
+    expect(candidates.map((candidate) => candidate.insertText)).toEqual([
+      '/videoer',
+      '/create-intro-video',
+      '/video',
+    ]);
+    expect(candidates.map((candidate) => candidate.disabled)).toEqual([false, false, true]);
+    expect(candidates[2]?.disabledReason).toBe('Requires a different machine.');
+  });
+
+  it('ranks before applying a source limit and preserves bare-trigger alphabetical order', () => {
+    const entries = [shortcut('create-intro-video'), shortcut('videoer')];
+    const input = { entries, context };
+
+    expect(selectPromptShortcutCandidates(input, 'video', translate, 1)[0]?.label).toBe('videoer');
+    expect(selectPromptShortcutCandidates(input, '', translate).map((item) => item.label)).toEqual([
+      'create-intro-video',
+      'videoer',
+    ]);
   });
 });
 

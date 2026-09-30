@@ -22,6 +22,7 @@ const bundledNodeBuiltins = new Set([
 ]);
 
 const explicitlyExternal = new Set([
+  '@napi-rs/keyring',
   'better-sqlite3',
   '@lydell/node-pty',
   '@sqlite.org/sqlite-wasm',
@@ -73,6 +74,7 @@ export default defineConfig({
       // better-sqlite3 external, just like the main CLI entry.
       input: {
         index: path.resolve(__dirname, 'src/index.ts'),
+        'cloudflared-worker': path.resolve(__dirname, 'src/preview/cloudflared-worker.ts'),
         'codex-acp': path.resolve(__dirname, 'src/codex-acp-entry.ts'),
         'claude-acp': path.resolve(__dirname, 'src/claude-acp-entry.ts'),
         'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),

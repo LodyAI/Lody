@@ -63,6 +63,35 @@ export function AppCommands() {
     run: () => toggleZenLayoutMode(),
   });
 
+  useCommand({
+    id: 'schedules.open',
+    title: t('commands.schedules.open', 'Open Schedules'),
+    category: 'Workspace',
+    keybindings: [],
+    when: () => !!workspaceSlug,
+    run: () => {
+      if (workspaceSlug)
+        void router.navigate({
+          to: '/$workspaceName/schedules',
+          params: { workspaceName: workspaceSlug },
+        });
+    },
+  });
+  useCommand({
+    id: 'schedules.new',
+    title: t('commands.schedules.new', 'New Schedule'),
+    category: 'Workspace',
+    keybindings: [],
+    when: () => !!workspaceSlug,
+    run: () => {
+      if (workspaceSlug)
+        void router.navigate({
+          to: '/$workspaceName/schedules/$scheduleId',
+          params: { workspaceName: workspaceSlug, scheduleId: 'new' },
+        });
+    },
+  });
+
   // ⌘, toggles settings: open from anywhere (remembering where we came from so the
   // close can return there), or — when already on a settings page — close back to it.
   useCommand({

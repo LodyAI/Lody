@@ -440,14 +440,14 @@ export function useCodeCollabSaveText(
   }, [commitLiveStatus, commitStatus]);
 
   useEffect(() => {
+    const isDirty = () =>
+      pendingTextRef.current !== null ||
+      statusRef.current.kind === 'saving' ||
+      statusRef.current.kind === 'conflict_pending' ||
+      statusRef.current.kind === 'conflict' ||
+      statusRef.current.kind === 'error';
     const handleBeforeUnload = (event: BeforeUnloadEvent): void => {
-      const dirty =
-        pendingTextRef.current !== null ||
-        statusRef.current.kind === 'saving' ||
-        statusRef.current.kind === 'conflict_pending' ||
-        statusRef.current.kind === 'conflict' ||
-        statusRef.current.kind === 'error';
-      if (!dirty) {
+      if (!isDirty()) {
         return;
       }
       event.preventDefault();

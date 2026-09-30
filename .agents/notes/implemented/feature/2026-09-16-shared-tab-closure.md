@@ -46,3 +46,6 @@ Owner follow-up (2026-09-19): a successful close shows no toast, whether this or
 another client closed the tab; the tab leaving the strip is the feedback. The
 "This conversation tab was closed" info toast added in #746 is removed. Close
 failures still surface an error toast.
+
+The legacy-archive coupling above (archives count as closed, reopening restores) is
+superseded by [orthogonal archive and closure](../bug-fix/2026-09-24-archive-independent-of-tab-close.md).

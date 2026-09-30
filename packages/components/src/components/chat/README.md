@@ -19,6 +19,7 @@ reasoning behind those rules.
 | Submission             | [`submission/`](submission/AGENTS.md)                                                                                                                                                    | Composer submission lifecycle and local rules.                                  |
 | Draft persistence      | [`../../atoms/local-storage-cache.ts`](../../atoms/local-storage-cache.ts), [`../../atoms/chat-landing-draft.ts`](../../atoms/chat-landing-draft.ts)                                     | Durable text and in-memory attachment state, scoped by workspace.               |
 | Attachment uploads     | [`../../hooks/use-chat-landing-image-draft.ts`](../../hooks/use-chat-landing-image-draft.ts), [`../../hooks/use-chat-landing-file-draft.ts`](../../hooks/use-chat-landing-file-draft.ts) | Image and file upload state, including Electron's local transport.              |
+| Held sends             | [`session-pending-messages.tsx`](session-pending-messages.tsx), [`session-pending-sends-host.tsx`](session-pending-sends-host.tsx) | In-memory sends awaiting attachments: pending rows, sidebar status, leave prompt. |
 
 ## Why the rules read the way they do
 
@@ -30,6 +31,9 @@ reasoning behind those rules.
   the menu mountable while search still ranks over everything. The project
   picker uses `DropdownMenuSearchInput` for mount-owned autofocus and to route
   typing back to search after pointer movement focuses a project row.
+- **Project context material.** The selected project and its Private segment use
+  the same raised tokens as the machine and worktree controls above the composer.
+  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-09-27-project-context-pill-elevation.md).
 - **Effective project access.** A project is only really shared when its machine
   is too, which is why the badge combines both bits instead of reading the raw
   project bit.

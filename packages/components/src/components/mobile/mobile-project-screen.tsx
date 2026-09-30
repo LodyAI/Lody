@@ -13,7 +13,7 @@ import {
   Settings as SettingsIcon,
   X,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { MdChat, MdSettings } from 'react-icons/md';
 import { FaRegFileCode } from 'react-icons/fa';
 import type { IconType } from 'react-icons';
@@ -22,7 +22,7 @@ import { isNativeAppShell } from '@/lib/native-platform';
 import { consumeMobileBackNavigation } from '@/lib/mobile-back-navigation';
 import { cn } from '@/lib/utils';
 import { useLongPress } from '@/hooks/use-long-press';
-import { Checkbox } from '@/ui/checkbox';
+import { Checkbox } from '@lody/ui/checkbox';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import {
@@ -564,7 +564,7 @@ export function ConversationRow({
           <Checkbox
             checked={isSelected}
             tabIndex={-1}
-            className="pointer-events-none h-4 w-4"
+            className="pointer-events-none"
             aria-hidden="true"
           />
         ) : (

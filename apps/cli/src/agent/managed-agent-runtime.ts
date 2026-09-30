@@ -27,6 +27,7 @@ import grokPackageJson from '../../../../packages/acp-extension-grok/package.jso
 import grokRuntimeManifestJson from '../../../../packages/acp-extension-grok/runtime-manifest.json';
 import claudeSdkManifestJson from '../../node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
 import claudeSdkPackageJson from '../../node_modules/@anthropic-ai/claude-agent-sdk/package.json';
+import grokPinsJson from './grok-runtime-manifest.json';
 import claudeRuntimeManifestJson from './claude-runtime-manifest.json';
 import codexRuntimeManifestJson from './codex-runtime-manifest.json';
 import kimiRuntimeManifestJson from './kimi-runtime-manifest.json';
@@ -353,7 +354,12 @@ export const PI_EXTENSIONS_SUPPORTED =
   'piExtensionsProtocolVersion' in piRuntimeManifestJson &&
   piRuntimeManifestJson.piExtensionsProtocolVersion === PI_EXTENSIONS_PROTOCOL_VERSION;
 export const GROK_ACP_ADAPTER_VERSION = grokPackageJson.version;
-export const GROK_BUILD_RUNTIME_VERSION = grokRuntimeManifestJson.officialRuntime.version;
+export const GROK_BUILD_RUNTIME_VERSION = grokPinsJson.version;
+if (GROK_BUILD_RUNTIME_VERSION !== grokRuntimeManifestJson.officialRuntime.version) {
+  throw new Error(
+    `Grok runtime manifest ${GROK_BUILD_RUNTIME_VERSION} does not match official runtime ${grokRuntimeManifestJson.officialRuntime.version}. Run pnpm mirror:agent-runtimes -- --runtime grok-build to refresh it.`
+  );
+}
 export const KIMI_CODE_MIN_NODE_VERSION = resolveMinimumNodeVersion(
   'Kimi managed runtime manifest',
   `>=${kimiRuntimeManifestJson.minNodeVersion}`
@@ -391,6 +397,15 @@ function createClaudeRuntimeArchive(platform: ClaudeRuntimePlatform): RuntimeArc
     stripComponents: 1,
     executableSha256: executable.checksum,
     executableSize: executable.size,
+  };
+}
+
+function createGrokRuntimeArchive(platform: keyof typeof grokPinsJson.artifacts): RuntimeArchive {
+  const { sourceIntegrity: _sourceIntegrity, ...artifact } = grokPinsJson.artifacts[platform];
+  return {
+    ...artifact,
+    compression: 'zstd',
+    cmd: platform.startsWith('win32-') ? 'grok.exe' : 'grok',
   };
 }
 
@@ -449,60 +464,12 @@ const RUNTIMES: Record<ManagedRuntimeName, RuntimeDefinition> = {
     name: 'grok-build',
     version: GROK_BUILD_RUNTIME_VERSION,
     platforms: {
-      'darwin-arm64': {
-        fileName: `xai-official-grok-darwin-arm64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: '15c99e54532904f452a58717f1cf19de94030c56b904976b351356bd709068f2',
-        size: 51521118,
-        compression: 'zstd',
-        cmd: 'grok',
-        executableSha256: '3f2aef9618191a2c60d18a5044fa462c9c77bdc4187b02ed716b0394e8d4fef2',
-        executableSize: 145308720,
-      },
-      'darwin-x64': {
-        fileName: `xai-official-grok-darwin-x64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: 'dacf51b674037e273faf1b75b7be54667cf47a84a827958bf813c9fb25fa3f4e',
-        size: 56521318,
-        compression: 'zstd',
-        cmd: 'grok',
-        executableSha256: 'ccac66f3a6778a39f3a19e95c82254b2482349a6ded68ed8d2f8df5c26e2d939',
-        executableSize: 162677920,
-      },
-      'linux-arm64': {
-        fileName: `xai-official-grok-linux-arm64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: 'd544e3452ec8a3d0dd3ff9d852350828aa4935dd101ffd8f2481521a9acbb55b',
-        size: 53769611,
-        compression: 'zstd',
-        cmd: 'grok',
-        executableSha256: 'a16d26cf06892ebb3eca9a702c65e031a053431ed4dde3b23bebc58a92b6117f',
-        executableSize: 138263464,
-      },
-      'linux-x64': {
-        fileName: `xai-official-grok-linux-x64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: '129b5ca9646ae014fd572f7ee4ebe812d9881549a4fb0a705c8aad59b2f1cb45',
-        size: 56793870,
-        compression: 'zstd',
-        cmd: 'grok',
-        executableSha256: '92c997dfd109c0672d40d5ae6fbd15835d53ffaf12cf9ea124d22aaef3ff23fc',
-        executableSize: 165587968,
-      },
-      'win32-arm64': {
-        fileName: `xai-official-grok-win32-arm64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: '5742bad3f4f52b7011180f5b7b7137e1f6887336486f6ecc3cc9cf96dcf1488c',
-        size: 50197344,
-        compression: 'zstd',
-        cmd: 'grok.exe',
-        executableSha256: '86cb5aac59cfd21f26b77e1caa6b804b9058a8ce1ea9d072631df5d06f62ae15',
-        executableSize: 132932096,
-      },
-      'win32-x64': {
-        fileName: `xai-official-grok-win32-x64-${GROK_BUILD_RUNTIME_VERSION}.tar.zst`,
-        sha256: 'f7a2a162c64dbf4a1aa1d505bb12967e6c97c9974a0a9eecbd4eee318f468772',
-        size: 53535773,
-        compression: 'zstd',
-        cmd: 'grok.exe',
-        executableSha256: 'be64017f7f5f5b85cd10b59eebcb596af8d3dcde077aad08aa8eae8defdc5e2a',
-        executableSize: 153720832,
-      },
+      'darwin-arm64': createGrokRuntimeArchive('darwin-arm64'),
+      'darwin-x64': createGrokRuntimeArchive('darwin-x64'),
+      'linux-arm64': createGrokRuntimeArchive('linux-arm64'),
+      'linux-x64': createGrokRuntimeArchive('linux-x64'),
+      'win32-arm64': createGrokRuntimeArchive('win32-arm64'),
+      'win32-x64': createGrokRuntimeArchive('win32-x64'),
     },
   },
 };

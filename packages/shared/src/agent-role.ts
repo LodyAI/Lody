@@ -43,6 +43,8 @@ export type AgentRole = {
   visibility: AgentRoleVisibility;
 
   name: string;
+  /** Short guidance for other agents deciding when to invoke this Role. */
+  description?: string;
   /** Optional single glyph shown before the name wherever the Role is listed. */
   emoji?: string;
 
@@ -76,6 +78,12 @@ export const isAgentRoleVisibility = (value: unknown): value is AgentRoleVisibil
 /** Long enough to stay readable inline, short enough not to dominate a prompt. */
 export const AGENT_ROLE_MENTION_SLUG_MAX_LENGTH = 40;
 export const AGENT_ROLE_NAME_MAX_LENGTH = 60;
+export const AGENT_ROLE_DESCRIPTION_MAX_LENGTH = 140;
+
+export const normalizeAgentRoleDescription = (value: string | undefined): string =>
+  Array.from(value ?? '')
+    .slice(0, AGENT_ROLE_DESCRIPTION_MAX_LENGTH)
+    .join('');
 /**
  * A few code points: one emoji, including a ZWJ sequence or a skin-tone
  * modifier, without becoming a second name field.
@@ -243,6 +251,7 @@ export const isAgentRole = (value: unknown): value is AgentRole => {
     return false;
   }
   if (value.emoji !== undefined && typeof value.emoji !== 'string') return false;
+  if (value.description !== undefined && typeof value.description !== 'string') return false;
   if (value.promptPrefix !== undefined && typeof value.promptPrefix !== 'string') return false;
   if (value.runConfig !== undefined && !isRecord(value.runConfig)) return false;
   // A name that normalizes to nothing (only punctuation the token strips) has no
@@ -259,6 +268,7 @@ export const isAgentRole = (value: unknown): value is AgentRole => {
 export const normalizeAgentRole = (value: unknown): AgentRole | undefined => {
   if (!isAgentRole(value)) return undefined;
   const emoji = normalizeAgentRoleEmoji(value.emoji);
+  const description = normalizeAgentRoleDescription(value.description);
   const promptPrefix = value.promptPrefix?.trim();
   return {
     v: AGENT_ROLE_VERSION,
@@ -266,6 +276,7 @@ export const normalizeAgentRole = (value: unknown): AgentRole | undefined => {
     ownerUserId: value.ownerUserId.trim(),
     visibility: value.visibility,
     name: value.name.trim(),
+    ...(description ? { description } : {}),
     ...(emoji ? { emoji } : {}),
     machineId: value.machineId.trim() as MachineId,
     agentConfigId: value.agentConfigId.trim() as AgentConfigId,
@@ -285,6 +296,7 @@ export const normalizeAgentRole = (value: unknown): AgentRole | undefined => {
  */
 export const isAgentRoleContentEqual = (left: AgentRole, right: AgentRole): boolean =>
   left.name === right.name &&
+  (left.description ?? '') === (right.description ?? '') &&
   (left.emoji ?? '') === (right.emoji ?? '') &&
   left.visibility === right.visibility &&
   left.machineId === right.machineId &&
@@ -364,51 +376,3 @@ export const resolveAgentRoleAvailability = (
   }
   return { kind: 'available' };
 };
-
-// ---------------------------------------------------------------------------
-// Work-context scope
-// ---------------------------------------------------------------------------
-
-/**
- * Where the mentioned Role is allowed to run, given what the composer is
- * attached to.
- *
- * - `machine`: a Local Project, or a child Session that shares this physical
- *   workspace — the target has to be the same machine.
- * - `authorized_machines`: plain chat or a GitHub project whose target Session
- *   can clone the repo itself on another authorized machine.
- */
-export type AgentRoleMentionScope =
-  | { kind: 'machine'; machineId: MachineId | null }
-  | { kind: 'authorized_machines'; machineIds: ReadonlySet<MachineId> };
-
-export const isAgentRoleInMentionScope = (
-  role: AgentRole,
-  scope: AgentRoleMentionScope
-): boolean =>
-  scope.kind === 'machine'
-    ? scope.machineId !== null && role.machineId === scope.machineId
-    : scope.machineIds.has(role.machineId);
-
-/**
- * The Roles a composer may execute: readable by this user, executable right now,
- * and inside the current work context.
- *
- * Order is visibility- and scope-independent so the menu stays stable: name
- * first, id as the tie-break.
- */
-export const selectMentionableAgentRoles = (
-  roles: readonly AgentRole[],
-  options: {
-    currentUserId: string | null | undefined;
-    scope: AgentRoleMentionScope;
-    getAvailability: (role: AgentRole) => AgentRoleAvailability;
-  }
-): AgentRole[] =>
-  listAccessibleAgentRoles(roles, options.currentUserId)
-    .filter(
-      (role) =>
-        isAgentRoleInMentionScope(role, options.scope) &&
-        options.getAvailability(role).kind === 'available'
-    )
-    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));

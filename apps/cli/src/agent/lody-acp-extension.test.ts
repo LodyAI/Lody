@@ -3,35 +3,40 @@ import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 import type { RequestPermissionRequest, SessionConfigOption } from '@agentclientprotocol/sdk';
 import {
   getBuiltinToolPermissionOutcome,
+  parseLodyExtensionCapabilities,
   parseRateLimitsSnapshot,
   parseLodyExtensionMessage,
 } from './lody-acp-extension';
 
 describe('Core usage accounting boundary', () => {
-  it('scopes only marked Codex turn snapshots and keeps their native routing session unchanged', () => {
+  it('scopes Core-marked snapshots for any provider and keeps the native routing session', () => {
     const usage = { inputTokens: 2000, outputTokens: 0, cacheReadInputTokens: 0 };
-    const params = {
-      sessionId: 'native',
-      usage,
-      modelUsage: { 'model-b': usage },
-      _meta: { codex: { usageTurnId: 'turn-b' } },
-    };
-    const parse = (provider: string, value = params) =>
+    const update = { sessionId: 'native', usage, modelUsage: { 'model-b': usage } };
+    const parse = (provider: string, _meta: Record<string, unknown>) =>
       parseLodyExtensionMessage({
         method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
-        params: value,
+        params: { ...update, _meta },
         sessionId: 'native',
         provider,
       });
-    expect(parse('codex')).toEqual({
+    for (const provider of ['claude', 'codex', 'kimi']) {
+      expect(parse(provider, { lody: { usageScopeId: 'result/1' } })).toEqual({
+        type: 'usage',
+        accountingId: 'native:scope:result%2F1',
+        update,
+      });
+    }
+    // Legacy Codex spelling maps to the same identity; other providers ignore it.
+    expect(parse('codex', { codex: { usageTurnId: 'turn-b' } })).toEqual({
       type: 'usage',
-      accountingId: 'native:turn:turn-b',
-      update: { sessionId: 'native', usage, modelUsage: { 'model-b': usage } },
+      accountingId: 'native:scope:turn-b',
+      update,
     });
-    expect(parse('claude')).toEqual({
+    expect(parse('claude', { codex: { usageTurnId: 'turn-b' } })).toEqual({
       type: 'usage',
-      update: { sessionId: 'native', usage, modelUsage: { 'model-b': usage } },
+      update,
     });
+    expect(parse('claude', { lody: { usageScopeId: '' } })).toEqual({ type: 'usage', update });
   });
   it.each(['codex', 'claude', 'kimi', 'grok', 'deepseek'] as const)(
     'preserves %s optional delta separately from cumulative totals and rejects invalid buckets',
@@ -174,5 +179,23 @@ describe('rate-limit window labels', () => {
         sessionId: 'synthetic-session',
       })
     ).toEqual({ type: 'rateLimits', snapshot });
+  });
+});
+
+describe('session title capability negotiation', () => {
+  it.each([undefined, null, true, { version: 2 }, { version: '1' }])(
+    'ignores unsupported title capability %j without losing other capabilities',
+    (sessionTitle) => {
+      const capabilities = parseLodyExtensionCapabilities({
+        lody: { sessionTitle, usage: { version: 1 } },
+      });
+      expect(capabilities.sessionTitle).toBeUndefined();
+      expect(capabilities.usage).toEqual({ version: 1 });
+    }
+  );
+  it('accepts title v1', () => {
+    expect(
+      parseLodyExtensionCapabilities({ lody: { sessionTitle: { version: 1 } } }).sessionTitle
+    ).toEqual({ version: 1 });
   });
 });

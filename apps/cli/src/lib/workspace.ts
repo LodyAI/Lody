@@ -236,6 +236,40 @@ export async function canUseMachineForCliToken(input: {
   }
 }
 
+// Convex's reply when a deploy predates a public function, so a newer CLI can
+// keep its older conservative check until the backend rolls out.
+const MISSING_PUBLIC_FUNCTION_ERROR = /Could not find (public )?function/;
+
+/**
+ * Delegated access: the token user (the executing machine's owner) and the
+ * requester must each be able to use the target. Returns `null` when the
+ * backend does not provide the query yet.
+ */
+export async function canDelegateMachineUseForCliToken(input: {
+  token: string;
+  workspaceId: string;
+  machineId: string;
+  requesterUserId: string;
+  localProjectId?: string;
+}): Promise<MachineAccessCheckResult | null> {
+  const client = createAuthConvexClient();
+  try {
+    const raw = await client.query(api.machines.canDelegateMachineUseFromCliToken, {
+      cliToken: input.token,
+      workspaceId: input.workspaceId,
+      machineId: input.machineId,
+      requesterUserId: input.requesterUserId,
+      ...(input.localProjectId !== undefined ? { localProjectId: input.localProjectId } : {}),
+    });
+    return MachineAccessCheckResultSchema.parse(raw);
+  } catch (error) {
+    if (error instanceof Error && MISSING_PUBLIC_FUNCTION_ERROR.test(error.message)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function canRequestMachineForCliToken(input: {
   token: string;
   workspaceId: string;

@@ -33,7 +33,7 @@ import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { lodyPresenceStatesAtom, lodyPresenceSyncStateAtom } from '../src/atoms/presence';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { SaveTextConflictError } from '../src/hooks/use-code-collab-save-text';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { writeTextToClipboard } from '../src/lib/clipboard';
 
 vi.mock('react-i18next', () => ({
@@ -206,7 +206,7 @@ async function render(node: ReactNode, options: RenderOptions = {}): Promise<HTM
     });
   }
   await act(async () => {
-    root?.render(createElement(Provider, { store }, createElement(TooltipProvider, null, node)));
+    root?.render(createElement(Provider, { store }, createElement(Tooltip.Provider, null, node)));
   });
   return container;
 }
@@ -217,7 +217,7 @@ async function rerender(node: ReactNode): Promise<void> {
   }
   await act(async () => {
     root?.render(
-      createElement(Provider, { store: currentStore }, createElement(TooltipProvider, null, node))
+      createElement(Provider, { store: currentStore }, createElement(Tooltip.Provider, null, node))
     );
   });
 }
@@ -1030,6 +1030,49 @@ describe('SessionFileContentView', () => {
       markdown
     );
     expect(view.querySelector('button[aria-label="Preview"]')).not.toBeNull();
+  });
+
+  it('loads document-relative remote images only after a click, while keeping the prose visible', async () => {
+    const provider = createFakeSessionFileProvider({
+      files: [
+        { path: 'docs/README.md', kind: 'text', sourceState: 'live-readonly' },
+        { path: 'images/chart.png', kind: 'binary', sourceState: 'live-readonly' },
+      ],
+      snapshots: {
+        'docs/README.md': {
+          kind: 'text',
+          text: '# Guide\n\n![Chart](../images/chart.png)\n\nEnd of document.',
+        },
+        'images/chart.png': { kind: 'binary', bytes: new Uint8Array([137, 80, 78, 71]) },
+      },
+    });
+    const paths: string[] = [];
+    const openFile = provider.openFile.bind(provider);
+    provider.openFile = async (path) => {
+      paths.push(path);
+      return openFile(path);
+    };
+    const view = await render(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'docs/README.md',
+        fileProvider: provider,
+      })
+    );
+    await flushMicrotasks();
+    expect(view.textContent).toContain('End of document.');
+    expect(view.querySelector('img')).toBeNull();
+    expect(paths).not.toContain('images/chart.png');
+    const load = [...view.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Load image'
+    );
+    expect(load).toBeDefined();
+    await act(async () => load!.click());
+    await flushMicrotasks();
+    expect(paths).toContain('images/chart.png');
+    expect(view.querySelector('img')?.src).toMatch(/^blob:/);
+    expect(view.textContent).toContain('End of document.');
   });
 
   it('copies the full Markdown source from the toolbar and external mobile request', async () => {

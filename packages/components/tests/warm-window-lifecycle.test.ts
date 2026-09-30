@@ -2,15 +2,32 @@ import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserWindow } from 'electron';
 
-const nativeState = vi.hoisted(() => ({ windows: new Map<number, unknown>(), nextId: 1 }));
+const nativeState = vi.hoisted(() => ({
+  windows: new Map<number, unknown>(),
+  nextId: 1,
+  unloadResponse: 0,
+  unloadPrompts: 0,
+}));
 // Resolve Electron from its owning app; components does not depend on Electron at runtime.
 vi.mock('../../../apps/electron/node_modules/electron', () => ({
   app: { focus() {} },
+  dialog: {
+    showMessageBoxSync: () => {
+      nativeState.unloadPrompts += 1;
+      return nativeState.unloadResponse;
+    },
+  },
   BrowserWindow: { fromId: (id: number) => nativeState.windows.get(id) ?? null },
 }));
 
 import {
+  closeProductWindowsForQuit,
+  installRendererUnloadConfirmation,
+} from '../../../apps/electron/src/main/renderer-unload';
+
+import {
   getMainWindow,
+  isAppQuitting,
   isWarmWindow,
   unmarkWarmWindow,
   productWindows,
@@ -49,18 +66,24 @@ class NativeWindow extends EventEmitter {
   loaded: { filePath: string; hash?: string } | string | null = null;
   target: unknown = null;
   throttling = true;
-  webContents = Object.assign(new EventEmitter(), {
+  readonly contents = Object.assign(new EventEmitter(), {
     getBackgroundThrottling: () => this.throttling,
     setBackgroundThrottling: (value: boolean) => {
       this.throttling = value;
     },
     id: this.id,
+    isDestroyed: () => this.destroyed,
     send: (_channel: string, target: unknown) => {
       // Navigation can trigger window lifecycle work; adoption must already be complete.
       expect(isWarmWindow(this.native)).toBe(_channel === 'app.prepareWindowTarget');
       this.target = target;
     },
   });
+  /** Like Electron, a destroyed window throws when its `webContents` is read. */
+  get webContents() {
+    if (this.destroyed) throw new TypeError('Object has been destroyed');
+    return this.contents;
+  }
   get native() {
     return this as unknown as BrowserWindow;
   }
@@ -80,9 +103,33 @@ class NativeWindow extends EventEmitter {
   focus() {
     this.focused = true;
   }
+  vetoUnload = false;
+  /** A hung renderer never answers `beforeunload`, so close() settles nothing. */
+  hung = false;
+  close() {
+    if (this.hung) return;
+    let prevented = false;
+    this.emit('close', {
+      preventDefault: () => {
+        prevented = true;
+      },
+    });
+    if (prevented) return;
+    if (this.vetoUnload) {
+      let overridden = false;
+      this.webContents.emit('will-prevent-unload', {
+        preventDefault: () => {
+          overridden = true;
+        },
+      });
+      if (!overridden) return;
+    }
+    this.destroy();
+  }
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.contents.emit('destroyed');
     this.emit('closed');
     nativeState.windows.delete(this.id);
   }
@@ -95,9 +142,16 @@ class NativeWindow extends EventEmitter {
 }
 
 vi.mock('../../../apps/electron/src/main/window', () => ({
-  adoptPreparedMainWindow: (window: BrowserWindow, target: { workspace: string; sessionId?: string }) => {
+  adoptPreparedMainWindow: (
+    window: BrowserWindow,
+    target: { workspace: string; sessionId?: string }
+  ) => {
     unmarkWarmWindow(window);
-    setReloadTarget(window, { type: 'file', filePath: '/synthetic/index.html', hash: getWindowTargetPath(target) });
+    setReloadTarget(window, {
+      type: 'file',
+      filePath: '/synthetic/index.html',
+      hash: getWindowTargetPath(target),
+    });
   },
   createWarmWindow: () => {
     const window = new NativeWindow();
@@ -116,6 +170,8 @@ vi.mock('../../../apps/electron/src/main/window', () => ({
 }));
 
 afterEach(() => {
+  nativeState.unloadResponse = 0;
+  nativeState.unloadPrompts = 0;
   setWindowWarmupEnabled(false);
   setAppQuitting(true);
   for (const window of productWindows) window.destroy();
@@ -173,7 +229,7 @@ describe('claimed warm window lifecycle', () => {
     expect(claimed.destroyed).toBe(false);
     expect(claimed.visible).toBe(false);
     expect(claimed.throttling).toBe(false);
-    handleWindowContentReady(original.webContents.id, target);
+    handleWindowContentReady(original.contents.id, target);
     handleWindowContentReady(claimed.webContents.id, { ...target, sessionId: 'other' });
     expect(claimed.visible).toBe(false);
     handleWindowContentReady(claimed.webContents.id, target);
@@ -202,13 +258,13 @@ describe('claimed warm window lifecycle', () => {
     presentWindowTarget(closed.native, target, { type: 'url', url: 'https://synthetic.test' });
     closed.destroy();
     vi.advanceTimersByTime(5000);
-    handleWindowContentReady(closed.webContents.id, target);
+    handleWindowContentReady(closed.contents.id, target);
     expect(closed.visible).toBe(false);
   });
 
   it.each([{ workspace: 'work', sessionId: 'session-1' }, { workspace: 'work' }])(
     'recovers the adopted target instead of reentering warm mode: %j',
-    (target) => {
+    async (target) => {
       const window = new NativeWindow();
       registerProductWindow(window.native, true);
       setReloadTarget(window.native, {
@@ -248,7 +304,7 @@ describe('macOS prepared targets', () => {
     registerProductWindow(source.native, false);
     setWindowWarmupEnabled(true);
     await vi.advanceTimersByTimeAsync(0);
-    const spare = [...nativeState.windows.values()].find(w => w !== source) as NativeWindow;
+    const spare = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
     handleWindowWarmReady(spare.id);
     const target = { workspace: 'local', sessionId: 'target' };
     prepareWindow(source.native, target, 'first');
@@ -272,8 +328,11 @@ describe('macOS prepared targets', () => {
     cancelPreparedWindow(source.id, 'second');
     source.destroy();
     expect(spare.destroyed).toBe(false);
-    await requestRendererReload(spare.native);
-    expect(spare.loaded).toEqual({ filePath: '/synthetic/index.html', hash: getWindowTargetPath(target) });
+    requestRendererReload(spare.native);
+    expect(spare.loaded).toEqual({
+      filePath: '/synthetic/index.html',
+      hash: getWindowTargetPath(target),
+    });
   });
 
   it('waits for current readiness after invalidation and ignores stale or foreign signals', async () => {
@@ -347,7 +406,7 @@ describe('macOS prepared targets', () => {
     const { source, spare } = await fixture();
     cancelPreparedWindow(source.id, 'first');
     await vi.advanceTimersByTimeAsync(2001);
-    const replacement = [...nativeState.windows.values()].find(w => w !== source) as NativeWindow;
+    const replacement = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
     expect(replacement).toBeDefined();
     expect(replacement).not.toBe(spare);
     expect(replacement.target).toBeNull();
@@ -360,7 +419,7 @@ describe('macOS prepared targets', () => {
     vi.stubGlobal('process', { ...process, platform: 'linux' });
     setWindowWarmupEnabled(true);
     await vi.advanceTimersByTimeAsync(0);
-    const neutral = [...nativeState.windows.values()].find(w => w !== source) as NativeWindow;
+    const neutral = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
     handleWindowWarmReady(neutral.id);
     prepareWindow(source.native, { workspace: 'local', sessionId: 'other' }, 'linux');
     expect(spare.destroyed).toBe(true);
@@ -374,7 +433,7 @@ describe('macOS prepared targets', () => {
     setWindowWarmupEnabled(false);
     setWindowWarmupEnabled(true);
     await vi.advanceTimersByTimeAsync(0);
-    const neutral = [...nativeState.windows.values()].find(w => w !== source) as NativeWindow;
+    const neutral = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
     const target = { workspace: 'local', sessionId: 'too-soon' };
     prepareWindow(source.native, target, 'queued');
     expect(claimWarmWindow(target)).toBeNull();
@@ -389,5 +448,67 @@ describe('macOS prepared targets', () => {
     spare.webContents.emit('render-process-gone');
     expect(spare.visible).toBe(true);
     expect(spare.destroyed).toBe(false);
+  });
+});
+
+describe('renderer unload confirmation', () => {
+  const productWindow = (options: { main?: boolean; veto?: boolean } = {}) => {
+    const window = new NativeWindow();
+    registerProductWindow(window.native, false);
+    installRendererUnloadConfirmation(window.native);
+    if (options.main) setMainWindow(window.native);
+    window.vetoUnload = options.veto ?? false;
+    return window;
+  };
+
+  it('asks before a vetoed close; Leave overrides only that veto', () => {
+    const window = productWindow({ veto: true });
+    window.close();
+    expect(nativeState.unloadPrompts).toBe(1);
+    expect(window.destroyed).toBe(false);
+    nativeState.unloadResponse = 1;
+    window.close();
+    expect(window.destroyed).toBe(true);
+  });
+
+  it('quit closes auxiliary windows before the main window', async () => {
+    const main = productWindow({ main: true });
+    const auxiliary = productWindow();
+    const order: NativeWindow[] = [];
+    for (const window of [main, auxiliary]) window.on('closed', () => order.push(window));
+    expect(await closeProductWindowsForQuit()).toBe(true);
+    expect(order).toEqual([auxiliary, main]);
+    expect(nativeState.unloadPrompts).toBe(0);
+    expect(isAppQuitting()).toBe(true);
+  });
+
+  it('Stay cancels quit before shutdown and leaves the kept window running', async () => {
+    const main = productWindow({ main: true, veto: true });
+    main.visible = false; // e.g. hidden by the macOS close button
+    const auxiliary = productWindow();
+    expect(await closeProductWindowsForQuit()).toBe(false);
+    expect(nativeState.unloadPrompts).toBe(1);
+    expect(auxiliary.destroyed).toBe(true);
+    expect(main.destroyed).toBe(false);
+    expect(main.visible).toBe(true);
+    expect(isAppQuitting()).toBe(false);
+    nativeState.unloadResponse = 1;
+    expect(await closeProductWindowsForQuit()).toBe(true);
+    expect(main.destroyed).toBe(true);
+  });
+
+  it('quit destroys a window whose renderer hangs or dies instead of waiting on it', async () => {
+    for (const [emitter, event] of [
+      ['window', 'unresponsive'],
+      ['webContents', 'render-process-gone'],
+    ] as const) {
+      const main = productWindow({ main: true });
+      main.hung = true;
+      const quit = closeProductWindowsForQuit();
+      expect(main.destroyed).toBe(false);
+      (emitter === 'window' ? main : main.webContents).emit(event);
+      await expect(quit).resolves.toBe(true);
+      expect(main.destroyed).toBe(true);
+    }
   });
 });

@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
-import { Button } from '@/ui/button';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 // Placeholder workspace avatar until per-workspace avatars are supported.
 import workspaceAvatarPlaceholder from '@/assets/icon-transparent.png';
@@ -68,7 +69,7 @@ export function AcceptInvitationPage({
         <div className="flex flex-col items-center px-7 pb-7 pt-8 text-center">
           {state === 'loading' ? (
             <>
-              <Spinner className="mb-4 size-6 text-muted-foreground" aria-hidden="true" />
+              <Spinner size="large" className="mb-4 text-muted-foreground" aria-hidden="true" />
               <Title>{t('invite.processing.title', 'Processing invitation')}</Title>
               <Description>
                 {t('invite.processing.description', 'Hang tight, this only takes a moment.')}
@@ -102,7 +103,7 @@ export function AcceptInvitationPage({
                 )}
               </Description>
               {roleLabel ? <InvitationRole role={roleLabel} /> : null}
-              <Button onClick={onAccept} size="lg" className="mt-6 h-10 w-full">
+              <Button size="large" onClick={onAccept} className="mt-6 w-full">
                 {t('invite.idle.accept', 'Accept invitation')}
               </Button>
             </>
@@ -139,7 +140,7 @@ export function AcceptInvitationPage({
                   />
                 </p>
               ) : null}
-              <Button onClick={onContinue} size="lg" className="mt-6 h-10 w-full">
+              <Button size="large" onClick={onContinue} className="mt-6 w-full">
                 {t('invite.authRequired.continue', 'Continue with invited email')}
               </Button>
             </>
@@ -165,10 +166,10 @@ export function AcceptInvitationPage({
                 />
               </Description>
               {roleLabel ? <InvitationRole role={roleLabel} /> : null}
-              <Button onClick={onSwitchAccount} size="lg" className="mt-6 h-10 w-full">
+              <Button size="large" onClick={onSwitchAccount} className="mt-6 w-full">
                 {t('invite.accountMismatch.switch', 'Switch account')}
               </Button>
-              <Button onClick={onBackHome} variant="ghost" size="lg" className="mt-2 h-10 w-full">
+              <Button size="large" onClick={onBackHome} variant="ghost" className="mt-2 w-full">
                 {t('invite.error.backButton', 'Back to home')}
               </Button>
             </>
@@ -183,7 +184,7 @@ export function AcceptInvitationPage({
                   'For security, verify the email address named by this invitation before accepting it.'
                 )}
               </Description>
-              <Button onClick={onVerifyEmail} size="lg" className="mt-6 h-10 w-full">
+              <Button size="large" onClick={onVerifyEmail} className="mt-6 w-full">
                 {t('invite.verificationRequired.continue', 'Continue to verification')}
               </Button>
             </>
@@ -209,7 +210,7 @@ export function AcceptInvitationPage({
               <Description>
                 {errorMessage || t('invite.error.notFound', 'Invitation not found or expired.')}
               </Description>
-              <Button onClick={onBackHome} variant="outline" size="lg" className="mt-6 h-10 w-full">
+              <Button size="large" onClick={onBackHome} variant="secondary" className="mt-6 w-full">
                 {t('invite.error.backButton', 'Back to home')}
               </Button>
             </>
@@ -240,8 +241,6 @@ function Description({ children }: { children: ReactNode }) {
 function InvitationRole({ role }: { role: string }) {
   const { t } = useTranslation();
   return (
-    <p className="mt-3 rounded-full border border-border/60 px-2.5 py-1 text-xs text-muted-foreground">
-      {t('invite.role.label', 'Role: {{role}}', { role })}
-    </p>
+    <Badge className="mt-3 max-w-full">{t('invite.role.label', 'Role: {{role}}', { role })}</Badge>
   );
 }

@@ -66,15 +66,42 @@ this page is the full text of the rules summarised there.
   Only the address bar may reach one.
   The composer info-bar Browser action is an explicit candidate-navigation request, not merely a
   panel-open action. It opens the reported candidate even when another page is already visible.
-  That click IS the approval for that exact target: a remote route creates (or replaces) its tunnel
-  immediately, with no confirmation dialog, because the CLI only accepts LOOPBACK targets from an
-  agent report. A typed loopback address and Share still go through the confirmation flow. The
-  approver is the session initiator, the same person the CLI already requires.
+  An eligible local Agent report already starts background remote preparation using
+  the active Session owner's execution identity. The click joins that work or reuses
+  the resulting endpoint. It remains exact-target authorization when a new endpoint
+  is needed, without a confirmation dialog; the CLI accepts only LOOPBACK targets.
+  Enter on a typed loopback address and Share likewise authorize the exact target,
+  without a second confirmation. No candidate is required for a user-started server.
+  The approver is the session initiator, the same person the CLI already requires.
   Consume the request after handling it so a later panel remount cannot replay stale user intent —
   but NOT while the candidate is still in flight. Session meta carries only the candidate status;
   its target lives in the session doc `preview` state, and the two planes sync independently, so a
   click landing between those writes must wait for the doc (bounded by the doc reaching `synced`)
   instead of consuming the request and leaving an empty panel.
+  `SessionPreviewPreload` consumes the visible conversation's existing preview document.
+  An available candidate plus active endpoint triggers one non-renewing status request;
+  only a matching live endpoint may load the candidate's exact path/query. Remote-preview
+  capability and atomic iframe moves are required; local Electron routes are skipped.
+  `managed-preview-frame-cache.ts` owns one speculative frame outside its opened-page LRU,
+  in an inert offscreen host with a nonzero viewport. Browser acquisition moves that same
+  frame into its surface, then releases the preparation host and its two-minute timer.
+  Subsequent preparation cleanup cannot destroy the claimed page. Target/endpoint changes,
+  unmount, and backgrounding dispose unclaimed work. Expiry does not retry, and no poller
+  or control keepalive is added. Application scripts and traffic do run before the click;
+  their ordinary authenticated requests can extend tunnel idle time within this bounded
+  preparation lifetime. Unsupported engines retain on-demand loading. Browser still
+  performs its normal live status check when opened. Candidate navigation waits for
+  that initial observation, avoiding a redundant create and empty viewer state that
+  would otherwise discard a prepared frame before it could be adopted.
+  Remote connections are queried through Machine RPC rather than restored from persisted `active`
+  flags. A visible remote Browser renews only its current endpoint every minute; hidden panels,
+  background documents, local viewers, and observational queries do not renew remote access.
+  Creation/revoke fences stale status responses. Navigation progress keeps existing
+  content mounted, and a failed status RPC retains the current viewer URL; only
+  an authoritative endpoint state invalidates it. The toolbar and expiry placeholder share
+  `PreviewConnectionStatus`; restore retains the logical address/path/query and explicitly
+  requests a new endpoint, then offers the replacement share link. Local content stays mounted
+  when remote sharing expires. The endpoint owner, not the panel, enforces the one-hour deadline.
   An empty Browser must always say WHY it is empty — a bare globe reads as a broken panel. With no
   reported candidate the empty state names that (the agent never called `lody_report_preview_candidate`,
   which is the common case, not a bug); with one, it points at the address bar.

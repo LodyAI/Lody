@@ -17,6 +17,7 @@ import { useStableNow } from '@/hooks/use-stable-now';
 import type { SessionListEntry } from '@/lib/session-visibility';
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
 import { CommandPaletteView, type PaletteResult } from './command-palette-view';
+import { COMMAND_ICONS } from './command-icons';
 import {
   getSessionPaletteSubtitle,
   resolveSessionProjectLabel,
@@ -85,15 +86,21 @@ export function CommandPalette() {
   );
 
   const toCommandResult = useCallback(
-    (cmd: Command): PaletteResult => ({
+    (cmd: Command, grouped = false): PaletteResult => ({
       kind: 'command',
       key: `command:${cmd.id}`,
       title: resolveLabel(cmd),
       subtitle: null,
       shortcut: commands.getKeybindingsFor(cmd.id)[0] ?? null,
+      icon: COMMAND_ICONS[cmd.id],
+      group: grouped
+        ? t(`settings.keyboardShortcuts.category.${cmd.category ?? 'Other'}`, {
+            defaultValue: cmd.category ?? 'Other',
+          })
+        : undefined,
       run: () => runCommand(cmd.id),
     }),
-    [resolveLabel, runCommand]
+    [resolveLabel, runCommand, t]
   );
 
   const toSessionResult = useCallback(
@@ -138,7 +145,7 @@ export function CommandPalette() {
           (a, b) =>
             rank(a.category) - rank(b.category) || resolveLabel(a).localeCompare(resolveLabel(b))
         )
-        .map(toCommandResult);
+        .map((cmd) => toCommandResult(cmd, true));
     }
 
     const scored: Array<{ result: PaletteResult; score: number }> = [];

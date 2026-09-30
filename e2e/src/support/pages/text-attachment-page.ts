@@ -9,6 +9,7 @@ import {
   TEXT_ATTACHMENT_PATH,
   type TextAttachmentFixture,
 } from '../fixtures/text-attachment-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const AGENT_NAME = 'Deterministic Text Attachment Agent';
 const HISTORY_ATTACHMENT_NAME = /(?:\d+-)?synthetic-text-attachment\.txt$/u;
@@ -81,7 +82,7 @@ export class TextAttachmentPage {
     await expect(this.composerRemoveAttachment()).toHaveCount(0);
     await expect(this.historyAttachment()).toHaveCount(1);
     await expect(this.historyAttachment()).toBeVisible();
-    await expect(this.page.getByText(ATTACHMENT_PROMPT, { exact: true })).toBeVisible();
+    await expect(this.historyPrompt(ATTACHMENT_PROMPT)).toBeVisible();
     await expect(this.composerPrompt()).toHaveValue('');
   }
 
@@ -95,7 +96,7 @@ export class TextAttachmentPage {
   }
 
   async expectPlainTextFollowUpWithoutAttachment(): Promise<void> {
-    await expect(this.page.getByText(FOLLOW_UP_PROMPT, { exact: true })).toBeVisible();
+    await expect(this.historyPrompt(FOLLOW_UP_PROMPT)).toBeVisible();
     await expect(this.historyAttachment()).toHaveCount(1);
     await expect(this.composerRemoveAttachment()).toHaveCount(0);
   }
@@ -209,8 +210,8 @@ export class TextAttachmentPage {
   private async expectPrimaryHistory(): Promise<void> {
     await expect(this.historyAttachment()).toHaveCount(1);
     await expect(this.historyAttachment()).toBeVisible();
-    await expect(this.page.getByText(ATTACHMENT_PROMPT, { exact: true })).toBeVisible();
-    await expect(this.page.getByText(FOLLOW_UP_PROMPT, { exact: true })).toBeVisible();
+    await expect(this.historyPrompt(ATTACHMENT_PROMPT)).toBeVisible();
+    await expect(this.historyPrompt(FOLLOW_UP_PROMPT)).toBeVisible();
   }
 
   private composerPrompt(): Locator {
@@ -233,6 +234,14 @@ export class TextAttachmentPage {
     return this.page.getByText(HISTORY_ATTACHMENT_NAME, { exact: true });
   }
 
+  private historyPrompt(prompt: string): Locator {
+    return this.page
+      .getByTestId('user-message-metadata')
+      .locator('..')
+      .filter({ hasText: prompt })
+      .getByText(prompt, { exact: true });
+  }
+
   private activeRow(sessionId: string): Locator {
     return this.page.locator(`[data-sidebar-session-id="${sessionId}"]`);
   }
@@ -253,7 +262,7 @@ export class TextAttachmentPage {
 
   private async openArchive(): Promise<void> {
     if (!/#\/local\/archive(?:\?.*)?$/u.test(this.page.url())) {
-      await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+      await openSidebarArchive(this.page);
     }
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
   }

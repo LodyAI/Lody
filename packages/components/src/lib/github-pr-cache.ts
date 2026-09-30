@@ -1,9 +1,10 @@
-import type {
-  GitHubCheckRunsSummary,
-  GitHubIssueComment,
-  GitHubPullRequestDetails,
-  GitHubReview,
-  GitHubReviewThread,
+import {
+  normalizeCheckRunsSummary,
+  type GitHubCheckRunsSummary,
+  type GitHubIssueComment,
+  type GitHubPullRequestDetails,
+  type GitHubReview,
+  type GitHubReviewThread,
 } from '@lody/shared';
 
 /**
@@ -30,6 +31,7 @@ export interface PrCachePayload {
 }
 
 export interface PrCacheEntry {
+  repositoryId?: number;
   workspaceId: string;
   repoFullName: string;
   prNumber: number;
@@ -45,8 +47,13 @@ const STORE_NAME = 'prDataByKey';
 
 const memoryCache = new Map<string, PrCacheEntry>();
 
-export function getPrCacheKey(workspaceId: string, repoFullName: string, prNumber: number): string {
-  return `${workspaceId}:${repoFullName.toLowerCase()}:#${prNumber}`;
+export function getPrCacheKey(
+  workspaceId: string,
+  repoFullName: string,
+  prNumber: number,
+  repositoryId?: number
+): string {
+  return `${workspaceId}:${repositoryId === undefined ? repoFullName.toLowerCase() : `repository-id:${repositoryId}`}:#${prNumber}`;
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -70,9 +77,10 @@ function openDb(): Promise<IDBDatabase> {
 export async function readPrCacheEntry(
   workspaceId: string,
   repoFullName: string,
-  prNumber: number
+  prNumber: number,
+  repositoryId?: number
 ): Promise<PrCacheEntry | null> {
-  const key = getPrCacheKey(workspaceId, repoFullName, prNumber);
+  const key = getPrCacheKey(workspaceId, repoFullName, prNumber, repositoryId);
   const cached = memoryCache.get(key);
   if (cached) return cached;
   try {
@@ -83,7 +91,15 @@ export async function readPrCacheEntry(
       const req = store.get(key);
       req.onerror = () => reject(req.error);
       req.onsuccess = () => {
-        const result = (req.result as PrCacheEntry | undefined) ?? null;
+        const stored = (req.result as PrCacheEntry | undefined) ?? null;
+        // Entries written by older builds may keep superseded check attempts.
+        const result = stored && {
+          ...stored,
+          payload: {
+            ...stored.payload,
+            checkRuns: normalizeCheckRunsSummary(stored.payload.checkRuns),
+          },
+        };
         if (result) memoryCache.set(key, result);
         resolve(result);
       };
@@ -94,7 +110,12 @@ export async function readPrCacheEntry(
 }
 
 export async function writePrCacheEntry(entry: PrCacheEntry): Promise<void> {
-  const key = getPrCacheKey(entry.workspaceId, entry.repoFullName, entry.prNumber);
+  const key = getPrCacheKey(
+    entry.workspaceId,
+    entry.repoFullName,
+    entry.prNumber,
+    entry.repositoryId
+  );
   memoryCache.set(key, entry);
   try {
     const db = await openDb();

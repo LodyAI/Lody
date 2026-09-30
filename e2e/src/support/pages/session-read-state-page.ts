@@ -5,6 +5,7 @@ import {
   SESSION_RESPONSE_TEXT,
   type SessionReadStateFixture,
 } from '../fixtures/session-read-state-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const AGENT_NAME = 'Deterministic Unread State Agent';
 
@@ -147,7 +148,7 @@ export class SessionReadStatePage {
 
   private async openArchive(): Promise<void> {
     if (!/#\/local\/archive(?:\?.*)?$/u.test(this.page.url())) {
-      await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+      await openSidebarArchive(this.page);
     }
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
   }

@@ -1,14 +1,19 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
-import { ACP_AUTHORIZATION_URL_MAX_LENGTH } from '@lody/shared';
+import { ACP_AUTHORIZATION_URL_MAX_LENGTH, type AgentConfigMeta } from '@lody/shared';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
+import { CodexProfileStore, getCodexProfileStore } from './codex-profile-store';
 import type { resolveBuiltinAuthenticationProcessLaunch } from './setting';
 
 const createSilentLogger = (): Logger => ({
@@ -17,6 +22,7 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   child: () => createSilentLogger(),
   close: async () => {},
@@ -49,6 +55,68 @@ describe('AcpAuthenticationManager', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('logs a new managed ChatGPT profile into its isolated home without forcing keyring', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'lody-codex-login-'));
+    try {
+      const profile = await new CodexProfileStore(root).resolve(
+        'workspace-fixture',
+        {
+          id: randomUUID() as AgentConfigMeta['id'],
+          machineId: 'machine-fixture',
+          name: 'ChatGPT',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: { mode: 'chatgpt', profileId: randomUUID() },
+        } as AgentConfigMeta,
+        true
+      );
+      if (!profile) throw new Error('Missing ChatGPT profile');
+      vi.spyOn(getCodexProfileStore(), 'isReady').mockResolvedValue(false);
+      vi.spyOn(getCodexProfileStore(), 'markChatgptReady').mockResolvedValue(undefined);
+      const child = createFakeChild();
+      let observedEnv: NodeJS.ProcessEnv | undefined;
+      const spawnProcess = vi.fn(
+        (_command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
+          observedEnv = options.env;
+          queueMicrotask(() => {
+            child.exitCode = 0;
+            child.emit('exit', 0, null);
+          });
+          return child;
+        }
+      );
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        spawnProcess: spawnProcess as never,
+        resolveLoginShellEnv: async () => ({}),
+        resolveAuthenticationProcessLaunch: (async () => ({
+          command: '/test/codex',
+          args: ['login', '--device-auth'],
+          env: {},
+        })) as never,
+      });
+
+      await expect(
+        manager.authenticate({
+          requestId: 'managed-chatgpt',
+          cliType: 'builtin',
+          agentType: 'codex',
+          codexProfile: profile,
+        })
+      ).resolves.toEqual({ success: true, disposition: 'authenticated' });
+      expect(spawnProcess).toHaveBeenCalledWith(
+        '/test/codex',
+        ['-c', 'forced_login_method="chatgpt"', 'login', '--device-auth'],
+        expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: profile.home }) })
+      );
+      expect(JSON.parse(observedEnv?.CODEX_CONFIG ?? '{}')).not.toHaveProperty(
+        'cli_auth_credentials_store'
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('reserves the login slot before asynchronous launch preparation', async () => {
@@ -199,7 +267,7 @@ describe('AcpAuthenticationManager', () => {
     expect(receivedInput).toEqual(['browser-code\n']);
   });
 
-  it('explains the ChatGPT device-code setting when Codex login exits unsuccessfully', async () => {
+  it('directs unsuccessful Codex login to its diagnostics without guessing the cause', async () => {
     const failedChild = createFakeChild();
     const manager = new AcpAuthenticationManager(createSilentLogger(), {
       spawnProcess: vi.fn(() => {
@@ -223,7 +291,7 @@ describe('AcpAuthenticationManager', () => {
       success: false,
       disposition: 'error',
       error:
-        'Codex authentication exited with code 1. Make sure device-code login is enabled in your ChatGPT security settings or workspace permissions, then try again.',
+        'Codex authentication exited with code 1. Check the Codex login log on the execution machine for the cause, then try again.',
     });
   });
 
@@ -943,6 +1011,16 @@ describe('AcpAuthenticationManager', () => {
 });
 
 describe('probeBuiltinAuthentication', () => {
+  // The probe merges process.env; a developer's or agent's own Anthropic/Bedrock
+  // settings would otherwise short-circuit it to env authentication.
+  beforeEach(() => {
+    for (const key of Object.keys(process.env)) {
+      if (/^(?:ANTHROPIC_|CLAUDE_CODE_USE_|AWS_BEARER_TOKEN_BEDROCK$)/u.test(key)) {
+        vi.stubEnv(key, undefined);
+      }
+    }
+  });
+
   it('does not spawn a status process for Pi', async () => {
     const spawnProcess = vi.fn();
     await expect(
@@ -959,6 +1037,7 @@ describe('probeBuiltinAuthentication', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('recognizes an authenticated Claude credential store', async () => {

@@ -1,5 +1,6 @@
 import { captureException, flushErrorReporting } from '@/instrument';
 import { getLogger, rootLogger, type Logger } from './logger';
+import { traceFatalErrorSync } from './process-exit-trace';
 
 const DEFAULT_FLUSH_TIMEOUT = 2000;
 const CLEANUP_TIMEOUT_MS = 5000;
@@ -52,6 +53,7 @@ export const registerProcessErrorHandlers = () => {
   handlersRegistered = true;
 
   process.on('uncaughtException', (error) => {
+    traceFatalErrorSync('uncaughtException', error);
     console.error('Uncaught exception in CLI:', error);
     const cleanup = processCleanupFn
       ? Promise.race([

@@ -39,9 +39,10 @@ type StoryProps = {
   machine: MachineViewMeta;
   showActions?: boolean;
   narrow?: boolean;
+  usage?: { conversations: number; lastUsedAt: number | null };
 };
 
-function StoryWrapper({ config, machine, showActions, narrow }: StoryProps) {
+function StoryWrapper({ config, machine, showActions, narrow, usage }: StoryProps) {
   return (
     <div
       className={cn(
@@ -55,6 +56,7 @@ function StoryWrapper({ config, machine, showActions, narrow }: StoryProps) {
         onEdit={() => {}}
         onRefresh={showActions ? async () => {} : undefined}
         onDelete={showActions ? async () => {} : undefined}
+        usage={usage}
       />
     </div>
   );
@@ -75,7 +77,7 @@ export const ClaudeWithRateLimit: Story = {
     config: makeConfig({ name: 'Claude Code', cliType: 'builtin', agentType: 'claude' }),
     machine: makeMachine({
       raceLimits: {
-        [getRateLimitEntryKey('claude', 'claude')]: {
+        [getRateLimitEntryKey('claude', 'claude', 'cfg-claude' as AgentConfigId)]: {
           limitId: 'claude',
           scope: { providerId: 'claude' },
           planName: 'Claude Pro',
@@ -117,7 +119,7 @@ export const ClaudeEnvOverrideHidesRateLimit: Story = {
     }),
     machine: makeMachine({
       raceLimits: {
-        [getRateLimitEntryKey('claude', 'claude')]: {
+        [getRateLimitEntryKey('claude', 'claude', 'cfg-claude' as AgentConfigId)]: {
           limitId: 'claude',
           scope: { providerId: 'claude' },
           planName: 'Claude Pro',
@@ -144,7 +146,11 @@ export const CodexSpark: Story = {
     config: makeConfig({ name: 'Codex Spark', cliType: 'builtin', agentType: 'codex' }),
     machine: makeMachine({
       raceLimits: {
-        [getRateLimitEntryKey('codex', CODEX_SPARK_LIMIT_ID)]: {
+        [getRateLimitEntryKey(
+          'codex',
+          CODEX_SPARK_LIMIT_ID,
+          'cfg-codex' as AgentConfigId
+        )]: {
           limitId: CODEX_SPARK_LIMIT_ID,
           scope: { providerId: 'codex' },
           planName: 'Codex Spark',
@@ -167,7 +173,7 @@ export const CodexWeeklyOnly: Story = {
     config: makeConfig({ name: 'Codex', cliType: 'builtin', agentType: 'codex' }),
     machine: makeMachine({
       raceLimits: {
-        [getRateLimitEntryKey('codex', 'codex')]: {
+        [getRateLimitEntryKey('codex', 'codex', 'cfg-codex' as AgentConfigId)]: {
           planName: 'ChatGPT Plus',
           limitId: 'codex',
           scope: { providerId: 'codex' },
@@ -222,5 +228,21 @@ export const RegistryProviderWithActions: Story = {
     }),
     machine: makeMachine(),
     showActions: true,
+  },
+};
+
+/**
+ * A custom command, used recently: the kind is the first fact of the meta line,
+ * in the reader's language ("自定义 · 1 个对话 · 2 分钟前用过"), not a pill.
+ */
+export const CustomProviderWithUsage: Story = {
+  args: {
+    config: makeConfig({
+      name: 'Deterministic E2E Agent',
+      cliType: 'custom',
+      agentType: 'custom',
+    }),
+    machine: makeMachine(),
+    usage: { conversations: 1, lastUsedAt: getServerNow() - 2 * 60_000 },
   },
 };

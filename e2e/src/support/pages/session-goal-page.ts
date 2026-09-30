@@ -7,6 +7,7 @@ import {
   UPDATED_GOAL_OBJECTIVE,
   type GoalSessionFixture,
 } from '../fixtures/session-goal-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const AGENT_NAME = 'Deterministic Goal Control Agent';
 
@@ -292,7 +293,9 @@ export class GoalSessionPage {
   }
 
   private goalDetails(): Locator {
-    return this.page.getByRole('dialog', { name: /^(Goal|目标)$/u });
+    return this.page.getByRole('dialog').filter({
+      hasText: new RegExp(`${GOAL_OBJECTIVE}|${UPDATED_GOAL_OBJECTIVE}`, 'u'),
+    });
   }
 
   private async expectGoalStage(status: RegExp, objective: string): Promise<void> {
@@ -355,7 +358,7 @@ export class GoalSessionPage {
       .click();
     await this.page.getByRole('menuitem', { name: /^(Archive session|归档会话)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
   }
 

@@ -118,6 +118,12 @@ export type ManagedStoreCache<K, V> = {
   release(key: K): Promise<void>;
   /** Get-or-create and increment ref count. */
   acquire(key: K): Promise<V>;
+  /**
+   * The store for `key` if it is already created and cached, synchronously.
+   * Does not affect ref count: a consumer rendering from it must still
+   * `acquire` it (in an effect) to keep it alive.
+   */
+  peek(key: K): V | undefined;
   /** Decrement ref count. Starts delayed release when it hits 0. */
   releaseRef(key: K): void;
   /**
@@ -144,6 +150,9 @@ export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: 
   unload?: (key: K) => Promise<void>;
 }): ManagedStoreCache<K, V> {
   const stores = new Map<K, Promise<V>>();
+  // Settled values of `stores`, so an already-open store can be read without
+  // waiting for a promise tick (a first render can then show it at once).
+  const settled = new Map<K, V>();
   // Per-key in-flight dispose+unload chains. `get` serializes re-creation
   // behind these so a new store is only built after the old doc is unloaded.
   const pendingDisposals = new Map<K, Promise<void>>();
@@ -156,6 +165,7 @@ export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: 
       return;
     }
     stores.delete(key);
+    settled.delete(key);
     const disposal = (async () => {
       let store: V | undefined;
       try {
@@ -201,10 +211,16 @@ export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: 
     const created = pending
       ? pending.catch(() => {}).then(() => opts.create(key))
       : opts.create(key);
-    const promise = created.catch((error: unknown) => {
-      stores.delete(key);
-      throw error;
-    });
+    const promise = created.then(
+      (store) => {
+        if (stores.get(key) === promise) settled.set(key, store);
+        return store;
+      },
+      (error: unknown) => {
+        stores.delete(key);
+        throw error;
+      }
+    );
     stores.set(key, promise);
     return promise;
   };
@@ -214,6 +230,8 @@ export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: 
     tracker.acquire(key);
     return store;
   };
+
+  const peek = (key: K): V | undefined => settled.get(key);
 
   const releaseRef = (key: K): void => {
     tracker.release(key);
@@ -237,6 +255,7 @@ export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: 
     // Intentionally no per-key unload here: this path is only used on full
     // workspace destroy, which is immediately followed by repo.destroy();
     // unloading each doc would serialize N persists for nothing.
+    settled.clear();
     for (const [key, storePromise] of stores) {
       stores.delete(key);
       try {
@@ -248,5 +267,5 @@ export function createManagedStoreCache<K, V extends { dispose(): void }>(opts: 
     }
   };
 
-  return { get, release, acquire, releaseRef, releaseIfIdle, releaseIdle, disposeAll };
+  return { get, release, acquire, peek, releaseRef, releaseIfIdle, releaseIdle, disposeAll };
 }

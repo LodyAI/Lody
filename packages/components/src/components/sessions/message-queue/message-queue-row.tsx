@@ -5,7 +5,7 @@ import { Check, GripVertical, Pencil, X, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { MessageQueueItem, SessionId } from '@lody/shared';
 import { normalizeSessionInputBlocks } from '@lody/shared';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { QueuedImagePreview, type QueuedImageBlock } from './queued-image-preview';
@@ -137,9 +137,8 @@ function LeadingHandle({
   }
 
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <button
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={<button
           type="button"
           ref={sortable.setActivatorNodeRef}
           className={cn(
@@ -158,10 +157,9 @@ function LeadingHandle({
             {index + 1}
           </span>
           <GripVertical className="hidden h-3 w-3 group-hover/row:block group-focus-within/row:block" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
+        </button>}/>
+      <Tooltip.Content side="top">{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -209,11 +207,9 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
             className={cn(
               'block w-full resize-none border-transparent bg-transparent',
               'px-2 pt-1 text-xs leading-snug text-foreground',
-              // The base layer paints `box-shadow: inset 0 0 0 1px` on any focused
-              // textarea. That used to land exactly on this field's own border; now
-              // that the shell owns the border, it would draw a second rectangle
-              // inside the box. The composer suppresses it the same way.
-              'outline-none focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0'
+              // The shell owns the focus ring; the base layer's inset shadow
+              // would draw another rectangle on the textarea.
+              'outline-none focus-visible:outline-hidden focus-visible:shadow-none'
             )}
             disabled={isPending}
             aria-label={t('sessions.messageQueue.editMessage', 'Edit queued message')}
@@ -353,7 +349,7 @@ function RowActions(props: MessageQueueRowProps) {
   );
 }
 
-function TextAction({
+export function TextAction({
   text,
   ariaLabel,
   onClick,
@@ -379,7 +375,7 @@ function TextAction({
   );
 }
 
-function IconAction({
+export function IconAction({
   icon: Icon,
   label,
   destructive,
@@ -393,9 +389,8 @@ function IconAction({
   onClick: () => void;
 }) {
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <button
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={<button
           type="button"
           aria-label={label}
           disabled={disabled}
@@ -410,9 +405,8 @@ function IconAction({
           onClick={onClick}
         >
           <Icon className="h-3 w-3" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
+        </button>}/>
+      <Tooltip.Content side="top">{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }

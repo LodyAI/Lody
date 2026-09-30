@@ -15,7 +15,7 @@ import { usePostHog } from '@posthog/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Check, Search, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { filterFuzzyOptions } from '@/lib/fuzzy-option-filter';
 import { capturePickerSearchSelected, type SearchPickerKind } from '@/lib/picker-search-analytics';

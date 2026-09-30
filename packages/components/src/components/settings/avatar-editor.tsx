@@ -1,13 +1,64 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pencil } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { toast } from 'sonner';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, focus, radius } from '@lody/ui/tokens/scales.stylex';
+import { toast } from '@/lib/toast';
 import type { AvatarKind } from '@lody/shared';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 import { AVATAR_ACCEPT, validateAvatarFile } from '@/lib/avatar-upload';
+import { cropAvatarFile, type AvatarCropArea } from '@/lib/avatar-crop';
 import { UserAvatar } from '../user-avatar';
 import { WorkspaceAvatar } from '../workspace-avatar';
+import { AvatarCropDialog } from './avatar-crop-dialog';
+
+const styles = stylex.create({
+  root: { flexShrink: 0 },
+  fileInput: { display: 'none' },
+  /**
+   * The avatar is the control. Its box is the avatar's own — a circle for a
+   * person, the large tile's corner for a workspace — so the scrim and the
+   * focus ring follow the face rather than cropping a tile into a circle.
+   */
+  button: {
+    position: 'relative',
+    display: 'block',
+    flexShrink: 0,
+    width: '32px',
+    height: '32px',
+    padding: 0,
+    margin: 0,
+    borderWidth: 0,
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
+    cursor: { default: 'pointer', ':disabled': 'default' },
+    outlineStyle: 'none',
+    boxShadow: { default: 'none', ':focus-visible': `0 0 0 ${focus.ringWidth} ${colors.accent}` },
+  },
+  person: { borderRadius: radius.full, cornerShape: corner.round },
+  tile: { borderRadius: radius.medium, cornerShape: corner.shape },
+  /**
+   * A scrim over a photograph: it covers the whole button, so its own hover is
+   * the button's. It stays up while the upload runs.
+   */
+  scrim: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.overlay,
+    color: 'white',
+    opacity: { default: 0, ':hover': 1 },
+    transitionProperty: 'opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  scrimShown: { opacity: { default: 1, ':hover': 1 } },
+  icon: { width: '14px', height: '14px' },
+});
 
 interface AvatarEditorProps {
   kind: AvatarKind;
@@ -38,71 +89,94 @@ export function AvatarEditor({
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [isCropDialogOpen, setIsCropDialogOpen] = useState(false);
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     // Allow re-selecting the same file later by clearing the input value.
     event.target.value = '';
     if (!file) return;
 
     const validationError = validateAvatarFile(file);
-    if (validationError) {
+    if (validationError !== null) {
       toast.error(t('settings.profile.avatar.invalidFile'), { description: validationError });
       return;
     }
 
+    setCropFile(file);
+    setIsCropDialogOpen(true);
+  };
+
+  const handleCropDialogOpenChange = (open: boolean) => {
+    setIsCropDialogOpen(open);
+    if (!open) setCropFile(null);
+  };
+
+  const handleCropConfirm = async (file: File, crop: AvatarCropArea): Promise<boolean> => {
     setIsUploading(true);
     try {
-      await onUpload(file);
-    } catch (error) {
-      toast.error(t('settings.profile.avatar.uploadFailed'), {
-        description: error instanceof Error ? error.message : undefined,
-      });
+      let croppedFile: File;
+      try {
+        croppedFile = await cropAvatarFile(file, crop);
+      } catch {
+        toast.error(t('settings.avatar.crop.failed'));
+        return false;
+      }
+
+      try {
+        await onUpload(croppedFile);
+        return true;
+      } catch (error) {
+        toast.error(t('settings.profile.avatar.uploadFailed'), {
+          description: error instanceof Error ? error.message : undefined,
+        });
+        return false;
+      }
     } finally {
       setIsUploading(false);
     }
   };
 
-  const avatarClassName = 'h-8 w-8 text-xs';
   const avatar =
     kind === 'user' ? (
-      <UserAvatar user={{ name, image, email }} className={avatarClassName} />
+      <UserAvatar user={{ name, image, email }} size="large" />
     ) : (
-      <WorkspaceAvatar workspace={{ name, logo: image }} className={avatarClassName} />
+      <WorkspaceAvatar workspace={{ name, logo: image }} size="large" />
     );
 
   if (!editable) {
-    return <div className={cn('shrink-0', className)}>{avatar}</div>;
+    return <div {...withClassName(stylex.props(styles.root), className)}>{avatar}</div>;
   }
 
   return (
-    <div className={cn('shrink-0', className)}>
+    <div {...withClassName(stylex.props(styles.root), className)}>
       <input
         ref={inputRef}
         type="file"
         accept={AVATAR_ACCEPT}
-        className="hidden"
-        onChange={(event) => {
-          void handleFileChange(event);
-        }}
+        {...stylex.props(styles.fileInput)}
+        onChange={handleFileChange}
       />
       <button
         type="button"
-        className="group relative block h-8 w-8 shrink-0 overflow-hidden rounded-full outline-none ring-offset-2 ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+        {...stylex.props(styles.button, kind === 'user' ? styles.person : styles.tile)}
         disabled={isUploading}
         onClick={() => inputRef.current?.click()}
         aria-label={t('settings.profile.avatar.change')}
       >
         {avatar}
-        <span
-          className={cn(
-            'absolute inset-0 flex items-center justify-center rounded-full bg-black/45 text-white transition-opacity',
-            isUploading ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          )}
-        >
-          {isUploading ? <Spinner className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+        <span {...stylex.props(styles.scrim, isUploading && styles.scrimShown)}>
+          {isUploading ? <Spinner size="small" /> : <Pencil {...stylex.props(styles.icon)} />}
         </span>
       </button>
+      <AvatarCropDialog
+        file={cropFile}
+        kind={kind}
+        open={isCropDialogOpen}
+        onOpenChange={handleCropDialogOpenChange}
+        onConfirm={handleCropConfirm}
+      />
     </div>
   );
 }

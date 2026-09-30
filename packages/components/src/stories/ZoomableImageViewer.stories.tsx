@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ZoomableImageViewer } from '@/components/shared/zoomable-image-viewer';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 /**
  * The one full-screen image viewer in the app. Chat image blocks
@@ -58,7 +58,7 @@ function ViewerHarness({ images }: { images: { key: string; src: string }[] }) {
   return (
     <div className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-muted/20">
       <p className="text-sm text-muted-foreground">
-        Drag to pan, scroll or double-click to zoom, close from the top-right button.
+        Drag to pan, scroll or double-click to zoom; close from the top-right button or backdrop.
       </p>
       <Button onClick={() => setIndex(0)} disabled={index !== null}>
         Open viewer

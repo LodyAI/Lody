@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { RefreshCw } from 'lucide-react';
 
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
+import { Spinner as IconSpinner } from '@/ui/spinner';
 
 const meta = {
   title: 'UI/Spinner',
@@ -17,13 +18,14 @@ export const Default: Story = {
 };
 
 export const SidebarWorking: Story = {
-  args: { className: 'h-3 w-3 text-primary' },
+  args: { size: 'small', className: 'text-primary' },
 };
 
+/** `ui/spinner.tsx` puts the same spin on an arbitrary icon, at rest or in flight. */
 export const RefreshIconAtRest: Story = {
-  args: { icon: RefreshCw, spinning: false, className: 'h-4 w-4' },
+  render: () => <IconSpinner icon={RefreshCw} spinning={false} className="h-4 w-4" />,
 };
 
 export const RefreshIconSpinning: Story = {
-  args: { icon: RefreshCw, spinning: true, className: 'h-4 w-4' },
+  render: () => <IconSpinner icon={RefreshCw} spinning className="h-4 w-4" />,
 };

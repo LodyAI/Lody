@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { Skeleton } from '../../ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 import type { SettingsUsageRange } from './settings-data-cache';
 import {
   CELL_GAP_PX,
@@ -50,7 +50,7 @@ export function UsageCalendarSkeleton({ range }: { range: SettingsUsageRange }) 
           </p>
         </div>
         {/* Metric toggle chrome — static size, pulsing like the rest. */}
-        <Skeleton className="h-8 w-56 rounded-lg" />
+        <Skeleton shape="block" width={224} height={32} />
       </header>
 
       <div className="p-4">
@@ -87,7 +87,7 @@ function LinePill({
     // `normal` line-height lands near 1.45 for the UI font — the real rows
     // measure that, so the pills stand on the same metric rather than 1.5.
     <div aria-hidden="true" className={cn(size, 'leading-[1.45]', className)}>
-      <Skeleton className="inline-block h-[0.75em] align-middle" style={{ width }} />
+      <Skeleton height="0.75em" width={width} className="inline-block align-middle" />
     </div>
   );
 }
@@ -97,7 +97,7 @@ function HeatLegendSkeleton() {
   return (
     <div className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
       <span>{t('workspace.usage.skyline.less')}</span>
-      <Skeleton className="h-2 w-20 rounded-full" />
+      <Skeleton shape="circle" width={80} height={8} />
       <span>{t('workspace.usage.skyline.more')}</span>
     </div>
   );
@@ -119,7 +119,7 @@ function CompositionSkeleton({ className }: { className?: string }) {
           <p className="text-[10px] font-normal uppercase tracking-[0.08em] text-muted-foreground/80">
             {label}
           </p>
-          <Skeleton className="mt-1.5 h-1.5 w-full rounded-full" />
+          <Skeleton shape="circle" height={6} width="100%" className="mt-1.5" />
           {/* The real legend wraps to two `text-[10px]` rows at this width. */}
           <div className="mt-1.5 flex flex-col gap-y-1 text-[10px]">
             {[
@@ -129,8 +129,8 @@ function CompositionSkeleton({ className }: { className?: string }) {
               <div key={row} className="flex h-[1.45em] items-center gap-2.5">
                 {widths.map((width) => (
                   <span key={width} className="flex items-center gap-1">
-                    <Skeleton className="size-1.5 shrink-0 rounded-full" />
-                    <Skeleton className="h-[0.75em]" style={{ width }} />
+                    <Skeleton shape="circle" width={6} height={6} />
+                    <Skeleton height="0.75em" width={width} />
                   </span>
                 ))}
               </div>
@@ -190,7 +190,7 @@ function HourlySkeleton({ shape }: { shape: 'day' | 'week' }) {
           </div>
         </div>
         <div className="mt-3 flex h-5 items-center">
-          <Skeleton className="h-3 w-52" />
+          <Skeleton width={208} height={12} />
         </div>
       </div>
     </div>
@@ -204,10 +204,10 @@ function RingSkeleton() {
       <div className="relative w-[9.5rem] max-w-full sm:w-[10.5rem]">
         {/* Ring, not a filled disc: border carries the pulse so the centre stays
            open like the real donut (RING_VIEWBOX 168 / RING_STROKE 26). */}
-        <Skeleton className="aspect-square w-full rounded-full border-[26px] border-primary/10 bg-transparent" />
+        <Skeleton shape="circle" width="100%" className="aspect-square border-[26px] border-primary/10 bg-transparent" />
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
-          <Skeleton className="h-4 w-12" />
-          <Skeleton className="h-2 w-9" />
+          <Skeleton width={48} height={16} />
+          <Skeleton width={36} height={8} />
         </div>
       </div>
       <LinePill size="text-[10px]" width={96} className="mt-3 w-full" />
@@ -215,9 +215,9 @@ function RingSkeleton() {
       <div className="mt-1.5 grid w-full grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
         {[0, 1, 2, 3].map((index) => (
           <div key={index} className="flex h-[1.45em] items-center gap-1">
-            <Skeleton className="size-1.5 shrink-0 rounded-full" />
-            <Skeleton className="h-[0.75em] w-12" />
-            <Skeleton className="ml-auto h-[0.75em] w-5" />
+            <Skeleton shape="circle" width={6} height={6} />
+            <Skeleton height="0.75em" width={48} />
+            <Skeleton className="ml-auto" height="0.75em" width={20} />
           </div>
         ))}
       </div>
@@ -230,7 +230,7 @@ function HourAxisSkeleton() {
     <div aria-hidden="true" className={cn(HOUR_COLUMNS_CLASS, 'mt-1.5')}>
       {Array.from({ length: 24 }, (_, hour) => (
         <div key={hour} className="flex justify-center">
-          {hour % 3 === 0 ? <Skeleton className="h-2 w-4 rounded-sm" /> : null}
+          {hour % 3 === 0 ? <Skeleton width={16} height={8} /> : null}
         </div>
       ))}
     </div>
@@ -243,7 +243,7 @@ function DayBarsSkeleton() {
       <div className={HOUR_COLUMNS_CLASS}>
         {DAY_BAR_HEIGHTS.map((height, hour) => (
           <div key={hour} className="flex w-full items-end" style={{ height: DAY_BAR_TRACK_PX }}>
-            <Skeleton className="w-full rounded-t-[3px]" style={{ height: `${height}%` }} />
+            <Skeleton width="100%" height={`${height}%`} className="rounded-t-[3px]" />
           </div>
         ))}
       </div>
@@ -265,7 +265,7 @@ function WeekDotsSkeleton() {
       <div aria-hidden="true" className="flex shrink-0 flex-col gap-[3px]">
         {Array.from({ length: 7 }, (_, dayIndex) => (
           <div key={dayIndex} className="flex items-center" style={{ height: WEEK_ROW_PX }}>
-            <Skeleton className="h-2.5 w-16" />
+            <Skeleton width={64} height={10} />
           </div>
         ))}
       </div>
@@ -281,7 +281,7 @@ function WeekDotsSkeleton() {
                     className="flex items-center justify-center"
                     style={{ height: WEEK_ROW_PX }}
                   >
-                    <Skeleton className="rounded-full" style={{ width: size, height: size }} />
+                    <Skeleton shape="circle" width={size} height={size} />
                   </div>
                 );
               })}
@@ -307,7 +307,7 @@ function YearSkeleton() {
         >
           {Array.from({ length: USAGE_CALENDAR_ROWS }, (_, row) => (
             <div key={row} className="flex items-center">
-              {row % 2 === 1 ? <Skeleton className="h-2.5 w-6" /> : null}
+              {row % 2 === 1 ? <Skeleton width={24} height={10} /> : null}
             </div>
           ))}
         </div>
@@ -321,7 +321,7 @@ function YearSkeleton() {
             >
               {Array.from({ length: USAGE_CALENDAR_COLUMNS }, (_, column) => (
                 <div key={column} className="flex">
-                  {column % 4 === 1 ? <Skeleton className="h-2.5 w-6" /> : null}
+                  {column % 4 === 1 ? <Skeleton width={24} height={10} /> : null}
                 </div>
               ))}
             </div>
@@ -336,7 +336,12 @@ function YearSkeleton() {
               }}
             >
               {Array.from({ length: USAGE_CALENDAR_CELLS }, (_, index) => (
-                <Skeleton key={index} className="aspect-square w-full rounded-[20%]" />
+                <Skeleton
+                  key={index}
+                  shape="block"
+                  width="100%"
+                  className="aspect-square rounded-[20%]"
+                />
               ))}
             </div>
           </div>
@@ -344,7 +349,7 @@ function YearSkeleton() {
       </div>
 
       <div className="flex h-5 items-center justify-between gap-4">
-        <Skeleton className="h-3 w-48" />
+        <Skeleton width={192} height={12} />
         <HeatLegendSkeleton />
       </div>
     </div>

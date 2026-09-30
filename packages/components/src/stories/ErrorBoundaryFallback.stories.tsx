@@ -13,7 +13,6 @@ function crashError(): Error {
 }
 
 const COMPONENT_STACK = [
-  '',
   '    at SessionChatHeader (session-chat-interface.tsx:5192:21)',
   '    at ErrorBoundary (error-boundary.tsx:116:1)',
   '    at RootOutlet',
@@ -29,6 +28,7 @@ const meta: Meta<typeof ErrorBoundaryFallback> = {
     variant: 'page',
     resetErrorBoundary: fn(),
   },
+  parameters: { layout: 'fullscreen' },
 };
 
 export default meta;
@@ -39,22 +39,49 @@ export const Page: Story = {};
 
 /** Recovery controls are always user initiated. */
 export const PageWithManualRecovery: Story = {
-  args: {
-  },
+  args: {},
 };
 
-/** One panel or region failed; the surrounding layout still works. */
+/** One panel or region failed; the surrounding layout still works. No tray: it keeps the section's ground. */
 export const Section: Story = {
   args: {
     variant: 'section',
   },
+  decorators: [
+    (Story) => (
+      <div style={{ maxWidth: 560, padding: 24 }}>
+        <Story />
+      </div>
+    ),
+  ],
 };
 
-/** Tight spots (headers, toolbars): one readable line, retry, and copy. */
+/** Tight spots (headers, toolbars): one calm sentence, retry, and copy. */
 export const Inline: Story = {
   args: {
     variant: 'inline',
   },
+  decorators: [
+    (Story) => (
+      <div style={{ padding: 24 }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+/** A narrow slot: the sentence wraps to a second line at most. */
+export const InlineNarrow: Story = {
+  args: {
+    variant: 'inline',
+  },
+  decorators: [
+    (Story) => (
+      <div style={{ width: 280, padding: 24 }}>
+        <Story />
+      </div>
+    ),
+  ],
 };
 
 /** Hosts that opt out of details still get the recovery steps. */

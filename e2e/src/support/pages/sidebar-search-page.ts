@@ -14,6 +14,7 @@ import {
   UNRELATED_SESSION_TITLE,
   type SidebarSearchFixture,
 } from '../fixtures/sidebar-search-fixture.js';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 const AGENT_NAME = 'Deterministic Sidebar Search Agent';
 
@@ -300,7 +301,7 @@ export class SidebarSearchPage {
 
   private async openArchive(): Promise<void> {
     if (!/#\/local\/archive(?:\?.*)?$/u.test(this.page.url())) {
-      await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+      await openSidebarArchive(this.page);
     }
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
   }

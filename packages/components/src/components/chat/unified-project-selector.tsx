@@ -3,6 +3,7 @@ import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   ArrowUpRight,
   Check,
+  ChevronDown,
   CircleSlash2,
   FolderOpen,
   FolderPlus,
@@ -11,7 +12,8 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import * as stylex from '@stylexjs/stylex';
+import { toast } from '@/lib/toast';
 
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
@@ -26,16 +28,10 @@ import {
 import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
 import type { VisibleLocalProjectIndex } from '@/lib/visible-local-project-index';
 import { cn } from '@/lib/utils';
-import { CONTEXT_PILL_HOVER_CLASS, CONTEXT_PILL_SURFACE_CLASS } from './context-pill-class';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSearchInput,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { withClassName } from '@/lib/stylex';
+import { contextPill } from './context-pill-class';
+import { Menu, MenuSearchInput } from '@/ui/menu';
+import { Tooltip } from '@lody/ui/tooltip';
 
 function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
   const ownerHandle = (repoFullName.split('/')[0] ?? '').trim();
@@ -279,20 +275,20 @@ function ProjectAccessStatus({
     'inline-flex shrink-0 select-none items-center gap-1 text-muted-foreground',
     variant === 'trigger' && [
       'h-6 rounded-r-md px-2 text-[0.8em] font-medium transition-colors',
-      CONTEXT_PILL_SURFACE_CLASS,
-      // The pill's own left border doubles as the divider from the trigger.
-      'dark:border-l-border/60',
     ],
     variant === 'option' && 'text-[0.8em] font-medium',
     'text-foreground/75',
-    isAction && ['cursor-pointer', CONTEXT_PILL_HOVER_CLASS],
+    isAction && 'cursor-pointer hover:text-foreground',
     variant === 'trigger' &&
       'outline-hidden focus-visible:relative focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-ring/50'
   );
   const content = isAction ? (
     <button
       type="button"
-      className={sharedClassName}
+      {...withClassName(
+        stylex.props(contextPill.surface, contextPill.interactive),
+        sharedClassName
+      )}
       aria-label={`${title}: ${description}. ${t(
         'workspace.projects.shareProjectAction',
         'Share project'
@@ -303,23 +299,29 @@ function ProjectAccessStatus({
       <span>{label}</span>
     </button>
   ) : (
-    <span tabIndex={variant === 'trigger' ? 0 : undefined} className={sharedClassName}>
+    <span
+      tabIndex={variant === 'trigger' ? 0 : undefined}
+      {...withClassName(
+        stylex.props(variant === 'trigger' && contextPill.surface),
+        sharedClassName
+      )}
+    >
       <LockKeyhole className="h-3 w-3" aria-hidden="true" />
       <span>{label}</span>
     </span>
   );
 
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>{content}</TooltipTrigger>
-      <TooltipContent
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={content} />
+      <Tooltip.Content
         side={variant === 'trigger' ? 'top' : 'right'}
         className="max-w-72 px-2.5 py-2"
       >
         <div className="font-medium">{title}</div>
         <div className="mt-0.5 text-[0.8em] text-muted-foreground">{description}</div>
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -490,34 +492,83 @@ export function UnifiedProjectSelectorView({
           <X className="h-3 w-3" />
         </button>
       ) : null}
-      <DropdownMenu
+      <Menu.Root
         open={open}
         onOpenChange={(nextOpen) => {
           setOpen(nextOpen);
           if (!nextOpen) setQuery('');
         }}
       >
-        <DropdownMenuTrigger asChild>
+        <Menu.Trigger
+          render={
+            <button
+              type="button"
+              {...withClassName(
+                stylex.props(
+                  !isPropertyRow && contextPill.surface,
+                  !isPropertyRow && contextPill.interactive,
+                  !isPropertyRow && open && contextPill.open
+                ),
+                cn(
+                  isPropertyRow
+                    ? [
+                        'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
+                        'text-[1em] font-normal transition-colors',
+                        'bg-transparent text-foreground hover:bg-hover',
+                        'data-[state=open]:bg-hover',
+                        '[&_svg]:text-current [&_svg]:opacity-70',
+                        value.kind === 'none' && 'text-muted-foreground',
+                      ]
+                    : [
+                        'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
+                        'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+                        'hover:text-foreground',
+                        selectedPrivateSharing && 'rounded-r-none',
+                      ],
+                  className
+                )
+              )}
+            >
+              <span
+                className={cn(
+                  'flex h-4 w-4 shrink-0 items-center justify-center',
+                  !isPropertyRow &&
+                    value.kind !== 'none' &&
+                    'transition-opacity group-hover/project:opacity-0 group-focus-within/project:opacity-0'
+                )}
+              >
+                {triggerIcon}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-left">{triggerLabel}</span>
+            </button>
+          }
+        >
           <button
             type="button"
-            className={cn(
-              isPropertyRow
-                ? [
-                    'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
-                    'text-[1em] font-normal transition-colors',
-                    'bg-transparent text-foreground hover:bg-hover',
-                    'data-[state=open]:bg-hover',
-                    '[&_svg]:text-current [&_svg]:opacity-70',
-                    value.kind === 'none' && 'text-muted-foreground',
-                  ]
-                : [
-                    'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
-                    CONTEXT_PILL_SURFACE_CLASS,
-                    'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-                    CONTEXT_PILL_HOVER_CLASS,
-                    selectedPrivateSharing && 'rounded-r-none border-r-0',
-                  ],
-              className
+            {...withClassName(
+              stylex.props(
+                !isPropertyRow && contextPill.surface,
+                !isPropertyRow && contextPill.interactive,
+                !isPropertyRow && open && contextPill.open
+              ),
+              cn(
+                isPropertyRow
+                  ? [
+                      'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
+                      'text-[1em] font-normal transition-colors',
+                      'bg-transparent text-foreground hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08]',
+                      'data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]',
+                      '[&_svg]:text-current [&_svg]:opacity-70',
+                      value.kind === 'none' && 'text-muted-foreground',
+                    ]
+                  : [
+                      'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
+                      'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+                      'hover:text-foreground',
+                      selectedPrivateSharing && 'rounded-r-none',
+                    ],
+                className
+              )
             )}
           >
             <span
@@ -531,16 +582,23 @@ export function UnifiedProjectSelectorView({
               {triggerIcon}
             </span>
             <span className="min-w-0 flex-1 truncate text-left">{triggerLabel}</span>
+            {isPropertyRow ? (
+              <ChevronDown className="size-3.5 shrink-0 !opacity-50" aria-hidden="true" />
+            ) : null}
           </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
+        </Menu.Trigger>
+        <Menu.Content
           side={contentSide}
           align="start"
-          avoidCollisions={contentSide === 'bottom'}
+          collisionAvoidance={
+            contentSide === 'bottom'
+              ? undefined
+              : { side: 'none', align: 'none', fallbackAxisSide: 'none' }
+          }
           className={cn('w-[min(20rem,calc(100vw-2rem))]', contentClassName)}
           style={contentStyle}
         >
-          <DropdownMenuSearchInput
+          <MenuSearchInput
             value={query}
             onValueChange={setQuery}
             placeholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
@@ -561,9 +619,9 @@ export function UnifiedProjectSelectorView({
                   </span>
                 );
                 return (
-                  <DropdownMenuItem
+                  <Menu.Item
                     key={option.value}
-                    onSelect={() => onChange(option.selection)}
+                    onClick={() => onChange(option.selection)}
                     className={cn(
                       'gap-2 py-1.5',
                       inlineDescription ? 'items-start' : 'items-center'
@@ -574,12 +632,12 @@ export function UnifiedProjectSelectorView({
                     </span>
                     <span className="flex min-w-0 flex-1 flex-col">
                       {localPath ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>{labelNode}</TooltipTrigger>
-                          <TooltipContent side="right" className="max-w-[22rem] break-all">
+                        <Tooltip.Root>
+                          <Tooltip.Trigger render={labelNode} />
+                          <Tooltip.Content side="right" className="max-w-[22rem] break-all">
                             {localPath}
-                          </TooltipContent>
-                        </Tooltip>
+                          </Tooltip.Content>
+                        </Tooltip.Root>
                       ) : (
                         labelNode
                       )}
@@ -598,7 +656,7 @@ export function UnifiedProjectSelectorView({
                         aria-hidden="true"
                       />
                     ) : null}
-                  </DropdownMenuItem>
+                  </Menu.Item>
                 );
               })
             ) : (
@@ -607,21 +665,21 @@ export function UnifiedProjectSelectorView({
               </div>
             )}
           </div>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => onChange({ kind: 'none' })}>
+          <Menu.Separator />
+          <Menu.Item onClick={() => onChange({ kind: 'none' })}>
             <CircleSlash2 className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span>{clearLabel}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onAddLocalProject}>
+          </Menu.Item>
+          <Menu.Item onClick={onAddLocalProject}>
             <FolderPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span>{t('chat.contextSwitch.addProject', 'Add a folder')}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onConnectGitRepo}>
+          </Menu.Item>
+          <Menu.Item onClick={onConnectGitRepo}>
             <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span>{t('repos.connectMore', 'Connect more GitHub projects')}</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </Menu.Item>
+        </Menu.Content>
+      </Menu.Root>
       {selectedPrivateSharing ? (
         <ProjectAccessStatus
           state={selectedPrivateSharing}

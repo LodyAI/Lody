@@ -23,7 +23,9 @@ import {
   normalizeLocalProjectRootPath,
 } from '@lody/shared/node/local-project';
 
+import type { MachineAccessCheckResult } from '@/lib/workspace';
 import {
+  type MachineAccessReaders,
   applyAgentRunConfigSelection,
   runSessionOperationWithSyncedMetadata,
   assertSupportedParentDepth,
@@ -45,6 +47,7 @@ import {
   resolveOpenedBySessionRelation,
   resolveSessionCreateOwnerUserId,
   selectDefaultAgentConfigForCreate,
+  readDelegatedMachineAccess,
   resolveSessionRequester,
   resolveSessionCommandRequesterUserId,
   resolveChatArgs,
@@ -329,6 +332,24 @@ describe('session command helpers', () => {
       'new-archived',
       'old-active',
     ]);
+    const targeted = {
+      ...sessions[0],
+      title: 'Review parser',
+      machineId: 'target-machine',
+      agentConfigId: 'target-agent',
+      agentRoleId: 'target-role',
+    } as SessionMeta;
+    const other = { ...targeted, id: 'other', agentRoleId: 'other-role' } as SessionMeta;
+    expect(
+      filterSessionMetas([targeted, other], {
+        query: 'PARSER',
+        machineId: 'target-machine',
+        agentConfigId: 'target-agent',
+        agentRoleId: 'target-role',
+      })
+    ).toEqual([targeted]);
+    expect(filterSessionMetas([targeted], { machineId: 'wrong' })).toEqual([]);
+    expect(filterSessionMetas([targeted], { agentConfigId: 'wrong' })).toEqual([]);
   });
 
   it('filters machine selectors to authorized machine ids before selection', () => {
@@ -830,6 +851,85 @@ describe('session command helpers', () => {
       )
     ).toEqual({ modeId: 'plan' });
     expect(resolveTurnDispatchDefaultsFromHistory([], agent)).toBeUndefined();
+  });
+
+  it("validates effort against the target model's declaration, keeping Claude's default", () => {
+    // The probe ran on model-a, which has no effort option at all.
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'claude',
+      modes: [{ id: 'default', name: 'Default' }],
+      models: [
+        { modelId: 'model-a', name: 'Model A' },
+        { modelId: 'model-b', name: 'Model B' },
+      ],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [
+            { value: 'model-a', name: 'Model A' },
+            { value: 'model-b', name: 'Model B' },
+          ],
+        },
+      ],
+      declaredModelControls: {
+        'model-a': { fastMode: false },
+        'model-b': { effortValues: ['low', 'high'], fastMode: true },
+      },
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'claude' });
+    const dispatch = (configOptionValues: Record<string, string | boolean>) => () =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modelId: 'model-b', configOptionValues },
+        target,
+        capability,
+      });
+
+    // `default` clears the effort pin and follows the provider: always offered.
+    expect(dispatch({ effort: 'default' })).not.toThrow();
+    expect(dispatch({ effort: 'high', fast: true })).not.toThrow();
+    expect(dispatch({ effort: 'max' })).toThrow(/Allowed values: default, low, high/);
+  });
+
+  it('keeps Fast values away from a model declared without Fast', () => {
+    // The probe ran on haiku, which has no Fast option; the declaration agrees.
+    const capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'claude',
+      modes: [{ id: 'default', name: 'Default' }],
+      models: [{ modelId: 'haiku', name: 'Haiku' }],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'haiku',
+          options: [{ value: 'haiku', name: 'Haiku' }],
+        },
+      ],
+      declaredModelControls: { haiku: { fastMode: false } },
+      fetchedAt: 1,
+    };
+    const target = createSessionMeta({ agentType: 'claude' });
+    const dispatch = (configOptionValues: Record<string, string | boolean>) => () =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modelId: 'haiku', configOptionValues },
+        target,
+        capability,
+      });
+
+    expect(dispatch({ fast: true })).toThrow(/does not offer fast mode/);
+    expect(dispatch({ fast: false })).not.toThrow();
+    // An inherited Fast value is dropped rather than sent to a model without it.
+    expect(
+      filterCompatibleTurnConfigOptionValues({ fast: true, effort: 'default' }, capability, 'haiku')
+    ).toBeUndefined();
   });
 
   it('fills omitted chat follow-up selectors from the target turn and keeps explicit overrides', () => {
@@ -1642,11 +1742,10 @@ describe('session command helpers', () => {
     }
   });
 
-  it('binds the workspace GitHub repository of a local project to its session', () => {
+  it('binds a local origin without product-cloud repository registration', () => {
     expect(
       resolveLocalProjectCreateGitContext({
         gitState: createLocalProjectGitState(),
-        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
         useWorktree: true,
       })
     ).toEqual({ branch: 'main', githubRepoFullName: 'loro-dev/lody' });
@@ -1656,33 +1755,23 @@ describe('session command helpers', () => {
     expect(
       resolveLocalProjectCreateGitContext({
         gitState: createLocalProjectGitState(),
-        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
       })
     ).toEqual({ githubRepoFullName: 'loro-dev/lody' });
   });
 
-  it('records the workspace spelling of an origin that differs only in case', () => {
+  it('preserves the remote repository identity spelling', () => {
     expect(
       resolveLocalProjectCreateGitContext({
         gitState: createLocalProjectGitState({ githubRepoFullName: 'Loro-Dev/Lody' }),
-        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
         useWorktree: true,
       })
-    ).toEqual({ branch: 'main', githubRepoFullName: 'loro-dev/lody' });
+    ).toEqual({ branch: 'main', githubRepoFullName: 'Loro-Dev/Lody' });
   });
 
-  it('keeps a local session local when its origin is not a workspace repository', () => {
-    expect(
-      resolveLocalProjectCreateGitContext({
-        gitState: createLocalProjectGitState(),
-        workspaceRepositories: [{ fullName: 'loro-dev/other' }],
-        useWorktree: true,
-      })
-    ).toEqual({ branch: 'main' });
+  it('keeps a non-GitHub local origin without a GitHub identity', () => {
     expect(
       resolveLocalProjectCreateGitContext({
         gitState: createLocalProjectGitState({ githubRepoFullName: null }),
-        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
         useWorktree: true,
       })
     ).toEqual({ branch: 'main' });
@@ -1700,14 +1789,12 @@ describe('session command helpers', () => {
           branches: ['main', remoteSelector],
           currentBranch: 'main',
         }),
-        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
         requestedBranch: 'feature/session',
       })
     ).toEqual({ branch: remoteSelector, githubRepoFullName: 'loro-dev/lody' });
     expect(() =>
       resolveLocalProjectCreateGitContext({
         gitState: createLocalProjectGitState(),
-        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
         requestedBranch: 'feature/missing',
       })
     ).toThrow('Local project branch not found: feature/missing');
@@ -1717,27 +1804,23 @@ describe('session command helpers', () => {
     expect(
       resolveLocalProjectCreateGitContext({
         gitState: { git: false },
-        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
       })
     ).toEqual({});
     expect(() =>
       resolveLocalProjectCreateGitContext({
         gitState: { git: false },
-        workspaceRepositories: [],
         useWorktree: true,
       })
     ).toThrow(/--worktree/);
     expect(() =>
       resolveLocalProjectCreateGitContext({
         gitState: { git: false },
-        workspaceRepositories: [],
         requestedBranch: 'main',
       })
     ).toThrow(/not a git repository/);
     expect(() =>
       resolveLocalProjectCreateGitContext({
         gitState: createLocalProjectGitState({ branches: [], currentBranch: null }),
-        workspaceRepositories: [{ fullName: 'loro-dev/lody' }],
         useWorktree: true,
       })
     ).toThrow(/does not have a branch to use as a worktree base/);
@@ -1964,5 +2047,112 @@ describe('session command helpers', () => {
     expect(shouldWaitForSessionCompletion({ json: true })).toBe(false);
     expect(shouldWaitForSessionCompletion({ jsonl: true })).toBe(false);
     expect(shouldWaitForSessionCompletion({ wait: true, json: true })).toBe(true);
+  });
+});
+
+describe('delegated machine access', () => {
+  // A synthetic model of the hosted rules. `reach` is one user's own access:
+  // owned, or shared (and, with a project, the project shared too).
+  const machines: Record<string, { owner: string; shared: boolean; sharedProjects?: string[] }> = {
+    'owner-private': { owner: 'owner', shared: false },
+    'owner-shared': { owner: 'owner', shared: true },
+    'peer-shared': { owner: 'peer', shared: true, sharedProjects: ['public-project'] },
+    'peer-private': { owner: 'peer', shared: false },
+  };
+  const tokenUser = 'owner';
+  const reach = (
+    userId: string,
+    machineId: string,
+    localProjectId?: string
+  ): MachineAccessCheckResult => {
+    const machine = machines[machineId];
+    if (!machine) return { allowed: false, reason: 'machine_not_registered' };
+    if (machine.owner === userId) return { allowed: true };
+    if (!machine.shared) return { allowed: false, reason: 'not_visible' };
+    if (localProjectId && !machine.sharedProjects?.includes(localProjectId))
+      return { allowed: false, reason: 'project_not_shared' };
+    return { allowed: true };
+  };
+  const legacyReaders: MachineAccessReaders = {
+    delegated: async () => null,
+    asTokenUser: async (input) => reach(tokenUser, input.machineId, input.localProjectId),
+    asServedRequester: async (input) =>
+      machines[input.machineId]?.owner === tokenUser
+        ? reach(input.requesterUserId, input.machineId, input.localProjectId)
+        : { allowed: false, reason: 'not_visible' },
+  };
+  const hostedReaders: MachineAccessReaders = {
+    ...legacyReaders,
+    delegated: async (input) => {
+      const owner = reach(tokenUser, input.machineId, input.localProjectId);
+      return owner.allowed
+        ? reach(input.requesterUserId, input.machineId, input.localProjectId)
+        : owner;
+    },
+  };
+  const read =
+    (readers: MachineAccessReaders) =>
+    (requesterUserId: string, machineId: string, localProjectId?: string) =>
+      readDelegatedMachineAccess(
+        {
+          token: 'synthetic-token',
+          tokenUserId: tokenUser,
+          workspaceId: 'workspace',
+          machineId,
+          requesterUserId,
+          ...(localProjectId ? { localProjectId } : {}),
+        },
+        readers
+      );
+
+  it.each([
+    ['hosted', hostedReaders],
+    ['legacy', legacyReaders],
+  ] as const)(
+    'reaches every machine and project the executing owner may use (%s backend)',
+    async (_backend, readers) => {
+      const check = read(readers);
+      expect(await check('owner', 'owner-private')).toEqual({ allowed: true });
+      expect(await check('owner', 'peer-shared')).toEqual({ allowed: true });
+      expect(await check('owner', 'peer-shared', 'public-project')).toEqual({ allowed: true });
+      expect(await check('owner', 'peer-shared', 'private-project')).toEqual({
+        allowed: false,
+        reason: 'project_not_shared',
+      });
+      expect(await check('owner', 'peer-private')).toEqual({
+        allowed: false,
+        reason: 'not_visible',
+      });
+    }
+  );
+
+  it.each([
+    ['hosted', hostedReaders],
+    ['legacy', legacyReaders],
+  ] as const)(
+    'never widens a teammate driving the owner machine beyond their own reach (%s backend)',
+    async (_backend, readers) => {
+      const check = read(readers);
+      expect(await check('teammate', 'owner-shared')).toEqual({ allowed: true });
+      expect(await check('teammate', 'owner-private')).toEqual({
+        allowed: false,
+        reason: 'not_visible',
+      });
+      expect(await check('teammate', 'peer-private')).toEqual({
+        allowed: false,
+        reason: 'not_visible',
+      });
+    }
+  );
+
+  it("lets a teammate reach a third person's shared machine once the backend checks both users", async () => {
+    expect(await read(hostedReaders)('teammate', 'peer-shared', 'public-project')).toEqual({
+      allowed: true,
+    });
+    // The fallback cannot check the teammate on a machine the owner does not own.
+    expect(await read(legacyReaders)('teammate', 'peer-shared', 'public-project')).toEqual({
+      allowed: false,
+      reason: 'not_visible',
+    });
   });
 });

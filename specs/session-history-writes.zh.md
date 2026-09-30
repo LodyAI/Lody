@@ -40,6 +40,17 @@ Translation: current
   单独解析。新增字段非法时，整条命令在写入前拒绝。
 - 新历史接受原有内置 CLI selector 的归一化，不重写旧历史。steer 配置编辑只校验变化的字段。
 - 队列提升必须在历史接受后才删除队列行；写入失败保留队列行。
+- 调度和激活检查遇到重复 turn ID 时，采用最后一条已存记录，与定点历史读写一致。
+  前面的副本不能复活已进入终态的最后一条。完整历史导出保留所有已存记录，不执行去重。
+  尝试修复终态后，若该身份仍可被调度，当前检查必须结束，不重放该消息或反复物化历史。
+- 用户状态写入作用于该用户 turn 的所有已存副本。是否接受带条件的写入由最后一条副本决定；
+  前面的副本随之更新，但已进入终态的副本不得回退。steer 结果只迁移仍处于 steer 状态的副本。
+  任一副本已开始或已结束时，拒绝把未送达的 steer 重新排队。
+- 追加一条历史中尚不存在的排队 turn 之前，队列提升在其租约内重新读取会话 meta。若该 turn 的
+  steer 已被拒绝，保留队列行，直到该 steer 自己的历史到达，或 missing-history 恢复将其结束。
+  若 steer 已被接收或已结束、turn 正在执行或已处理、激活已结算、存在 missing-history
+  tombstone 或已完成的 assistant 输出，则删除队列行且不追加历史；这些证据优先于被拒绝的
+  steer 状态。
 - 输入框 steering 必须同时具备权威 ACP acknowledged steering 能力、活跃 prompt 和已知未结束
   assistant turn。忙碌期间，Guide 偏好或反转 Queue 的发送若不具备该能力，直接追加到正规 Queue；
   能力信息不可用或仅为 provisional 时也如此。消息保留队列顺序及正常提升前的编辑/删除能力，
@@ -83,7 +94,7 @@ Translation: current
   replacement 的进程。create/restore 原有的取消 fence 保持有效。
 - promotion 写入失败不能丢失已确认的未投递结论。CLI 返回 `promotion-failed` 和错误，不能
   假装恢复成功或改报投递未知。daemon 的 `recoveryOwned` 响应表示恢复仍由该 daemon 负责：
-  前端仅对明确的 promotion 失败通过同一 RPC 重试一次，持续失败则报错。旧响应保留
+  前端既不重试也不修复该轮次。旧响应（没有 `recoveryOwned`）保留
   pending_apply/pending/seen 的 dispatch 修复。不得复活 active、terminal 或已删除的轮次；
   超时或投递未知绝不授权重试。
 - foreground run configuration 归属其 turn 的 Effect signal。turn 被中断后，在途配置请求

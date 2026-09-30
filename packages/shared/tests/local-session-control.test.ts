@@ -16,6 +16,36 @@ const {
 };
 
 describe('local session control node validators', () => {
+  it('accepts the new preview status contract and rejects malformed renewal/expiry fields', () => {
+    const request = {
+      type: 'session/preview-status',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+      requestedByUserId: 'user-1',
+      renewEndpointId: 'endpoint-1',
+    };
+    const response = {
+      type: 'session/preview-status_response',
+      sessionId: 'session-1',
+      success: true,
+      connection: { status: 'closed', closedReason: 'idle_timeout', endpointId: 'endpoint-1' },
+      expiresAt: 1_800_000_000_000,
+    };
+    for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+      expect(validate(request)).toBe(true);
+      expect(validate({ ...request, renewEndpointId: 1 })).toBe(false);
+    }
+    for (const validate of [isLocalSessionControlResponse, isLocalSessionControlResponseCjs]) {
+      expect(validate(response)).toBe(true);
+      expect(validate({ ...response, expiresAt: 'tomorrow' })).toBe(false);
+      expect(validate({ ...response, expiresAt: -1 })).toBe(false);
+      expect(validate({ ...response, connection: { status: 'revoked' } })).toBe(false);
+      expect(
+        validate({ ...response, connection: { status: 'closed', closedReason: 'unknown' } })
+      ).toBe(false);
+    }
+  });
   it('accepts builtin Kimi sessions in TS and CJS validators', () => {
     const request = {
       type: 'session/create',
@@ -578,6 +608,20 @@ describe('local session control node validators', () => {
         env: { ACP_PROVIDER_TOKEN: 'attacker-controlled' },
       })
     ).toBe(false);
+  });
+
+  it('carries the forced capability refresh flag through ts and cjs validators', () => {
+    const request = {
+      type: 'machine/acp-capabilities-refresh' as const,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      configId: 'config-1',
+    };
+
+    expect(isLocalSessionControlRequest({ ...request, force: true })).toBe(true);
+    expect(isLocalSessionControlRequestCjs({ ...request, force: true })).toBe(true);
+    expect(isLocalSessionControlRequest({ ...request, force: 'yes' })).toBe(false);
+    expect(isLocalSessionControlRequestCjs({ ...request, force: 'yes' })).toBe(false);
   });
 
   it('accepts machine ping requests and responses in ts and cjs validators', () => {

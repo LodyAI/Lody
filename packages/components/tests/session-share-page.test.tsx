@@ -36,7 +36,7 @@ const theme = vi.hoisted(() => ({ value: 'system' as string, setTheme: vi.fn() }
 vi.mock('../src/theme-provider', () => ({
   useTheme: () => ({ theme: theme.value, setTheme: theme.setTheme }),
 }));
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('@/lib/toast', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 // Exercise the real share shell and copy builder without a virtualized viewport.
 vi.mock('../src/components/ai-gui/view', () => ({
   SessionChatStreamView: ({ sessionId }: { sessionId: string }) => (
@@ -305,9 +305,11 @@ describe('static share presentation', () => {
   });
 
   it('still switches the page when browser storage is unavailable', async () => {
-    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new DOMException('Storage disabled', 'SecurityError');
-    });
+    const storage = vi
+      .spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem')
+      .mockImplementation(() => {
+        throw new DOMException('Storage disabled', 'SecurityError');
+      });
     try {
       await render();
       await act(async () =>

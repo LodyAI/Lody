@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 
+import { COMMAND_ICONS } from '@/components/commands/command-icons';
 import {
   CommandPaletteView,
   type CommandPaletteLabels,
@@ -18,7 +19,7 @@ const LABELS: CommandPaletteLabels = {
 
 const noop = () => {};
 
-const COMMAND_RESULTS: PaletteResult[] = [
+const COMMAND_FIXTURES: PaletteResult[] = [
   { kind: 'command', key: 'c1', title: 'New Chat', subtitle: null, shortcut: 'Mod+n', run: noop },
   {
     kind: 'command',
@@ -54,8 +55,66 @@ const COMMAND_RESULTS: PaletteResult[] = [
   },
 ];
 
+/* What the container hands over with no query: each command's glyph, grouped under its category. */
+const COMMAND_META: Record<string, [string, string]> = {
+  c1: ['session.new', 'Session'],
+  c2: ['sidebar.toggle', 'View'],
+  c3: ['palette.toggle', 'Navigation'],
+  c4: ['session.nextTab', 'Session'],
+  c5: ['session.copyCurrentBranch', 'Session'],
+  c6: ['session.toggleCurrentPinned', 'Session'],
+  c7: ['layout.toggleZenMode', 'View'],
+  c8: ['workspace.openSettings', 'Workspace'],
+  c9: ['app.cycleTheme', 'View'],
+};
+const GROUP_ORDER = ['Navigation', 'Session', 'View', 'Workspace'];
+
+const COMMAND_RESULTS: PaletteResult[] = (
+  [
+    ...COMMAND_FIXTURES,
+    {
+      kind: 'command',
+      key: 'c6',
+      title: 'Pin Current Session',
+      subtitle: null,
+      shortcut: 'Mod+Shift+p',
+      run: noop,
+    },
+    {
+      kind: 'command',
+      key: 'c7',
+      title: 'Toggle Zen Mode',
+      subtitle: null,
+      shortcut: 'Mod+.',
+      run: noop,
+    },
+    {
+      kind: 'command',
+      key: 'c8',
+      title: 'Open Settings',
+      subtitle: null,
+      shortcut: 'Mod+,',
+      run: noop,
+    },
+    { kind: 'command', key: 'c9', title: 'Cycle Theme', subtitle: null, shortcut: null, run: noop },
+  ] satisfies PaletteResult[]
+)
+  .map((result): PaletteResult => {
+    const [id, group] = COMMAND_META[result.key] ?? [];
+    return { ...result, icon: id ? COMMAND_ICONS[id] : undefined, group };
+  })
+  .sort((a, b) => GROUP_ORDER.indexOf(a.group ?? '') - GROUP_ORDER.indexOf(b.group ?? ''));
+
 const MIXED_RESULTS: PaletteResult[] = [
-  { kind: 'command', key: 'c1', title: 'New Chat', subtitle: null, shortcut: 'Mod+n', run: noop },
+  {
+    kind: 'command',
+    key: 'c1',
+    title: 'New Chat',
+    subtitle: null,
+    shortcut: 'Mod+n',
+    icon: COMMAND_ICONS['session.new'],
+    run: noop,
+  },
   {
     kind: 'session',
     key: 's1',
@@ -107,7 +166,7 @@ const baseArgs = {
   labels: LABELS,
 };
 
-/** Default view: flat command list, no query. */
+/** Default view: no query, commands grouped under their category. */
 export const Commands: Story = {
   args: { ...baseArgs, query: '', results: COMMAND_RESULTS },
 };

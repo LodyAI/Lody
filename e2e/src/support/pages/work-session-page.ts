@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { expect, type Page } from '@playwright/test';
+import { openSidebarArchive } from './sidebar-footer.js';
 
 type TerminalSnapshot = {
   terminalId: string;
@@ -73,7 +74,13 @@ export class WorkSessionPage {
     const agentOption = this.page.getByRole('menuitemradio', { name: agentName, exact: true });
     await agentOption.click();
     await expect(agentOption).toHaveAttribute('aria-checked', 'true');
-    await this.page.keyboard.press('Escape');
+    // Picking an option keeps this menu open on purpose, and Escape dismisses
+    // one level at a time — close the submenu, then the root menu.
+    const openMenus = this.page.getByRole('menu');
+    for (let i = 0; i < 4 && (await openMenus.count()) > 0; i++) {
+      await this.page.keyboard.press('Escape');
+    }
+    await expect(openMenus).toHaveCount(0);
   }
 
   async enableWorktree(): Promise<void> {
@@ -137,13 +144,13 @@ export class WorkSessionPage {
     await this.page.getByRole('menuitem', { name: /^(Archive session|归档会话)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
     await expect
-      .poll(() => this.listTerminals(resources.sessionId), {
+      .poll(() => this.listTerminalsDuringCleanup(resources.sessionId), {
         timeout: 30_000,
         intervals: [50, 100, 250, 500],
       })
       .toEqual([]);
 
-    await this.page.getByRole('button', { name: /^(Archive|归档)$/u, exact: true }).click();
+    await openSidebarArchive(this.page);
     await expect(this.page).toHaveURL(/#\/local\/archive(?:\?.*)?$/u);
     const archivedRow = this.page.locator(`[data-id="archive-session:${resources.sessionId}"]`);
     await expect(archivedRow).toBeVisible({ timeout: 30_000 });
@@ -167,7 +174,7 @@ export class WorkSessionPage {
     await expect
       .poll(
         async () => ({
-          terminals: await this.listTerminals(resources.sessionId),
+          terminals: await this.listTerminalsDuringCleanup(resources.sessionId),
           worktreeExists: existsSync(resources.worktreePath),
           liveAgentPids: agentPids.filter(isProcessAlive),
         }),
@@ -186,5 +193,19 @@ export class WorkSessionPage {
     return (await this.page.evaluate(async (targetSessionId) => {
       return await window.ipc!.invoke('terminal.list', targetSessionId);
     }, sessionId)) as TerminalSnapshot[];
+  }
+
+  private async listTerminalsDuringCleanup(
+    sessionId: string
+  ): Promise<TerminalSnapshot[] | { transportError: string }> {
+    try {
+      return await this.listTerminals(sessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/terminal_socket_closed|terminal_socket_unavailable|daemon_unavailable/u.test(message)) {
+        return { transportError: message };
+      }
+      throw error;
+    }
   }
 }

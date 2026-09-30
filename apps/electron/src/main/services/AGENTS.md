@@ -11,6 +11,11 @@ click, close, or failure. `NotificationService` owns those references and
 `notification-delivery.ts` releases them; returning IPC success is not dismissal.
 See the [lifetime fix](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-notification-click-lifetime.md).
 
+Window badge reports replace absolute contributions; always apply repeated values,
+including zero. Discard a contribution when its renderer crashes or navigates to a
+new document, as well as when the window closes. Renderer reconciliation must not
+cause another bounce while permission waiting remains nonzero.
+
 The Devbar Hub is off by default and starts only after the primary window's hidden
 Developer Mode control enables it; `LODY_DEVBAR=true` is an automation override.
 It binds to loopback, and the normal renderer CSP stays unchanged. Enabling it
@@ -46,3 +51,11 @@ access without a new capability/security decision in the owning
   `installNavigationGuard` in `window.ts`: `will-navigate` does not fire for a
   server-side 3xx, so a public page redirecting to loopback would otherwise
   commit here and never reach Managed Preview.
+
+Renderer `beforeunload` vetoes on product windows (close, reload, quit) surface
+through one native Stay/Leave confirmation (`../renderer-unload.ts`); Leave only
+ignores that document's veto. Quit closes product windows, and so gets unload
+approval, before it destroys relays or stops the CLI; Stay cancels quit with the
+app fully running. A quit close whose renderer hangs or dies is destroyed so quit
+cannot wait forever. Never destroy a normally closing window or add a path that
+bypasses unrelated `beforeunload` guards such as unsaved editors.

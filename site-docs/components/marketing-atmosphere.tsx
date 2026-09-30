@@ -301,6 +301,8 @@ export function isMarketingAtmospherePath(pathname: string): boolean {
   const bare = path.startsWith('/zh/') ? path.slice(3) : path === '/zh' ? '/' : path;
   return (
     bare === '/price' ||
+    bare === '/coding-agent-gui' ||
+    bare === '/coding-agent-remote-control' ||
     bare === '/download' ||
     bare === '/download/nightly' ||
     bare === '/changelog' ||

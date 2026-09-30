@@ -3,8 +3,8 @@
 /**
  * LandingPreviewPanel — the session Browser panel for the DESIGN-MODE feature demo.
  *
- * Uses the REAL `SessionBrowserToolbar` (back / forward / reload / address bar /
- * annotate / share) over a mock page surface, mirroring `SessionBrowserPanel`
+ * Uses a replica of the app's `SessionBrowserToolbar` (back / forward / reload /
+ * address bar / annotate / share) over a mock page surface, mirroring `SessionBrowserPanel`
  * (packages/components/src/components/sessions/session-browser-panel.tsx), which
  * replaced the old `SessionPreviewPanel` — there is no Preview header, device
  * toolbar or dotted canvas any more; the page fills the panel like a browser tab.
@@ -16,10 +16,9 @@
 
 import { type ReactNode } from 'react';
 import { Check, Send, SendHorizontal, X } from 'lucide-react';
-import { Button } from '@/ui/button';
-import { Textarea } from '@/ui/textarea';
-import { SessionBrowserToolbar } from '@/components/sessions/session-browser-toolbar';
-import { cn } from '@/lib/utils';
+import { ReplicaBrowserToolbar } from './landing-replica/browser-toolbar';
+import { Button } from './landing-replica/button';
+import { cn } from './landing-replica/utils';
 
 export type LandingPreviewDemoState = {
   loading: boolean;
@@ -66,29 +65,11 @@ const BROWSER_ADDRESS = 'http://127.0.0.1:3002/';
 export function LandingPreviewPanel({ state }: { state: LandingPreviewDemoState }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      {/* The REAL toolbar; every control is inert here except annotation mode,
-          which the scripted demo drives. */}
-      <SessionBrowserToolbar
+      {/* Toolbar replica; only annotation mode changes, driven by the demo. */}
+      <ReplicaBrowserToolbar
         address={BROWSER_ADDRESS}
-        canGoBack={false}
-        canGoForward={false}
         loading={state.loading}
-        annotationEnabled={state.annotating}
-        annotationAvailable
-        sharing={false}
-        shareAvailable
-        hasShareUrl={false}
-        busy={false}
-        onAddressChange={() => undefined}
-        onRestoreAddress={() => undefined}
-        onNavigate={() => undefined}
-        onBack={() => undefined}
-        onForward={() => undefined}
-        onReload={() => undefined}
-        onStop={() => undefined}
-        onToggleAnnotation={() => undefined}
-        onShare={() => undefined}
-        onStopSharing={() => undefined}
+        annotating={state.annotating}
       />
 
       {/* The page fills the panel — the browser has no device canvas. */}
@@ -117,11 +98,7 @@ function MockPreviewLoading() {
 // ---- The previewed page: a mock Lody landing hero -----------------------------
 
 function MockLandingSite({ state }: { state: LandingPreviewDemoState }) {
-  const lines = [
-    PAGE_LINES[0],
-    PAGE_LINES[1],
-    state.edited ? PAGE_LINE_2_EDITED : PAGE_LINES[2],
-  ];
+  const lines = [PAGE_LINES[0], PAGE_LINES[1], state.edited ? PAGE_LINE_2_EDITED : PAGE_LINES[2]];
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-[linear-gradient(180deg,#071a2c_0%,#03090f_78%,#02060b_100%)] text-slate-100">
       {/* Mock site nav */}
@@ -183,7 +160,11 @@ function CopyLine({
     <div className="relative w-fit max-w-full" data-demo={`pv-line-${index}`}>
       {children}
       {hovered || draft ? (
-        <span aria-hidden className="pointer-events-none absolute inset-0" style={HOVER_BOX_STYLE} />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={HOVER_BOX_STYLE}
+        />
       ) : null}
       {saved ? (
         // Anchor pin — visual-annotation-comments-overlay.tsx pin dot.
@@ -220,11 +201,12 @@ function DraftCommentCard({ text }: { text: string }) {
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
-      <Textarea
+      {/* The app's `ui/textarea` classes merged with the card's overrides. */}
+      <textarea
         value={text}
-        onChange={() => undefined}
+        readOnly
         placeholder="Describe what should change here..."
-        className="min-h-20 resize-none bg-background text-xs"
+        className="flex min-h-20 w-full resize-none rounded-md border border-input-border bg-background px-3 py-2 text-xs text-input-foreground ring-offset-background placeholder:text-input-placeholder focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60"
       />
       <div className="mt-2 flex justify-end gap-1.5">
         <Button type="button" size="sm" variant="ghost">
@@ -282,7 +264,11 @@ function SavedCommentCard({ text, staged }: { text: string; staged: boolean }) {
               : 'text-muted-foreground hover:bg-hover hover:text-hover-foreground'
           )}
         >
-          {staged ? <Check className="h-3 w-3" /> : <SendHorizontal className="h-3 w-3 -scale-x-100" />}
+          {staged ? (
+            <Check className="h-3 w-3" />
+          ) : (
+            <SendHorizontal className="h-3 w-3 -scale-x-100" />
+          )}
           {staged ? 'Added' : 'Send'}
         </button>
         <button

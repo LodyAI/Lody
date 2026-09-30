@@ -3,7 +3,7 @@ import { fn, userEvent, within } from 'storybook/test';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 
 import { SessionAccessControl } from '@/components/session-sharing';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const machineId = 'machine-access-story' as MachineId;
 const localProjectId = 'project-access-story' as LocalProjectId;
@@ -14,11 +14,11 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
-      <TooltipProvider>
+      <Tooltip.Provider>
         <div className="flex min-h-dvh items-start justify-end bg-background p-10 text-foreground">
           <Story />
         </div>
-      </TooltipProvider>
+      </Tooltip.Provider>
     ),
   ],
   args: {

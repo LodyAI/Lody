@@ -55,6 +55,7 @@ const selectorOptions: AcpSelectorOptions = {
 const configured: AgentRoleFormValue = {
   ...EMPTY_AGENT_ROLE_FORM_VALUE,
   name: 'Code Reviewer',
+  description: 'Call this agent to review code changes for correctness before merging.',
   emoji: '🔍',
   machineId: 'machine-1' as MachineId,
   agentConfigId: 'config-1' as AgentConfigId,
@@ -86,9 +87,10 @@ const meta = {
   },
   decorators: [
     // Mirrors the settings dialog that hosts the form: a fixed-height panel the
-    // form's own scroll body and sticky footer size themselves against.
+    // form's own scroll body and sticky footer size themselves against. The
+    // panel pads its content; the form has no padding of its own.
     (Story) => (
-      <div className="mx-auto flex h-[620px] w-[620px] flex-col overflow-hidden rounded-lg border bg-background">
+      <div className="mx-auto flex h-[620px] w-[620px] flex-col gap-4 overflow-hidden rounded-lg border bg-background p-4">
         <Story />
       </div>
     ),

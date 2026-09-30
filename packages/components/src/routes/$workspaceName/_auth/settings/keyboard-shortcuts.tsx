@@ -1,6 +1,25 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { Navigate, createFileRoute } from '@tanstack/react-router';
 import { KeyboardShortcutsSetting } from '@/components/settings/keyboard-shortcuts-setting';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 export const Route = createFileRoute('/$workspaceName/_auth/settings/keyboard-shortcuts')({
-  component: KeyboardShortcutsSetting,
+  component: KeyboardShortcutsSettingsRoute,
 });
+
+export function KeyboardShortcutsSettingsRoute() {
+  const isMobile = useIsMobile();
+  const { workspaceName } = Route.useParams();
+
+  if (isMobile) {
+    return (
+      <Navigate
+        to="/$workspaceName/settings"
+        params={{ workspaceName }}
+        search={(previous) => previous}
+        replace
+      />
+    );
+  }
+
+  return <KeyboardShortcutsSetting />;
+}

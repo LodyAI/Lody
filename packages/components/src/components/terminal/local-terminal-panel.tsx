@@ -10,13 +10,7 @@ import { terminalFontFamilyAtom, terminalFontSizeAtom } from '@/atoms';
 import { formatKeyBinding } from '@/lib/commands';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuShortcut,
-  ContextMenuTrigger,
-} from '@/ui/context-menu';
+import { ContextMenu } from '@lody/ui/context-menu';
 import { useActiveVSCodeThemeId, useResolvedTheme } from '../../theme-provider';
 import {
   copyShortcutBinding,
@@ -371,22 +365,24 @@ export function LocalTerminalPanel({
   if (windowsRightClick) return host;
 
   return (
-    <ContextMenu
+    <ContextMenu.Root
       onOpenChange={(open) => {
         if (open) setHasSelection(termRef.current?.hasSelection() ?? false);
       }}
     >
-      <ContextMenuTrigger asChild>{host}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-40">
-        <ContextMenuItem disabled={!hasSelection} onSelect={copySelection}>
+      <ContextMenu.Trigger >{host}</ContextMenu.Trigger>
+      <ContextMenu.Content className="min-w-40">
+        <ContextMenu.Item
+          disabled={!hasSelection}
+          onClick={copySelection}
+          shortcut={copyShortcutLabel}
+        >
           {translate('common.copy', 'Copy')}
-          <ContextMenuShortcut>{copyShortcutLabel}</ContextMenuShortcut>
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={pasteClipboard}>
+        </ContextMenu.Item>
+        <ContextMenu.Item onClick={pasteClipboard} shortcut={pasteShortcutLabel}>
           {translate('common.paste', 'Paste')}
-          <ContextMenuShortcut>{pasteShortcutLabel}</ContextMenuShortcut>
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+        </ContextMenu.Item>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   );
 }

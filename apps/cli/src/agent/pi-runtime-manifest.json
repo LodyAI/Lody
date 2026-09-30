@@ -1,14 +1,14 @@
 {
   "name": "pi",
-  "version": "0.2.0-lody.e6debc2f6aac",
+  "version": "0.2.0-lody.693d6964a676",
   "sourceVersion": "0.2.0",
-  "sourceCommit": "e6debc2f6aaca6f0fd3409f6dd36468a8fba8a8f",
+  "sourceCommit": "693d6964a676203757706685b6acca96e740c47b",
   "kind": "node-package",
   "minNodeVersion": "22.19.0",
   "artifact": {
-    "fileName": "lody-pi-0.2.0-lody.e6debc2f6aac-0942748a1ca3b6d6.tar.zst",
-    "sha256": "0942748a1ca3b6d6eb083ef4ed6717f07838b2479f8dfb7e913f47efe58ce4f2",
-    "size": 37201691,
+    "fileName": "lody-pi-0.2.0-lody.693d6964a676-82b3c0240ef751c1.tar.zst",
+    "sha256": "82b3c0240ef751c19194e29001b9cd175180d0f4951af00796d333cd9ae37039",
+    "size": 37520002,
     "compression": "zstd",
     "cmd": "package/dist/index.js"
   }

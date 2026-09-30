@@ -42,8 +42,20 @@
   Compare only same-version hashes, recomputing from the replay when versions differ;
   unknown versions or missing replay data refuse before any write. A metadata-only
   conflict marker never upgrades the stored cursor by implication.
+- `user-status` writes every stored copy of a duplicated user turn through
+  `updateCopies`: the last copy gates guarded writes, settled copies never regress,
+  and any started or settled copy vetoes a requeue.
 - Legacy inline rows and unchanged unknown fields survive updates. Never rewrite
   history while opening or reading. Auto-seen is a separately attached CLI policy
   with a commit-time guard against regressing an advanced execution status.
 - Test the real Loro reader and writer. Delayed reads use small injected Promise
   gates; there is no test-only implementation of the complete command API.
+- Normalized subagent events persist inside `subagent_task.run`, keyed by root ACP
+  session plus run id. Bind the initiating turn once; child output never changes root
+  turn identity, plan, tools, or accounting. Ignore unregistered/terminal output,
+  reject lineage cycles, and retain incomplete observation across snapshots. Declare
+  nested transcript streaming fields in `schema.ts`; legacy rows stay unchanged.
+
+- Submissions append on the live doc as local commits; transports upload only
+  local events. Never author on a fork and import the export: it misses upload,
+  copies the whole doc and adds a permanent peer.

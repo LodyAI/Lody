@@ -12,6 +12,25 @@ const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 const claudeProvider = { cliType: 'builtin', agentType: 'claude' } as const;
 
 describe('local project control request schema', () => {
+  it('preserves an exact Provider selection for custom ACP history requests', () => {
+    const request = {
+      type: 'local-project/sync-history',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      localProjectId: 'project-1',
+      provider: { cliType: 'custom', agentType: 'custom-agent', agentConfigId: 'config-1' },
+    };
+    expect(safeParseLocalProjectControlRequest(JSON.stringify(request))).toMatchObject({
+      success: true,
+      data: request,
+    });
+    expect(
+      safeParseLocalProjectControlRequest(
+        JSON.stringify({ ...request, provider: { ...request.provider, agentConfigId: '' } })
+      ).success
+    ).toBe(false);
+  });
+
   it('parses add request', () => {
     const parsed = safeParseLocalProjectControlRequest(
       JSON.stringify({

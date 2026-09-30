@@ -79,6 +79,37 @@ const getToolFilePaths = (toolCall: ToolCallMessage): string[] => {
   return [...paths];
 };
 
+/**
+ * Whether a tool call is a shell-command step — the predicate behind the group
+ * header's `commandCount`, shared with the row renderer so every row counted in
+ * "Ran N commands" is the one that carries the "Ran" verb. `execute`/`bash`
+ * always qualify; other kinds qualify only when the call actually carried a
+ * command (a search's `terminal_command` pattern block does not make it one,
+ * and reads keep their own verb). Output alone does not: a Claude tool such as
+ * `TaskStop` or an MCP call returns a plain string, which history stores as
+ * `terminal_output`, and counting it made "Ran TaskStop" one of the commands.
+ */
+export const isCommandToolCall = (toolCall: ToolCallMessage): boolean => {
+  switch (toolCall.kind) {
+    case 'execute':
+    case 'bash':
+      return true;
+    case 'read':
+    case 'edit':
+    case 'write':
+    case 'delete':
+    case 'move':
+    case 'search':
+    case 'fetch':
+    case 'think':
+    case 'switch_mode':
+      return false;
+    default:
+      break;
+  }
+  return Boolean(toolCall.content?.some((block) => block.type === 'terminal_command'));
+};
+
 export const summarizeAssistantActivity = (
   entries: readonly AssistantActivityRenderItem[]
 ): AssistantActivitySummary => {
@@ -129,10 +160,7 @@ export const summarizeAssistantActivity = (
         fetchCount += 1;
         break;
       default: {
-        const hasTerminalContent = toolCall.content?.some(
-          (block) => block.type === 'terminal_command' || block.type === 'terminal_output'
-        );
-        if (hasTerminalContent) {
+        if (isCommandToolCall(toolCall)) {
           commandCount += 1;
         } else {
           otherCount += 1;

@@ -608,6 +608,10 @@ async function probeGitHubRemoteAtRootPath(rootPath: string): Promise<{
   return null;
 }
 
+export async function getLocalProjectGitHubRepoAtRootPath(rootPath: string) {
+  return (await probeGitHubRemoteAtRootPath(normalizeLocalProjectRootPath(rootPath)))?.repoFullName ?? null;
+}
+
 async function listLocalProjectBranchesAtRootPath(rootPath: string): Promise<{
   branches: string[];
   currentBranch: string | null;

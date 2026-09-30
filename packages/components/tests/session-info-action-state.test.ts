@@ -5,6 +5,7 @@ import {
 } from '../src/components/sessions/session-info-action-state';
 
 const BASE_INPUT = {
+  canMutatePr: true,
   canShowGitHubActions: true,
   hasExistingPr: false,
   workspaceDirty: false,
@@ -218,4 +219,13 @@ describe('shouldDisableSessionInfoBarGitHubActionForHydration', () => {
     );
     expect(shouldDisableSessionInfoBarGitHubActionForHydration('merge', false)).toBe(false);
   });
+});
+
+it('keeps local agent repair actions without offering unavailable hosted mutations', () => {
+  expect(resolveSessionInfoBarGitHubActionIds({
+    ...BASE_INPUT, canMutatePr: false, hasExistingPr: true, prStatus: 'draft', workspaceDirty: true,
+  })).toEqual(['commit-and-push']);
+  expect(resolveSessionInfoBarGitHubActionIds({
+    ...BASE_INPUT, canMutatePr: false, hasExistingPr: true, prStatus: 'open', prReadiness: 'y', prCiState: 'f',
+  })).toEqual(['fix-ci-errors']);
 });

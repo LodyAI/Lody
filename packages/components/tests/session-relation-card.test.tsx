@@ -9,6 +9,8 @@ import { getSessionRoomId, type SessionHistoryParsed, type SessionId } from '@lo
 import { setDocMetaByRoomIdAtom } from '../src/atoms/doc-meta';
 import { MessageRowView } from '../src/components/ai-gui/view';
 import { SessionRelationCard } from '../src/components/shared/session-relation-card';
+import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
+import { CurrentSessionRelationsChip } from '../src/components/sessions/session-relations-chip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -126,7 +128,7 @@ describe('Session relation cards', () => {
 
     await act(async () => {
       Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-        .find((button) => button.textContent?.includes('View session'))
+        .find((button) => button.getAttribute('aria-label')?.startsWith('View session:'))
         ?.click();
     });
     expect(onNavigateSession).toHaveBeenCalledWith({ sessionId: createdSessionId });
@@ -358,5 +360,66 @@ describe('Session relation cards', () => {
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog?.textContent).toContain('Detail paragraph 6.');
     expect(dialog?.textContent).toContain(conclusion);
+  });
+
+  it('opens the whole related-Sessions tree from the info-bar chip and routes Tabs by root', async () => {
+    const store = createStore();
+    const meta = (id: string, title: string, extra: Record<string, unknown> = {}) =>
+      store.set(setDocMetaByRoomIdAtom, getSessionRoomId(id as SessionId), {
+        id,
+        machineId: 'machine-1',
+        userId: 'user-1',
+        createdAt: '2026-08-14T12:00:00.000Z',
+        cliType: 'builtin',
+        agentType: 'codex',
+        title,
+        ...extra,
+      });
+    // top ─ opener[tab] ─ created (current)
+    meta('top', 'Top');
+    meta(openerSessionId, 'Opener', { openedBySessionId: 'top' });
+    meta('opener-tab', 'Opener tab', {
+      parentSessionId: openerSessionId,
+      openedBySessionId: openerSessionId,
+      createdAt: '2026-08-14T12:01:00.000Z',
+    });
+    meta(createdSessionId, 'Created', {
+      openedBySessionId: 'opener-tab',
+      openedByRootSessionId: openerSessionId,
+    });
+    const opened: unknown[] = [];
+
+    await act(async () => {
+      root.render(
+        <Provider store={store}>
+          <SessionInfoBar
+            status={null}
+            relations={
+              <CurrentSessionRelationsChip
+                sessionId={createdSessionId}
+                onOpenSession={(target) => opened.push(target)}
+              />
+            }
+          />
+        </Provider>
+      );
+    });
+
+    const chip = container.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]');
+    expect(chip?.textContent).toBe('3');
+    await act(async () => chip?.click());
+
+    const rows = Array.from(document.querySelectorAll('[data-session-relation-row]'));
+    expect(rows.map((row) => row.textContent)).toEqual(['Top', 'Opener', 'Opener tab', 'Created']);
+    expect(
+      document
+        .querySelector(`[data-session-relation-row="${createdSessionId}"]`)
+        ?.getAttribute('aria-current')
+    ).toBe('page');
+
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[data-session-relation-row="opener-tab"]')?.click()
+    );
+    expect(opened).toEqual([{ sessionId: openerSessionId, tabSessionId: 'opener-tab' }]);
   });
 });

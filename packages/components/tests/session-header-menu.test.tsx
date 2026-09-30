@@ -11,7 +11,7 @@ import {
   reviewAgentExperimentEnabledAtom,
 } from '../src/atoms/settings';
 import { SessionHeaderMenu } from '../src/components/sessions/session-chat-interface';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -73,12 +73,13 @@ describe('SessionHeaderMenu', () => {
     expect(trigger).toBeInstanceOf(HTMLButtonElement);
     await act(async () => {
       trigger?.dispatchEvent(
-        new TestPointerEvent('pointerdown', {
+        new TestPointerEvent('mousedown', {
           bubbles: true,
           button: 0,
           pointerType: 'mouse',
         })
       );
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
   }
 
@@ -237,7 +238,7 @@ describe('SessionHeaderMenu', () => {
   it('omits the Session group heading and keeps Team as a normal-weight row', async () => {
     await act(async () => {
       root?.render(
-        <TooltipProvider>
+        <Tooltip.Provider>
           <SessionHeaderMenu
             session={
               {
@@ -260,7 +261,7 @@ describe('SessionHeaderMenu', () => {
             onCopyUrl={vi.fn()}
             t={translate}
           />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
     await openMenu();

@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 import {
   MANAGED_BROWSER_STATE_MESSAGE_TYPE,
+  MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE,
   MANAGED_BROWSER_READY_MESSAGE_TYPE,
   SET_ANNOTATION_MODE_MESSAGE_TYPE,
   RESOLVE_VISUAL_ANNOTATION_ANCHORS_MESSAGE_TYPE,
@@ -16,7 +17,11 @@ import {
 
 import { userAtom } from '../src/atoms';
 import { ManagedPreviewSurface } from '../src/components/sessions/managed-preview-surface';
-import { clearManagedPreviewFrame } from '../src/components/sessions/managed-preview-frame-cache';
+import {
+  acquireManagedPreviewFrame,
+  clearManagedPreviewFrame,
+  prepareManagedPreviewFrame,
+} from '../src/components/sessions/managed-preview-frame-cache';
 
 const mocks = vi.hoisted(() => ({
   comments: [],
@@ -27,7 +32,7 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_key: string, fallback?: string) => fallback ?? _key }),
 }));
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
+vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn() } }));
 
 vi.mock('../src/components/preview/visual-annotation-comments-overlay', () => ({
   VisualAnnotationCommentsOverlay: () => null,
@@ -163,6 +168,7 @@ describe('ManagedPreviewSurface', () => {
     container = undefined;
     vi.clearAllMocks();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('runs static HTML as an uncached opaque-origin srcdoc', async () => {
@@ -231,6 +237,87 @@ describe('ManagedPreviewSurface', () => {
       root?.render(<Provider store={store}>{null}</Provider>);
     });
     expect(iframe.isConnected).toBe(false);
+  });
+
+  it('accepts runtime data only from the current exact Quick origin and frame, including after restore', async () => {
+    const store = createStore();
+    store.set(userAtom, { id: 'user-1', name: 'Test User', email: 'test@example.com' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const firstOrigin = 'https://first-preview.trycloudflare.com';
+    const restoredOrigin = 'https://restored-preview.trycloudflare.com';
+    const ignore = () => {};
+    function Harness({ origin }: { origin: string }) {
+      const [title, setTitle] = useState('untouched');
+      const [navigation, setNavigation] = useState('untouched');
+      return (
+        <Provider store={store}>
+          <output data-testid="state">{title}</output>
+          <output data-testid="navigation">{navigation}</output>
+          <ManagedPreviewSurface
+            session={session}
+            viewerUrl={`${origin}/docs?__lody_preview_token=synthetic`}
+            logicalUrl="http://localhost:5173/docs"
+            annotationEnabled
+            onAnnotationAvailabilityChange={ignore}
+            onRuntimeError={ignore}
+            onLoadingChange={ignore}
+            onBrowserStateChange={(state) => setTitle(state.title)}
+            onNavigationRequest={setNavigation}
+          />
+        </Provider>
+      );
+    }
+    await act(async () => root?.render(<Harness origin={firstOrigin} />));
+    const iframe = container.querySelector('iframe');
+    if (!iframe?.contentWindow) throw new Error('Expected managed preview iframe');
+    const messages = [
+      targetMessage,
+      {
+        type: MANAGED_BROWSER_STATE_MESSAGE_TYPE,
+        payload: {
+          url: '/docs',
+          title: 'accepted',
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+        },
+      },
+      { type: MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE, payload: { url: '/next' } },
+    ];
+    const dispatch = async (origin: string, source: Window | null) => {
+      await act(async () => {
+        for (const data of messages) {
+          window.dispatchEvent(new MessageEvent('message', { origin, source, data }));
+        }
+      });
+    };
+    for (const origin of [restoredOrigin, 'http://first-preview.trycloudflare.com', 'null']) {
+      await dispatch(origin, iframe.contentWindow);
+    }
+    await dispatch(firstOrigin, window);
+    await dispatch(firstOrigin, null);
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('untouched');
+    expect(container.querySelector('[data-testid="navigation"]')?.textContent).toBe('untouched');
+
+    await dispatch(firstOrigin, iframe.contentWindow);
+    expect(container.querySelector('textarea')).not.toBeNull();
+    expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('accepted');
+    expect(container.querySelector('[data-testid="navigation"]')?.textContent).toBe('/next');
+
+    await act(async () => root?.render(<Harness origin={restoredOrigin} />));
+    const restoredFrame = container.querySelector('iframe');
+    if (!restoredFrame?.contentWindow) throw new Error('Expected restored frame');
+    // Cached iframe/window identity may survive restore; origin must still change.
+    expect(container.querySelector('textarea')).toBeNull();
+    await dispatch(firstOrigin, restoredFrame.contentWindow);
+    await dispatch(restoredOrigin, window);
+    expect(container.querySelector('textarea')).toBeNull();
+    await dispatch(restoredOrigin, restoredFrame.contentWindow);
+    expect(container.querySelector('textarea')).not.toBeNull();
+    expect(container.querySelector('iframe')?.src).toContain(restoredOrigin);
   });
 
   it('stages a newly created annotation reference in the matching chat input', async () => {
@@ -582,6 +669,80 @@ describe('ManagedPreviewSurface', () => {
     // A plain appendChild would also pass the identity check above while
     // silently discarding the page, so assert the atomic move actually ran.
     expect(moveBefore).toHaveBeenCalled();
+  });
+
+  it('hands the preloaded page to the surface and keeps it alive after preparation cleanup', async () => {
+    vi.useFakeTimers();
+    const release = prepareManagedPreviewFrame(session.id, 'http://127.0.0.1:61234/', 'Preview');
+    const prepared = document.querySelector('[data-lody-preview-preload] iframe');
+    expect(prepared).not.toBeNull();
+    const { firstIframe, remountedIframe } = await mountRemountCycle(vi.fn());
+    expect(firstIframe).toBe(prepared);
+    expect(remountedIframe).toBe(prepared);
+    release();
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    expect(prepared?.isConnected).toBe(true);
+    expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+  });
+
+  it('expires an unopened preload once and never recreates it', () => {
+    vi.useFakeTimers();
+    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/', 'Preview');
+    const prepared = document.querySelector('[data-lody-preview-preload] iframe');
+    expect(prepared?.isConnected).toBe(true);
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    expect(prepared?.isConnected).toBe(false);
+    expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('replaces the single preload and prevents stale cleanup from destroying its replacement', () => {
+    const release = prepareManagedPreviewFrame(
+      session.id,
+      'https://preview.invalid/old',
+      'Preview'
+    );
+    const old = document.querySelector('[data-lody-preview-preload] iframe');
+    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/new', 'Preview');
+    const replacement = document.querySelector('[data-lody-preview-preload] iframe');
+    release();
+    expect(old?.isConnected).toBe(false);
+    expect(replacement?.isConnected).toBe(true);
+    expect(document.querySelectorAll('[data-lody-preview-preload]')).toHaveLength(1);
+    clearManagedPreviewFrame(session.id);
+    expect(replacement?.isConnected).toBe(false);
+  });
+
+  it('discards a preload when Browser opens a different path', () => {
+    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/old', 'Preview');
+    const old = document.querySelector('[data-lody-preview-preload] iframe');
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    const frame = acquireManagedPreviewFrame({
+      sessionId: session.id,
+      viewerUrl: 'https://preview.invalid/new',
+      title: 'Preview',
+      host: container,
+    });
+    expect(frame.iframe).not.toBe(old);
+    expect(frame.iframe.src).toBe('https://preview.invalid/new');
+    expect(old?.isConnected).toBe(false);
+  });
+
+  it('skips speculative frames without atomic moves and never replaces an opened page', async () => {
+    const moveBefore = (HTMLElement.prototype as StatePreservingElement).moveBefore;
+    delete (HTMLElement.prototype as StatePreservingElement).moveBefore;
+    try {
+      prepareManagedPreviewFrame(session.id, 'https://preview.invalid/', 'Preview');
+      expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+    } finally {
+      (HTMLElement.prototype as StatePreservingElement).moveBefore = moveBefore;
+    }
+    const { remountedIframe } = await mountRemountCycle(vi.fn());
+    prepareManagedPreviewFrame(session.id, 'https://preview.invalid/other', 'Preview');
+    expect(document.querySelector('[data-lody-preview-preload]')).toBeNull();
+    expect(remountedIframe?.isConnected).toBe(true);
+    expect(remountedIframe?.src).toBe('http://127.0.0.1:61234/');
   });
 
   it('mounts a fresh iframe when the engine cannot reparent without a reload', async () => {

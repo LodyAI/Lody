@@ -1,12 +1,33 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { Check, Clock3, Minus, RotateCcw, XCircle } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { ProviderSetupFailureCode } from '@lody/shared';
-import { Table, TableBody, TableCell, TableRow } from '@/ui/table';
-import { Button } from '@/ui/button';
+import { Table } from '@lody/ui/table';
+import { Button } from '@lody/ui/button';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { OnboardingBackButton, OnboardingNextButton, OnboardingShell } from '../onboarding-shell';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
+import { onboardingSurface as surface } from './surface';
+
+const styles = stylex.create({
+  retry: { marginTop: space[3] },
+  // Layout only: the table owns each cell's type, padding and truncation.
+  labelColumn: { width: '96px' },
+  valueColumn: { maxWidth: '192px' },
+  value: { fontWeight: 500 },
+  status: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  statusReady: { color: colors.success },
+});
 
 export type OnboardingSummaryAgentState = 'ready' | 'preparing' | 'failed' | 'missing';
 
@@ -84,9 +105,9 @@ export function SummaryScreen({
         />
       }
     >
-      <div className="overflow-hidden rounded-xl border border-border/60 bg-card/45">
-        <Table>
-          <TableBody>
+      <div {...stylex.props(surface.card)}>
+        <Table.Root size="large">
+          <Table.Body>
             <SummaryRow
               label={t('onboarding.summary.agent', 'Agent')}
               value={resolvedAgentName}
@@ -97,26 +118,23 @@ export function SummaryScreen({
               value={resolvedProjectName}
               status={projectName ? 'ready' : 'missing'}
             />
-          </TableBody>
-        </Table>
+          </Table.Body>
+        </Table.Root>
       </div>
       {agentState === 'failed' && onRetryAgent ? (
-        <div className="mt-3 space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-xs text-destructive">
-          <div role="alert">
-            <p className="break-words">
+        <div {...stylex.props(surface.message, surface.messageDanger, styles.retry)}>
+          <div role="alert" {...stylex.props(surface.messageBody)}>
+            <p {...stylex.props(surface.messageText)}>
               {agentFailureCode
                 ? agentFailureMessage(t, agentFailureCode)
                 : t('onboarding.summary.agentRetryHint', 'Agent setup can be retried here.')}
             </p>
-            {retryError ? (
-              <p className="mt-1 break-words font-mono opacity-90">{retryError}</p>
-            ) : null}
+            {retryError ? <p {...stylex.props(surface.messageDetail)}>{retryError}</p> : null}
           </div>
           <Button
             type="button"
-            variant="outline"
-            size="sm"
-            className="gap-2"
+            variant="secondary"
+            size="small"
             disabled={retryingAgent}
             onClick={() => {
               if (retryingAgent) return;
@@ -149,7 +167,11 @@ export function SummaryScreen({
                 .finally(() => setRetryingAgent(false));
             }}
           >
-            {retryingAgent ? <Spinner className="size-3.5" /> : <RotateCcw className="size-3.5" />}
+            {retryingAgent ? (
+              <Spinner size="small" />
+            ) : (
+              <RotateCcw {...stylex.props(surface.icon16)} />
+            )}
             {t('common.retry', 'Retry')}
           </Button>
         </div>
@@ -203,23 +225,27 @@ function SummaryRow({
           : t('onboarding.summary.statusLater', 'Set up later');
 
   return (
-    <TableRow className="hover:bg-transparent">
-      <TableCell className="w-24 py-4 text-xs font-medium text-muted-foreground">{label}</TableCell>
-      <TableCell className="max-w-48 truncate py-4 font-medium">{value}</TableCell>
-      <TableCell className="py-4 text-right">
-        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+    <Table.Row>
+      <Table.ColumnHeader scope="row" className={stylex.props(styles.labelColumn).className}>
+        {label}
+      </Table.ColumnHeader>
+      <Table.Cell className={stylex.props(styles.valueColumn).className}>
+        <span {...stylex.props(styles.value)}>{value}</span>
+      </Table.Cell>
+      <Table.Cell align="end">
+        <span {...stylex.props(styles.status)}>
           {status === 'ready' ? (
-            <Check className="size-3.5 text-primary" />
+            <Check {...stylex.props(surface.icon14, styles.statusReady)} />
           ) : status === 'preparing' ? (
-            <Clock3 className="size-3.5 text-primary" />
+            <Clock3 {...stylex.props(surface.icon14, surface.iconAccent)} />
           ) : status === 'failed' ? (
-            <XCircle className="size-3.5 text-destructive" />
+            <XCircle {...stylex.props(surface.icon14, surface.iconDestructive)} />
           ) : (
-            <Minus className="size-3.5" />
+            <Minus {...stylex.props(surface.icon14, surface.iconMuted)} />
           )}
           {statusLabel}
         </span>
-      </TableCell>
-    </TableRow>
+      </Table.Cell>
+    </Table.Row>
   );
 }

@@ -2,22 +2,23 @@ import { execSync } from 'node:child_process'
 import fs from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
-import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import wasm from 'vite-plugin-wasm'
 import tailwindcss from '@tailwindcss/vite'
+import stylex from '@stylexjs/unplugin'
 import {
   loroCrdtBundlerAlias,
   loroCrdtWasmUrlWorkaround
 } from '../../packages/components/vite-wasm-workarounds'
-import { injectPreviewPublicBaseDomain } from '../../scripts/preview-public-base-domain.mjs'
 import { mermaidLazyBoundaryGuardPlugin } from '../../packages/components/vite-mermaid-lazy-boundary-guard'
 import {
   isMermaidRuntimeDependency,
   rendererBundleAliasPlugin,
   rendererBundleAliases
 } from '../../packages/components/vite-renderer-bundle-aliases'
+import { stylexOptions } from '../../packages/ui/stylex-options'
 import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-assets'
+import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
 
 function getGitCommitHash(): string {
   try {
@@ -40,8 +41,7 @@ function getAppVersion(): string {
 
 const OSS_BUILD_MODE = 'oss'
 const OSS_BUILD_ENV: Record<string, string> = {
-  VITE_LODY_PLATFORM: 'local',
-  VITE_PREVIEW_PUBLIC_BASE_DOMAIN: 'local.invalid'
+  VITE_LODY_PLATFORM: 'local'
 }
 
 function applyEnvToProcess(env: Record<string, string>): void {
@@ -66,16 +66,6 @@ function buildViteEnvDefine(env: Record<string, string>): Record<string, string>
   return define
 }
 
-function previewPublicBaseDomainHtmlPlugin(baseDomain: string): Plugin {
-  return {
-    name: 'lody-preview-public-base-domain-html',
-    enforce: 'pre',
-    transformIndexHtml(html) {
-      return injectPreviewPublicBaseDomain(html, baseDomain)
-    }
-  }
-}
-
 export default defineConfig(({ mode }) => {
   const buildMode = mode || OSS_BUILD_MODE
   if (buildMode !== OSS_BUILD_MODE) {
@@ -83,10 +73,8 @@ export default defineConfig(({ mode }) => {
   }
 
   const buildEnv = { ...OSS_BUILD_ENV }
-  const previewPublicBaseDomain = buildEnv.VITE_PREVIEW_PUBLIC_BASE_DOMAIN
   const viteEnvDefine = {
-    ...buildViteEnvDefine(buildEnv),
-    'import.meta.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN': JSON.stringify(previewPublicBaseDomain)
+    ...buildViteEnvDefine(buildEnv)
   }
 
   // Build and preview are deterministic: do not inherit cloud or telemetry
@@ -194,8 +182,8 @@ export default defineConfig(({ mode }) => {
       },
       // Tailwind via Vite plugin so @fontsource url() assets are emitted by Vite.
       plugins: [
-        previewPublicBaseDomainHtmlPlugin(previewPublicBaseDomain),
         tailwindcss(),
+        stylex.vite(stylexOptions),
         loroCrdtWasmUrlWorkaround(),
         react(),
         wasm(),
@@ -203,7 +191,9 @@ export default defineConfig(({ mode }) => {
         // dataset ships in the bundle instead of being fetched from a CDN.
         emojibaseAssetsPlugin(),
         rendererBundleAliasPlugin(),
-        mermaidLazyBoundaryGuardPlugin()
+        mermaidLazyBoundaryGuardPlugin(),
+        // Paints the window's first frame before the renderer bundle has run.
+        bootShellPlugin()
       ]
     }
   }

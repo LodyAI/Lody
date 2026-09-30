@@ -22,6 +22,11 @@ output and reasoning are disjoint. Unknown costs are omitted, not zero.
 For adapter-owned ledgers, replay adds nothing; model changes and compaction preserve counters. A new
 accounting lifetime requires a fresh consumer accounting identity or a restored
 baseline. Process-local state does not guarantee restart continuity.
+An adapter whose counters restart with its process marks each update with a Core
+usage scope, `_meta.lody.usageScopeId`: `modelUsage` is then cumulative only within
+that never-reused scope, and consumers sum scopes. Reusing one identity across a
+restart is wrong, because the hosted per-key maximum hides the restarted, smaller
+counters until they pass the old total.
 Grok deduplicates prompt contributions across both completion channels and permits
 monotonic late corrections. DSH counts committed per-request events using their
 actual request route, not the currently selected UI model.
@@ -33,13 +38,18 @@ their attribution until acknowledged; concurrent flushes share one drain. Delta
 is neither added to totals nor forwarded to the legacy persistence endpoint.
 Persistence projects only token/cost fields and aggregate contextWindow; search
 request counts and model-level contextWindow are not forwarded.
+For any provider, a scoped update uses `nativeSessionId:scope:encodedScopeId` as
+the existing usage endpoint's accounting identity; unscoped updates keep the ACP
+session ID. The actual ACP session ID and session metadata stay unchanged. Repeat
+delivery of a scope stays idempotent without modifying hosted persistence.
 Codex attributes native root-thread counter increments to the model frozen from
-the submitted turn parameters. A native turn is one accounting lifetime.
-Its cumulative turn snapshot carries notification-local `_meta.codex.usageTurnId`;
-the CLI uses `nativeSessionId:turn:encodedTurnId` as the existing usage endpoint's
-accounting identity. The actual ACP session ID and session metadata stay unchanged.
-This keeps A's earlier tokens out of B's new turn and makes repeat delivery
-idempotent without modifying hosted persistence.
+the submitted turn parameters. A native turn is one accounting lifetime and its
+scope; for one release the CLI also reads the legacy Codex-only
+`_meta.codex.usageTurnId` as that scope. This keeps A's earlier tokens out of B's
+new turn.
+Claude scopes each SDK result by its uuid, carrying only what that result added
+to the query-wide reading; a new query() after restart or clear-context counts
+from zero under new scopes.
 
 Only the previous native snapshot and current turn are kept in memory. Restored
 snapshots are comparison points; if missing, the first notification is skipped
@@ -48,8 +58,8 @@ historical model ledger or raw-response bookkeeping. Child usage is not added.
 Resets, reroutes and crashes remain best effort, not an exact billing guarantee.
 Unmarked adapters keep their old scope; the new adapter requires the matching CLI.
 
-Claude query and Kimi activation snapshots can provide delta without
-changing their cumulative scope. Kimi source changes require a new managed artifact
+Kimi activation snapshots can provide delta without changing their cumulative
+scope. Kimi source changes require a new managed artifact
 before they affect the consuming runtime.
 Provider costs are preserved; missing cache-write tariffs cannot be replaced with
 cache-read prices. An empty aggregate does not imply a known zero cost.
@@ -66,12 +76,23 @@ Unknown routes, custom endpoints or missing timestamps do not receive invented
 prices. This dated list-price estimate is not an invoice; requests crossing a
 pricing boundary may differ from billing. Unreported runtime activity cannot be counted.
 
+## Per-turn display
+
+Each assistant history entry may carry `tokenUsage` (input, output, cache
+read/write, reasoning; disjoint like Core buckets): the sum of the `delta.usage`
+reports routed to that entry. The CLI writes a live turn's sum at finalization
+and adds late reports to the finished entry; a reopened turn keeps adding. It is
+display data only, never an accounting source, and adapters without `delta`
+leave it absent. The turn details popover shows input, output (including
+reasoning) and cache (read + write) in compact product-language units.
+
 ## Evidence and rollout
 
 - [Core contract](../packages/acp-extension-core/src/usage.ts)
 - [DSH tests](../packages/acp-extension-dsh/src/usage.test.ts)
 - [Grok tests](../packages/acp-extension-grok/test/proxy.test.js)
 - [Delivery tests](../apps/cli/src/lib/usage/usage-tracking-service.test.ts)
+- [Scope decision](../.agents/notes/proposed/bug-fix/2026-09-25-usage-accounting-scopes.md)
 - [Research correction](../.agents/notes/proposed/bug-fix/2026-09-12-grok-token-accounting.md)
 
 Publish Core 0.1.5 before adapters requiring its accumulator, then rebuild/release

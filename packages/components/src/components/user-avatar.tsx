@@ -1,4 +1,4 @@
-import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
+import { Avatar, type AvatarSize } from '@lody/ui/avatar';
 import { UserIcon } from 'lucide-react';
 import { useStableAvatarSrc } from '@/hooks/use-stable-avatar-src';
 
@@ -13,13 +13,16 @@ interface UserAvatarProps {
     email?: string | null;
   } | null;
   /**
-   * 头像大小样式类
+   * Which rung of `@lody/ui`'s avatar ladder this face sits on. The rung picks
+   * the letters inside it too, so a surface no longer states a box and a type
+   * size that can disagree.
+   */
+  size?: AvatarSize;
+  /**
+   * Layout only — where the avatar sits in the row around it. The box, the
+   * corner, the fill and the letters all belong to the primitive.
    */
   className?: string;
-  /**
-   * Fallback 样式类
-   */
-  fallbackClassName?: string;
   /**
    * 是否显示默认图标而不是首字母
    */
@@ -30,12 +33,7 @@ interface UserAvatarProps {
  * 用户头像组件
  * 统一处理用户头像的显示，支持图片和首字母fallback
  */
-export function UserAvatar({
-  user,
-  className,
-  fallbackClassName,
-  showIcon = false,
-}: UserAvatarProps) {
+export function UserAvatar({ user, size = 'medium', className, showIcon = false }: UserAvatarProps) {
   const avatarImage = useStableAvatarSrc(user?.image);
 
   // TODO: 为 Lody CLI 添加一个特殊的 fallback
@@ -53,11 +51,19 @@ export function UserAvatar({
   const initials = getInitials();
 
   return (
-    <Avatar className={className}>
-      <AvatarImage src={avatarImage} alt={user?.name || 'User'} />
-      <AvatarFallback className={fallbackClassName}>
-        {showIcon || !initials ? <UserIcon className="h-4 w-4" /> : initials}
-      </AvatarFallback>
-    </Avatar>
+    <Avatar.Root size={size} className={className}>
+      {avatarImage ? <Avatar.Image src={avatarImage} alt={user?.name || 'User'} /> : null}
+      <Avatar.Fallback>
+        {showIcon || !initials ? (
+          // The glyph box is the primitive's and follows the rung; the icon
+          // states 100% of it, the way every caller's icon does in that package.
+          <Avatar.Glyph>
+            <UserIcon className="size-full" />
+          </Avatar.Glyph>
+        ) : (
+          initials
+        )}
+      </Avatar.Fallback>
+    </Avatar.Root>
   );
 }

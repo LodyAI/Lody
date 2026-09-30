@@ -110,6 +110,14 @@ Codex 在首轮完成之后才生成标题，并且在被恢复的会话上完�
 恢复的 codex 会话不再获得 Lody 生成的标题。生成在 adapter 内部也是尽力而为，并会吞掉失败而不通知 client，
 因此一次失败的生成现在会让草稿标题留在原处，而不是回退到 Lody 的生成器。
 
+这个草稿标题原本只存在于从桌面输入框启动的会话。通过 `lody session create` 或 MCP `lody_session_create`
+工具创建的会话（通常是一个 agent 派发另一个 agent）完全没有标题，因此 Codex 子会话在整个首轮期间都没有名字
+（实测从创建到推送标题历时 21 分钟），生成失败时则永远没有名字。现在 `prepareSessionInput` 在未给出显式标题
+时，按与输入框相同的 `deriveDraftSessionTitle` 规则，把提示词第一个非空行存为 `draft` 标题；推送的或本地
+生成的标题仍会替换它。显式标题（CLI 的 `--title`、定时任务的标题）现在存为 `titleSource: 'user'`。此前它没有
+来源，因此能躲过 Lody 的独立生成器，却会被 Claude、Codex 或 Grok 推送的标题覆盖——调用方给的名字能否保留取决于
+agent。
+
 把标题交给 adapter，也就把措辞交了出去。这三者都看不到 `DEFAULT_TITLE_GENERATION_PROMPT`，因此它所携带的
 约束——26 个英文字母的预算、单行规则——对它们不再适用。Grok 还会在最初几轮中持续打磨标题然后才冻结，因此
 Grok 的会话标题在首次出现之后仍可能变化。

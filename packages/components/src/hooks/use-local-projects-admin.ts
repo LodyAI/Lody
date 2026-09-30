@@ -10,10 +10,11 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { useCloudMutation } from '@lody/platform/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
-  getLocalProjectHistoryProviderKey,
+  getLocalProjectHistoryCatalogKey,
+  machineSupportsHistoryProviderSelection,
   resolveWorktreeSetupShellForPlatform,
   type AgentConfigMeta,
   type LocalProjectHistoryCatalogItem,
@@ -95,13 +96,18 @@ export type LocalProjectsAdminData = {
 
 function buildHistoryProvidersForMachine(
   configs: AgentConfigMeta[],
-  machineId: MachineId
+  machineId: MachineId,
+  supportsProviderSelection: boolean
 ): LocalProjectHistoryProvider[] {
   const byKey = new Map<LocalProjectHistoryProviderKey, LocalProjectHistoryProvider>();
   for (const config of configs) {
     if (config.machineId !== machineId) continue;
-    const provider = { cliType: config.cliType, agentType: config.agentType };
-    byKey.set(getLocalProjectHistoryProviderKey(provider), provider);
+    const provider = {
+      cliType: config.cliType,
+      agentType: config.agentType,
+      ...(supportsProviderSelection ? { agentConfigId: config.id } : {}),
+    };
+    byKey.set(getLocalProjectHistoryCatalogKey(provider), provider);
   }
   return [...byKey.values()];
 }
@@ -421,10 +427,14 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
       const machineName = entry.machine.name.trim() || entry.machine.id;
       const sharingUpdate = sharingByKey[entry.key];
       const canUseHistoryProjectControl = Boolean(workspaceId);
-      const historyProviders = buildHistoryProvidersForMachine(agentConfigs, entry.machineId);
+      const historyProviders = buildHistoryProvidersForMachine(
+        agentConfigs,
+        entry.machineId,
+        machineSupportsHistoryProviderSelection(entry.machine)
+      );
       const historyImports: ProjectHistoryImportState[] = historyProviders.map((provider) => {
         const key = historyStateKey(entry.key, provider);
-        const providerKey = getLocalProjectHistoryProviderKey(provider);
+        const providerKey = getLocalProjectHistoryCatalogKey(provider);
         const rawCatalog = catalogByKey[key] ?? catalogFromProject(entry.project, provider);
         const resolvingSessionIds = Object.entries(resolvingByKey[key] ?? {})
           .filter(([, resolving]) => resolving)
@@ -454,6 +464,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         return {
           provider,
           providerKey,
+          providerLabel: agentConfigs.find((config) => config.id === provider.agentConfigId)?.name,
           canSync:
             canUseHistoryProjectControl &&
             canUseProjectHistoryProjectControl({
@@ -648,7 +659,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         setErrorByKey((current) => ({ ...current, [key]: 'Workspace is not ready.' }));
         return;
       }
-      const providerKey = getLocalProjectHistoryProviderKey(provider);
+      const providerKey = getLocalProjectHistoryCatalogKey(provider);
       const state = row.historyImports.find((item) => item.providerKey === providerKey);
       if (!state || state.selectedSessionIds.length === 0) return;
       setImportingByKey((current) => ({ ...current, [key]: true }));

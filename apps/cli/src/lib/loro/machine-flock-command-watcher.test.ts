@@ -9,6 +9,7 @@ import { MachineFlockCommandWatcher } from './machine-flock-command-watcher';
 const createLogger = (): Logger =>
   ({
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),

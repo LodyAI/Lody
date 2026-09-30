@@ -9,10 +9,7 @@ import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream
 import { SessionChatStreamView } from '../src/components/ai-gui/view';
 import { initI18n } from '../src/i18n';
 import { createConversationViewFromHistory } from '../src/lib/conversation-view';
-
-vi.mock('virtua', () => ({
-  Virtualizer: ({ children }: { children: import('react').ReactNode }) => children,
-}));
+import { clearSavedScrollStates } from '../src/lib/conversation-scroll/saved-state';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -53,6 +50,7 @@ describe('live agent status', () => {
 
   beforeEach(async () => {
     await initI18n('en');
+    clearSavedScrollStates();
     // The live turn started at 00:00:01, so every live status reads 30s in.
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-09-19T00:00:31Z'));
@@ -71,6 +69,7 @@ describe('live agent status', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    clearSavedScrollStates();
     container.remove();
     vi.unstubAllGlobals();
     vi.useRealTimers();
@@ -79,7 +78,7 @@ describe('live agent status', () => {
   const render = async (
     history: unknown[],
     status: { label: string; tone?: 'primary' | 'warning' },
-    options: { withTurnFooter?: boolean } = {}
+    options: { withTurnFooter?: boolean; scrollAway?: boolean } = {}
   ) => {
     const view = createConversationViewFromHistory({
       sessionId,
@@ -102,21 +101,23 @@ describe('live agent status', () => {
         })
       )
     );
+
+    if (options.scrollAway) {
+      const viewport = container.querySelector<HTMLElement>('[data-message-selection-scroll]');
+      expect(viewport).not.toBeNull();
+      Object.defineProperties(viewport, {
+        clientHeight: { configurable: true, value: 400 },
+        scrollHeight: { configurable: true, value: 1000 },
+      });
+      await act(async () => {
+        viewport!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -20 }));
+      });
+    }
   };
 
   const statusRow = () => container.querySelector('[data-agent-activity-row]');
   const shimmering = () =>
     Array.from(container.querySelectorAll('.agent-shimmer')).map((el) => el.textContent);
-
-  it('does not report populated but scroll-hidden conversation content as ready', async () => {
-    await render(liveTurn([{ type: 'text', text: 'Already hydrated answer.' }]), {
-      label: 'Working',
-    });
-    const viewport = container.querySelector<HTMLElement>('[data-message-selection-scroll]');
-    expect(viewport).not.toBeNull();
-    expect(viewport!.style.visibility).toBe('hidden');
-    expect(container.querySelector('[data-window-session-stream-ready]')).toBeNull();
-  });
 
   it('shimmers the collapsed tool group at the bottom of a working turn instead of adding a row', async () => {
     await render(liveTurn([{ type: 'text', text: 'Checking.' }, toolCall('a'), toolCall('b')]), {
@@ -141,6 +142,29 @@ describe('live agent status', () => {
     });
     expect(statusRow()?.textContent).toBe('Waiting for permission (Worked for 30s)');
     expect(shimmering()).toEqual([]);
+  });
+
+  it('shows the working state on the scroll-to-latest button while output streams', async () => {
+    await render(
+      liveTurn([{ type: 'text', text: 'Still writing.' }]),
+      { label: 'Working' },
+      { scrollAway: true }
+    );
+    const button = container.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
+    expect(button).not.toBeNull();
+    expect(button!.querySelector('.animate-spin')).not.toBeNull();
+  });
+
+  it('keeps the scroll-to-latest arrow while waiting for permission', async () => {
+    await render(
+      liveTurn([{ type: 'text', text: 'May I continue?' }]),
+      { label: 'Waiting for permission', tone: 'warning' },
+      { scrollAway: true }
+    );
+    const button = container.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
+    expect(button).not.toBeNull();
+    expect(button!.querySelector('.animate-spin')).toBeNull();
+    expect(button!.querySelector('.lucide-arrow-down')).not.toBeNull();
   });
 
   it('places the status inside a live turn, above its footer actions', async () => {
@@ -229,7 +253,206 @@ describe('live agent status', () => {
     expect(status!.compareDocumentPosition(info!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // Copying the whole response still waits for the reply to finish.
     expect(container.querySelector('[aria-label="Copy response"]')).toBeNull();
-    await act(async () => info!.click());
+    // Row overlays mount once their row is armed by a pointer entry, as in the
+    // app; arming remounts the trigger, so click the live one.
+    await act(async () => {
+      info!
+        .closest('[data-virtual-index]')!
+        .dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+    });
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]')!.click()
+    );
     expect(document.body.textContent).toContain('Claude Opus 5');
+  });
+
+  it('labels command steps with the Run verb in the expanded group', async () => {
+    await render(
+      liveTurn([
+        {
+          type: 'tool_call',
+          toolCallId: 'sed-1',
+          title: "sed -n '1,240p' apps/view.tsx",
+          kind: 'execute',
+          status: 'completed',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'bash-1',
+          title: 'pnpm --dir apps/electron test',
+          kind: 'bash',
+          status: 'in_progress',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'mystery-1',
+          title: 'mycmd --flag',
+          status: 'completed',
+          content: [{ type: 'terminal_command', command: 'mycmd', args: ['--flag'] }],
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'shell-1',
+          title: 'Shell: cat hello.txt',
+          kind: 'execute',
+          status: 'completed',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'shell-2',
+          title: 'Shell: npm start',
+          kind: 'execute',
+          status: 'in_progress',
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'search-1',
+          title: "Search for 'createServer'",
+          kind: 'search',
+          status: 'completed',
+        },
+      ]),
+      { label: 'Working' }
+    );
+
+    const header = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('commands')
+    );
+    expect(header).toBeDefined();
+    await act(async () => header!.click());
+
+    // Bare command titles get the verb, in the step's tense.
+    expect(container.textContent).toContain("Ran sed -n '1,240p' apps/view.tsx");
+    expect(container.textContent).toContain('Running pnpm --dir apps/electron test');
+    // A kindless call carrying a command is a command too.
+    expect(container.textContent).toContain('Ran mycmd --flag');
+    // Agent-authored labels keep their own wording — no doubled verb.
+    expect(container.textContent).toContain('Shell: cat hello.txt');
+    expect(container.textContent).not.toContain('Ran Shell');
+    expect(container.textContent).toContain("Searched for 'createServer'");
+
+    // The shimmering verb is the running signal: a tense-verb row drops the
+    // trailing spinner, while a running authored label keeps it.
+    const step = (text: string) =>
+      [...container.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes(text)
+      )!;
+    expect(step('Running pnpm').querySelector('.animate-spin')).toBeNull();
+    expect(step('Shell: npm start').querySelector('.animate-spin')).not.toBeNull();
+  });
+
+  it('opens a step onto one sheet: the command once, then its output', async () => {
+    const script =
+      "cd /tmp/extract && python3 -c \"\nimport re\nprint(*re.findall(r'a*', 'aa'))\n\"";
+    const linkedEcho = script.replace('/tmp/extract', '[/tmp/extract](file:///tmp/extract)');
+    await render(
+      liveTurn([
+        {
+          type: 'tool_call',
+          toolCallId: 'python-1',
+          title: 'python3',
+          kind: 'execute',
+          status: 'completed',
+          content: [
+            // The agent restates the command as text beside the structured one.
+            { type: 'content', content: { type: 'text', text: linkedEcho } },
+            { type: 'terminal_command', command: script },
+            { type: 'terminal_output', output: 'aa', stream: 'combined' },
+          ],
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'codex-1',
+          title: 'pnpm typecheck',
+          kind: 'execute',
+          status: 'failed',
+          content: [
+            { type: 'terminal_command', command: '/bin/bash', args: ['-lc', 'pnpm typecheck'] },
+            {
+              type: 'terminal_output',
+              output: "error TS6133: 'Badge' is declared",
+              stream: 'combined',
+              exitStatus: { exitCode: 2, signal: null },
+            },
+          ],
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'task-stop-1',
+          title: 'TaskStop',
+          kind: 'other',
+          status: 'completed',
+          // A Claude tool's string result is stored as terminal output.
+          content: [{ type: 'terminal_output', output: '{"task_id":"b7q2"}', stream: 'combined' }],
+        },
+      ]),
+      { label: 'Working' }
+    );
+
+    const button = (text: string) =>
+      [...container.querySelectorAll('button')].find((candidate) =>
+        candidate.textContent?.includes(text)
+      )!;
+    // A string result does not make a tool a command.
+    expect(button('Ran 2 commands').textContent).toContain('Called 1 tool');
+    await act(async () => button('Ran 2 commands').click());
+    expect(container.textContent).not.toContain('Ran TaskStop');
+    for (const step of ['Ran python3', 'Ran pnpm typecheck', 'TaskStop']) {
+      await act(async () => button(step).click());
+    }
+
+    const sheets = [...container.querySelectorAll('[data-tool-detail-sheet]')];
+    expect(sheets).toHaveLength(3);
+    const [python, codex, taskStop] = sheets as [Element, Element, Element];
+    // The echo is gone: the script appears once, as code, never as Markdown.
+    expect(container.textContent!.split('import re')).toHaveLength(2);
+    expect(python.querySelector('.markdown-renderer')).toBeNull();
+    expect(python.querySelectorAll('pre')[1]?.textContent).toBe('aa');
+    expect(python.textContent).toContain('$');
+    // Codex's shell wrapper is not part of what the reader ran.
+    expect(codex.textContent).toContain('pnpm typecheck');
+    expect(codex.textContent).not.toContain('/bin/bash');
+    expect(codex.textContent).toContain('Exit 2');
+    // A result has no prompt and no header restating the row's title.
+    expect(taskStop.textContent).toBe('{"task_id":"b7q2"}');
+  });
+
+  it('shows the turn token usage in compact units with exact values on hover', async () => {
+    await render(
+      liveTurn([{ type: 'text', text: 'Done.' }], {
+        finished: true,
+        tokenUsage: {
+          inputTokens: 1234,
+          outputTokens: 300,
+          cacheReadInputTokens: 1_500_000,
+          cacheCreationInputTokens: 2000,
+          reasoningOutputTokens: 200,
+        },
+      }),
+      { label: 'Working' }
+    );
+    // Token usage alone is enough to offer the turn details.
+    const info = container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]');
+    // Row overlays mount once their row is armed by a pointer entry, as in the
+    // app; arming remounts the trigger, so click the live one.
+    await act(async () => {
+      info!
+        .closest('[data-virtual-index]')!
+        .dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+    });
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]')!.click()
+    );
+    const value = (label: string) =>
+      [...document.body.querySelectorAll('dt')].find((dt) => dt.textContent === label)
+        ?.nextElementSibling;
+    expect(document.body.textContent).toContain('Tokens');
+    expect(value('Input')?.textContent).toBe('1.2K');
+    // Output includes reasoning; cache sums reads and writes.
+    expect(value('Output')?.textContent).toBe('500');
+    expect(value('Output')?.getAttribute('title')).toBe('500 · Reasoning 200');
+    expect(value('Cache')?.textContent).toBe('1.5M');
+    expect(value('Cache')?.getAttribute('title')).toBe('1,502,000 · Read 1,500,000 · Write 2,000');
+    expect(document.body.textContent).not.toContain('No configuration recorded');
   });
 });

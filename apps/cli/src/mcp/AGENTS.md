@@ -2,6 +2,13 @@
 
 Parent instructions apply.
 
+- Local Session/catalog tools route through `session/call-tool` to the daemon's
+  existing repo. `session-tool-router.ts` reuses SDK-parsed MCP arguments and
+  parses daemon inputs; `session-command-environment.ts` scopes identity and
+  host operations with AsyncLocalStorage. Require an active local user Turn and
+  exact workspace/machine scope; never open a second local writer replica.
+  Cloud keeps its authenticated command runtime and remote recovery confirmation.
+
 - MCP sharing requires the active Turn user to equal the CLI authenticated account.
   Fail closed on shared-machine account mismatch; never substitute the machine owner.
 
@@ -31,6 +38,11 @@ Parent instructions apply.
   the workspace catalog; no driving-Turn mention authorization is required. Resolve its target,
   Prompt prefix, revision, and concrete run config before Operation acceptance. Recovery uses
   the frozen canonical Prompt and target dispatch config and never rereads the mutable catalog.
+  A Role may target any reachable Machine, whatever the requester's context; a Local Project
+  requester defaults to a child only for a same-Machine Role. `readDelegatedMachineAccess`
+  requires both the executing Machine owner and the driving human to be able to use the target
+  (owned, or shared plus shared project); never decide it from synced `MachineMeta.ownerUserId`
+  ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-28-mcp-cross-machine-agent-role.md)).
 - Session orchestration derives its human identity from the active execution runtime populated
   by the dispatch payload, not from the daemon credential, Session owner, or observed history.
   An absent active runtime fails closed; never reconstruct invocation identity from history.
@@ -46,6 +58,16 @@ Parent instructions apply.
   and those fields must not influence validation, canonical identity, recovery, or dispatch.
 
 ## Session tool contracts
+
+- Resource discovery uses `lib/resource-discovery.ts` for CLI and MCP. Resolve the
+  active Turn user for MCP, never the daemon owner. Role list/get use
+  `canReadAgentRole`; explicit Role creation retains its separate existing contract.
+  Preserve unavailable readable Roles and three-state presence. List MCP entries
+  through the allowlisted summary, never return launch/connection credentials.
+- Directory cursors bind resource, workspace, user and filters. Operations additionally
+  bind requester Session and query only that user's machine-local rows; list replies
+  contain no canonical prompt or assistant output. See
+  [discovery Spec](../../../../specs/resource-discovery.md).
 
 - MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.
   Create/chat Commands require a caller-chosen Operation id, and Create persists the Operation

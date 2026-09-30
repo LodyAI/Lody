@@ -9,7 +9,7 @@ import {
   LocalProjectItem,
 } from '../src/components/loro-app-sidebar';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import type { LocalProjectId, MachineId, SessionMeta } from '@lody/shared';
 
 const machineId = 'machine-local' as MachineId;
@@ -92,7 +92,7 @@ describe('LocalProjectItem session-type icon', () => {
     flushSync(() => {
       root?.render(
         React.createElement(
-          TooltipProvider,
+          Tooltip.Provider,
           null,
           React.createElement(LocalProjectItem, {
             machineId,
@@ -186,7 +186,7 @@ describe('LocalProjectItem session-type icon', () => {
     flushSync(() => {
       root?.render(
         React.createElement(
-          TooltipProvider,
+          Tooltip.Provider,
           null,
           React.createElement(LocalProjectItem, {
             machineId,

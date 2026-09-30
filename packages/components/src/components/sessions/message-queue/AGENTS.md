@@ -21,3 +21,11 @@ The queue intentionally stays OUT of the composer info bar's items
 It renders through the bar's `queue` slot as an inset sheet (composer fill, rounded
 top, square bottom) sitting directly on the bar, or on the composer when the bar
 has nothing to show; never with a gap, and never inside the input area.
+
+Queue-bound sends held in memory (`runtime.pendingSends`) while attachments
+prepare render here as local rows (`pending-queue-row.tsx`) after the real items,
+never in `mq` and never in the conversation stream. They are display-only (retry
+and cancel only; no drag, edit or steer) and are hidden by `userTurnId` once the
+real item exists. Upload progress is subscribed only inside the sheet; the page
+reads `useHasPendingQueueRecords`. Decisions: [local queue rows](../../../../../../.agents/notes/implemented/feature/2026-09-28-local-queue-pending-rows.md),
+[in-memory held sends](../../../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).

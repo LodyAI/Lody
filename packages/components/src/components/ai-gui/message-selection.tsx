@@ -12,8 +12,8 @@ import {
 import { useTranslation } from 'react-i18next';
 import { ImageIcon } from 'lucide-react';
 import type { ConversationMessage } from '@lody/shared';
-import { Button } from '@/ui/button';
-import { Checkbox } from '@/ui/checkbox';
+import { Button } from '@lody/ui/button';
+import { Checkbox } from '@lody/ui/checkbox';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -380,7 +380,7 @@ export function MessageSelectionToolbar({
   // These buttons are the mode's primary touch targets on a handset, so they
   // keep the default size there — the same call the share preview's own action
   // row makes (h-8 text-xs is a desktop density).
-  const actionSize = isMobile ? 'default' : 'sm';
+  const actionSize = isMobile ? 'medium' : 'small';
   return (
     <ConversationColumn className="flex flex-wrap items-center gap-2 border-t py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <span className="mr-auto text-sm" role="status">

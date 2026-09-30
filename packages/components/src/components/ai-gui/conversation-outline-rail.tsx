@@ -14,7 +14,7 @@ import { createPortal } from 'react-dom';
 import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { Popover, PopoverAnchor, PopoverContent } from '@/ui/popover';
+import { Popover } from '@/ui/armed-overlays';
 import type { ConversationOutlineEntry } from '@/lib/conversation-outline';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { capturePostHogSampled } from '@/lib/posthog-analytics';
@@ -219,7 +219,9 @@ const OutlineTick = memo(function OutlineTick({
             // Resting contrast has to carry the edge fade: at /25 the ticks
             // were faint enough that a gradient over them had almost nothing
             // to take away, so a scrollable edge looked the same as a hard one.
-            'h-[2px] rounded-full bg-muted-foreground/45',
+            // /45 at rest read as a barcode beside the text in peripheral
+            // vision, so the rail rests at /32 and lifts while the pointer is on it.
+            'h-[2px] rounded-full bg-muted-foreground/32 group-hover/rail:bg-muted-foreground/50',
             // Ease-out so the swell tracks the cursor immediately and settles,
             // rather than lagging behind it.
             'transition-[background-color,width] duration-150 ease-out',
@@ -615,11 +617,11 @@ export function ConversationOutlineRail({
       // be found before it becomes visible.
       className={cn(
         'group/rail pointer-events-none absolute inset-y-0 left-0 z-10 hidden items-center',
-        // The conversation column is 46rem wide and centered. Below this the
-        // rail would sit on top of message content, so it does not render at
-        // all. A container query keeps that decision in CSS — no JS
-        // measurement, no layout shift on mount.
-        '@[860px]:flex',
+        // The conversation column is 804px wide (768px of content plus its
+        // gutter) and centered. Below this the rail would sit on top of message
+        // content, so it does not render at all. A container query keeps that
+        // decision in CSS — no JS measurement, no layout shift on mount.
+        '@[928px]:flex',
         className
       )}
       style={{ width: RAIL_WIDTH }}
@@ -681,21 +683,23 @@ export function ConversationOutlineRail({
       {/* ONE popover for the whole rail, re-anchored to the hovered tick. A
           popover per tick would mount hundreds of Radix instances for a long
           session. */}
-      <Popover open={cardOpen && hoveredEntry !== null}>
-        <PopoverAnchor virtualRef={hoverCard ? { current: hoverCard.element } : undefined} />
-        <PopoverContent
+      <Popover.Root open={cardOpen && hoveredEntry !== null}>
+        <Popover.Content
+          anchor={hoverCard ? { current: hoverCard.element } : undefined}
           side="right"
           align="center"
           sideOffset={10}
           // Purely informational: it must never take focus from the rail, and
           // dismissing it is the pointer's job.
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          onCloseAutoFocus={(event) => event.preventDefault()}
+          initialFocus={false}
+          finalFocus={false}
           className="pointer-events-none w-72 select-none p-3"
-          onAnimationEnd={(event) => {
+          onTransitionEnd={(event) => {
+            // The surface transitions out before Base UI unmounts it; clear the
+            // anchor's state only once that fade has ended.
             if (
-              event.target === event.currentTarget &&
-              event.currentTarget.dataset.state === 'closed' &&
+              event.target instanceof HTMLElement &&
+              'endingStyle' in event.target.dataset &&
               !cardOpenRef.current
             ) {
               setHoverCard(null);
@@ -715,8 +719,8 @@ export function ConversationOutlineRail({
               </div>
             </>
           )}
-        </PopoverContent>
-      </Popover>
+        </Popover.Content>
+      </Popover.Root>
     </nav>
   );
 

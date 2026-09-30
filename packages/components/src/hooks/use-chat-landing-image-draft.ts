@@ -1,3 +1,4 @@
+import { snapshotAttachmentDrafts } from '@/lib/session-attachment-draft';
 import { useCallback, useMemo, type ClipboardEvent } from 'react';
 import type { MessageTextSpan } from '@lody/shared';
 import {
@@ -8,19 +9,17 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { useAtom } from 'jotai';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useTranslation } from 'react-i18next';
-import { usePostHog } from '@posthog/react';
 import { chatLandingPendingImagesAtomFamily, type PendingImage } from '@/atoms/chat-landing-draft';
 import { selectPastedClipboardFiles } from '@/lib/file-drop';
-import { capturePostHogEvent } from '@/lib/posthog-analytics';
-import { uploadSessionImage, validateSessionImageFile } from '@/lib/session-image-upload';
+import { validateSessionImageFile } from '@/lib/session-image-upload';
 
 export type ChatLandingImageDraftItem = {
   id: string;
   name: string;
   previewUrl: string;
-  status: 'uploading' | 'uploaded' | 'failed';
+  status: 'draft' | 'uploading' | 'uploaded' | 'failed';
   progress: number;
   error?: string;
 };
@@ -53,22 +52,8 @@ export function useChatLandingImageDraft(args: {
   ensureSessionId: () => SessionId;
 }) {
   const { t } = useTranslation();
-  const {
-    draftKey,
-    workspaceId,
-    authToken,
-    isMobile,
-    projectKind,
-    sessionId: draftSessionId,
-    ensureSessionId,
-  } = args;
-  const postHog = usePostHog();
+  const { draftKey, ensureSessionId, isMobile } = args;
   const [pendingImages, setPendingImages] = useAtom(chatLandingPendingImagesAtomFamily(draftKey));
-  const imageUploadFailedLabel = t('sessions.imageUploadFailed', 'Image upload failed');
-  const imageUploadMissingAuthLabel = t(
-    'sessions.imageUploadMissingAuth',
-    'Missing workspace or auth token'
-  );
   const imageCountLimitLabel = t(
     'sessions.imageCountLimit',
     'At most {{count}} images are allowed',
@@ -104,6 +89,7 @@ export function useChatLandingImageDraft(args: {
   const clearPendingImages = useCallback(() => {
     setPendingImages((prev) => {
       for (const image of prev) {
+        image.abort?.abort();
         URL.revokeObjectURL(image.previewUrl);
       }
       return [];
@@ -114,116 +100,6 @@ export function useChatLandingImageDraft(args: {
   // preview URL is revoked only when its image is removed or the whole draft
   // is cleared (send accepted / draft reset), never because the user navigated
   // to another tab.
-
-  const updatePendingImage = useCallback(
-    (localId: string, updater: (image: PendingImage) => PendingImage) => {
-      setPendingImages((prev) =>
-        prev.map((image) => (image.localId === localId ? updater(image) : image))
-      );
-    },
-    [setPendingImages]
-  );
-
-  const startUpload = useCallback(
-    async (localId: string, file: File, sessionId: SessionId) => {
-      if (!workspaceId || !authToken) {
-        capturePostHogEvent(postHog, 'session/image_upload_failed', {
-          channel: 'web',
-          entrypoint: 'chat_landing',
-          actor: 'user',
-          workspace_id: workspaceId ?? null,
-          session_id: sessionId,
-          image_count: 1,
-          total_size_bytes: file.size,
-          project_kind: projectKind,
-          failure_reason: 'missing_auth',
-        });
-        updatePendingImage(localId, (image) => ({
-          ...image,
-          status: 'failed',
-          progress: 0,
-          error: imageUploadMissingAuthLabel,
-        }));
-        return;
-      }
-
-      updatePendingImage(localId, (image) => ({
-        ...image,
-        status: 'uploading',
-        progress: 0,
-        error: undefined,
-      }));
-      capturePostHogEvent(postHog, 'session/image_upload_requested', {
-        channel: 'web',
-        entrypoint: 'chat_landing',
-        actor: 'user',
-        workspace_id: workspaceId,
-        session_id: sessionId,
-        image_count: 1,
-        total_size_bytes: file.size,
-        project_kind: projectKind,
-      });
-
-      try {
-        const uploaded = await uploadSessionImage({
-          workspaceId,
-          sessionId,
-          token: authToken,
-          file,
-          onProgress: (progress) => {
-            updatePendingImage(localId, (image) => ({ ...image, progress }));
-          },
-        });
-        updatePendingImage(localId, (image) => ({
-          ...image,
-          status: 'uploaded',
-          progress: 100,
-          uploaded,
-          error: undefined,
-        }));
-        capturePostHogEvent(postHog, 'session/image_upload_succeeded', {
-          channel: 'web',
-          entrypoint: 'chat_landing',
-          actor: 'user',
-          workspace_id: workspaceId,
-          session_id: sessionId,
-          image_count: 1,
-          total_size_bytes: file.size,
-          project_kind: projectKind,
-          mime_type: uploaded.mimeType,
-        });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : imageUploadFailedLabel;
-        updatePendingImage(localId, (image) => ({
-          ...image,
-          status: 'failed',
-          progress: 0,
-          error: errorMessage,
-        }));
-        capturePostHogEvent(postHog, 'session/image_upload_failed', {
-          channel: 'web',
-          entrypoint: 'chat_landing',
-          actor: 'user',
-          workspace_id: workspaceId,
-          session_id: sessionId,
-          image_count: 1,
-          total_size_bytes: file.size,
-          project_kind: projectKind,
-          failure_reason: 'upload_error',
-          error_message: errorMessage,
-        });
-      }
-    },
-    [
-      authToken,
-      imageUploadFailedLabel,
-      imageUploadMissingAuthLabel,
-      postHog,
-      projectKind,
-      updatePendingImage,
-      workspaceId,
-    ]
-  );
 
   const handleAddFiles = useCallback(
     (files: File[]) => {
@@ -251,7 +127,7 @@ export function useChatLandingImageDraft(args: {
           localId: createLocalImageId(),
           previewUrl: URL.createObjectURL(file),
           file,
-          status: 'uploading',
+          status: 'draft',
           progress: 0,
         };
         nextEntries.push(entry);
@@ -265,11 +141,8 @@ export function useChatLandingImageDraft(args: {
 
       showImageSelectionIssues(issues);
 
-      const sessionId = ensureSessionId();
+      ensureSessionId();
       setPendingImages((prev) => [...prev, ...nextEntries]);
-      for (const entry of nextEntries) {
-        void startUpload(entry.localId, entry.file, sessionId);
-      }
     },
     [
       ensureSessionId,
@@ -277,7 +150,6 @@ export function useChatLandingImageDraft(args: {
       pendingImages.length,
       setPendingImages,
       showImageSelectionIssues,
-      startUpload,
     ]
   );
 
@@ -313,6 +185,7 @@ export function useChatLandingImageDraft(args: {
       setPendingImages((prev) => {
         const target = prev.find((item) => item.localId === localId);
         if (target) {
+          target.abort?.abort();
           URL.revokeObjectURL(target.previewUrl);
         }
         return prev.filter((item) => item.localId !== localId);
@@ -323,25 +196,17 @@ export function useChatLandingImageDraft(args: {
 
   const handleRetryImage = useCallback(
     (localId: string) => {
-      const target = pendingImages.find((image) => image.localId === localId);
-      if (!target) {
-        return;
-      }
-      const uploadSessionId = draftSessionId ?? ensureSessionId();
-      void startUpload(localId, target.file, uploadSessionId);
+      setPendingImages((previous) =>
+        previous.map((item) =>
+          item.localId === localId ? { ...item, status: 'draft', error: undefined } : item
+        )
+      );
     },
-    [draftSessionId, ensureSessionId, pendingImages, startUpload]
+    [setPendingImages]
   );
 
-  const hasBlockingImages = useMemo(
-    () => pendingImages.some((image) => image.status !== 'uploaded'),
-    [pendingImages]
-  );
-
-  const hasUploadedImages = useMemo(
-    () => pendingImages.some((image) => image.status === 'uploaded' && !!image.uploaded),
-    [pendingImages]
-  );
+  const hasBlockingImages = false;
+  const hasUploadedImages = pendingImages.length > 0;
 
   const imageItems = useMemo<ChatLandingImageDraftItem[]>(
     () =>
@@ -380,6 +245,7 @@ export function useChatLandingImageDraft(args: {
   );
 
   return {
+    attachments: snapshotAttachmentDrafts(pendingImages, []),
     imageItems,
     hasBlockingImages,
     hasUploadedImages,

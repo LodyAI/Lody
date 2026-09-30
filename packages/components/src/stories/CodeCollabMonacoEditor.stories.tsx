@@ -38,14 +38,12 @@ const sampleText = [
   '    path: file.path.replace(/\\\\/g, "/"),',
   '    sizeBytes: file.sizeBytes ?? 0,',
   '  }));',
-  '',
   '  return {',
   '    meta,',
   '    files,',
   '    builtAt: Date.now(),',
   '  };',
   '}',
-  '',
 ].join('\n');
 
 const FILE_ID = 'monaco-story-file-1';

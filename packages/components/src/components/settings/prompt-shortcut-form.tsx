@@ -1,5 +1,6 @@
 import { useId, useMemo, useState, type ReactNode } from 'react';
-import { Spinner } from '@/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { parsePromptShortcut } from '@lody/shared/prompt-shortcuts/compiler';
 import {
@@ -10,13 +11,16 @@ import {
   type PromptShortcut,
   type PromptShortcutScope,
 } from '@lody/shared/prompt-shortcuts/model';
-import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Textarea } from '@/ui/textarea';
-import { Label } from '@/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger } from '@/ui/select';
-import { Switch } from '@/ui/switch';
+import { withClassName } from '@/lib/stylex';
+import { Button } from '@lody/ui/button';
+import { Dialog } from '@lody/ui/dialog';
+import { Input } from '@lody/ui/input';
+import { Textarea } from '@lody/ui/textarea';
+import { Field as UiField } from '@lody/ui/field';
+import { Select } from '@lody/ui/select';
+import { Switch } from '@lody/ui/switch';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { control, space } from '@lody/ui/tokens/scales.stylex';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
 import {
   shortcutMentionRanges,
@@ -29,6 +33,65 @@ import {
   ScopeAxisIcon,
   SHORTCUT_SCOPE_NONE,
 } from './prompt-shortcut-scope';
+import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
+
+const WIDE = '@media (min-width: 640px)';
+
+const styles = stylex.create({
+  /** Name and command share a line once there is room; each takes its own well. */
+  identity: {
+    display: 'flex',
+    flexDirection: { default: 'column', [WIDE]: 'row' },
+    alignItems: { default: 'stretch', [WIDE]: 'center' },
+    gap: space[2],
+  },
+  name: { flexGrow: 1, minWidth: 0 },
+  command: { flexShrink: 0, minWidth: 0, width: { default: '100%', [WIDE]: '224px' } },
+  /** The three axes: a fieldset stripped to a grid, so `disabled` still reaches them. */
+  axes: {
+    display: 'grid',
+    gridTemplateColumns: { default: 'minmax(0, 1fr)', [WIDE]: 'repeat(3, minmax(0, 1fr))' },
+    gap: space[2],
+    minWidth: 0,
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+  },
+  /** The one-machine axis is a switch with its name, at a field's height and no box. */
+  thisMachine: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    minHeight: control.medium,
+    minWidth: 0,
+  },
+  axisIcon: { flexShrink: 0, width: '12px', height: '12px', color: colors.tertiaryLabel },
+  axisName: { flexShrink: 0, color: colors.secondaryLabel },
+  thisMachineLabel: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '12px',
+    color: colors.secondaryLabel,
+  },
+  /** A trigger's content: not a <span>, which the trigger line-clamps. */
+  trigger: { display: 'flex', flexGrow: 1, alignItems: 'center', gap: space[1.5], minWidth: 0 },
+  value: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  issuesTitle: { display: 'block' },
+  issues: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    margin: 0,
+    marginTop: space[1],
+    paddingInlineStart: space[4],
+    listStyleType: 'disc',
+  },
+  mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },
+  shareBlock: { display: 'flex', flexDirection: 'column', gap: space[2] },
+});
 
 export type ShortcutScopeOptions = {
   projects: { value: NonNullable<PromptShortcutScope['project']>; label: string }[];
@@ -145,37 +208,38 @@ export function PromptShortcutForm({
   };
   return (
     <form
-      className={cn('flex min-h-0 flex-col', className)}
+      {...withClassName(stylex.props(catalog.editorForm), className)}
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
       }}
     >
-      <div className="scrollbar-pro min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+      <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
         {/* Name and command are the Shortcut's identity, shown as themselves
             rather than inside a titled card — the same opening row as the Role
             editor. The command carries its `/` so what is typed is what shows. */}
-        <div className="space-y-1.5">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <EmojiField
-                value={value.emoji ?? ''}
-                defaultEmoji={DEFAULT_PROMPT_SHORTCUT_EMOJI}
-                onChange={(emoji) =>
-                  setValue((previous) => ({
-                    ...previous,
-                    ...(normalizeShortcutEmoji(emoji)
-                      ? { emoji: normalizeShortcutEmoji(emoji) }
-                      : { emoji: undefined }),
-                  }))
-                }
-              />
+        <div {...stylex.props(catalog.stack)}>
+          <div {...stylex.props(styles.identity)}>
+            <div {...stylex.props(styles.name)}>
               <Input
                 id="shortcut-name"
                 autoComplete="off"
                 aria-label={t('settings.promptShortcuts.name', 'Name')}
                 placeholder={t('settings.promptShortcuts.name', 'Name')}
-                className="h-9 min-w-0 flex-1 text-sm"
+                leading={
+                  <EmojiField
+                    value={value.emoji ?? ''}
+                    defaultEmoji={DEFAULT_PROMPT_SHORTCUT_EMOJI}
+                    onChange={(emoji) =>
+                      setValue((previous) => ({
+                        ...previous,
+                        ...(normalizeShortcutEmoji(emoji)
+                          ? { emoji: normalizeShortcutEmoji(emoji) }
+                          : { emoji: undefined }),
+                      }))
+                    }
+                  />
+                }
                 value={value.name}
                 maxLength={PROMPT_SHORTCUT_LIMITS.name}
                 required
@@ -190,16 +254,13 @@ export function PromptShortcutForm({
                 }}
               />
             </div>
-            <div className="flex h-9 min-w-0 items-center gap-1 rounded-md border border-input-border bg-input-field px-2 focus-within:ring-1 focus-within:ring-ring sm:w-56">
-              <span aria-hidden="true" className="font-mono text-sm text-muted-foreground">
-                /
-              </span>
+            <div {...stylex.props(styles.command)}>
               <Input
                 id="shortcut-slug"
                 autoComplete="off"
                 aria-label={t('settings.promptShortcuts.command', 'Slash command')}
                 placeholder={t('settings.promptShortcuts.commandPlaceholder', 'review-pr')}
-                className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 font-mono text-sm shadow-none focus-visible:ring-0"
+                leading={<span aria-hidden="true">/</span>}
                 value={value.slug}
                 maxLength={PROMPT_SHORTCUT_LIMITS.slug}
                 pattern="[a-z0-9][a-z0-9-]*"
@@ -220,7 +281,6 @@ export function PromptShortcutForm({
               'settings.promptShortcuts.descriptionPlaceholder',
               'Description — shown in the / menu'
             )}
-            className="h-9 text-sm"
             value={value.description ?? ''}
             maxLength={PROMPT_SHORTCUT_LIMITS.description}
             disabled={saving}
@@ -238,7 +298,7 @@ export function PromptShortcutForm({
           {/* Scope sits with the prompt rather than in a section of its own: it
               is the same decision as writing the prompt, because it is what the
               `@` menu completes against. */}
-          <fieldset disabled={saving} className="grid gap-2 sm:grid-cols-3">
+          <fieldset disabled={saving} {...stylex.props(styles.axes)}>
             <ScopeSelect
               id="shortcut-project"
               axis="project"
@@ -270,11 +330,9 @@ export function PromptShortcutForm({
             ) : (
               // One machine exists here, so the axis is a yes/no rather than a
               // list — but it stays the Machine axis, in its own column.
-              <div className="flex h-9 items-center gap-1.5 rounded-md border border-input-border bg-input-field px-2">
-                <ScopeAxisIcon axis="machine" className="size-3 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                  {axes.machineId}
-                </span>
+              <div {...stylex.props(styles.thisMachine)}>
+                <ScopeAxisIcon axis="machine" {...stylex.props(styles.axisIcon)} />
+                <span {...stylex.props(styles.thisMachineLabel)}>{axes.machineId}</span>
                 <Switch
                   id={`${fieldId}-this-machine`}
                   aria-label={t('settings.promptShortcuts.thisMachine', 'Limit to this machine')}
@@ -307,7 +365,8 @@ export function PromptShortcutForm({
             <Textarea
               id="shortcut-prompt"
               aria-label={t('settings.promptShortcuts.prompt', 'Prompt')}
-              className="min-h-28 resize-none text-sm leading-6"
+              rows={4}
+              resize="none"
               value={value.prompt}
               disabled={saving}
               onChange={(event) => promptProps.onValueChange(event.target.value)}
@@ -318,16 +377,16 @@ export function PromptShortcutForm({
               the two no longer agree — and it names which reference. */}
           {scopeIssues.length > 0 && (
             <FormMessage tone="error">
-              <span className="block font-normal">
+              <span {...stylex.props(styles.issuesTitle)}>
                 {t(
                   'settings.promptShortcuts.repairScope',
                   'Restore the matching scope or remove these mentions before saving.'
                 )}
               </span>
-              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              <ul {...stylex.props(styles.issues)}>
                 {scopeIssues.map(({ mention, issues }) => (
                   <li key={mention.start}>
-                    <code className="font-mono">{mention.label}</code>
+                    <code {...stylex.props(styles.mono)}>{mention.label}</code>
                     {' — '}
                     {t('settings.promptShortcuts.requiredAxes', {
                       defaultValue: 'Requires matching {{axes}}',
@@ -341,13 +400,13 @@ export function PromptShortcutForm({
         </Section>
 
         {canShare && (
-          <div className="space-y-2 rounded-lg border border-border/70 bg-card/60 px-3 py-2.5">
-            <div className="flex items-center justify-between gap-4">
-              <div className="min-w-0">
-                <Label htmlFor={`${fieldId}-share`} className="text-sm">
+          <div {...stylex.props(surface.formBlock, styles.shareBlock)}>
+            <div {...stylex.props(catalog.blockRow)}>
+              <div {...stylex.props(catalog.blockText)}>
+                <UiField.Label htmlFor={`${fieldId}-share`}>
                   {t('settings.promptShortcuts.share', 'Share with workspace')}
-                </Label>
-                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                </UiField.Label>
+                <p {...stylex.props(catalog.blockHint)}>
                   {t(
                     'settings.promptShortcuts.shareHint',
                     'Off by default. Sharing is separate from where the Shortcut applies.'
@@ -377,15 +436,15 @@ export function PromptShortcutForm({
         {error && <FormMessage tone="error">{error}</FormMessage>}
       </div>
 
-      <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button type="button" variant="outline" size="sm" disabled={saving} onClick={onCancel}>
+      <Dialog.Footer>
+        <Button type="button" variant="secondary" disabled={saving} onClick={onCancel}>
           {t('common.cancel', 'Cancel')}
         </Button>
-        <Button type="submit" size="sm" disabled={saving || blocked}>
-          {saving ? <Spinner className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+        <Button type="submit" disabled={saving || blocked}>
+          {saving ? <Spinner size="small" aria-hidden="true" /> : null}
           {isNew ? t('settings.promptShortcuts.create', 'Create') : t('common.save', 'Save')}
         </Button>
-      </footer>
+      </Dialog.Footer>
     </form>
   );
 }
@@ -424,34 +483,40 @@ function ScopeSelect({
       ? [...options, { value, label: fallbackLabel || value }]
       : options;
   return (
-    <Select
+    <Select.Root
+      items={[
+        { value: SHORTCUT_SCOPE_NONE, label: t('settings.promptShortcuts.none', 'None') },
+        ...entries,
+      ]}
       value={value || SHORTCUT_SCOPE_NONE}
-      onValueChange={(next) => onChange(next === SHORTCUT_SCOPE_NONE ? '' : next)}
+      onValueChange={(next) => {
+        if (next != null) onChange(next === SHORTCUT_SCOPE_NONE ? '' : next);
+      }}
     >
-      <SelectTrigger id={id} className="h-9 gap-1.5 text-xs" aria-label={label}>
+      <Select.Trigger id={id} aria-label={label}>
         {/* Not a <span>: the trigger line-clamps its direct span children, which
             turns a flex row into a stacked box. The axis names itself here
             because these three sit inline above the prompt with no field label
             of their own. */}
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <ScopeAxisIcon axis={axis} className="size-3 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 text-muted-foreground">{label}</span>
-          <span className="min-w-0 truncate">
+        <div {...stylex.props(styles.trigger)}>
+          <ScopeAxisIcon axis={axis} {...stylex.props(styles.axisIcon)} />
+          <span {...stylex.props(styles.axisName)}>{label}</span>
+          <span {...stylex.props(styles.value)}>
             {entries.find((option) => option.value === value)?.label ??
               t('settings.promptShortcuts.none', 'None')}
           </span>
         </div>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={SHORTCUT_SCOPE_NONE}>
+      </Select.Trigger>
+      <Select.Content>
+        <Select.Item value={SHORTCUT_SCOPE_NONE}>
           {t('settings.promptShortcuts.none', 'None')}
-        </SelectItem>
+        </Select.Item>
         {entries.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
+          <Select.Item key={option.value} value={option.value}>
             {option.label}
-          </SelectItem>
+          </Select.Item>
         ))}
-      </SelectContent>
-    </Select>
+      </Select.Content>
+    </Select.Root>
   );
 }

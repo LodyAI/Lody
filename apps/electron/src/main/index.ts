@@ -1,5 +1,6 @@
 import './desktop-bootstrap'
 import { app, dialog } from 'electron'
+import { beginDesktopRunRecord } from './desktop-log'
 import { isLocalPlatform, desktopInstallationProfile } from './platform'
 import { extractDeepLinkFromArgv, parseDeepLinkArg } from './deep-link-url'
 import { publishDeepLinkToPrimary, startDeepLinkIpcListener } from './deep-link-ipc'
@@ -40,6 +41,7 @@ async function start(): Promise<void> {
     app.quit()
     return
   }
+  beginDesktopRunRecord()
   if (!isolatedE2E && process.platform === 'win32') {
     const stop = startDeepLinkIpcListener((url) => launches.push({ url }))
     app.once('will-quit', stop)

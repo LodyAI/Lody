@@ -2,7 +2,12 @@ import type { MentionPrepare } from '@/ui/mention/index';
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { getAgentRoleEmoji, type AcpCommandSummary } from '@lody/shared';
-import { filterAndRankSlashCommands } from '@/lib/command-slash-search';
+import {
+  rankSlashItems,
+  rankSlashMatch,
+  sortRankedSlashItems,
+  type SlashMatchRank,
+} from '@/lib/command-slash-search';
 import {
   getSuggestions,
   type PathSuggestion,
@@ -38,6 +43,7 @@ export const MENTION_TRIGGER = '@';
 
 /** Per-category cap when one query is answered across every category. */
 export const AGGREGATE_LIMIT_PER_CATEGORY = 4;
+export const SLASH_MENU_LIMIT = 50;
 
 export type MentionCategoryId =
   | 'file'
@@ -68,9 +74,13 @@ export type MentionCategoryStatus = 'ready' | 'loading' | 'error' | 'disabled';
  * plain fields rather than shipping its own component.
  */
 export type MentionCandidateDetail = {
-  /** Absent on a candidate whose pane carries its own heading — a Role's does. */
+  /**
+   * The pane's heading. The menu falls back to the row's title, so a pane is
+   * never headed by its metadata; a Role's pane carries its own heading.
+   */
   title?: string;
-  badges?: string[];
+  /** Scope, version and the like: quiet facts the pane sets on one line. */
+  meta?: string[];
   description?: string;
   rows?: Array<{ label: string; value: string; mono?: boolean }>;
   /**
@@ -102,10 +112,22 @@ export type MentionCandidate = {
   kind: MentionKind;
   icon: MentionIcon;
   title: string;
+  /**
+   * Quiet words on the title's own line, after it: a file's folder, a
+   * command's description. The row stays one line; they give way first.
+   */
+  hint?: string;
+  /** Shared relevance for the direct command menu; never used to rank other mention types. */
+  slashRank?: SlashMatchRank;
+  /** A second line under the title, such as why a Role cannot be picked. */
   subtitle?: string;
   trailing?: string;
-  /** Render the title in the monospace face (paths, tokens). */
-  mono?: boolean;
+  /**
+   * When the thing was last touched, for a row whose recency is what tells two
+   * of them apart (sessions). The menu renders it as a compact "2h" against a
+   * shared clock, so the registry stays free of `Date.now()`.
+   */
+  activityAt?: number;
   /** Path an extension-aware icon derives its glyph from. */
   iconPath?: string;
   /**
@@ -195,6 +217,8 @@ export type MentionMenuView =
       /** Categories whose own name matches, offered above the results. */
       categories: MentionCategory[];
       groups: MentionCandidateGroup[];
+      /** Direct / and 、 searches are one relevance-ordered list across sources. */
+      rankedCandidates?: Array<{ category: MentionCategory; candidate: MentionCandidate }>;
       /** Direct grouped triggers activate only their own sources, even while empty. */
       queriedCategories?: readonly MentionCategory[];
     }
@@ -215,7 +239,11 @@ export function getCategoryNavigateText(category: Pick<MentionCategory, 'namespa
 export function getMentionViewCandidates(view: MentionMenuView | null): MentionCandidate[] {
   if (!view) return [];
   if (view.level === 'category') return view.candidates;
-  if (view.level === 'aggregate') return view.groups.flatMap((group) => group.candidates);
+  if (view.level === 'aggregate') {
+    return view.rankedCandidates
+      ? view.rankedCandidates.map(({ candidate }) => candidate)
+      : view.groups.flatMap((group) => group.candidates);
+  }
   return [];
 }
 
@@ -314,15 +342,42 @@ export function selectMentionMenuViewForTrigger(
   }
   if (isCommandMenuTrigger(trigger)) {
     const directCategories = categories.filter((category) => category.directTrigger === '/');
+    const groups = directCategories.map((category) => ({
+      category,
+      candidates:
+        category.status === 'disabled' ? [] : category.getCandidates(search, SLASH_MENU_LIMIT),
+    }));
+    const rankedCandidates = search.trim()
+      ? sortRankedSlashItems(
+          groups.flatMap((group) =>
+            group.candidates.flatMap((candidate) => {
+              const rank =
+                candidate.slashRank ??
+                rankSlashMatch({ token: candidate.label, description: candidate.hint }, search);
+              return rank
+                ? [
+                    {
+                      category: group.category,
+                      candidate,
+                      rank,
+                      disabled: candidate.disabled,
+                      token: candidate.label,
+                      id: candidate.value,
+                    },
+                  ]
+                : [];
+            })
+          ),
+          SLASH_MENU_LIMIT
+        ).map(({ category, candidate }) => ({ category, candidate }))
+      : undefined;
     return {
       level: 'aggregate',
       term: search,
       categories: [],
       queriedCategories: directCategories,
-      groups: directCategories.map((category) => ({
-        category,
-        candidates: category.status === 'disabled' ? [] : category.getCandidates(search),
-      })),
+      groups,
+      rankedCandidates,
     };
   }
   const direct = categories.find((entry) => entry.directTrigger === trigger);
@@ -344,8 +399,20 @@ function applyLimit<T>(ranked: T[], limit: number | undefined): T[] {
   return limit === undefined || ranked.length <= limit ? ranked : ranked.slice(0, limit);
 }
 
+/**
+ * A path as a row reads it: the name, then the folder it sits in. The name is
+ * what a person scans for; the folder tells two same-named files apart.
+ */
+function splitPathForRow(token: string, isDirectory: boolean): { name: string; folder?: string } {
+  const trimmed = token.replace(/\/+$/, '');
+  const slash = trimmed.lastIndexOf('/');
+  const name = `${trimmed.slice(slash + 1)}${isDirectory ? '/' : ''}`;
+  return slash > 0 ? { name, folder: trimmed.slice(0, slash) } : { name };
+}
+
 export function toFileCandidate(item: PathSuggestion): MentionCandidate {
   const isDirectory = item.kind === 'dir';
+  const { name, folder } = splitPathForRow(item.token, isDirectory);
   return {
     value: item.token,
     label: item.token,
@@ -355,9 +422,9 @@ export function toFileCandidate(item: PathSuggestion): MentionCandidate {
     navigateText: isDirectory ? `${MENTION_TRIGGER}${item.token}` : undefined,
     kind: isDirectory ? 'dir' : 'file',
     icon: isDirectory ? 'dir' : 'file',
-    title: item.token,
+    title: name,
+    hint: folder,
     iconPath: item.path,
-    mono: true,
   };
 }
 
@@ -428,7 +495,7 @@ export function toSkillCandidate(
     title: item.token,
     detail: {
       title: skill.name,
-      badges: [
+      meta: [
         labels.scope[item.scope],
         ...(skill.version ? [`v${skill.version}`] : []),
         ...(skill.isSymlink ? [labels.symlink] : []),
@@ -469,6 +536,7 @@ export function toSessionCandidate(
     kind: 'session',
     icon: 'session',
     title: item.title || labels.untitled,
+    activityAt: item.activityAt > 0 ? item.activityAt : undefined,
   };
 }
 
@@ -513,10 +581,13 @@ export function toAgentRoleCandidate(
     icon: 'agent_role',
     iconEmoji: emoji,
     title: role.name,
+    // Who does the work and where: two Roles named alike on two machines are
+    // told apart here without opening the pane.
+    hint: [item.agentConfig?.name, item.machine?.name].filter(Boolean).join(' · ') || undefined,
     disabled: item.availability.kind !== 'available',
     subtitle: availabilityText,
     detail: {
-      // No `title` and no badges: the pane heads itself with the Role's own
+      // No `title` and no meta: the pane heads itself with the Role's own
       // mark and name, and visibility is deliberately absent — every Role the menu
       // lists is one this user may read, so private-vs-workspace changes
       // nothing about accepting it. It is a Settings concern.
@@ -544,7 +615,10 @@ export function buildAgentRoleCandidates(
   );
 }
 
-export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate {
+export function toCommandCandidate(
+  command: AcpCommandSummary,
+  slashRank?: SlashMatchRank
+): MentionCandidate {
   return {
     value: `acp-command:${command.name}`,
     label: command.name,
@@ -554,7 +628,8 @@ export function toCommandCandidate(command: AcpCommandSummary): MentionCandidate
     kind: 'command',
     icon: 'command',
     title: `/${command.name}`,
-    subtitle: command.description,
+    hint: command.description,
+    slashRank,
   };
 }
 
@@ -563,7 +638,12 @@ export function buildCommandCandidates(
   term: string,
   limit?: number
 ): MentionCandidate[] {
-  return applyLimit(filterAndRankSlashCommands([...commands], term), limit).map(toCommandCandidate);
+  return rankSlashItems(
+    commands,
+    term,
+    (command) => ({ token: command.name, description: command.description }),
+    limit ?? commands.length
+  ).map(({ item, rank }) => toCommandCandidate(item, rank));
 }
 
 // ============================================================================
@@ -744,10 +824,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
             const { availability } = item;
             if (availability.kind === 'available') return undefined;
             if (availability.kind === 'unknown') return t('settings.agentRoles.status.checking');
-            const reason =
-              availability.reason === 'outside_work_context'
-                ? t('mention.agentRole.unavailable.workContext')
-                : t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]);
+            const reason = t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason]);
             return t('settings.agentRoles.unavailable.label', { reason });
           }),
       });

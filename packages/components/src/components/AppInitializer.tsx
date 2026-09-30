@@ -10,6 +10,7 @@ import { languageAtom } from '../atoms/settings';
 import { maybeClearLodyCacheOnBoot } from '../lib/clear-local-cache';
 import { getIpcServices } from '../lib/electron-ipc-client';
 import { useSetAtom } from 'jotai';
+import { installFocusModality } from '@lody/ui/focus-modality';
 import {
   detectBrowserLanguage,
   fallbackLanguage,
@@ -50,6 +51,9 @@ const AppInitializer = ({ children }: { children: React.ReactNode }) => {
       console.error('AppInitializer: failed to initialize i18n', error);
     });
   }, [setLanguage]);
+
+  // Focus rings follow keyboard navigation, not whatever key was pressed last.
+  useEffect(() => installFocusModality(), []);
 
   /* Run a pending "clear cache" / "clear all local data" request as early as
      possible. `RuntimeProvider` also awaits it (and shares the same one-shot

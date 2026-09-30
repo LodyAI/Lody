@@ -2,13 +2,17 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   type ReactNode,
   type RefObject,
 } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import {
+  ARCHIVE_GROUP_GAP_PX,
   ARCHIVE_LIST_OVERSCAN,
   ARCHIVE_LIST_VIRTUALIZE_THRESHOLD,
   archiveRowDataId,
@@ -29,12 +33,74 @@ function isArchiveListTextInput(target: EventTarget | null): boolean {
   );
 }
 
-function rowGapClassName(row: ArchiveVirtualRow): string {
-  return cn(
-    row.kind === 'header' && !row.isFirst && 'pt-4',
-    row.kind === 'header' && row.isLastInGroup && 'pb-4',
-    row.kind === 'session' && row.isLastInGroup && 'pb-4'
-  );
+const WIDE = '@media (min-width: 640px)';
+
+const styles = stylex.create({
+  scroll: {
+    boxSizing: 'border-box',
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '0%',
+    width: '100%',
+    minWidth: 0,
+    minHeight: 0,
+    overflowX: 'hidden',
+    overflowY: 'auto',
+    // A few px above the first row, so a card's top edge is not clipped by the scrollport.
+    paddingTop: space[1],
+    paddingBottom: space[4],
+    paddingInline: { default: space[4], [WIDE]: space[6] },
+  },
+  fill: { width: '100%', minWidth: 0 },
+  virtualList: { position: 'relative', width: '100%', minWidth: 0 },
+  virtualItem: { position: 'absolute', top: 0, left: 0, width: '100%' },
+  staticList: { display: 'flex', flexDirection: 'column', width: '100%', minWidth: 0 },
+  gapBefore: { paddingTop: space[4] },
+  gapAfter: { paddingBottom: space[4] },
+  /**
+   * A group's sessions are one card of ruled rows. The card is drawn here, under
+   * the rows, rather than by a row: a virtualized row is positioned alone, so the
+   * card spans the group's run from the virtualizer's own measurements.
+   */
+  card: {
+    boxSizing: 'border-box',
+    minWidth: 0,
+    backgroundColor: colors.elevatedBackground,
+    boxShadow: shadow.card,
+    borderRadius: radius.large,
+    cornerShape: corner.shape,
+  },
+  virtualCard: { position: 'absolute', top: 0, left: 0, width: '100%' },
+});
+
+function rowGapStyles(row: ArchiveVirtualRow) {
+  return [
+    row.kind === 'header' && !row.isFirst && styles.gapBefore,
+    row.isLastInGroup && styles.gapAfter,
+  ];
+}
+
+/** One card: the consecutive session rows of a group, as row indexes (inclusive). */
+type ArchiveCardRun = { key: string; start: number; end: number };
+
+function archiveCardRuns(rows: readonly ArchiveVirtualRow[]): ArchiveCardRun[] {
+  const runs: ArchiveCardRun[] = [];
+  let current: ArchiveCardRun | null = null;
+  rows.forEach((row, index) => {
+    if (row.kind !== 'session') {
+      current = null;
+      return;
+    }
+    const previous = rows[index - 1];
+    if (current && previous?.kind === 'session' && previous.groupKey === row.groupKey) {
+      current.end = index;
+    } else {
+      current = { key: `card:${row.groupKey}:${index}`, start: index, end: index };
+      runs.push(current);
+    }
+    if (row.isLastInGroup) current = null;
+  });
+  return runs;
 }
 
 function useArchiveVirtualListKeyboardNavigation({
@@ -178,27 +244,90 @@ export function ArchiveListWindow({
   });
 
   const virtualItems = rowVirtualizer.getVirtualItems();
+  // Phones keep the flat list of the rest of the mobile shell: a swipe row's
+  // content is opaque on the page, so it cannot sit on a card.
+  const drawCards = !isMobile;
+  const cardRuns = useMemo(() => (drawCards ? archiveCardRuns(rows) : []), [drawCards, rows]);
+
+  const renderStaticRows = () => {
+    if (!drawCards) {
+      return rows.map((row) => (
+        <div key={row.key} {...stylex.props(rowGapStyles(row))}>
+          {renderRow(row)}
+        </div>
+      ));
+    }
+    const runByStart = new Map(cardRuns.map((run) => [run.start, run]));
+    const nodes: ReactNode[] = [];
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (!row) continue;
+      const run = runByStart.get(index);
+      if (!run) {
+        nodes.push(
+          <div key={row.key} {...stylex.props(rowGapStyles(row))}>
+            {renderRow(row)}
+          </div>
+        );
+        continue;
+      }
+      const runRows = rows.slice(run.start, run.end + 1);
+      nodes.push(
+        <div key={run.key} {...stylex.props(runRows.at(-1)?.isLastInGroup && styles.gapAfter)}>
+          <div {...stylex.props(styles.card)}>
+            {runRows.map((runRow) => (
+              <div key={runRow.key}>{renderRow(runRow)}</div>
+            ))}
+          </div>
+        </div>
+      );
+      index = run.end;
+    }
+    return nodes;
+  };
+
+  const renderVirtualCards = () => {
+    const first = virtualItems[0];
+    const last = virtualItems.at(-1);
+    if (!drawCards || !first || !last) return null;
+    const measurements = rowVirtualizer.measurementsCache;
+    return cardRuns.map((run) => {
+      if (run.end < first.index || run.start > last.index) return null;
+      const top = measurements[run.start]?.start;
+      const bottom = measurements[run.end]?.end;
+      if (top === undefined || bottom === undefined) return null;
+      const gap = rows[run.end]?.isLastInGroup ? ARCHIVE_GROUP_GAP_PX : 0;
+      return (
+        <div
+          key={run.key}
+          aria-hidden
+          {...stylex.props(styles.card, styles.virtualCard)}
+          style={{
+            height: `${bottom - gap - top}px`,
+            transform: `translateY(${top}px)`,
+          }}
+        />
+      );
+    });
+  };
 
   return (
-    <div
-      ref={scrollRef}
-      data-archive-list-scroll=""
-      className="min-h-0 w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-4 sm:px-6"
-    >
-      <FocusScope id={listScopeId} className="w-full min-w-0">
+    <div ref={scrollRef} data-archive-list-scroll="" {...stylex.props(styles.scroll)}>
+      <FocusScope id={listScopeId} {...stylex.props(styles.fill)}>
         {shouldVirtualize ? (
           <div
             data-archive-list="virtualized"
-            className="relative w-full min-w-0"
+            {...stylex.props(styles.virtualList)}
             style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
           >
+            {renderVirtualCards()}
             {virtualItems.map((virtualItem) => {
               const row = rows[virtualItem.index];
               if (!row) return null;
               return (
                 <div
                   key={virtualItem.key}
-                  className={cn('absolute left-0 top-0 w-full', rowGapClassName(row))}
+                  {...stylex.props(styles.virtualItem, rowGapStyles(row))}
                   style={{
                     height: `${virtualItem.size}px`,
                     transform: `translateY(${virtualItem.start}px)`,
@@ -210,12 +339,8 @@ export function ArchiveListWindow({
             })}
           </div>
         ) : (
-          <div data-archive-list="static" className="flex w-full min-w-0 flex-col">
-            {rows.map((row) => (
-              <div key={row.key} className={rowGapClassName(row)}>
-                {renderRow(row)}
-              </div>
-            ))}
+          <div data-archive-list="static" {...stylex.props(styles.staticList)}>
+            {renderStaticRows()}
           </div>
         )}
       </FocusScope>

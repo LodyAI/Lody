@@ -6,7 +6,7 @@ import { createStore, Provider } from 'jotai';
 import type { McpServerId, WorkspaceMcpServerMeta } from '@lody/shared';
 import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { McpSetting } from '../src/components/settings/mcp-setting';
 import { initI18n } from '../src/i18n';
 
@@ -95,9 +95,9 @@ it.each(['tools', 'empty', 'error'])(
       await act(async () =>
         root.render(
           <Provider store={store}>
-            <TooltipProvider>
+            <Tooltip.Provider>
               <McpSetting />
-            </TooltipProvider>
+            </Tooltip.Provider>
           </Provider>
         )
       );
@@ -129,9 +129,9 @@ it.each(['tools', 'empty', 'error'])(
       await act(async () =>
         root.render(
           <Provider store={store}>
-            <TooltipProvider>
+            <Tooltip.Provider>
               <McpSetting />
-            </TooltipProvider>
+            </Tooltip.Provider>
           </Provider>
         )
       );
@@ -159,6 +159,7 @@ it.each(['tools', 'empty', 'error'])(
           'saved_tool'
         );
       else expect(container.querySelector('[aria-label="Available tools"]')).toBeNull();
+      if (outcome === 'empty') expect(container.textContent).toContain('No tools found');
       if (outcome === 'error') expect(container.textContent).toContain('Connection failed');
       expect(document.querySelector('[role="dialog"]')).toBeNull();
     } finally {

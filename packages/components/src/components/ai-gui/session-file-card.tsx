@@ -15,7 +15,7 @@ import {
   FileText,
   FileVideo,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { SessionFilePayload } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import {
@@ -39,6 +39,13 @@ const KIND_ICON: Record<SessionFileKind, typeof FileIcon> = {
   document: FileText,
   binary: FileIcon,
 };
+
+/**
+ * Icon for a file's derived kind. Shared with the pre-upload pending-attachment
+ * card so a draft attachment and the delivered card read as the same object.
+ */
+export const getSessionFileIcon = (fileName: string, mimeType?: string) =>
+  KIND_ICON[getSessionFileKind(fileName, mimeType)];
 
 export type SessionFileCardProps = {
   file: SessionFilePayload;

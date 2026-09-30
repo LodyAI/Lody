@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, X } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useAtomValue } from 'jotai';
 import { notificationPromptDismissedAtom, userAtom, currentWorkspaceSlugAtom } from '@/atoms';
@@ -8,6 +8,39 @@ import { cn } from '@/lib/utils';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { COMPOSER_ELEVATION_CLASS } from '@/components/chat/composer-surface';
+
+// `Notification.permission` is a synchronous browser round trip (~3ms in Chrome),
+// and this prompt remounts with every conversation. Cache it only while a
+// permission-change listener keeps the cache honest (settings can grant or deny
+// while the page lives); without the Permissions API, read it each time.
+let cachedNotificationPermission: NotificationPermission | null = null;
+let notificationPermissionWatch: 'idle' | 'pending' | 'active' = 'idle';
+
+function readNotificationPermission(): NotificationPermission {
+  if (notificationPermissionWatch === 'active' && cachedNotificationPermission !== null) {
+    return cachedNotificationPermission;
+  }
+  const permission = Notification.permission;
+  if (
+    notificationPermissionWatch === 'idle' &&
+    typeof navigator.permissions?.query === 'function'
+  ) {
+    notificationPermissionWatch = 'pending';
+    navigator.permissions.query({ name: 'notifications' }).then(
+      (status) => {
+        status.addEventListener('change', () => {
+          cachedNotificationPermission = null;
+        });
+        notificationPermissionWatch = 'active';
+      },
+      () => {
+        // Unsupported descriptor: keep reading directly.
+      }
+    );
+  }
+  if (notificationPermissionWatch === 'active') cachedNotificationPermission = permission;
+  return permission;
+}
 
 export interface NotificationPermissionPromptProps {
   /** Whether the session has completed (used as trigger to show the prompt) */
@@ -49,12 +82,8 @@ export function NotificationPermissionPrompt({
     return 'Notification' in window && typeof Notification === 'function';
   }, []);
 
-  const permissionStatus = useMemo(() => {
-    if (!notificationSupported) return 'denied';
-    return Notification.permission;
-  }, [notificationSupported]);
-
-  // Determine if we should show the prompt
+  // Determine if we should show the prompt. The permission read goes last: it
+  // is the only check that costs a browser round trip.
   const shouldShow = useMemo(() => {
     // Don't show if user is not logged in
     if (!user) return false;
@@ -62,22 +91,13 @@ export function NotificationPermissionPrompt({
     if (dismissed) return false;
     // Don't show if notifications not supported
     if (!notificationSupported) return false;
-    // Don't show if permission already granted or denied
-    if (permissionStatus !== 'default') return false;
     // Only show after session completion
     if (!sessionCompleted) return false;
     // Don't show again if already shown for this session
     if (hasShownForThisSession) return false;
-
-    return true;
-  }, [
-    user,
-    dismissed,
-    notificationSupported,
-    permissionStatus,
-    sessionCompleted,
-    hasShownForThisSession,
-  ]);
+    // Don't show if permission already granted or denied
+    return readNotificationPermission() === 'default';
+  }, [user, dismissed, notificationSupported, sessionCompleted, hasShownForThisSession]);
 
   // Show the prompt with a slight delay after session completion
   useEffect(() => {
@@ -139,14 +159,14 @@ export function NotificationPermissionPrompt({
             {t('notifications.prompt.description', 'Get notified when your AI tasks complete.')}
           </p>
           <div className="mt-2 flex items-center gap-2">
-            <Button variant="default" size="sm" onClick={handleEnable} className="h-7 px-3 text-xs">
+            <Button size="small" onClick={handleEnable}>
               {t('notifications.prompt.enable', 'Enable')}
             </Button>
             <Button
               variant="ghost"
-              size="sm"
+              size="small"
               onClick={handleDismiss}
-              className="h-7 px-3 text-xs text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground"
             >
               {t('notifications.prompt.dontRemind', "Don't remind me")}
             </Button>
@@ -154,9 +174,10 @@ export function NotificationPermissionPrompt({
         </div>
         <Button
           variant="ghost"
-          size="icon"
+          size="mini"
+          icon
           onClick={handleClose}
-          className="h-6 w-6 shrink-0 text-muted-foreground/70 hover:text-foreground"
+          className="shrink-0 text-muted-foreground/70 hover:text-foreground"
           aria-label={t('common.close', 'Close')}
         >
           <X className="h-3.5 w-3.5" />

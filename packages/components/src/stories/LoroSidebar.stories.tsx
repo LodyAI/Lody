@@ -423,6 +423,8 @@ function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProp
       onWorkspaceSelected={setWorkspaceId}
       onHomeClicked={() => setActiveNav('home')}
       onArchiveClicked={() => setActiveNav('archive')}
+      // Production always mounts the Schedules nav row (`loro-app-sidebar`).
+      onSchedulesClicked={() => setActiveNav('schedules')}
     />
   );
 
@@ -1279,6 +1281,13 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
   );
   const [chatsCollapsed, setChatsCollapsed] = useState(false);
   const [sessions, setTasks] = useState<SessionListRow[]>(baseSessionListProps.sessions);
+  // A story may drive the list over time (e.g. sessions finishing one by one);
+  // take a new list when the args hand one over.
+  const [argSessions, setArgSessions] = useState(baseSessionListProps.sessions);
+  if (argSessions !== baseSessionListProps.sessions) {
+    setArgSessions(baseSessionListProps.sessions);
+    setTasks(baseSessionListProps.sessions);
+  }
   const [repos, setRepos] = useState<SessionListRepoState[]>(baseSessionListProps.repos);
   const nextSessionIdRef = useRef(1);
 
@@ -1370,6 +1379,8 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
       onWorkspaceSelected={setWorkspaceId}
       onHomeClicked={() => setActiveNav('home')}
       onArchiveClicked={() => setActiveNav('archive')}
+      // Production always mounts the Schedules nav row (`loro-app-sidebar`).
+      onSchedulesClicked={() => setActiveNav('schedules')}
     />
   );
 
@@ -1459,4 +1470,142 @@ export const StressTest: Story = {
     ...Default.args!,
     sessionListProps: stressTaskListProps,
   },
+};
+
+/** Every session running at once: many working marks sharing one sea down the sidebar. */
+export const AllSessionsWorking: Story = {
+  name: 'All sessions working',
+  render: (args) => <WithProjectsLayout {...args} />,
+  args: {
+    ...Default.args!,
+    sessionListProps: {
+      ...demoTaskListProps,
+      sessions: demoTaskListProps.sessions.map((session) => ({
+        ...session,
+        isWorking: true,
+        isWaitingPermission: false,
+        hasUnreadMessages: false,
+      })),
+    },
+  },
+};
+
+const FINISH_EVERY_MS = 1400;
+
+/** Starts every session working, then finishes one at a time, then starts over. */
+function SessionsFinishingLayout(args: Parameters<typeof LoroSidebar>[0]) {
+  const base = demoTaskListProps.sessions;
+  const [finished, setFinished] = useState(0);
+  useEffect(() => {
+    const id = setInterval(
+      () => setFinished((count) => (count > base.length + 1 ? 0 : count + 1)),
+      FINISH_EVERY_MS
+    );
+    return () => clearInterval(id);
+  }, [base.length]);
+  const sessions = useMemo(
+    () =>
+      base.map((session, index) => ({
+        ...session,
+        isWorking: index >= finished,
+        isWaitingPermission: false,
+        hasUnreadMessages: index < finished,
+      })),
+    [base, finished]
+  );
+  return <WithProjectsLayout {...args} sessionListProps={{ ...demoTaskListProps, sessions }} />;
+}
+
+/** Sessions finish one by one: each working grid spins and gathers into the unread dot. */
+export const SessionsFinishing: Story = {
+  name: 'Sessions finishing',
+  render: (args) => <SessionsFinishingLayout {...args} />,
+  args: { ...Default.args! },
+};
+
+/**
+ * Regression fixture for a machine group's scrolling header. Mirrors
+ * `LoroAppSidebar`'s local-project section DOM with many collapsed project
+ * rows. Scroll the box: the machine label must leave the viewport with its
+ * rows, without sticking over a project.
+ */
+function MachineGroupScrollFixture() {
+  const isMobile = useIsMobile();
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
+  const projects = useMemo<LocalProjectMeta[]>(
+    () =>
+      Array.from({ length: 24 }, (_, index) => ({
+        id: `scroll-proj-${index + 1}` as LocalProjectId,
+        name: `project-${String(index + 1).padStart(2, '0')}`,
+        rootPath: `C:\\Users\\dev\\Code\\project-${String(index + 1).padStart(2, '0')}`,
+        createdAtMs: NOW - index * 24 * 60 * 60 * 1000,
+      })),
+    []
+  );
+  return (
+    <div className="flex min-h-screen w-full items-start justify-center bg-background p-10">
+      <div
+        data-testid="machine-group-scrollbox"
+        className="h-[360px] w-[280px] overflow-y-auto rounded-xl border border-sidebar-border/60 bg-sidebar p-2"
+      >
+        {/* Production section wrapper: loro-app-sidebar.tsx localProjectsTopContent. */}
+        <div className="space-y-0.5">
+          <div>
+            <SidebarSectionHeader
+              label="LAPTOP-PP66IJ89"
+              collapsed={false}
+              isMobile={isMobile}
+              toggleLabel="Toggle section"
+              onToggleCollapsed={() => {}}
+            />
+          </div>
+          <div className="space-y-0.5">
+            {projects.map((project, index) => {
+              const key = `${demoMachineId}:${project.id}`;
+              return (
+                <LocalProjectItem
+                  key={project.id}
+                  machineId={demoMachineId}
+                  machineName="LAPTOP-PP66IJ89"
+                  project={project}
+                  canRemoveProject
+                  collapsed={collapsedProjects[key] ?? true}
+                  whetherShowFullList={false}
+                  isSelected={index === 0}
+                  sessionsForProject={[]}
+                  childSessionsByParent={new Map()}
+                  liveSessionStatuses={EMPTY_LIVE_SESSION_STATUSES}
+                  formattedPath={project.rootPath}
+                  defaultSessionTitle="Untitled"
+                  selectedSessionId={null}
+                  removeProjectLabel="Remove folder"
+                  archiveTooltipLabel="Archive"
+                  archiveActionLabel="Archive"
+                  archiveConfirmLabel="Confirm"
+                  isMobile={isMobile}
+                  toggleLabel="Toggle"
+                  onNavigateProject={() => {}}
+                  onNavigateSession={() => {}}
+                  onArchive={() => {}}
+                  collapsedOpenedBySessionIds={{}}
+                  onToggleOpenedBySessions={() => {}}
+                  onToggleCollapsed={() =>
+                    setCollapsedProjects((prev) => ({ ...prev, [key]: !(prev[key] ?? true) }))
+                  }
+                  onToggleFullList={() => {}}
+                  onRequestRemoval={() => {}}
+                />
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const MachineGroupScrollingHeader: Story = {
+  name: 'Machine group scrolling header',
+  render: () => <MachineGroupScrollFixture />,
+  args: { ...Default.args! },
 };

@@ -14,6 +14,15 @@ this page is the full text of the rules summarised there.
   workspace-relative path and, when wired, opens a file-preview viewer tab
   through `handleOpenFile` with `pathKind: 'canonical'` (never the markdown
   href parser).
+- The Changes sidebar's Types view keeps the filename prominent and shows its
+  parent workspace path beneath it, so similarly named files remain identifiable
+  without relying on a hover-only title.
+- Diffs opened with a precise file focus open only that file by default; the other
+  cards start collapsed and remain individually expandable. A base (All Changes)
+  diff opened without a focus starts with every card collapsed, while a direct
+  conversation/turn diff without a file focus keeps its all-files-open default.
+  On mobile, the diff-header action closes the diff sheet before opening the
+  file drawer so the diff modal cannot cover the destination viewer.
 - Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
   `session-file-content-view.tsx`.
 - **What a client may DO with a session file is one model, `hooks/use-session-file-actions.ts`,
@@ -47,7 +56,10 @@ this page is the full text of the rules summarised there.
   clicks while pending; browser downloads remain independent. Each export uses an isolated
   cache filename. No remote host path is passed to the device OS.
   The path is resolved on the OWNING machine (its Flock `dotlodyPath` /
-  local-project root) and is built ONLY from that workspace root plus a
+  local-project root). The owning daemon publishes a real, normalized project
+  root even for older registrations through a symbolic link, so the renderer's
+  worktree ID matches the directory the daemon created. The file path is built
+  ONLY from that workspace root plus a
   genuinely workspace-relative viewer path — `lib/session-local-file-path.ts`
   rejects absolute and `..` paths, so a remote session can never hand this
   machine's shell a path of its choosing. The Files tree and the side-panel ⋯
@@ -66,6 +78,19 @@ this page is the full text of the rules summarised there.
   memoized rows, so they must stay referentially stable, and only FILE rows get
   a menu (`item.children === undefined`; `hasChildren` is false for an empty
   directory too).
+- Session PDFs use the PDF.js paged viewer. Electron's `lody-resource://` URL is a
+  custom scheme; PDF.js's URL loader only enables its network range reader for
+  HTTP(S), so passing that URL directly can consume the whole file. Use
+  `PDFDataRangeTransport` to request and validate 64 KiB byte ranges instead. The
+  local resource service classifies `.pdf` paths as binary `application/pdf` and
+  exposes `Accept-Ranges` and `Content-Range` to the cross-origin renderer. Do not
+  copy local PDF bytes into a renderer snapshot. PDF.js virtualizes page rendering,
+  and the viewer caps each page canvas at 8 megapixels. Remote/provider binary
+  limits remain unchanged; parse and read failures return to the existing binary
+  notice with its file actions. The viewer starts at fit width and offers page
+  thumbnails, direct page entry, quarter-turn rotation, zoom modes and percentages,
+  and expandable search. Thumbnail rendering follows the visible sidebar range;
+  file actions remain in the existing side-panel menu.
 - Markdown file viewers copy the latest complete source text (including unsaved
   editor changes) from the top toolbar. On mobile, source mode uses the native
   text surface instead of Monaco so long-press keeps the OS selection menu;
@@ -73,10 +98,22 @@ this page is the full text of the rules summarised there.
   `data-native-selection-allow`.
 - v2 semantics for file tree, All Changes, refresh/save conflicts, and CLI-local
   turn diff RPC: `specs/code-collab-v2.md`.
-- **Viewers are intentionally NOT code-split** (file viewer, diff viewer, diff
-  panel, inner Monaco/Markdown are static imports). Code-splitting only pays off
-  over a network; in the local Electron bundle a lazy `import()` adds no benefit
-  and a stale/eval-broken chunk surfaced as "Viewer failed to load / the app may have updated".
-  Do not reintroduce `lazy(() => import())` for these — there must be no separate
-  viewer chunk that can fail to load. The old `*-lazy.tsx` wrappers + stale-asset
-  ErrorBoundary fallbacks were removed for this reason.
+- DOCX, XLSX, and PPTX enter through the static `SessionFileOfficePreview` shell.
+  An active preview schedules a bounded read at idle and then imports only that
+  format's renderer and worker-backed engine. The local resource URL is read
+  into at most 25 MiB; remote providers must first pass their own binary limit.
+  Hiding the panel aborts the read and discards a late import. XLSX uses a
+  read-only virtual grid, DOCX requires worker parsing, and PPTX virtualizes its
+  slide list. Parse failures return to the file-action notice. Legacy `.doc`,
+  `.xls`, and `.ppt` are not parsed.
+- CSV and TSV keep the existing text `Source` tab. Their default table preview
+  starts a worker only while active, parses at most 50,000 rows, 256 columns,
+  and 200,000 cells, and virtualizes rows and columns. Search also stays in the
+  worker. Hiding the panel terminates the worker; source editing stays in the
+  existing Monaco/native text surface.
+- **Core viewers are intentionally NOT code-split** (file viewer, diff viewer,
+  diff panel, inner Monaco/Markdown remain static imports). The old
+  `lazy(() => import())` wrappers produced stale-chunk load failures in the
+  local Electron bundle and must not return. Office format engines are the
+  narrow exception: their WASM/worker cost is deferred until an active file
+  actually needs them. The static entry shell handles loading and errors.

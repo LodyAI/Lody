@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 // The action model is shared with the file tree context menu and the side
 // panel ⋯ menu; the card is one consumer of it, not its owner.
 import type { SessionFileErrorActions } from '@/lib/session-file-actions';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 type Translation = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
 
@@ -318,7 +318,7 @@ export function SessionFileNoticeCard({
           <div className="mt-3 flex flex-col gap-0.5">
             {actions.onShare ? (
               <Button
-                size="sm"
+                size="small"
                 variant="secondary"
                 className={ACTION_BUTTON_CLASS}
                 onClick={actions.onShare}
@@ -335,7 +335,7 @@ export function SessionFileNoticeCard({
             {localHost ? (
               <>
                 <Button
-                  size="sm"
+                  size="small"
                   variant="secondary"
                   className={ACTION_BUTTON_CLASS}
                   onClick={localHost.onOpen}
@@ -347,7 +347,7 @@ export function SessionFileNoticeCard({
                     : t('sessions.fileActions.openInDefaultApp', 'Open in default app')}
                 </Button>
                 <Button
-                  size="sm"
+                  size="small"
                   variant="ghost"
                   className={ACTION_BUTTON_CLASS}
                   onClick={localHost.onReveal}
@@ -359,7 +359,7 @@ export function SessionFileNoticeCard({
               </>
             ) : null}
             <Button
-              size="sm"
+              size="small"
               // Without the local-host pair this is the only way out of the
               // card, so it leads instead of trailing them.
               variant={localHost || actions.onShare ? 'ghost' : 'secondary'}

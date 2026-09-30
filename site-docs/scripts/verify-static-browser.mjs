@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { absoluteSiteUrl, collectSitePaths } from './site-paths.mjs';
+import { collectSitePaths } from './site-paths.mjs';
 import { createStaticHost } from './static-host.mjs';
 
 // Run against the real production build, never a dev server or synthetic page.
@@ -11,7 +11,7 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const output = path.join(packageRoot, 'out/client');
 const artifactDir = path.join(packageRoot, 'out/static-verification');
 const phase = process.env.STATIC_TEST_PHASE ?? 'all';
-assert.ok(['all', 'scan', 'faults', 'navigation'].includes(phase));
+assert.ok(['all', 'scan', 'faults', 'navigation', 'agent-pages'].includes(phase));
 const host = createStaticHost({ root: output, port: 0 });
 const server = await host.listen();
 const origin = `http://127.0.0.1:${server.address().port}`;
@@ -23,6 +23,8 @@ const results = [];
 const baselines = new Map();
 const pagePaths = collectSitePaths(packageRoot).filter((p) => !['/404', '/zh/404'].includes(p));
 const normalize = (p) => p.replace(/\/$/u, '') || '/';
+const directoryPath = (p) => (p === '/' ? '/' : `${normalize(p)}/`);
+const pagePathSet = new Set(pagePaths);
 const failures = [];
 
 async function run(name, action) {
@@ -65,6 +67,8 @@ function snapshot(page) {
     title: document.title,
     description: document.querySelector('meta[name=description]')?.content,
     canonical: document.querySelector('link[rel=canonical]')?.href,
+    ogUrl: document.querySelector('meta[property="og:url"]')?.content,
+    alternates: [...document.querySelectorAll('link[hreflang]')].map((el) => el.href),
     lang: document.documentElement.lang,
     headings: [...document.querySelectorAll('h1')].map((el) => el.textContent.trim()),
     paragraphs: [...document.querySelectorAll('main p, #nd-page p')]
@@ -118,14 +122,27 @@ async function scan() {
         const page = await context.newPage();
         for (let urlPath; (urlPath = queue.shift()) !== undefined;) {
           await run(`no-js ${urlPath}`, async () => {
-            const response = await page.goto(origin + urlPath);
+            const response = await page.goto(origin + directoryPath(urlPath));
             assert.equal(response.status(), 200);
             const data = await snapshot(page);
             assert.ok(data.title.trim().length > 0);
             assert.ok(data.description?.length > 5);
             const canonicalPath =
               urlPath === '/home' ? '/' : urlPath === '/zh/home' ? '/zh' : urlPath;
-            assert.equal(data.canonical, absoluteSiteUrl(canonicalPath));
+            assert.equal(data.canonical, `https://lody.ai${directoryPath(canonicalPath)}`);
+            assert.equal(data.ogUrl, data.canonical);
+            for (const alternate of data.alternates) {
+              const url = new URL(alternate);
+              assert.equal(
+                url.pathname,
+                directoryPath(url.pathname),
+                `Redirecting alternate: ${alternate}`
+              );
+              assert.ok(
+                pagePathSet.has(normalize(url.pathname)),
+                `Unknown alternate: ${alternate}`
+              );
+            }
             assert.equal(data.lang, urlPath.startsWith('/zh') ? 'zh-CN' : 'en');
             assert.ok(data.headings.length > 0);
             assert.ok(await page.locator('h1').first().isVisible());
@@ -136,13 +153,21 @@ async function scan() {
             assert.ok(!data.text.includes('Something went wrong!'));
             assert.ok(data.links.length > 0);
             for (const href of data.links) {
-              const url = new URL(href, origin + urlPath);
+              const url = new URL(href, page.url());
               // Hosted app/auth and third-party destinations are outside this static build.
               if (
                 [origin, 'https://lody.ai'].includes(url.origin) &&
                 !/^\/(app|login)(\/|$)/u.test(url.pathname)
-              )
+              ) {
+                if (pagePathSet.has(normalize(url.pathname))) {
+                  assert.equal(
+                    url.pathname,
+                    directoryPath(url.pathname),
+                    `Redirecting link: ${href}`
+                  );
+                }
                 targets.add(url.pathname);
+              }
             }
             baselines.set(urlPath, data);
             return { title: data.title, textLength: data.text.length };
@@ -154,7 +179,7 @@ async function scan() {
     await run('all internal static link targets', async () => {
       const broken = [];
       for (const target of targets) {
-        const response = await fetch(origin + target);
+        const response = await fetch(origin + target, { redirect: 'manual' });
         if (response.status !== 200) broken.push({ target, status: response.status });
         await response.body?.cancel();
       }
@@ -226,6 +251,18 @@ async function faults() {
           'Healthy hydration must not replace mismatched server HTML'
         );
       });
+      if (urlPath === '/' || urlPath === '/zh') {
+        // The app preview renders real workspace components inside an
+        // OptionalEnhancement boundary, so an app-only hook it newly reaches
+        // blanks the stage without failing anything else on the page.
+        await run(`landing app preview mounts ${urlPath}`, async () => {
+          await page.locator('section.underwater-reveal').scrollIntoViewIfNeeded();
+          await page
+            .locator('.underwater-reveal__frame textarea')
+            .first()
+            .waitFor({ state: 'visible' });
+        });
+      }
     } finally {
       await context.close();
     }
@@ -293,6 +330,7 @@ async function clickTo(page, link, destination) {
     return canonical && (new URL(canonical).pathname.replace(/\/$/u, '') || '/') === expected;
   }, expectedCanonical);
   assert.ok(await page.locator('h1').first().isVisible());
+  assert.equal(new URL(page.url()).pathname, directoryPath(destination));
   assert.equal(
     new URL((await snapshot(page)).canonical).pathname.replace(/\/$/u, '') || '/',
     destination.replace(/\/home$/u, '') || '/'
@@ -314,10 +352,10 @@ async function navigation() {
               name: mobile ? 'Primary mobile' : 'Primary',
               exact: true,
             });
-            await clickTo(page, nav.locator(`a[href="${prefix}/docs"]`), `${prefix}/docs`);
+            await clickTo(page, nav.locator(`a[href="${prefix}/docs/"]`), `${prefix}/docs`);
             await clickTo(
               page,
-              page.locator(`#nd-page a[href="${prefix}/docs/session-handoff"]`).first(),
+              page.locator(`#nd-page a[href="${prefix}/docs/session-handoff/"]`).first(),
               `${prefix}/docs/session-handoff`
             );
             await page.goto(origin + prefix + '/blog');
@@ -361,7 +399,7 @@ async function navigation() {
           page,
           page
             .getByRole('navigation', { name: 'Primary mobile' })
-            .locator(`a[href="${prefix}/blog"]`),
+            .locator(`a[href="${prefix}/blog/"]`),
           `${prefix}/blog`
         );
       });
@@ -392,7 +430,7 @@ async function navigation() {
           page,
           page
             .getByRole('navigation', { name: 'Primary mobile' })
-            .locator(`a[href="${prefix}/docs"]`),
+            .locator(`a[href="${prefix}/docs/"]`),
           `${prefix}/docs`
         );
       });
@@ -449,11 +487,94 @@ async function navigation() {
   }
 }
 
+async function agentPages() {
+  for (const mobile of [false, true]) {
+    for (const js of [false, true]) {
+      const context = await newContext({ mobile, js });
+      try {
+        await run(
+          `coding agent pages ${mobile ? 'mobile' : 'desktop'} ${js ? 'hydrated' : 'no-js'}`,
+          async () => {
+            const page = await context.newPage();
+            const errors = [];
+            page.on('pageerror', (error) => errors.push(error.message));
+            for (const [slug, heading] of [
+              ['coding-agent-gui', 'One GUI for Your Coding Agents'],
+              ['coding-agent-remote-control', 'Remote Control for Your Coding Agents'],
+            ]) {
+              await page.goto(`${origin}/${slug}/`);
+              if (js) await settled(page);
+              assert.equal(await page.locator('h1').count(), 1);
+              assert.equal(
+                (await page.locator('h1').textContent()).replace(/\s+/gu, ' ').trim(),
+                heading
+              );
+              assert.equal((await snapshot(page)).canonical, `https://lody.ai/${slug}/`);
+              assert.equal(await page.locator('.agent-page__agent').count(), 6);
+              assert.equal(await page.locator('link[hreflang]').count(), 0);
+              assert.ok(
+                await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+              );
+              assert.ok(
+                await page
+                  .locator('main img')
+                  .evaluateAll((images) =>
+                    images.every((image) => image.complete && image.naturalWidth > 0)
+                  )
+              );
+              const faq = page.locator('.agent-page__faq details').first();
+              await faq.locator('summary').click();
+              assert.ok(await faq.evaluate((element) => element.open));
+              await faq.locator('summary').click();
+              assert.equal(await faq.evaluate((element) => element.open), false);
+              if (js) {
+                const previous = await page.locator('html').getAttribute('class');
+                await page.getByRole('button', { name: 'Toggle color theme' }).click();
+                await page.waitForFunction(
+                  (value) => document.documentElement.className !== value,
+                  previous
+                );
+              }
+              await page.screenshot({
+                path: path.join(
+                  artifactDir,
+                  `${slug}-${mobile ? 'mobile' : 'desktop'}-${js ? 'js' : 'no-js'}.png`
+                ),
+                fullPage: true,
+              });
+            }
+            await clickTo(
+              page,
+              page
+                .getByRole('navigation', { name: 'Coding agent guides' })
+                .getByRole('link', { name: 'Agent GUI', exact: true }),
+              '/coding-agent-gui'
+            );
+            await page.goBack();
+            await page.waitForURL(`${origin}/coding-agent-remote-control/`);
+            await page.goForward();
+            await page.waitForURL(`${origin}/coding-agent-gui/`);
+            await clickTo(
+              page,
+              page.getByRole('link', { name: 'Follow the quick start', exact: true }).first(),
+              '/docs/quickstart'
+            );
+            assert.deepEqual(errors, []);
+          }
+        );
+      } finally {
+        await context.close();
+      }
+    }
+  }
+}
+
 try {
   await mkdir(artifactDir, { recursive: true });
   if (phase === 'all' || phase === 'scan') await scan();
   if (phase === 'all' || phase === 'faults') await faults();
   if (phase === 'all' || phase === 'navigation') await navigation();
+  if (phase === 'all' || phase === 'agent-pages') await agentPages();
 } finally {
   await writeFile(
     path.join(artifactDir, `${phase}.json`),

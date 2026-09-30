@@ -8,8 +8,8 @@ import {
   SessionChatStreamView,
   type ChatStreamItem,
 } from '@/components/ai-gui/view';
-import { Button } from '@/ui/button';
-import { clearScrollPosition, saveScrollPosition } from '@/hooks/use-scroll-position-cache';
+import { Button } from '@lody/ui/button';
+import { clearSavedScrollStates, saveScrollState } from '@/lib/conversation-scroll/saved-state';
 
 const sessionId = 'hydration-regression' as SessionId;
 const platform = createLocalPlatformProvider({
@@ -118,7 +118,11 @@ export const MobileLeadingContent: Story = {
   args: { ...PermissionActivity.args, topInset: 64 },
 };
 
-/** Cold virtualizer mount with enough rows to expose estimated-height restoration. */
+/**
+ * A cold mount with enough rows to expose estimated heights: the scroll engine
+ * has no saved sizes, so every row starts at an estimate. With `cachedOffset`
+ * the session reopens at a saved reading position (row `cold-4` at the top).
+ */
 function ColdTailStory({ cachedOffset = false }: { cachedOffset?: boolean }) {
   const [opened, setOpened] = useState(0);
   const items: ChatStreamItem[] = Array.from(
@@ -140,10 +144,25 @@ function ColdTailStory({ cachedOffset = false }: { cachedOffset?: boolean }) {
       <div className="flex h-screen flex-col">
         <Button
           onClick={() => {
-            // Every open is cold: a warm row cache already counts as measured.
-            clearScrollPosition(sessionId);
+            // Every open is cold: saved sizes would already count as measured.
+            clearSavedScrollStates();
             if (cachedOffset) {
-              saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 1200 });
+              saveScrollState(sessionId, {
+                formatVersion: 1,
+                intent: {
+                  kind: 'read',
+                  anchor: {
+                    kind: 'turn',
+                    turnId: 'cold-4',
+                    turnIndex: 4,
+                    rowKey: 'cold-4',
+                    item: null,
+                    offsetPx: 0,
+                  },
+                  screenY: 0,
+                },
+                sizes: null,
+              });
             }
             setOpened((n) => n + 1);
           }}

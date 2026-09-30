@@ -154,11 +154,13 @@ export class LodyWorld extends World {
   }
 
   async configureSessionForkAgent(): Promise<void> {
-    if (!this.onboarding || !this.harness?.page) {
+    if (!this.artifacts || !this.onboarding || !this.harness?.page) {
       throw new Error('Scenario is not ready for Session fork setup');
     }
     await this.onboarding.waitForLocalBootstrap();
-    this.sessionForkFixture = await SessionForkFixture.create();
+    this.sessionForkFixture = await SessionForkFixture.create(
+      `${this.artifacts.scenarioDir}/session-fork-scripted-acp.ndjson`
+    );
     this.sessionForkPage = new SessionForkPage(this.harness.page, this.sessionForkFixture);
     this.sessionRelationLifecyclePage = new SessionRelationLifecyclePage(this.harness.page);
     await this.onboarding.skipConfigurationAndEnterProduct();

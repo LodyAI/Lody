@@ -1,10 +1,10 @@
 # Shared UI helpers and file surfaces
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
-These rules also bind callers changing crash recovery, localStorage caches, file
-surfaces, or Electron IPC typing. Read the relevant sections before those changes.
-Rationale: [components](../../../../.agents/docs/components-package.md) and
-[file paths](../../../../.agents/docs/components-file-paths.md).
+Rules bind callers too.
+Background: [components](../../../../.agents/docs/components-package.md),
+[files](../../../../.agents/docs/components-file-paths.md).
+
+- Send acceptance and RPC await local commits, never Repo-wide flush.
 
 ## Electron IPC types
 
@@ -22,6 +22,8 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
 - `ErrorBoundary`'s `error-boundary-fallback.tsx` displays the real error and one-click
   full-report copy on every build. Details default visible (`showErrorDetails` opts out);
   `lib/error-boundary-report.ts` is the pure copy builder.
+- Error/not-found screens use `components/status-page.tsx`; pre-React `boot-failure.ts`
+  draws that column in plain DOM with copied V2 token values, never React/StyleX/Tailwind.
 - Crash screens never reload/restart/reset themselves. `resetKeys` must not clear a captured
   error; the copyable fallback stays visible until the user presses a recovery button.
 - A cloud query throws into render and keeps throwing. An optional surface inside a larger
@@ -116,3 +118,5 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
   `formatAgentRateLimitWindowLabel`, even when duration/utilization/reset match.
 - Before creating top-level or child sessions, call `filterAcpSessionConfigOptionValues()`
   so cached values outside the current selector schema are neither dispatched nor persisted.
+
+Attachment transfer lifecycle changes follow [workspace ownership](../providers/AGENTS.md#attachment-transfer-ownership).

@@ -206,6 +206,15 @@ export function useChatLandingKeyboardNav(
       //   - in the composer → exit input mode onto the first option (focus-move mode);
       //   - on a focused option → exit focus-move mode entirely (blur + drop highlight).
       if (event.key === 'Escape') {
+        // A modal may open without moving focus out of the composer immediately. Let its
+        // own Escape handler run instead of consuming the key in this capture listener.
+        if (
+          document.querySelector(
+            '[role="dialog"][data-open], [role="alertdialog"][data-open], [aria-modal="true"]'
+          )
+        ) {
+          return;
+        }
         if (dropdownOpen) return;
         if (!active || !root.contains(active)) return;
         const options = collectOptions(root);

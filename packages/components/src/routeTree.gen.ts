@@ -29,9 +29,11 @@ import { Route as DesktopCheckoutReturnRouteImport } from './routes/desktop/chec
 import { Route as WorkspaceNameAuthRouteImport } from './routes/$workspaceName/_auth';
 import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspaceName/_auth/settings';
 import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions';
+import { Route as WorkspaceNameAuthSchedulesRouteImport } from './routes/$workspaceName/_auth/schedules';
 import { Route as WorkspaceNameAuthChatRouteImport } from './routes/$workspaceName/_auth/chat';
 import { Route as WorkspaceNameAuthArchiveRouteImport } from './routes/$workspaceName/_auth/archive';
 import { Route as WorkspaceNameAuthSettingsIndexRouteImport } from './routes/$workspaceName/_auth/settings.index';
+import { Route as WorkspaceNameAuthSchedulesIndexRouteImport } from './routes/$workspaceName/_auth/schedules.index';
 import { Route as WorkspaceNameAuthSettingsWorkspaceRouteImport } from './routes/$workspaceName/_auth/settings/workspace';
 import { Route as WorkspaceNameAuthSettingsStatsRouteImport } from './routes/$workspaceName/_auth/settings/stats';
 import { Route as WorkspaceNameAuthSettingsSharesRouteImport } from './routes/$workspaceName/_auth/settings/shares';
@@ -55,6 +57,7 @@ import { Route as WorkspaceNameAuthSettingsAgentConfigRouteImport } from './rout
 import { Route as WorkspaceNameAuthSettingsAccountRouteImport } from './routes/$workspaceName/_auth/settings/account';
 import { Route as WorkspaceNameAuthSettingsAboutRouteImport } from './routes/$workspaceName/_auth/settings/about';
 import { Route as WorkspaceNameAuthSessionsSessionIdRouteImport } from './routes/$workspaceName/_auth/sessions/$sessionId';
+import { Route as WorkspaceNameAuthSchedulesScheduleIdRouteImport } from './routes/$workspaceName/_auth/schedules.$scheduleId';
 import { Route as WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport } from './routes/$workspaceName/_auth/local/$machineId/$localProjectId';
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -156,6 +159,11 @@ const WorkspaceNameAuthSessionsRoute = WorkspaceNameAuthSessionsRouteImport.upda
   path: '/sessions',
   getParentRoute: () => WorkspaceNameAuthRoute,
 } as any);
+const WorkspaceNameAuthSchedulesRoute = WorkspaceNameAuthSchedulesRouteImport.update({
+  id: '/schedules',
+  path: '/schedules',
+  getParentRoute: () => WorkspaceNameAuthRoute,
+} as any);
 const WorkspaceNameAuthChatRoute = WorkspaceNameAuthChatRouteImport.update({
   id: '/chat',
   path: '/chat',
@@ -170,6 +178,11 @@ const WorkspaceNameAuthSettingsIndexRoute = WorkspaceNameAuthSettingsIndexRouteI
   id: '/',
   path: '/',
   getParentRoute: () => WorkspaceNameAuthSettingsRoute,
+} as any);
+const WorkspaceNameAuthSchedulesIndexRoute = WorkspaceNameAuthSchedulesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => WorkspaceNameAuthSchedulesRoute,
 } as any);
 const WorkspaceNameAuthSettingsWorkspaceRoute =
   WorkspaceNameAuthSettingsWorkspaceRouteImport.update({
@@ -295,6 +308,12 @@ const WorkspaceNameAuthSessionsSessionIdRoute =
     path: '/$sessionId',
     getParentRoute: () => WorkspaceNameAuthSessionsRoute,
   } as any);
+const WorkspaceNameAuthSchedulesScheduleIdRoute =
+  WorkspaceNameAuthSchedulesScheduleIdRouteImport.update({
+    id: '/$scheduleId',
+    path: '/$scheduleId',
+    getParentRoute: () => WorkspaceNameAuthSchedulesRoute,
+  } as any);
 const WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute =
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRouteImport.update({
     id: '/local/$machineId/$localProjectId',
@@ -322,8 +341,10 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/': typeof WorkspaceNameIndexRoute;
   '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute;
   '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute;
+  '/$workspaceName/schedules': typeof WorkspaceNameAuthSchedulesRouteWithChildren;
   '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
   '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  '/$workspaceName/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
   '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
   '/$workspaceName/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute;
@@ -347,6 +368,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
   '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
   '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  '/$workspaceName/schedules/': typeof WorkspaceNameAuthSchedulesIndexRoute;
   '/$workspaceName/settings/': typeof WorkspaceNameAuthSettingsIndexRoute;
   '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
@@ -370,6 +392,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/archive': typeof WorkspaceNameAuthArchiveRoute;
   '/$workspaceName/chat': typeof WorkspaceNameAuthChatRoute;
   '/$workspaceName/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
+  '/$workspaceName/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
   '/$workspaceName/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
   '/$workspaceName/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute;
@@ -393,6 +416,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
   '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
   '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  '/$workspaceName/schedules': typeof WorkspaceNameAuthSchedulesIndexRoute;
   '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsIndexRoute;
   '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
@@ -418,8 +442,10 @@ export interface FileRoutesById {
   '/$workspaceName/': typeof WorkspaceNameIndexRoute;
   '/$workspaceName/_auth/archive': typeof WorkspaceNameAuthArchiveRoute;
   '/$workspaceName/_auth/chat': typeof WorkspaceNameAuthChatRoute;
+  '/$workspaceName/_auth/schedules': typeof WorkspaceNameAuthSchedulesRouteWithChildren;
   '/$workspaceName/_auth/sessions': typeof WorkspaceNameAuthSessionsRouteWithChildren;
   '/$workspaceName/_auth/settings': typeof WorkspaceNameAuthSettingsRouteWithChildren;
+  '/$workspaceName/_auth/schedules/$scheduleId': typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
   '/$workspaceName/_auth/sessions/$sessionId': typeof WorkspaceNameAuthSessionsSessionIdRoute;
   '/$workspaceName/_auth/settings/about': typeof WorkspaceNameAuthSettingsAboutRoute;
   '/$workspaceName/_auth/settings/account': typeof WorkspaceNameAuthSettingsAccountRoute;
@@ -443,6 +469,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
   '/$workspaceName/_auth/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
   '/$workspaceName/_auth/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
+  '/$workspaceName/_auth/schedules/': typeof WorkspaceNameAuthSchedulesIndexRoute;
   '/$workspaceName/_auth/settings/': typeof WorkspaceNameAuthSettingsIndexRoute;
   '/$workspaceName/_auth/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
@@ -468,8 +495,10 @@ export interface FileRouteTypes {
     | '/$workspaceName/'
     | '/$workspaceName/archive'
     | '/$workspaceName/chat'
+    | '/$workspaceName/schedules'
     | '/$workspaceName/sessions'
     | '/$workspaceName/settings'
+    | '/$workspaceName/schedules/$scheduleId'
     | '/$workspaceName/sessions/$sessionId'
     | '/$workspaceName/settings/about'
     | '/$workspaceName/settings/account'
@@ -493,6 +522,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/shares'
     | '/$workspaceName/settings/stats'
     | '/$workspaceName/settings/workspace'
+    | '/$workspaceName/schedules/'
     | '/$workspaceName/settings/'
     | '/$workspaceName/local/$machineId/$localProjectId';
   fileRoutesByTo: FileRoutesByTo;
@@ -516,6 +546,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/archive'
     | '/$workspaceName/chat'
     | '/$workspaceName/sessions'
+    | '/$workspaceName/schedules/$scheduleId'
     | '/$workspaceName/sessions/$sessionId'
     | '/$workspaceName/settings/about'
     | '/$workspaceName/settings/account'
@@ -539,6 +570,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/shares'
     | '/$workspaceName/settings/stats'
     | '/$workspaceName/settings/workspace'
+    | '/$workspaceName/schedules'
     | '/$workspaceName/settings'
     | '/$workspaceName/local/$machineId/$localProjectId';
   id:
@@ -563,8 +595,10 @@ export interface FileRouteTypes {
     | '/$workspaceName/'
     | '/$workspaceName/_auth/archive'
     | '/$workspaceName/_auth/chat'
+    | '/$workspaceName/_auth/schedules'
     | '/$workspaceName/_auth/sessions'
     | '/$workspaceName/_auth/settings'
+    | '/$workspaceName/_auth/schedules/$scheduleId'
     | '/$workspaceName/_auth/sessions/$sessionId'
     | '/$workspaceName/_auth/settings/about'
     | '/$workspaceName/_auth/settings/account'
@@ -588,6 +622,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/settings/shares'
     | '/$workspaceName/_auth/settings/stats'
     | '/$workspaceName/_auth/settings/workspace'
+    | '/$workspaceName/_auth/schedules/'
     | '/$workspaceName/_auth/settings/'
     | '/$workspaceName/_auth/local/$machineId/$localProjectId';
   fileRoutesById: FileRoutesById;
@@ -753,6 +788,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSessionsRouteImport;
       parentRoute: typeof WorkspaceNameAuthRoute;
     };
+    '/$workspaceName/_auth/schedules': {
+      id: '/$workspaceName/_auth/schedules';
+      path: '/schedules';
+      fullPath: '/$workspaceName/schedules';
+      preLoaderRoute: typeof WorkspaceNameAuthSchedulesRouteImport;
+      parentRoute: typeof WorkspaceNameAuthRoute;
+    };
     '/$workspaceName/_auth/chat': {
       id: '/$workspaceName/_auth/chat';
       path: '/chat';
@@ -773,6 +815,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/$workspaceName/settings/';
       preLoaderRoute: typeof WorkspaceNameAuthSettingsIndexRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
+    };
+    '/$workspaceName/_auth/schedules/': {
+      id: '/$workspaceName/_auth/schedules/';
+      path: '/';
+      fullPath: '/$workspaceName/schedules/';
+      preLoaderRoute: typeof WorkspaceNameAuthSchedulesIndexRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSchedulesRoute;
     };
     '/$workspaceName/_auth/settings/workspace': {
       id: '/$workspaceName/_auth/settings/workspace';
@@ -935,6 +984,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthSessionsSessionIdRouteImport;
       parentRoute: typeof WorkspaceNameAuthSessionsRoute;
     };
+    '/$workspaceName/_auth/schedules/$scheduleId': {
+      id: '/$workspaceName/_auth/schedules/$scheduleId';
+      path: '/$scheduleId';
+      fullPath: '/$workspaceName/schedules/$scheduleId';
+      preLoaderRoute: typeof WorkspaceNameAuthSchedulesScheduleIdRouteImport;
+      parentRoute: typeof WorkspaceNameAuthSchedulesRoute;
+    };
     '/$workspaceName/_auth/local/$machineId/$localProjectId': {
       id: '/$workspaceName/_auth/local/$machineId/$localProjectId';
       path: '/local/$machineId/$localProjectId';
@@ -944,6 +1000,19 @@ declare module '@tanstack/react-router' {
     };
   }
 }
+
+interface WorkspaceNameAuthSchedulesRouteChildren {
+  WorkspaceNameAuthSchedulesScheduleIdRoute: typeof WorkspaceNameAuthSchedulesScheduleIdRoute;
+  WorkspaceNameAuthSchedulesIndexRoute: typeof WorkspaceNameAuthSchedulesIndexRoute;
+}
+
+const WorkspaceNameAuthSchedulesRouteChildren: WorkspaceNameAuthSchedulesRouteChildren = {
+  WorkspaceNameAuthSchedulesScheduleIdRoute: WorkspaceNameAuthSchedulesScheduleIdRoute,
+  WorkspaceNameAuthSchedulesIndexRoute: WorkspaceNameAuthSchedulesIndexRoute,
+};
+
+const WorkspaceNameAuthSchedulesRouteWithChildren =
+  WorkspaceNameAuthSchedulesRoute._addFileChildren(WorkspaceNameAuthSchedulesRouteChildren);
 
 interface WorkspaceNameAuthSessionsRouteChildren {
   WorkspaceNameAuthSessionsSessionIdRoute: typeof WorkspaceNameAuthSessionsSessionIdRoute;
@@ -1016,6 +1085,7 @@ const WorkspaceNameAuthSettingsRouteWithChildren = WorkspaceNameAuthSettingsRout
 interface WorkspaceNameAuthRouteChildren {
   WorkspaceNameAuthArchiveRoute: typeof WorkspaceNameAuthArchiveRoute;
   WorkspaceNameAuthChatRoute: typeof WorkspaceNameAuthChatRoute;
+  WorkspaceNameAuthSchedulesRoute: typeof WorkspaceNameAuthSchedulesRouteWithChildren;
   WorkspaceNameAuthSessionsRoute: typeof WorkspaceNameAuthSessionsRouteWithChildren;
   WorkspaceNameAuthSettingsRoute: typeof WorkspaceNameAuthSettingsRouteWithChildren;
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute: typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
@@ -1024,6 +1094,7 @@ interface WorkspaceNameAuthRouteChildren {
 const WorkspaceNameAuthRouteChildren: WorkspaceNameAuthRouteChildren = {
   WorkspaceNameAuthArchiveRoute: WorkspaceNameAuthArchiveRoute,
   WorkspaceNameAuthChatRoute: WorkspaceNameAuthChatRoute,
+  WorkspaceNameAuthSchedulesRoute: WorkspaceNameAuthSchedulesRouteWithChildren,
   WorkspaceNameAuthSessionsRoute: WorkspaceNameAuthSessionsRouteWithChildren,
   WorkspaceNameAuthSettingsRoute: WorkspaceNameAuthSettingsRouteWithChildren,
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute:

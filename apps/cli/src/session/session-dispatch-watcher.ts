@@ -40,6 +40,7 @@ import {
 import type { SessionUserResolver, SessionUserProfile } from './session-user-resolver';
 import {
   findNextDispatchableUserTurn,
+  findLastHistoryEntry,
   isActivationAwaitingHistory,
   resolveDispatchTurnInput,
   resolveDispatchAcpSessionId,
@@ -2119,26 +2120,12 @@ export class SessionDispatchWatcher {
       }
 
       const queuedTurnId = queuedItem.userTurnId?.trim() || `queued-${queuedItem.$cid}`;
-      const existing = history.find((entry) => entry.id === queuedTurnId);
+      const existing = findLastHistoryEntry(history, queuedTurnId);
       if (existing) {
         if (existing.role === 'user' && isActivationAwaitingHistory(history, queuedTurnId)) {
           const currentMeta = await sessionDoc.getMetaState();
           if (!currentMeta) return null;
-          const alreadyExecuted =
-            currentMeta.lastHandledUserMsgId === queuedTurnId ||
-            currentMeta.settledActivationUserMsgId === queuedTurnId ||
-            currentMeta.lastMissingHistoryUserMsgId === queuedTurnId ||
-            this.deps.executionService.getTerminalUserTurnStatusWithoutEntry?.(
-              meta.id,
-              queuedTurnId
-            ) !== undefined ||
-            history.some(
-              (entry) =>
-                entry.role === 'assistant' &&
-                entry.userTurnId === queuedTurnId &&
-                typeof entry.endedAt === 'number'
-            );
-          if (!alreadyExecuted) {
+          if (!this.hasQueuedTurnSettled(currentMeta, queuedTurnId, history)) {
             // History may have committed before activation publication failed. Do not
             // discard the retry record until the missing second write succeeds.
             const pending = getPendingUserTurnActivationId(currentMeta);
@@ -2153,6 +2140,32 @@ export class SessionDispatchWatcher {
         await sessionDoc.removeMessageQueueItem(queuedItem.$cid);
         this.deps.logger.debug(
           `[${meta.id}] Dropping already-promoted queued message ${queuedItem.$cid}`
+        );
+        return null;
+      }
+
+      // Renderer steering appends this turn and removes the queue row on another
+      // replica. Execution may have seen the steer before either write syncs here.
+      const currentMeta = await sessionDoc.getMetaState();
+      if (!currentMeta) return null;
+      const steerStatus = currentMeta.steerTurnStatuses?.[queuedTurnId];
+      // Settled evidence outranks a refused steer: recovery writes its tombstone
+      // before clearing the steer status, and a hold would then never end.
+      if (
+        (steerStatus !== undefined && steerStatus !== 'pending') ||
+        this.deps.executionService.getActiveUserTurnId?.(meta.id) === queuedTurnId ||
+        this.hasQueuedTurnSettled(currentMeta, queuedTurnId, history)
+      ) {
+        await sessionDoc.removeMessageQueueItem(queuedItem.$cid);
+        this.deps.logger.debug(
+          `[${meta.id}] Dropping queued message ${queuedItem.$cid} already owned by execution`
+        );
+        return null;
+      }
+      if (steerStatus === 'pending') {
+        // A refused steer still owes an ordinary run through its own history row.
+        this.deps.logger.debug(
+          `[${meta.id}] Holding queued message ${queuedItem.$cid} for refused steer history`
         );
         return null;
       }
@@ -2205,6 +2218,27 @@ export class SessionDispatchWatcher {
     } finally {
       releaseQueueMutation();
     }
+  }
+
+  /** Durable evidence that this turn ran or must never run again. */
+  private hasQueuedTurnSettled(
+    meta: SessionMeta,
+    turnId: string,
+    history: SessionHistoryInput[]
+  ): boolean {
+    return (
+      meta.lastHandledUserMsgId === turnId ||
+      meta.settledActivationUserMsgId === turnId ||
+      meta.lastMissingHistoryUserMsgId === turnId ||
+      this.deps.executionService.getTerminalUserTurnStatusWithoutEntry?.(meta.id, turnId) !==
+        undefined ||
+      history.some(
+        (entry) =>
+          entry.role === 'assistant' &&
+          entry.userTurnId === turnId &&
+          typeof entry.endedAt === 'number'
+      )
+    );
   }
 
   /** Maximum time (ms) to wait for a pending user-turn pointer to appear in history. */
@@ -2727,35 +2761,45 @@ export class SessionDispatchWatcher {
     meta: SessionMeta,
     isActive: () => boolean = () => true
   ): Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }> {
-    await this.deps.executionService.reconcileSteerHistory(meta.id, sessionDoc);
-    const history = readSessionHistory(sessionDoc.sessionData.history);
-    if (!isActive()) {
-      return { turn: null, history };
-    }
-    const turn = findNextDispatchableUserTurn(history, meta);
-    if (turn) {
-      const repaired = await this.maybeRepairAlreadyHandledTurn(sessionDoc, meta, turn, history);
-      if (repaired) {
-        // The repaired entry no longer matches; re-scan so an older repaired
-        // turn cannot mask a genuinely dispatchable newer one.
-        return await this.checkHistoryAndQueue(sessionDoc, meta, isActive);
+    const repairedTurnIds = new Set<string>();
+    while (true) {
+      await this.deps.executionService.reconcileSteerHistory(meta.id, sessionDoc);
+      const history = readSessionHistory(sessionDoc.sessionData.history);
+      if (!isActive()) {
+        return { turn: null, history };
       }
-      // The history copy is authoritative once it syncs; drop the RPC copy.
-      this.consumeStashedRpcTurn(meta.id, turn.id);
-      return { turn, history };
+      const turn = findNextDispatchableUserTurn(history, meta);
+      if (turn) {
+        if (repairedTurnIds.has(turn.id)) {
+          this.deps.logger.warn(
+            `[${meta.id}] Stopping history check: repaired user turn ${turn.id} is still dispatchable`
+          );
+          return { turn: null, history };
+        }
+        const repaired = await this.maybeRepairAlreadyHandledTurn(sessionDoc, meta, turn, history);
+        if (repaired) {
+          // Re-read without retaining recursive frames and stop if the repair
+          // did not retire this identity. A matched write need not change it.
+          repairedTurnIds.add(turn.id);
+          continue;
+        }
+        // The history copy is authoritative once it syncs; drop the RPC copy.
+        this.consumeStashedRpcTurn(meta.id, turn.id);
+        return { turn, history };
+      }
+      if (!isActive()) {
+        return { turn: null, history };
+      }
+      const promoted = await this.promoteNextQueuedMessage(sessionDoc, meta, history);
+      if (!isActive()) {
+        return { turn: null, history };
+      }
+      if (promoted) {
+        this.turnSourceHints.set(`${meta.id}:${promoted.id}`, 'queue');
+        return { turn: promoted, history };
+      }
+      return { turn: this.peekStashedRpcTurn(meta.id, meta, history), history };
     }
-    if (!isActive()) {
-      return { turn: null, history };
-    }
-    const promoted = await this.promoteNextQueuedMessage(sessionDoc, meta, history);
-    if (!isActive()) {
-      return { turn: null, history };
-    }
-    if (promoted) {
-      this.turnSourceHints.set(`${meta.id}:${promoted.id}`, 'queue');
-      return { turn: promoted, history };
-    }
-    return { turn: this.peekStashedRpcTurn(meta.id, meta, history), history };
   }
 
   /**

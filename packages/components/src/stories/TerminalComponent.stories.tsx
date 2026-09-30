@@ -49,7 +49,6 @@ export const WithAnsi: Story = {
       '\u001b[90m[info]\u001b[0m Starting Storybook...',
       '\u001b[32m[success]\u001b[0m Local: http://localhost:6006',
       '\u001b[33m[warn]\u001b[0m Some warnings may be expected in dev.',
-      '',
       '\u001b[31m[error]\u001b[0m Example error output for color rendering.',
     ].join('\n'),
   },

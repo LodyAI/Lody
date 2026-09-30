@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type {
+  AgentConfigId,
   LocalProjectHistoryCatalogResult,
   LocalProjectHistoryProvider,
   LocalProjectHistorySyncSummary,
@@ -66,6 +67,24 @@ function importedSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
 }
 
 describe('reconcileLocalProjectHistoryCatalog', () => {
+  it('does not label another account’s matching native ID as already imported', () => {
+    const selected = { ...provider, agentConfigId: 'account-a' as AgentConfigId };
+    const reconcile = (binding: string) =>
+      reconcileLocalProjectHistoryCatalog({
+        catalog: catalog('available'),
+        machineId,
+        localProjectId,
+        provider: selected,
+        sessionMetas: [importedSession({ agentConfigId: binding as AgentConfigId })],
+      });
+    expect(reconcile('account-b')?.sessions[0]).toMatchObject({ status: 'available' });
+    expect(reconcile('account-b')?.sessions[0].importedSessionId).toBeUndefined();
+    expect(reconcile('account-a')?.sessions[0]).toMatchObject({
+      status: 'imported',
+      importedSessionId: 'session-1',
+    });
+  });
+
   it('marks stale imported catalog rows available when the Lody session no longer exists', () => {
     expect(
       reconcileLocalProjectHistoryCatalog({

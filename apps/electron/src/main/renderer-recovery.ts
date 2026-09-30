@@ -87,11 +87,19 @@ function loadTarget(window: BrowserWindow, target: ReloadTarget): Promise<void> 
   return window.loadFile(target.filePath, target.hash ? { hash: target.hash } : undefined)
 }
 
-export function requestRendererReload(window: BrowserWindow): void {
+export function requestRendererReload(
+  window: BrowserWindow,
+  options: { ignoreCache?: boolean } = {}
+): void {
   if (window.isDestroyed()) return
   const state = getState(window)
+  const wasInRecovery = state.inRecovery
   state.hasNotifiedMounted = false
   state.inRecovery = false
+  if (options.ignoreCache && !wasInRecovery) {
+    window.webContents.reloadIgnoringCache()
+    return
+  }
   const target = state.reloadTarget
   if (target) {
     void loadTarget(window, target).catch((error) => {

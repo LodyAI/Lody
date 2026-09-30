@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { OnboardingBackdrop, OnboardingShell } from '@/components/onboarding';
 
 /**
@@ -41,7 +41,7 @@ export const NarrowSingleAction: Story = {
     stepKey: 'language',
     title: 'Choose your language',
     description: 'You can switch this anytime from settings.',
-    primaryAction: <Button size="lg">Next</Button>,
+    primaryAction: <Button size="large">Next</Button>,
     children: (
       <div className="rounded-md border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
         Body slot
@@ -57,11 +57,11 @@ export const WideWithBackAndNext: Story = {
     title: 'Connect a coding agent',
     description: 'Test at least one provider so we know your credentials work.',
     secondaryAction: (
-      <Button variant="ghost" size="lg">
+      <Button variant="ghost" size="large">
         Back
       </Button>
     ),
-    primaryAction: <Button size="lg">Next</Button>,
+    primaryAction: <Button size="large">Next</Button>,
     children: (
       <div className="rounded-md border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
         Body slot — wide
@@ -77,11 +77,11 @@ export const ProjectsStep: Story = {
     title: 'Pick a project to start with',
     description: 'Add at least one project so Lody knows where to work.',
     secondaryAction: (
-      <Button variant="ghost" size="lg">
+      <Button variant="ghost" size="large">
         Back
       </Button>
     ),
-    primaryAction: <Button size="lg">Finish</Button>,
+    primaryAction: <Button size="large">Finish</Button>,
     children: (
       <div className="rounded-md border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
         Body slot

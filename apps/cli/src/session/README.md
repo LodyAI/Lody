@@ -13,7 +13,7 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 | ---------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
 | Admission        | [Dispatch watcher](session-dispatch-watcher.ts)   | Resolves metadata activation against history, queue, and RPC offers. |
 | Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.      |
-| Process lifetime | [Session](session.ts)                             | Owns ACP resources and confirmed termination.                        |
+| Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
 ## Files
 
@@ -33,14 +33,20 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 - `acp-error-classification.ts` — JSON-RPC/transport error string matching for the above.
 - `session-manager.ts` / `session.ts` / `session-sandbox.ts` / `terminal-manager.ts` —
   session and process lifecycle, workdirs, worktrees, sandboxed spawning, ACP terminals.
+  Managed GitHub credential preparation excludes local projects and their worktrees;
+  context refresh only rotates sessions already enrolled during preparation.
 - `session-preparation-service.ts` — process-local speculative ACP lease/state owner.
 - `session-fork-service.ts` / `session-fork-operation-store.ts` — the fork saga and its
   machine-local marker store.
 - `session-edit-and-resend-service.ts` — same-session replacement of the last normal User turn.
 - `session-launch-config-resolver.ts` — durable launch config resolution.
+- `workspace-git-service.ts` — observes checkout branches for local folders and worktrees,
+  serializes reads/writes per owner Session, and publishes the last named branch. Execution
+  binds, terminal turns, and authorized Code Collab activation/refresh use this service;
+  observation requires neither a running agent nor a GitHub remote.
 - `turn-post-processing-service.ts` — post-turn work (titles, notifications, diff stats,
   and the `workspaceDirty`/`workspaceUnpushed` probes that drive the Info Bar's
-  Commit & Push action; both cancellation routes run `syncWorkspaceGitState` alone,
+  Commit & Push action; both cancellation routes refresh the branch and run `syncWorkspaceGitState`,
   which self-gates on the session's GitHub binding).
 - `session-diff-stats-target.ts` — chooses which writer owns a session's `diffStats`.
 - `session-access-policy.ts` — local-first dispatch access precheck (optimistic-allow cache,
@@ -200,6 +206,15 @@ space is still spawned directly. The shell is non-interactive and non-login (`sh
 change its environment. A spawn that still fails answers with a JSON-RPC code instead of a bare
 errno, and its error is recorded as an exit status so no waiter is left pending.
 
+### Imported ACP identity
+
+Continuation and fork use the shared `resolveSessionAcpTargetId` projection: a
+Lody-owned runtime supersedes the immutable imported source; an unresolved source
+history conflict cannot authorize native fork. Import does not fabricate a live
+runtime id. Fork copies an ACP runtime configuration baseline only when it belongs
+to the copied last user turn and source ACP identity, rebasing it to the new native
+session id. Ordinary and worktree forks use the same projection and fence.
+
 ### Fork saga recovery
 
 Because a preparing target publishes no Session meta until its final commit, the repo meta
@@ -225,7 +240,8 @@ Agent `gh` auth for GitHub repo sessions is set up in `session-manager.ts`: it c
 credential broker, prepends the `~/.lody/bin/gh` shim, and injects/refreshes a managed
 `GH_TOKEN` when no user token is present. The shim lives in `../lib/gh-shim-script.ts`; token
 fetching/caching is in `../lib/github-token-manager.ts`; git HTTPS auth uses
-`../lib/git-credential-helper-script.ts`. Session process trees are already correct —
+`../lib/git-credential-helper-script.ts`. A native `gh` earlier in PATH bypasses the shim, so the
+PATH merges keep the shim dir first (see [../lib/AGENTS.md](../lib/AGENTS.md)). Session process trees are already correct —
 `prepareGitHubRepoSessionConfig` injects the env explicitly. The host-side rule is in
 [worktree/AGENTS.md](worktree/AGENTS.md).
 

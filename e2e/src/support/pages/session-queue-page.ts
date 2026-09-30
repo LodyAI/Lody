@@ -101,7 +101,10 @@ export class QueueSessionPage {
   }
 
   private queueItem(prompt: string): Locator {
-    return this.page.getByText(prompt, { exact: true }).locator('../..');
+    return this.page
+      .getByRole('button', { name: /^(Remove from queue|从队列移除)$/u })
+      .locator('../..')
+      .filter({ hasText: prompt });
   }
 
   private async openSettings(): Promise<Locator> {

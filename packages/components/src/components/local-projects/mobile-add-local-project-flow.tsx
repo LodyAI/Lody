@@ -20,9 +20,10 @@ import {
 import { Spinner } from '@/ui/spinner';
 import type { LocalProjectBrowseDirectoryEntry } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Skeleton } from '@/ui/skeleton';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Skeleton } from '@lody/ui/skeleton';
 import {
   describeBrowseError,
   getTailPriorityBreadcrumbs,
@@ -246,7 +247,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
           <>
             <div className="flex min-h-10 min-w-0 flex-1 items-center gap-0.5 overflow-hidden whitespace-nowrap text-[0.9rem] text-muted-foreground">
               {crumbs.length === 0 ? (
-                <Skeleton className="mx-1.5 h-4 w-32 shrink-0 rounded" />
+                <Skeleton width={128} height={16} className="mx-1.5 shrink-0" />
               ) : (
                 <>
                   {breadcrumbTrail.hiddenPrefix ? (
@@ -328,7 +329,7 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
             title={errorView.title}
             description={errorView.description}
             action={
-              <Button type="button" variant="outline" onClick={c.retry} className="h-10 gap-1.5">
+              <Button type="button" variant="secondary" size="large" onClick={c.retry}>
                 <RefreshCw className="h-4 w-4" />
                 {t('common.retry', 'Retry')}
               </Button>
@@ -387,7 +388,8 @@ function MobileBrowse({ controller: c }: { controller: RemoteDirectoryPickerCont
         ) : null}
         <Button
           type="button"
-          className="h-12 w-full gap-2 text-[1rem]"
+          size="large"
+          className="w-full"
           disabled={!c.current || c.status !== 'ready' || c.editingPath || c.adding}
           onClick={() => void c.addCurrentFolder()}
         >
@@ -431,10 +433,9 @@ function MobileEntryRow({
         {entry.name}
       </span>
       {registered ? (
-        <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[0.75rem] font-medium text-emerald-600 dark:text-emerald-400">
-          <Check className="h-3.5 w-3.5" />
+        <Badge tone="success" icon={<Check size="100%" />}>
           {t('localProjects.add.added', 'Added')}
-        </span>
+        </Badge>
       ) : unreadable ? (
         <Lock className="h-5 w-5 shrink-0 text-muted-foreground/40" aria-hidden />
       ) : (
@@ -449,8 +450,8 @@ function MobileDirectorySkeleton() {
     <div className="py-1">
       {Array.from({ length: 8 }).map((_, index) => (
         <div key={index} className="flex items-center gap-3 px-4 py-3.5">
-          <Skeleton className="h-7 w-7 shrink-0 rounded" />
-          <Skeleton className="h-4 flex-1 rounded" style={{ maxWidth: `${64 - index * 5}%` }} />
+          <Skeleton width={28} height={28} className="shrink-0" />
+          <Skeleton height={16} className="flex-1" style={{ maxWidth: `${64 - index * 5}%` }} />
         </div>
       ))}
     </div>

@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { createHistoryWriter, type WorkspaceId } from '@lody/shared';
-import { createProjectedConversationView } from '../src/lib/conversation-view/projected-conversation-view';
+import { createHistoryWriter } from '@lody/shared';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -202,9 +201,9 @@ it('releases a cancelled touch candidate when scrolling produces no native selec
   expect(viewport.textContent).toContain('live update');
 });
 
-it('pins an optimistic turn when it becomes authoritative without replacing its selected node', async () => {
+it('keeps a selected turn pinned and its node in place when a later turn lands', async () => {
   const doc = reimport(buildSessionDoc(buildFixtureHistory(20)));
-  const base = await openReaderView(doc, {
+  const view = await openReaderView(doc, {
     sessionId: FIXTURE_SESSION_ID,
     maxHydrated: 1,
     tailKeep: 0,
@@ -213,36 +212,35 @@ it('pins an optimistic turn when it becomes authoritative without replacing its 
   });
   const writer = createHistoryWriter(doc);
   dispose = () => {
-    base.dispose();
+    view.dispose();
     doc.free();
   };
-  const entry = { ...buildFixtureHistory(1)[0]!, id: 'accepted-turn' };
-  const view = createProjectedConversationView(base, [
-    {
-      workspaceId: 'test-workspace' as WorkspaceId,
-      sessionId: FIXTURE_SESSION_ID,
-      entry,
-    },
-  ]);
-  const rows = [row(entry.id, view.indexOf(entry.id))];
+  const [selected, landed] = buildFixtureHistory(1).map((entry, i) => ({
+    ...entry,
+    id: i === 0 ? 'selected-turn' : 'landed-turn',
+  }));
+  writer.append(selected!);
+  await flushReaderChanges();
+  const rows = [row(selected!.id, view.indexOf(selected!.id))];
   await act(async () => root.render(<Probe rows={rows} view={view} />));
   await act(async () => select(0));
   const anchor = document.getSelection()!.anchorNode;
   await act(async () => {
-    writer.append(entry);
+    writer.append(landed!);
     await flushReaderChanges();
   });
-  await act(async () => root.render(<Probe rows={rows} view={base} />));
-  const distant = base.acquireRange(0, 10);
+  await act(async () => root.render(<Probe rows={rows} view={view} />));
+  expect(view.indexOf(landed!.id)).toBe(view.turnCount - 1);
+  const distant = view.acquireRange(0, 10);
   await distant.ready;
-  expect(base.isHydrated(base.indexOf(entry.id))).toBe(true);
+  expect(view.isHydrated(view.indexOf(selected!.id))).toBe(true);
   expect(document.getSelection()!.anchorNode).toBe(anchor);
   expect(anchor!.isConnected).toBe(true);
   await act(async () => {
     document.getSelection()!.removeAllRanges();
     document.dispatchEvent(new Event('selectionchange'));
   });
-  expect(base.isHydrated(base.indexOf(entry.id))).toBe(false);
+  expect(view.isHydrated(view.indexOf(selected!.id))).toBe(false);
   distant.release();
 });
 

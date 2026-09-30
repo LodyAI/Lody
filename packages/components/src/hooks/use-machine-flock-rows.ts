@@ -22,13 +22,44 @@ import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runti
 import { deferredPostHog } from '@/lib/deferred-posthog';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { readinessBinding } from '@/lib/room-readiness';
-import {
-  flockVersionTokensEqual,
-  readFlockVersionToken,
-  type FlockVersionToken,
-} from '@/lib/flock-version';
 
 type MachineFlockDocHandle = Awaited<ReturnType<WorkspaceRuntime['repo']['openFlockDoc']>>;
+type MachineFlock = MachineFlockDocHandle['flock'];
+
+/**
+ * A Machine Flock's change stamp: a process-unique number that changes on
+ * every change event. Every import and local write emits an event (Machine
+ * Flocks have no auto-debounce), so an unchanged stamp means unchanged rows. It
+ * replaces exporting and encoding the full version vector (~5ms per switch) for
+ * the "is the materialized projection current" check. Stamps come from one
+ * global sequence, so a reopened Flock instance can never repeat an old stamp.
+ */
+type MachineFlockVersion = number;
+
+let machineFlockChangeSequence = 0;
+const MACHINE_FLOCK_CHANGE_STAMPS = new WeakMap<object, { stamp: MachineFlockVersion }>();
+
+/**
+ * Starts counting a Flock's changes; held for the Flock's lifetime (handles are
+ * cached per runtime). Registered when the handle opens, before any consumer
+ * subscribes, so every later listener sees the stamp already advanced.
+ */
+function trackMachineFlockChanges(flock: MachineFlock): void {
+  if (MACHINE_FLOCK_CHANGE_STAMPS.has(flock)) return;
+  const subscribe = (flock as Partial<Pick<MachineFlock, 'subscribe'>>).subscribe;
+  if (typeof subscribe !== 'function') return;
+  const entry = { stamp: ++machineFlockChangeSequence };
+  MACHINE_FLOCK_CHANGE_STAMPS.set(flock, entry);
+  subscribe.call(flock, () => {
+    entry.stamp = ++machineFlockChangeSequence;
+  });
+}
+
+/** The Flock's current change stamp, or null when its changes cannot be observed. */
+function readMachineFlockVersion(flock: MachineFlock): MachineFlockVersion | null {
+  trackMachineFlockChanges(flock);
+  return MACHINE_FLOCK_CHANGE_STAMPS.get(flock)?.stamp ?? null;
+}
 type MachineFlockRoomSubscription = Awaited<ReturnType<MachineFlockDocHandle['joinRoom']>>;
 
 const EMPTY_MACHINE_FLOCK_ROWS = Object.freeze({}) as MachineFlockRowMap;
@@ -48,7 +79,7 @@ type MachineFlockRowsSnapshot = {
   mode?: 'replace' | 'merge';
   preserveExistingOnEmpty?: boolean;
   syncedRemote?: boolean;
-  version?: FlockVersionToken | null;
+  version?: MachineFlockVersion | null;
 };
 
 type UseMachineFlockRowsOptions = {
@@ -117,7 +148,7 @@ const MACHINE_FLOCK_MATERIALIZED_VERSIONS = new WeakMap<
     string,
     {
       readonly runtime: WorkspaceRuntime;
-      readonly versionsByFamily: Map<string, FlockVersionToken>;
+      readonly versionsByFamily: Map<string, MachineFlockVersion>;
     }
   >
 >();
@@ -127,12 +158,13 @@ function hasMaterializedMachineFlockVersion(
   runtime: WorkspaceRuntime,
   cacheKey: string,
   familiesKey: string,
-  version: FlockVersionToken | null
+  version: MachineFlockVersion | null
 ): boolean {
   const entry = MACHINE_FLOCK_MATERIALIZED_VERSIONS.get(store)?.get(cacheKey);
   return (
     entry?.runtime === runtime &&
-    flockVersionTokensEqual(entry.versionsByFamily.get(familiesKey), version)
+    version !== null &&
+    entry.versionsByFamily.get(familiesKey) === version
   );
 }
 
@@ -141,7 +173,7 @@ function markMaterializedMachineFlockVersion(
   runtime: WorkspaceRuntime,
   cacheKey: string,
   familiesKey: string,
-  version: FlockVersionToken
+  version: MachineFlockVersion
 ): void {
   let byCacheKey = MACHINE_FLOCK_MATERIALIZED_VERSIONS.get(store);
   if (!byCacheKey) {
@@ -160,9 +192,9 @@ function advanceMaterializedMachineFlockVersions(
   store: MachineFlockRowsStore,
   runtime: WorkspaceRuntime,
   cacheKey: string,
-  version: FlockVersionToken | null
+  version: MachineFlockVersion | null
 ): void {
-  if (!version) return;
+  if (version === null) return;
   const entry = MACHINE_FLOCK_MATERIALIZED_VERSIONS.get(store)?.get(cacheKey);
   if (!entry || entry.runtime !== runtime) return;
   for (const familiesKey of entry.versionsByFamily.keys()) {
@@ -498,7 +530,7 @@ function acquireMachineFlockEvents(
         const events = (batch as { events?: MachineFlockEvent[] }).events ?? [];
         if (events.length === 0) return;
         const cacheKey = getMachineFlockRowsCacheKey(runtime.workspaceId, machineId);
-        const version = readFlockVersionToken(handle.flock);
+        const version = readMachineFlockVersion(handle.flock);
         for (const activeStore of refCountsByStore.keys()) {
           activeStore.set(applyMachineFlockRowEventsForMachineAtom, {
             workspaceId: runtime.workspaceId,
@@ -583,7 +615,10 @@ async function openMachineFlockDoc(
   if (!handlePromise) {
     handlePromise = measureMachineFlockRowsAsync('machine-flock:open-doc', () =>
       runtime.repo.openFlockDoc(getMachineFlockDocId(runtime.workspaceId, machineId))
-    );
+    ).then((handle) => {
+      trackMachineFlockChanges(handle.flock);
+      return handle;
+    });
     handlesByMachineId.set(machineId, handlePromise);
   }
 
@@ -636,7 +671,7 @@ export async function resyncMachineFlockRows(
   const cacheKey = getMachineFlockRowsCacheKey(runtime.workspaceId, normalizedMachineId);
   const handle = await openMachineFlockDoc(runtime, normalizedMachineId);
   const syncResult = await syncMachineFlockRowsOnce(cacheKey, handle, { force: true });
-  const version = readFlockVersionToken(handle.flock);
+  const version = readMachineFlockVersion(handle.flock);
   notifyMachineFlockRowsCache(cacheKey, {
     rows: (readOptions) => readMachineFlockRowsSnapshot(handle, readOptions, 'resync'),
     mode: 'merge',
@@ -831,7 +866,7 @@ export function useMachineFlockRowsByMachineIdsState(
       const publishSnapshot = (snapshot: MachineFlockRowsSnapshot): void => {
         if (!isCurrent()) return;
         if (
-          snapshot.version &&
+          typeof snapshot.version === 'number' &&
           hasMaterializedMachineFlockVersion(
             machineFlockRowsStore,
             runtime,
@@ -852,7 +887,7 @@ export function useMachineFlockRowsByMachineIdsState(
           mode: snapshot.mode,
           preserveExistingOnEmpty: snapshot.preserveExistingOnEmpty,
         });
-        if (snapshot.version) {
+        if (typeof snapshot.version === 'number') {
           markMaterializedMachineFlockVersion(
             machineFlockRowsStore,
             runtime,
@@ -872,7 +907,7 @@ export function useMachineFlockRowsByMachineIdsState(
         const handle = await openMachineFlockDoc(runtime, machineId);
         if (!isCurrent()) return;
 
-        const localVersion = readFlockVersionToken(handle.flock);
+        const localVersion = readMachineFlockVersion(handle.flock);
         if (
           readLocal &&
           !hasMaterializedMachineFlockVersion(
@@ -894,7 +929,7 @@ export function useMachineFlockRowsByMachineIdsState(
         // cannot land between the snapshot and the live tail.
         if (!isCurrent()) return;
         if (readLocal) {
-          if (localVersion) {
+          if (localVersion !== null) {
             markMaterializedMachineFlockVersion(
               machineFlockRowsStore,
               runtime,
@@ -938,7 +973,7 @@ export function useMachineFlockRowsByMachineIdsState(
             // readiness is the selected binding's first sync.
             await roomLease.firstSyncedWithRemote;
             if (!isCurrent()) return;
-            const remoteVersion = readFlockVersionToken(handle.flock);
+            const remoteVersion = readMachineFlockVersion(handle.flock);
             if (
               !hasMaterializedMachineFlockVersion(
                 machineFlockRowsStore,
@@ -953,7 +988,7 @@ export function useMachineFlockRowsByMachineIdsState(
                 mode: 'merge',
                 preserveExistingOnEmpty: true,
               });
-              if (remoteVersion) {
+              if (remoteVersion !== null) {
                 markMaterializedMachineFlockVersion(
                   machineFlockRowsStore,
                   runtime,

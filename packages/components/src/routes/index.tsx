@@ -7,7 +7,6 @@ import { RouteMessage } from '@/components/route-message';
 import { useEffect, useState } from 'react';
 import { useStableSession } from '@/hooks/useStableSession';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
-import { readLastAppRoutePath } from '@/lib/last-app-route';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
 import { isLocalAppPlatform } from '@/lib/app-platform';
 import {
@@ -49,6 +48,7 @@ function LocalHomeRoute() {
   if (!workspace) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.localStartingTitle')}
         description={t('workspace.route.localStartingDescription')}
       />
@@ -76,11 +76,6 @@ function CloudHomeRoute() {
   // Returning user with cached workspace: redirect immediately without waiting
   // for session network queries. The _auth route guard handles the rest.
   if (hasLocalToken) {
-    const lastRoutePath = readLastAppRoutePath();
-    if (lastRoutePath) {
-      return <Navigate to={lastRoutePath} replace />;
-    }
-
     const preferredSlug = readPreferredWorkspaceSlug();
     if (preferredSlug) {
       return (
@@ -93,6 +88,7 @@ function CloudHomeRoute() {
   if (isPending || isRetrying) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.signingInTitle')}
         description={t('workspace.route.signingInDescription')}
       />
@@ -110,7 +106,6 @@ function CloudHomeRoute() {
 
 function AuthedHomeRoute() {
   const { t } = useTranslation();
-  const lastRoutePath = readLastAppRoutePath();
   const preferredWorkspaceSlug = readPreferredWorkspaceSlug();
   const {
     activeOrganization,
@@ -129,6 +124,7 @@ function AuthedHomeRoute() {
   if (!orgSettled) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />
@@ -151,6 +147,7 @@ function AuthedHomeRoute() {
   if (organizationsLoading || organizations === undefined) {
     return (
       <LoadingPlaceholder
+        variant="boot"
         title={t('workspace.route.loadingWorkspacesTitle')}
         description={t('workspace.route.loadingWorkspacesDescription')}
       />
@@ -159,10 +156,6 @@ function AuthedHomeRoute() {
 
   if (organizations.length === 0) {
     return <Navigate to="/workspace/create" replace />;
-  }
-
-  if (lastRoutePath) {
-    return <Navigate to={lastRoutePath} replace />;
   }
 
   const targetSlug = getPreferredWorkspaceSlug(

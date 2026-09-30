@@ -7,7 +7,7 @@ import {
   UnifiedProjectSelectorView,
   type UnifiedLocalProjectOption,
 } from '@/components/chat/unified-project-selector';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const machineId = 'machine-project-selector-story' as MachineId;
 
@@ -154,11 +154,11 @@ const meta = {
   parameters: { layout: 'fullscreen' },
   decorators: [
     (Story) => (
-      <TooltipProvider>
+      <Tooltip.Provider>
         <div className="flex min-h-dvh items-end justify-center bg-background pb-24 text-foreground">
           <Story />
         </div>
-      </TooltipProvider>
+      </Tooltip.Provider>
     ),
   ],
   args: {

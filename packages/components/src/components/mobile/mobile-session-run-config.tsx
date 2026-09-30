@@ -1,9 +1,11 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 
 import { getAllAgentConfigAtom } from '@/atoms';
 import { AgentIcon } from '@/components/icons/agent-icon';
+import { composerSurface } from '@/components/shared/composer-surface';
 import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
@@ -34,6 +36,7 @@ export type MobileSessionRunConfigProps = {
   /** When true the agent row is display-only (conversation already has turns). */
   agentLocked?: boolean;
   onAgentConfigChange?: (selection: AgentSelection) => void;
+  disabled?: boolean;
   modelOptions: ReadonlyArray<AcpSessionSelectOption>;
   selectedModelId: string | null;
   onModelChange: (value: string) => void;
@@ -64,6 +67,9 @@ export type MobileSessionRunConfigProps = {
 export function MobileSessionRunConfig(props: MobileSessionRunConfigProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (props.disabled) setOpen(false);
+  }, [props.disabled]);
   const {
     agentSelection,
     allowedMachineIds,
@@ -88,7 +94,7 @@ export function MobileSessionRunConfig(props: MobileSessionRunConfigProps) {
             agentType={cfg.agentType}
             brandId={cfg.brandId}
             env={cfg.env}
-            className="h-4 w-4"
+            className={stylex.props(composerSurface.glyph16).className}
           />
         );
       }
@@ -98,7 +104,7 @@ export function MobileSessionRunConfig(props: MobileSessionRunConfigProps) {
         <AgentIcon
           cliType={fallbackAgent.cliType}
           agentType={fallbackAgent.agentType}
-          className="h-4 w-4"
+          className={stylex.props(composerSurface.glyph16).className}
         />
       );
     }
@@ -116,10 +122,11 @@ export function MobileSessionRunConfig(props: MobileSessionRunConfigProps) {
         configOptionSelectors={props.configOptionSelectors}
         configOptionValues={props.configOptionValues}
         onOpen={() => setOpen(true)}
+        disabled={props.disabled}
         ariaLabel={t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
       />
       <MobileRunConfigSheet
-        open={open}
+        open={open && !props.disabled}
         onOpenChange={setOpen}
         agentSelection={agentSelection}
         allowedMachineIds={allowedMachineIds}

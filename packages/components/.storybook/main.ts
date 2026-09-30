@@ -1,13 +1,24 @@
-import { fileURLToPath } from 'node:url';
 import type { StorybookConfig } from '@storybook/react-vite';
+import { createRequire } from 'node:module';
+import { dirname } from 'node:path';
+import { searchForWorkspaceRoot } from 'vite';
+import stylex from '@stylexjs/unplugin';
 import tailwindcss from '@tailwindcss/vite';
-import { loadEnv } from 'vite';
 import wasm from 'vite-plugin-wasm';
-import { requirePreviewPublicBaseDomain } from '../../../scripts/preview-public-base-domain.mjs';
+import { stylexOptions } from '../../ui/stylex-options';
 import topLevelAwait from '../vite-top-level-await-fixed.cjs';
+import { emojibaseAssetsPlugin } from '../vite-emojibase-assets';
 import { loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
 
-const packageRoot = fileURLToPath(new URL('..', import.meta.url));
+// The shell can export NODE_ENV=production even while running Storybook's dev
+// server. Vite's React plugin then disables its refresh runtime while the
+// serve transform still emits refresh signatures. Keep only `storybook dev`
+// aligned with its actual mode; `storybook build` remains production.
+if (process.argv.includes('dev') && process.env.NODE_ENV === 'production') {
+  process.env.NODE_ENV = 'development';
+}
+
+const require = createRequire(import.meta.url);
 
 const config: StorybookConfig = {
   stories: ['../src/stories/**/*.mdx', '../src/stories/**/*.stories.@(js|jsx|ts|tsx)'],
@@ -16,14 +27,18 @@ const config: StorybookConfig = {
     options: {},
   },
   async viteFinal(viteConfig) {
-    const mode = viteConfig.mode ?? 'development';
-    const previewPublicBaseDomain = requirePreviewPublicBaseDomain(
-      { ...loadEnv(mode, packageRoot, ''), ...process.env },
-      `@lody/components Storybook (${mode})`
-    );
-    viteConfig.define = {
-      ...viteConfig.define,
-      'import.meta.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN': JSON.stringify(previewPublicBaseDomain),
+    // In an embedded checkout pnpm stores these assets outside the public
+    // workspace. Allow only the resolved font packages, not the private repo.
+    viteConfig.server = {
+      ...viteConfig.server,
+      fs: {
+        ...viteConfig.server?.fs,
+        allow: [
+          ...(viteConfig.server?.fs?.allow ?? [searchForWorkspaceRoot(process.cwd())]),
+          dirname(require.resolve('@fontsource/inter/package.json')),
+          dirname(require.resolve('@fontsource/jetbrains-mono/package.json')),
+        ],
+      },
     };
     viteConfig.plugins = (viteConfig.plugins ?? []).filter((plugin) => {
       if (!plugin) return false;
@@ -33,6 +48,10 @@ const config: StorybookConfig = {
       return true;
     });
     viteConfig.plugins.push(tailwindcss());
+    viteConfig.plugins.push(stylex.vite(stylexOptions));
+    // Serves `/emojibase/<locale>/{data,messages}.json` in dev so the picker's
+    // bundled-dataset URL contract holds here too, not only in app builds.
+    viteConfig.plugins.push(emojibaseAssetsPlugin());
 
     viteConfig.worker = {
       ...(viteConfig.worker ?? {}),

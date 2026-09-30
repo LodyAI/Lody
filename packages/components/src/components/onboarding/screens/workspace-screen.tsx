@@ -2,17 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
+import * as stylex from '@stylexjs/stylex';
 import { ArrowRight, Building2, Check, Plus, RotateCcw } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import type { WorkspaceId } from '@lody/shared';
 import { setWorkspaceContextAtom } from '@/atoms/workspace-context';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useCloudQuery, usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { cn } from '@/lib/utils';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
 import { ErrorBoundary } from '@/components/error-boundary';
 import {
   generateWorkspaceSlug,
@@ -23,6 +26,83 @@ import {
 } from '@/lib/workspace';
 import { OnboardingShell, OnboardingBackButton, OnboardingNextButton } from '../onboarding-shell';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
+import { onboardingSurface as surface } from './surface';
+
+const styles = stylex.create({
+  field: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
+  labelRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[4],
+  },
+  noWrap: { whiteSpace: 'nowrap' },
+  /**
+   * A name this step shows but does not change. It holds no value a person can
+   * set, so it is the region rung rather than a well.
+   */
+  readOnlyValue: {
+    paddingInline: space[3],
+    paddingBlock: '10px',
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+  checking: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: space[1.5],
+    maxWidth: '100%',
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: '20px',
+    color: colors.secondaryLabel,
+  },
+  checkingSpinner: { marginTop: space[1] },
+  checkingText: { minWidth: 0, overflowWrap: 'anywhere' },
+  available: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.success,
+  },
+  createErrorDetail: { opacity: 0.9 },
+  loading: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+    paddingBlock: '40px',
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    color: colors.secondaryLabel,
+  },
+  loadError: { gap: space[3] },
+  /** Room for the tiles' shadows and the selection ring inside the scroll box. */
+  scroller: {
+    maxHeight: '420px',
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+    marginInline: '-4px',
+    paddingInline: '4px',
+    paddingBlock: space[2],
+  },
+  workspaceList: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  /** An unpicked choice is the well a radio rests in. */
+  unselectedMark: {
+    flexShrink: 0,
+    width: '20px',
+    height: '20px',
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    backgroundColor: colors.wellBackground,
+    boxShadow: shadow.inset,
+  },
+});
 
 type SlugError = 'required' | WorkspaceSlugRuleError | 'unavailable';
 
@@ -217,8 +297,8 @@ export function WorkspaceScreenView({
       }
       primaryAction={
         creating ? (
-          <Button size="lg" disabled={!canSubmitCreate} onClick={onSubmitCreate} className="gap-2">
-            {saving ? <Spinner className="h-4 w-4" /> : null}
+          <Button size="large" disabled={!canSubmitCreate} onClick={onSubmitCreate}>
+            {saving ? <Spinner {...stylex.props(surface.icon16)} /> : null}
             {createError
               ? t('common.retry', 'Retry')
               : repairingWorkspace
@@ -226,9 +306,9 @@ export function WorkspaceScreenView({
                 : t('onboarding.workspace.createAndContinue', 'Create & continue')}
             {!saving ? (
               createError ? (
-                <RotateCcw className="h-4 w-4" />
+                <RotateCcw {...stylex.props(surface.icon16)} />
               ) : (
-                <ArrowRight className="h-4 w-4" />
+                <ArrowRight {...stylex.props(surface.icon16)} />
               )
             ) : null}
           </Button>
@@ -249,20 +329,18 @@ export function WorkspaceScreenView({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.25 }}
-            className="space-y-4"
+            {...stylex.props(surface.stackLoose)}
           >
             {repairingWorkspace ? (
-              <div className="space-y-2">
-                <Label>{t('organization.workspaceName', 'Workspace name')}</Label>
-                <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium">
-                  {repairingWorkspaceName}
-                </div>
+              <div {...stylex.props(styles.field)}>
+                <UiField.Label>{t('organization.workspaceName', 'Workspace name')}</UiField.Label>
+                <div {...stylex.props(styles.readOnlyValue)}>{repairingWorkspaceName}</div>
               </div>
             ) : (
-              <div className="space-y-2">
-                <Label htmlFor="onboarding-workspace-name">
+              <div {...stylex.props(styles.field)}>
+                <UiField.Label htmlFor="onboarding-workspace-name">
                   {t('organization.workspaceName', 'Workspace name')}
-                </Label>
+                </UiField.Label>
                 <Input
                   id="onboarding-workspace-name"
                   value={newName}
@@ -270,26 +348,30 @@ export function WorkspaceScreenView({
                   placeholder={t('organization.workspaceNamePlaceholder', 'My Workspace')}
                   autoFocus
                   disabled={writePending}
-                  className={newNameError ? 'border-destructive' : ''}
+                  aria-invalid={newNameError ? true : undefined}
                 />
-                {newNameError ? <p className="text-xs text-destructive">{newNameError}</p> : null}
+                {newNameError ? <UiField.Error render={<p />}>{newNameError}</UiField.Error> : null}
               </div>
             )}
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-4">
-                <Label htmlFor="onboarding-workspace-slug" className="whitespace-nowrap">
+            <div {...stylex.props(styles.field)}>
+              <div {...stylex.props(styles.labelRow)}>
+                <UiField.Label
+                  htmlFor="onboarding-workspace-slug"
+                  className={stylex.props(styles.noWrap).className}
+                >
                   {t('organization.workspaceSlug', 'Handle')}
-                </Label>
+                </UiField.Label>
                 {canResetSlug ? (
-                  <button
+                  <Button
                     type="button"
-                    className="shrink-0 whitespace-nowrap text-xs text-muted-foreground hover:text-foreground"
+                    variant="ghost"
+                    size="mini"
                     onClick={onResetNewSlug}
                     disabled={writePending}
                   >
                     {t('organization.workspaceSlugReset', 'Reset')}
-                  </button>
+                  </Button>
                 ) : null}
               </div>
               <Input
@@ -298,37 +380,30 @@ export function WorkspaceScreenView({
                 onChange={(event) => onNewSlugChange(event.target.value)}
                 placeholder={t('organization.workspaceSlugPlaceholder', 'my-workspace')}
                 disabled={writePending}
-                className={newSlugError ? 'border-destructive' : ''}
+                aria-invalid={newSlugError ? true : undefined}
               />
               {slugErrorText ? (
-                <p className="text-xs text-destructive">{slugErrorText}</p>
+                <UiField.Error render={<p />}>{slugErrorText}</UiField.Error>
               ) : newSlugCheckError ? (
-                <div
-                  role="alert"
-                  className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-                >
-                  <p>
+                <div role="alert" {...stylex.props(surface.message, surface.messageDanger)}>
+                  <p {...stylex.props(surface.messageText)}>
                     {t('organization.workspaceSlugCheckFailed', 'Could not verify this handle.')}
                   </p>
-                  <p className="break-words font-mono opacity-90">{newSlugCheckError}</p>
+                  <p {...stylex.props(surface.messageDetail)}>{newSlugCheckError}</p>
                   <Button
                     type="button"
-                    variant="outline"
-                    size="sm"
-                    className="gap-2"
+                    variant="secondary"
+                    size="small"
                     onClick={onRetryNewSlugCheck}
                   >
-                    <RotateCcw className="size-3.5" />
+                    <RotateCcw {...stylex.props(surface.icon16)} />
                     {t('common.retry', 'Retry')}
                   </Button>
                 </div>
               ) : newSlugChecking ? (
-                <p
-                  role="status"
-                  className="flex max-w-full items-start gap-1.5 text-xs leading-5 text-muted-foreground"
-                >
-                  <Spinner className="mt-1 size-3 shrink-0" />
-                  <span className="min-w-0 break-words">
+                <p role="status" {...stylex.props(styles.checking)}>
+                  <Spinner {...stylex.props(surface.icon12, styles.checkingSpinner)} />
+                  <span {...stylex.props(styles.checkingText)}>
                     {newSlugCheckSlow
                       ? t(
                           'organization.workspaceSlugCheckingSlow',
@@ -337,34 +412,27 @@ export function WorkspaceScreenView({
                       : t('organization.workspaceSlugChecking', 'Checking…')}
                   </span>
                   {newSlugCheckSlow ? (
-                    <button
-                      type="button"
-                      className="shrink-0 font-medium text-foreground underline-offset-4 hover:underline"
-                      onClick={onRetryNewSlugCheck}
-                    >
+                    <Button type="button" variant="link" size="mini" onClick={onRetryNewSlugCheck}>
                       {t('organization.workspaceSlugCheckAgain', 'Check again')}
-                    </button>
+                    </Button>
                   ) : null}
                 </p>
               ) : newSlugAvailable ? (
-                <p role="status" className="text-xs text-primary">
+                <p role="status" {...stylex.props(styles.available)}>
                   {t('organization.workspaceSlugAvailable', 'Available')}
                 </p>
               ) : null}
-              <p className="text-xs text-muted-foreground/80">
+              <UiField.Description>
                 {t(
                   'onboarding.workspace.slugHint',
                   'Used in URLs. Lowercase letters, numbers, and dashes.'
                 )}
-              </p>
+              </UiField.Description>
             </div>
 
             {createError !== null ? (
-              <div
-                role="alert"
-                className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-              >
-                <p>
+              <div role="alert" {...stylex.props(surface.message, surface.messageDanger)}>
+                <p {...stylex.props(surface.messageText)}>
                   {repairingWorkspace
                     ? t(
                         'onboarding.workspace.repairFailed',
@@ -376,7 +444,9 @@ export function WorkspaceScreenView({
                       )}
                 </p>
                 {createError.length > 0 ? (
-                  <p className="mt-1 break-words opacity-90">{createError}</p>
+                  <p {...stylex.props(surface.messageText, styles.createErrorDetail)}>
+                    {createError}
+                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -388,103 +458,85 @@ export function WorkspaceScreenView({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.25 }}
-            className="flex flex-col gap-3"
+            {...stylex.props(surface.stack)}
           >
             {workspacesStatus === 'loading' ? (
-              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                <Spinner className="h-4 w-4" />
+              <div {...stylex.props(styles.loading)}>
+                <Spinner {...stylex.props(surface.icon16)} />
                 {t('onboarding.workspace.loading', 'Loading workspaces…')}
               </div>
             ) : workspacesStatus === 'error' ? (
-              <div className="space-y-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3">
-                <div role="alert" className="text-xs text-destructive">
-                  <p>{t('onboarding.workspace.loadFailed', 'Could not load workspaces.')}</p>
+              <div {...stylex.props(surface.message, surface.messageDanger, styles.loadError)}>
+                <div role="alert" {...stylex.props(surface.messageBody)}>
+                  <p {...stylex.props(surface.messageText)}>
+                    {t('onboarding.workspace.loadFailed', 'Could not load workspaces.')}
+                  </p>
                   {workspacesError ? (
-                    <p className="mt-1 break-words font-mono opacity-90">{workspacesError}</p>
+                    <p {...stylex.props(surface.messageDetail)}>{workspacesError}</p>
                   ) : null}
                 </div>
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   disabled={retryingWorkspaces}
                   onClick={onRetryWorkspaces}
-                  className="gap-2"
                 >
-                  <Spinner icon={RotateCcw} spinning={retryingWorkspaces} className="size-3.5" />
+                  <Spinner
+                    icon={RotateCcw}
+                    spinning={retryingWorkspaces}
+                    {...stylex.props(surface.icon16)}
+                  />
                   {t('common.retry', 'Retry')}
                 </Button>
               </div>
             ) : hasWorkspaces ? (
               // ~6 rows visible (each row ≈ 64px incl. gap); longer lists scroll
-              // inside the card with the transparent-track style.
-              <div className="scrollbar-pro -mx-1 max-h-[420px] overflow-y-auto overscroll-contain px-1 py-2">
-                <div className="flex flex-col gap-2">
+              // inside their own column with the transparent-track style.
+              <div {...withClassName(stylex.props(styles.scroller), 'scrollbar-pro')}>
+                <div {...stylex.props(styles.workspaceList)}>
                   {workspaces.map((workspace) => {
                     const isSelected = workspace.id === selectedWorkspaceId;
                     // A workspace without a slug cannot be confirmed downstream;
                     // show why instead of letting Next die silently.
                     const hasSlug = workspace.slug.length > 0;
                     return (
-                      <motion.button
+                      <button
                         key={workspace.id}
                         type="button"
-                        whileHover={writePending ? undefined : { y: -1 }}
-                        whileTap={writePending ? undefined : { scale: 0.99 }}
                         disabled={writePending}
                         onClick={() =>
                           hasSlug ? onSelectWorkspace(workspace.id) : onStartRepair(workspace.id)
                         }
                         aria-pressed={isSelected}
-                        className={cn(
-                          'group flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-all',
-                          'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-                          'disabled:cursor-not-allowed disabled:opacity-60',
-                          isSelected
-                            ? 'border-primary/60 bg-primary/[0.05] shadow-[0_0_0_3px_hsl(var(--primary)/0.08)]'
-                            : 'border-border/60 bg-card/40 hover:border-border hover:bg-card/70'
+                        {...stylex.props(
+                          surface.tile,
+                          writePending ? surface.tileDisabled : surface.tileHover,
+                          isSelected && surface.tileSelected
                         )}
                       >
-                        <div
-                          className={cn(
-                            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors',
-                            isSelected
-                              ? 'bg-primary text-primary-foreground'
-                              : 'bg-muted/50 text-foreground/80'
-                          )}
-                        >
-                          <Building2 className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium text-foreground">
-                            {workspace.name}
-                          </span>
-                          <div className="truncate text-xs text-muted-foreground">
+                        <span {...stylex.props(surface.glyphBox)}>
+                          <Building2 {...stylex.props(surface.icon20)} />
+                        </span>
+                        <span {...stylex.props(surface.textColumn)}>
+                          <span {...stylex.props(surface.title)}>{workspace.name}</span>
+                          <span {...stylex.props(surface.detail)}>
                             {hasSlug
                               ? `/${workspace.slug}`
                               : t(
                                   'onboarding.workspace.slugMissing',
                                   'No handle yet — select this workspace to set one.'
                                 )}
-                          </div>
-                        </div>
+                          </span>
+                        </span>
                         {isSelected ? (
-                          <span
-                            className={cn(
-                              'flex h-5 w-5 shrink-0 items-center justify-center rounded-full',
-                              'bg-primary text-primary-foreground'
-                            )}
-                            aria-hidden
-                          >
-                            <Check className="h-3 w-3" />
+                          <span {...stylex.props(surface.selectedMark)} aria-hidden>
+                            <Check {...stylex.props(surface.icon12)} />
                           </span>
                         ) : (
-                          <span
-                            className="h-5 w-5 shrink-0 rounded-full border border-border/70 transition-colors group-hover:border-foreground/50"
-                            aria-hidden
-                          />
+                          <span {...stylex.props(styles.unselectedMark)} aria-hidden />
                         )}
-                      </motion.button>
+                      </button>
                     );
                   })}
                 </div>
@@ -492,20 +544,16 @@ export function WorkspaceScreenView({
             ) : null}
 
             {workspacesStatus === 'ready' ? (
-              <button
+              <Button
                 type="button"
+                variant="secondary"
+                size="large"
                 disabled={writePending}
                 onClick={onStartCreate}
-                className={cn(
-                  'group flex items-center justify-center gap-2 rounded-lg border-2 border-dashed py-4 text-sm font-medium transition-all',
-                  'border-border/60 text-muted-foreground hover:border-primary/60 hover:bg-primary/[0.04] hover:text-foreground',
-                  'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-                  'disabled:opacity-50'
-                )}
               >
-                <Plus className="h-4 w-4 transition-transform group-hover:rotate-90" />
+                <Plus {...stylex.props(surface.icon16)} />
                 {t('onboarding.workspace.createNew', 'Create a new workspace')}
-              </button>
+              </Button>
             ) : null}
           </motion.div>
         )}

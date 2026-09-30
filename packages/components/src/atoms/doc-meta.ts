@@ -1,4 +1,6 @@
-import { atom, type PrimitiveAtom } from 'jotai';
+import { atom, type createStore, type PrimitiveAtom } from 'jotai';
+
+type JotaiStore = ReturnType<typeof createStore>;
 import { atomFamily } from 'jotai/utils';
 import { atomEffect } from 'jotai-effect';
 import type { LoroRepo } from 'loro-repo';
@@ -16,7 +18,8 @@ import {
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from './runtime';
 import { mergeBootstrapMetaCache } from '@/lib/doc-meta-bootstrap';
-import { listDocMetaEntries } from '@/lib/doc-meta-batch';
+import { listDocMetaEntries, type DocMetaCacheSnapshot } from '@/lib/doc-meta-batch';
+import { jsonValueEqual } from '@/lib/json-value-equal';
 import { getDocMetaRoomKind, withDerivedDocMetaId } from '@/lib/doc-meta-room';
 
 // ---------------------------------------------------------------------------
@@ -106,6 +109,7 @@ const SESSION_LIST_VISIBLE_KEYS: readonly (keyof SessionMeta)[] = [
   'userId',
   'machineId',
   'isArchived',
+  'isTabClosed',
   'isPinned',
   'diffStats',
   'pullRequests',
@@ -126,17 +130,9 @@ function sessionListEntryEqual(a: SessionMeta, b: SessionMeta): boolean {
     const av = a[key];
     const bv = b[key];
     if (av === bv) continue;
-    if (!sessionMetaValueEqual(av, bv)) return false;
+    if (!jsonValueEqual(av, bv)) return false;
   }
   return true;
-}
-
-function sessionMetaValueEqual(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
-  if ((typeof a === 'object' && a !== null) || (typeof b === 'object' && b !== null)) {
-    return JSON.stringify(a) === JSON.stringify(b);
-  }
-  return false;
 }
 
 function metaRecordEqual(
@@ -150,7 +146,7 @@ function metaRecordEqual(
   if (aKeys.length !== bKeys.length) return false;
   for (const key of aKeys) {
     if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
-    if (!sessionMetaValueEqual(a[key], b[key])) return false;
+    if (!jsonValueEqual(a[key], b[key])) return false;
   }
   return true;
 }
@@ -163,7 +159,7 @@ function sessionMetaEqual(a: SessionMeta, b: SessionMeta): boolean {
 
   for (const key of aKeys) {
     if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
-    if (!sessionMetaValueEqual(a[key], b[key])) return false;
+    if (!jsonValueEqual(a[key], b[key])) return false;
   }
 
   return true;
@@ -187,11 +183,22 @@ function isTrackedMetaDocRoomId(roomId: string): boolean {
   return getDocMetaRoomKind(roomId) !== undefined;
 }
 
+/**
+ * One list entry per metadata object. Cache updates are copy-on-write, so an
+ * unchanged session keeps its meta object — and therefore its entry — and the
+ * list atoms below compare it by identity instead of field by field.
+ */
+const sessionListEntryByMeta = new WeakMap<SessionMeta, SessionListEntry>();
+
 function toSessionListEntry(roomId: string, meta: SessionMeta): SessionListEntry {
-  return {
+  const cached = sessionListEntryByMeta.get(meta);
+  if (cached) return cached;
+  const entry: SessionListEntry = {
     ...meta,
     id: meta.id ?? (roomId.slice(SESSION_DOC_PREFIX.length) as SessionId),
   };
+  sessionListEntryByMeta.set(meta, entry);
+  return entry;
 }
 
 function listSessionEntries(
@@ -205,6 +212,12 @@ function listSessionEntries(
 
 // 分类缓存
 export const sessionMetaCacheAtom = atom<Record<string, SessionMeta>>({});
+/** Placeholders for new conversations held in memory until their first send is written; never authored into repo metadata. */
+export const pendingSendSessionMetasAtom = atom<Record<string, SessionMeta>>({});
+const visibleSessionMetaCacheAtom = atom((get) => ({
+  ...get(pendingSendSessionMetasAtom),
+  ...get(sessionMetaCacheAtom),
+}));
 export const machineMetaCacheAtom = atom<Record<string, MachineMeta>>({});
 export const agentConfigMetaCacheAtom = atom<Record<string, AgentConfigMeta>>({});
 export const docMetaCacheReadyAtom = atom(false);
@@ -223,10 +236,28 @@ export type DocMetaCacheScope = {
   workspaceId: WorkspaceRuntime['workspaceId'];
   workspaceSlug: string;
   ready: boolean;
+  /**
+   * Set when this runtime's first scan rejected. The scope then stays not
+   * ready until the runtime is replaced; only diagnostics read this.
+   */
+  scanFailure?: { errorType: string };
 };
 
 /** Identifies which runtime owns the current singleton metadata projection. */
 export const docMetaCacheScopeAtom = atom<DocMetaCacheScope | null>(null);
+
+/**
+ * The ready projection for `repo`, or null while it bootstraps or belongs to
+ * another runtime. Lets runtime startup readers skip a second full meta scan.
+ */
+export function readReadyDocMetaCache(
+  store: Pick<JotaiStore, 'get'>,
+  repo: LoroRepo
+): DocMetaCacheSnapshot | null {
+  const scope = store.get(docMetaCacheScopeAtom);
+  if (!scope?.ready || scope.runtime.repo !== repo) return null;
+  return { sessions: store.get(sessionMetaCacheAtom), machines: store.get(machineMetaCacheAtom) };
+}
 
 // 兼容层
 // Doc-meta atoms expose durable CRDT state only. Live signals (machine online,
@@ -235,7 +266,7 @@ export const docMetaCacheScopeAtom = atom<DocMetaCacheScope | null>(null);
 // heartbeat.
 export const docMetaCacheAtom = atom<Record<string, unknown>>((get) => {
   return {
-    ...get(sessionMetaCacheAtom),
+    ...get(visibleSessionMetaCacheAtom),
     ...get(machineMetaCacheAtom),
     ...get(agentConfigMetaCacheAtom),
   };
@@ -249,14 +280,14 @@ export const docMetaCacheAtom = atom<Record<string, unknown>>((get) => {
  * unrelated meta ticks.
  */
 export const sessionMetaCountAtom = atom((get) =>
-  get(docMetaCacheReadyAtom) ? Object.keys(get(sessionMetaCacheAtom)).length : null
+  get(docMetaCacheReadyAtom) ? Object.keys(get(visibleSessionMetaCacheAtom)).length : null
 );
 
 // 精确订阅 - 使用普通 atom 而非 selectAtom，确保缓存更新时正确触发订阅者
 export const sessionMetaAtomFamily = atomFamily((roomId: string) => {
   let previous: SessionMeta | undefined;
   return atom((get) => {
-    const next = get(sessionMetaCacheAtom)[roomId];
+    const next = get(visibleSessionMetaCacheAtom)[roomId];
     if (!next) {
       previous = undefined;
       return undefined;
@@ -278,7 +309,7 @@ export const agentConfigMetaAtomFamily = atomFamily((roomId: string) =>
 // Session 列表 (active sessions only) — stabilized with structural equality
 let _prevSessionList: SessionListEntry[] = [];
 export const sessionListAtom = atom((get) => {
-  const cache = get(sessionMetaCacheAtom);
+  const cache = get(visibleSessionMetaCacheAtom);
   const next = listSessionEntries(
     cache,
     (session) => !session.isArchived && !session.parentSessionId
@@ -289,7 +320,10 @@ export const sessionListAtom = atom((get) => {
     next.length === _prevSessionList.length &&
     next.every((entry, i) => {
       const prev = _prevSessionList[i];
-      return prev !== undefined && prev.id === entry.id && sessionListEntryEqual(prev, entry);
+      return (
+        prev === entry ||
+        (prev !== undefined && prev.id === entry.id && sessionListEntryEqual(prev, entry))
+      );
     })
   ) {
     return _prevSessionList;
@@ -301,7 +335,7 @@ export const sessionListAtom = atom((get) => {
 // Archived session 列表 — stabilized with structural equality
 let _prevArchivedSessionList: SessionListEntry[] = [];
 export const archivedSessionListAtom = atom((get) => {
-  const cache = get(sessionMetaCacheAtom);
+  const cache = get(visibleSessionMetaCacheAtom);
   const next = listSessionEntries(
     cache,
     (session) => !!session.isArchived && !session.parentSessionId
@@ -311,7 +345,10 @@ export const archivedSessionListAtom = atom((get) => {
     next.length === _prevArchivedSessionList.length &&
     next.every((entry, i) => {
       const prev = _prevArchivedSessionList[i];
-      return prev !== undefined && prev.id === entry.id && sessionListEntryEqual(prev, entry);
+      return (
+        prev === entry ||
+        (prev !== undefined && prev.id === entry.id && sessionListEntryEqual(prev, entry))
+      );
     })
   ) {
     return _prevArchivedSessionList;
@@ -323,7 +360,7 @@ export const archivedSessionListAtom = atom((get) => {
 // All active sessions (including children) — used for child status aggregation
 let _prevAllActiveSessions: SessionMeta[] = [];
 export const allActiveSessionsAtom = atom((get) => {
-  const cache = get(sessionMetaCacheAtom);
+  const cache = get(visibleSessionMetaCacheAtom);
   const next = Object.values(cache).filter((session) => !session.isArchived);
   if (sessionMetaArrayEqual(_prevAllActiveSessions, next)) {
     return _prevAllActiveSessions;
@@ -341,7 +378,7 @@ function createChildSessionsAtomFamily(
   return atomFamily((parentId: SessionId) => {
     let previous: SessionMeta[] = [];
     return atom((get) => {
-      const cache = get(sessionMetaCacheAtom);
+      const cache = get(visibleSessionMetaCacheAtom);
       const next = Object.values(cache).filter((session) => match(session, parentId));
       if (compare) next.sort(compare);
       if (sessionMetaArrayEqual(previous, next)) {
@@ -553,7 +590,52 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   const existenceStateByDocId = new Map<string, DocExistenceState>();
   const fullMetaFetchEpochByDocId = new Map<string, number>();
 
+  /**
+   * Full metadata reads resolve one document at a time; opening a session or a
+   * reconnect resolves many in the same turn. Each write to a cache atom
+   * recomputes every derived session list, so reads that resolve together are
+   * written together, once per microtask — before any later task, so a patch
+   * flushed by the timer below still lands after the read it follows.
+   */
+  const pendingFullMetas = new Map<string, Record<string, unknown>>();
+  let fullMetaFlushQueued = false;
+  const flushFullMetas = () => {
+    fullMetaFlushQueued = false;
+    if (cancelled) {
+      pendingFullMetas.clear();
+      return;
+    }
+    const sessions: Array<[string, Record<string, unknown>]> = [];
+    const machines: Array<[string, Record<string, unknown>]> = [];
+    const agents: Array<[string, Record<string, unknown>]> = [];
+    for (const entry of pendingFullMetas) {
+      if (isSessionDocRoomId(entry[0])) sessions.push(entry);
+      else if (isMachineDocRoomId(entry[0])) machines.push(entry);
+      else if (isAgentConfigDocRoomId(entry[0])) agents.push(entry);
+    }
+    pendingFullMetas.clear();
+    const write = <T>(
+      cacheAtom: PrimitiveAtom<Record<string, T>>,
+      entries: Array<[string, Record<string, unknown>]>
+    ) => {
+      if (entries.length === 0) return;
+      set(cacheAtom, (prev) => {
+        let next = prev;
+        for (const [docId, meta] of entries) {
+          if (metaRecordEqual(prev[docId] as Record<string, unknown> | undefined, meta)) continue;
+          if (next === prev) next = { ...prev };
+          next[docId] = meta as T;
+        }
+        return next;
+      });
+    };
+    write(sessionMetaCacheAtom, sessions);
+    write(machineMetaCacheAtom, machines);
+    write(agentConfigMetaCacheAtom, agents);
+  };
+
   const clearCachedDocMeta = (docId: string) => {
+    pendingFullMetas.delete(docId);
     if (isSessionDocRoomId(docId)) {
       console.debug('[doc-meta] clearCachedDocMeta:', docId);
       set(sessionMetaCacheAtom, (p) => {
@@ -585,25 +667,11 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
       reportInvalidMeta('setCached', docId, meta);
       return;
     }
-    const nextMeta = normalizeDocMetaForCache(docId, meta);
-    if (isSessionDocRoomId(docId))
-      set(sessionMetaCacheAtom, (p) =>
-        metaRecordEqual(p[docId] as Record<string, unknown> | undefined, nextMeta)
-          ? p
-          : { ...p, [docId]: nextMeta as SessionMeta }
-      );
-    else if (isMachineDocRoomId(docId))
-      set(machineMetaCacheAtom, (p) =>
-        metaRecordEqual(p[docId] as Record<string, unknown> | undefined, nextMeta)
-          ? p
-          : { ...p, [docId]: nextMeta as MachineMeta }
-      );
-    else if (isAgentConfigDocRoomId(docId))
-      set(agentConfigMetaCacheAtom, (p) =>
-        metaRecordEqual(p[docId] as Record<string, unknown> | undefined, nextMeta)
-          ? p
-          : { ...p, [docId]: nextMeta as AgentConfigMeta }
-      );
+    pendingFullMetas.set(docId, normalizeDocMetaForCache(docId, meta));
+    if (!fullMetaFlushQueued) {
+      fullMetaFlushQueued = true;
+      queueMicrotask(flushFullMetas);
+    }
   };
 
   const hasCachedDocMeta = (docId: string): boolean => {
@@ -871,25 +939,43 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   // later partial live patch must not clobber complete metadata already present in
   // the flock snapshot, and a resolving snapshot must not undo an archive/restore
   // already observed live.
-  void buildDocMetaCache(runtime.repo).then((cache) => {
-    if (cancelled) return;
-    set(sessionMetaCacheAtom, (prev) =>
-      mergeBootstrapMetaCache(cache.sessions, prev, existenceStateByDocId)
-    );
-    set(machineMetaCacheAtom, (prev) =>
-      mergeBootstrapMetaCache(cache.machines, prev, existenceStateByDocId)
-    );
-    set(agentConfigMetaCacheAtom, (prev) =>
-      mergeBootstrapMetaCache(cache.agents, prev, existenceStateByDocId)
-    );
-    set(docMetaCacheReadyAtom, true);
-    set(docMetaCacheScopeAtom, {
-      runtime,
-      workspaceId: runtime.workspaceId,
-      workspaceSlug: runtime.workspaceSlug,
-      ready: true,
-    });
-  });
+  void buildDocMetaCache(runtime.repo).then(
+    (cache) => {
+      if (cancelled) return;
+      set(sessionMetaCacheAtom, (prev) =>
+        mergeBootstrapMetaCache(cache.sessions, prev, existenceStateByDocId)
+      );
+      set(machineMetaCacheAtom, (prev) =>
+        mergeBootstrapMetaCache(cache.machines, prev, existenceStateByDocId)
+      );
+      set(agentConfigMetaCacheAtom, (prev) =>
+        mergeBootstrapMetaCache(cache.agents, prev, existenceStateByDocId)
+      );
+      set(docMetaCacheReadyAtom, true);
+      set(docMetaCacheScopeAtom, {
+        runtime,
+        workspaceId: runtime.workspaceId,
+        workspaceSlug: runtime.workspaceSlug,
+        ready: true,
+      });
+    },
+    (error: unknown) => {
+      if (cancelled) return;
+      // The scope stays not ready (the workspace keeps reading as syncing), so
+      // record why: the stuck-sync report names this failure instead of a hang.
+      console.warn('[doc-meta] initial metadata scan failed', {
+        workspaceId: runtime.workspaceId,
+        error,
+      });
+      set(docMetaCacheScopeAtom, {
+        runtime,
+        workspaceId: runtime.workspaceId,
+        workspaceSlug: runtime.workspaceSlug,
+        ready: false,
+        scanFailure: { errorType: error instanceof Error ? error.name || 'Error' : typeof error },
+      });
+    }
+  );
 
   return () => {
     cancelled = true;

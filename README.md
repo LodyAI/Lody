@@ -160,6 +160,7 @@ action to trigger CI. Existing releases and their assets are preserved on reruns
 - `apps/cli` — Connect machines and run coding agents
 - `apps/electron` — Lody desktop app
 - `packages/components` — Shared workspace UI
+- `packages/ui` — Base UI primitives and StyleX design tokens
 - `packages/platform` — Platform capabilities and integrations
 - `packages/shared` — Shared schemas, protocols, and utilities
 - `packages/cloud-api` — Optional-cloud protocol names and DTOs

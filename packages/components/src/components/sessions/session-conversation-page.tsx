@@ -4,7 +4,6 @@ import {
   ConversationDropOverlay,
   type ConversationDropKind,
 } from '@/components/shared/conversation-drop-overlay';
-import { CardHeader } from '@/ui/card';
 import { cn } from '@/lib/utils';
 
 /**
@@ -40,7 +39,7 @@ export function SessionConversationPageHeader({
   reserveMacTrafficLightInset = false,
 }: SessionConversationPageHeaderProps) {
   return (
-    <CardHeader
+    <div
       className={cn(
         SESSION_PAGE_CONTAINER_CLASS,
         'flex flex-col justify-center gap-1 border-b border-border px-3 py-2 shrink-0 h-12',
@@ -62,7 +61,7 @@ export function SessionConversationPageHeader({
           {endSlot}
         </div>
       </div>
-    </CardHeader>
+    </div>
   );
 }
 

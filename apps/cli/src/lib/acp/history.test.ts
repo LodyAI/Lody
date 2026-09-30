@@ -83,6 +83,140 @@ function createDoc(initialHistory: SessionHistoryInput[] = []) {
 }
 
 describe('handleACPUpdateMessage', () => {
+  it('keeps post-result terminal corrections whose status and kind are omitted', async () => {
+    const { doc, readHistory } = createDoc();
+    const callbacks = { getCurrentSessionTurnId: () => 'turn-1' };
+    const send = async (update: unknown) =>
+      handleACPUpdateMessage(
+        doc,
+        parseSessionNotification({ sessionId: 'acp-session', update }),
+        callbacks
+      );
+    await send({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'shell',
+      title: 'echo test',
+      kind: 'execute',
+      status: 'in_progress',
+      rawInput: { command: 'echo test' },
+    });
+    await send({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'shell',
+      status: 'completed',
+      rawOutput: 'first',
+    });
+    await send({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'shell',
+      rawOutput: 'corrected',
+      content: [],
+    });
+    const tool = readHistory()[0]?.items?.[0] as Extract<MessageContent, { type: 'tool_call' }>;
+    expect(tool.status).toBe('completed');
+    expect(tool.content?.filter((block) => block.type === 'terminal_output')).toEqual([
+      expect.objectContaining({ output: 'corrected' }),
+    ]);
+  });
+
+  it('replaces edit evidence lists and does not revive explicitly cleared diffs', async () => {
+    for (const clear of [false, true]) {
+      const { doc } = createDoc();
+      const edits: unknown[] = [];
+      const callbacks = {
+        getCurrentSessionTurnId: () => 'turn-1',
+        editCallback: (value: unknown) => {
+          edits.push(value);
+        },
+      };
+      const send = async (update: unknown) =>
+        handleACPUpdateMessage(
+          doc,
+          parseSessionNotification({ sessionId: 'acp-session', update }),
+          callbacks
+        );
+      const diff = (path: string) => ({ type: 'diff', path, oldText: 'before', newText: 'after' });
+      await send({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'edit',
+        title: 'Edit',
+        kind: 'edit',
+        status: 'in_progress',
+        content: [diff('/old')],
+      });
+      await send({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'edit',
+        content: clear ? [] : [diff('/new')],
+      });
+      await send({ sessionUpdate: 'tool_call_update', toolCallId: 'edit', status: 'completed' });
+      expect(edits).toEqual(
+        clear
+          ? []
+          : [
+              [
+                expect.objectContaining({
+                  path: '/new',
+                  contentOldText: 'before',
+                  contentNewText: 'after',
+                }),
+              ],
+            ]
+      );
+    }
+  });
+
+  it('keeps sparse title and list updates through live filtering across flushes', async () => {
+    const { doc, readHistory } = createDoc();
+    const callbacks = { getCurrentSessionTurnId: () => 'turn-1' };
+    const text = (value: string) => ({ type: 'content', content: { type: 'text', text: value } });
+    const send = async (update: unknown) =>
+      handleACPUpdateMessage(
+        doc,
+        parseSessionNotification({ sessionId: 'acp-session', update }),
+        callbacks
+      );
+    await send({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'sparse',
+      title: 'MCP',
+      kind: 'other',
+      status: 'in_progress',
+      content: [text('old')],
+      locations: [{ path: '/old' }],
+    });
+    await send({ sessionUpdate: 'tool_call_update', toolCallId: 'sparse', title: 'MCP result' });
+    await send({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'sparse',
+      content: [text('new')],
+      locations: [{ path: '/new' }],
+    });
+    await send({ sessionUpdate: 'tool_call_update', toolCallId: 'sparse', status: 'completed' });
+    expect(readHistory()[0]?.items).toEqual([
+      expect.objectContaining({
+        title: 'MCP result',
+        status: 'completed',
+        content: [text('new')],
+        locations: [{ path: '/new' }],
+      }),
+    ]);
+    await send({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'sparse',
+      content: [],
+      locations: [],
+    });
+    expect(readHistory()[0]?.items).toEqual([
+      expect.objectContaining({
+        title: 'MCP result',
+        status: 'completed',
+        content: [],
+        locations: [],
+      }),
+    ]);
+  });
+
   it('retains native task progress before completion and merges it into one task', async () => {
     const { doc, readHistory } = createDoc();
     for (const [index, status] of ['in_progress', 'in_progress', 'completed'].entries()) {

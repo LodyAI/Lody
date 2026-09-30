@@ -1,25 +1,28 @@
 import { Component, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
+import { StatusPage, StatusPageActions } from '@/components/status-page';
 
 export function SessionShareReadError() {
   const { t } = useTranslation();
   return (
-    <main className="flex min-h-dvh items-center justify-center p-8 text-center" role="alert">
-      <div className="max-w-sm space-y-3">
-        <h1 className="text-lg font-medium">
-          {t('sharing.renderError', 'This conversation could not be displayed')}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {t(
-            'sharing.renderErrorDetail',
-            'The shared document may contain unsupported content. Try reloading the page.'
-          )}
-        </p>
-        <Button variant="outline" onClick={() => window.location.reload()}>
-          {t('sharing.reloadPage', 'Reload page')}
-        </Button>
-      </div>
+    <main>
+      <StatusPage
+        layout="window"
+        illustration="broken"
+        role="alert"
+        title={t('sharing.renderError', 'This conversation could not be displayed')}
+        description={t(
+          'sharing.renderErrorDetail',
+          'The shared document may contain unsupported content. Try reloading the page.'
+        )}
+      >
+        <StatusPageActions>
+          <Button size="small" onClick={() => window.location.reload()}>
+            {t('sharing.reloadPage', 'Reload page')}
+          </Button>
+        </StatusPageActions>
+      </StatusPage>
     </main>
   );
 }

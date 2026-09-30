@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { observePreparedTarget, waitForTargetContentPainted } from '../../../apps/electron/src/renderer/src/warm-window-reveal';
+import {
+  observePreparedTarget,
+  waitForTargetContentPainted,
+} from '../../../apps/electron/src/renderer/src/warm-window-reveal';
 
 afterEach(() => vi.useRealTimers());
 
@@ -72,9 +75,12 @@ describe('warm window reveal', () => {
 it('revokes prepared readiness when its stream disappears, and stops after disposal', async () => {
   vi.useFakeTimers();
   const root = document.createElement('div');
-  root.innerHTML = '<span data-window-session-ready="a" data-window-requires-stream="true"></span><div data-window-session-stream-ready="a"></div>';
+  root.innerHTML =
+    '<span data-window-session-ready="a" data-window-requires-stream="true"></span><div data-window-session-stream-ready="a"></div>';
   let ready = false;
-  const stop = observePreparedTarget(root, { workspace: 'local', sessionId: 'a' }, state => { ready = state; });
+  const stop = observePreparedTarget(root, { workspace: 'local', sessionId: 'a' }, (state) => {
+    ready = state;
+  });
   vi.advanceTimersToNextFrame();
   vi.advanceTimersToNextFrame();
   expect(ready).toBe(true);

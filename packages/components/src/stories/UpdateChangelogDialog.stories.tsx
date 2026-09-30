@@ -4,12 +4,9 @@ import { UpdateChangelogDialog } from '@/components/update-changelog-dialog';
 
 const RELEASE_NOTES = [
   '## Highlights',
-  '',
   '- Sessions reconnect faster after the machine sleeps',
   '- The file tree keeps its scroll position when a session updates',
-  '',
   '### Fixes',
-  '',
   '- Fixed a crash when opening a diff for a deleted file',
   '- Fixed duplicated notifications on Windows',
 ].join('\n');

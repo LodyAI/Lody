@@ -19,6 +19,7 @@ function createTestLogger(): Logger {
     error: vi.fn(),
     success: vi.fn(),
     debug: vi.fn(),
+    trace: vi.fn(),
     setLevel: vi.fn(),
     setDebug: vi.fn(),
     child: vi.fn(() => logger),
@@ -50,10 +51,10 @@ describe('createLodyPrPollerWorkspace', () => {
     const workspace = createLodyPrPollerWorkspace({
       documentManager: {} as LoroDocumentManager,
       workspaceId: 'workspace-1',
-      cliToken: 'cli-token',
+      githubTokens: null,
+      prAssociation: null,
       userId: 'user-1',
       machineId: machineId('machine-1'),
-      authBaseUrl: 'https://example.test',
       logger: createTestLogger(),
     });
 
@@ -80,10 +81,10 @@ describe('createLodyPrPollerWorkspace', () => {
     const workspace = createLodyPrPollerWorkspace({
       documentManager,
       workspaceId: 'workspace-1',
-      cliToken: 'cli-token',
+      githubTokens: null,
+      prAssociation: null,
       userId: 'user-1',
       machineId: machineId('machine-1'),
-      authBaseUrl: 'https://example.test',
       logger: createTestLogger(),
     });
     const listener = vi.fn();

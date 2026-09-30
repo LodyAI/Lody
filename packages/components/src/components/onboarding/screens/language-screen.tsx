@@ -2,11 +2,38 @@ import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAtom } from 'jotai';
+import * as stylex from '@stylexjs/stylex';
 import type { SupportedLanguage } from '@lody/shared';
-import { cn } from '@/lib/utils';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { languageAtom } from '@/atoms/settings';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { OnboardingShell, OnboardingNextButton } from '../onboarding-shell';
+import { onboardingSurface as surface } from './surface';
+
+const styles = stylex.create({
+  options: {
+    display: 'grid',
+    gridTemplateColumns: { default: '1fr', '@media (min-width: 640px)': 'repeat(2, 1fr)' },
+    gap: space[3],
+  },
+  option: { position: 'relative', paddingInline: space[6], paddingBlock: space[6] },
+  check: { position: 'absolute', insetBlockStart: space[3], insetInlineEnd: space[3] },
+  glyph: {
+    width: '56px',
+    height: '56px',
+    fontSize: '24px',
+    fontWeight: 500,
+    color: colors.label,
+  },
+  labels: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 },
+  nativeLabel: {
+    fontSize: text.headlineSize,
+    lineHeight: text.headlineLeading,
+    fontWeight: 500,
+    color: colors.label,
+  },
+});
 
 interface LanguageOption {
   value: SupportedLanguage;
@@ -45,51 +72,40 @@ export function LanguageScreenView({ value, onChange, onNext }: LanguageScreenVi
       <div
         role="radiogroup"
         aria-label={t('onboarding.language.title', 'Choose your language')}
-        className="grid gap-3 sm:grid-cols-2"
+        {...stylex.props(styles.options)}
       >
         {LANGUAGE_OPTIONS.map((option) => {
           const selected = value === option.value;
           return (
-            <motion.button
+            <button
               key={option.value}
               type="button"
               role="radio"
               aria-checked={selected}
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.98 }}
               onClick={() => onChange(option.value)}
-              className={cn(
-                'group relative flex flex-col items-center gap-3 rounded-xl border px-6 py-6 text-center transition-all',
-                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
-                selected
-                  ? 'border-primary/70 bg-primary/[0.06] shadow-[0_0_0_4px_hsl(var(--primary)/0.1)]'
-                  : 'border-border/60 bg-card/40 hover:border-border hover:bg-card/70'
+              {...stylex.props(
+                surface.tile,
+                surface.tileHover,
+                surface.tileColumn,
+                styles.option,
+                selected && surface.tileSelected
               )}
             >
               {selected ? (
                 <motion.span
                   layoutId="onboarding-language-check"
-                  className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground"
                   transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                  {...stylex.props(surface.selectedMark, styles.check)}
                 >
-                  <Check className="h-3 w-3" />
+                  <Check {...stylex.props(surface.icon12)} />
                 </motion.span>
               ) : null}
-              <div
-                className={cn(
-                  'flex h-14 w-14 items-center justify-center rounded-xl text-2xl font-medium transition-colors',
-                  selected
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted/60 text-foreground/80 group-hover:bg-muted'
-                )}
-              >
-                {option.glyph}
-              </div>
-              <div className="space-y-0.5">
-                <div className="text-base font-medium text-foreground">{option.nativeLabel}</div>
-                <div className="text-xs text-muted-foreground">{option.caption}</div>
-              </div>
-            </motion.button>
+              <span {...stylex.props(surface.glyphBox, styles.glyph)}>{option.glyph}</span>
+              <span {...stylex.props(styles.labels)}>
+                <span {...stylex.props(styles.nativeLabel)}>{option.nativeLabel}</span>
+                <span {...stylex.props(surface.detail)}>{option.caption}</span>
+              </span>
+            </button>
           );
         })}
       </div>

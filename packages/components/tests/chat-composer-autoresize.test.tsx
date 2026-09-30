@@ -51,7 +51,6 @@ describe('ChatComposer auto resize', () => {
 
   it('grows through 11 rows and becomes internally scrollable after that', async () => {
     const promptRef = createRef<HTMLTextAreaElement>();
-    const skipNextViewportResizeAutoScrollRef = { current: false };
     const renderComposer = (promptValue: string) => (
       <ChatComposer
         variant="session"
@@ -62,7 +61,6 @@ describe('ChatComposer auto resize', () => {
         primaryAction={null}
         autoResize
         maxRows={11}
-        skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
       />
     );
 
@@ -70,7 +68,6 @@ describe('ChatComposer auto resize', () => {
 
     const textarea = promptRef.current;
     expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
-    expect(skipNextViewportResizeAutoScrollRef.current).toBe(false);
     textarea!.style.lineHeight = '24px';
     let scrollHeight = 240;
     Object.defineProperty(textarea, 'scrollHeight', {
@@ -82,7 +79,6 @@ describe('ChatComposer auto resize', () => {
 
     expect(textarea?.style.height).toBe('240px');
     expect(textarea?.style.overflowY).toBe('hidden');
-    expect(skipNextViewportResizeAutoScrollRef.current).toBe(true);
 
     scrollHeight = 288;
     await act(async () => root.render(renderComposer('twelve\n'.repeat(12))));
@@ -94,5 +90,16 @@ describe('ChatComposer auto resize', () => {
       Number.parseFloat(computed.paddingBottom || '0');
     expect(textarea?.style.height).toBe(`${elevenRowsHeight}px`);
     expect(textarea?.style.overflowY).toBe('auto');
+
+    // Cleared (e.g. after sending): back to the two-row minimum, whatever the
+    // wrapped placeholder would report as scrollHeight.
+    scrollHeight = 480;
+    await act(async () => root.render(renderComposer('')));
+    const twoRowsHeight =
+      24 * 2 +
+      Number.parseFloat(computed.paddingTop || '0') +
+      Number.parseFloat(computed.paddingBottom || '0');
+    expect(textarea?.style.height).toBe(`${twoRowsHeight}px`);
+    expect(textarea?.style.overflowY).toBe('hidden');
   });
 });

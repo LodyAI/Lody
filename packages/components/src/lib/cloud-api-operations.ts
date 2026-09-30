@@ -293,6 +293,9 @@ export const cloudOperations = {
     getPrCacheVersions: query<ConvexApi['github']['getPrCacheVersions']>(
       'github:getPrCacheVersions'
     ),
+    resolveLegacyPrRepositoryIdentity: mutation<
+      ConvexApi['github']['resolveLegacyPrRepositoryIdentity']
+    >('github:resolveLegacyPrRepositoryIdentity'),
     getWorkspaceRepositories: query<ConvexApi['github']['getWorkspaceRepositories']>(
       'github:getWorkspaceRepositories'
     ),

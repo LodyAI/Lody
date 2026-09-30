@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Provider } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import type { AgentBrandId, AgentConfigCliType, SessionId, SessionMeta } from '@lody/shared';
+import type {
+  AgentBrandId,
+  AgentConfigCliType,
+  MessageContent,
+  SessionId,
+  SessionMeta,
+} from '@lody/shared';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { DesktopSessionDetailLayout } from '@/components/sessions/desktop-session-detail-layout';
-import { PermissionRequestCard } from '@/components/sessions/floating-permission-request';
+import { PermissionPrompt } from '@/components/sessions/floating-permission-request';
 import {
   SessionConversationPage,
   SessionConversationPageBody,
@@ -37,6 +43,7 @@ import {
   TOUR_PULL_REQUEST,
   TOUR_SESSION_ID,
   TOUR_TASKS,
+  buildPermissionItem,
   buildTourHistory,
   buildTourSession,
   buildTourStableSession,
@@ -51,7 +58,7 @@ import { TourCloudBoundary } from './tour-cloud-boundary';
 //
 // Not a drawing of it, not a "preview", not a fixed-size still life scaled into
 // a card. This is `LoroSidebar` beside `DesktopSessionDetailLayout`, holding
-// `SessionTabBar`, `SessionChatStreamView`, `PermissionRequestCard`,
+// `SessionTabBar`, `SessionChatStreamView`, `PermissionPrompt`,
 // `SessionInfoBar`, `SessionChatInputArea`, `SessionSidePanelTabBar`,
 // `SessionChangesSidebar` and `TerminalDock` — every one of them the component
 // production mounts, in the position production mounts it.
@@ -144,6 +151,12 @@ export type TourAppProps = {
   onMergePr?: () => void;
   className?: string;
 };
+
+/** The pending request the run stops on, as the product's prompt receives it. */
+const TOUR_PERMISSION_TOOL_CALL = buildPermissionItem(null) as Extract<
+  MessageContent,
+  { type: 'tool_call' }
+>;
 
 const TOUR_PROMPT = 'Have a look at the auth module and clean it up.';
 /** What the film types into the composer to start the second task. */
@@ -261,6 +274,15 @@ function TourWindow({
     }));
   }, [identity.projectName, merged, tracks.archived, tracks.pr, tracks.tasks]);
 
+  // Once onboarding has sent the person's own first task, the run on screen is
+  // theirs: their words open the conversation and name the tab, and the
+  // composer they typed into is empty again. The sidebar lists it as the
+  // project's first session.
+  const sentPrompt =
+    configurationState?.conversationStatus === 'starting'
+      ? configurationState.promptValue.trim() || null
+      : null;
+
   /**
    * The project groups the sidebar renders.
    *
@@ -273,35 +295,48 @@ function TourWindow({
     return [...names].map((repoFullName) => ({
       id: repoFullName,
       repoFullName,
-      items: visibleTasks
-        .filter((task) => task.repoFullName === repoFullName)
-        .map((task) => ({
-          id: task.taskId,
-          title: task.title,
-          isSelected: task.taskId === selectedTaskId,
-        })),
+      items: [
+        ...(sentPrompt && repoFullName === identity.projectName
+          ? [{ id: TOUR_SESSION_ID, title: sentPrompt, isSelected: true }]
+          : []),
+        ...visibleTasks
+          .filter((task) => task.repoFullName === repoFullName)
+          .map((task) => ({
+            id: task.taskId,
+            title: task.title,
+            isSelected: !sentPrompt && task.taskId === selectedTaskId,
+          })),
+      ],
     }));
-  }, [identity.projectName, selectedTaskId, visibleTasks]);
+  }, [identity.projectName, selectedTaskId, sentPrompt, visibleTasks]);
 
   const history = useMemo(
     () =>
       buildTourHistory({
-        prompt: TOUR_PROMPT,
+        prompt: sentPrompt ?? TOUR_PROMPT,
         revealed: tracks.reveal,
         permissionAnswer,
         subagents: tracks.subagents >= 0.5,
         taskId: selectedTaskId,
       }),
-    [permissionAnswer, selectedTaskId, tracks.reveal, tracks.subagents]
+    [permissionAnswer, selectedTaskId, sentPrompt, tracks.reveal, tracks.subagents]
+  );
+  const shownSession = useMemo(
+    () => (sentPrompt ? { ...session, title: sentPrompt } : session),
+    [sentPrompt, session]
   );
 
+  // A setup preview before anything has been sent shows the conversation as a
+  // fresh install has it: empty. Nothing is drawn that has not happened.
+  const emptyConversation =
+    configurationState !== undefined && sentPrompt === null && tracks.reveal <= 0;
   const items = useMemo(
     () =>
-      history.map(
+      (emptyConversation ? [] : history).map(
         (message, turnIndex) =>
           ({ type: 'message', sessionId: TOUR_SESSION_ID, message, turnIndex }) as const
       ),
-    [history]
+    [emptyConversation, history]
   );
 
   /**
@@ -326,14 +361,16 @@ function TourWindow({
    */
   const typedRef = useRef<string>('');
   useEffect(() => {
-    const target = configurationState?.promptValue ?? (tracks.typing > 0 ? TOUR_SECOND_PROMPT : '');
+    const target = sentPrompt
+      ? ''
+      : (configurationState?.promptValue ?? (tracks.typing > 0 ? TOUR_SECOND_PROMPT : ''));
     const shown = configurationState
       ? target
       : target.slice(0, Math.round(target.length * Math.min(1, tracks.typing)));
     if (shown === typedRef.current) return;
     typedRef.current = shown;
     composerRef.current?.setInputText(shown);
-  }, [configurationState, tracks.typing]);
+  }, [configurationState, sentPrompt, tracks.typing]);
 
   const stagedAnnotation = useRef(false);
   useEffect(() => {
@@ -488,7 +525,7 @@ function TourWindow({
       {/* Window chrome. The tour is a WINDOW on a desk, not a fullscreen slab:
           nobody runs their editor fullscreen, and a frameless rectangle reads
           as a screenshot of a product rather than a product. */}
-      <div className="flex h-9 shrink-0 items-center gap-2  px-4">
+      <div data-tour-anchor="window.chrome" className="flex h-9 shrink-0 items-center gap-2  px-4">
         <span className="flex items-center gap-1.5">
           <span className="size-[11px] rounded-full bg-[#ff5f57]" />
           <span className="size-[11px] rounded-full bg-[#febc2e]" />
@@ -515,6 +552,8 @@ function TourWindow({
             }
             activeNav="home"
             repoSections={repoSections}
+            // Setup previews someone's own, still-empty Lody: no invented chats.
+            chats={configurationState ? [] : undefined}
           />
         </div>
 
@@ -532,7 +571,7 @@ function TourWindow({
               <div data-tour-anchor="tab-bar">
                 <SessionTabBar
                   variant="session"
-                  parentSession={session}
+                  parentSession={shownSession}
                   childSessions={childSessions}
                   draftTabs={[]}
                   archivedChildSessions={[]}
@@ -562,17 +601,22 @@ function TourWindow({
                         <SessionChatStreamView
                           sessionId={TOUR_SESSION_ID}
                           items={items}
+                          // A fresh window says nothing about its emptiness; the
+                          // product's own "no messages" line would be noise here.
+                          emptyState={emptyConversation ? <span /> : undefined}
                           renderMessageRow={({ message, sessionId }) => (
                             <MessageRowView message={message} sessionId={sessionId} />
                           )}
                           className="h-full"
                           agentActivityLabel={
-                            configurationActivity?.label ??
-                            (permissionPending
-                              ? t('sessions.statusIndicator.requestPermission')
-                              : Math.floor(tracks.reveal) >= 13
-                                ? null
-                                : t('sessions.statusIndicator.running'))
+                            emptyConversation
+                              ? (configurationActivity?.label ?? null)
+                              : (configurationActivity?.label ??
+                                (permissionPending
+                                  ? t('sessions.statusIndicator.requestPermission')
+                                  : Math.floor(tracks.reveal) >= 13
+                                    ? null
+                                    : t('sessions.statusIndicator.running')))
                           }
                           agentActivityTone={
                             configurationActivity?.tone ??
@@ -587,12 +631,9 @@ function TourWindow({
                         // scripted cursor presses the real button inside it; the
                         // resolution is this component resolving, not a flag.
                         <div data-tour-anchor="permission" className="px-3 pb-2">
-                          <PermissionRequestCard
-                            title="Bash(pnpm typecheck)"
-                            options={[
-                              { optionId: 'allow', name: 'Allow once', kind: 'allow_once' },
-                              { optionId: 'deny', name: 'Not this time', kind: 'reject_once' },
-                            ]}
+                          <PermissionPrompt
+                            toolCall={TOUR_PERMISSION_TOOL_CALL}
+                            permission={TOUR_PERMISSION_TOOL_CALL.permissionRequest!}
                             onSelect={onPermissionAnswer}
                           />
                         </div>
@@ -604,7 +645,9 @@ function TourWindow({
                           <SessionInfoBar
                             status={null}
                             projectName={identity.projectName}
-                            branch={session.branchName}
+                            // A setup preview has no session yet, so it has no
+                            // session branch either: show the project's own.
+                            branch={configurationState ? 'main' : session.branchName}
                             pr={tracks.pr >= 1 ? TOUR_PULL_REQUEST : null}
                             prCiRuns={
                               tracks.pr >= 2
@@ -702,7 +745,13 @@ function TourWindow({
             secondaryPanel={
               <div
                 data-tour-anchor="side-panel"
-                className="flex h-full min-w-0 flex-col overflow-hidden border-l border-border/70 bg-background"
+                // The edge belongs to an OPEN panel. Collapsed, the panel is a
+                // zero-width sliver whose border drew a notch into the window's
+                // right edge.
+                className={cn(
+                  'flex h-full min-w-0 flex-col overflow-hidden bg-background',
+                  panelOpen && 'border-l border-border/70'
+                )}
               >
                 <SessionSidePanelTabBar
                   tabs={sidePanelTabs}

@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   getMachineFlockLocalProjects,
   type CodeCollabContentUnavailableReason,
@@ -60,8 +60,10 @@ import {
 } from '@/lib/session-file-content-snapshot';
 import { normalizePinnedProviderOpenResult } from '@/lib/session-file-provider-open-result';
 import { SessionFileBinaryPreview } from './session-file-binary-preview';
+import { SessionFileCsvPreview } from './session-file-csv-preview';
 import { SessionFileImagePreview } from './session-file-image-preview';
 import { MarkdownRenderer } from '../ai-gui/markdown-renderer';
+import { MarkdownFileResources } from '../ai-gui/markdown-file-image';
 import { isSvgPath } from '@/lib/image-file-preview';
 import { logCodeCollabDebug } from '@/lib/code-collab-debug';
 import {
@@ -69,6 +71,7 @@ import {
   RecentLocalTextEchoTracker,
 } from '@/lib/code-collab-live-text-update';
 import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
+import { getOfficePreviewKind } from '@/lib/session-file-office-source';
 import { downloadBytesAsFile } from '@/lib/download-file';
 import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent, getAnalyticsFileKind } from '@/lib/posthog-analytics';
@@ -83,8 +86,8 @@ import {
   type SessionFileLiveSyncStatus,
   type SessionFileSaveStatus,
 } from '@/hooks/use-code-collab-save-text';
-import { Button } from '@/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Button } from '@lody/ui/button';
+import { Tooltip } from '@lody/ui/tooltip';
 import { useCodeCollabLsp, type CodeCollabLspState } from '@/hooks/use-code-collab-lsp';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import {
@@ -313,6 +316,7 @@ function SessionFileContentViewImpl({
   // Markdown opens as a rendered document by default, matching SVG previews.
   // The source remains one toggle away in the editable source surface.
   const [markdownRenderMode, setMarkdownRenderMode] = useState<'rendered' | 'code'>('rendered');
+  const [csvRenderMode, setCsvRenderMode] = useState<'rendered' | 'code'>('rendered');
   // HTML starts as source because entering preview executes its inline scripts.
   const [htmlRenderMode, setHtmlRenderMode] = useState<'rendered' | 'code'>('code');
   const handledHtmlPreviewRequestSeqRef = useRef<number | undefined>(undefined);
@@ -1120,6 +1124,12 @@ function SessionFileContentViewImpl({
     isSessionMarkdownPath(normalizedPath) &&
     data.snapshot.truncated !== true;
   const showMarkdownRendered = isMarkdownTextFile && markdownRenderMode === 'rendered';
+  const isCsvTextFile =
+    data.status === 'ready' &&
+    data.snapshot.kind === 'text' &&
+    data.snapshot.truncated !== true &&
+    /\.(csv|tsv)$/i.test(normalizedPath);
+  const showCsvRendered = isCsvTextFile && csvRenderMode === 'rendered';
   // Source text for the rendered Markdown preview. Prefer the latest text the
   // editor has committed (local edits + applied live syncs) over the opened
   // snapshot, so toggling to `rendered` after editing shows the current
@@ -1139,7 +1149,19 @@ function SessionFileContentViewImpl({
       className="mx-auto w-full max-w-3xl px-3 py-3 select-text sm:px-4 sm:py-4"
       data-native-selection-allow
     >
-      <MarkdownRenderer text={markdownPreviewText} size={conversationFontSize} />
+      {fileProvider ? (
+        <MarkdownFileResources
+          key={`${session.machineId}:${sessionId}`}
+          provider={fileProvider}
+          documentPath={providerEntry?.path ?? normalizedPath}
+          automatic={Boolean(sessionFileActions.localHost)}
+          active={isActiveSurface && showMarkdownRendered}
+        >
+          <MarkdownRenderer text={markdownPreviewText} size={conversationFontSize} />
+        </MarkdownFileResources>
+      ) : (
+        <MarkdownRenderer text={markdownPreviewText} size={conversationFontSize} />
+      )}
     </div>
   ) : isSvgTextFile && data.status === 'ready' && data.snapshot.kind === 'text' ? (
     <SessionFileImagePreview path={normalizedPath} svgText={data.snapshot.text} />
@@ -1235,6 +1257,7 @@ function SessionFileContentViewImpl({
         path={normalizedPath}
         bytes={data.snapshot.bytes}
         url={data.snapshot.url}
+        active={isActiveSurface}
         fileActions={sessionFileActions.buildErrorActions(normalizedPath, data.snapshot)}
       />
     );
@@ -1280,6 +1303,14 @@ function SessionFileContentViewImpl({
           </div>
         ) : null}
       </div>
+    );
+  } else if (showCsvRendered && data.snapshot.kind === 'text') {
+    body = (
+      <SessionFileCsvPreview
+        text={latestEditorTextRef.current ?? data.snapshot.text}
+        path={normalizedPath}
+        active={isActiveSurface}
+      />
     );
   } else if (showSvgRendered || showMarkdownRendered) {
     body = previewSurface;
@@ -1381,26 +1412,37 @@ function SessionFileContentViewImpl({
     }
   }
 
-  const bodyUsesNativeScrolling = isTextFileReady && !showSvgRendered && !showMarkdownRendered;
+  const bodyUsesNativeScrolling =
+    (isTextFileReady && !showSvgRendered && !showMarkdownRendered) ||
+    (data.status === 'ready' &&
+      data.snapshot.kind === 'binary' &&
+      getOfficePreviewKind(normalizedPath) !== null);
   const showRealtimeStatusBar = shouldUseProviderFileContent || showProviderConnecting;
   // Top toolbar controls. The render-mode toggle moved here from the bottom
   // status bar (which now only carries save/live/offline state). The search
   // button only appears when a Monaco editor is mounted — a rendered SVG/Markdown
   // preview has no editor to search.
-  const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || isHtmlTextFile;
+  const showPreviewToggle = isSvgTextFile || isMarkdownTextFile || isHtmlTextFile || isCsvTextFile;
   const filePreviewActive = isSvgTextFile
     ? svgRenderMode === 'rendered'
     : isMarkdownTextFile
       ? markdownRenderMode === 'rendered'
-      : htmlRenderMode === 'rendered';
+      : isCsvTextFile
+        ? csvRenderMode === 'rendered'
+        : htmlRenderMode === 'rendered';
   const showSearchButton =
     isTextFileReady &&
     !showSvgRendered &&
     !showMarkdownRendered &&
+    !showCsvRendered &&
     !showHtmlRendered &&
     !(isMarkdownTextFile && preferNativeMarkdownSelection);
   const showWordWrapButton =
-    isTextFileReady && !showSvgRendered && !showMarkdownRendered && !showHtmlRendered;
+    isTextFileReady &&
+    !showSvgRendered &&
+    !showMarkdownRendered &&
+    !showCsvRendered &&
+    !showHtmlRendered;
   const showSaveButton = isProviderFileEditable && isTextFileReady;
   const showRefreshButton = shouldUseProviderFileContent && isTextFileReady && !showHtmlRendered;
   const showViewerTopBar =
@@ -1430,6 +1472,8 @@ function SessionFileContentViewImpl({
                     setSvgRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
                   } else if (isMarkdownTextFile) {
                     setMarkdownRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
+                  } else if (isCsvTextFile) {
+                    setCsvRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
                   } else {
                     setHtmlAnnotationEnabled(false);
                     setHtmlRenderMode((mode) => (mode === 'rendered' ? 'code' : 'rendered'));
@@ -1743,31 +1787,34 @@ function FilePreviewToggle({
   const Icon = active ? EyeClosed : Eye;
   const label = active ? hideLabel : showLabel;
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-pressed={active}
-          onClick={onToggle}
-          aria-label={label}
-          className={cn(
-            'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground',
-            active ? 'text-foreground' : 'text-muted-foreground'
-          )}
-        >
-          {/* lucide's open Eye packs the iris + almond into 14px, so at stroke-width
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        delay={300}
+        render={
+          <button
+            type="button"
+            aria-pressed={active}
+            onClick={onToggle}
+            aria-label={label}
+            className={cn(
+              'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground',
+              active ? 'text-foreground' : 'text-muted-foreground'
+            )}
+          >
+            {/* lucide's open Eye packs the iris + almond into 14px, so at stroke-width
               2 it reads ~26% denser than the neighbouring Search glyph and looks
               darker at the same color. Thin it to 1.5 to match Search's optical
               weight (measured ink coverage 20.2% vs 20.9%). The closed Eye has no
               iris (already lighter) and is shown alone in the active color, so it
               keeps the default weight. */}
-          <Icon className="h-3.5 w-3.5" strokeWidth={active ? 2 : 1.5} aria-hidden="true" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="text-xs">
+            <Icon className="h-3.5 w-3.5" strokeWidth={active ? 2 : 1.5} aria-hidden="true" />
+          </button>
+        }
+      />
+      <Tooltip.Content side="bottom" className="text-xs">
         {label}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -2026,18 +2073,12 @@ export function SessionFileConflictActionRow({
       <span className="ml-auto flex gap-1.5">
         {pendingOverride ? (
           <>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-6 px-2 text-[11px]"
-              onClick={() => setPendingOverride(false)}
-            >
+            <Button variant="ghost" size="small" onClick={() => setPendingOverride(false)}>
               {t('common.cancel', 'Cancel')}
             </Button>
             <Button
-              size="sm"
               variant="destructive"
-              className="h-6 px-2 text-[11px]"
+              size="small"
               onClick={() => {
                 setPendingOverride(false);
                 void onResolveConflict('override');
@@ -2049,37 +2090,33 @@ export function SessionFileConflictActionRow({
         ) : (
           <>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictDiscardHint',
                 'Throw away your local edits and reload from disk.'
               )}
+              size="small"
               onClick={() => void onResolveConflict('discard')}
             >
               {t('sessions.fileSave.conflictDiscard', 'Discard my edits')}
             </Button>
             <Button
-              size="sm"
               variant="ghost"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictMarkersHint',
                 'Reload with <<<<<<< / >>>>>>> conflict markers so you can resolve by hand.'
               )}
+              size="small"
               onClick={() => void onResolveConflict('load_with_conflicts')}
             >
               {t('sessions.fileSave.conflictMarkers', 'Insert conflict markers')}
             </Button>
             <Button
-              size="sm"
-              variant="default"
-              className="h-6 px-2 text-[11px]"
               title={t(
                 'sessions.fileSave.conflictOverrideHint',
                 'Replace the disk version with your edits. Concurrent changes will be lost.'
               )}
+              size="small"
               onClick={() => setPendingOverride(true)}
             >
               {t('sessions.fileSave.conflictOverride', 'Overwrite disk')}
@@ -2122,7 +2159,7 @@ function SessionFileLspPanel({
     <div className="flex flex-col gap-1 border-t border-border bg-muted/30 px-3 py-2 text-xs">
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium text-foreground">{actionLabel}</span>
-        <Button size="sm" variant="ghost" onClick={onDismiss}>
+        <Button variant="ghost" size="small" onClick={onDismiss}>
           {t('sessions.lsp.dismiss', 'Dismiss')}
         </Button>
       </div>

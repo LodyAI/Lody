@@ -22,10 +22,10 @@ import {
   MobileModelPickerLabel,
   mobileModelPickerTriggerClassName,
 } from '@/components/mobile/mobile-session-composer-footer';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
-import { Tabs, TabsList, TabsTrigger } from '@/ui/tabs';
+import { Tabs } from '@lody/ui/tabs';
 
 const meta = {
   title: 'Mobile/MobileNewChatSheet',
@@ -125,26 +125,26 @@ function MockContextTypeNode({
     'text-muted-foreground'
   );
   return (
-    <Tabs
+    <Tabs.Root
       value={value}
       onValueChange={(v) => onChange(v as 'local' | 'github' | 'chat')}
       className="w-full"
     >
-      <TabsList className="flex h-10 w-full rounded-md bg-muted p-1">
-        <TabsTrigger value="local" className={triggerClassName}>
+      <Tabs.List className="flex h-10 w-full rounded-md bg-muted p-1">
+        <Tabs.Tab value="local" className={triggerClassName}>
           <Folder className="h-3.5 w-3.5" />
           <span>Local</span>
-        </TabsTrigger>
-        <TabsTrigger value="github" className={triggerClassName}>
+        </Tabs.Tab>
+        <Tabs.Tab value="github" className={triggerClassName}>
           <Github className="h-3.5 w-3.5" />
           <span>GitHub</span>
-        </TabsTrigger>
-        <TabsTrigger value="chat" className={triggerClassName}>
+        </Tabs.Tab>
+        <Tabs.Tab value="chat" className={triggerClassName}>
           <MessageCircle className="h-3.5 w-3.5" />
           <span>Chat</span>
-        </TabsTrigger>
-      </TabsList>
-    </Tabs>
+        </Tabs.Tab>
+      </Tabs.List>
+    </Tabs.Root>
   );
 }
 
@@ -228,10 +228,11 @@ function MockComposer({
           </div>
           <Button
             type="button"
-            size="icon"
-            variant="ghost"
+            variant="primary"
             aria-label="Send"
-            className="ml-2 h-8 w-8 shrink-0 rounded-full bg-foreground text-background shadow-xs transition-all hover:bg-foreground/90 hover:text-background"
+            icon
+            shape="pill"
+            className="ml-2 shrink-0"
           >
             <ArrowUp className="h-5 w-5" />
           </Button>

@@ -60,6 +60,7 @@ import {
   LoroStreamsMachineRpcClient,
   LoroStreamsRpcResponseDispatcher,
   LoroStreamsRpcRequestSchema,
+  LoroMachineAcpCapabilitiesRefreshRpcRequestSchema,
   createRpcSecretRecipient,
   createLoroStreamsJsonStreamClient,
   decryptCodeCollabV2RpcPayload,
@@ -250,6 +251,49 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcClient', () => {
+  describe('capability refresh force field', () => {
+    // How a daemon without the acpCapabilityRefreshCache capability parses this
+    // request: the same strict schema minus the params field that build never
+    // declared. Derived from the current schema so it cannot drift from what shipped.
+    const previousGenerationSchema = LoroMachineAcpCapabilitiesRefreshRpcRequestSchema.extend({
+      params: LoroMachineAcpCapabilitiesRefreshRpcRequestSchema.shape.params.omit({ force: true }),
+    });
+
+    const emitRefreshRequest = async (force: boolean | undefined): Promise<unknown> => {
+      const fake = createFakeStreamClient();
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: 'workspace-1',
+        machineId: 'machine-1',
+        streamClient: fake.streamClient,
+      });
+      void client
+        .requestMachineAcpCapabilitiesRefresh({ configId, force, timeoutMs: 5_000 })
+        .catch(() => undefined);
+      await vi.waitFor(() => expect(fake.appended).toHaveLength(1));
+      return fake.appended[0]?.value;
+    };
+
+    it('omits the field entirely when the caller did not negotiate a forced refresh', async () => {
+      const request = await emitRefreshRequest(undefined);
+
+      // A strict schema rejects the key even when its value is undefined, so
+      // absence — not falsiness — is what keeps an older daemon able to answer.
+      expect(Object.keys((request as { params: object }).params)).not.toContain('force');
+      expect(previousGenerationSchema.safeParse(request).success).toBe(true);
+      expect(LoroStreamsRpcRequestSchema.safeParse(request).success).toBe(true);
+    });
+
+    it('sends the field when the caller negotiated a forced refresh', async () => {
+      const request = await emitRefreshRequest(true);
+
+      expect((request as { params: { force?: boolean } }).params.force).toBe(true);
+      expect(LoroStreamsRpcRequestSchema.safeParse(request).success).toBe(true);
+      // The regression negotiation prevents: an older daemon fails to parse the
+      // request and drops it without a reply, so the caller only sees a timeout.
+      expect(previousGenerationSchema.safeParse(request).success).toBe(false);
+    });
+  });
+
   it('sends minimal session preparation requests and resolves the response', async () => {
     const fake = createFakeStreamClient();
     const sessionId = SessionIdSchema.parse('session-1');
@@ -1882,7 +1926,12 @@ describe('LoroStreamsMachineRpcClient', () => {
     client.stop();
   });
 
-  it('sends session preview create requests and resolves preview responses', async () => {
+  it('keeps preview creation pending beyond public route propagation and resolves its response', async () => {
+    const proof = {
+      runtimeNonce: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      requestToken: 'synthetic-preview-proof',
+    };
     const fake = createFakeStreamClient();
     const client = new LoroStreamsMachineRpcClient({
       workspaceId: 'workspace-1',
@@ -1890,76 +1939,85 @@ describe('LoroStreamsMachineRpcClient', () => {
       streamClient: fake.streamClient,
     });
 
-    const responsePromise = client.requestSessionPreviewCreate({
-      sessionId: 'session-1',
-      requestedByUserId: 'user-1',
-      target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-      approval: {
-        source: 'browser_address',
-        targetClass: 'loopback',
-        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-        confirmedByUserId: 'user-1',
-        confirmedAt: 1000,
-      },
-      timeoutMs: 5000,
-    });
-
-    await vi.waitFor(() => {
-      expect(fake.appended).toHaveLength(1);
-    });
-
-    const request = fake.appended[0]?.value as {
-      id: string;
-      method: string;
-      params?: { sessionId?: string; requestedByUserId?: string };
-    };
-    expect(request.method).toBe('session/preview-create');
-    expect(request.params).toEqual({
-      sessionId: 'session-1',
-      requestedByUserId: 'user-1',
-      target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-      approval: {
-        source: 'browser_address',
-        targetClass: 'loopback',
-        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
-        confirmedByUserId: 'user-1',
-        confirmedAt: 1000,
-      },
-      replaceExisting: undefined,
-    });
-
-    fake.pushBatch({
-      messages: [
-        {
-          jsonrpc: '2.0',
-          id: request.id,
-          method: 'session/preview-create',
-          rpcVersion: '1',
-          machineId: 'machine-1',
-          result: {
-            type: 'session/preview-create_response',
-            sessionId: 'session-1',
-            success: false,
-            error: 'tunnel_not_configured',
-            message: 'Preview gateway is not configured.',
-          },
-        },
-      ],
-      nextOffset: '3',
-      cursor: 'cursor-3',
-      upToDate: true,
-    });
-
-    await expect(responsePromise).resolves.toEqual(
-      expect.objectContaining({
-        type: 'session/preview-create_response',
+    vi.useFakeTimers();
+    try {
+      const responsePromise = client.requestSessionPreviewCreate({
+        proof,
         sessionId: 'session-1',
-        success: false,
-        error: 'tunnel_not_configured',
-      })
-    );
+        requestedByUserId: 'user-1',
+        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+        approval: {
+          source: 'browser_address',
+          targetClass: 'loopback',
+          target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+          confirmedByUserId: 'user-1',
+          confirmedAt: 1000,
+        },
+      });
 
-    client.stop();
+      await fake.waitForAppendedCount(1);
+      let settled = false;
+      void responsePromise.then(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(65_000);
+      expect(settled).toBe(false);
+
+      const request = fake.appended[0]?.value as {
+        id: string;
+        method: string;
+        params?: { sessionId?: string; requestedByUserId?: string };
+      };
+      expect(request.method).toBe('session/preview-create');
+      expect(request.params).toEqual({
+        proof,
+        sessionId: 'session-1',
+        requestedByUserId: 'user-1',
+        target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+        approval: {
+          source: 'browser_address',
+          targetClass: 'loopback',
+          target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
+          confirmedByUserId: 'user-1',
+          confirmedAt: 1000,
+        },
+        restart: undefined,
+      });
+
+      fake.pushBatch({
+        messages: [
+          {
+            jsonrpc: '2.0',
+            id: request.id,
+            method: 'session/preview-create',
+            rpcVersion: '1',
+            machineId: 'machine-1',
+            result: {
+              type: 'session/preview-create_response',
+              sessionId: 'session-1',
+              success: false,
+              error: 'tunnel_not_configured',
+              message: 'Remote preview is not configured.',
+            },
+          },
+        ],
+        nextOffset: '3',
+        cursor: 'cursor-3',
+        upToDate: true,
+      });
+
+      await expect(responsePromise).resolves.toEqual(
+        expect.objectContaining({
+          type: 'session/preview-create_response',
+          sessionId: 'session-1',
+          success: false,
+          error: 'tunnel_not_configured',
+        })
+      );
+    } finally {
+      client.stop();
+      vi.useRealTimers();
+    }
   });
 
   it('sends local project git state requests and resolves git state responses', async () => {

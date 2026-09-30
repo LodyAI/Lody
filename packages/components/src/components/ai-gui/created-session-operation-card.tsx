@@ -77,7 +77,7 @@ export function CreatedSessionOperationCard({
           role="status"
           data-session-creation-status={status}
           className={cn(
-            'inline-flex shrink-0 items-center gap-1.5 self-start text-xs sm:self-auto',
+            'inline-flex shrink-0 items-center gap-1 text-xs',
             status === 'failed'
               ? 'text-destructive'
               : status === 'succeeded'
@@ -88,7 +88,7 @@ export function CreatedSessionOperationCard({
           <Spinner
             icon={StatusIcon}
             spinning={status === 'running'}
-            className="h-3.5 w-3.5 motion-reduce:animate-none"
+            className="h-3 w-3 motion-reduce:animate-none"
             aria-hidden="true"
           />
           {t(statusLabels[status])}

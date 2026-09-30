@@ -1,5 +1,7 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 /**
  * Landing post-demo — team collaboration surfaces that already ship:
  * usage by member + in-session PR/CI/merge demos, plus short team points
@@ -34,8 +36,9 @@ export type PowerSectionCopy = {
 };
 
 /**
- * Product demos pull packages/components (NumberFlow, Radix, …) that peer React
- * 18 in the monorepo. Mount only after hydration so SSR never dual-loads React.
+ * The live demos load lazily once the section approaches, so the landing's first
+ * paint never pays for them; until then (and in static HTML) the SSR placeholder
+ * carries the feature title and summary.
  */
 function ClientPowerDemo({
   id,
@@ -109,7 +112,7 @@ export function LandingPowerSection({
 
       scenes.forEach((scene, index) => {
         const scrollports = scene.querySelectorAll<HTMLElement>(
-          '.uw-power__demo-inner, [data-pr-content-scroll-area] [data-radix-scroll-area-viewport]'
+          '.uw-power__demo-inner, [data-power-scrollport]'
         );
         if (scrollports.length === 0) return;
 
@@ -169,7 +172,7 @@ export function LandingPowerSection({
           <p className="uw-power__body">{copy.body}</p>
           {copy.docsLink ? (
             <p className="uw-section-docs">
-              <a href={copy.docsLink.href}>{copy.docsLink.label}</a>
+              <SiteAnchor href={copy.docsLink.href}>{copy.docsLink.label}</SiteAnchor>
             </p>
           ) : null}
           {copy.points && copy.points.length > 0 ? (

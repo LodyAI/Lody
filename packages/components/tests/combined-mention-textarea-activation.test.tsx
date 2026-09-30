@@ -224,6 +224,8 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
         truncated: false,
       };
       const selectedPath = prefix === '@other:' ? 'src/other:Other.ts' : 'src/Other.ts';
+      // A file row reads its name, then the folder it sits in.
+      const selectedRowText = `${selectedPath.slice(4)}src`;
       try {
         await render({ value: '', mentionSource: { kind: 'local', localProjectId: 'project-1' } });
         await typeInto(`${prefix}Composer`);
@@ -254,11 +256,11 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
         );
         const row = Array.from(
           document.querySelectorAll<HTMLElement>('[data-slot="mention-item"]')
-        ).find((element) => element.textContent?.includes(selectedPath));
+        ).find((element) => element.textContent?.includes(selectedRowText));
         expect(row).toBeDefined();
         await act(async () => vi.advanceTimersToNextFrame());
         if (prefix === '@') {
-          expect(highlightedRowText()).toContain('src/Other.ts');
+          expect(highlightedRowText()).toContain('Other.tssrc');
           await act(async () =>
             textarea()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
           );

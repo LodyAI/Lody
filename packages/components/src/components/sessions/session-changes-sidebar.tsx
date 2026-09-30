@@ -44,6 +44,12 @@ export type SessionChangesSidebarProps = {
 // every row, instead of jittering with content length.
 const STAT_COL_CLASS = 'inline-block min-w-[2.25rem] text-right tabular-nums';
 
+function getParentPath(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, '/');
+  const separatorIndex = normalized.lastIndexOf('/');
+  return separatorIndex > 0 ? normalized.slice(0, separatorIndex) : '';
+}
+
 export function SessionChangesSidebar({
   ready,
   synced,
@@ -137,6 +143,7 @@ export function SessionChangesSidebar({
   };
 
   const renderEntryRow = (entry: DisplayChangeEntry) => {
+    const parentPath = getParentPath(entry.filePath);
     return (
       <button
         key={entry.filePath}
@@ -144,7 +151,7 @@ export function SessionChangesSidebar({
         data-id={`change:${entry.filePath}`}
         data-scope-item="row"
         className={cn(
-          'group flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left',
+          'group flex min-h-9 w-full items-center gap-1.5 rounded-md px-2 py-1 text-left',
           'text-foreground/90 hover:bg-hover hover:text-hover-foreground',
           'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
         )}
@@ -152,7 +159,15 @@ export function SessionChangesSidebar({
         onClick={() => onOpenChangesDiff(entry.filePath, changeFilePaths)}
       >
         <FileIcon filePath={entry.filePath} className="h-4 w-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-sm">{getBasename(entry.filePath)}</span>
+        <span
+          className="flex min-w-0 flex-1 flex-col justify-center leading-tight"
+          title={entry.filePath}
+        >
+          <span className="truncate text-sm">{getBasename(entry.filePath)}</span>
+          {parentPath ? (
+            <span className="truncate text-[10px] text-muted-foreground/70">{parentPath}/</span>
+          ) : null}
+        </span>
         <RowTrailing
           add={entry.add}
           del={entry.del}
@@ -314,8 +329,8 @@ function AggregateStats({
 
   return (
     <>
-      <span className={cn(STAT_COL_CLASS, 'text-code-added')}>+{add}</span>
-      <span className={cn(STAT_COL_CLASS, 'text-code-removed')}>−{del}</span>
+      <span className={cn(STAT_COL_CLASS, 'text-github-addition')}>+{add}</span>
+      <span className={cn(STAT_COL_CLASS, 'text-github-deletion')}>−{del}</span>
     </>
   );
 }
@@ -337,8 +352,8 @@ function RowTrailing({
         </span>
       ) : (
         <>
-          <span className={cn(STAT_COL_CLASS, 'text-code-added')}>+{add}</span>
-          <span className={cn(STAT_COL_CLASS, 'text-code-removed')}>−{del}</span>
+          <span className={cn(STAT_COL_CLASS, 'text-github-addition')}>+{add}</span>
+          <span className={cn(STAT_COL_CLASS, 'text-github-deletion')}>−{del}</span>
         </>
       )}
     </span>

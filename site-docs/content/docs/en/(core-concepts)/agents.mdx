@@ -1,12 +1,34 @@
 ---
 title: Agent Config
-description: Configure Lody agent configs for Claude Code, Codex, Claude-compatible endpoints, DeepSeek, Kimi, GLM, MiniMax, Qwen, and other runtimes.
+description: Configure Codex, Claude Code, Kimi Code, GLM over Claude Code, DeepSeek Harness, Pi, and other coding agents in Lody's shared GUI and remote workflow.
 ---
 
 # Agent Config
 
-Agent Config is Lody's abstraction for different coding CLIs. Each config consists of a CLI type
-(Claude Code / Codex) plus environment variables.
+Agent Config connects a coding runtime to its settings, authentication, and execution machine.
+Lody supports built-in integrations, managed runtimes, provider presets, registry runtimes, and
+custom ACP commands. They share a workspace interface without promising identical capabilities.
+
+For a product overview, see [One GUI for Your Coding Agents](/coding-agent-gui/) and
+[Remote Control for Your Coding Agents](/coding-agent-remote-control/).
+
+## Choose an Integration
+
+| Agent or provider | Setup in Lody | Important distinction |
+| --- | --- | --- |
+| Codex | Select Codex and use the supported machine-side login or configuration | Models and controls depend on the runtime and account |
+| Claude Code | Select Claude Code and configure its authentication | Lody discovers supported commands and modes from the config |
+| Kimi Code | Select the managed Kimi Code provider and sign in | Native Kimi Code is separate from Kimi over a Claude-compatible endpoint |
+| GLM over Claude Code | Use the GLM preset with the matching endpoint and API key | A provider preset running through Claude Code, not a native GLM agent |
+| DeepSeek Harness | Select the built-in ACP provider and configure its endpoint and token | Separate from DeepSeek over Claude Code; see the delegation limitation below |
+| Pi | Select the built-in Pi provider on a supported machine | Managed runtime; model and extension support depend on the pinned runtime |
+
+The selected machine must have the runtime's credentials and dependencies. Remote work also needs
+that machine awake and online with the Lody CLI running. This list describes integration paths,
+not an end-to-end certification of every model, mode, extension, or mobile client. See
+[Mobile Access](/docs/mobile/) and [CLI Runtime Types](/docs/cli-runtimes/) for requirements.
+
+## Authentication
 
 By default, Lody uses the Claude Code / Codex subscription login from the machine running the Lody CLI.
 You can also configure non-subscription setups through environment variables.
@@ -14,7 +36,7 @@ You can also configure non-subscription setups through environment variables.
 For non-subscription logins, go to **Settings** -> **Agent Config**, click the plus icon to
 create a new config, and choose **Claude** for Claude-compatible endpoints.
 
-<img src="/_docs-assets/agent-config-select.png" width="200px" />
+<img src="/_docs-assets/agent-config-select.png" width="200px" alt="Agent Config runtime picker" />
 
 Below are official and third-party API key setup examples. Copy them into environment variables and
 replace the placeholders with your real API keys.
@@ -86,6 +108,17 @@ ANTHROPIC_API_KEY=sk-kimi-xxxxxxxxxxxxxxxxxxxxxxxxxx  # Generated API key
 ```
 
 [Reference docs](https://www.kimi.com/code/docs/en/more/third-party-agents.html)
+
+## Pi
+
+Lody provides Pi through a managed, checksummed ACP runtime on supported machines. Configure its
+credentials on the execution machine or through the provider's environment, then select the Pi
+config for a conversation. Available models and modes come from the runtime.
+
+Existing legacy Pi configs may offer an explicit migration when the machine supports built-in Pi.
+Migration preserves the provider configuration but does not convert legacy native session IDs;
+start a new chat after migrating. Extension controls require a compatible runtime and machine
+capability. Do not assume arbitrary Pi extensions or terminal interfaces work in Lody.
 
 ## Bub
 

@@ -10,7 +10,6 @@ import { getAuthResponseError, type AuthResponseError } from './auth-response';
 import { deferredPostHog } from './deferred-posthog';
 import { registerAuthClient } from './auth-client-singleton';
 import { replaceAppWindowLocation } from './app-location';
-import { clearLastAppRoutePath } from './last-app-route';
 import { setLoginHintCookie } from './login-hint-cookie';
 import { clearPreferredWorkspaceSlug } from './workspace';
 
@@ -48,7 +47,6 @@ const invalidateAuthSessionIntent = (authClient: LodyAuthClient): void => {
 export const clearLocalAuthState = () => {
   clearStoredAuthToken();
   clearAuthBootstrapSnapshot();
-  clearLastAppRoutePath();
   clearPreferredWorkspaceSlug();
   if (typeof window !== 'undefined') {
     try {

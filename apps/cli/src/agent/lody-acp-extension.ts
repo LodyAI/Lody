@@ -10,6 +10,10 @@ import type {
 } from '@agentclientprotocol/sdk';
 import {
   LODY_EXTENSION_METHODS,
+  LODY_SUBAGENT_EVENT_METHOD,
+  isLodySubagentEvent,
+  type LodySubagentEvent,
+  MAX_USAGE_SCOPE_ID_LENGTH,
   normalizeLodyExtensionMethod,
   type LodyExtensionCapabilities,
   type RateLimitsSnapshot,
@@ -46,6 +50,8 @@ const VersionOneSchema = z.object({ version: z.literal(1) });
 const GoalActionSchema = z.enum(['set', 'pause', 'resume', 'clear']);
 const LodyCapabilitiesSchema = z
   .object({
+    sessionTitle: VersionOneSchema.optional().catch(undefined),
+    subagentEvents: VersionOneSchema.optional().catch(undefined),
     usage: VersionOneSchema.optional(),
     rateLimits: VersionOneSchema.extend({ query: z.literal(true).optional() }).optional(),
     forkAtTurn: VersionOneSchema.optional(),
@@ -155,6 +161,7 @@ const LEGACY_METHODS = {
 } as const;
 
 export type LodyExtensionEvent =
+  | { readonly type: 'subagent'; readonly event: LodySubagentEvent }
   | { readonly type: 'usage'; readonly update: SessionUsageUpdate; readonly accountingId?: string }
   | { readonly type: 'rateLimits'; readonly snapshot: RateLimitsSnapshot }
   | {
@@ -211,6 +218,23 @@ export function parseLodyMessagePhase(
   return legacy.success ? legacy.data.phase : undefined;
 }
 
+const UsageScopeIdSchema = z.string().min(1).max(MAX_USAGE_SCOPE_ID_LENGTH);
+
+// A scoped update is cumulative only within its scope, so each scope gets its own
+// accounting identity. Unscoped adapters retain their session-lifetime identity.
+function parseUsageScopeId(params: Record<string, unknown>, provider: string): string | null {
+  const scoped = z
+    .object({ _meta: z.object({ lody: z.object({ usageScopeId: UsageScopeIdSchema }) }) })
+    .safeParse(params);
+  if (scoped.success) return scoped.data._meta.lody.usageScopeId;
+  // One-release compatibility for Codex adapters predating Core usage scopes.
+  if (provider !== 'codex') return null;
+  const legacy = z
+    .object({ _meta: z.object({ codex: z.object({ usageTurnId: UsageScopeIdSchema }) }) })
+    .safeParse(params);
+  return legacy.success ? legacy.data._meta.codex.usageTurnId : null;
+}
+
 export function parseLodyExtensionMessage(args: {
   method: string;
   params: Record<string, unknown>;
@@ -218,21 +242,19 @@ export function parseLodyExtensionMessage(args: {
   provider: string;
 }): LodyExtensionEvent | null {
   const method = normalizeLodyExtensionMethod(args.method);
+  if (method === LODY_SUBAGENT_EVENT_METHOD) {
+    return isLodySubagentEvent(args.params) && args.params.sessionId === args.sessionId
+      ? { type: 'subagent', event: args.params }
+      : null;
+  }
   if (method === LODY_EXTENSION_METHODS.sessionUsageUpdate) {
     const update = SessionUsageUpdateSchema.parse(args.params);
-    // Codex turn totals use a stable per-turn identity; unmarked adapters retain their scope.
-    const scope = z
-      .object({
-        _meta: z.object({ codex: z.object({ usageTurnId: z.string().min(1).max(256) }) }),
-      })
-      .safeParse(args.params);
+    const scopeId = parseUsageScopeId(args.params, args.provider);
     return {
       type: 'usage',
       update,
-      ...(args.provider === 'codex' && scope.success
-        ? {
-            accountingId: `${args.sessionId}:turn:${encodeURIComponent(scope.data._meta.codex.usageTurnId)}`,
-          }
+      ...(scopeId
+        ? { accountingId: `${args.sessionId}:scope:${encodeURIComponent(scopeId)}` }
         : {}),
     };
   }

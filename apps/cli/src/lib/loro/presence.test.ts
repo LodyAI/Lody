@@ -20,6 +20,7 @@ import { CliPresenceRuntime } from './presence';
 const createLogger = (): Logger =>
   ({
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),

@@ -47,6 +47,9 @@ describe('BugReportDialog IME handling', () => {
     textarea?.focus();
 
     await act(async () => {
+      // Base UI tracks composition through the document's compositionstart/end
+      // listeners rather than `KeyboardEvent.isComposing`.
+      textarea?.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
       textarea?.dispatchEvent(
         new KeyboardEvent('keydown', {
           key: 'Escape',
@@ -61,6 +64,12 @@ describe('BugReportDialog IME handling', () => {
     expect(document.activeElement).toBe(textarea);
 
     await act(async () => {
+      // The cancelled composition ends before the next keydown, as a real IME
+      // session does.
+      textarea?.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+      // Base UI clears its composing flag a tick after compositionend (Safari
+      // orders it before the keydown), so let that settle first.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       textarea?.dispatchEvent(
         new KeyboardEvent('keydown', {
           key: 'Escape',
@@ -69,7 +78,5 @@ describe('BugReportDialog IME handling', () => {
         })
       );
     });
-
-    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

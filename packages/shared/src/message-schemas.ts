@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
 import {
+  isLodySubagentSnapshot,
+  isLodySubagentProgress,
+  type LodySubagentSnapshot,
+  type LodySubagentProgress,
+} from 'acp-extension-core';
+import {
   PI_EXTENSION_PATH_MAX_LENGTH,
   PI_EXTENSIONS_MAX_SELECTIONS,
   SESSION_FILE_MAX_COUNT,
@@ -14,6 +20,7 @@ import {
 } from './ai';
 import { SESSION_GOAL_ACTIONS } from './goal';
 import type { AgentRoleId, SessionId } from './ids';
+import type { ProjectRef } from './project';
 import { MAX_MESSAGE_TEXT_SPAN_MARK_LENGTH, MESSAGE_TEXT_SPAN_KINDS } from './message-text-spans';
 import { RpcSecretPublicKeySchema } from './rpc-secret';
 import { LodyOperationIdSchema, LodyOperationCompletionSchema } from './session-orchestration';
@@ -1092,6 +1099,16 @@ export const MachineStatusResponseSchema = z
   })
   .strict();
 
+export const MachinePreviewControlResponseSchema = z
+  .object({
+    type: z.literal('machine/preview-control_response'),
+    machineId: MachineIdSchema,
+    success: z.boolean(),
+    runtimeNonce: z.string().uuid().optional(),
+    error: z.string().optional(),
+  })
+  .strict();
+
 export const MachinePingRequestSchema = z
   .object({
     type: z.literal('machine/ping'),
@@ -1231,6 +1248,7 @@ const AcpCapabilityCacheEntrySchema = z
       .optional(),
     sessionFork: z.boolean().optional(),
     acknowledgedSteer: z.boolean().optional(),
+    sessionTitle: z.boolean().optional(),
     goalActions: z.array(z.enum(SESSION_GOAL_ACTIONS)).optional(),
     sessionForkWorktree: z.boolean().optional(),
     fetchedAt: z.number(),
@@ -1345,6 +1363,7 @@ export const MachineAcpCapabilitiesRefreshRequestSchema = z
     machineId: MachineIdSchema,
     workspaceId: WorkspaceIdSchema,
     configId: AgentConfigIdSchema,
+    force: z.boolean().optional(),
   })
   .strict();
 
@@ -1794,9 +1813,7 @@ const PreviewCandidateSourceSchema = z
 
 const PreviewErrorCodeSchema = z.enum([
   'host_not_loopback',
-  'host_not_private',
   'host_prohibited',
-  'target_resolution_failed',
   'target_changed',
   'user_confirmation_required',
   'invalid_port',
@@ -1806,15 +1823,11 @@ const PreviewErrorCodeSchema = z.enum([
   'session_archived',
   'port_not_listening',
   'local_server_unreachable',
-  'process_not_owned_by_session',
   'preview_already_active',
   'resource_limit_exceeded',
-  'preview_expired',
-  'preview_idle_timeout',
   'grant_denied',
   'tunnel_not_configured',
   'tunnel_creation_failed',
-  'cloud_authorization_failed',
   'internal_error',
 ]);
 
@@ -1851,47 +1864,19 @@ const PreviewConnectionErrorSchema = z
   })
   .strict();
 
-const PreviewResourceLimitsSchema = z
+export const PreviewConnectionSchema = z
   .object({
-    maxRequestBodyBytes: z.number().int().positive(),
-    maxResponseBodyBytes: z.number().int().positive(),
-    maxRequestDurationMs: z.number().int().positive(),
-  })
-  .strict();
-
-const PreviewResourceUsageSchema = z
-  .object({
-    httpRequestCount: z.number().int().nonnegative().optional(),
-    webSocketOpenCount: z.number().int().nonnegative().optional(),
-    requestBytesIn: z.number().int().nonnegative().optional(),
-    responseBytesOut: z.number().int().nonnegative().optional(),
-    limitExceededCount: z.number().int().nonnegative().optional(),
-    lastLimitExceededAt: z.number().int().nonnegative().optional(),
-    lastCloseReason: z.string().optional(),
-  })
-  .strict();
-
-const PreviewConnectionSchema = z
-  .object({
-    status: z.enum(['idle', 'creating', 'active', 'failed', 'revoked', 'expired']),
-    grantId: z.string().optional(),
+    status: z.enum(['creating', 'active', 'closed', 'failed']),
+    endpointId: z.string().optional(),
     publicUrl: z.string().url().optional(),
-    tunnelId: z.string().optional(),
     target: PreviewTargetSchema.optional(),
-    viewerScope: z
-      .object({ type: z.literal('workspace') })
-      .strict()
-      .optional(),
     approvedByUserId: z.string().optional(),
     createdAt: z.number().int().nonnegative().optional(),
     updatedAt: z.number().int().nonnegative().optional(),
-    leaseExpiresAt: z.number().int().nonnegative().optional(),
     idleTimeoutMs: z.number().int().positive().optional(),
-    lastActiveAt: z.number().int().nonnegative().optional(),
-    revokedAt: z.number().int().nonnegative().optional(),
-    revokeReason: z.string().optional(),
-    resourceLimits: PreviewResourceLimitsSchema.optional(),
-    resourceUsage: PreviewResourceUsageSchema.optional(),
+    closedReason: z
+      .enum(['idle_timeout', 'revoked', 'session_ended', 'replaced', 'runtime_lost'])
+      .optional(),
     error: PreviewConnectionErrorSchema.optional(),
   })
   .strict();
@@ -1899,7 +1884,7 @@ const PreviewConnectionSchema = z
 const PreviewEndpointSchema = z
   .object({
     endpointId: z.string().trim().min(1),
-    kind: z.enum(['local-proxy', 'cloud-gateway']),
+    kind: z.enum(['local-proxy', 'quick-tunnel']),
     viewerUrl: z.string().url(),
     shareUrl: z.string().url().optional(),
     target: PreviewTargetSchema,
@@ -1953,7 +1938,7 @@ export const SessionPreviewCreateRequestSchema = z
         confirmedAt: z.number().int().nonnegative(),
       })
       .strict(),
-    replaceExisting: z.boolean().optional(),
+    restart: z.boolean().optional(),
   })
   .strict();
 
@@ -1963,6 +1948,29 @@ export const SessionPreviewCreateResponseSchema = z
     sessionId: SessionIdSchema,
     success: z.boolean(),
     connection: PreviewConnectionSchema.optional(),
+    error: PreviewErrorCodeSchema.optional(),
+    message: z.string().optional(),
+  })
+  .strict();
+
+export const SessionPreviewStatusRequestSchema = z
+  .object({
+    type: z.literal('session/preview-status'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    requestedByUserId: z.string().trim().min(1),
+    renewEndpointId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
+export const SessionPreviewStatusResponseSchema = z
+  .object({
+    type: z.literal('session/preview-status_response'),
+    sessionId: SessionIdSchema,
+    success: z.boolean(),
+    connection: PreviewConnectionSchema.optional(),
+    expiresAt: z.number().int().nonnegative().optional(),
     error: PreviewErrorCodeSchema.optional(),
     message: z.string().optional(),
   })
@@ -2032,6 +2040,7 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   PreviewCandidateReportRequestSchema,
   SessionPreviewCreateRequestSchema,
   SessionPreviewRevokeRequestSchema,
+  SessionPreviewStatusRequestSchema,
 ]);
 
 export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
@@ -2059,6 +2068,7 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   PreviewCandidateReportResponseSchema,
   SessionPreviewCreateResponseSchema,
   SessionPreviewRevokeResponseSchema,
+  SessionPreviewStatusResponseSchema,
 ]);
 
 export const LocalProjectAddRequestSchema = z
@@ -2242,8 +2252,9 @@ export const LocalProjectSetWorktreeCleanupRequestSchema = z
   })
   .strict();
 
-const LocalProjectHistoryProviderSchema = z
+export const LocalProjectHistoryProviderSchema = z
   .object({
+    agentConfigId: AgentConfigIdSchema.refine((id) => id.trim().length > 0).optional(),
     cliType: AgentConfigCliTypeSchema,
     agentType: z.string().trim().min(1),
   })
@@ -3160,6 +3171,61 @@ export const TaskProposalMetaSchema = z.object({
   proposedBy: MessageItemActorSchema.optional(),
 });
 
+const proposalTimeOfDay = {
+  hour: z.number().int().min(0).max(23),
+  minute: z.number().int().min(0).max(59),
+  timeZone: z.string().min(1).max(100).optional(),
+};
+export const ScheduleProposalRuleSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('manual') }).strict(),
+  z.object({ kind: z.literal('minutes'), every: z.number().int().min(1).max(59) }).strict(),
+  z.object({ kind: z.literal('hours'), every: z.number().int().min(1).max(23) }).strict(),
+  z.object({ kind: z.literal('daily'), ...proposalTimeOfDay }).strict(),
+  z.object({ kind: z.literal('weekdays'), ...proposalTimeOfDay }).strict(),
+  z
+    .object({
+      kind: z.literal('weekly'),
+      weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+      ...proposalTimeOfDay,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('monthly'),
+      days: z.array(z.number().int().min(1).max(31)).min(1).max(31),
+      ...proposalTimeOfDay,
+    })
+    .strict(),
+  z.object({ kind: z.literal('once'), at: z.string().datetime({ offset: true }) }).strict(),
+]);
+
+export const ScheduleProposalDestinationSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('new_session') }).strict(),
+  z.object({ kind: z.literal('own_session') }).strict(),
+  z.object({ kind: z.literal('existing_session'), sessionId: z.string().min(1) }).strict(),
+]);
+
+export const ScheduleProposalTargetSchema = z
+  .object({
+    agentConfigId: z.string().min(1).optional(),
+    agentRoleId: z.string().min(1).optional(),
+    machineId: z.string().min(1).optional(),
+    project: ProjectRefSchema.transform((value) => value as ProjectRef).optional(),
+  })
+  .strict();
+
+export const ScheduleProposalMetaSchema = z.object({
+  proposalId: z.string().trim().min(1),
+  title: z.string().trim().min(1).max(200),
+  prompt: z.string().min(1).max(32768),
+  rule: ScheduleProposalRuleSchema,
+  destination: ScheduleProposalDestinationSchema.optional(),
+  target: ScheduleProposalTargetSchema.optional(),
+  outcome: z.enum(['created', 'dismissed']).optional(),
+  scheduleId: z.string().optional(),
+  proposedBy: MessageItemActorSchema.optional(),
+});
+
 // Reason codes for chat_failed system notice
 export const ChatFailedReasonSchema = z.enum([
   'session_archived',
@@ -3220,13 +3286,47 @@ export const ToolCallMessageSchema = z.object({
 });
 
 // Non-system notice MessageContent discriminated union
+const SubagentItemIdentityShape = {
+  nativeTurnId: z.string().optional(),
+  messageId: z.string().optional(),
+};
 export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('text'),
     text: z.string(),
     spans: z.array(MessageTextSpanSchema).optional(),
   }),
-  SubagentTaskPayloadSchema.extend({ type: z.literal('subagent_task') }),
+  SubagentTaskPayloadSchema.extend({
+    type: z.literal('subagent_task'),
+    run: z
+      .object({
+        sessionId: z.string().min(1),
+        snapshot: z.custom<LodySubagentSnapshot>(isLodySubagentSnapshot),
+        progress: z.custom<LodySubagentProgress>(isLodySubagentProgress).optional(),
+        items: z.array(
+          z.discriminatedUnion('type', [
+            z.object({
+              ...SubagentItemIdentityShape,
+              type: z.literal('text'),
+              text: z.string(),
+              spans: z.array(MessageTextSpanSchema).optional(),
+            }),
+            z.object({
+              ...SubagentItemIdentityShape,
+              type: z.literal('thought'),
+              text: z.string(),
+            }),
+            z.object({
+              ...SubagentItemIdentityShape,
+              type: z.literal('plan'),
+              entries: z.array(PlanEntrySchema),
+            }),
+            ToolCallMessageSchema.extend(SubagentItemIdentityShape),
+          ])
+        ),
+      })
+      .optional(),
+  }),
   SessionCommentReferenceInputBlockSchema,
   SessionVisualAnnotationReferenceInputBlockSchema,
   SessionImageInputBlockSchema,
@@ -3349,6 +3449,11 @@ export const SystemNoticeSchema = z.discriminatedUnion('name', [
     type: z.literal('system_notice'),
     name: z.literal('task_proposal'),
     meta: TaskProposalMetaSchema.optional(),
+  }),
+  z.object({
+    type: z.literal('system_notice'),
+    name: z.literal('schedule_proposal'),
+    meta: ScheduleProposalMetaSchema.optional(),
   }),
   z.object({
     type: z.literal('system_notice'),

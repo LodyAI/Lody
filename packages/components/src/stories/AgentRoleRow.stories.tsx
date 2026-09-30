@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import * as stylex from '@stylexjs/stylex';
 import {
   AGENT_ROLE_VERSION,
   type AgentConfigId,
@@ -8,6 +9,7 @@ import {
   type MachineId,
 } from '@lody/shared';
 import { AgentRoleRow } from '@/components/settings/agent-roles-setting';
+import { settingsSurface } from '@/components/settings/surface';
 
 const base: AgentRole = {
   v: AGENT_ROLE_VERSION,
@@ -45,7 +47,10 @@ const meta = {
   decorators: [
     (Story) => (
       <div className="mx-auto w-[640px] p-4">
-        <Story />
+        {/* The row is a line of its machine's card; the list draws the card. */}
+        <div {...stylex.props(settingsSurface.card)}>
+          <Story />
+        </div>
       </div>
     ),
   ],
@@ -71,7 +76,7 @@ export const WithPromptPrefix: Story = {
 
 /**
  * A machine that is simply asleep. The row says nothing about it: in the list
- * these rows sit under their machine's pill, which carries that status.
+ * these rows sit under their machine's heading, which carries that status.
  */
 export const MachineOffline: Story = {
   args: { availability: { kind: 'unavailable', reason: 'machine_offline' } },

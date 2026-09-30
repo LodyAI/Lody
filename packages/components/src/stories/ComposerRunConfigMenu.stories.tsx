@@ -15,7 +15,9 @@ import {
 } from '@lody/shared';
 
 import { agentConfigMetaCacheAtom } from '@/atoms/doc-meta';
+import { ChatLandingView } from '@/components/chat/chat-landing-view';
 import {
+  DesktopMachineMenu,
   DesktopPermissionModeButton,
   DesktopRunConfigMenu,
 } from '@/components/sessions/desktop-run-config-menu';
@@ -32,13 +34,9 @@ import {
 } from '@/lib/composer-agent-roles';
 
 /**
- * The desktop composer's run-config dropdown with its second tab.
- *
- * **Detailed** is the knob-by-knob menu. **Roles** lists the Agent Roles bound
- * to the machine this chat will start on — one packaged answer to the same
- * questions — beside a pane stating what the highlighted Role actually runs,
- * because picking one authorizes exactly that. The footer names a Role only
- * while every value it pins is still what will run.
+ * The desktop composer's run-config dropdown. A Role row sits above the
+ * individual settings and opens the roles available in this scope; the footer
+ * names a Role only while every value it pins is still what will run.
  */
 const machineId = 'machine-storybook' as MachineId;
 const codexId = 'agent-codex' as AgentConfigId;
@@ -65,6 +63,33 @@ const claude: AgentConfigMeta = {
 };
 
 const agents: AgentConfigMeta[] = [codex, claude];
+
+const recentRuns = [
+  {
+    id: 'recent-codex',
+    agent: codex,
+    modelLabel: '5.4',
+    reasoningLabel: 'High',
+    planOn: false,
+    fastOn: false,
+  },
+  {
+    id: 'recent-codex-mini',
+    agent: codex,
+    modelLabel: '5.4-mini',
+    reasoningLabel: 'High',
+    planOn: false,
+    fastOn: false,
+  },
+  {
+    id: 'recent-claude',
+    agent: claude,
+    modelLabel: 'Default',
+    reasoningLabel: 'High',
+    planOn: false,
+    fastOn: false,
+  },
+];
 
 const modelOptions: AcpSessionSelectOption[] = [
   { value: 'gpt-5.5', label: '5.5', description: 'Latest frontier Codex model' },
@@ -123,6 +148,17 @@ const selectors: AcpConfigOptionSelector[] = [
     options: [
       { value: 'default', label: 'Default' },
       { value: 'plan', label: 'Plan' },
+    ],
+  },
+  {
+    type: 'select',
+    configId: 'fast-mode',
+    category: 'fast-mode',
+    label: 'Fast mode',
+    currentValue: 'off',
+    options: [
+      { value: 'off', label: 'Off' },
+      { value: 'on', label: 'On' },
     ],
   },
 ];
@@ -197,6 +233,23 @@ const roleItems: ComposerAgentRoleItem[] = [
   },
 ];
 
+const manyRoleItems: ComposerAgentRoleItem[] = [
+  ...roleItems,
+  ...Array.from({ length: 12 }, (_, index) => ({
+    role: makeRole({
+      id: `role-extra-${index}` as AgentRoleId,
+      name: `Workspace role ${index + 1}`,
+      emoji: '🧩',
+      promptPrefix:
+        'Inspect the request and repository context, explain any important constraints, ' +
+        'then make a focused change and verify the observable result. '.repeat(3),
+      runConfig: { modelId: 'gpt-5.4' },
+    }),
+    availability: { kind: 'available' as const },
+    agentConfig: codex,
+  })),
+];
+
 /* The menu calls `useOnlineMachines`, so it needs a platform in context. A
    local provider keeps the story offline; the agent pool is passed explicitly
    through `availableAgentConfigs` so it does not depend on machine presence. */
@@ -222,11 +275,15 @@ function StoryShell({
   items,
   initialRoleId = null,
   models = modelOptions,
+  landing = false,
+  existingSession = false,
 }: {
   items: ReadonlyArray<ComposerAgentRoleItem>;
   initialRoleId?: AgentRoleId | null;
   /** Overridden by the long-list story: what an agent provider may publish. */
   models?: AcpSessionSelectOption[];
+  landing?: boolean;
+  existingSession?: boolean;
 }) {
   const store = useMemo(() => {
     const s = createStore();
@@ -279,66 +336,96 @@ function StoryShell({
       }).source
     );
 
+  const footer = (
+    <>
+      <DesktopRunConfigMenu
+        agentSelection={agentSelection}
+        availableAgentConfigs={agents}
+        agentLocked={existingSession}
+        showAgentNameInTrigger={!landing}
+        onAgentConfigChange={setAgentSelection}
+        modelOptions={models}
+        selectedModelId={model}
+        onModelChange={setModel}
+        configOptionSelectors={selectors}
+        configOptionValues={values}
+        onConfigOptionChange={(configId, value) =>
+          setValues((prev) => ({ ...prev, [configId]: value }))
+        }
+        modeOptions={modeOptions}
+        selectedModeId={mode}
+        recentRunConfigs={landing ? recentRuns : undefined}
+        onRecentRunConfigSelect={landing ? fn() : undefined}
+        agentRoles={{
+          items,
+          selectedRoleId: selectedRole?.id ?? null,
+          onSelect: (roleId) => {
+            if (roleId === null) {
+              setClearedRoleId(matchedRole?.id ?? null);
+              return;
+            }
+            setClearedRoleId(null);
+            const role = items.find((item) => item.role.id === roleId)?.role;
+            if (!role) return;
+            setAgentSelection({
+              agentId: role.agentConfigId,
+              machineId: role.machineId,
+            });
+            setModel(role.runConfig.modelId ?? null);
+            setMode(role.runConfig.modeId ?? null);
+            setValues((prev) => ({ ...prev, ...(role.runConfig.configOptionValues ?? {}) }));
+          },
+          onCreate: fn(),
+          onEdit: existingSession ? undefined : fn(),
+        }}
+      />
+      {/* Mirrors the composer footer: behind a Role that pins permission,
+          this button is gone and the Role's face states the value. */}
+      {permissionPinnedByRole ? null : (
+        <DesktopPermissionModeButton
+          modeOptions={modeOptions}
+          selectedModeId={mode}
+          onModeChange={setMode}
+          configOptionSelectors={selectors}
+          configOptionValues={values}
+          onConfigOptionChange={(configId, value) =>
+            setValues((prev) => ({ ...prev, [configId]: value }))
+          }
+        />
+      )}
+    </>
+  );
+
   return (
     <PlatformContext.Provider value={storyPlatform}>
       <Provider store={store}>
-        <div className="flex min-h-dvh items-end bg-background p-8">
-          {/* Mimic the composer footer row the button lives in. */}
-          <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
-            <DesktopRunConfigMenu
-              agentSelection={agentSelection}
-              availableAgentConfigs={agents}
-              showAgentNameInTrigger
-              onAgentConfigChange={setAgentSelection}
-              modelOptions={models}
-              selectedModelId={model}
-              onModelChange={setModel}
-              configOptionSelectors={selectors}
-              configOptionValues={values}
-              onConfigOptionChange={(configId, value) =>
-                setValues((prev) => ({ ...prev, [configId]: value }))
+        {landing ? (
+          <div className="h-dvh">
+            <ChatLandingView
+              tone="light"
+              title="今天想做点什么？"
+              promptValue=""
+              onPromptChange={fn()}
+              promptPlaceholder="按 / 使用命令，@ 添加提及。"
+              onAttachmentAddClick={fn()}
+              topSelector={
+                <DesktopMachineMenu
+                  value={machineId}
+                  visibleLocalMachineId={machineId}
+                  options={[{ value: machineId, label: 'Mac Studio' }]}
+                  onChange={fn()}
+                />
               }
-              modeOptions={modeOptions}
-              selectedModeId={mode}
-              agentRoles={{
-                items,
-                selectedRoleId: selectedRole?.id ?? null,
-                onSelect: (roleId) => {
-                  if (roleId === null) {
-                    setClearedRoleId(matchedRole?.id ?? null);
-                    return;
-                  }
-                  setClearedRoleId(null);
-                  const role = items.find((item) => item.role.id === roleId)?.role;
-                  if (!role) return;
-                  setAgentSelection({
-                    agentId: role.agentConfigId,
-                    machineId: role.machineId,
-                  });
-                  setModel(role.runConfig.modelId ?? null);
-                  setMode(role.runConfig.modeId ?? null);
-                  setValues((prev) => ({ ...prev, ...(role.runConfig.configOptionValues ?? {}) }));
-                },
-                onCreate: fn(),
-                onEdit: fn(),
-              }}
+              footerSelector={footer}
             />
-            {/* Mirrors the composer footer: behind a Role that pins permission,
-                this button is gone and the Role's face states the value. */}
-            {permissionPinnedByRole ? null : (
-              <DesktopPermissionModeButton
-                modeOptions={modeOptions}
-                selectedModeId={mode}
-                onModeChange={setMode}
-                configOptionSelectors={selectors}
-                configOptionValues={values}
-                onConfigOptionChange={(configId, value) =>
-                  setValues((prev) => ({ ...prev, [configId]: value }))
-                }
-              />
-            )}
           </div>
-        </div>
+        ) : (
+          <div className="flex min-h-dvh items-end bg-background p-8">
+            <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
+              {footer}
+            </div>
+          </div>
+        )}
       </Provider>
     </PlatformContext.Provider>
   );
@@ -355,13 +442,16 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 const openMenu = async (canvasElement: HTMLElement) => {
-  const canvas = within(canvasElement);
-  await userEvent.click(canvas.getByRole('button', { name: 'Run configuration' }));
+  const trigger = canvasElement.querySelector<HTMLButtonElement>('[data-run-config-trigger]');
+  if (!trigger) throw new Error('Run configuration trigger is missing');
+  await userEvent.click(trigger);
 };
 
 const openRoleSubmenu = async (canvasElement: HTMLElement) => {
   await openMenu(canvasElement);
-  await userEvent.hover(await within(document.body).findByText('Role'));
+  await userEvent.hover(
+    await within(document.body).findByRole('menuitem', { name: /^(?:Role|角色)/ })
+  );
 };
 
 /** The footer button while the composer is configured knob by knob. */
@@ -376,6 +466,49 @@ export const Menu: Story = {
 
 /** The Role submenu: recognise the Role on the left, read what it runs on the right. */
 export const RoleSubmenu: Story = {
+  play: async ({ canvasElement }) => {
+    await openRoleSubmenu(canvasElement);
+  },
+};
+
+/** The production landing view docks the composer at the bottom of the page. */
+export const LandingRoleSubmenu: Story = {
+  args: { landing: true },
+  play: async ({ canvasElement }) => {
+    await openRoleSubmenu(canvasElement);
+  },
+};
+
+/** The list and the preview scroll separately when the machine has many Roles. */
+export const LandingManyRoles: Story = {
+  args: { landing: true, items: manyRoleItems },
+  play: async ({ canvasElement }) => {
+    await openRoleSubmenu(canvasElement);
+  },
+};
+
+/** The empty Role row is a create action, not a submenu. */
+export const LandingNoRoles: Story = {
+  args: { landing: true, items: [] },
+  play: async ({ canvasElement }) => {
+    await openMenu(canvasElement);
+  },
+};
+
+/** A selected Role changes the docked composer's face and may hide permission. */
+export const LandingRoleSelected: Story = {
+  args: { landing: true, initialRoleId: 'role-reviewer' as AgentRoleId },
+  play: async ({ canvasElement }) => {
+    await openRoleSubmenu(canvasElement);
+  },
+};
+
+/** Existing sessions keep their Agent and only offer Roles for that binding. */
+export const ExistingSessionRoles: Story = {
+  args: {
+    existingSession: true,
+    items: roleItems.filter((item) => item.role.agentConfigId === codexId),
+  },
   play: async ({ canvasElement }) => {
     await openRoleSubmenu(canvasElement);
   },

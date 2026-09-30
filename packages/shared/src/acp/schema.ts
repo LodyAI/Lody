@@ -10,6 +10,7 @@ import type {
   ToolCallUpdate,
 } from '@agentclientprotocol/sdk';
 import { z } from 'zod';
+import { isLodySubagentEvent, type LodySubagentEvent } from 'acp-extension-core';
 
 const zMeta = z.record(z.string(), z.unknown()).nullish();
 
@@ -154,6 +155,10 @@ const zContentChunk = withMeta({
 });
 
 export const zSessionUpdate = z.discriminatedUnion('sessionUpdate', [
+  withMeta({
+    sessionUpdate: z.literal('subagent_event'),
+    event: z.custom<LodySubagentEvent>(isLodySubagentEvent),
+  }),
   zContentChunk.extend({ sessionUpdate: z.literal('user_message_chunk') }),
   zContentChunk.extend({ sessionUpdate: z.literal('agent_message_chunk') }),
   zContentChunk.extend({ sessionUpdate: z.literal('agent_thought_chunk') }),
@@ -183,8 +188,16 @@ export const zSessionNotification = withMeta({
   update: zSessionUpdate,
 });
 
-export type AcpSessionNotification = SessionNotification;
-export type AcpSessionUpdate = SessionUpdate;
+export type AcpSessionUpdate =
+  | SessionUpdate
+  | {
+      sessionUpdate: 'subagent_event';
+      event: LodySubagentEvent;
+      _meta?: Record<string, unknown> | null;
+    };
+export type AcpSessionNotification = Omit<SessionNotification, 'update'> & {
+  update: AcpSessionUpdate;
+};
 export type AcpToolCall = ToolCall;
 export type AcpToolCallUpdate = ToolCallUpdate;
 export type AcpContentBlock = ContentBlock;

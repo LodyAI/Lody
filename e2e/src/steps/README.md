@@ -12,6 +12,7 @@
 | `mcp-catalog.steps.ts`               | Carries an explicit MCP selection through catalog, composer, and dispatch                        |
 | `project-lifecycle.steps.ts`         | Adds, selects, removes, and verifies a synthetic local project                                   |
 | `project-reopen.steps.ts`            | Switches between two projects and rejects a duplicate folder registration                        |
+| `session-follow-up.steps.ts`         | Sends follow-ups after completed Turns and proves ordered single dispatch                        |
 | `session-queue.steps.ts`             | Removes one queued follow-up and proves only the retained message dispatches                     |
 | `session-management.steps.ts`        | Exercises metadata, Archive restore, history, and deletion                                       |
 | `session-read-state.steps.ts`        | Exercises unread marking, navigation-based clearing, and UI cleanup                              |

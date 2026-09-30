@@ -51,6 +51,8 @@ export function useSessionAcpSelectorContext({
 
   return {
     ...selectorOptions,
+    /** The memoized options object itself, for callers that pass it on whole. */
+    selectorOptions,
     availableCommands,
     machineFlockRows,
     sessionMachine,

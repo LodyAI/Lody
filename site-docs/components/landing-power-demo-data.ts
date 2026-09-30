@@ -3,22 +3,22 @@
  * Fixed timestamps / curves so SSR and client match (no Date.now / Math.random).
  */
 
+import type { PowerPrConversationItem, PowerPrData } from './landing-replica/power-pr';
 import type {
-  SettingsUsageCalendarData,
-  SettingsUsageDayData,
-  SettingsUsageRange,
-  SettingsUsageTimelineBucket,
-  SettingsUsageTimelineData,
-} from '@/components/settings/settings-data-cache';
-import type { StackedAreaBucket } from '@/components/settings/usage-stacked-area-chart';
-import type { PrTabViewData } from '@/components/sessions/pr-tab-view';
-import type {
-  GitHubCheckRun,
-  GitHubIssueComment,
-  GitHubPullRequestDetails,
-  GitHubReview,
-  GitHubUser,
-} from '@lody/shared';
+  StackedAreaBucket,
+  UsageCalendar,
+  UsageCalendarDay,
+  UsageDayDetail,
+  UsageRange,
+  UsageTimeline,
+  UsageTimelineBucket,
+} from './landing-replica/power-usage';
+
+/** Localized axis labels the demo data carries into the stacked-area charts. */
+export type LandingUsageDataLabels = {
+  weekdays: readonly string[];
+  today: string;
+};
 
 // ---- Stats (Settings → Usage) ----------------------------------------------
 //
@@ -341,10 +341,20 @@ function costForTokens(modelId: LandingUsageModelId, tokens: number): number {
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
-const LANDING_WORKSPACE_ID = 'landing-ws';
 const LANDING_CALENDAR_START_MS = Date.UTC(2025, 7, 24);
 const LANDING_CALENDAR_TODAY_MS = Date.UTC(2026, 7, 27);
 const LANDING_CALENDAR_DAY_COUNT = 53 * 7;
+const TODAY_LABEL = 'Today';
+const LANDING_WEEK_START_MS = Date.UTC(2026, 7, 17);
+const DAY_RANGE_SALT = 31;
+const WEEK_RANGE_SALT = 41;
+
+/** Swap the canonical English day labels for the page locale's. */
+function localizeLabel(label: string, labels: LandingUsageDataLabels): string {
+  if (label === TODAY_LABEL) return labels.today;
+  const weekday = (WEEKDAY_LABELS as readonly string[]).indexOf(label);
+  return weekday >= 0 ? (labels.weekdays[weekday] ?? label) : label;
+}
 
 function hourlySlices(source: DaySlice, salt: number): DaySlice[] {
   const weights = Array.from({ length: 24 }, (_, hour) => {
@@ -373,12 +383,12 @@ function hourlySlices(source: DaySlice, salt: number): DaySlice[] {
   });
 }
 
-function slicesForRange(range: SettingsUsageRange): DaySlice[] {
+function slicesForRange(range: UsageRange): DaySlice[] {
   if (range === 'week') {
     return LANDING_WEEK;
   }
   if (range === 'day') {
-    return hourlySlices(CANONICAL_WEEK[3]!, 31);
+    return hourlySlices(CANONICAL_WEEK[3]!, DAY_RANGE_SALT);
   }
 
   // Month uses its real 30-day window. All-time is compressed into 16 chart
@@ -393,7 +403,7 @@ function slicesForRange(range: SettingsUsageRange): DaySlice[] {
     const inactive = quietDay || activity < 0.2;
     const intensity = inactive ? 0 : (0.48 + activity * 1.02) * (activity > 0.88 ? 1.42 : 1);
     const daysAgo = days - 1 - i;
-    const label = daysAgo === 0 ? 'Today' : `-${daysAgo}d`;
+    const label = daysAgo === 0 ? TODAY_LABEL : `-${daysAgo}d`;
     const byMemberModel = {} as DaySlice['byMemberModel'];
     for (const member of LANDING_USAGE_MEMBERS) {
       const memberScale = intensity * (0.88 + dayNoise(MEMBER_ORDINAL[member.id], i, 11) * 0.28);
@@ -410,75 +420,62 @@ function slicesForRange(range: SettingsUsageRange): DaySlice[] {
   return out;
 }
 
-function memberCost(slice: DaySlice, memberId: LandingUsageMemberId): number {
-  return LANDING_USAGE_MODELS.reduce(
-    (sum, model) => sum + costForTokens(model.id, slice.byMemberModel[memberId][model.id] ?? 0),
-    0
-  );
-}
-
-function timelineBucket(slice: DaySlice, bucketStartMs: number): SettingsUsageTimelineBucket {
+function timelineBucket(
+  slice: DaySlice,
+  bucketStartMs: number,
+  labels: LandingUsageDataLabels
+): UsageTimelineBucket {
   const totals = dayTotals(slice);
   return {
     bucketStartMs,
-    bucketLabel: slice.label,
+    bucketLabel: localizeLabel(slice.label, labels),
     tokens: totals.tokens,
     costUSD: Math.round(totals.costUSD * 100) / 100,
     byModel: LANDING_USAGE_MODELS.map((model) => ({
       modelId: model.id,
       tokens: totals.byModel[model.id] ?? 0,
-      costUSD: Math.round(costForTokens(model.id, totals.byModel[model.id] ?? 0) * 100) / 100,
     })),
     byUser: LANDING_USAGE_MEMBERS.map((member) => ({
       userId: member.id,
       tokens: totals.byMember[member.id] ?? 0,
-      costUSD: Math.round(memberCost(slice, member.id) * 100) / 100,
     })),
   };
 }
 
 function scaleTimelineBucket(
-  bucket: SettingsUsageTimelineBucket,
+  bucket: UsageTimelineBucket,
   tokenScale: number,
   costScale: number
-): SettingsUsageTimelineBucket {
+): UsageTimelineBucket {
   return {
     ...bucket,
     tokens: bucket.tokens * tokenScale,
     costUSD: bucket.costUSD * costScale,
-    byModel: bucket.byModel.map((model) => ({
-      ...model,
-      tokens: model.tokens * tokenScale,
-      costUSD: model.costUSD * costScale,
-    })),
-    byUser: bucket.byUser.map((user) => ({
-      ...user,
-      tokens: user.tokens * tokenScale,
-      costUSD: user.costUSD * costScale,
-    })),
+    byModel: bucket.byModel.map((model) => ({ ...model, tokens: model.tokens * tokenScale })),
+    byUser: bucket.byUser.map((user) => ({ ...user, tokens: user.tokens * tokenScale })),
   };
 }
 
-function buildLandingUsageTimeline(range: SettingsUsageRange): SettingsUsageTimelineData {
+function buildLandingUsageTimeline(
+  range: UsageRange,
+  labels: LandingUsageDataLabels
+): UsageTimeline {
   let startMs: number;
   let endMs: number;
-  let bucketSizeMs: number;
-  let buckets: SettingsUsageTimelineBucket[];
+  let buckets: UsageTimelineBucket[];
 
   if (range === 'day') {
     startMs = LANDING_CALENDAR_TODAY_MS;
     endMs = startMs + DAY_MS;
-    bucketSizeMs = HOUR_MS;
-    buckets = hourlySlices(CANONICAL_WEEK[3]!, 31).map((slice, hour) =>
-      timelineBucket(slice, startMs + hour * HOUR_MS)
+    buckets = hourlySlices(CANONICAL_WEEK[3]!, DAY_RANGE_SALT).map((slice, hour) =>
+      timelineBucket(slice, startMs + hour * HOUR_MS, labels)
     );
   } else if (range === 'week') {
-    startMs = Date.UTC(2026, 7, 17);
+    startMs = LANDING_WEEK_START_MS;
     endMs = startMs + 7 * DAY_MS;
-    bucketSizeMs = HOUR_MS;
     buckets = LANDING_WEEK.flatMap((source, day) =>
-      hourlySlices(source, 41 + day).map((slice, hour) =>
-        timelineBucket(slice, startMs + day * DAY_MS + hour * HOUR_MS)
+      hourlySlices(source, WEEK_RANGE_SALT + day).map((slice, hour) =>
+        timelineBucket(slice, startMs + day * DAY_MS + hour * HOUR_MS, labels)
       )
     );
   } else {
@@ -486,8 +483,10 @@ function buildLandingUsageTimeline(range: SettingsUsageRange): SettingsUsageTime
     startMs =
       range === 'month' ? LANDING_CALENDAR_TODAY_MS - 29 * DAY_MS : LANDING_CALENDAR_START_MS;
     endMs = LANDING_CALENDAR_TODAY_MS + DAY_MS;
-    bucketSizeMs = Math.floor((endMs - startMs) / slices.length);
-    buckets = slices.map((slice, index) => timelineBucket(slice, startMs + index * bucketSizeMs));
+    const bucketSizeMs = Math.floor((endMs - startMs) / slices.length);
+    buckets = slices.map((slice, index) =>
+      timelineBucket(slice, startMs + index * bucketSizeMs, labels)
+    );
   }
 
   let tokens = buckets.reduce((sum, bucket) => sum + bucket.tokens, 0);
@@ -506,11 +505,9 @@ function buildLandingUsageTimeline(range: SettingsUsageRange): SettingsUsageTime
   const cacheCreationInputTokens = Math.round(tokens * 0.05);
 
   return {
-    workspaceId: LANDING_WORKSPACE_ID,
     range,
     startMs,
     endMs,
-    bucketSizeMs,
     totals: {
       tokens,
       costUSD: Math.round(costUSD * 100) / 100,
@@ -530,14 +527,52 @@ function buildLandingUsageTimeline(range: SettingsUsageRange): SettingsUsageTime
   };
 }
 
-const LANDING_USAGE_CALENDAR: SettingsUsageCalendarData = {
-  workspaceId: LANDING_WORKSPACE_ID,
-  timezone: 'UTC',
+function sumSlices(slices: DaySlice[], label: string): DaySlice {
+  const byMemberModel = {} as DaySlice['byMemberModel'];
+  for (const member of LANDING_USAGE_MEMBERS) {
+    const summed = {} as Record<LandingUsageModelId, number>;
+    for (const model of LANDING_USAGE_MODELS) {
+      summed[model.id] = slices.reduce(
+        (sum, slice) => sum + (slice.byMemberModel[member.id][model.id] ?? 0),
+        0
+      );
+    }
+    byMemberModel[member.id] = summed;
+  }
+  return { label, byMemberModel };
+}
+
+/**
+ * Days the 24h / 7d timelines cover, as the sum of their hourly buckets. The
+ * calendar and the day breakdown use these, so a clicked hour's day reports the
+ * same total in the matrix readout, the day panel and the year heatmap.
+ */
+const HOURLY_DAY_SLICES: ReadonlyMap<number, DaySlice> = new Map([
+  ...LANDING_WEEK.map((source, day): [number, DaySlice] => [
+    LANDING_WEEK_START_MS + day * DAY_MS,
+    sumSlices(hourlySlices(source, WEEK_RANGE_SALT + day), source.label),
+  ]),
+  [
+    LANDING_CALENDAR_TODAY_MS,
+    sumSlices(hourlySlices(CANONICAL_WEEK[3]!, DAY_RANGE_SALT), TODAY_LABEL),
+  ],
+]);
+
+const LANDING_USAGE_CALENDAR: UsageCalendar = {
   startMs: LANDING_CALENDAR_START_MS,
-  endMs: LANDING_CALENDAR_START_MS + LANDING_CALENDAR_DAY_COUNT * DAY_MS,
-  days: Array.from({ length: LANDING_CALENDAR_DAY_COUNT }, (_, index) => {
+  days: Array.from({ length: LANDING_CALENDAR_DAY_COUNT }, (_, index): UsageCalendarDay => {
     const dayStartMs = LANDING_CALENDAR_START_MS + index * DAY_MS;
     const isFuture = dayStartMs > LANDING_CALENDAR_TODAY_MS;
+    const hourlyDay = HOURLY_DAY_SLICES.get(dayStartMs);
+    if (hourlyDay) {
+      const totals = dayTotals(hourlyDay);
+      return {
+        dayStartMs,
+        tokens: totals.tokens,
+        costUSD: Math.round(totals.costUSD * 100) / 100,
+        isFuture,
+      };
+    }
     const sourceIndex = Math.min(6, Math.floor(dayNoise(17, index, 83) * 7));
     const source = CANONICAL_WEEK[sourceIndex]!;
     const sourceTotals = dayTotals(source);
@@ -548,11 +583,9 @@ const LANDING_USAGE_CALENDAR: SettingsUsageCalendarData = {
     const baseIntensity = 0.22 + dayNoise(11, index, 59) * 1.36;
     const spike = dayNoise(15, index, 71) > 0.88 ? 1.82 : 1;
     const intensity = active ? season * baseIntensity * spike : 0;
-    const tokens = Math.round(sourceTotals.tokens * intensity);
     return {
       dayStartMs,
-      date: new Date(dayStartMs).toISOString().slice(0, 10),
-      tokens,
+      tokens: Math.round(sourceTotals.tokens * intensity),
       costUSD: Math.round(sourceTotals.costUSD * intensity * 100) / 100,
       isFuture,
     };
@@ -572,13 +605,19 @@ function landingCalendarTotals() {
   );
 }
 
-export function buildLandingUsageDay(dayStartMs: number): SettingsUsageDayData | undefined {
+/**
+ * Breakdown for one calendar day: the day's calendar total split by its source
+ * model/member mix (the hourly buckets for days the 24h / 7d timelines cover).
+ * Deterministic — no clock, no randomness.
+ */
+export function buildLandingUsageDay(dayStartMs: number): UsageDayDetail | undefined {
   const calendarDay = LANDING_USAGE_CALENDAR.days.find((day) => day.dayStartMs === dayStartMs);
   if (!calendarDay || calendarDay.isFuture) return undefined;
 
   const dayIndex = Math.round((dayStartMs - LANDING_CALENDAR_START_MS) / DAY_MS);
   const sourceIndex = Math.min(6, Math.floor(dayNoise(17, dayIndex, 83) * 7));
-  const source = CANONICAL_WEEK[sourceIndex]!;
+  // Timeline-covered days split exactly like their hourly buckets.
+  const source = HOURLY_DAY_SLICES.get(dayStartMs) ?? CANONICAL_WEEK[sourceIndex]!;
   const sourceTotals = dayTotals(source);
   const scale = sourceTotals.tokens > 0 ? calendarDay.tokens / sourceTotals.tokens : 0;
   const inputTokens = Math.round(calendarDay.tokens * 0.22);
@@ -587,9 +626,7 @@ export function buildLandingUsageDay(dayStartMs: number): SettingsUsageDayData |
   const cacheCreationInputTokens = Math.round(calendarDay.tokens * 0.05);
 
   return {
-    workspaceId: LANDING_WORKSPACE_ID,
     dayStartMs,
-    date: calendarDay.date,
     totals: {
       tokens: calendarDay.tokens,
       costUSD: calendarDay.costUSD,
@@ -605,18 +642,13 @@ export function buildLandingUsageDay(dayStartMs: number): SettingsUsageDayData |
         cacheCreationInputTokens,
       webSearchRequests: 12 + Math.round(dayNoise(13, dayIndex, 67) * 52),
     },
-    byModel: LANDING_USAGE_MODELS.map((model) => {
-      const tokens = Math.round((sourceTotals.byModel[model.id] ?? 0) * scale);
-      return {
-        modelId: model.id,
-        tokens,
-        costUSD: Math.round(costForTokens(model.id, tokens) * 100) / 100,
-      };
-    }).sort((a, b) => b.tokens - a.tokens),
+    byModel: LANDING_USAGE_MODELS.map((model) => ({
+      modelId: model.id,
+      tokens: Math.round((sourceTotals.byModel[model.id] ?? 0) * scale),
+    })).sort((a, b) => b.tokens - a.tokens),
     byUser: LANDING_USAGE_MEMBERS.map((member) => ({
       userId: member.id,
       tokens: Math.round((sourceTotals.byMember[member.id] ?? 0) * scale),
-      costUSD: Math.round(memberCost(source, member.id) * scale * 100) / 100,
     })).sort((a, b) => b.tokens - a.tokens),
     users: Object.fromEntries(
       LANDING_USAGE_MEMBERS.map((member) => [member.id, { name: member.name }])
@@ -624,7 +656,7 @@ export function buildLandingUsageDay(dayStartMs: number): SettingsUsageDayData |
   };
 }
 
-export function buildLandingUsageDemo(range: SettingsUsageRange = 'week') {
+export function buildLandingUsageDemo(range: UsageRange, labels: LandingUsageDataLabels) {
   const slices = slicesForRange(range);
   const byModelBuckets: StackedAreaBucket[] = [];
   const byMemberBuckets: StackedAreaBucket[] = [];
@@ -633,13 +665,14 @@ export function buildLandingUsageDemo(range: SettingsUsageRange = 'week') {
 
   for (const slice of slices) {
     const totals = dayTotals(slice);
+    const label = localizeLabel(slice.label, labels);
     totalTokens += totals.tokens;
     for (const model of LANDING_USAGE_MODELS) {
       totalCost += costForTokens(model.id, totals.byModel[model.id] ?? 0);
     }
 
     byModelBuckets.push({
-      label: slice.label,
+      label,
       values: LANDING_USAGE_MODELS.map((m) => ({
         id: m.id,
         label: m.label,
@@ -648,7 +681,7 @@ export function buildLandingUsageDemo(range: SettingsUsageRange = 'week') {
     });
 
     byMemberBuckets.push({
-      label: slice.label,
+      label,
       values: LANDING_USAGE_MEMBERS.map((u) => ({
         id: u.id,
         label: u.name,
@@ -670,8 +703,8 @@ export function buildLandingUsageDemo(range: SettingsUsageRange = 'week') {
   return {
     byModelBuckets,
     byMemberBuckets,
-    usageCalendar: LANDING_USAGE_CALENDAR,
-    usageTimeline: buildLandingUsageTimeline(range),
+    calendar: LANDING_USAGE_CALENDAR,
+    timeline: buildLandingUsageTimeline(range, labels),
     totals: {
       tokens: totalTokens,
       costUSD: Math.round(totalCost * 100) / 100,
@@ -683,145 +716,65 @@ export function buildLandingUsageDemo(range: SettingsUsageRange = 'week') {
 //
 // Compact thread so the landing PR card matches the usage card height:
 //   Zixuan finds an issue → Lee: Fixed. → Wibus LGTM (one approve).
+// The description is pre-structured Markdown (headings, bullets, inline code).
 
-const lee: GitHubUser = {
-  login: 'Lee',
-  id: 201,
-  avatarUrl: '',
-  htmlUrl: 'https://github.com/Lee',
-};
-const zixuan: GitHubUser = {
-  login: 'Zixuan',
-  id: 202,
-  avatarUrl: '',
-  htmlUrl: 'https://github.com/Zixuan',
-};
-const wibus: GitHubUser = {
-  login: 'Wibus',
-  id: 203,
-  avatarUrl: '',
-  htmlUrl: 'https://github.com/Wibus',
-};
+const LANDING_PR_CONVERSATION: readonly PowerPrConversationItem[] = [
+  {
+    kind: 'comment',
+    id: 'issue-501',
+    author: 'Zixuan',
+    createdAt: '2026-07-30T14:20:00.000Z',
+    body: 'List path still opens task docs on cold cache — fail closed if the index is missing.',
+  },
+  {
+    kind: 'comment',
+    id: 'issue-502',
+    author: 'Lee',
+    createdAt: '2026-07-30T15:10:00.000Z',
+    body: 'Fixed.',
+  },
+  {
+    kind: 'review',
+    id: 'review-601',
+    author: 'Wibus',
+    submittedAt: '2026-07-31T16:00:00.000Z',
+    body: 'LGTM!',
+  },
+];
 
-const FIXED_CREATED = '2026-07-30T10:00:00.000Z';
-const FIXED_UPDATED = '2026-07-31T08:30:00.000Z';
-
-const landingPr: GitHubPullRequestDetails = {
+export const LANDING_PR_DEMO_DATA: PowerPrData = {
+  repoFullName: 'loro-dev/lody',
   number: 3175,
-  nodeId: 'PR_landing_demo_3175',
   title: 'feat(tasks): add task list/create MCP tools and property writes',
-  body: [
-    '## Summary',
-    'Add MCP tools so agents can list/create tasks and write properties without pasting a task id into the prompt.',
-    '',
-    '## Changes',
-    '- `list_tasks` / `create_task` tools on the workspace MCP surface',
-    '- Property writes on the task document (status, assignee, custom fields)',
-    '- Fail closed when the task index is cold or missing — no silent empty lists',
-  ].join('\n'),
-  state: 'open',
-  merged: false,
-  draft: false,
-  htmlUrl: 'https://github.com/loro-dev/lody/pull/3175',
-  baseRef: 'main',
-  headRef: 'feat/task-mcp-list-create-properties',
-  headSha: 'a1b2c3d4e5f67890',
-  user: lee,
-  createdAt: FIXED_CREATED,
-  updatedAt: FIXED_UPDATED,
-  mergedAt: null,
-  closedAt: null,
+  author: 'Lee',
+  createdAt: '2026-07-30T10:00:00.000Z',
+  commits: 3,
   additions: 1314,
   deletions: 69,
   changedFiles: 9,
-  commits: 3,
-  mergeable: true,
-  mergeableState: 'clean',
+  body: [
+    { kind: 'heading', text: 'Summary' },
+    {
+      kind: 'paragraph',
+      runs: [
+        'Add MCP tools so agents can list/create tasks and write properties without pasting a task id into the prompt.',
+      ],
+    },
+    { kind: 'heading', text: 'Changes' },
+    {
+      kind: 'list',
+      items: [
+        [
+          { code: 'list_tasks' },
+          ' / ',
+          { code: 'create_task' },
+          ' tools on the workspace MCP surface',
+        ],
+        ['Property writes on the task document (status, assignee, custom fields)'],
+        ['Fail closed when the task index is cold or missing — no silent empty lists'],
+      ],
+    },
+  ],
+  checksTotal: 3,
+  conversation: LANDING_PR_CONVERSATION,
 };
-
-function checkRun(
-  overrides: Partial<GitHubCheckRun> & Pick<GitHubCheckRun, 'id' | 'name'>
-): GitHubCheckRun {
-  return {
-    status: 'completed',
-    conclusion: 'success',
-    htmlUrl: null,
-    startedAt: FIXED_CREATED,
-    completedAt: FIXED_UPDATED,
-    appName: 'GitHub Actions',
-    ...overrides,
-  };
-}
-
-function issueComment(
-  overrides: Pick<GitHubIssueComment, 'id' | 'body' | 'user' | 'createdAt'> &
-    Partial<GitHubIssueComment>
-): GitHubIssueComment {
-  return {
-    nodeId: `IC_${overrides.id}`,
-    authorAssociation: 'MEMBER',
-    updatedAt: overrides.createdAt,
-    htmlUrl: `https://github.com/loro-dev/lody/pull/3175#issuecomment-${overrides.id}`,
-    issueUrl: 'https://github.com/loro-dev/lody/issues/3175',
-    ...overrides,
-  };
-}
-
-function review(
-  overrides: Pick<GitHubReview, 'id' | 'body' | 'state' | 'user' | 'submittedAt'> &
-    Partial<GitHubReview>
-): GitHubReview {
-  return {
-    nodeId: `PRR_${overrides.id}`,
-    authorAssociation: 'MEMBER',
-    commitId: 'a1b2c3d4e5f67890',
-    htmlUrl: `https://github.com/loro-dev/lody/pull/3175#pullrequestreview-${overrides.id}`,
-    ...overrides,
-  };
-}
-
-/** One review LGTM only — no extra LGTM comment noise. */
-const landingIssueComments: GitHubIssueComment[] = [
-  issueComment({
-    id: 501,
-    user: zixuan,
-    createdAt: '2026-07-30T14:20:00.000Z',
-    body: 'List path still opens task docs on cold cache — fail closed if the index is missing.',
-  }),
-  issueComment({
-    id: 502,
-    user: lee,
-    createdAt: '2026-07-30T15:10:00.000Z',
-    body: 'Fixed.',
-  }),
-];
-
-const landingReviews: GitHubReview[] = [
-  review({
-    id: 601,
-    user: wibus,
-    state: 'approved',
-    submittedAt: '2026-07-30T16:00:00.000Z',
-    body: 'LGTM!',
-  }),
-];
-
-export const LANDING_PR_DEMO_DATA: PrTabViewData = {
-  pullRequest: landingPr,
-  reviewThreads: [],
-  reviews: landingReviews,
-  issueComments: landingIssueComments,
-  checkRuns: {
-    status: 'completed',
-    conclusion: 'success',
-    total: 3,
-    runs: [
-      checkRun({ id: 1, name: 'test' }),
-      checkRun({ id: 2, name: 'typecheck' }),
-      checkRun({ id: 3, name: 'lint' }),
-    ],
-  },
-};
-
-export const LANDING_PR_DEMO_REPO = 'loro-dev/lody';
-export const LANDING_PR_DEMO_NUMBER = 3175;

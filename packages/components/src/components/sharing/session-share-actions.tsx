@@ -1,9 +1,39 @@
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { Copy, MessageSquare } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { Button } from '@/ui/button';
+import * as stylex from '@stylexjs/stylex';
+import { Button } from '@lody/ui/button';
+import { Textarea } from '@lody/ui/textarea';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space, text } from '@lody/ui/tokens/scales.stylex';
+import { shareSurface } from './surface';
+
+const styles = stylex.create({
+  foot: {
+    flexShrink: 0,
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    backgroundColor: colors.background,
+  },
+  row: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[2],
+  },
+  notice: {
+    margin: 0,
+    marginTop: space[1.5],
+    textAlign: 'center',
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
+    color: colors.secondaryLabel,
+  },
+  manual: { marginTop: space[2] },
+});
 
 /**
  * The share reader's foot: the two things a visitor can actually do with a
@@ -48,14 +78,14 @@ export function SessionShareActions({
     }
   }
   return (
-    <div className="shrink-0 bg-background px-3 py-2">
+    <div {...stylex.props(styles.foot)}>
       <ConversationColumn>
-        <div className="flex flex-wrap items-center justify-center gap-2">
+        <div {...stylex.props(styles.row)}>
           {createAgentPrompt && (
             <Button
               type="button"
-              size="sm"
-              variant="outline"
+              size="small"
+              variant="secondary"
               disabled={busy || copyDisabled}
               onClick={() => void copyAgentPrompt()}
               title={t(
@@ -63,17 +93,21 @@ export function SessionShareActions({
                 'Anyone receiving this prompt can read the shared conversations and images.'
               )}
             >
-              <MessageSquare className="size-3.5" aria-hidden />
-              <span className="truncate">{t('sharing.copyAgentPrompt', 'Copy Agent Prompt')}</span>
+              <MessageSquare {...stylex.props(shareSurface.glyphSmall)} aria-hidden />
+              <span {...stylex.props(shareSurface.buttonLabel)}>
+                {t('sharing.copyAgentPrompt', 'Copy Agent Prompt')}
+              </span>
             </Button>
           )}
-          <Button type="button" size="sm" disabled={copyDisabled} onClick={onCopyMarkdown}>
-            <Copy className="size-3.5" aria-hidden />
-            <span className="truncate">{t('sharing.copyMarkdown', 'Copy as Markdown')}</span>
+          <Button type="button" size="small" disabled={copyDisabled} onClick={onCopyMarkdown}>
+            <Copy {...stylex.props(shareSurface.glyphSmall)} aria-hidden />
+            <span {...stylex.props(shareSurface.buttonLabel)}>
+              {t('sharing.copyMarkdown', 'Copy as Markdown')}
+            </span>
           </Button>
         </div>
         {createAgentPrompt && (
-          <p className="mt-1.5 text-center text-[11px] leading-tight text-muted-foreground">
+          <p {...stylex.props(styles.notice)}>
             {t(
               'sharing.agentAccessNotice',
               'Anyone receiving this prompt can read the shared conversations and images.'
@@ -81,13 +115,14 @@ export function SessionShareActions({
           </p>
         )}
         {manualPrompt && (
-          <textarea
+          <Textarea
             readOnly
+            resize="none"
             value={manualPrompt}
             aria-label={t('sharing.copyAgentPrompt', 'Copy Agent Prompt')}
-            className="mt-2 w-full rounded-md border bg-background p-2 text-xs"
             rows={6}
             onFocus={(event) => event.currentTarget.select()}
+            className={stylex.props(styles.manual).className}
           />
         )}
       </ConversationColumn>

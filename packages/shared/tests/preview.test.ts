@@ -2,24 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PREVIEW_ACCESS_TOKEN_COOKIE,
-  PREVIEW_ACCESS_TOKEN_QUERY_PARAM,
   PREVIEW_EMBEDDER_POLICY,
   PREVIEW_RESOURCE_POLICY,
-  PREVIEW_TUNNEL_HTTP_BODY_BATCH_BYTES,
-  PREVIEW_TUNNEL_PROTOCOL_VERSION,
-  PREVIEW_TUNNEL_RESPONSE_BODY_CREDIT_WINDOW_BYTES,
-  PREVIEW_TUNNEL_SOCKET_BACKPRESSURE_HIGH_WATERMARK_BYTES,
-  PREVIEW_TUNNEL_SOCKET_BACKPRESSURE_LOW_WATERMARK_BYTES,
-  DEFAULT_PREVIEW_RESOURCE_LIMITS,
   applyPreviewEmbeddingHeaders,
   buildPreviewAccessTokenCookie,
-  buildPreviewPublicUrl,
   hasReportedPreviewTarget,
-  isPreviewTunnelCreateResponse,
-  isAllowedPreviewPublicUrl,
-  normalizePreviewPublicBaseDomain,
-  parsePreviewTunnelClientMessage,
-  parsePreviewTunnelServerMessage,
+  isQuickTunnelViewerUrl,
   removePreviewAccessTokenFromSearch,
   removePreviewQueryParamFromSearch,
   sanitizePreviewProxyResponseHeaders,
@@ -27,82 +15,24 @@ import {
   stripPreviewFrameAncestorsDirective,
 } from '../src/preview';
 
-describe('preview tunnel transport profile', () => {
-  it('keeps body batches bounded while allowing multiple batches in flight', () => {
-    expect(PREVIEW_TUNNEL_PROTOCOL_VERSION).toBe(3);
-    expect(PREVIEW_TUNNEL_HTTP_BODY_BATCH_BYTES).toBeGreaterThanOrEqual(256 * 1024);
-    expect(PREVIEW_TUNNEL_HTTP_BODY_BATCH_BYTES).toBeLessThan(32 * 1024 * 1024);
-    expect(PREVIEW_TUNNEL_RESPONSE_BODY_CREDIT_WINDOW_BYTES).toBeGreaterThanOrEqual(
-      PREVIEW_TUNNEL_HTTP_BODY_BATCH_BYTES * 2
-    );
+describe('Quick Tunnel viewer URL shape', () => {
+  it('requires an HTTPS Quick origin and capability, independently of old preview domains', () => {
     expect(
-      PREVIEW_TUNNEL_RESPONSE_BODY_CREDIT_WINDOW_BYTES % PREVIEW_TUNNEL_HTTP_BODY_BATCH_BYTES
-    ).toBe(0);
-    expect(PREVIEW_TUNNEL_SOCKET_BACKPRESSURE_LOW_WATERMARK_BYTES).toBeGreaterThanOrEqual(
-      PREVIEW_TUNNEL_HTTP_BODY_BATCH_BYTES
-    );
-    expect(PREVIEW_TUNNEL_SOCKET_BACKPRESSURE_HIGH_WATERMARK_BYTES).toBeGreaterThan(
-      PREVIEW_TUNNEL_SOCKET_BACKPRESSURE_LOW_WATERMARK_BYTES
-    );
-  });
-});
-
-describe('preview public URLs', () => {
-  it('accepts generated managed preview URLs', () => {
-    const url = buildPreviewPublicUrl({
-      sessionId: 'session_abc123',
-      grantId: 'grant_def456',
-    });
-
-    expect(isAllowedPreviewPublicUrl(url)).toBe(true);
-  });
-
-  it('accepts managed preview URLs with a bootstrap access token', () => {
-    const url = new URL(
-      buildPreviewPublicUrl({
-        sessionId: 'session_abc123',
-        grantId: 'grant_def456',
-      })
-    );
-    url.searchParams.set(PREVIEW_ACCESS_TOKEN_QUERY_PARAM, 'preview-token');
-
-    expect(isAllowedPreviewPublicUrl(url.toString())).toBe(true);
-  });
-
-  it('supports an explicitly configured preview base domain', () => {
-    const url = buildPreviewPublicUrl({
-      sessionId: 'session_abc123',
-      grantId: 'grant_def456',
-      baseDomain: 'LODY.UK',
-    });
-
-    expect(url).toBe('https://session-grantde.lody.uk');
-    expect(isAllowedPreviewPublicUrl(url, 'lody.uk')).toBe(true);
-    expect(isAllowedPreviewPublicUrl(url, 'mylody.app')).toBe(false);
-  });
-
-  it.each([
-    '',
-    'localhost',
-    'https://lody.uk',
-    '*.lody.uk',
-    'lody.uk:443',
-    'lody.uk/path',
-    'lody.uk.',
-    '127.0.0.1',
-  ])('rejects invalid preview base domain %j', (domain) => {
-    expect(() => normalizePreviewPublicBaseDomain(domain)).toThrow(
-      'Preview public base domain must be an ASCII public base domain'
-    );
-  });
-
-  it('rejects non-managed preview URLs', () => {
-    expect(isAllowedPreviewPublicUrl('https://mylody.app')).toBe(false);
-    expect(isAllowedPreviewPublicUrl('http://abc.mylody.app')).toBe(false);
-    expect(isAllowedPreviewPublicUrl('https://abc.mylody.app:444')).toBe(false);
-    expect(isAllowedPreviewPublicUrl('https://mylody.app.evil.test')).toBe(false);
-    expect(isAllowedPreviewPublicUrl('https://a.b.mylody.app')).toBe(false);
-    expect(isAllowedPreviewPublicUrl('https://user:pass@abc.mylody.app')).toBe(false);
+      isQuickTunnelViewerUrl(
+        'https://preview-example.trycloudflare.com/page?__lody_preview_token=capability'
+      )
+    ).toBe(true);
+    for (const url of [
+      'https://preview-example.trycloudflare.com/',
+      'https://preview-example.trycloudflare.com/?__lody_preview_token=',
+      'http://preview-example.trycloudflare.com/?__lody_preview_token=capability',
+      'https://user:pass@preview-example.trycloudflare.com/?__lody_preview_token=capability',
+      'https://preview-example.trycloudflare.com:8080/?__lody_preview_token=capability',
+      'https://nested.preview-example.trycloudflare.com/?__lody_preview_token=capability',
+      'https://preview-example.trycloudflare.com.attacker.test/?__lody_preview_token=capability',
+      'https://preview-example.mylody.app/?__lody_preview_token=capability',
+    ])
+      expect(isQuickTunnelViewerUrl(url)).toBe(false);
   });
 });
 
@@ -229,96 +159,6 @@ describe('preview embedding headers', () => {
     expect(headers.get('Cross-Origin-Embedder-Policy')).toBe('credentialless');
     expect(headers.get('Cross-Origin-Resource-Policy')).toBe('cross-origin');
     expect(headers.get('Content-Type')).toBe('text/html');
-  });
-});
-
-describe('preview tunnel resource limits', () => {
-  it('accepts create responses with resource limits', () => {
-    expect(
-      isPreviewTunnelCreateResponse({
-        tunnelId: 'session-grant',
-        publicUrl: 'https://session-grant.mylody.app',
-        websocketUrl: 'wss://api.example.com/api/preview/tunnels/session-grant/connect?token=abc',
-        sessionToken: 'session-token',
-        expiresAt: 1_800_000,
-        resourceLimits: DEFAULT_PREVIEW_RESOURCE_LIMITS,
-      })
-    ).toBe(true);
-  });
-
-  it('rejects malformed resource limits in create responses', () => {
-    expect(
-      isPreviewTunnelCreateResponse({
-        tunnelId: 'session-grant',
-        publicUrl: 'https://session-grant.mylody.app',
-        websocketUrl: 'wss://api.example.com/api/preview/tunnels/session-grant/connect?token=abc',
-        sessionToken: 'session-token',
-        expiresAt: 1_800_000,
-        resourceLimits: {
-          ...DEFAULT_PREVIEW_RESOURCE_LIMITS,
-          maxRequestBodyBytes: 0,
-        },
-      })
-    ).toBe(false);
-  });
-});
-
-describe('preview tunnel protocol messages', () => {
-  it('parses valid server messages', () => {
-    expect(
-      parsePreviewTunnelServerMessage(
-        JSON.stringify({
-          type: 'request-start',
-          requestId: 'request-1',
-          method: 'GET',
-          url: '/@vite/client',
-          headers: [['accept', '*/*']],
-          hasBody: false,
-          binaryPayload: true,
-          responseBodyCredit: true,
-        })
-      )
-    ).toMatchObject({ type: 'request-start', requestId: 'request-1' });
-  });
-
-  it('rejects malformed server messages', () => {
-    expect(
-      parsePreviewTunnelServerMessage(
-        JSON.stringify({
-          type: 'response-body-credit',
-          requestId: 'request-1',
-          credit: 0,
-        })
-      )
-    ).toBeNull();
-    expect(parsePreviewTunnelServerMessage('not json')).toBeNull();
-  });
-
-  it('parses valid client messages', () => {
-    expect(
-      parsePreviewTunnelClientMessage(
-        JSON.stringify({
-          type: 'client-ready',
-          protocolVersion: PREVIEW_TUNNEL_PROTOCOL_VERSION,
-          capabilities: [],
-        })
-      )
-    ).toMatchObject({ type: 'client-ready' });
-  });
-
-  it('rejects malformed client messages', () => {
-    expect(
-      parsePreviewTunnelClientMessage(
-        JSON.stringify({
-          type: 'response-start',
-          requestId: 'request-1',
-          status: 200,
-          statusText: 'OK',
-          headers: [['set-cookie']],
-          hasBody: false,
-        })
-      )
-    ).toBeNull();
   });
 });
 

@@ -8,7 +8,9 @@ import {
   AgentFileLinkContextMenuItemsContext,
   MarkdownRenderer,
 } from '../src/components/ai-gui/markdown-renderer';
+import { SessionSearchProvider } from '../src/components/sessions/session-search-context';
 import type { MarkdownAgentFileLinkMenuItem } from '../src/hooks/use-session-file-actions';
+import { InteractionArmedProvider } from '../src/ui/interaction-arm';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -31,9 +33,7 @@ describe('agent Markdown file-link context menu', () => {
     root = undefined;
     container?.remove();
     container = undefined;
-    document
-      .querySelectorAll('[data-radix-popper-content-wrapper]')
-      .forEach((node) => node.remove());
+    document.querySelectorAll('[role="menu"]').forEach((node) => node.remove());
   });
 
   const render = async (
@@ -67,7 +67,9 @@ describe('agent Markdown file-link context menu', () => {
     await act(async () => {
       link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
-    expect(onAgentFileLinkClick).toHaveBeenCalledWith('/Users/dev/project/src/ledger/submit.ts:366');
+    expect(onAgentFileLinkClick).toHaveBeenCalledWith(
+      '/Users/dev/project/src/ledger/submit.ts:366'
+    );
 
     await act(async () => {
       link.dispatchEvent(
@@ -93,7 +95,71 @@ describe('agent Markdown file-link context menu', () => {
       link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       await Promise.resolve();
     });
-    const menu = document.querySelector('[data-slot="context-menu-content"]');
+    const menu = document.querySelector('[role="menu"]');
     expect(menu?.textContent).toBe('Copy Path');
+  });
+
+  it('arms a file link beside search highlights without losing React-owned text', async () => {
+    const items = () =>
+      [{ kind: 'action', id: 'copy-path', label: 'Copy Path', icon: Copy, run: vi.fn() }] as const;
+    const search = {
+      isOpen: true,
+      query: 'ledger',
+      activeBlockId: 'block',
+      activeResultId: 'r1',
+      blockMatches: new Map([
+        [
+          'block',
+          {
+            blockId: 'block',
+            resultIds: ['r0', 'r1'],
+            activeResultId: 'r1',
+            activeOccurrenceIndex: 1,
+          },
+        ],
+      ]),
+      hasMatchedPrefix: () => true,
+      hasActivePrefix: () => true,
+    };
+    const renderRow = (armed: boolean, isOpen = true) =>
+      root?.render(
+        createElement(
+          SessionSearchProvider,
+          { value: { ...search, isOpen } },
+          createElement(
+            InteractionArmedProvider,
+            { value: armed },
+            createElement(
+              AgentFileLinkContextMenuItemsContext.Provider,
+              { value: items },
+              createElement(MarkdownRenderer, {
+                text: '1. [ledger/submit.ts](/Users/dev/project/src/ledger/submit.ts:366) posts the ledger entry',
+                searchBlockId: 'block',
+              })
+            )
+          )
+        )
+      );
+
+    await act(async () => renderRow(false));
+    const marks = () =>
+      [...(container?.querySelectorAll('mark[data-session-search-mark="true"]') ?? [])].map(
+        (mark) => mark.getAttribute('data-search-result-id')
+      );
+    expect(marks()).toEqual(['r0', 'r1']);
+
+    await act(async () => renderRow(true));
+    expect(container?.querySelector('li')?.textContent).toBe(
+      'ledger/submit.ts posts the ledger entry'
+    );
+    expect(container?.querySelector('mark[data-search-result-id="r1"]')?.textContent).toBe(
+      'ledger'
+    );
+
+    await act(async () => renderRow(true, false));
+    expect(marks()).toEqual([]);
+    expect(container?.querySelector('li')?.textContent).toBe(
+      'ledger/submit.ts posts the ledger entry'
+    );
   });
 });

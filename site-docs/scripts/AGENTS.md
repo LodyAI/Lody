@@ -40,3 +40,6 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   are deferred. Do not hide first-screen chrome and reveal it later.
 - `generate:landing-agents` produces `components/landing-agents.generated.ts`; provider
   marks and the ACP wall must come from it rather than hand-written lists.
+- `app-boundary.mjs` (run by `test`) fails when site source imports the app (`@/*`,
+  `@lody/components`, `@lody/shared`) or a build input points at `packages/components/src`.
+  The landing's product demo is a site-owned replica; never relax this check to reuse app code.

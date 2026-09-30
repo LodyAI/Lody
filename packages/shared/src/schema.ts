@@ -35,6 +35,7 @@ export * from 'loro-mirror';
 import type { RateLimit } from 'acp-extension-core';
 
 export const RATE_LIMIT_ENTRY_KEY_SEPARATOR = '::';
+const PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX = 'provider';
 
 /**
  * Known limitId values used to distinguish rate limit tiers.
@@ -45,21 +46,53 @@ export const CODEX_SPARK_LIMIT_ID = 'codex_bengalfox';
 
 export const getRateLimitEntryKey = (
   cliType: CliType,
-  limitId: string | null | undefined
+  limitId: string | null | undefined,
+  agentConfigId?: AgentConfigId | null
 ): string => {
   const id = limitId?.trim() || cliType;
+  if (agentConfigId) {
+    return [
+      PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX,
+      encodeURIComponent(agentConfigId),
+      cliType,
+      encodeURIComponent(id),
+    ].join(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
+  }
   return `${cliType}${RATE_LIMIT_ENTRY_KEY_SEPARATOR}${id}`;
 };
 
 export const parseRateLimitEntryKey = (
   key: string
 ): {
+  agentConfigId: AgentConfigId | null;
   cliType: string;
   limitId: string | null;
 } => {
+  const parts = key.split(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
+  if (
+    parts.length === 4 &&
+    parts[0] === PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX &&
+    parts[1] &&
+    parts[2] &&
+    parts[3]
+  ) {
+    try {
+      return {
+        agentConfigId: decodeURIComponent(parts[1]) as AgentConfigId,
+        cliType: parts[2],
+        limitId: decodeURIComponent(parts[3]),
+      };
+    } catch {
+      // Malformed scoped keys stay unreadable rather than being attributed to
+      // an unrelated provider through the legacy parser below.
+      return { agentConfigId: null, cliType: '', limitId: null };
+    }
+  }
+
   const separatorIndex = key.indexOf(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
   if (separatorIndex === -1) {
     return {
+      agentConfigId: null,
       cliType: key,
       limitId: null,
     };
@@ -69,12 +102,14 @@ export const parseRateLimitEntryKey = (
   const limitId = key.slice(separatorIndex + RATE_LIMIT_ENTRY_KEY_SEPARATOR.length);
   if (!limitId) {
     return {
+      agentConfigId: null,
       cliType,
       limitId: null,
     };
   }
 
   return {
+    agentConfigId: null,
     cliType,
     limitId,
   };
@@ -116,6 +151,7 @@ export type TitleGenerationConfig = {
 };
 
 export type AgentConfigMeta = {
+  codexAuth?: import('./codex-auth-profile').CodexAuthProfile;
   id: AgentConfigId;
   /**
    * Parent machine this config belongs to. Configs are scoped per-machine because
@@ -243,6 +279,27 @@ const historyMessageItemSchema = schema
     {
       type: schema.String<MessageContent['type']>(),
       text: schema.LoroText({ required: false }),
+      run: schema.Any({
+        storageSchema: schema
+          .LoroMap(
+            {
+              items: schema.LoroList(
+                schema
+                  .LoroMap({
+                    text: schema.LoroText({ required: false }),
+                    content: schema.Any({
+                      storageSchema: schema.LoroList(historyToolContentSchema, undefined, {
+                        required: false,
+                      }),
+                    }),
+                  })
+                  .catchall(historyNestedPayloadSchema)
+              ),
+            },
+            { required: false }
+          )
+          .catchall(historyNestedPayloadSchema),
+      }),
       // Streaming fields: a hint, not a validation constraint on old/future payloads.
       markdown: schema.Any({ storageSchema: schema.LoroText({ required: false }) }),
       content: schema.Any({
@@ -479,6 +536,7 @@ export const sessionPlanEntrySchema = schema.LoroMap({
 
 export type SessionHistorySendStatus = 'timeout';
 export type SessionHistoryStatus =
+  | 'prepared'
   | 'pending'
   | 'pending_apply'
   | 'delivery_unknown'
@@ -584,10 +642,23 @@ export const isSessionHistoryDelivered = (
 ): boolean => {
   const status = resolveSessionHistoryStatus(entry);
   if (status) {
-    return status !== 'pending' && status !== 'pending_apply' && status !== 'delivery_unknown';
+    return (
+      status !== 'prepared' &&
+      status !== 'pending' &&
+      status !== 'pending_apply' &&
+      status !== 'delivery_unknown'
+    );
   }
   return entry?.read === true;
 };
+
+/**
+ * User input no execution has claimed. `seen` is only the CLI's read receipt:
+ * the turn still needs its dispatch pointer and has not started.
+ */
+export const isSessionHistoryStatusAwaitingStart = (
+  status: SessionHistoryStatus | undefined
+): boolean => status === 'pending' || status === 'seen';
 
 export const isSessionHistoryPendingForDispatch = (
   entry: SessionHistoryStatusReadable | null | undefined
@@ -621,6 +692,9 @@ export const sessionHistorySchema = schema.LoroMap({
   read: schema.Boolean({ required: false }),
   userId: schema.String({ required: false }),
   modelInfo: schema.Any({ required: false }),
+  // Assistant turns: tokens this turn consumed, summed from adapter usage deltas.
+  // A primitive JSON value (`SessionTurnTokenUsage`), replaced whole on each write.
+  tokenUsage: schema.Any({ required: false }),
   // FileDiff 此次对话有哪些文件变更，和具体变更行数
   fileDiff: schema.Any(),
   // Indicates whether the agent's response for this turn has finished
@@ -742,6 +816,20 @@ export type SessionContextWindowUsage = {
 
 export type SessionTitleSource = 'user' | 'generated' | 'draft';
 
+const DRAFT_SESSION_TITLE_MAX_CHARS = 50;
+
+/**
+ * Placeholder title for a new Session: the prompt's first non-empty line. Stored
+ * with `titleSource: 'draft'` so a generated title still replaces it; ACP-owned
+ * titles (e.g. Codex) only arrive after the first turn ends.
+ */
+export const deriveDraftSessionTitle = (prompt: string): string | undefined =>
+  prompt
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0)
+    ?.slice(0, DRAFT_SESSION_TITLE_MAX_CHARS);
+
 export type ExternalAcpHistorySyncMeta = {
   provider: LocalProjectHistoryProvider;
   source: 'local-acp-history';
@@ -772,13 +860,6 @@ export type SessionPreviewCandidateMeta = Pick<PreviewCandidate, 'status' | 'upd
 
 export type SessionPreviewConnectionMeta = Pick<PreviewConnection, 'status' | 'updatedAt'>;
 
-export type SessionPreviewLegacyMetaFields = {
-  /** Deprecated legacy detail. Full preview candidate state lives in session doc `preview`. */
-  previewCandidate?: PreviewCandidate;
-  /** Deprecated legacy detail. Full preview connection state lives in session doc `preview`. */
-  previewConnection?: PreviewConnection;
-};
-
 export type SessionExternalHistoryCursorDocState = {
   importedTurnHashes?: string[];
   /**
@@ -797,6 +878,7 @@ export type SessionExternalHistoryCursorDocState = {
  * resolve customAcp/env from AgentConfigMeta and worktree scripts from project config.
  */
 export type SessionLaunchConfig = {
+  codexAuth?: import('./codex-auth-profile').CodexAuthProfile;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
   env?: Record<string, string>;
@@ -886,6 +968,8 @@ export type SessionMeta = {
    */
   agentRoleId?: AgentRoleId;
   agentRoleRevision?: number;
+  /** Schedule provenance only, a UUID of at most 50 UTF-8 bytes. */
+  scheduleId?: string;
   acpSessionId?: ACPSessionId;
   /** Exact Session or child Tab that created/opened this session, when known. */
   openedBySessionId?: SessionId;
@@ -1058,18 +1142,6 @@ export type SessionLegacyMetaFields = {
   worktreeCleanup?: WorktreeCleanupScriptConfig;
 };
 
-export type SessionMetaWithLegacyPreview = Omit<
-  SessionMeta,
-  'previewCandidate' | 'previewConnection'
-> &
-  Partial<SessionPreviewLegacyMetaFields>;
-
-export function getSessionPreviewLegacyFields(
-  session: Pick<SessionMeta, 'previewCandidate' | 'previewConnection'> | null | undefined
-): Partial<SessionPreviewLegacyMetaFields> {
-  return (session ?? {}) as Partial<SessionPreviewLegacyMetaFields>;
-}
-
 export type NeedToDeleteSessionQueueItem =
   | boolean
   | {
@@ -1225,6 +1297,12 @@ export type MachineMeta = {
   supportsLocalProjectHistoryRpc?: boolean;
   /** Versioned daemon protocols available to remote and local clients. */
   protocolCapabilities?: MachineProtocolCapabilities;
+  /**
+   * IANA zone of the machine's clock, e.g. `Asia/Shanghai` (under 50 bytes,
+   * rewritten only at registration). Schedules owned by this machine are
+   * authored on this clock; absent on older CLIs.
+   */
+  timeZone?: string;
 };
 
 /**

@@ -38,6 +38,12 @@ import {
   SessionPrepareCancelResponseSchema,
   SessionPrepareResponseSchema,
   SessionPreviewEndpointAcquireResponseSchema,
+  SessionPreviewCreateRequestSchema,
+  SessionPreviewCreateResponseSchema,
+  SessionPreviewRevokeRequestSchema,
+  SessionPreviewRevokeResponseSchema,
+  SessionPreviewStatusRequestSchema,
+  SessionPreviewStatusResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
   PreviewTargetSchema,
   SessionSteerResponseSchema,
@@ -87,11 +93,34 @@ export const McpToolListResultSchema = z
   .strict();
 export type McpToolListResult = z.infer<typeof McpToolListResultSchema>;
 
+export const SessionToolResultSchema = z
+  .object({
+    type: z.literal('session/tool-result'),
+    content: z.array(z.object({ type: z.literal('text'), text: z.string() }).strict()),
+    isError: z.boolean().optional(),
+  })
+  .strict();
+
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('mcp/list-tools'),
     params: z
       .object({ server: z.custom<WorkspaceMcpServerMeta>(isWorkspaceMcpServerMeta) })
+      .strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/call-tool'),
+    params: z
+      .object({
+        sessionId: SessionIdSchema,
+        name: z.string().min(1).max(100),
+        arguments: z
+          .record(z.string(), z.json())
+          .refine(
+            (value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 256 * 1024,
+            'Session tool arguments exceed 256 KiB'
+          ),
+      })
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
@@ -235,6 +264,30 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/preview-create'),
+    params: SessionPreviewCreateRequestSchema.omit({
+      type: true,
+      machineId: true,
+      workspaceId: true,
+    }),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/preview-revoke'),
+    params: SessionPreviewRevokeRequestSchema.omit({
+      type: true,
+      machineId: true,
+      workspaceId: true,
+    }),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('session/preview-status'),
+    params: SessionPreviewStatusRequestSchema.omit({
+      type: true,
+      machineId: true,
+      workspaceId: true,
+    }),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/preview-endpoint-acquire'),
     params: z
       .object({
@@ -276,6 +329,7 @@ export type LocalMachineRpcRequestValidated = LocalMachineRpcRequest;
 
 export const LocalMachineRpcResultSchema = z.union([
   McpToolListResultSchema,
+  SessionToolResultSchema,
   SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,
   CodeCollabV2OpenTextOkSchema,
@@ -298,6 +352,9 @@ export const LocalMachineRpcResultSchema = z.union([
   SessionPreviewEndpointAcquireResponseSchema,
   SessionPreviewEndpointReleaseResponseSchema,
   SessionSteerResponseSchema,
+  SessionPreviewCreateResponseSchema,
+  SessionPreviewRevokeResponseSchema,
+  SessionPreviewStatusResponseSchema,
   SessionGoalResponseSchema,
   SessionTerminateResponseSchema,
   MachinePiExtensionsResponseSchema,

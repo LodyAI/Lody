@@ -10,7 +10,6 @@ import {
   clearCachedWorkspaceInfo,
   getCachedWorkspaceId,
 } from '@/lib/local-storage-cache';
-import { clearLastAppRoutePathIfWorkspaceMatch } from '@/lib/last-app-route';
 import { useSetAtom, useStore } from 'jotai';
 import {
   setWorkspaceContextAtRevisionAtom,
@@ -622,14 +621,13 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         if (data) {
           didDelete = true;
           // Drop per-slug caches up front so the post-delete `/` redirect
-          // doesn't bounce back into the deleted workspace via lastAppRoute /
-          // preferredSlug, and so `optimisticWorkspaceId` stops resolving the
+          // doesn't bounce back into the deleted workspace via preferredSlug,
+          // and so `optimisticWorkspaceId` stops resolving the
           // stale workspaceId — both routes triggered listVisibleMachines for
           // a workspace the user no longer belongs to (Convex 403 → error
           // boundary "Something went wrong").
           if (removalTransition.removedSlug) {
             clearCachedWorkspaceInfo(removalTransition.removedSlug);
-            clearLastAppRoutePathIfWorkspaceMatch(removalTransition.removedSlug);
             clearPreferredWorkspaceSlugIfMatch(removalTransition.removedSlug);
           }
           if (removalTransition.isActiveOrganization) {
@@ -741,7 +739,6 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
           didLeave = true;
           if (removalTransition.removedSlug) {
             clearCachedWorkspaceInfo(removalTransition.removedSlug);
-            clearLastAppRoutePathIfWorkspaceMatch(removalTransition.removedSlug);
             clearPreferredWorkspaceSlugIfMatch(removalTransition.removedSlug);
           }
           if (removalTransition.isActiveOrganization) {

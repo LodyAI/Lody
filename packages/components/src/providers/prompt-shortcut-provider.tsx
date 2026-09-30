@@ -24,9 +24,9 @@ import {
   usePlatform,
   usePlatformSession,
 } from '@lody/platform/react';
-import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { cloudOperations as api } from '@/lib/cloud-api-operations';
+import { scheduleIdleTask } from '@/lib/idle-task';
 import { promptShortcutDatabaseName } from '@/lib/prompt-shortcut-storage';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 
@@ -60,6 +60,22 @@ export function usePromptShortcuts() {
   };
 }
 
+function PromptShortcutBodyPrefetcher() {
+  const { runtime, entries, loading } = usePromptShortcuts();
+  useEffect(() => {
+    if (!runtime || loading || entries.length === 0) return undefined;
+    const controller = new AbortController();
+    const cancelIdle = scheduleIdleTask(() => {
+      void runtime.prefetch(entries, { signal: controller.signal });
+    });
+    return () => {
+      controller.abort();
+      cancelIdle();
+    };
+  }, [entries, loading, runtime]);
+  return null;
+}
+
 /** Mounted once by MainLayout, not once per settings panel/composer. */
 export function PromptShortcutProvider({
   children,
@@ -71,8 +87,7 @@ export function PromptShortcutProvider({
   const platform = usePlatform();
   const session = usePlatformSession();
   const workspaceRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
-  const featureEnabled = useAtomValue(promptShortcutsFeatureEnabledAtom);
-  const scope = useResolvedWorkspaceScope({ enabled: enabled && featureEnabled });
+  const scope = useResolvedWorkspaceScope({ enabled });
   const userId = session.status === 'authenticated' ? session.user.id : null;
   const workspaceId =
     scope.enabled && scope.workspaceId === workspaceRuntime?.workspaceId ? scope.workspaceId : null;
@@ -92,6 +107,9 @@ export function PromptShortcutProvider({
   const [instance, setInstance] = useState<{
     runtime: PromptShortcutRuntime;
     generation: number;
+    platform: typeof platform;
+    cloud: boolean;
+    isActive: () => boolean;
   } | null>(null);
   const [failure, setFailure] = useState<{
     workspaceId: string;
@@ -103,7 +121,10 @@ export function PromptShortcutProvider({
   const runtime =
     instance?.runtime.workspaceId === workspaceId &&
     instance.runtime.userId === userId &&
-    instance.generation === generation
+    instance.generation === generation &&
+    instance.platform === platform &&
+    instance.cloud === cloud &&
+    instance.isActive()
       ? instance.runtime
       : null;
   const initializationError =
@@ -223,7 +244,7 @@ export function PromptShortcutProvider({
           : undefined
       );
       check();
-      setInstance({ runtime: owned, generation });
+      setInstance({ runtime: owned, generation, platform, cloud, isActive: () => !disposed });
       void owned.flush();
     })().catch((error) => {
       if (!disposed) {
@@ -233,6 +254,9 @@ export function PromptShortcutProvider({
     });
     return () => {
       disposed = true;
+      // Identity can return before the replacement finishes opening. Retire this
+      // effect's instance immediately, even while its durable close is pending.
+      setInstance((value) => (value?.runtime === owned ? null : value));
       // Close a late initialization as well; no leaked IndexedDB/Streams leases.
       const closing = opening
         .then(async () => {
@@ -267,6 +291,7 @@ export function PromptShortcutProvider({
         retry: () => setGeneration((value) => value + 1),
       }}
     >
+      <PromptShortcutBodyPrefetcher />
       {children}
     </Context.Provider>
   );

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { PanelLeft } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 
 export type MobileChatLandingScreenProps = {
@@ -31,14 +31,12 @@ export function MobileChatLandingScreen({
         <div className="relative flex items-center pb-2 pl-[calc(16px+var(--safe-area-left))] pr-[calc(16px+var(--safe-area-right))] pt-[calc(16px+var(--safe-area-top))]">
           <Button
             variant="ghost"
-            size="icon"
-            className={cn(
-              'h-11 w-11 rounded-xl md:hidden',
-              'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-            )}
+            size="large"
+            icon
+            className={cn('md:hidden')}
             onClick={onOpenMobileDrawer}
           >
-            <PanelLeft />
+            <PanelLeft className="size-4" />
             <span className="sr-only">Open sidebar</span>
           </Button>
           <span className="sr-only">{title}</span>

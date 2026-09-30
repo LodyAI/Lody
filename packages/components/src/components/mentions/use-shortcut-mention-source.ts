@@ -1,5 +1,3 @@
-import { useAtomValue } from 'jotai';
-import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
@@ -20,20 +18,19 @@ export function useShortcutMentionSource(
   scope: PromptShortcutScope | null,
   draftKey?: string
 ): MentionCategorySources['promptShortcut'] {
-  const featureEnabled = useAtomValue(promptShortcutsFeatureEnabledAtom);
   const { t } = useTranslation();
   const postHog = usePostHog();
   const { runtime, entries, loading } = usePromptShortcuts();
   const context = useMemo<ShortcutMentionContext | null>(
     () =>
-      featureEnabled && runtime && scope
+      runtime && scope
         ? {
             workspaceId: runtime.workspaceId,
             userId: runtime.userId,
             scope,
           }
         : null,
-    [featureEnabled, runtime, scope]
+    [runtime, scope]
   );
   const scopeKey = JSON.stringify([context, draftKey]);
   const current = useRef({ runtime, scopeKey });

@@ -2,7 +2,7 @@
 
 `CLAUDE.md` symlinks here. Edit `AGENTS.md` only.
 
-Parent rules apply. Read each heading’s linked context before edits.
+Read parent rules and each heading's linked context before edits.
 
 ## [Tabs and `?tab` routing](../../../../../.agents/docs/sessions-tabs-routing.md)
 
@@ -15,7 +15,7 @@ Parent rules apply. Read each heading’s linked context before edits.
 - `?tab` owns selection; never mirror it in state (#193). Confirmed shared closure
   may replace the current choice with a neighbour or local draft. Close writes
   `isTabClosed`, never archive or delete.
-  Reopening archives restores lifecycle first.
+  Reopen clears only `isTabClosed`; it never unarchives.
 - Cmd/Ctrl+W ownership: [command rules](../../lib/commands/AGENTS.md).
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
   they stay separate actions.
@@ -38,12 +38,12 @@ Parent rules apply. Read each heading’s linked context before edits.
 
 ## [Browser and Managed Preview](../../../../../.agents/docs/sessions-browser.md)
 
-- The engine split is the agent machine's own LOOPBACK (Managed Preview) vs.
-  everything else, LAN included (public browser capability). Never fall back from
-  a missing public engine to iframe, system browser, CLI, or gateway.
-- INVARIANT: a managed preview is never a pivot; approval cannot make a LAN
-  target safe. Agent-authored navigation (`fromPageContent`) never opens a
-  private-LAN destination — only the address bar may.
+- Managed Preview accepts only the agent machine's LOOPBACK. All other addresses
+  require public-browser capability; no iframe/system-browser/CLI/gateway fallback.
+- Approval cannot authorize LAN previews. Agent-authored navigation
+  (`fromPageContent`) never opens private LAN; only the address bar may.
+- Preload one bounded frame after live confirmation; require atomic moves, no
+  polling, and cleanup safe after Browser takeover.
 - Static HTML runs `allow-scripts`-only from a policy-owned `srcdoc`; truncated
   documents are never executable and static frames die with their tab.
 - Preview comment writes go through `runtime.writer.mutatePreviewVisualComments`, never the store's `setState`.
@@ -121,6 +121,7 @@ Parent rules apply. Read each heading’s linked context before edits.
 - A RESTORED side-panel state must not animate: bump `sidebarRestoreSeq` in the
   same commit as any non-user `isSidebarOpen` write.
 - "Current branch" copy uses `SessionMeta.branchName` only.
+- PR summaries do not enable hosted detail/mutation APIs; local PR links open externally.
 
 ## [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
 
@@ -131,12 +132,11 @@ Parent rules apply. Read each heading’s linked context before edits.
 - Local paths resolve on the OWNING machine from its workspace root plus a
   genuinely workspace-relative path; `lib/session-local-file-path.ts` rejects
   absolute and `..` paths.
-- Viewers are intentionally NOT code-split; never reintroduce
-  `lazy(() => import())` for them. v2 semantics: `specs/code-collab-v2.md`.
+- Keep viewer shells static; load Office engines on activation/idle only.
+  Local PDFs use 64 KiB ranges and 8 MP canvases.
 
 ## [Stories](../../../../../.agents/docs/sessions-stories.md)
 
 - Stories mirror production and never own UI: a story may only mock data and
   render the real component; appearance lives in the component.
-  `SessionConversationPage.stories.tsx` hand-composes leaves and drifts — keep it
-  minimal and verify UI changes in the real app.
+  Keep stories minimal; verify UI changes in the app.

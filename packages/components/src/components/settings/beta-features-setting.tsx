@@ -1,10 +1,9 @@
 import { useAtom, useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { Switch } from '@/ui/switch';
+import { Switch } from '@lody/ui/switch';
 import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
-  promptShortcutsBetaEnabledAtom,
   semanticShortcutsBetaEnabledAtom,
 } from '@/atoms/settings';
 import { CompactRow, CompactSection } from './compact-layout';
@@ -23,10 +22,6 @@ export function BetaFeaturesSection() {
   const { t } = useTranslation();
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
-
-  const [promptShortcutsBetaEnabled, setPromptShortcutsBetaEnabled] = useAtom(
-    promptShortcutsBetaEnabledAtom
-  );
 
   const [semanticShortcutsEnabled, setSemanticShortcutsEnabled] = useAtom(
     semanticShortcutsBetaEnabledAtom
@@ -49,19 +44,7 @@ export function BetaFeaturesSection() {
           aria-label={t('settings.beta.inbox', 'Inbox')}
         />
       </CompactRow>
-      <CompactRow
-        label={t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
-        helper={t(
-          'settings.beta.promptShortcutsHelper',
-          'Create reusable prompts and insert them with /. In development — expect rough edges.'
-        )}
-      >
-        <Switch
-          checked={promptShortcutsBetaEnabled}
-          onCheckedChange={setPromptShortcutsBetaEnabled}
-          aria-label={t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
-        />
-      </CompactRow>
+
       <CompactRow
         label={t('settings.beta.semanticShortcuts', 'Pointer-aware close shortcut')}
         helper={t(

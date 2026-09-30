@@ -13,7 +13,7 @@ import type {
   SessionFileSendLocalResponse
 } from '@lody/shared/message'
 import type { SessionId, WorkspaceId } from '@lody/shared/ids'
-import { SessionIdSchema } from '@lody/shared/message-schemas'
+import { SessionIdSchema, LocalProjectHistoryProviderSchema } from '@lody/shared/message-schemas'
 import type { LocalProjectHistoryProvider, LocalProjectId } from '@lody/shared/project'
 import { formatUnknownError } from '../../utils'
 import { getIpcServiceDeps } from '../ipc-service-deps'
@@ -57,14 +57,7 @@ function parseSendSessionFileLocalInput(payload: unknown): SendSessionFileLocalI
 }
 
 function isLocalProjectHistoryProvider(value: unknown): value is LocalProjectHistoryProvider {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    ((value as { cliType?: unknown }).cliType === 'builtin' ||
-      (value as { cliType?: unknown }).cliType === 'registry') &&
-    typeof (value as { agentType?: unknown }).agentType === 'string' &&
-    (value as { agentType: string }).agentType.trim().length > 0
-  )
+  return LocalProjectHistoryProviderSchema.safeParse(value).success
 }
 
 export class LocalProjectsIpc extends IpcService {

@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react';
 import { Send, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { type SessionMeta, type VisualAnnotationReferencePayload } from '@lody/shared';
@@ -42,9 +42,9 @@ import {
 } from '@lody/shared/preview-comment-types';
 
 import { userAtom } from '@/atoms';
-import { Button } from '@/ui/button';
-import { Textarea } from '@/ui/textarea';
-import { toast } from 'sonner';
+import { Button } from '@lody/ui/button';
+import { Textarea } from '@lody/ui/textarea';
+import { toast } from '@/lib/toast';
 import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-annotation-comments-overlay';
 import { getVisiblePreviewVisualComments } from '@/components/preview/preview-visual-comments';
 import {
@@ -725,8 +725,9 @@ export function ManagedPreviewSurface({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="h-6 w-6 shrink-0"
+              size="mini"
+              icon
+              className="shrink-0"
               aria-label={t('common.cancel', 'Cancel')}
               onClick={() => {
                 setSelectedTarget(null);
@@ -746,7 +747,7 @@ export function ManagedPreviewSurface({
           <div className="mt-2 flex justify-end">
             <Button
               type="button"
-              size="sm"
+              size="small"
               disabled={!draftBody.trim() || submitting}
               onClick={() => void submitDraft()}
             >

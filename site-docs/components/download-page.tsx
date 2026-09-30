@@ -1,5 +1,7 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 import { Download, ExternalLink, Globe2, Laptop, MonitorDown, Smartphone } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -339,7 +341,7 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
                       const isOpen = item.action === 'open';
                       const target = item.target ?? (isOpen ? '_blank' : undefined);
                       return (
-                        <a
+                        <SiteAnchor
                           className="download-card__action"
                           href={getDownloadUrl(item, downloads)}
                           key={getItemKey(item)}
@@ -352,7 +354,7 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
                           ) : (
                             <Download aria-hidden="true" />
                           )}
-                        </a>
+                        </SiteAnchor>
                       );
                     })}
                   </div>

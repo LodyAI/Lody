@@ -7,7 +7,6 @@ import { LoroMap } from 'loro-crdt';
 import {
   createHistoryWriter,
   resolveSessionConversationConfig,
-  type WorkspaceId,
 } from '@lody/shared';
 import {
   useConversationVersion,
@@ -18,7 +17,6 @@ import { useIncrementalSearchBlocks } from '../src/hooks/use-incremental-search-
 import {
   createConversationSession,
   createConversationDerivation,
-  createProjectedConversationView,
   collectConversationConfigSources,
   type ConversationView,
 } from '../src/lib/conversation-view';
@@ -163,8 +161,38 @@ describe('conversation view React readers', () => {
     expect(itemFor('a-10')?.type).toBe('placeholder');
   });
 
-  it('keeps revealed content and its reading window through projection refreshes', async () => {
-    const { view } = await openView(150);
+  it('loads a restored reading turn far from the tail before the first viewport report', async () => {
+    const { view } = await openView(150, 200);
+    let stream!: ReturnType<typeof useConversationStreamItems>;
+    function Probe() {
+      stream = useConversationStreamItems(view, FIXTURE_SESSION_ID, { initialFocusTurnId: 'a-40' });
+      return null;
+    }
+    await act(async () => root.render(<Probe />));
+    await flush();
+    const itemFor = (id: string) =>
+      stream.items.find((item) =>
+        item.type === 'message'
+          ? item.message.id === id
+          : item.type === 'placeholder' && item.row.id === id
+      );
+    expect(stream.initialWindowReady).toBe(true);
+    // The focus turn and its neighbours render as rows, not placeholders.
+    expect(itemFor('a-40')?.type).toBe('message');
+    expect(itemFor('a-45')?.type).toBe('message');
+    // Far from both the focus and the tail stays a placeholder.
+    expect(itemFor('a-5')?.type).toBe('placeholder');
+    // The first real report takes over from the focus (a round is a user and
+    // an assistant turn, so round 100 sits at turn index 201).
+    await act(async () => stream.onVisibleTurnRangeChange({ from: 200, to: 208 }));
+    await flush();
+    expect(itemFor('a-5')?.type).toBe('placeholder');
+    expect(itemFor('a-100')?.type).toBe('message');
+  });
+
+  it('keeps revealed content and its reading window while new turns land', async () => {
+    const { doc, view } = await openView(150);
+    const writer = createHistoryWriter(doc);
     let stream!: ReturnType<typeof useConversationStreamItems>;
     function Probe({ current }: { current: ConversationView }) {
       stream = useConversationStreamItems(current, FIXTURE_SESSION_ID);
@@ -177,7 +205,6 @@ describe('conversation view React readers', () => {
     await act(async () => root.render(<Probe current={view} />));
     await act(async () => stream.onVisibleTurnRangeChange({ from: 20, to: 28 }));
     await flush();
-    const entry = view.turn(20)!;
     const acquire = view.acquireRange.bind(view);
     let releaseReady!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -187,25 +214,21 @@ describe('conversation view React readers', () => {
       const lease = acquire(...args);
       return { ...lease, ready: lease.ready.then(() => gate) };
     });
-    for (let refresh = 0; refresh < 3; refresh++) {
-      const projected = createProjectedConversationView(view, [
-        {
-          workspaceId: 'projection-fixture' as WorkspaceId,
-          sessionId: FIXTURE_SESSION_ID,
-          entry,
-        },
-      ]);
-      await act(async () => root.render(<Probe current={projected} />));
+    for (let landed = 0; landed < 3; landed++) {
+      await act(async () => {
+        writer.append({ ...buildFixtureHistory(1)[0]!, id: `landed-${landed}` });
+        await flushReaderChanges();
+      });
+      await act(async () => root.render(<Probe current={view} />));
       await flush();
+      expect(view.indexOf(`landed-${landed}`)).toBe(view.turnCount - 1);
       expect(getComputedStyle(container.firstElementChild!).visibility).toBe('visible');
       expect(view.isHydrated(20)).toBe(true);
     }
-    await act(async () => root.render(<Probe current={view} />));
-    expect(getComputedStyle(container.firstElementChild!).visibility).toBe('visible');
     await act(async () => releaseReady());
   });
 
-  it('holds the initial tail window until ready and never hides later window loads', async () => {
+  it('is ready once the initial tail is hydrated, without a promise tick, and never hides later window loads', async () => {
     const { view } = await openView(150);
     const acquire = view.acquireRange.bind(view);
     let releaseReady!: () => void;
@@ -221,20 +244,25 @@ describe('conversation view React readers', () => {
       stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
       return <span>{String(stream.initialWindowReady)}</span>;
     }
+    // 300 turns: the 40-turn tail beyond the always-hydrated keep is not hydrated yet.
+    expect(view.isHydrated(260)).toBe(false);
     await act(async () => root.render(<Probe />));
     expect(container.textContent).toBe('false');
+    // The lease hydrates it; its promise is still pending, and ready does not wait for it.
+    await act(async () => {
+      await flush();
+    });
+    expect(view.isHydrated(260)).toBe(true);
+    expect(container.textContent).toBe('true');
+
+    // A later window loading (still gated) never hides the revealed tail.
     await act(async () => {
       stream.onVisibleTurnRangeChange({ from: 0, to: 8 });
     });
     await flush();
-    expect(view.isHydrated(0)).toBe(false);
-    expect(container.textContent).toBe('false');
-    await act(async () => {
-      releaseReady();
-    });
     expect(container.textContent).toBe('true');
     await act(async () => {
-      stream.onVisibleTurnRangeChange({ from: 0, to: 8 });
+      releaseReady();
     });
     await flush();
     expect(view.isHydrated(0)).toBe(true);

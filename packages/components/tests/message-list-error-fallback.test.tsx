@@ -20,7 +20,9 @@ function BrokenMessages() {
 }
 function button(text: string) {
   const found = [...container.querySelectorAll('button')].find((element) =>
-    element.textContent?.toLowerCase().includes(text.toLowerCase())
+    `${element.textContent ?? ''} ${element.getAttribute('aria-label') ?? ''}`
+      .toLowerCase()
+      .includes(text.toLowerCase())
   );
   if (!found) throw new Error(`Missing button: ${text}`);
   return found;
@@ -69,7 +71,7 @@ it('copies the original exception and caught React stack without resetting the d
   expect(report).toContain('Boundary: SessionChatStream');
   expect(report).toContain('Component stack:');
   expect(report).toContain('BrokenMessages');
-  expect(container.textContent).toContain('Copied');
+  expect(button('Copied')).toBeDefined();
   expect(container.querySelector('textarea')?.value).toBe('unsent draft');
   crash = false;
   await click('Try again');
@@ -81,6 +83,7 @@ it('opens selectable details when copying fails, without claiming success', asyn
   await click('Copy error details');
   expect(container.textContent).toContain('Copying was blocked');
   expect(button('Copy error details')).toBeDefined();
-  expect(container.querySelector('details')?.open).toBe(true);
-  expect(container.querySelector('pre')?.textContent).toContain('at measureRow');
+  expect(button('Technical details').getAttribute('aria-expanded')).toBe('true');
+  const details = [...container.querySelectorAll('pre')].map((pre) => pre.textContent).join('\n');
+  expect(details).toContain('at measureRow');
 });

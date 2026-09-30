@@ -1,4 +1,7 @@
 import EventEmitter from 'eventemitter3';
+import { clearGitHubTokenEnv } from '@/lib/gh-token-env';
+import { applyNonOwnerShellEnv } from '@/lib/non-owner-shell-env';
+import { prependGhShimBinDirToPath } from '@/lib/gh-shim-script';
 import { ACPSessionId, getServerNow, MachineId, SessionId } from '@lody/shared';
 import type { CreateAgentConfig, ISession, SessionMonitorRuntimeInfo } from './session-manager';
 import {
@@ -23,6 +26,7 @@ import {
   createAcpStartupMonitor,
 } from '@/agent/acp-startup-monitor';
 import { runNpxStartupWithRecovery } from '@/agent/acp-npx-startup-policy';
+import { runCodexRefreshStartupWithRetry } from './codex-refresh-startup';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { withLodyNpmCacheForNpx } from '@/agent/npx-cache';
 import { resolveDeepSeekHarnessSpawn } from '@/agent/deepseek-harness-runtime';
@@ -124,7 +128,6 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private acpCapabilities: AcpCapabilitiesResult | null = null;
   private acpCapabilitySourceVersion: string | null = null;
   public terminalManager: TerminalManager;
-  public ghTokenInjected: boolean = false;
 
   constructor(
     config: SessionConfig,
@@ -380,15 +383,25 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     userName: string,
     userEmail: string,
     userId: string | undefined,
-    options: { preferMachineIdentity: boolean }
+    options: { preferMachineIdentity: boolean; personalIdentityEnabled?: boolean }
   ): void {
     const configEnv = this.config.env ?? {};
-    // Set git identity using Git's recognized environment variables directly
+    if (this.config.githubCredentialPolicy) {
+      this.config.githubCredentialPolicy.allowLocalAuth = options.preferMachineIdentity;
+      if (options.personalIdentityEnabled !== undefined) {
+        this.config.githubCredentialPolicy.personalEnabled = options.personalIdentityEnabled;
+      }
+    }
+    // Set git identity using Git's recognized environment variables directly.
+    // The env is per agent process, so a shared machine never mixes requesters.
     const { name, email } = resolveSessionGitIdentity(
       { name: userName, email: userEmail },
       {
         preferMachineIdentity: options.preferMachineIdentity,
-        cwd: this.getWorkdir(),
+        personalIdentityEnabled:
+          options.personalIdentityEnabled ??
+          this.config.githubCredentialPolicy?.personalEnabled ??
+          false,
       }
     );
     configEnv.GIT_AUTHOR_NAME = name;
@@ -488,7 +501,28 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     // gateway); a proxy inherited from the host process or the login shell
     // must never intercept those. Runs last so a proxy contributed by the
     // login shell is covered too.
-    return withLoopbackNoProxy(withDefaultAcpPathEntries(agentEnv, this.config.agentType));
+    const finalEnv = withLoopbackNoProxy(
+      withDefaultAcpPathEntries(agentEnv, this.config.agentType)
+    );
+    const policy = this.config.githubCredentialPolicy;
+    if (policy) {
+      if (!policy.allowLocalAuth) {
+        clearGitHubTokenEnv(finalEnv);
+        applyNonOwnerShellEnv(finalEnv, policy.stateFilePath);
+      } else if (policy.stateFilePath) {
+        finalEnv.PATH = prependGhShimBinDirToPath(finalEnv.PATH, policy.stateFilePath);
+      }
+      // Shell/agent overrides cannot select a different session's authority.
+      for (const key of Object.keys(configEnv)) {
+        if (
+          key.startsWith('LODY_GIT_CRED_') ||
+          key.startsWith('GIT_CONFIG_') ||
+          key === 'LODY_GIT_LOCAL_CONFIG'
+        )
+          finalEnv[key] = configEnv[key];
+      }
+    }
+    return finalEnv;
   }
 
   async createAgent(callbacks: CreateAgentConfig): Promise<string> {
@@ -544,20 +578,44 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       );
       captureAcpSpawnStarted(spawnAnalyticsProps);
       let agentProcessHandle: SessionProcessHandle;
+      let releaseProfile:
+        | import('../agent/codex-profile-process-usage').CodexProfileProcessUsage
+        | undefined;
+      let closeBroker: (() => Promise<void>) | undefined;
+      const releaseResources = async () => {
+        await closeBroker?.();
+        await releaseProfile?.();
+      };
       try {
         callbacks.abortSignal?.throwIfAborted();
+        const profile = this.config.codexProfile;
+        if (profile?.profile.mode === 'chatgpt')
+          releaseProfile = await registerCodexProfileProcess(profile);
+        const prepared = profile
+          ? await codexProfileSpawnEnvironment({ profile }, env)
+          : { env, close: undefined };
+        closeBroker = prepared.close;
+        if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
         const executable = resolveDeepSeekHarnessSpawn({
           command: callbacks.command,
           args: callbacks.args ?? [],
-          env,
+          env: prepared.env,
           workdir: this.getWorkdir(),
         });
         agentProcessHandle = await this.sandbox.spawn(executable.command, executable.args, {
           cwd: this.getWorkdir(),
-          env,
+          env: prepared.env,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
+        agentProcessHandle.onExit(() => {
+          void releaseResources().catch(() => {});
+        });
+        agentProcessHandle.onError(() => {
+          void releaseResources().catch(() => {});
+        });
       } catch (error) {
+        await releaseProfile?.abandonBeforeSpawn();
+        await releaseResources();
         captureAcpSpawnFailed({ ...spawnAnalyticsProps, reason: classifyCliSpawnReason(error) });
         throw error;
       }
@@ -677,6 +735,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         acpSessionId = started.acpSessionId;
         acpCapabilities = normalizeAcpSessionCapabilities(started.sessionResponse, {
           sessionFork: started.client.supportsSessionFork(),
+          sessionTitle: started.client.supportsSessionTitleGeneration(),
           acknowledgedSteer: started.client.supportsAcknowledgedSteer(),
           goalActions: started.client.getGoalCapability()?.actions.slice(),
           agent: { cliType: this.config.agentCliType, agentType: this.config.agentType },
@@ -707,15 +766,16 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       return acpSessionId;
     };
 
-    try {
-      return await withAcpSessionStartSlot(
+    const startAttempt = async (retry: boolean): Promise<string> =>
+      await withAcpSessionStartSlot(
         {
           label: this.sessionId,
           logger: this.logger,
           abortSignal: callbacks.abortSignal,
         },
-        async () =>
-          await runNpxStartupWithRecovery({
+        async () => {
+          if (retry) await callbacks.revalidateManagedCodexProfile?.();
+          return await runNpxStartupWithRecovery({
             command: callbacks.command,
             args: callbacks.args ?? [],
             env,
@@ -724,8 +784,22 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             attempt: ({ startupTimeouts }) => attemptCreateAgent(startupTimeouts),
             cleanupFailedAttempt,
             getStderrTail: () => lastStderrTail,
-          })
+          });
+        }
       );
+    try {
+      return await runCodexRefreshStartupWithRetry({
+        attempt: () => startAttempt(false),
+        retryAttempt: callbacks.revalidateManagedCodexProfile
+          ? () => startAttempt(true)
+          : undefined,
+        cleanupFailedAttempt,
+        abortSignal: callbacks.abortSignal,
+        onRetry: () =>
+          this.logger.warn(
+            `[${this.sessionId}] Retrying Codex session startup after refresh contention`
+          ),
+      });
     } catch (error) {
       await cleanupFailedAttempt();
       throw error;
@@ -910,3 +984,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     this.emit('output', output);
   }
 }
+import {
+  registerCodexProfileProcess,
+  codexProfileSpawnEnvironment,
+} from '../agent/codex-profile-runtime';

@@ -1,28 +1,71 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment jsdom
+
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
   DEFAULT_AGENT_ROLE_EMOJI,
   applyTextRewrites,
+  resolveAgentRoleAvailability,
   type AgentConfigId,
   type AgentRole,
   type AgentRoleId,
   type LocalProjectId,
   type MachineId,
-  type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
 import { buildAgentRoleCandidates } from '../src/components/mentions/mention-registry';
 import {
-  buildAgentRoleMentionContext,
   buildAgentRoleMentionItems,
   buildAgentRoleMentionPrompt,
   buildAgentRoleMentionRewrites,
   hydrateAgentRoleMentionsFromText,
-  resolveAgentRoleMentionScope,
-  resolveAgentRoleMentionAvailability,
   selectAgentRoleMentionCandidates,
   type AgentRoleMentionItem,
 } from '../src/components/mentions/mention-agent-role-source';
+import {
+  useMentionPromptExpansion,
+  type MentionPromptExpansion,
+} from '../src/components/mentions/mention-expansion';
+
+// The composer-facing hooks read the authenticated machine index and the
+// workspace catalog. Stub those inputs, keep the real availability rule.
+const reach = vi.hoisted(() => ({
+  roles: [] as AgentRole[],
+  authorized: new Set<string>(),
+}));
+vi.mock('../src/hooks/use-visible-machine-metas', () => ({
+  useVisibleMachineMetas: () => ({
+    machines: new Map([...reach.authorized].map((id) => [id, { id, name: id }])),
+  }),
+}));
+vi.mock('../src/hooks/use-workspace-agent-roles', () => ({
+  useWorkspaceAgentRoles: () => ({ roles: reach.roles, synced: true }),
+  useAgentRoleAvailability: () => ({
+    resolve: (entry: AgentRole) =>
+      resolveAgentRoleAvailability(entry, {
+        authorizedMachineIds: reach.authorized as Set<MachineId>,
+        onlineMachineIds: reach.authorized as Set<MachineId>,
+        agentConfigMachineIds: new Map(
+          reach.roles.map((candidate) => [candidate.agentConfigId, candidate.machineId])
+        ),
+        loadedAgentConfigMachineIds: reach.authorized as Set<MachineId>,
+      }),
+  }),
+}));
+vi.mock('../src/components/mentions/mention-session-source', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useSessionMentionItems: () => [],
+}));
+vi.mock('../src/components/mentions/mention-skill-source', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useSkillMentionRewrites: () => () => [],
+}));
+
+(
+  globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 const machineId = 'machine-1' as MachineId;
 
@@ -51,73 +94,52 @@ const items = (...roles: AgentRole[]): AgentRoleMentionItem[] =>
     agentConfig: () => agentConfig,
   });
 
-describe('agent role mention work context', () => {
-  it('pins a local project to its own machine', () => {
-    expect(
-      buildAgentRoleMentionContext({
-        mentionSource: {
+describe('agent role reach from a local project composer', () => {
+  it('dispatches a role bound to another authorized machine, never an unreachable one', async () => {
+    const remote = role({
+      id: 'remote' as AgentRoleId,
+      name: 'Remote Reviewer',
+      machineId: 'machine-2' as MachineId,
+      agentConfigId: 'config-2' as AgentConfigId,
+    });
+    const unreachable = role({
+      id: 'unreachable' as AgentRoleId,
+      name: 'Unreachable Reviewer',
+      machineId: 'machine-3' as MachineId,
+      agentConfigId: 'config-3' as AgentConfigId,
+    });
+    reach.roles = [remote, unreachable];
+    reach.authorized = new Set([machineId, 'machine-2']);
+
+    let expansion: MentionPromptExpansion | undefined;
+    function LocalProjectComposer() {
+      expansion = useMentionPromptExpansion({
+        source: {
           kind: 'local',
-          machineId: 'machine-2' as MachineId,
+          machineId,
           workspaceId: 'w' as WorkspaceId,
           localProjectId: 'p' as LocalProjectId,
         },
-      })
-    ).toEqual({ kind: 'machine', machineId: 'machine-2' });
-  });
+        skillAgent: undefined,
+        promptValue: '',
+      });
+      return null;
+    }
+    const root = createRoot(document.createElement('div'));
+    await act(async () => root.render(createElement(LocalProjectComposer)));
 
-  it('retains local-project pinning while a live provider serves its files', () => {
-    expect(
-      buildAgentRoleMentionContext({
-        mentionSource: {
-          kind: 'provider',
-          localProject: {
-            machineId: 'machine-2' as MachineId,
-            localProjectId: 'p' as LocalProjectId,
-          },
-          githubRepoFullName: 'loro-dev/lody',
-        },
-      })
-    ).toEqual({ kind: 'machine', machineId: 'machine-2' });
-  });
-
-  it('lets a github project reach every authorized machine', () => {
-    const context = buildAgentRoleMentionContext({
-      mentionSource: { kind: 'github', repoFullName: 'loro-dev/lody' },
+    const text = '@Remote-Reviewer and @Unreachable-Reviewer';
+    const expanded = expansion!.expand({
+      text,
+      mentions: [
+        { start: 0, end: 16, kind: 'agent_role', value: 'remote' },
+        { start: 21, end: 42, kind: 'agent_role', value: 'unreachable' },
+      ],
     });
-    expect(context).toEqual({ kind: 'authorized_machines' });
-    const authorized = new Set([machineId, 'machine-2' as MachineId]);
-    expect(resolveAgentRoleMentionScope(context, authorized)).toEqual({
-      kind: 'authorized_machines',
-      machineIds: authorized,
-    });
-  });
-
-  it('pins a github session that is checked out on a machine', () => {
-    expect(
-      buildAgentRoleMentionContext({
-        mentionSource: {
-          kind: 'github',
-          repoFullName: 'loro-dev/lody',
-          localWorktree: {
-            machineId: 'machine-3' as MachineId,
-            repoKey: 'repo',
-            sessionId: 's' as SessionId,
-          },
-        },
-      })
-    ).toEqual({ kind: 'machine', machineId: 'machine-3' });
-  });
-
-  it('opens plain chat to authorized machines', () => {
-    expect(buildAgentRoleMentionContext({ mentionSource: undefined })).toEqual({
-      kind: 'authorized_machines',
-    });
-    expect(
-      resolveAgentRoleMentionScope(
-        buildAgentRoleMentionContext({ mentionSource: undefined }),
-        new Set([machineId])
-      )
-    ).toEqual({ kind: 'authorized_machines', machineIds: new Set([machineId]) });
+    expect(expanded.text).toBe(
+      `${buildAgentRoleMentionPrompt({ id: 'remote', name: 'Remote Reviewer' })} and @Unreachable-Reviewer`
+    );
+    await act(async () => root.unmount());
   });
 });
 
@@ -150,35 +172,6 @@ describe('agent role candidates', () => {
 });
 
 describe('agent role availability in mentions', () => {
-  it('marks a remote role outside a local work context without hiding its row', () => {
-    const remote = role({ machineId: 'remote' as MachineId });
-    const list = buildAgentRoleMentionItems([remote], {
-      machine: () => null,
-      agentConfig: () => undefined,
-      availability: (entry) =>
-        resolveAgentRoleMentionAvailability(entry, { kind: 'machine', machineId }, () => ({
-          kind: 'available',
-        })),
-    });
-    expect(list).toHaveLength(1);
-    expect(list[0]?.availability).toEqual({ kind: 'unavailable', reason: 'outside_work_context' });
-  });
-
-  it.each([
-    'machine_unknown',
-    'machine_offline',
-    'agent_config_missing',
-    'agent_config_machine_mismatch',
-  ] as const)('preserves the binding failure %s', (reason) => {
-    expect(
-      resolveAgentRoleMentionAvailability(
-        role(),
-        { kind: 'machine', machineId: 'another' as MachineId },
-        () => ({ kind: 'unavailable', reason })
-      )
-    ).toEqual({ kind: 'unavailable', reason });
-  });
-
   it('puts available matches first even when a disabled match has a higher score', () => {
     const available = items(role({ id: 'ready' as AgentRoleId, name: 'Deep Reviewer' }))[0]!;
     const offline = {
@@ -214,6 +207,8 @@ describe('agent role menu rows', () => {
     // Nothing restated in the detail: the pane heads itself with the same mark
     // and name.
     expect(candidate?.detail?.title).toBeUndefined();
+    // Who does the work and where, on the row's own line.
+    expect(candidate?.hint).toBe('Codex · Studio');
   });
 
   it('hands the Role to the shared pane instead of restating it as rows', () => {

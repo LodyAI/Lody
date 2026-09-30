@@ -1,0 +1,263 @@
+# Attachment draft lifetimes and PR boundaries
+
+Status: implemented
+Translation: current
+
+[中文](2026-09-14-deferred-attachment-send.zh.md)
+
+Verdict (2026-09-29): implemented. The four-layer stack shipped through #705, #707, #709 and #719, so this note moved from `proposed/`. Partially superseded by [removing the session send journal](../simplification/2026-09-29-remove-session-send-journal.md): the durable journal, cross-window recovery, recovery-record compatibility and exit/logout/cache-clear gating were removed, and sends waiting for attachments are now held in memory only. Send-time attachment preparation, the workspace Effect resource owner and the submission boundary remain. The body below is the historical record.
+
+## Abstract
+
+Attachments currently transfer on addition, and composer unmounting or failure handling can affect complete submission. The draft feature unifies creation and continuation: addition only validates/previews, an independent service takes over after Send, and every attachment must be ready before submission. Adopt pinned Effect 3.18.4 through four proposed PRs: extract submission boundaries, own resources, complete submission/delivery, then deliver all draft entry points together; the first three retain transfer on addition, at the cost of completing persistence, recovery, and exit boundaries before feature delivery. Original local paths, permanent zero upload, and related protocol/Daemon work remain separate follow-up work. Six probes establish partial cancellation/resource boundaries, including two using the actual store cache; this revision changes design only, without product implementation or acceptance.
+
+## PR boundary
+
+The [attachment draft Spec](../../../../specs/session-files.md) owns this PR. New conversations and continuations share takeover, preparation, retry, and cancellation contracts, while retaining distinct final creation/continuation adapters. Both require complete UI acceptance; testing a shared helper or landing alone is insufficient.
+
+The [direct local-reference Spec](../../../../specs/local-attachment-references.md) separately preserves the follow-up design: original paths, generated local files, registration authority, new attachment protocols, Daemon/adapter/preview compatibility, and disabling backfill. None are implementation or acceptance gates for this PR. The current work delays existing upload/local handoff and preserves attachment types, fallback, backfill, materialization, and platform capabilities without claiming permanently upload-free local files.
+
+This replaces the initial combined draft/local-reference implementation scope. The later PR plugs into the same preparation boundary instead of duplicating draft state machines. The split reduces this PR's implementation scope, without removing draft failure, cancellation, exit, or recovery requirements.
+
+## Inspected source and tradeoffs
+
+Baseline: `8c429a890037c5b21855ce7ef9f59e3677c25a38`.
+
+- `session-chat-input-area.tsx` and landing hooks transfer on addition. Failed ordinary files are filtered while unsuccessful images block sending. This PR unifies both entry points around complete attachment readiness.
+- `use-session-actions.ts` generates turn IDs per call; `HistoryWriter.append` has no ID deduplication, and initial meta/history writes run concurrently. Stable IDs need reconciliation and persistent handoff together.
+- An in-memory manager supports in-page navigation but is insufficient for mobile-shell reclamation. Retain local recovery records, preserve drafts on save failure, and do not claim OS background transfer.
+- Electron confirmation must still precede relay/CLI cleanup. This belongs to draft lifecycle and is not deferred with local-communication optimization.
+- Reusing existing local handoff lets drafts ship independently. Its copying/backfill changes belong to the later PR; current UI must not imply they have disappeared.
+
+Native mobile shells and private upload services outside this repository were not inspected. API reuse is an implementation direction, not completed integration acceptance.
+
+## Effect proposal and tradeoffs
+
+[Spec section 11](../../../../specs/session-files.md#11-effect-ts-integration-and-implementation-order) scopes adoption to workspace preparation, submission, and delivery. React/Jotai retain drafts and short takeover/focus tokens; CLI retains Agent/backfill ownership. Scopes follow release boundaries. Ref.modify is optional state-operation syntax; encapsulated ordinary variables also work. Ref is neither a cross-I/O transaction nor a cross-window lock.
+
+Current call-chain findings refine the proposal:
+
+- Mount-scoped useComposerSubmission also owns keyboard/focus; session-chat-input-area's success callback clears drafts and marks visual comments submitted. Split saved takeover from actual acceptance to avoid premature annotation changes, prolonged input locking, or focus theft. Preserve click-time mobile blur; data clearing waits for saving.
+- session-detail.handleSendDraft couples child creation, tab promotion, navigation, and failure deletion while reading the current parent. Freeze parent/identity, recover promotion aliases, and never delete a written child on navigation failure. Landing is not the only creation entry.
+- useSessionPreparation.handoffToSession only drops references/timers. First version stops warmup on attachment takeover and gives the service exact cancellation cleanup; actual send may cold-start. Preserve CLI TTL/compatible claim and attachment-free warmup reuse.
+- workspace-writer-impl runs initial meta/history concurrently and ignores dispatch arguments. use-session-actions.requestSessionDispatch separately launches sync, full-input RPC, and a meta pointer write. Extract UI-independent submission and delivery ownership; old “durable accept unit” comments are not evidence.
+- CLI SessionDispatchWatcher.offerRpcTurn ACK means stash/deduplicated receipt, not execution or persistence. RPC carries full input and can start execution early. TurnHistoryGate waits for user history before output writes, so ACK does not end history sync; preserve CLI execution/deduplication ownership.
+- createSessionStore separates references from room sync leases; store-ref-tracker owns dispose/unload. Effect finalizers release only their borrow. Preparation/offline parking does not retain full history; late acquisition still needs release. acquireRelease masks acquisition by default, so unbounded acquisition is not controlled shutdown.
+- waitUntilSynced(signal) can resolve on abort/detached, while transport-ready waiting does not yet forward cancellation. Distinguish success, skipped, interrupted, and uncertain outcomes; delivery borrows existing sync instead of creating per-message transports/reconnect loops.
+- session-chat-interface captures MCP, Role, tool switches, resume, billing guards, presence, and direct locks in components. Freeze user choices and recheck runtime facts after extraction. Ordinary messages share FIFO; preserve unfinished-history queue barriers. Guide false mixes outcomes: authoritative no-active-turn differs from uncertainty.
+- resolveWorkspaceRuntimeCacheIdentity isolates repo/cursors per window; another window's empty replica cannot prove rejection. Token refresh need not destroy the service, while account/topology changes require old-generation exit protection.
+- Image cancellation, unowned multipart cleanup, noncancelable IPC, runtime/Electron shutdown still need changes. Main temporary files and CLI blobs/backfill keep existing ownership/semantics; upload-free local references remain a separate PR.
+
+Use one ManagedRuntime with storage, transport, and submission dependency boundaries. Persistent handoff can compact into smaller delivery obligations instead of stopping delivery with upload Scope. The cost is defining actual persistence/sync receipts, original-replica recovery, and side-effect timing; replacing individual Promises is insufficient. Adapt coupled boundaries without rewriting unrelated reconnect/cache/Daemon systems.
+
+## Staged adoption and rollback
+
+[Spec section 11.6](../../../../specs/session-files.md#114-staged-adoption) proposes three prerequisite PRs followed by one complete draft feature PR, each merged after its responsibility is complete:
+
+1. Extract ordinary submission interfaces while preserving behavior. Baseline cases exercise actual input/configuration/routing; retain existing defects as counterexamples with an owning later fix.
+2. Use Effect inside the service to fully own migrated uploads, cancellation, retries, borrows, and release. Components keep ordinary interfaces and transfer still starts on addition; exit cleanup ships with its resources.
+3. Own submission/delivery of already-prepared messages, with identity, persistence receipts, uncertain-result reconciliation, cross-window recovery, and necessary exit flows. This explicitly improves reliability while retaining transfer timing.
+4. Connect complete drafts for creation, children, and continuations together, including saving, failure, cancellation, ordering, warmup, and platform exit/recovery before enabling the feature.
+
+Remove the previous owner when migrating a responsibility. Never run real uploads/writes twice or fall back to legacy sending after an uncertain result. Do not simultaneously upgrade Effect, rewrite underlying sync, or implement upload-free local references. The tradeoff is later visible feature delivery in exchange for independently checking behavior, cancellation, and resource ownership at each stage. After introducing recovery records, rollback requires a compatible version that can process them; stop takeover and finish or reliably retain in-flight work first. Deleting records or resending is not rollback. Do not ship the persistent stage before original-replica recovery and record compatibility are defined.
+
+## Related decisions
+
+- Preserve [workspace draft isolation](../../implemented/bug-fix/2026-09-11-workspace-window-composer-drafts.md) across new/existing conversation drafts and account/workspace boundaries.
+- Preserve the [single history writer](../../implemented/architecture/2026-09-07-single-history-writer.md), without another history mutation path.
+- Preserve folded text and pre-send expansion from the [context-copy decision](../../implemented/feature/2026-09-09-conversation-context-fallback.md). Automatic text-file conversion and image editing are excluded.
+
+## Stack implementation status
+
+PR 1: [#705](https://github.com/LodyAI/Lody/pull/705) — `refactor/attachment-submission-boundary` → `main`.
+
+Layer 1 extracts `lib/session-submission.ts` from `use-session-actions.ts` and
+keeps React bindings for billing admission, analytics, and observable atoms.
+Creation, initial history, continuation, dispatch, and guide still use the same
+writer and routing. It preserves transfer timing and acceptance behavior; no
+persistent send service or draft product behavior is enabled by this layer.
+The base includes main's composer paste-size ceiling (`6fde8b07`). Validation
+uses the existing action/composer suites, with writer-call-only assertions
+replaced by observable initial/continuation history checks.
+
+Layer 1 validation: repository typechecking/lint pass; components 3,656 tests,
+shared 1,194 tests, and Electron 112 tests pass. The full `pnpm check` run stops
+at an unrelated CLI worktree-GC assertion comparing macOS `/var` and
+`/private/var` aliases (other CLI cases: 2,791 passed). Its complete 11-test suite
+passes with `TMPDIR=/private/tmp`; remaining i18n/import/platform/public-boundary
+checks and docs check pass separately. `pnpm format` ran; unrelated formatting
+was discarded. No packaged-device draft acceptance is claimed.
+
+## Verification and limits
+
+The [finite model](../../../../specs/models/session-files.model.ts) covers only the current draft scope: add/remove/replace/navigate/send gates for both entry points, paired attachment readiness, and two accepted same-session messages with at most one retry each. Acceptance and persistent handoff are separate; cancellation, obsolete callbacks, FIFO, and the old failed-file filtering counterexample remain. Upload-free local routing has been removed from this model.
+
+Run `node --experimental-strip-types specs/models/session-files.model.ts` and `tsc --noEmit --strict --target ES2022 --module ESNext --lib ES2022,DOM --skipLibCheck specs/models/session-files.model.ts`. This model does not connect to actual UI, writers, disk, IPC, or Agents. Complete new-conversation/continuation acceptance follows A01–A18 and cannot be replaced by the model.
+
+The [Effect probes](../../../../specs/models/session-files.effect-probe.mjs) use pinned 3.18.4 and pass six cases: noncooperative writes after interruption, signal-controlled transfer, awaited Scope cleanup, phase/generation checks, plus late-acquisition release and preservation of shared UI references through current store-ref-tracker.ts. The cache cases use synthetic stores, not real Loro/disk/network. Explicit gates and releaseIfIdle drive release without elapsed-time or scheduler guesses.
+
+Reproduce with a temporary effect@3.18.4 installation (`npm install --prefix <temp> --ignore-scripts --no-audit --no-fund effect@3.18.4`). Copy specs/models/session-files.effect-probe.mjs and packages/components/src/providers/store-ref-tracker.ts retaining their repository-relative paths; run `node --experimental-strip-types --test <temp>/specs/models/session-files.effect-probe.mjs`. This establishes only those boundaries, not real XHR/IPC, writer durability, cross-window coordination, or E01–E12 acceptance. Official v3 sources and current code references are in the Spec.
+
+The original design checkout had 20 broken links to uninitialized ACP submodules. The independent implementation checkout initializes the pinned submodules: document checks now have zero errors and no registered SHA-protected topics. The three action/composer suites pass 69 tests for layer 1; full repository verification and PR references are recorded with the stack status. Product draft behavior and device acceptance remain incomplete. Specs remain draft and this Note remains proposed.
+
+## Layer 2 implementation
+
+Layer 2 creates one workspace Effect resource owner for file preparation, image uploads, and send-path store borrows. React keeps Promise interfaces. Navigation does not cancel uploads; workspace disposal cancels and joins work before closing caches/transports. Noncancelable IPC must settle before dependency release. New and continuing conversations share file preparation; cancellation cannot trigger fallback upload, and multipart cleanup is awaited.
+
+Deterministic tests cover parallel cancellation, late store acquisition, sibling isolation, actual XHR cancellation, and progress versus successful response. Transfer still starts on addition. Persistent submission and complete draft behavior remain the next two layers.
+
+Layer 2 validation: `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes completely (components: 478 files, 3,661 tests). `pnpm format` and `pnpm run docs check` completed; docs have no errors. Packaged-device draft acceptance remains outstanding.
+
+Layer 2 PR: [#707](https://github.com/LodyAI/Lody/pull/707), based on #705.
+
+Layer 3 is implemented in [#709](https://github.com/LodyAI/Lody/pull/709), based on #707. To close the appended-history/lost-local-receipt window, the same HistoryWriter abstraction prepares operations on a temporary fork, persists the original replica name and exact operation bytes, and only then imports them into the live document. Restart replays the same operations instead of appending again. Flush the original baseline before publishing prepared operations; another window first loads that baseline, retaining the record and stopping if unavailable. A fresh empty replica cannot prove non-submission. Real Loro tests cover replay across two replicas, missing dependencies, and validation refusal. The journal includes strict IndexedDB receipts, account/workspace isolation, cross-window locks and invalidations, a recovery panel, and renderer exit checks before CLI shutdown. Imported prepared operations are explicitly synchronized through the existing target transport; a transport receipt is not Agent execution. Logout and cache/reset preserve outstanding recovery records. Expired authentication still fences access immediately. Transfer timing remains unchanged until layer 4. Packaged desktop/mobile acceptance remains outstanding.
+
+Layer 3 validation: full `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes, including 479 component files / 3,670 tests. Queue preparation uses the existing WorkspaceWriter and retains queue format. Native queue-steer keeps the queued journal identity but first promotes its delivered queue operation back to saved history work; the full saved history intent is durable before queue removal, and the history turn is prepared and committed before guide delivery. A crash between queue removal and history commit resumes from that saved intent. A prepared or committed record may be explicitly discarded only after disclosure; destructive logout/cache-clear writes a forced-clear marker that actually deletes the recovery database on boot. A non-forced clear blocked by recovery stays pending without preventing runtime initialization, including a one-shot native reset request copied into the local boot marker before it is deferred. `pnpm format` and docs check completed; docs report zero errors. No packaged-device acceptance is claimed.
+
+## Layer 4 implementation
+
+Both landing and existing/child conversation composers keep attachments local until Send. Strict journal admission saves immutable Blob snapshots before releasing input; a local metadata overlay makes pending new conversations reachable without early publication. All entry points share preparation, per-file checkpoints, retry, cancellation, and FIFO. Current eligibility is checked again after preparation. Accepted-input acknowledgement is independent of later navigation/preferences; activity updates cannot prematurely publish partial creation metadata.
+
+Owned warmup cancellation joins its original start and cleanup. Durable cancellation fences cross-window stale publication and transfers first-message creation metadata to the next pending message. Following admissions freeze that metadata too, covering cancellation while the next message is being saved. Version 2 protects rollback from older readers sending incomplete input. Preparing-window identity is recorded with the exact operations, including cross-window takeover. Completed guide targets become follow-up input; an uncertain earlier offer is only reconciled.
+
+Primary pending presentation belongs in the conversation stream. The workspace recovery panel is removed; outside the conversation, the desktop sidebar row shows a local sending/failed mark and a muted title for an unsent new conversation ([sidebar send status](../feature/2026-09-28-sidebar-send-status.md)). After Send, a new conversation opens immediately and a continuation stays on its current conversation. Until the history entry can be committed, the local pending record renders as the ordinary right-aligned user-message row: attachment previews/cards carry their individual preparation or upload progress, the message row says it is waiting to send, and failure keeps that same row with retry/cancel actions. Retry/cancel/disclosed discard for interrupted preparation remain reachable in the message row, including inside mobile drawers.
+
+Validation: final full `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes (480 component files / 3,677 tests). Targeted resource/warmup checks pass 9 tests, including the later idle-warmup exit refinement; component typecheck also passes. After restacking and the concurrent-admission refinement, 60 targeted tests and component typechecking pass. Root format, targeted component Prettier, and docs check completed with zero documentation errors. Packaged-device, real-network multi-window, and native mobile-shell acceptance remain outstanding. Status stays proposed; no human approval is inferred.
+
+Cross-window takeover records the replica that actually prepared the operations. The admitting window is not necessarily the source baseline owner. A deterministic journal test covers this recovery boundary.
+
+## Pending failure hierarchy
+
+The first pending row rendered the same failure three times — a message-level
+"Not sent · Attachment upload failed", the record's `error` string, and each
+failed attachment's own reason — so a partly failed message read as a diagnostic
+dump rather than a message. Rendering now assigns one owner per fact:
+
+- The message level keeps ONE short status (`sessions.pendingMessageUploadFailed`
+  is now just "Not sent"), rendered in `text-muted-foreground`. The icon and the
+  word already carry the meaning; colouring this line as well is what stacked
+  three red things down a single message.
+- The reason belongs to the attachment that failed. The record-level reason
+  renders only when no attachment carries one, so a journal-level failure with
+  every attachment ready still explains itself without ever duplicating a reason.
+- `FAILED_FRAME_CLASS` (`border-destructive/30 bg-destructive/[0.04]`) is the
+  whole red budget for a failure, and only the failed card takes it. The icon
+  tile, the filename, and the message status all stay neutral; the frame, one
+  `AlertCircle`, and the single reason line are the only red in the row. The
+  image card's failure uses a neutral `bg-background/55` scrim rather than a red
+  wash — it only has to make the glyph legible over an arbitrary photo.
+- A reason with no card to live on renders through `PendingFailureNotice`, the
+  same frame at notice scale, instead of loose red text under the bubble. That
+  shape was the one thing in the row that did not read as a contained object.
+  The retry/cancel action failure uses it too.
+- Finished attachments keep the ordinary Ready card, so partial success stays
+  legible. File cards share `getSessionFileIcon` with the delivered
+  `SessionFileCard`, so a draft and its delivered form read as one object.
+- Uploading / ready / failed share one card skeleton (icon slot, name plus one
+  status line, trailing state glyph). The progress bar is a full-width strip
+  flush on the card's bottom edge, ALWAYS in the flow and always the same height,
+  empty when the attachment is not transferring; reserving that row is what keeps
+  one card height across all three states. Absolute positioning inside the card's
+  padding was tried first and was wrong: at `bottom-2` the bar overlapped the 40px
+  content row by 2px and left an unrelated 8px gap under it, so its spacing
+  matched nothing else in the card. The image card puts the same strip between
+  thumbnail and caption instead of floating it over the photo. Measured: the image
+  card is 198px and the file card 66px in uploading, failed and prepared alike.
+  All three trailing
+  glyphs stay mounted and cross-fade on opacity/scale/blur (0→1, 0.25→1, 4px→0)
+  over 300ms, so an attachment settling reads as one object changing state. The
+  transition names its exact properties and uses CSS rather than framer-motion:
+  nothing else under `chat/` or `ai-gui/` pulls that dependency into the
+  conversation's module graph.
+- Image previews carry a 1px `outline-black/10 dark:outline-white/10` edge. A
+  tinted neutral there picks up the surface beneath and reads as dirt.
+- Press-scale feedback was deliberately NOT added to the two actions: the shared
+  `Button` primitive has none, and the surrounding conversation controls
+  (edit / pin / copy) have none either.
+- "Continue sending" is the primary action and "Cancel send" the ghost secondary,
+  in one row tight under the message rather than a detached control strip.
+
+This is a rendering change only: journal stages, Effect lifetimes, retry/cancel
+semantics, ordering, and persistence are untouched. `PendingMessageRow` is
+exported as a pure component so Storybook and
+`tests/session-pending-message-row.test.tsx` drive the states without a workspace
+runtime. Both regressions above were ablated to confirm the tests fail when the
+duplicate reason or the blanket destructive styling returns; the ready-file
+fixture exists because a ready IMAGE alone cannot observe a file-card regression.
+Verified by component typecheck, `lint:i18n`, oxlint, the full 481-file /
+3,684-test component suite, and rendered Storybook screenshots at 720px and
+380px in both light and dark. The cross-fade's computed `opacity` / `scale` /
+`filter` and its `transition-property` were read from the live DOM rather than
+assumed. Two ablations initially passed silently and each earned a new
+assertion: recolouring the message status, and dropping the reserved progress
+row. The reserved row is asserted through a `data-attachment-progress` hook
+because `Progress` merges to the same `h-1 w-full` and is indistinguishable by
+styling alone; jsdom has no layout, so the equal-height property is guarded
+structurally there and measured in the browser.
+
+## Sending in place (2026-09-29)
+
+Sending an image as the FIRST message of a new conversation showed a loading
+skeleton filling the stream, with the pending row pinned beneath it; the commit
+then replaced both with a differently shaped row. The skeleton came from the
+content-sync state, not from real loading: creation metadata already carries
+`lastMessageAt` while history stays empty until the upload commits, so the
+stream read as "has messages, nothing cached" (`cold`). The empty stream also
+lays its empty state out as `flex-1`, which pushes trailing content to the bottom.
+
+- While `sessionUnsentNewConversationAtomFamily` is true and history is empty,
+  the pending rows ARE the stream's empty state, at the top where the committed
+  turn lands, and are not also passed as trailing content. That atom changes only
+  when a first message is written, so the page-level subscription stays cheap.
+- `PendingMessageRow` now mirrors `UserMessageRowView`: avatar column (the same
+  `getUserById` query, so the same cached face), widths and container-query
+  caps, the `py-2 sm:py-3` column, a metadata line of timestamp plus a status
+  slot where the delivered row draws its read mark, and the same text bubble at
+  the conversation font size. Committing therefore changes only that slot, from
+  "Waiting to send" to the unread/read mark.
+- This partly replaces the image-card decision above: an image now uses the
+  delivered frame (a lone image at natural size capped at 10.5rem, several as
+  large squares) with the progress strip on its bottom edge and no caption,
+  because the caption was the height the row lost at commit. A failed image's
+  reason therefore reaches the reader through the row notice; file cards keep
+  their caption and remain the reason owners.
+- The action row is always in the flow at 28px, the delivered row's
+  hover-revealed action height, so nothing below moves at commit.
+- The write reaches the conversation view before the held send is removed
+  (originally: before the journal recorded the commit; after #1118, before the
+  in-memory list drops it). `SessionPendingMessages` hides any send whose id is
+  already in the conversation view, through a string snapshot so token-rate
+  view changes do not re-render it. Otherwise a continuation could show the
+  same turn twice for that interval.
+
+Verified by component typecheck, the pending-row suite (a test stalls the write
+after the history update and fails when the filter is removed), and Storybook
+screenshots at 720px and 380px in light and dark. Re-verified after merging
+main's local-first sends (#1118).
+Remaining limit: the delivered image still fetches its thumbnail from the
+server after commit and shows its own loading block meanwhile; seeding that
+cache from the uploaded blob is a separate change. Not verified in the packaged
+app or on native mobile shells.
+
+## Mainline reconciliation (2026-09-27)
+
+Reconciled with main `ef242986`. The mainline composer upload-wait flow is superseded by immediate durable draft admission: the journal owns subsequent transfer. Preserve current routing/queue inversion, scope fencing, duplicate-submit prevention and field-by-field protection of replacement drafts. Updated composer tests assert complete byte snapshots, failed-admission retry, attachment-only submission and blocked states; upload and recovery failures remain covered by preparation/journal suites. Preserve the keyed conversation virtualizer, reply-room scrolling, image peek and current UI primitives. Renderer draining now precedes the existing desktop CLI shutdown barrier; cancellation retains services and CLI shutdown failure retains ownership.
+
+Later: the [conversation scroll engine](../../implemented/architecture/2026-09-27-conversation-scroll-engine.md) (#1071) replaced the keyed conversation virtualizer and `useStickyScroll`. Reply-room scrolling is the engine's `sent` intent, and the pending messages (`trailingContent`) render as its fixed `trailing` row.
+
+Mainline resource reconciliation preserves target synchronization and workspace disposal ordering. Scoped ownership rules are condensed without changing their guarantees to remain below the AGENTS.md size gate.
+
+Desktop integration runs renderer draining before the existing CLI quit barrier; cancellation retains services, and CLI shutdown failure retains ownership. Recovery dialogs use the current UI primitives. Journal, queue-steer, writer and session-action tests passed (91); quit ordering and cancellation tests passed.
+
+Review corrections: every committed ordinary pending turn now persists its activation pointer before sync, even when prior history or a queue defers the RPC fast path. The CLI remains the owner of history classification and execution order; legacy/imported `seen` rows cannot hide a new follow-up from its idle-session watcher. Electron send registration belongs to a renderer document, not the reused WebContents: confirmed process exit or committed navigation retires old requests, while timeout alone still blocks exit. Replacement product documents must register again. Regression tests exercise real Loro history plus journal receipts and CLI watch decisions, and native events plus the real reload boundary; no packaged crash-injection acceptance is claimed.
+
+Image fallback correction: deferred image preparation keeps the pre-existing same-machine Electron fallback after cloud image upload fails. It checkpoints the CLI's existing local file receipt, including source bytes and the rest of the message, without introducing a new transport or disabling backfill. Remote targets, absent local capability, cancellation and the existing file-count limit prohibit fallback; a failed local handoff retains the original upload error for retry. Tests use actual journal storage and Loro history to verify the resulting file block and retained message on failure.
+
+## CI test lifetimes
+
+The mobile opened-by list tests now await React `act` for rendering, fold interactions, and unmounting, with the act environment enabled only for each test. This drains React work before jsdom teardown instead of relying on `flushSync` or elapsed-time delays; the existing assertions still exercise the real list and its shared fold state. The stack also includes the upstream logger test cleanup, which waits for the file transport finish event before deleting its temporary directory. These changes address test-resource ownership without changing attachment or product behavior.
+Native exit approval only releases the sending module's own beforeunload veto after runtime disposal. Main never overrides unrelated unload protection. Editor dirty/saving/conflict/error checks share one synchronous predicate with native preflight; any such state blocks cleanup with a save-first notice, and commit rechecks edits made during confirmation. Normal close re-enters close() after drain rather than destroy(), preserving native unload guards. Failed checks keep runtimes, CLI and relays alive. Menu/keyboard reloads use the same guard. Tests mount the actual editor hook and recovery component for quit/reload/close, exercise saving failure and intervening edits, and verify native close preserves a remaining veto.
+
+Recovery storage permits 100 unfinished messages and 128 MiB of message metadata plus prepared CRDT operations per account/workspace. Attachment source Blobs use the existing per-file/image size and count limits and the browser's actual IndexedDB quota; they do not consume the metadata budget or introduce a smaller per-message limit. A failed storage transaction preserves the composer. After every attachment has a ready receipt, persist the final input and release source Blobs in the same checkpoint; retain source bytes while any preparation still needs retry.
+
+Preparation-stage recovery is classified from live local work and the same account/workspace Web Locks (including waiting executors), never a persisted busy flag. Refresh on startup, conversation entry and foreground return; observing a record must not start old messages. An interrupted message has an inline Continue sending action on desktop and mobile; prepared records additionally offer disclosed discard because history publication may already have happened. There is no separate workspace recovery panel; the sidebar row status only points back to the conversation.

@@ -5,14 +5,18 @@ import {
   type Rectangle
 } from 'electron'
 import Conf from 'conf'
-import { MOBILE_LAYOUT_BREAKPOINT } from '@lody/shared/layout'
+import { createSettingsStoreWithFallback } from './settings-store-core'
+import { DESKTOP_WINDOW_MIN_WIDTH } from '@lody/shared/layout'
 
 const DEFAULT_MAIN_WINDOW_BOUNDS = {
   width: 900,
   height: 670
 } as const
 
-export const MAIN_WINDOW_MIN_WIDTH = MOBILE_LAYOUT_BREAKPOINT
+// The desktop shell keeps the desktop layout at every width — a narrow window
+// takes the compact presentation (overlay sidebars) rather than the mobile
+// renderer, so this floor only protects window chrome, not the layout switch.
+export const MAIN_WINDOW_MIN_WIDTH = DESKTOP_WINDOW_MIN_WIDTH
 export const MAIN_WINDOW_MIN_HEIGHT = 600
 
 const WINDOW_STATE_DEBOUNCE_MS = 150
@@ -48,37 +52,46 @@ if (typeof ConfConstructor !== 'function') {
   throw new TypeError('Unable to initialize config store: invalid Conf module export shape.')
 }
 
-const windowStateStore = new ConfConstructor<WindowStateSchema>({
-  projectName: 'lody-desktop',
-  configName: 'window-state',
-  defaults: {
-    mainWindow: {
-      bounds: DEFAULT_MAIN_WINDOW_BOUNDS,
-      isMaximized: false
-    }
-  },
-  schema: {
-    mainWindow: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['bounds', 'isMaximized'],
-      properties: {
-        bounds: {
+const windowStateStore = createSettingsStoreWithFallback<WindowStateSchema>(
+  () =>
+    new ConfConstructor<WindowStateSchema>({
+      projectName: 'lody-desktop',
+      configName: 'window-state',
+      defaults: {
+        mainWindow: {
+          bounds: DEFAULT_MAIN_WINDOW_BOUNDS,
+          isMaximized: false
+        }
+      },
+      schema: {
+        mainWindow: {
           type: 'object',
           additionalProperties: false,
-          required: ['width', 'height'],
+          required: ['bounds', 'isMaximized'],
           properties: {
-            width: { type: 'number', minimum: MIN_VISIBLE_WIDTH },
-            height: { type: 'number', minimum: MIN_VISIBLE_HEIGHT },
-            x: { type: 'number' },
-            y: { type: 'number' }
+            bounds: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['width', 'height'],
+              properties: {
+                width: { type: 'number', minimum: MIN_VISIBLE_WIDTH },
+                height: { type: 'number', minimum: MIN_VISIBLE_HEIGHT },
+                x: { type: 'number' },
+                y: { type: 'number' }
+              }
+            },
+            isMaximized: { type: 'boolean' }
           }
-        },
-        isMaximized: { type: 'boolean' }
+        }
       }
+    }),
+  {
+    configName: 'window-state',
+    defaults: {
+      mainWindow: { bounds: DEFAULT_MAIN_WINDOW_BOUNDS, isMaximized: false }
     }
   }
-})
+)
 
 function roundCoordinate(value: number | undefined): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) {

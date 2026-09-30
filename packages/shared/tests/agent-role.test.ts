@@ -15,7 +15,6 @@ import {
   normalizeAgentRoleMentionSlug,
   normalizeAgentRoleRunConfig,
   resolveAgentRoleAvailability,
-  selectMentionableAgentRoles,
   type AgentRole,
   type AgentRoleAvailabilityContext,
 } from '../src/agent-role';
@@ -44,6 +43,25 @@ const context = (
   agentConfigMachineIds: new Map([['config-1' as AgentConfigId, 'machine-1' as MachineId]]),
   loadedAgentConfigMachineIds: new Set(['machine-1' as MachineId]),
   ...overrides,
+});
+
+describe('agent role description', () => {
+  it('reads legacy roles as blank and bounds descriptions by Unicode code point', () => {
+    expect(normalizeAgentRole(role())?.description ?? '').toBe('');
+    for (const character of ['a', '中', '😀']) {
+      const description = character.repeat(140);
+      expect(normalizeAgentRole(role({ description }))?.description).toBe(description);
+      expect(normalizeAgentRole(role({ description: description + character }))?.description).toBe(
+        description
+      );
+    }
+    expect(normalizeAgentRole({ ...role(), description: 42 })).toBeUndefined();
+  });
+
+  it('treats missing and blank as equal but detects description edits', () => {
+    expect(isAgentRoleContentEqual(role(), role({ description: '' }))).toBe(true);
+    expect(isAgentRoleContentEqual(role(), role({ description: 'Review changes' }))).toBe(false);
+  });
 });
 
 describe('agent role mention slug', () => {
@@ -197,61 +215,5 @@ describe('agent role availability', () => {
     expect(
       resolveAgentRoleAvailability(role(), context({ loadedAgentConfigMachineIds: new Set() }))
     ).toEqual({ kind: 'unknown' });
-  });
-});
-
-describe('agent role mention scope', () => {
-  const local = role({ id: 'local' as AgentRoleId });
-  const remote = role({
-    id: 'remote' as AgentRoleId,
-    machineId: 'machine-2' as MachineId,
-    agentConfigId: 'config-2' as AgentConfigId,
-    name: 'Remote',
-  });
-  const bothMachines = context({
-    authorizedMachineIds: new Set(['machine-1', 'machine-2'] as MachineId[]),
-    onlineMachineIds: new Set(['machine-1', 'machine-2'] as MachineId[]),
-    agentConfigMachineIds: new Map([
-      ['config-1' as AgentConfigId, 'machine-1' as MachineId],
-      ['config-2' as AgentConfigId, 'machine-2' as MachineId],
-    ]),
-    loadedAgentConfigMachineIds: new Set(['machine-1', 'machine-2'] as MachineId[]),
-  });
-  const getAvailability = (candidate: AgentRole) =>
-    resolveAgentRoleAvailability(candidate, bothMachines);
-
-  it('pins a local project to its own machine', () => {
-    expect(
-      selectMentionableAgentRoles([local, remote], {
-        currentUserId: 'user-1',
-        scope: { kind: 'machine', machineId: 'machine-1' as MachineId },
-        getAvailability,
-      })
-    ).toEqual([local]);
-  });
-
-  it('lets a github project reach every authorized machine', () => {
-    expect(
-      selectMentionableAgentRoles([local, remote], {
-        currentUserId: 'user-1',
-        scope: {
-          kind: 'authorized_machines',
-          machineIds: new Set(['machine-1', 'machine-2'] as MachineId[]),
-        },
-        getAvailability,
-        // Ordered by name, so a cross-machine role does not sort below every
-        // local one: "Remote" precedes "Reviewer".
-      })
-    ).toEqual([remote, local]);
-  });
-
-  it('never offers an unavailable role as a candidate', () => {
-    expect(
-      selectMentionableAgentRoles([local], {
-        currentUserId: 'user-1',
-        scope: { kind: 'machine', machineId: 'machine-1' as MachineId },
-        getAvailability: () => ({ kind: 'unavailable', reason: 'machine_offline' }),
-      })
-    ).toEqual([]);
   });
 });

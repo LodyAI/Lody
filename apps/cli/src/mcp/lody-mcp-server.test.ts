@@ -151,6 +151,16 @@ describe('Lody MCP tool catalog', () => {
     );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
   });
+
+  it('always advertises only the bounded Schedule family', async () => {
+    const names = await listPublishedToolNames();
+    expect(names.filter((name) => name.startsWith('lody_schedule_')).sort()).toEqual([
+      'lody_schedule_get',
+      'lody_schedule_list',
+      'lody_schedule_pause',
+      'lody_schedule_propose',
+    ]);
+  });
 });
 
 describe('lody_feedback input schema', () => {
@@ -635,7 +645,24 @@ describe('session MCP input schemas', () => {
     });
   });
 
-  it('keeps Local Project Role execution on its Machine and defaults to a child Session', () => {
+  it('runs a Role on its own Machine from a chat Session on another Machine', () => {
+    const resolved = resolveMcpSessionCreate(
+      { operationId: 'role-remote-1', prompt: 'Pair on this.', agentRoleId: 'reviewer' },
+      { chainDepth: 0, frozenInputConfig: {} as SessionTurnInputConfig },
+      { machineId: 'current-machine', project: undefined },
+      agentRole()
+    );
+
+    expect(resolved.input).toMatchObject({
+      machineId: 'remote-machine',
+      agentConfigId: 'claude-opus',
+    });
+    expect(resolved.input).not.toHaveProperty('useCurrentSessionAsParent');
+    expect(resolved.input).not.toHaveProperty('workContext');
+    expect(resolved.role?.id).toBe('reviewer');
+  });
+
+  it('defaults a same-Machine Local Project Role to a child Session and a remote one to its own Machine', () => {
     const frozenInputConfig = {} as SessionTurnInputConfig;
     const role = agentRole({
       id: 'implementer' as AgentRoleId,
@@ -660,17 +687,20 @@ describe('session MCP input schemas', () => {
         role
       ).input.useCurrentSessionAsParent
     ).toBe(true);
-    expect(() =>
-      resolveMcpSessionCreate(
-        input,
-        { chainDepth: 0, frozenInputConfig },
-        {
-          machineId: 'different-machine',
-          project: { kind: 'local', localProjectId: 'project-id', useWorktree: true },
-        },
-        role
-      )
-    ).toThrow(/Local Project's Machine/);
+    // The Local Project's filesystem is not on the Role's Machine, so the
+    // Role cannot be its child; it starts independently where it is bound.
+    const remote = resolveMcpSessionCreate(
+      input,
+      { chainDepth: 0, frozenInputConfig },
+      {
+        machineId: 'different-machine',
+        project: { kind: 'local', localProjectId: 'project-id', useWorktree: true },
+      },
+      role
+    ).input;
+    expect(remote).toMatchObject({ machineId: 'local-machine', agentConfigId: 'codex' });
+    expect(remote).not.toHaveProperty('useCurrentSessionAsParent');
+    expect(remote).not.toHaveProperty('workContext');
     expect(composeAgentRolePrompt('  ', 'Implement this.')).toBe('Implement this.');
   });
 

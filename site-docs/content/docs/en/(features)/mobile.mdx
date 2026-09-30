@@ -7,6 +7,28 @@ description: Install the native Lody mobile app to receive coding-agent notifica
 
 Lody ships native iOS and Android apps so you can keep coding on the go.
 
+Your phone controls agents on a connected machine; it does not execute the coding runtime itself.
+For a workflow overview and official alternatives, see
+[Remote Control for Your Coding Agents](/coding-agent-remote-control/).
+
+## Connect the Execution Machine
+
+1. Follow the [Quick Start](/docs/quickstart/) on the workstation or server where the agents will run.
+   The desktop app starts a local CLI daemon, or you can run `npx lody daemon start` on the target
+   machine and complete sign-in.
+2. Keep that machine awake, online, and running the Lody CLI. Sleeping, disconnecting, or stopping
+   the CLI makes live remote work unavailable.
+3. Add the project and [configure the agent](/docs/agents/) on that machine, including any required
+   runtime authentication and dependencies.
+4. Sign in to the same Lody workspace on mobile. Select the project, execution machine, and Agent
+   Config to start or continue a conversation.
+
+The shared workflow supports configured Codex, Claude Code, Kimi Code, GLM over Claude Code,
+DeepSeek Harness, and Pi integrations. GLM is a Claude Code provider preset; DeepSeek Harness is
+a separate built-in ACP provider. Models, modes, permission controls, and extensions remain
+runtime-dependent. This is not a claim of end-to-end verification across all six runtimes and
+every mobile device. See the [integration guide](/docs/agents/#choose-an-integration) for setup boundaries.
+
 ## Install the App
 
 ### iOS

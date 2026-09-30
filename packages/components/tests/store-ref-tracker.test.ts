@@ -132,6 +132,35 @@ describe('createManagedStoreCache', () => {
     }
   };
 
+  it('peeks only settled, still-cached stores', async () => {
+    let finish!: (store: ReturnType<typeof createMockStore>) => void;
+    const store = createMockStore();
+    const cache = createManagedStoreCache({
+      create: () =>
+        new Promise<ReturnType<typeof createMockStore>>((resolve) => (finish = resolve)),
+      releaseDelayMs: 60_000,
+    });
+
+    const pending = cache.acquire('a');
+    expect(cache.peek('a')).toBeUndefined();
+    finish(store);
+    await pending;
+    expect(cache.peek('a')).toBe(store);
+
+    await cache.release('a');
+    expect(store.dispose).toHaveBeenCalled();
+    expect(cache.peek('a')).toBeUndefined();
+  });
+
+  it('never peeks a failed create', async () => {
+    const cache = createManagedStoreCache({
+      create: () => Promise.reject(new Error('boom')),
+      releaseDelayMs: 60_000,
+    });
+    await expect(cache.acquire('a')).rejects.toThrow('boom');
+    expect(cache.peek('a')).toBeUndefined();
+  });
+
   it('caches stores by key', async () => {
     const create = vi.fn().mockResolvedValue(createMockStore());
     const cache = createManagedStoreCache({ create, releaseDelayMs: 60_000 });
@@ -317,7 +346,7 @@ describe('createManagedStoreCache', () => {
       () =>
         new Promise<void>((resolve) => {
           resolveUnload = resolve;
-        }),
+        })
     );
     const cache = createManagedStoreCache({ create, releaseDelayMs: 60_000, unload });
 
@@ -354,7 +383,7 @@ describe('createManagedStoreCache', () => {
       () =>
         new Promise<void>((resolve) => {
           resolveUnload = resolve;
-        }),
+        })
     );
     const cache = createManagedStoreCache({ create, releaseDelayMs: 60_000, unload });
 
@@ -393,7 +422,7 @@ describe('createManagedStoreCache', () => {
       await expect(cache.release('x')).resolves.toBeUndefined();
       expect(warnSpy).toHaveBeenCalledWith(
         'Failed to unload doc for released store',
-        expect.objectContaining({ key: 'x', error: expect.any(Error) }),
+        expect.objectContaining({ key: 'x', error: expect.any(Error) })
       );
 
       // The next acquire→release cycle retries the unload.

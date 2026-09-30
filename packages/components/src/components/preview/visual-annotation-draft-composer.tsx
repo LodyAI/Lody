@@ -1,11 +1,11 @@
 import type { CSSProperties } from 'react';
 import { Send, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Textarea } from '@/ui/textarea';
+import { Button } from '@lody/ui/button';
+import { Textarea } from '@lody/ui/textarea';
 
 export type VisualAnnotationDraftComposerProps = {
   targetLabel: string;
@@ -51,7 +51,7 @@ export function VisualAnnotationDraftComposer({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
+          icon
           className="h-6 w-6 shrink-0"
           aria-label={t('common.cancel', 'Cancel')}
           onClick={onCancel}
@@ -67,7 +67,12 @@ export function VisualAnnotationDraftComposer({
         autoFocus={autoFocus}
       />
       <div className="mt-2 flex justify-end">
-        <Button type="button" size="sm" disabled={!value.trim() || submitting} onClick={onSubmit}>
+        <Button
+          type="button"
+          size="small"
+          disabled={!value.trim() || submitting}
+          onClick={onSubmit}
+        >
           {submitting ? <Spinner className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
           {t('sessions.preview.annotation.send', 'Send')}
         </Button>

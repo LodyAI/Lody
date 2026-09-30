@@ -17,6 +17,8 @@ import type { SessionActivePresencePhase } from '@/lib/loro/session-active-prese
  * 会话配置
  */
 export interface SessionConfig {
+  codexAuth?: import('@lody/shared').CodexAuthProfile;
+  codexProfile?: import('../agent/codex-profile-store').ResolvedCodexProfile;
   workspaceId: WorkspaceId;
   requesterUserId: string;
   machineId: string;
@@ -36,6 +38,13 @@ export interface SessionConfig {
   sessionId?: SessionId;
   // promptBuildConfig: PromptBuildConfig;
   env?: Record<string, string>;
+  /** Runtime-only policy, derived from the driving requester (never environment flags). */
+  githubCredentialPolicy?: {
+    allowLocalAuth: boolean;
+    /** Requester enabled "Act as you"; commits and credentials prefer their identity. */
+    personalEnabled?: boolean;
+    stateFilePath?: string;
+  };
   assumeDocExisting?: boolean;
   // for local session
   title?: string;

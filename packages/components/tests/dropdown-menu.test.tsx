@@ -4,18 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '../src/ui/dropdown-menu';
+import { Menu } from '../src/ui/menu';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -30,9 +19,17 @@ class TestPointerEvent extends MouseEvent {
   }
 }
 
-describe('DropdownMenu', () => {
+describe('Menu', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
+
+  // Base UI defers menu opens to the next animation frame; jsdom's rAF is a
+  // real timer, so give it a beat.
+  const flushFrame = async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+  };
 
   beforeEach(() => {
     Object.defineProperty(globalThis, 'PointerEvent', {
@@ -53,58 +50,48 @@ describe('DropdownMenu', () => {
     container = undefined;
   });
 
-  it('opens on mouse down and keeps only the latest hovered submenu open', async () => {
+  it('opens and keeps only the latest hovered submenu open', async () => {
     await act(async () => {
       root?.render(
-        <DropdownMenu>
-          <DropdownMenuTrigger>Open menu</DropdownMenuTrigger>
-          <DropdownMenuContent data-testid="root-menu">
-            <DropdownMenuItem>Root item</DropdownMenuItem>
-            <DropdownMenuCheckboxItem checked>Checked item</DropdownMenuCheckboxItem>
-            <DropdownMenuRadioGroup value="radio">
-              <DropdownMenuRadioItem value="radio">Radio item</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>First submenu</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent data-testid="first-submenu">
-                <DropdownMenuItem>First nested item</DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>Second submenu</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent data-testid="second-submenu">
-                <DropdownMenuItem>Second nested item</DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Menu.Root>
+          <Menu.Trigger>Open menu</Menu.Trigger>
+          <Menu.Content data-testid="root-menu">
+            <Menu.Item>Root item</Menu.Item>
+            <Menu.CheckboxItem checked>Checked item</Menu.CheckboxItem>
+            <Menu.RadioGroup value="radio">
+              <Menu.RadioItem value="radio">Radio item</Menu.RadioItem>
+            </Menu.RadioGroup>
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger>First submenu</Menu.SubmenuTrigger>
+              <Menu.Content data-testid="first-submenu">
+                <Menu.Item>First nested item</Menu.Item>
+              </Menu.Content>
+            </Menu.Submenu>
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger>Second submenu</Menu.SubmenuTrigger>
+              <Menu.Content data-testid="second-submenu">
+                <Menu.Item>Second nested item</Menu.Item>
+              </Menu.Content>
+            </Menu.Submenu>
+          </Menu.Content>
+        </Menu.Root>
       );
     });
 
     const trigger = getButton('Open menu');
     await act(async () => {
-      trigger.dispatchEvent(
-        new TestPointerEvent('pointerdown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     });
+    await flushFrame();
 
     expect(document.body.textContent).toContain('Root item');
     expect(document.body.textContent).not.toContain('First nested item');
     expect(document.body.textContent).not.toContain('Second nested item');
     const rootMenu = document.querySelector('[data-testid="root-menu"]');
-    expect(rootMenu?.className).not.toMatch(/transition|animate-|fade-|zoom-|slide-/);
-
     const rootMenuItems = rootMenu?.querySelectorAll(
       '[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]'
     );
     expect(rootMenuItems).toHaveLength(5);
-    for (const menuItem of rootMenuItems ?? []) {
-      expect(menuItem.className).not.toMatch(/transition/);
-    }
 
     const firstSubTrigger = getMenuItem('First submenu');
     await act(async () => {
@@ -124,7 +111,11 @@ describe('DropdownMenu', () => {
           pointerType: 'mouse',
         })
       );
+      firstSubTrigger.dispatchEvent(
+        new MouseEvent('mousemove', { bubbles: true })
+      );
     });
+    await flushFrame();
 
     expect(document.body.textContent).toContain('First nested item');
     expect(document.body.textContent).not.toContain('Second nested item');
@@ -137,50 +128,45 @@ describe('DropdownMenu', () => {
           pointerType: 'mouse',
         })
       );
+      secondSubTrigger.dispatchEvent(
+        new MouseEvent('mousemove', { bubbles: true })
+      );
     });
+    await flushFrame();
 
     expect(document.body.textContent).not.toContain('First nested item');
     expect(document.body.textContent).toContain('Second nested item');
-    const submenu = document.querySelector('[data-testid="second-submenu"]');
-    expect(submenu?.className).not.toMatch(/transition|animate-|fade-|zoom-|slide-/);
-    for (const menuItem of submenu?.querySelectorAll('[role="menuitem"]') ?? []) {
-      expect(menuItem.className).not.toMatch(/transition/);
-    }
   });
 
   it('preserves keyboard submenu navigation and focus', async () => {
     await act(async () => {
       root?.render(
-        <DropdownMenu>
-          <DropdownMenuTrigger>Open keyboard menu</DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>Keyboard submenu</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                <DropdownMenuItem>Keyboard nested item</DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Menu.Root>
+          <Menu.Trigger>Open keyboard menu</Menu.Trigger>
+          <Menu.Content>
+            <Menu.Submenu>
+              <Menu.SubmenuTrigger>Keyboard submenu</Menu.SubmenuTrigger>
+              <Menu.Content>
+                <Menu.Item>Keyboard nested item</Menu.Item>
+              </Menu.Content>
+            </Menu.Submenu>
+          </Menu.Content>
+        </Menu.Root>
       );
     });
 
     const trigger = getButton('Open keyboard menu');
     await act(async () => {
-      trigger.dispatchEvent(
-        new TestPointerEvent('pointerdown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     });
+    await flushFrame();
 
     const subTrigger = getMenuItem('Keyboard submenu');
     await act(async () => {
       subTrigger.focus();
       subTrigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     });
+    await flushFrame();
 
     const nestedItem = getMenuItem('Keyboard nested item');
     expect(document.activeElement).toBe(nestedItem);
@@ -188,6 +174,7 @@ describe('DropdownMenu', () => {
     await act(async () => {
       nestedItem.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     });
+    await flushFrame();
 
     expect(document.body.textContent).not.toContain('Keyboard nested item');
     expect(document.activeElement).toBe(subTrigger);
@@ -196,31 +183,28 @@ describe('DropdownMenu', () => {
   it('does not return focus to the trigger after selecting an item', async () => {
     await act(async () => {
       root?.render(
-        <DropdownMenu>
-          <DropdownMenuTrigger>Open menu</DropdownMenuTrigger>
-          <DropdownMenuContent>
-            <DropdownMenuItem>Choose model</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Menu.Root>
+          <Menu.Trigger>Open menu</Menu.Trigger>
+          <Menu.Content>
+            <Menu.Item>Choose model</Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
       );
     });
 
     const trigger = getButton('Open menu');
     await act(async () => {
-      trigger.dispatchEvent(
-        new TestPointerEvent('pointerdown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     });
+    await flushFrame();
 
     const item = getMenuItem('Choose model');
     await act(async () => {
       item.focus();
       item.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
+    await flushFrame();
 
     expect(document.body.textContent).not.toContain('Choose model');
     expect(document.activeElement).not.toBe(trigger);
@@ -238,25 +222,19 @@ describe('DropdownMenu', () => {
       root?.render(
         <div>
           <textarea data-keyboard-nav="composer" defaultValue="hello" />
-          <DropdownMenu>
-            <DropdownMenuTrigger>Run config</DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem
-                onSelect={(event) => {
-                  // Keep-open multi-pick (model/agent rows)
-                  event.preventDefault();
-                }}
-              >
-                Pick model
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger>Permission</DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem>Agent mode</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Menu.Root>
+            <Menu.Trigger>Run config</Menu.Trigger>
+            <Menu.Content>
+              {/* Keep-open multi-pick (model/agent rows). */}
+              <Menu.Item closeOnClick={false}>Pick model</Menu.Item>
+            </Menu.Content>
+          </Menu.Root>
+          <Menu.Root>
+            <Menu.Trigger>Permission</Menu.Trigger>
+            <Menu.Content>
+              <Menu.Item>Agent mode</Menu.Item>
+            </Menu.Content>
+          </Menu.Root>
         </div>
       );
     });
@@ -267,19 +245,15 @@ describe('DropdownMenu', () => {
 
     // Keep-open select on run config, then Esc-dismiss → composer, not trigger.
     await act(async () => {
-      runConfig.dispatchEvent(
-        new TestPointerEvent('pointerdown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
+      runConfig.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     });
+    await flushFrame();
     const modelItem = getMenuItem('Pick model');
     await act(async () => {
       modelItem.focus();
-      modelItem.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      modelItem.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
+    await flushFrame();
     expect(document.body.textContent).toContain('Pick model');
 
     await act(async () => {
@@ -287,10 +261,7 @@ describe('DropdownMenu', () => {
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
       );
     });
-    // Radix FocusScope fires onCloseAutoFocus from effect cleanup; allow it to settle.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await flushFrame();
     expect(document.activeElement).toBe(textarea);
     expect(document.activeElement).not.toBe(runConfig);
 
@@ -303,33 +274,22 @@ describe('DropdownMenu', () => {
 
     // Permission mode close-on-select also returns focus to the composer.
     await act(async () => {
-      permission.dispatchEvent(
-        new TestPointerEvent('pointerdown', {
-          bubbles: true,
-          button: 0,
-          pointerType: 'mouse',
-        })
-      );
+      permission.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     });
+    await flushFrame();
     const modeItem = getMenuItem('Agent mode');
     await act(async () => {
       modeItem.focus();
-      modeItem.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      modeItem.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await flushFrame();
     expect(document.body.textContent).not.toContain('Agent mode');
     expect(document.activeElement).toBe(textarea);
     expect(document.activeElement).not.toBe(runConfig);
     expect(document.activeElement).not.toBe(permission);
   });
 
-  it('touch tap opens the menu without leaking the synthetic pointerdown to ancestors', async () => {
-    // Simulates a vaul Drawer.Content ancestor: it grabs the pointer in
-    // onPointerDown via setPointerCapture, which throws NotFoundError for a
-    // synthetic event (no active pointer). The trigger's touch re-dispatch
-    // must toggle Radix on the trigger element but never reach ancestors.
+  it('opens on a touch tap without synthesizing extra pointer events to ancestors', async () => {
     const ancestorPointerDowns: string[] = [];
     await act(async () => {
       root?.render(
@@ -338,12 +298,12 @@ describe('DropdownMenu', () => {
             ancestorPointerDowns.push(event.pointerType);
           }}
         >
-          <DropdownMenu>
-            <DropdownMenuTrigger>Touch menu</DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem>Touch item</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Menu.Root>
+            <Menu.Trigger>Touch menu</Menu.Trigger>
+            <Menu.Content>
+              <Menu.Item>Touch item</Menu.Item>
+            </Menu.Content>
+          </Menu.Root>
         </div>
       );
     });
@@ -359,18 +319,16 @@ describe('DropdownMenu', () => {
         })
       );
     });
-    // The real touch pointerdown is blocked for Radix (no menu yet) but
-    // still bubbles to ancestors as a genuine pointer event.
-    expect(document.body.textContent).not.toContain('Touch item');
     expect(ancestorPointerDowns).toEqual(['touch']);
 
     await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      trigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
       trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     });
+    await flushFrame();
 
-    // The synthetic re-dispatch toggles the menu on the trigger itself...
     expect(document.body.textContent).toContain('Touch item');
-    // ...but never bubbles to ancestor pointer handlers (vaul's onPress).
     expect(ancestorPointerDowns).toEqual(['touch']);
   });
 

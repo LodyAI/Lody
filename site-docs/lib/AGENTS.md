@@ -10,6 +10,9 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   types, formatting, and pure normalization helpers only.
 - `source.ts` exposes generated docs content for server-only loaders. Do not import it
   from route components, shared page components, or browser-safe code.
+- `site-url.mjs` owns canonical page URL normalization for metadata, generators,
+  and navigation. Known page slugs may contain dots; never infer file semantics
+  for a URL already identified as a page.
 - `metadata.ts` creates canonical, alternate/hreflang, Open Graph, Twitter, robots, and
   article metadata records for TanStack `head()`.
 - `docs-faq.ts` emits FAQPage JSON-LD through `pageHead`.
@@ -21,5 +24,7 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   download page reads `VITE_NIGHTLY_UPDATE_URL` at build time and fetches its live
   manifest in the browser; missing/invalid metadata never falls back to Stable
   or guessed latest aliases. Keep installer links inside the configured HTTPS root.
+  The Nightly display sequence is non-negative: accept `.0` at the start of a
+  release cycle, while rejecting leading-zero counters. It is not a CI build number.
 - `blog-reading-time.generated.ts` and `docs-faq.generated.ts` are generated and
   ignored. Do not edit or format them.

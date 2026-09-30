@@ -1,15 +1,10 @@
 import { memo, useEffect, useRef, type ReactNode } from 'react';
 import { FileDiff, Files, GitPullRequest, MessageSquare, MonitorPlay, Plus, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { FileIcon } from '@/components/icons/file-icons';
 import { useHorizontalWheelScroll } from '@/hooks/use-horizontal-wheel-scroll';
 import { ScrollArea } from '@/ui/scroll-area';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
@@ -315,8 +310,18 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
       {moreSlot ? (
         <div className={cn('flex shrink-0 items-center', WINDOW_DRAG_EXEMPT_CLASS)}>{moreSlot}</div>
       ) : null}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
+      <Menu.Root>
+        <Menu.Trigger render={<button
+            type="button"
+            disabled={availablePanels.length === 0}
+            aria-label={addPanelLabel}
+            className={cn(
+              'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent',
+              WINDOW_DRAG_EXEMPT_CLASS
+            )}
+          >
+            <Plus className="h-4 w-4" />
+          </button>}>
           <button
             type="button"
             disabled={availablePanels.length === 0}
@@ -328,21 +333,21 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
           >
             <Plus className="h-4 w-4" />
           </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-40">
+        </Menu.Trigger>
+        <Menu.Content align="end" className="min-w-40">
           {availablePanels.map((panel) => (
-            <DropdownMenuItem
+            <Menu.Item
               key={panel.id}
               className="gap-2"
               disabled={panel.disabled}
-              onSelect={() => onPanelOpen(panel.id)}
+              onClick={() => onPanelOpen(panel.id)}
             >
               <SidePanelTabIcon tab={panel} />
               <span>{panel.label}</span>
-            </DropdownMenuItem>
+            </Menu.Item>
           ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </Menu.Content>
+      </Menu.Root>
       {endSlot ? (
         <div className={cn('flex shrink-0 items-center', WINDOW_DRAG_EXEMPT_CLASS)}>{endSlot}</div>
       ) : null}

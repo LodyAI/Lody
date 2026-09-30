@@ -81,15 +81,29 @@ Shared mention primitive used by composer autocomplete surfaces.
   match the search term against each item's `value` hides rows whose payload
   happens not to contain it, and a hidden row renders null, which strips its node
   from the collection and breaks arrow-key movement across groups.
-- Desktop `MentionContent` is caret-anchored vertically but horizontally constrained
-  to the textarea range via its virtual collision boundary and
-  `--mention-input-width`.
-- `MentionContent positionAnchor="input-top"` places top-side menus against the
-  input wrapper's top edge instead of the current caret line.
+- Desktop `MentionContent` follows the current query caret using mirrored
+  textarea wrapping/scroll. Its virtual `contextElement` is the textarea, so
+  layout shifts update an open popup. Default bottom menus flip to fit; an
+  explicit top menu stays above while a row fits and scrolls within that room.
+  Both stay within the virtual collision boundary and `--mention-input-width`.
+- `positionAnchor="composer"` anchors to the input's nearest `[data-mention-frame]`
+  (else its wrapper), left-aligned and no wider. It picks its side once per open
+  — above unless there is no room — and never flips: a level change resizes it
+  in place, and its height is capped to that side's room. An explicit `side`
+  pins the side instead of the room pick.
 - Menu callers should include `var(--mention-input-width)` in desktop `max-w`
   classes; viewport-only caps let wide menus escape the composer.
-- Mobile mention content bypasses floating-ui and docks through
-  `MentionMobilePanel`; desktop positioning classes do not control mobile layout.
+- Mobile `MentionMobilePanel` bypasses floating-ui and desktop positioning.
+  It docks above `[data-mention-frame]` (else the input) and caps to visible
+  room without covering the frame or top inset.
+  The docked strip is the only scroller: menus pass `docked` and drop their own.
+- Desktop content, the mobile strip and rows share `mention-surface.ts`: the
+  `@lody/ui` popup surface restated in semantic tokens (no border, no Tailwind).
+  StyleX cannot read `data-highlighted`, so `ui/mention.tsx` derives the row
+  highlight from `highlightedItem.value`; row values must stay unique per menu.
+  Rows keep `flexShrink: 0` so wrapped subtitles determine their height; the
+  capped list scrolls instead of letting one row paint over its neighbour.
+  The entrance rises from the side the menu landed on (`--mention-rise`).
 
 ## Files
 

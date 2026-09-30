@@ -5,9 +5,9 @@ import type {
   OpenSystemNotificationSettingsResult,
 } from '@lody/shared';
 import { useAtom, useAtomValue } from 'jotai';
-import { Loading } from '@/ui';
-import { Switch } from '@/ui/switch';
-import { toast } from 'sonner';
+import { Spinner } from '@lody/ui/spinner';
+import { Switch } from '@lody/ui/switch';
+import { toast } from '@/lib/toast';
 import {
   autoArchiveOnPrClosedAtom,
   autoArchiveOnPrMergedAtom,
@@ -605,7 +605,9 @@ export function MobileGeneralSettings() {
             }
           >
             {isProcessing ? (
-              <Loading size="sm" className="h-5 w-9" />
+              <span className="flex h-5 w-9 items-center justify-center">
+                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                </span>
             ) : (
               <Switch
                 id="notification-toggle"
@@ -724,7 +726,9 @@ export function MobileGeneralSettings() {
           <MobileSettingsRowGroup>
             <MobileSettingsRow label={t('settings.general.autoLaunch.label', 'Launch at startup')}>
               {autoLaunch.enabledLoading ? (
-                <Loading size="sm" className="h-5 w-9" />
+                <span className="flex h-5 w-9 items-center justify-center">
+                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                </span>
               ) : (
                 <Switch
                   id="auto-launch-toggle"
@@ -744,7 +748,9 @@ export function MobileGeneralSettings() {
               )}
             >
               {autoLaunch.hideWindowLoading ? (
-                <Loading size="sm" className="h-5 w-9" />
+                <span className="flex h-5 w-9 items-center justify-center">
+                  <Spinner size="small" label={t('common.loading', 'Loading...')} />
+                </span>
               ) : (
                 <Switch
                   id="auto-launch-hide-window-toggle"

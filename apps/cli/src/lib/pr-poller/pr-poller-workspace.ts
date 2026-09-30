@@ -59,8 +59,8 @@ export interface PrPollerWorkspaceHandle {
   waitForInitialSync(timeoutMs?: number): Promise<boolean>;
   resolveCredential(repoFullName: string): Promise<ResolvedGitHubCredential | null>;
   invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void;
-  /** `github:associatePullRequestForCli` — the poller's only backend write (plan §4). */
-  associatePullRequest(args: AssociatePullRequestArgs): Promise<boolean>;
+  /** Optional hosted webhook association, required before publication when present. */
+  associatePullRequest: ((args: AssociatePullRequestArgs) => Promise<boolean>) | null;
   /** Release owned resources (token manager). Idempotent. */
   dispose(): Promise<void>;
 }
@@ -73,7 +73,7 @@ export function createLodyPrPollerWorkspace(options: {
   userId: string;
   machineId: MachineId;
   githubTokens: CloudGithubTokenPort | null;
-  prAssociation: CloudPrAssociationPort;
+  prAssociation: CloudPrAssociationPort | null;
   logger: Logger;
 }): PrPollerWorkspaceHandle {
   const { documentManager, workspaceId, userId, machineId, githubTokens, prAssociation, logger } =
@@ -155,37 +155,39 @@ export function createLodyPrPollerWorkspace(options: {
       credentialResolver.invalidate(repoFullName, credential);
     },
 
-    async associatePullRequest(args: AssociatePullRequestArgs): Promise<boolean> {
-      // Reference caller: turn-post-processing-service.ts detectAndAssociatePR.
-      // Idempotent — an existing link row keeps its status.
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), ASSOCIATE_TIMEOUT_MS);
-      try {
-        const associated = await Promise.race([
-          prAssociation.associatePullRequest({
-            ...args,
-            workspaceId: workspaceId as WorkspaceId,
-          }),
-          new Promise<never>((_, reject) => {
-            controller.signal.addEventListener('abort', () => reject(new Error('timed out')), {
-              once: true,
-            });
-          }),
-        ]);
-        if (!associated) {
-          logger.debug(`[pr-poller] PR association was rejected for ${args.prUrl}`);
-          return false;
+    associatePullRequest: prAssociation
+      ? async (args: AssociatePullRequestArgs): Promise<boolean> => {
+          // Reference caller: turn-post-processing-service.ts detectAndAssociatePR.
+          // Idempotent — an existing link row keeps its status.
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), ASSOCIATE_TIMEOUT_MS);
+          try {
+            const associated = await Promise.race([
+              prAssociation.associatePullRequest({
+                ...args,
+                workspaceId: workspaceId as WorkspaceId,
+              }),
+              new Promise<never>((_, reject) => {
+                controller.signal.addEventListener('abort', () => reject(new Error('timed out')), {
+                  once: true,
+                });
+              }),
+            ]);
+            if (!associated) {
+              logger.debug(`[pr-poller] PR association was rejected for ${args.prUrl}`);
+              return false;
+            }
+            return true;
+          } catch (error) {
+            logger.debug(
+              `[pr-poller] PR association failed for ${args.prUrl}: ${formatErrorMessage(error)}`
+            );
+            return false;
+          } finally {
+            clearTimeout(timeout);
+          }
         }
-        return true;
-      } catch (error) {
-        logger.debug(
-          `[pr-poller] PR association failed for ${args.prUrl}: ${formatErrorMessage(error)}`
-        );
-        return false;
-      } finally {
-        clearTimeout(timeout);
-      }
-    },
+      : null,
 
     async dispose(): Promise<void> {
       if (disposed) {

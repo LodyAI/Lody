@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
@@ -37,4 +38,15 @@ void test('Devbar may resolve official Hub icons without broadening the normal r
     !getDirectiveSources(rendererHtml, 'connect-src').includes('https://api.iconify.design')
   )
   assert.ok(getDirectiveSources(devbarHtml, 'connect-src').includes('https://api.iconify.design'))
+})
+
+void test('renderer entries allow exactly the current inline boot shell script', async () => {
+  const { createBootShellScript } =
+    await import('../../../../packages/components/src/lib/boot-shell-script.ts')
+  const digest = createHash('sha256').update(createBootShellScript()).digest('base64')
+  for (const html of [rendererHtml, devbarHtml]) {
+    assert.ok(html.includes('<!-- lody:boot-shell-head -->'))
+    assert.ok(html.includes('<div id="root"><!-- lody:boot-shell --></div>'))
+    assert.ok(getDirectiveSources(html, 'script-src').includes(`'sha256-${digest}'`))
+  }
 })

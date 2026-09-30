@@ -79,7 +79,6 @@ const searchMessages: SessionHistoryParsed[] = [
         type: 'text',
         text: [
           'I indexed the session history and highlighted every visible `rg` match.',
-          '',
           '- Search results are occurrence-based.',
           '- Only conversation text is indexed; the tool call below is not searchable.',
         ].join('\n'),

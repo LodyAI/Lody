@@ -30,3 +30,17 @@ export function detectAppDeviceClass(): AppDeviceClass {
 
   return 'desktop';
 }
+
+/**
+ * Shells that always keep the desktop layout family regardless of viewport
+ * width. `detectAppDeviceClass() === 'desktop'` already covers a normal
+ * Electron or desktop-browser window; this preload-global check is the
+ * explicit fallback for shells whose UA does not parse to 'desktop'. A narrow
+ * window there takes the compact desktop presentation, never the mobile
+ * renderer. Kept free of imports so `use-mobile.ts` stays lightweight in
+ * every bundle and test graph; lib/electron.ts owns the richer Electron API
+ * surface.
+ */
+export function isDesktopLayoutShell(): boolean {
+  return typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
+}

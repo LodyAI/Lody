@@ -1,10 +1,26 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 
 import { usePostHog } from '@posthog/react';
 
 import { filterFuzzyOptions, shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
+import { withClassName } from '@/lib/stylex';
+import { MenuSearchInput } from '@/ui/menu';
+import { composerSurface } from './composer-surface';
 import { capturePickerSearchSelected, type SearchPickerKind } from '@/lib/picker-search-analytics';
-import { DropdownMenuSearchInput } from '@/ui/dropdown-menu';
+
+const styles = stylex.create({
+  body: { display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 },
+  list: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minHeight: 0,
+    overflowX: 'hidden',
+    overflowY: 'auto',
+    scrollbarGutter: 'auto',
+  },
+});
 
 export type MenuSearchableOption = {
   value: string;
@@ -33,10 +49,10 @@ export type MenuOptionSearchListProps<TOption extends MenuSearchableOption> = {
  * Body for a menu whose option list can be long enough that scrolling it is not
  * a way to find anything — an agent provider may publish dozens of models.
  *
- * Renders as the whole content of a `DropdownMenuContent` / `SubContent` given
- * `flex flex-col overflow-y-hidden p-0`: the search row stays put while only
- * the list below it scrolls. Below `OPTION_SEARCH_MIN_OPTIONS` the field is not
- * rendered at all and the list reads exactly as it did before.
+ * Renders as the whole content of a `Menu.Content` that holds its own overflow
+ * (`overflow-y-hidden`): the search well stays put at the top of the popup's
+ * inset while only the list below it scrolls. Below `OPTION_SEARCH_MIN_OPTIONS`
+ * the field is not rendered at all and the list reads exactly as it did before.
  */
 export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
   options,
@@ -79,21 +95,22 @@ export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div {...stylex.props(styles.body)}>
       {searchable ? (
-        <DropdownMenuSearchInput
+        <MenuSearchInput
           value={query}
           onValueChange={setQuery}
           placeholder={searchPlaceholder}
           onSubmit={submitTopMatch}
           // The width floor belongs to the field, not the list: a menu with no
           // search field keeps the menu surface's own narrow minimum.
-          className="min-w-56 border-b border-border/40 px-2.5 py-2"
+          className="min-w-56"
         />
       ) : null}
-      <div className="scroll-pro scrollbar-pro min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-1.5 [scrollbar-gutter:auto]">
+      {/* `scroll-pro scrollbar-pro` are the app's global scrollbar skin. */}
+      <div {...withClassName(stylex.props(styles.list), 'scroll-pro scrollbar-pro')}>
         {filtered.length === 0 ? (
-          <div className="px-2.5 py-2 text-[0.8rem] text-muted-foreground">{emptyText}</div>
+          <div {...stylex.props(composerSurface.empty)}>{emptyText}</div>
         ) : (
           filtered.map((option) => renderOption(option, () => select(option)))
         )}

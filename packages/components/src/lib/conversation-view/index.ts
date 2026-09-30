@@ -10,7 +10,6 @@ export {
   createConversationViewFromHistory,
   type CreateConversationViewFromHistoryOptions,
 } from './create-conversation-view-from-history';
-export { createProjectedConversationView } from './projected-conversation-view';
 export { createHistoryWriter, type HistoryWriter } from '@lody/shared';
 export {
   collectConversationConfigSources,

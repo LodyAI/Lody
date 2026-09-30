@@ -1,6 +1,72 @@
 import lodyLogo from '@/assets/lody-icon.png';
-import { cn } from '@/lib/utils';
-import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
+import * as stylex from '@stylexjs/stylex';
+import { Avatar } from '@lody/ui/avatar';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { corner, duration, ease, radius, space, text } from '@lody/ui/tokens/scales.stylex';
+
+const WIDE = '@media (min-width: 640px)';
+
+const styles = stylex.create({
+  identity: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: space[2],
+    paddingInlineStart: space[1],
+  },
+  name: {
+    display: { default: 'none', [WIDE]: 'block' },
+    minWidth: 0,
+    maxWidth: '160px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  brand: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1.5],
+    paddingInline: space[1.5],
+    paddingBlock: space[1],
+    borderRadius: radius.small,
+    cornerShape: corner.shape,
+    color: colors.label,
+    textDecoration: 'none',
+  },
+  brandLink: {
+    backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    transitionProperty: 'background-color',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  /**
+   * The icon's own black tile, whatever the appearance. The hairline is the
+   * label at 10%: ink on black in the light palette, where the tile needs no
+   * edge, and white on black in the dark one, where it does.
+   */
+  tile: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '20px',
+    height: '20px',
+    borderRadius: '6px',
+    cornerShape: corner.shape,
+    backgroundColor: '#0d0d0f',
+    boxShadow: `0 0 0 1px color-mix(in oklab, transparent, ${colors.label} 10%)`,
+  },
+  logo: { width: '18px', height: '18px', objectFit: 'contain' },
+  wordmark: {
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
+    letterSpacing: '-0.025em',
+  },
+});
 
 /**
  * Who is looking at this share, as far as the reader can tell.
@@ -46,16 +112,12 @@ function initialsOf(name: string): string {
 export function ShareViewerIdentity({ viewer }: { viewer: ShareViewer }) {
   if (viewer.status === 'signed-in')
     return (
-      <div className="flex min-w-0 items-center gap-2 pl-1">
-        <span className="hidden min-w-0 max-w-40 truncate text-xs text-muted-foreground sm:block">
-          {viewer.name}
-        </span>
-        <Avatar className="size-6">
-          {viewer.imageUrl ? <AvatarImage src={viewer.imageUrl} alt="" /> : null}
-          <AvatarFallback className="text-[10px] font-medium">
-            {initialsOf(viewer.name)}
-          </AvatarFallback>
-        </Avatar>
+      <div {...stylex.props(styles.identity)}>
+        <span {...stylex.props(styles.name)}>{viewer.name}</span>
+        <Avatar.Root size="medium">
+          {viewer.imageUrl ? <Avatar.Image src={viewer.imageUrl} alt="" /> : null}
+          <Avatar.Fallback>{initialsOf(viewer.name)}</Avatar.Fallback>
+        </Avatar.Root>
       </div>
     );
   return null;
@@ -71,26 +133,17 @@ export function ShareViewerIdentity({ viewer }: { viewer: ShareViewer }) {
 export function ShareBrandLink({ appOrigin }: { appOrigin: string | null }) {
   const mark = (
     <>
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-[6px] bg-[#0d0d0f] dark:ring-1 dark:ring-white/10">
-        <img
-          src={lodyLogo}
-          alt=""
-          aria-hidden
-          draggable={false}
-          className="size-[18px] object-contain"
-        />
+      <span {...stylex.props(styles.tile)}>
+        <img src={lodyLogo} alt="" aria-hidden draggable={false} {...stylex.props(styles.logo)} />
       </span>
-      <span className="text-sm tracking-tight">Lody</span>
+      <span {...stylex.props(styles.wordmark)}>Lody</span>
     </>
   );
-  const className = cn(
-    'flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-foreground',
-    appOrigin && 'transition-colors hover:bg-hover'
-  );
-  if (!appOrigin) return <span className={className}>{mark}</span>;
+  const surface = stylex.props(styles.brand, !!appOrigin && styles.brandLink);
+  if (!appOrigin) return <span {...surface}>{mark}</span>;
   // A new tab: a visitor reading a share must not lose it to the marketing site.
   return (
-    <a href={appOrigin} target="_blank" rel="noopener noreferrer" className={className}>
+    <a href={appOrigin} target="_blank" rel="noopener noreferrer" {...surface}>
       {mark}
     </a>
   );

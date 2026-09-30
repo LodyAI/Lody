@@ -6,14 +6,24 @@ import {
   getSessionRoomId,
   sessionDocSchema,
   parseSessionNotification,
+  resolveSessionAcpRuntimeConfig,
   type AcpSessionNotification,
+  type AgentConfigMeta,
+  type AgentConfigId,
+  type LocalProjectHistoryProvider,
+  resolveSessionAcpTargetId,
   type LocalProjectId,
   type MachineId,
   type SessionId,
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
-import { HASH_VERSION_V1, hashHistoryEntryForVersion, hashText } from '@lody/shared/session-data';
+import {
+  HASH_VERSION_V1,
+  hashHistoryEntryForVersion,
+  hashText,
+  readSessionHistory,
+} from '@lody/shared/session-data';
 import type { SessionHistoryInput } from '@lody/shared';
 
 import { LocalProjectHistorySyncService } from '../src/lib/local-project-history-sync-service';
@@ -31,7 +41,8 @@ vi.mock('../src/lib/history-session-catalog-client', () => ({
   MAX_LOCAL_PROJECT_HISTORY_CATALOG_SESSIONS: 100,
 }));
 
-vi.mock('../src/lib/local-project-meta', () => ({
+vi.mock('../src/lib/local-project-meta', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/local-project-meta')>()),
   readMachineLocalProjects: async () => ({}),
   upsertMachineLocalProject: async () => {},
 }));
@@ -84,6 +95,7 @@ async function createHarness() {
     error: () => {},
     success: () => {},
     debug: () => {},
+    trace: () => {},
     setLevel: () => {},
     child: () => logger,
     close: async () => {},
@@ -101,16 +113,27 @@ async function createHarness() {
       return doc;
     },
     cleanSessionDoc: async () => {},
+    findSoleAgentConfig: async () => agentConfigs.sole,
+    getAgentConfigById: async (id: string) =>
+      agentConfigs.all.find((config) => config.id === id) ?? null,
   };
-  const service = new LocalProjectHistorySyncService(
-    manager as unknown as LoroDocumentManager,
-    logger,
-    { workspaceId, machineId, userId: 'synthetic-user' },
-    provider
-  );
+  const agentConfigs: { sole?: AgentConfigMeta; all: AgentConfigMeta[] } = { all: [] };
+  // Production builds a service per request.
+  const createService = (selectedProvider: LocalProjectHistoryProvider = provider) =>
+    new LocalProjectHistorySyncService(
+      manager as unknown as LoroDocumentManager,
+      logger,
+      { workspaceId, machineId, userId: 'synthetic-user' },
+      selectedProvider
+    );
+  const service = createService();
 
   let revision = 0;
-  async function importTurns(turns: number) {
+  async function importTurns(
+    turns: number,
+    modelId?: string,
+    selectedProvider: LocalProjectHistoryProvider = provider
+  ) {
     revision += 1;
     providerMocks.list.mockResolvedValue({
       sessions: [
@@ -121,8 +144,11 @@ async function createHarness() {
         },
       ],
     });
-    providerMocks.replay.mockResolvedValue(notifications(turns));
-    return service.importLocalProjectSessions({
+    providerMocks.replay.mockResolvedValue({
+      notifications: notifications(turns),
+      runtimeConfig: modelId && { acpSessionId, modelId, configOptionValues: { model: modelId } },
+    });
+    return createService(selectedProvider).importLocalProjectSessions({
       localProjectId,
       rootPath,
       acpSessionIds: [acpSessionId],
@@ -168,7 +194,17 @@ async function createHarness() {
     });
     return loro;
   }
-  return { repo, service, importTurns, getOnlyDoc, getMeta, rawDoc, makeLegacy };
+  return {
+    repo,
+    service,
+    agentConfigs,
+    importTurns,
+    getOnlyDoc,
+    getMeta,
+    rawDoc,
+    makeLegacy,
+    docs,
+  };
 }
 
 function location(doc: LoroDoc): LoroMap {
@@ -178,6 +214,78 @@ function location(doc: LoroDoc): LoroMap {
 }
 
 describe('history import through the real SessionDocument writer', () => {
+  it('binds the exact selected Provider with multiple accounts and retains imported runtime identity', async () => {
+    const h = await createHarness();
+    const config = {
+      ...provider,
+      machineId,
+      id: 'config-a',
+      env: { CODEX_HOME: '/synthetic/a' },
+    } as AgentConfigMeta;
+    h.agentConfigs.all.push(config, {
+      ...config,
+      id: 'config-b' as AgentConfigId,
+      env: { CODEX_HOME: '/synthetic/b' },
+    });
+    const selected = { ...provider, agentConfigId: config.id };
+    expect((await h.importTurns(1, 'source-model', selected)).summary.imported).toBe(1);
+    const { sessionId, doc } = h.getOnlyDoc();
+    const meta = await h.getMeta(sessionId);
+    expect(meta.agentConfigId).toBe(config.id);
+    expect(meta.acpSessionId).toBeUndefined();
+    expect(resolveSessionAcpTargetId(meta)).toBe(acpSessionId);
+    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({ modelId: 'source-model' });
+    expect((await h.importTurns(2, 'next-model', selected)).summary.refreshed).toBe(1);
+    expect(h.docs.size).toBe(1);
+    expect(providerMocks.replay.mock.lastCall?.[0].provider.env).toEqual(config.env);
+
+    // Identical native IDs under another account must not refresh or steal this session.
+    expect(
+      (
+        await h.importTurns(1, 'other-model', {
+          ...provider,
+          agentConfigId: 'config-b' as AgentConfigId,
+        })
+      ).summary.imported
+    ).toBe(1);
+    expect(h.docs.size).toBe(2);
+    expect((await h.getMeta(sessionId)).agentConfigId).toBe(config.id);
+    expect(doc.mirror?.getState().acpRuntimeConfig).toMatchObject({ modelId: 'next-model' });
+  });
+
+  it('repairs an unbound legacy import without duplicating or rewriting its history', async () => {
+    const h = await createHarness();
+    await h.importTurns(1, 'source-model');
+    const { sessionId, doc } = h.getOnlyDoc();
+    const history = readSessionHistory(doc.sessionData.history);
+    const config = { ...provider, machineId, id: 'config-a' } as AgentConfigMeta;
+    h.agentConfigs.all.push(config);
+    await h.importTurns(1, 'source-model', { ...provider, agentConfigId: config.id });
+    expect(h.docs.size).toBe(1);
+    expect((await h.getMeta(sessionId)).agentConfigId).toBe(config.id);
+    expect(readSessionHistory(doc.sessionData.history)).toEqual(history);
+  });
+
+  it.each(['missing', 'wrong-machine', 'wrong-agent'])(
+    'rejects a %s explicit Provider without falling back or writing history',
+    async (kind) => {
+      const h = await createHarness();
+      const config = { ...provider, machineId, id: 'config-a' } as AgentConfigMeta;
+      h.agentConfigs.sole = config;
+      if (kind !== 'missing')
+        h.agentConfigs.all.push({
+          ...config,
+          ...(kind === 'wrong-machine'
+            ? { machineId: 'other-machine' as MachineId }
+            : { agentType: 'claude' }),
+        });
+      await expect(
+        h.importTurns(1, 'model', { ...provider, agentConfigId: config.id })
+      ).rejects.toThrow('selected history Provider is unavailable');
+      expect(h.docs.size).toBe(0);
+    }
+  );
+
   it.each([false, true])(
     'recognizes a projected suffix arriving before the cursor (legacy=%s)',
     async (legacy) => {
@@ -197,6 +305,36 @@ describe('history import through the real SessionDocument writer', () => {
       expect((await doc.getExternalHistoryCursor())?.importedTurnHashes).toHaveLength(4);
     }
   );
+
+  it("keeps the source session's model as the composer baseline across import and refresh", async () => {
+    const h = await createHarness();
+    await h.importTurns(1, 'model-a');
+    const { doc } = h.getOnlyDoc();
+    const baselineModel = () =>
+      resolveSessionAcpRuntimeConfig(
+        readSessionHistory(doc.sessionData.history),
+        [],
+        doc.mirror?.getState().acpRuntimeConfig
+      )?.modelId;
+    expect(baselineModel()).toBe('model-a');
+
+    expect((await h.importTurns(2, 'model-b')).summary.refreshed).toBe(1);
+    expect(baselineModel()).toBe('model-b');
+  });
+
+  it('refreshes a bound session through its own Provider after the sole one changes', async () => {
+    const h = await createHarness();
+    const bound = { id: 'config-a', env: { CODEX_HOME: '/a' } } as unknown as AgentConfigMeta;
+    h.agentConfigs.all.push(bound);
+    h.agentConfigs.sole = bound;
+    await h.importTurns(1);
+    expect((await h.getMeta(h.getOnlyDoc().sessionId)).agentConfigId).toBe('config-a');
+
+    // A second same-type Provider appears, so there is no sole Provider any more.
+    h.agentConfigs.sole = undefined;
+    expect((await h.importTurns(2)).summary.refreshed).toBe(1);
+    expect(providerMocks.replay.mock.lastCall?.[0].provider.env).toEqual({ CODEX_HOME: '/a' });
+  });
 
   it('does not advance the cursor when the new history command fails validation', async () => {
     const h = await createHarness();

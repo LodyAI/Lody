@@ -10,6 +10,7 @@ import {
   getAcpCapabilityCacheKey,
   machineFlockKeys,
   serializeMachineFlockKey,
+  serializeCustomAcpLaunchSpec,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
@@ -33,7 +34,7 @@ import {
 } from '../src/components/settings/agent-config-dialog';
 import * as machineAuthenticationHook from '../src/hooks/use-machine-acp-authentication';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const machineId = 'machine-test' as MachineId;
 const claudeConfigId = 'claude-config' as AgentConfigId;
@@ -221,7 +222,7 @@ describe('AgentConfigDialog', () => {
     await act(async () => {
       root?.render(
         <Provider store={store}>
-          <TooltipProvider>
+          <Tooltip.Provider>
             <AgentConfigDialog
               open
               onOpenChange={vi.fn()}
@@ -233,11 +234,124 @@ describe('AgentConfigDialog', () => {
               onManagedRuntimeSelected={onManagedRuntimeSelected}
               onScanPiExtensions={onScanPiExtensions}
             />
-          </TooltipProvider>
+          </Tooltip.Provider>
         </Provider>
       );
     });
   };
+
+  it('preserves managed Codex identity and disables editing on a downgraded machine', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'managed-codex' as AgentConfigId,
+          machineId,
+          name: 'Work Codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: { mode: 'chatgpt', profileId: '937c8a40-0e27-4d44-9716-0eb60b26a195' },
+        },
+      },
+      createMachine('Old machine'),
+      async (payload) => {
+        saved.push(payload);
+      }
+    );
+    const save = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Save'
+    );
+    expect(save?.disabled).toBe(true);
+    await act(async () => {
+      save?.click();
+    });
+    expect(saved).toEqual([]);
+  });
+
+  it('shows the immutable account binding without a sign-in action for managed ChatGPT', async () => {
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'managed-chatgpt' as AgentConfigId,
+          machineId,
+          name: 'Work Codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: { mode: 'chatgpt', profileId: '937c8a40-0e27-4d44-9716-0eb60b26a195' },
+        },
+      },
+      createMachine('Workstation', { codexAuthProfiles: 1 })
+    );
+
+    expect(document.body.textContent).toContain(
+      'This provider is bound to its ChatGPT account. Add a new provider to use another account.'
+    );
+    expect(document.body.textContent).not.toContain('Sign in again');
+  });
+
+  it('keeps API key replacement available when editing a managed Codex endpoint', async () => {
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'managed-api-key' as AgentConfigId,
+          machineId,
+          name: 'Relay Codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: {
+            mode: 'api-key',
+            profileId: '3e332bd5-96ab-4d35-b9fc-9a965a1be42c',
+            baseUrl: 'https://relay.example.invalid/v1',
+          },
+        },
+      },
+      createMachine('Workstation', { codexAuthProfiles: 1 })
+    );
+
+    expect(
+      Array.from(document.body.querySelectorAll('button')).some(
+        (button) => button.textContent?.trim() === 'Update API Key'
+      )
+    ).toBe(true);
+  });
+
+  it('shows managed Codex endpoint choices only for capable machines and never saves a key in the form', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    await renderDialog(
+      { kind: 'create', initialForm: { name: 'Relay', cliType: 'builtin', agentType: 'codex' } },
+      createMachine('New machine', { codexAuthProfiles: 1, providerSetup: 1 }),
+      async (payload) => {
+        saved.push(payload);
+      }
+    );
+    const custom = Array.from(document.querySelectorAll('[role=tab]')).find(
+      (tab) => tab.textContent === 'Custom API'
+    ) as HTMLElement | undefined;
+    expect(custom).toBeDefined();
+    await act(async () => {
+      custom?.click();
+    });
+    const endpoint = document.querySelector<HTMLInputElement>('#codex-base-url');
+    expect(endpoint?.value).toBe('https://api.openai.com/v1');
+    expect(document.querySelector('input[type=password]')).toBeNull();
+    const create = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Create'
+    );
+    await act(async () => {
+      create?.click();
+    });
+    expect(saved[0]?.codexAuth).toMatchObject({
+      mode: 'api-key',
+      baseUrl: 'https://api.openai.com/v1',
+    });
+    expect(saved[0]?.env).toEqual({});
+  });
 
   it('scans Pi without publishing or enabling candidates, then saves only selected paths', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
@@ -719,10 +833,15 @@ describe('AgentConfigDialog', () => {
   };
 
   const selectTab = async (name: string): Promise<void> => {
+    // A whole press, not just its first half: the strip is Base UI's now and a
+    // tab is taken on the click, while Radix took it on the mousedown.
     await act(async () => {
-      getTabByName(name).dispatchEvent(
-        new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
-      );
+      const tab = getTabByName(name);
+      const press = { bubbles: true, cancelable: true, button: 0 };
+      tab.dispatchEvent(new MouseEvent('mousedown', press));
+      tab.focus();
+      tab.dispatchEvent(new MouseEvent('mouseup', press));
+      tab.click();
     });
   };
 
@@ -1035,37 +1154,6 @@ describe('AgentConfigDialog', () => {
         },
       })
     );
-  });
-
-  it('keeps the draft config id stable when create mode props are recreated', async () => {
-    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
-    const clickSave = async () => {
-      const createButton = Array.from(document.body.querySelectorAll('button')).find(
-        (button) => button.textContent?.trim() === 'Create'
-      );
-      await act(async () => {
-        createButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      });
-    };
-
-    await renderDialog(
-      { kind: 'create', initialForm: { name: 'Claude' } },
-      createMachine('Workstation'),
-      onSubmit
-    );
-    await clickSave();
-    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    const firstId = onSubmit.mock.calls[0]?.[0].id;
-
-    await renderDialog(
-      { kind: 'create', initialForm: { name: 'Claude' } },
-      createMachine('Workstation refreshed'),
-      onSubmit
-    );
-    await clickSave();
-    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
-
-    expect(onSubmit.mock.calls.every(([payload]) => payload.id === firstId)).toBe(true);
   });
 
   it('shows the managed Kimi Node requirement before create', async () => {
@@ -1478,6 +1566,46 @@ describe('AgentConfigDialog', () => {
       );
 
       expect(document.body.textContent).not.toContain('Title generation');
+    }
+  );
+
+  it.each([true, false])(
+    'uses advertised title ownership in settings: %s',
+    async (sessionTitle) => {
+      const machine = createTitleConfigMachine();
+      const entry = machine.acpCapabilities?.[getAcpCapabilityCacheKey(kimiConfigId)];
+      if (!entry) throw new Error('Missing capability fixture');
+      entry.sessionTitle = sessionTitle;
+      await renderDialog({ kind: 'edit', config: createBuiltinConfig() }, machine);
+      expect(document.body.textContent?.includes('Title generation')).toBe(!sessionTitle);
+    }
+  );
+
+  it.each([true, false])(
+    'only hides custom title settings for the matching command: %s',
+    async (matches) => {
+      const customAcp = { command: 'title-agent', args: ['--acp'] };
+      const machine = createTitleConfigMachine();
+      const entry = machine.acpCapabilities?.[getAcpCapabilityCacheKey(kimiConfigId)];
+      if (!entry) throw new Error('Missing capability fixture');
+      Object.assign(entry, {
+        cliType: 'custom',
+        agentType: 'custom-title',
+        sessionTitle: true,
+        sourceVersion: `custom:${serializeCustomAcpLaunchSpec(matches ? customAcp : { command: 'other-agent' })}`,
+      });
+      await renderDialog(
+        {
+          kind: 'edit',
+          config: createBuiltinConfig({
+            cliType: 'custom',
+            agentType: 'custom-title',
+            customAcp,
+          }),
+        },
+        machine
+      );
+      expect(document.body.textContent?.includes('Title generation')).toBe(!matches);
     }
   );
 

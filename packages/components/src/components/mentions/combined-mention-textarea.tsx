@@ -27,7 +27,6 @@ import {
   type SessionMentionProjectScope,
 } from '@/components/mentions/mention-session-source';
 import {
-  buildAgentRoleMentionContext,
   hydrateAgentRoleMentionsFromText,
   useAgentRoleMentionItems,
   type AgentRoleMentionItem,
@@ -64,7 +63,7 @@ import {
 import { getAgentRoleEmoji, type AcpCommandSummary } from '@lody/shared';
 import { Mention, MentionInput, MentionLabel, useMentionContext } from '@/ui/mention';
 import type { Mention as MentionRange, MentionChipResolver } from '@/ui/mention/index';
-import { Textarea, type TextareaProps } from '@/ui/textarea';
+import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { parseMentionNamespaceSearch } from '@/ui/mention/mention-trigger';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import type { PromptShortcutScope } from '@lody/shared/prompt-shortcuts';
@@ -111,6 +110,9 @@ function TwoLevelMentionMenu({
   surface,
   templateScope,
   promptShortcutSource,
+  menuSide,
+  menuAnchor,
+  menuMobileDocked,
 }: {
   fileData: MentionFileDataState;
   fileSourceKind: MentionFileSourceKind;
@@ -136,6 +138,14 @@ function TwoLevelMentionMenu({
   surface: MentionSurface;
   templateScope?: PromptShortcutScope;
   promptShortcutSource?: MentionCategorySources['promptShortcut'];
+  menuSide?: 'top' | 'bottom';
+  /** `caret` follows the insertion point; `composer` fixes the menu to the
+   *  nearest `[data-mention-frame]`. Defaults to `caret`. */
+  menuAnchor?: 'caret' | 'composer';
+  /** Keep the <640px docked panel. False keeps the floating caret popover on
+   *  mobile — for an editor mid-conversation where there is no bottom composer
+   *  to dock above. */
+  menuMobileDocked?: boolean;
 }) {
   const context = useMentionContext('TwoLevelMentionMenu');
   const { t } = useTranslation();
@@ -437,7 +447,15 @@ function TwoLevelMentionMenu({
     onLazyDirectoryOpen(directoryId);
   }, [active, lazyDirectoryIdByToken, onLazyDirectoryOpen, search]);
 
-  return <MentionTwoLevelMenu categories={categories} surface={surface} />;
+  return (
+    <MentionTwoLevelMenu
+      categories={categories}
+      surface={surface}
+      menuSide={menuSide}
+      anchor={menuAnchor}
+      mobileDocked={menuMobileDocked}
+    />
+  );
 }
 
 // ============================================================================
@@ -676,6 +694,15 @@ export interface CombinedMentionTextareaProps extends Omit<
   skillAgent?: SkillMentionAgent;
   /** Entry point for mention analytics (spec §8e). Defaults to 'unknown'. */
   mentionSurface?: MentionSurface;
+  /** Preferred side; an explicit `top` caret menu scrolls above unless no row fits. */
+  menuSide?: 'top' | 'bottom';
+  /** `caret` follows the insertion point; `composer` fixes the menu to the
+   *  nearest `[data-mention-frame]`. Defaults to `caret`. */
+  menuAnchor?: 'caret' | 'composer';
+  /** Keep the <640px docked panel. False keeps the floating caret popover on
+   *  mobile — for an editor mid-conversation where there is no bottom composer
+   *  to dock above. */
+  menuMobileDocked?: boolean;
   /** False for a mounted but hidden composer that must not own app commands. */
   commandsEnabled?: boolean;
   /** Dropped from the `@session:` category — a session never references itself. */
@@ -741,6 +768,9 @@ export const CombinedMentionTextarea = React.forwardRef<
       availableCommands,
       skillAgent,
       mentionSurface = 'unknown',
+      menuSide,
+      menuAnchor,
+      menuMobileDocked,
       commandsEnabled = true,
       currentSessionId,
       value,
@@ -847,14 +877,7 @@ export const CombinedMentionTextarea = React.forwardRef<
       () => getMentionSourceProjectKey(mentionSource),
       [mentionSource]
     );
-    const agentRoleContext = React.useMemo(
-      () =>
-        templateScope
-          ? { kind: 'authorized_machines' as const }
-          : buildAgentRoleMentionContext({ mentionSource }),
-      [mentionSource, templateScope]
-    );
-    const agentRoleItems = useAgentRoleMentionItems(agentRoleContext);
+    const agentRoleItems = useAgentRoleMentionItems();
     // A committed range carries only the Role id, so the caller's chip resolver
     // cannot reach the Role's emoji on its own. The composer already owns the
     // mentionable list, so it upgrades the glyph on the way through.
@@ -983,8 +1006,8 @@ export const CombinedMentionTextarea = React.forwardRef<
     // already: a composer with only issues rendered a plain textarea.
     const enableSessionMentions = !templateScope && sessionItems.length > 0;
     // Having any mentionable Role IS the enablement rule: the list is already
-    // filtered by visibility, executability, and work context, so an empty one
-    // means there is nothing this composer could offer.
+    // filtered by visibility, so an empty one means there is nothing this
+    // composer could offer.
     const enableAgentRoleMentions = agentRoleItems.length > 0;
     const enableAtMentions =
       !!templateScope ||
@@ -1144,6 +1167,9 @@ export const CombinedMentionTextarea = React.forwardRef<
           enableAgentRoleMentions={enableAgentRoleMentions}
           agentRoleItems={agentRoleItems}
           surface={mentionSurface}
+          menuSide={menuSide}
+          menuAnchor={menuAnchor}
+          menuMobileDocked={menuMobileDocked}
         />
       </Mention>
     );

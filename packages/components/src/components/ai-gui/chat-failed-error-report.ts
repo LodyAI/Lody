@@ -61,7 +61,9 @@ const trimmed = (value: string | undefined): string | undefined => {
  */
 export function buildChatFailedErrorReport(input: ChatFailedErrorReportInput): string {
   const fields: Array<[string, string | undefined]> = [
-    ['Error', trimmed(input.title)],
+    // A single-word `Error:` prefix can be interpreted as a custom URL scheme
+    // by clipboard consumers. Keep the report unambiguously plain text.
+    ['Error details', trimmed(input.title)],
     ['Reason', trimmed(input.reason)],
     ['Code', trimmed(input.code)],
     ['Session', trimmed(input.sessionId)],

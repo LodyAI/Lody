@@ -17,7 +17,7 @@ import {
 import { withGitHubTokenRetry } from '@/lib/github-token';
 import { cn } from '@/lib/utils';
 import { useMentionContext } from '@/ui/mention';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { Popover } from '@lody/ui/popover';
 
 // ============================================================================
 // Types
@@ -918,14 +918,13 @@ export function IssuePrMentionTitleHint({
   const { Icon, iconClassName } = getItemIconMeta(active.meta.type);
 
   return (
-    <Popover
+    <Popover.Root
       open={open}
       onOpenChange={(next) => {
         if (!next) close();
       }}
     >
-      <PopoverTrigger asChild>
-        <span
+      <Popover.Trigger render={<span
           aria-hidden="true"
           style={{
             position: 'fixed',
@@ -935,9 +934,8 @@ export function IssuePrMentionTitleHint({
             height: 1,
             pointerEvents: 'none',
           }}
-        />
-      </PopoverTrigger>
-      <PopoverContent
+        />}/>
+      <Popover.Content
         side="top"
         align="start"
         className="max-w-[320px] p-3"
@@ -974,7 +972,7 @@ export function IssuePrMentionTitleHint({
             {active.meta.title}
           </p>
         </div>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }

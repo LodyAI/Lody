@@ -5,18 +5,19 @@ Translation: pending
 
 ## Behavior
 
-In plain chat, a user can mention a Role on any authorized machine. A GitHub
-project can also use another machine when its file source is not bound to a
-local worktree. Local projects and GitHub file sources with a local worktree
-require the Role to execute on that filesystem's machine.
+In every composer, including plain chat, GitHub projects and Local Projects, a
+user can mention a Role on any authorized machine. A Role on another machine
+than a Local Project or local worktree cannot reach that filesystem, so it runs
+as an independent Session on its own machine rather than as a child Session.
+Agents dispatching Roles reach the machines the executing machine's owner may
+use, never more than the human driving the Turn may use.
 
 The Role menu lists every Role readable in the current workspace, including
 unavailable and loading Roles. It preserves ownership and sharing permissions;
 it does not expose another user's private Roles. Available search matches come
 first, followed by disabled matches. Disabled rows explain their state below
-the name: checking availability, machine inaccessible/offline, binding missing
-or mismatched, or execution outside the current work context. Binding failures
-take precedence over work-context restrictions.
+the name: checking availability, machine inaccessible/offline, or binding
+missing or mismatched.
 
 The dedicated Role list shows the full readable catalog. Aggregate search keeps
 its existing per-category cap, applied after availability ordering. Search
