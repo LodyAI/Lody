@@ -62,10 +62,12 @@ export const surface = stylex.create({
    * A list belongs to a control that shows the value it holds, so it takes
    * `--anchor-width` and the two read as one control. A menu is opened by
    * whatever happens to be there — often a 28px icon button — so it states its
-   * own width and grows past it for the longest row.
+   * own width and grows past it for the longest row. Commands use regular
+   * weight because the rows are peers; group headings keep their emphasis.
    */
   popupMenu: {
     minWidth: popup.menuWidth,
+    fontWeight: 400,
     // A list keeps its scroll in `list`, between the two scroll arrows. A menu
     // has no such part — its rows are the popup's own children — so the popup
     // is the scrolling box, bounded by the `--available-height` it already has.
@@ -307,7 +309,7 @@ export const surface = stylex.create({
     color: popup.label,
     fontFamily: 'inherit',
     fontSize: popup.text,
-    fontWeight: 500,
+    fontWeight: 400,
     letterSpacing: text.controlTracking,
     lineHeight: 1,
     cursor: 'default',

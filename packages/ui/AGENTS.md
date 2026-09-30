@@ -41,9 +41,9 @@ with this package's `stylex-options.ts`.
   popup, taking the positioning props outside. They mount into the nearest
   `PopupContainerProvider` through a boxless portal on the absolute strategy:
   a container centred with `translate` contains `fixed` descendants.
-- `Menu` is the dropdown; `ContextMenu` and `Menubar` restate only the way in
-  and re-export its rows. A menu reads `popup` and replaces one declaration,
-  `--anchor-width`; surface and rows come from `src/popup/surface.ts`.
+- `Menu`, `ContextMenu` and `Menubar` share `src/popup/surface.ts` rows.
+  Menu labels use weight 400; group headings retain emphasis. Menus use their
+  own width floor rather than `--anchor-width`.
 - Whatever holds a glyph gives it a box, because this package's glyphs state
   100% and StyleX has no descendant selector: a menu row's, a badge's, an
   avatar's, an icon-only `Button`'s. A caller's icon states 100% too; a
