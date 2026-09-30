@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1160](https://github.com/LodyAI/Lody/pull/1160)
 
 [中文](2026-09-30-composer-pending-send-config.zh.md)
 
