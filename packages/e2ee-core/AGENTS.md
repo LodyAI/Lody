@@ -51,9 +51,9 @@ in-package tests only; do not re-export it.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
   same bytes. `./effect` has the intent client; old `./ledger` submit/resume
   delegate to the same `workflows/ledger-engine.ts`. No second submit path.
-  Guard `pure/ports/workflows` with `check:effect-boundaries --complete`.
-  Native verify/extend live in `workflows/verification.ts`. Malformed pages must
-  not become Pending.
+  Verify/extend live only in `workflows/verification.ts`; `./ledger` runs them
+  via `ledger/compat.ts` (no own replay/cache); `check:effect-boundaries
+--complete` guards both. Malformed pages must not become Pending.
 - `openEpochEnvelope` requires `canSendEpoch`, an admitted recipient, current
   epoch and matching `commitEpochKey`; install into the epoch it was verified
   against. Every active personal/machine device, including Guest, may forward;

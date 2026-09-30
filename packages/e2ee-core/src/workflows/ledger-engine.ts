@@ -59,7 +59,8 @@ export interface SnapshotBootstrap {
   readonly snapshot: Uint8Array;
 }
 
-type Session = { journal: LedgerJournal; ledger: LedgerView };
+/** The verified journal view; transactions read and replace it only through `cached`. */
+type Session = { readonly journal: LedgerJournal; readonly ledger: LedgerView };
 type Dependencies = JournalStore | LedgerTransport | SignatureVerifier;
 
 function copyJournal(journal: LedgerJournal): LedgerJournal {
@@ -250,16 +251,25 @@ export class LedgerEngine {
   /** Advanced migration/audit boundary. Always verifies bytes against the current view. */
   submitEncoded(input: Uint8Array): Effect.Effect<CommandOutcome, ClientError> {
     const record = copyBytes(input);
-    return this.store.exclusive((tx) =>
-      Effect.gen(this, function* () {
-        const session = yield* this.load(tx);
-        const retrying = session.journal.pending !== null;
-        if (session.journal.pending !== null && !bytesEqual(session.journal.pending, record)) {
-          return yield* Effect.fail(new PendingOperationExists());
-        }
-        yield* this.synchronize(tx, session);
-        return yield* this.submit(tx, session, record, retrying);
-      })
+    return this.store
+      .exclusive((tx) =>
+        Effect.gen(this, function* () {
+          const session = yield* this.load(tx);
+          const retrying = session.journal.pending !== null;
+          if (session.journal.pending !== null && !bytesEqual(session.journal.pending, record)) {
+            return yield* Effect.fail(new PendingOperationExists());
+          }
+          yield* this.synchronize(tx);
+          return yield* this.submit(tx, record, retrying);
+        })
+      )
+      .pipe(Effect.withSpan('LedgerEngine.submitEncoded'));
+  }
+
+  /** The session saved by the current transaction; `load` always runs first. */
+  private get session(): Effect.Effect<Session> {
+    return Effect.flatMap(Ref.get(this.cached), (session) =>
+      session ? Effect.succeed(session) : Effect.dieMessage('ledger session read before load')
     );
   }
 
@@ -335,36 +345,36 @@ export class LedgerEngine {
     });
   }
 
+  /** Persists first; only then does the new session become visible. */
   private save(
     tx: JournalTransaction,
-    session: Session,
     journal: LedgerJournal,
-    ledger = session.ledger
-  ) {
+    ledger?: LedgerView
+  ): Effect.Effect<Session, ClientError> {
     return Effect.gen(this, function* () {
       const stable = copyJournal(journal);
+      const view = ledger ?? (yield* this.session).ledger;
       yield* Effect.uninterruptible(tx.save(copyJournal(stable)));
-      session.journal = stable;
-      session.ledger = ledger;
-      yield* Ref.set(this.cached, { journal: stable, ledger });
+      const next = { journal: stable, ledger: view };
+      yield* Ref.set(this.cached, next);
+      return next;
     });
   }
 
-  private synchronize(tx: JournalTransaction, session: Session): Effect.Effect<void, ClientError> {
+  private synchronize(tx: JournalTransaction): Effect.Effect<void, ClientError> {
     return Effect.gen(this, function* () {
-      const seen = new Set([this.stream.initialOffset, session.journal.offset]);
-      const snapshotMode = session.journal.snapshot !== undefined;
-      const snapshotHead = session.journal.snapshotTrust?.head;
-      let bound =
-        !snapshotMode ||
-        session.journal.records.length > 0 ||
-        session.journal.snapshotBound === true;
-      let cursor = session.journal.offset;
+      const initial = (yield* this.session).journal;
+      const seen = new Set([this.stream.initialOffset, initial.offset]);
+      const snapshotMode = initial.snapshot !== undefined;
+      const snapshotHead = initial.snapshotTrust?.head;
+      let bound = !snapshotMode || initial.records.length > 0 || initial.snapshotBound === true;
+      let cursor = initial.offset;
       let skippedUnknown = false;
       // Point validity only, not signatures or authority. Carry across pages of
       // a snapshot prefix without making a global cache or trusting that prefix.
       let prefixFacts = SigningFacts.empty;
       for (let pageIndex = 0; pageIndex < MAX_LEDGER_READ_PAGES; pageIndex++) {
+        const session = yield* this.session;
         const page = yield* this.stream.readAfter(cursor);
         yield* offset(page.nextOffset);
         if (!Array.isArray(page.records) || typeof page.upToDate !== 'boolean')
@@ -431,7 +441,6 @@ export class LedgerEngine {
         }
         yield* this.save(
           tx,
-          session,
           {
             ...session.journal,
             offset: page.nextOffset,
@@ -449,27 +458,32 @@ export class LedgerEngine {
   }
 
   refresh(): Effect.Effect<LedgerView, ClientError> {
-    return this.store.exclusive((tx) =>
-      Effect.gen(this, function* () {
-        const session = yield* this.load(tx);
-        yield* this.synchronize(tx, session);
-        return session.ledger;
-      })
-    );
+    return this.store
+      .exclusive((tx) =>
+        Effect.gen(this, function* () {
+          yield* this.load(tx);
+          yield* this.synchronize(tx);
+          return (yield* this.session).ledger;
+        })
+      )
+      .pipe(Effect.withSpan('LedgerEngine.refresh'));
   }
 
   /** Internal recovery guard: absence of the separate candidate is not permission to rotate. */
   hasPendingEpochPublication(): Effect.Effect<boolean, ClientError> {
-    return this.store.exclusive((tx) =>
-      Effect.gen(this, function* () {
-        const session = yield* this.load(tx);
-        if (session.journal.pending === null) return false;
-        const decoded = yield* decodeRecord(session.journal.pending);
-        return (
-          decoded.body.type === 'ordinary' && decoded.body.fields.operation.type === 'publishEpoch'
-        );
-      })
-    );
+    return this.store
+      .exclusive((tx) =>
+        Effect.gen(this, function* () {
+          const session = yield* this.load(tx);
+          if (session.journal.pending === null) return false;
+          const decoded = yield* decodeRecord(session.journal.pending);
+          return (
+            decoded.body.type === 'ordinary' &&
+            decoded.body.fields.operation.type === 'publishEpoch'
+          );
+        })
+      )
+      .pipe(Effect.withSpan('LedgerEngine.hasPendingEpochPublication'));
   }
 
   /** Internal rotation boundary. Caller must durably save the candidate before submitEncoded. */
@@ -482,21 +496,32 @@ export class LedgerEngine {
       commitment: copyBytes(operation.commitment),
       previousEpochKey: copyBytes(operation.previousEpochKey),
     };
-    return this.store.exclusive((tx) =>
-      Effect.gen(this, function* () {
-        const session = yield* this.load(tx);
-        if (session.journal.pending !== null)
-          return yield* Effect.fail(new PendingOperationExists());
-        yield* this.synchronize(tx, session);
-        const proposal = yield* this.withVerifier(
-          prepareChecked(session.ledger, captured, signer.publicKey)
-        );
-        const signed = yield* signer.sign(proposal.signingBytes);
-        return (yield* this.withVerifier(
-          finalizePrepared(session.ledger, proposal.bodyBytes, proposal.previousHash, signed)
-        )).record;
-      })
-    );
+    return this.store
+      .exclusive((tx) =>
+        Effect.gen(this, function* () {
+          const loaded = yield* this.load(tx);
+          if (loaded.journal.pending !== null)
+            return yield* Effect.fail(new PendingOperationExists());
+          yield* this.synchronize(tx);
+          return yield* this.sign(captured, signer);
+        })
+      )
+      .pipe(Effect.withSpan('LedgerEngine.prepareEpochPublication'));
+  }
+
+  /** Checks policy and nested proofs against the synchronized view, then signs once. */
+  private sign(operation: Operation, signer: DeviceSigner['Type']) {
+    return Effect.gen(this, function* () {
+      const { ledger } = yield* this.session;
+      const proposal = yield* this.withVerifier(
+        prepareChecked(ledger, operation, signer.publicKey)
+      );
+      const signed = yield* signer.sign(proposal.signingBytes);
+      const finalized = yield* this.withVerifier(
+        finalizePrepared(ledger, proposal.bodyBytes, proposal.previousHash, signed)
+      );
+      return finalized.record;
+    });
   }
 
   execute(
@@ -511,44 +536,40 @@ export class LedgerEngine {
       const operation = commandOperation(captured);
       return this.store.exclusive((tx) =>
         Effect.gen(this, function* () {
-          const session = yield* this.load(tx);
-          if (session.journal.pending !== null)
+          const loaded = yield* this.load(tx);
+          if (loaded.journal.pending !== null)
             return yield* Effect.fail(new PendingOperationExists());
-          yield* this.synchronize(tx, session);
-          const proposal = yield* this.withVerifier(
-            prepareChecked(session.ledger, operation, signer.publicKey)
-          );
-          const signed = yield* signer.sign(proposal.signingBytes);
-          const record = (yield* this.withVerifier(
-            finalizePrepared(session.ledger, proposal.bodyBytes, proposal.previousHash, signed)
-          )).record;
-          return yield* this.submit(tx, session, record, false);
+          yield* this.synchronize(tx);
+          const record = yield* this.sign(operation, signer);
+          return yield* this.submit(tx, record, false);
         })
       );
-    });
+    }).pipe(Effect.withSpan('LedgerEngine.execute', { attributes: { command: captured._tag } }));
   }
 
   resume(expectedSigner?: SigningPublicKey): Effect.Effect<ResumeOutcome, ClientError> {
-    return this.store.exclusive((tx) =>
-      Effect.gen(this, function* () {
-        const session = yield* this.load(tx);
-        const pending = session.journal.pending;
-        if (pending !== null && expectedSigner !== undefined) {
-          const parsed = yield* decodeRecord(pending);
-          if (!bytesEqual(parsed.body.fields.signer, expectedSigner.toBytes())) {
-            return yield* Effect.fail(new ContextMismatch({ context: 'signer' }));
+    return this.store
+      .exclusive((tx) =>
+        Effect.gen(this, function* () {
+          const session = yield* this.load(tx);
+          const pending = session.journal.pending;
+          if (pending !== null && expectedSigner !== undefined) {
+            const parsed = yield* decodeRecord(pending);
+            if (!bytesEqual(parsed.body.fields.signer, expectedSigner.toBytes())) {
+              return yield* Effect.fail(new ContextMismatch({ context: 'signer' }));
+            }
           }
-        }
-        yield* this.synchronize(tx, session);
-        if (pending === null) return { _tag: 'Idle', ledger: session.ledger } as const;
-        return yield* this.submit(tx, session, pending, true);
-      })
-    );
+          yield* this.synchronize(tx);
+          if (pending === null)
+            return { _tag: 'Idle', ledger: (yield* this.session).ledger } as const;
+          return yield* this.submit(tx, pending, true);
+        })
+      )
+      .pipe(Effect.withSpan('LedgerEngine.resume'));
   }
 
   private submit(
     tx: JournalTransaction,
-    session: Session,
     record: Uint8Array,
     retrying: boolean
   ): Effect.Effect<CommandOutcome, ClientError> {
@@ -557,39 +578,40 @@ export class LedgerEngine {
       if (parsed.body.type !== 'ordinary') return yield* invalid('genesis-mismatch');
       const parent = parsed.body.fields.previousHash;
       const hash = hashRecordBytes(record);
-      const reconcile = () =>
-        Effect.gen(this, function* () {
-          const presence = classifyLedgerPresence({
-            containsRecord: session.ledger.hasRecordHash(hash),
-            parentIsHead: bytesEqual(parent, session.ledger.head.toBytes()),
-          });
-          if (presence === 'absent') return undefined;
-          yield* this.save(tx, session, { ...session.journal, pending: null });
-          const tag = presence === 'committed' ? 'Committed' : 'Conflict';
-          return { _tag: tag, ledger: session.ledger } as const;
+      const reconcile = Effect.gen(this, function* () {
+        const { journal, ledger } = yield* this.session;
+        const presence = classifyLedgerPresence({
+          containsRecord: ledger.hasRecordHash(hash),
+          parentIsHead: bytesEqual(parent, ledger.head.toBytes()),
         });
-      const prior = yield* reconcile();
+        if (presence === 'absent') return undefined;
+        yield* this.save(tx, { ...journal, pending: null });
+        const tag = presence === 'committed' ? 'Committed' : 'Conflict';
+        return { _tag: tag, ledger } as const;
+      });
+      const prior = yield* reconcile;
       if (prior) return prior;
-      yield* this.withVerifier(extendLedger(session.ledger, [record]));
-      yield* Effect.uninterruptible(
-        this.save(tx, session, { ...session.journal, pending: record })
-      );
+      const before = yield* this.session;
+      yield* this.withVerifier(extendLedger(before.ledger, [record]));
+      yield* Effect.uninterruptible(this.save(tx, { ...before.journal, pending: record }));
       const cas = yield* this.stream
-        .appendCas(session.journal.offset, copyBytes(record))
+        .appendCas(before.journal.offset, copyBytes(record))
         .pipe(Effect.catchTag('TransportError', () => Effect.succeed('unknown' as const)));
-      const refreshed = yield* this.synchronize(tx, session).pipe(
-        Effect.map(() => true),
+      // A failed read keeps every page it already saved: the session is re-read below.
+      const refreshed = yield* this.synchronize(tx).pipe(
+        Effect.as(true),
         Effect.catchTag('TransportError', () => Effect.succeed(false))
       );
       if (refreshed) {
-        const observed = yield* reconcile();
+        const observed = yield* reconcile;
         if (observed) return observed;
       }
+      const after = yield* this.session;
       if (classifyUnresolvedSubmit({ cas, retrying }) === 'unsupported') {
-        yield* this.save(tx, session, { ...session.journal, pending: null });
-        return { _tag: 'Unsupported', ledger: session.ledger } as const;
+        yield* this.save(tx, { ...after.journal, pending: null });
+        return { _tag: 'Unsupported', ledger: after.ledger } as const;
       }
-      return { _tag: 'Pending', ledger: session.ledger } as const;
+      return { _tag: 'Pending', ledger: after.ledger } as const;
     });
   }
 }

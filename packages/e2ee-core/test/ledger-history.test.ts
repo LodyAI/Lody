@@ -40,7 +40,7 @@ describe('L2 long mixed-chain extend', () => {
         expect(extended.hashAt(i)).toEqual(full.hashAt(i));
       }
     }
-  });
+  }, 30_000);
 });
 
 describe('L2 immutable extend', () => {

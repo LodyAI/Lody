@@ -86,60 +86,94 @@ export function verifyRecordSignature(
   });
 }
 
-export function verifyLedger(input: {
-  readonly anchor: GenesisHash;
-  readonly records: readonly Uint8Array[];
-}): Effect.Effect<LedgerView, ValidationError, SignatureVerifier> {
-  const records = input.records.map((record) => new Uint8Array(record));
+const atPosition = (position: number) => (error: ValidationError) =>
+  error.position === undefined ? new ValidationError({ code: error.code, position }) : error;
+
+const proofInputs = (
+  jobs: readonly { readonly pk: Uint8Array; readonly msg: Uint8Array; readonly sig: Uint8Array }[],
+  position?: number
+): SignatureJobInput[] =>
+  jobs.map((job) => ({
+    publicKey: job.pk,
+    message: job.msg,
+    signature: job.sig,
+    code: 'bad-proof' as const,
+    position,
+  }));
+
+interface DecodedBatch {
+  readonly records: readonly SchemaRecord[];
+  readonly hashes: readonly Uint8Array[];
+  readonly facts: SigningFacts;
+}
+
+/** Decode and hash every record, then check all outer signatures and admitMember
+ * proofs in two batches. `genesis` defaults to the hash of the first record. */
+function decodeAndVerify(
+  records: readonly Uint8Array[],
+  start: number,
+  initialFacts: SigningFacts,
+  knownGenesis?: Uint8Array
+): Effect.Effect<DecodedBatch, ValidationError, SignatureVerifier> {
   return Effect.gen(function* () {
     const verifier = yield* SignatureVerifier;
-    if (records.length === 0)
-      return yield* Effect.fail(new ValidationError({ code: 'genesis-mismatch', position: 0 }));
     const decoded: SchemaRecord[] = [];
     const hashes: Uint8Array[] = [];
     const outer: SignatureJobInput[] = [];
     const memberProofs: SignatureJobInput[] = [];
-    let facts = SigningFacts.empty;
-    for (let position = 0; position < records.length; position++) {
+    let facts = initialFacts;
+    let genesis = knownGenesis;
+    for (let offset = 0; offset < records.length; offset++) {
+      const position = start + offset;
       const parsed = yield* Effect.mapError(
-        decodeRecordWithFacts(records[position]!, facts),
-        (error) =>
-          error.position === undefined ? new ValidationError({ code: error.code, position }) : error
+        decodeRecordWithFacts(records[offset]!, facts),
+        atPosition(position)
       );
       facts = parsed.facts;
-      decoded.push(parsed.record);
-      hashes.push(hashRecordBytes(parsed.record.recordBytes));
+      const record = parsed.record;
+      const hash = hashRecordBytes(record.recordBytes);
+      genesis ??= hash;
+      decoded.push(record);
+      hashes.push(hash);
       outer.push({
-        publicKey: parsed.record.body.fields.signer,
-        message: recordSigningBytes(parsed.record.bodyBytes),
-        signature: parsed.record.signature,
+        publicKey: record.body.fields.signer,
+        message: recordSigningBytes(record.bodyBytes),
+        signature: record.signature,
         position,
       });
+      // Position 0 must be genesis; replay rejects anything else structurally.
+      if (
+        position > 0 &&
+        record.body.type === 'ordinary' &&
+        record.body.fields.operation.type === 'admitMember'
+      ) {
+        const jobs = yield* Effect.mapError(
+          operationProofJobs(genesis, record.body.fields.operation),
+          atPosition(position)
+        );
+        memberProofs.push(...proofInputs(jobs, position));
+      }
     }
     yield* verifier.verifyMany(outer, facts);
-    const genesis = hashes[0]!;
-    for (let position = 1; position < decoded.length; position++) {
-      const record = decoded[position]!;
-      if (record.body.type !== 'ordinary' || record.body.fields.operation.type !== 'admitMember')
-        continue;
-      const jobs = yield* Effect.mapError(
-        operationProofJobs(genesis, record.body.fields.operation),
-        (error) =>
-          error.position === undefined ? new ValidationError({ code: error.code, position }) : error
-      );
-      for (const job of jobs)
-        memberProofs.push({
-          publicKey: job.pk,
-          message: job.msg,
-          signature: job.sig,
-          code: 'bad-proof',
-          position,
-        });
-    }
     if (memberProofs.length > 0) yield* verifier.verifyMany(memberProofs, facts);
-    let state: InternalState | undefined;
-    for (let position = 0; position < decoded.length; position++) {
-      const record = decoded[position]!;
+    return { records: decoded, hashes, facts };
+  });
+}
+
+/** Policy replay in order. Device possession proofs bind the actor's membership in
+ * the preceding verified state, so they are checked here rather than batched. */
+function replay(
+  initial: InternalState | undefined,
+  batch: DecodedBatch,
+  start: number,
+  anchor?: Uint8Array
+): Effect.Effect<InternalState | undefined, ValidationError, SignatureVerifier> {
+  return Effect.gen(function* () {
+    const verifier = yield* SignatureVerifier;
+    let state = initial;
+    for (let offset = 0; offset < batch.records.length; offset++) {
+      const position = start + offset;
+      const record = batch.records[offset]!;
       // Without a genesis state, replay rejects the record structurally first.
       if (
         state !== undefined &&
@@ -147,39 +181,42 @@ export function verifyLedger(input: {
         record.body.fields.operation.type === 'admitDevice'
       ) {
         const jobs = yield* operationProofJobs(
-          genesis,
+          state.genesis,
           record.body.fields.operation,
           state.devices.get(keyId(record.body.fields.signer))?.membershipId
         );
-        yield* verifier.verifyMany(
-          jobs.map((job) => ({
-            publicKey: job.pk,
-            message: job.msg,
-            signature: job.sig,
-            code: 'bad-proof' as const,
-            position,
-          })),
-          facts
-        );
+        yield* verifier.verifyMany(proofInputs(jobs, position), batch.facts);
       }
       state = yield* applyDecodedRecord(
         state,
         record,
-        hashes[position]!,
+        batch.hashes[offset]!,
         position,
-        position === 0 ? input.anchor.toBytes() : undefined,
-        facts
+        position === 0 ? anchor : undefined,
+        batch.facts
       );
     }
+    return state;
+  });
+}
+
+export function verifyLedger(input: {
+  readonly anchor: GenesisHash;
+  readonly records: readonly Uint8Array[];
+}): Effect.Effect<LedgerView, ValidationError, SignatureVerifier> {
+  const records = input.records.map((record) => new Uint8Array(record));
+  const anchor = input.anchor.toBytes();
+  return Effect.gen(function* () {
+    if (records.length === 0)
+      return yield* Effect.fail(new ValidationError({ code: 'genesis-mismatch', position: 0 }));
+    const batch = yield* decodeAndVerify(records, 0, SigningFacts.empty);
+    const state = yield* replay(undefined, batch, 0, anchor);
     if (!state)
       return yield* Effect.fail(new ValidationError({ code: 'genesis-mismatch', position: 0 }));
-    if (
-      !bytesEqual(state.genesis, input.anchor.toBytes()) ||
-      !bytesEqual(state.hashes[0]!, input.anchor.toBytes())
-    )
+    if (!bytesEqual(state.genesis, anchor) || !bytesEqual(state.hashes[0]!, anchor))
       return yield* Effect.fail(new ValidationError({ code: 'wrong-anchor', position: 0 }));
-    return yield* viewOf(state, facts);
-  });
+    return yield* viewOf(state, batch.facts);
+  }).pipe(Effect.withSpan('e2ee.verifyLedger', { attributes: { records: records.length } }));
 }
 
 export function extendLedger(
@@ -189,82 +226,12 @@ export function extendLedger(
   if (suffix.length === 0) return Effect.succeed(view);
   const records = suffix.map((record) => new Uint8Array(record));
   return Effect.gen(function* () {
-    const verifier = yield* SignatureVerifier;
     const state = cloneState(viewState(view));
     const start = state.hashes.length;
-    let facts = viewFacts(view);
-    const decoded: SchemaRecord[] = [];
-    const outer: SignatureJobInput[] = [];
-    const memberProofs: SignatureJobInput[] = [];
-    for (let offset = 0; offset < records.length; offset++) {
-      const position = start + offset;
-      const parsed = yield* Effect.mapError(
-        decodeRecordWithFacts(records[offset]!, facts),
-        (error) =>
-          error.position === undefined ? new ValidationError({ code: error.code, position }) : error
-      );
-      facts = parsed.facts;
-      decoded.push(parsed.record);
-      outer.push({
-        publicKey: parsed.record.body.fields.signer,
-        message: recordSigningBytes(parsed.record.bodyBytes),
-        signature: parsed.record.signature,
-        position,
-      });
-      if (
-        parsed.record.body.type === 'ordinary' &&
-        parsed.record.body.fields.operation.type === 'admitMember'
-      ) {
-        const jobs = yield* Effect.mapError(
-          operationProofJobs(state.genesis, parsed.record.body.fields.operation),
-          (error) =>
-            error.position === undefined
-              ? new ValidationError({ code: error.code, position })
-              : error
-        );
-        for (const job of jobs)
-          memberProofs.push({
-            publicKey: job.pk,
-            message: job.msg,
-            signature: job.sig,
-            code: 'bad-proof',
-            position,
-          });
-      }
-    }
-    yield* verifier.verifyMany(outer, facts);
-    if (memberProofs.length > 0) yield* verifier.verifyMany(memberProofs, facts);
-    for (let offset = 0; offset < decoded.length; offset++) {
-      const position = start + offset;
-      const record = decoded[offset]!;
-      if (record.body.type === 'ordinary' && record.body.fields.operation.type === 'admitDevice') {
-        const jobs = yield* operationProofJobs(
-          state.genesis,
-          record.body.fields.operation,
-          state.devices.get(keyId(record.body.fields.signer))?.membershipId
-        );
-        yield* verifier.verifyMany(
-          jobs.map((job) => ({
-            publicKey: job.pk,
-            message: job.msg,
-            signature: job.sig,
-            code: 'bad-proof' as const,
-            position,
-          })),
-          facts
-        );
-      }
-      yield* applyDecodedRecord(
-        state,
-        record,
-        hashRecordBytes(record.recordBytes),
-        position,
-        undefined,
-        facts
-      );
-    }
-    return yield* viewOf(state, facts);
-  });
+    const batch = yield* decodeAndVerify(records, start, viewFacts(view), state.genesis);
+    yield* replay(state, batch, start);
+    return yield* viewOf(state, batch.facts);
+  }).pipe(Effect.withSpan('e2ee.extendLedger', { attributes: { records: records.length } }));
 }
 
 export function authorizeRecord(
@@ -301,16 +268,7 @@ export function prepareChecked(
       operation,
       state.devices.get(keyId(signer.toBytes()))?.membershipId
     );
-    if (jobs.length > 0)
-      yield* verifier.verifyMany(
-        jobs.map((job) => ({
-          publicKey: job.pk,
-          message: job.msg,
-          signature: job.sig,
-          code: 'bad-proof',
-        })),
-        viewFacts(view)
-      );
+    if (jobs.length > 0) yield* verifier.verifyMany(proofInputs(jobs), viewFacts(view));
     yield* operationChanges(state, signer.toBytes(), operation, viewFacts(view));
     const bodyBytes = yield* encodeOrdinaryBody({
       previousHash: copyBytes(previousHash),

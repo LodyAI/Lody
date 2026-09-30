@@ -52,10 +52,10 @@ alone does not create a ledger: use the same Layer in `LedgerClient.create` to
 write genesis. A failed creation may leave a file; errors never delete/recreate it.
 Directories must be application-owned; this is not protection from a concurrent
 local filesystem attacker. This Node Layer acquires/releases synchronous SQLite
-leases directly with Effect, including interruption cleanup; it does not use the
-Promise transaction adapter. Older callers still use that temporary adapter over
-the same SQLite implementation. `pure/journal-codec.ts` owns the unchanged v0/v1
-persisted envelope.
+leases directly with Effect, including interruption cleanup. The legacy
+`SqliteLedgerStore` and `MemoryLedgerStore` implement the same `JournalStore`
+service (lazy creation, semaphore); there is no Promise transaction adapter.
+`pure/journal-codec.ts` owns the unchanged v0/v1 persisted envelope.
 
 `pure/ledger-policy.ts` computes typed authorization changes without mutating its
 inputs. The temporary replay adapter applies them only after complete success to
@@ -126,9 +126,10 @@ included in diagnostics. This is not the legacy length-framed key stream adapter
 ledger, bind the current genesis/epoch/sender/recipient, verify the saved signature,
 and refresh again. Resume uses no epoch secret or HPKE Service. `DeliveryId` is a
 checked 16-byte identifier distinct from a join `RequestId`. Observed means exact
-remote ciphertext readback, not recipient installation. The Promise-store lease
-is temporary for unmigrated callers; `nodeKeyOutboxLayer({ path, mode })` from
-`./effect/platform-node` owns synchronous SQLite leases directly through Effect.
+remote ciphertext readback, not recipient installation. `MemoryLedgerKeyOutbox` and
+`SqliteLedgerKeyOutbox` implement the `KeyOutbox` service directly;
+`nodeKeyOutboxLayer({ path, mode })` from `./effect/platform-node` owns synchronous
+SQLite leases directly through Effect.
 Choose `create` or `open` explicitly; open never creates a missing file or initializes
 foreign storage. The pure outbox codec preserves the old v0 payload, shared with
 legacy callers. Saves commit independently, including when later work is cancelled.
@@ -186,9 +187,14 @@ native rotation/delivery workflows.
 
 Native `verifyLedger` / `extendLedger` / `verifySnapshot` replay in
 `workflows/verification.ts` using `SignatureVerifier.verifyMany` for one batched
-Effect, then pure policy application. The Promise `Ledger` class remains for
-`./ledger` callers and reconstructs from a verified view. `check:effect-boundaries
---complete` now requires zero workflow imports of `../ledger/`.
+Effect, then pure policy application. `./ledger` is only a Promise/throw facade:
+`Ledger.verify` / `extend` / `verifySnapshot` / `finalize` / `prepareChecked` wrap a
+`LedgerView` and run these workflows through `ledger/compat.ts`; there is no second
+replay path. There is no process-wide point cache: a view carries the point-validity
+facts it was verified with, shared only by the `Ledger` values derived from it.
+`check:effect-boundaries --complete` requires zero workflow imports of `../ledger/`
+and rejects replay-policy imports, module-level mutable state and runtime starts
+outside `ledger/compat.ts` in `ledger/`.
 `pure/content-frame.ts` and `workflows/content.ts` own content parse/seal/open;
 `ContentCipher` is the Promise unwrap (`ContentError` → `ControlLogError`).
 Policy callback throws stay defects. Listed Promise SDK/app boundaries:

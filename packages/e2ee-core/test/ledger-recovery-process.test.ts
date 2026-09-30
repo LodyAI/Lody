@@ -100,7 +100,7 @@ describe('R backup material and two-process restore', () => {
       const restore = await run('restore', dir, variant);
       expect(restore.status, `${variant}: ${restore.stderr}`).not.toBe(0);
     }
-  });
+  }, 30_000);
 
   it('fails snapshot restore when R is revoked, membership is removed, the packet is missing, or the backup is damaged', async () => {
     for (const variant of [

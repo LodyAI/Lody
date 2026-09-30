@@ -65,6 +65,33 @@ Translation: current
 
 ## 工作日志（追加）
 
+### 2026-09-30 — 旧 `./ledger` 收敛为薄 facade
+
+- **问题：** `ledger/ledger.ts` 在 `workflows/verification.ts` 之外仍保留一套抛异常的
+  重放（`withPosition`、`applyDecoded`、proof 循环）、进程级 `liveSigningPointCache`，
+  以及用 `Effect.async` 租借 Promise 回调锁的 store 适配器（`journalStoreLayer`、
+  `keyOutboxLayer`）。边界检查不扫描 `ledger/`。
+- **决策：** 保留 `./ledger`，但作为受检查的 Promise/throw facade，而不是删除（约 50 个
+  core 测试和 Lab session 仍在使用）。`Ledger` 包装 `LedgerView`，经 `ledger/compat.ts`
+  运行 workflow；只有 compat.ts 启动 runtime 并把类型化失败映射为 `LedgerError`。
+  Store 原生实现 `JournalStore`/`KeyOutbox`（信号量或 SQLite 租约）；删除 Promise
+  锁租借适配器、`ledger/policy.ts`、`submit-decision.ts` 以及未使用的 Lab
+  `PersistingLedgerStore`。提交判定移到 `pure/submit-outcome.ts` 并由 engine 使用。
+  engine 的 session 只存在于 `Ref`（不再原地修改），`verifyLedger` 与 `extendLedger`
+  共用一条 decode/verify/replay 路径，engine 公开方法带 span。
+  `check:effect-boundaries` 现在拒绝 `ledger/` 中导入重放策略模块、模块级可变状态，
+  以及 `compat.ts` 之外启动 runtime。
+- **缓存：** 去掉全局缓存后，依赖夹具的测试看起来慢约 25%，因为夹具生成时已预热了该
+  缓存。`LedgerView` 现在携带验证时得到的点有效性 `SigningFacts`，并在同一 `Ledger`
+  衍生链内共享（不是授权，也不是进程级）。清空 baseline 缓存后在同一台机器上：
+  1000 条重放中位数 1709 → 1494 ms，100 次单条 `extend` 179 → 171 ms（`/tmp` 基准脚本，
+  7–8 次；不能替代四类性能门槛）。测试用例之间不再共享已校验公钥，三个 CPU 密集用例
+  （L2、L3、R restore）单独运行约慢 15%，现显式设置 30 s 超时。
+- **行为：** 以 `admitDevice` 开头的乱序链重新报告 `genesis-mismatch`（先结构后 proof）。
+  `SigningPointCache` 不再公开 `get`/`set`/schema facts。面向 Lab 的 Promise API 其余不变。
+- **证据：** core 533 通过 / 1 跳过，Lab 164 通过（未跟踪的 `review2-*` 发现测试除外），
+  core/Lab/Electron 类型检查、oxlint 0 错误、`check:effect-boundaries --complete` 通过。
+
 ### 2026-09-23 — 接入者验收跟进
 
 - 在 b878752c 重跑根 `pnpm check`，停在 Electron 类型检查：LedgerClient 的

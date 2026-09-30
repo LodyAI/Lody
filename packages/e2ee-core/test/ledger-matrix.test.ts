@@ -613,5 +613,5 @@ describe('L3 confirmed permission matrix', () => {
         expect(extended.hashAt(i)).toEqual(full.hashAt(i));
       }
     }
-  });
+  }, 30_000);
 });

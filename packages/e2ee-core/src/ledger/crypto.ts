@@ -35,7 +35,8 @@ export {
 export type { Hash, SigningPublicKey, EncryptionPublicKey, Signature } from '../pure/wire-crypto';
 export { bytesEqual } from '../pure/cbor';
 
-const text = new TextEncoder();
+// Exported copies for callers; verification builds its own private domain bytes.
+const text = { encode: (value: string) => new TextEncoder().encode(value) };
 export const SIGNATURE_DOMAIN = text.encode('lody-e2ee/sig/v1\0');
 export const RECORD_HASH_DOMAIN = text.encode('lody-e2ee/rec/v1\0');
 export const JOIN_DOMAIN = text.encode('lody-e2ee/join/v1\0');

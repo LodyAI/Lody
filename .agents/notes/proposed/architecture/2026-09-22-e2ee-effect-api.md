@@ -82,6 +82,39 @@ scenarios or protocol acceptance requirements.
 
 ## Work log (append only)
 
+### 2026-09-30 — Legacy `./ledger` becomes a thin facade
+
+- **Problem:** `ledger/ledger.ts` still had its own throw-based replay (`withPosition`,
+  `applyDecoded`, proof loop) beside `workflows/verification.ts`, a process-wide
+  `liveSigningPointCache`, and Promise-callback stores bridged by `Effect.async`
+  lock leases (`journalStoreLayer`, `keyOutboxLayer`). The boundary check did not
+  scan `ledger/`.
+- **Decision:** keep `./ledger` as a guarded Promise/throw facade rather than delete it
+  (about 50 core tests and the Lab session use it). `Ledger` wraps a `LedgerView` and
+  runs the workflows through `ledger/compat.ts`, the only place that starts a runtime
+  or maps typed failures to `LedgerError`. Stores implement `JournalStore`/`KeyOutbox`
+  natively (semaphore or SQLite lease); the Promise lease adapters, `ledger/policy.ts`,
+  `submit-decision.ts` and the Lab `PersistingLedgerStore` (unused) are removed.
+  Submit decisions moved to `pure/submit-outcome.ts` and the engine uses them. The
+  engine keeps its session only in `Ref` (no in-place mutation), `verifyLedger` and
+  `extendLedger` share one decode/verify/replay path, and public engine methods have
+  spans. `check:effect-boundaries` now rejects replay-policy imports, module-level
+  mutable state and runtime starts outside `compat.ts` in `ledger/`.
+- **Cache:** removing the global cache made fixture-heavy tests look ~25% slower,
+  because fixture generation had warmed it. `LedgerView` now carries the point-validity
+  `SigningFacts` it was verified with, and a `Ledger` lineage shares them (never
+  authority, never process-wide). With the baseline cache cleared, same machine:
+  1000-record replay median 1709 → 1494 ms, 100 single `extend`s 179 → 171 ms
+  (`/tmp` bench scripts, 7–8 runs; not a substitute for the four-class gate). Test cases
+  no longer share checked keys, so three CPU-bound suites (L2, L3, R restore) take
+  ~15% longer in isolation and now declare explicit 30 s timeouts.
+- **Behavior:** a reordered chain starting with `admitDevice` reports
+  `genesis-mismatch` again (structure before proofs). `SigningPointCache` no longer
+  exposes `get`/`set`/schema facts. Lab-facing Promise APIs are otherwise unchanged.
+- **Evidence:** core 533 passed / 1 skipped, Lab 164 passed (untracked `review2-*`
+  finding tests excluded), core/Lab/Electron typechecks, oxlint 0 errors,
+  `check:effect-boundaries --complete` clean.
+
 ### 2026-09-23 — Integrator acceptance follow-up
 
 - Re-ran root `pnpm check` on b878752c: it stopped in Electron typecheck with
