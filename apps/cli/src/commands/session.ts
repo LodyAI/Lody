@@ -5,7 +5,6 @@ import {
   isPreparedSessionDispatched,
   type PreparedSessionInput,
 } from '@/lib/prepared-session-input';
-import { readSessionHistory } from '@lody/shared/session-data';
 import { Command } from 'commander';
 import {
   SessionDiscoveryFilterShape,
@@ -130,6 +129,7 @@ import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
 import { createCloudBillingPort, createCloudStreamsTokenPort } from '@/lib/cloud-cli-port';
 import { getCliHttpFetch } from '@/utils/http-transport';
 import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
+import { createSessionBackend } from '@/session/session-backend';
 
 type CommonOptions = CommonCommandOptions;
 
@@ -956,9 +956,10 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   // Same ordering as session create: settle the plan before reading the doc.
   const entitlement = await getWorkspaceBillingEntitlementBestEffort(args.manager, args.workspace);
   if (!entitlement || isBillingQuotaExempt(entitlement)) return undefined;
+  const backend = createSessionBackend(args.sessionDoc, await args.sessionDoc.getMetaState());
   const [history, queue] = await Promise.all([
-    readSessionHistory(args.sessionDoc.sessionData.history),
-    args.sessionDoc.getMessageQueue(),
+    Promise.resolve(backend.readHistory()),
+    backend.getMessageQueue(),
   ]);
   if (
     args.userTurnId &&
@@ -1273,7 +1274,7 @@ async function resolveRunningAssistantTurnId(
   sessionId: SessionId
 ): Promise<string | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = readSessionHistory(sessionDoc.sessionData.history);
+  const history = createSessionBackend(sessionDoc, await sessionDoc.getMetaState()).readHistory();
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
@@ -1288,8 +1289,9 @@ async function appendUserPromptHistory(args: {
 }): Promise<{ id: string; timestamp: string; inputConfig?: SessionTurnInputConfig }> {
   const { sessionDoc, prompt, userId, inputConfig, preallocatedId } = args;
   const historyId = preallocatedId?.trim() || uuidV4();
+  const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   if (preallocatedId) {
-    const history = args.knownHistory ?? readSessionHistory(sessionDoc.sessionData.history);
+    const history = args.knownHistory ?? backend.readHistory();
     const existing = history.find((entry) => entry.id === historyId);
     if (existing) {
       const existingText = existing.items?.find((item) => item.type === 'text');
@@ -1321,7 +1323,7 @@ async function appendUserPromptHistory(args: {
     fileDiff: [],
     finished: true,
   };
-  await sessionDoc.sessionData.commands.appendTurn(entry);
+  await backend.appendUserTurn(entry);
   return {
     id: historyId,
     timestamp,
@@ -1766,10 +1768,8 @@ async function resolveSessionTurnDispatchDefaults(
   agentConfig: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
 ): Promise<ResolvedTurnDispatchConfig | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  return resolveTurnDispatchDefaultsFromHistory(
-    readSessionHistory(sessionDoc.sessionData.history),
-    agentConfig
-  );
+  const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  return resolveTurnDispatchDefaultsFromHistory(backend.readHistory(), agentConfig);
 }
 
 export function resolveEffectiveSessionChatDispatchConfig(args: {
@@ -1866,7 +1866,8 @@ async function removeHistoryEntryById(
   sessionDoc: SessionDocument,
   historyId: string
 ): Promise<void> {
-  await sessionDoc.sessionData.commands.applyHistoryAction({
+  const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  await backend.applyHistoryAction({
     kind: 'remove-turn',
     turnId: historyId,
   });
@@ -3138,6 +3139,7 @@ export async function prepareSessionInput(
     isArchived: false,
     cliType: agentConfig.cliType,
     agentType: agentConfig.agentType,
+    historyBackend: 'loro',
     agentConfigId: agentConfig.id,
     ...(title ? { title, titleSource: 'user' as const } : {}),
     ...(draftTitle ? { title: draftTitle, titleSource: 'draft' as const } : {}),
@@ -3385,6 +3387,7 @@ export async function sendSessionChatResult(
     `session.chat:${sessionId}:prewrite:doc`
   );
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   const quotaHistory = orchestration?.bypassSessionQuota
     ? undefined
     : await checkSessionTurnQuotaAndReadHistory({
@@ -3393,8 +3396,7 @@ export async function sendSessionChatResult(
         sessionDoc,
         userTurnId: orchestration?.userTurnId,
       });
-  const historyForDefaults =
-    quotaHistory ?? (await readSessionHistory(sessionDoc.sessionData.history));
+  const historyForDefaults = quotaHistory ?? backend.readHistory();
   const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
     historyForDefaults,
     session
@@ -3511,9 +3513,10 @@ async function buildSessionShowResult(
 ): Promise<SessionShowResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   const [directory, queue] = await Promise.all([
-    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
-    sessionDoc.getMessageQueue(),
+    backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
+    backend.getMessageQueue(),
   ]);
 
   return {
@@ -3692,7 +3695,7 @@ async function buildSessionStatusResult(
 ): Promise<SessionStatusResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = readSessionHistory(sessionDoc.sessionData.history);
+  const history = createSessionBackend(sessionDoc, await sessionDoc.getMetaState()).readHistory();
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({
     auth,
@@ -4405,9 +4408,8 @@ const sessionHistoryCommand = new Command('history')
         );
         await resolveSessionMetaOrThrow(manager, sessionId);
         const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-        const transcript = toSessionTranscriptEntries(
-          readSessionHistory(sessionDoc.sessionData.history)
-        );
+        const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+        const transcript = toSessionTranscriptEntries(backend.readHistory());
         const entries = selectSessionTranscriptEntries(transcript, {
           all: options.all,
           limit: options.limit,

@@ -161,7 +161,19 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       await withSessionStore(sessionId, (store) => {
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
-          draft.mq = [...mq, item as MessageQueueItem];
+          const userTurnId = item.userTurnId;
+          const operationId =
+            item.operationId ??
+            (typeof userTurnId === 'string' && userTurnId.length > 0
+              ? `queue:${userTurnId}`
+              : undefined);
+          draft.mq = [
+            ...mq,
+            {
+              ...item,
+              ...(operationId ? { operationId } : {}),
+            } as MessageQueueItem,
+          ];
         });
       });
       await bumpMessageQueueWatermark(sessionId);

@@ -1,4 +1,3 @@
-import { readSessionHistory } from '@lody/shared/session-data';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
@@ -36,6 +35,7 @@ import {
   type SessionForkOperationMarker,
   type SessionForkOperationStore,
 } from './session-fork-operation-store';
+import { createSessionBackend } from './session-backend';
 
 type ForkWarning = SessionForkResponse['warnings'][number];
 const execFileAsync = promisify(execFile);
@@ -334,7 +334,8 @@ export class SessionForkService {
       return;
     }
 
-    const history = readSessionHistory(targetDoc.sessionData.history);
+    const targetBackend = createSessionBackend(targetDoc, await targetDoc.getMetaState());
+    const history = targetBackend.readHistory();
     const hasOriginNotice = history.some((entry) =>
       (entry.items ?? []).some(
         (item) => item.type === 'system_notice' && item.name === 'session_fork_origin'
@@ -421,6 +422,7 @@ export class SessionForkService {
         isArchived: false,
         cliType: marker.cleanup.cliType,
         agentType: marker.cleanup.agentType,
+        ...(marker.historyBackend ? { historyBackend: marker.historyBackend } : {}),
         agentConfigId: marker.cleanup.agentConfigId as AgentConfigId,
         project: marker.cleanup.project as ProjectRef,
         repoFullName: marker.cleanup.repoFullName,
@@ -714,6 +716,7 @@ export class SessionForkService {
         isArchived: false,
         cliType: source.cliType,
         agentType: source.agentType,
+        ...(source.historyBackend ? { historyBackend: source.historyBackend } : {}),
         agentConfigId: source.agentConfigId,
         project: targetProject,
         repoFullName: targetRepoFullName,
@@ -729,6 +732,7 @@ export class SessionForkService {
         operationId: operation.id,
         createdAt: operation.createdAt,
         title: forkTitle,
+        ...(source.historyBackend ? { historyBackend: source.historyBackend } : {}),
         cleanup: {
           project: targetProject,
           ...(targetRepoFullName ? { repoFullName: targetRepoFullName } : {}),
@@ -821,6 +825,7 @@ export class SessionForkService {
       isArchived: false,
       cliType: source.cliType,
       agentType: source.agentType,
+      ...(source.historyBackend ? { historyBackend: source.historyBackend } : {}),
       agentConfigId: source.agentConfigId,
       project: source.project,
       repoFullName: source.repoFullName,

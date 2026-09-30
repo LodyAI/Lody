@@ -25,6 +25,7 @@ import {
   isCodeCollabFileIndexSignalFlockDocId,
   CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS,
   SessionMeta,
+  type SessionQueuePromotionRecord,
   SessionDocMeta,
   type SessionPreviewDocState,
   AgentConfigMeta,
@@ -1314,6 +1315,7 @@ export class LoroDocumentManager {
       isArchived: false,
       cliType,
       agentType,
+      historyBackend: 'loro',
     };
     const sanitizedTitle = title?.trim();
     if (sanitizedTitle) {
@@ -2222,6 +2224,43 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     return await getAliveDocMeta<SessionMeta>(this.repo, this.roomId);
   }
 
+  async getQueuePromotionRecord(
+    operationId: string
+  ): Promise<SessionQueuePromotionRecord | undefined> {
+    return (await this.getMetaState())?.queuePromotionLedger?.[operationId];
+  }
+
+  /**
+   * Persist queue promotion progress as a bounded receipt. The history and
+   * queue live in different CRDT roots, so this receipt is the recovery point
+   * between those writes. Keeping the last 64 receipts prevents metadata from
+   * growing with the lifetime of a long-running session.
+   */
+  async setQueuePromotionRecord(
+    operationId: string,
+    record: SessionQueuePromotionRecord | undefined
+  ): Promise<void> {
+    const current = await this.getMetaState();
+    const ledger = { ...(current?.queuePromotionLedger ?? {}) };
+    if (record) ledger[operationId] = record;
+    else delete ledger[operationId];
+    const entries = Object.entries(ledger);
+    const bounded = Object.fromEntries(entries.slice(Math.max(0, entries.length - 64)));
+    await this.repo.upsertDocMeta(this.roomId, {
+      queuePromotionLedger: bounded,
+    } satisfies Partial<SessionMeta>);
+  }
+
+  async getSteerTurnStatuses(): Promise<SessionMeta['steerTurnStatuses']> {
+    return (await this.getMetaState())?.steerTurnStatuses;
+  }
+
+  async replaceSteerTurnStatuses(statuses: SessionMeta['steerTurnStatuses']): Promise<void> {
+    await this.repo.upsertDocMeta(this.roomId, {
+      steerTurnStatuses: statuses,
+    } satisfies Partial<SessionMeta>);
+  }
+
   getForkOperation(): SessionForkOperation | undefined {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
@@ -2701,8 +2740,12 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     // Queue promotion is a dispatch producer: append through the domain command
     // (which validates before writing), then publish the activation pointer.
     await this.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
+    await this.publishUserTurnActivation(entry.id);
+  }
+
+  async publishUserTurnActivation(userTurnId: string): Promise<void> {
     await this.repo.upsertDocMeta(this.roomId, {
-      latestUserMsgId: entry.id,
+      latestUserMsgId: userTurnId,
     } satisfies Partial<SessionMeta>);
   }
 
@@ -2801,8 +2844,13 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
     this.mirror.setState((prev) => {
       const mq = (prev.mq ?? []) as MessageQueueItem[];
+      const operationId =
+        item.operationId ??
+        (typeof item.userTurnId === 'string' && item.userTurnId.trim().length > 0
+          ? `queue:${item.userTurnId.trim()}`
+          : undefined);
       // @ts-ignore - mq is read-only in type but writable at runtime
-      prev.mq = [...mq, item];
+      prev.mq = [...mq, { ...item, ...(operationId ? { operationId } : {}) }];
       return prev;
     });
   }

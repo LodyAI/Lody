@@ -1,5 +1,3 @@
-import { readSessionHistory } from '@lody/shared/session-data';
-import { readLatestTurn } from '@lody/shared/session-data';
 import {
   type ACPSessionId,
   type AgentConfigId,
@@ -113,6 +111,7 @@ import type { SessionConfig } from './types';
 import type { ISession, SessionManager } from './session-manager';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { subscribeSessionChanges } from '@/lib/loro/doc';
+import { createSessionBackend, type SessionBackend } from './session-backend';
 import { buildPrompt, normalizeSessionInputBlocks } from './session-execution-helpers';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import {
@@ -1106,7 +1105,8 @@ export class SessionExecutionService {
         // Best-effort: missing meta should not break turn completion.
       }
       try {
-        const latestAssistant = await readLatestTurn(sessionDoc.sessionData.history, 'assistant');
+        const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+        const latestAssistant = await backend.readLatestTurn('assistant');
         diffFileCount = Array.isArray(latestAssistant?.fileDiff)
           ? latestAssistant.fileDiff.length
           : 0;
@@ -1928,8 +1928,9 @@ export class SessionExecutionService {
     sessionDoc: SessionDocument,
     userTurnId: string
   ): Promise<boolean> {
+    const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
     let queueable = true;
-    await sessionDoc.sessionData.commands
+    await backend
       .applyHistoryAction({
         kind: 'user-status',
         turnId: userTurnId,
@@ -1964,7 +1965,7 @@ export class SessionExecutionService {
 
   private async setSteerHistoryStatus(
     sessionId: SessionId,
-    sessionDoc: Pick<SessionDocument, 'sessionData'>,
+    sessionDoc: SessionDocument,
     userTurnId: string,
     status: 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown'
   ): Promise<void> {
@@ -1973,16 +1974,14 @@ export class SessionExecutionService {
   }
 
   /** Results can arrive before the producer's history; metadata retains only their identity/state. */
-  async reconcileSteerHistory(
-    sessionId: SessionId,
-    sessionDoc: Pick<SessionDocument, 'sessionData'>
-  ): Promise<void> {
+  async reconcileSteerHistory(sessionId: SessionId, sessionDoc: SessionDocument): Promise<void> {
     await this.steerStatusQueue.enqueue(sessionId, async () => {
       const meta = await this.getSessionMeta(sessionId);
+      const backend = createSessionBackend(sessionDoc, meta);
       const statuses = { ...meta?.steerTurnStatuses };
       let changed = false;
       for (const [turnId, status] of Object.entries(statuses)) {
-        const turn = await sessionDoc.sessionData.history.readTurn(turnId);
+        const turn = await backend.readTurn(turnId);
         if (turn.state !== 'ready' || turn.turn.role !== 'user') continue;
         const terminal =
           !!turn.turn.status &&
@@ -1993,7 +1992,7 @@ export class SessionExecutionService {
             : status;
         let matched = false;
         if (!terminal) {
-          const result = await sessionDoc.sessionData.commands.applyHistoryAction({
+          const result = await backend.applyHistoryAction({
             kind: 'user-status',
             turnId,
             status: projectedStatus,
@@ -3769,12 +3768,19 @@ export class SessionExecutionService {
    * entry is repaired instead of re-dispatched.
    */
   private async setUserTurnStatus(
-    sessionDoc: SessionDocument,
+    backendOrDoc: SessionBackend | SessionDocument,
     userTurnId: string,
     status: 'pending' | 'seen' | 'processing' | 'handled' | 'failed' | 'canceled'
   ): Promise<boolean> {
+    const backend =
+      'applyHistoryAction' in backendOrDoc
+        ? backendOrDoc
+        : {
+            applyHistoryAction: (action: Parameters<SessionBackend['applyHistoryAction']>[0]) =>
+              backendOrDoc.sessionData.commands.applyHistoryAction(action),
+          };
     let matched = false;
-    await sessionDoc.sessionData.commands
+    await backend
       .applyHistoryAction({ kind: 'user-status', turnId: userTurnId, status })
       .then((result) => {
         matched = result.matched ?? false;
@@ -3815,11 +3821,12 @@ export class SessionExecutionService {
     status: 'handled' | 'failed' | 'canceled'
   ): Promise<void> {
     const meta = await this.getSessionMeta(sessionId);
+    const backend = createSessionBackend(sessionDoc, meta);
     if (meta?.steerTurnStatuses?.[userTurnId] === 'processing') {
       await this.setSteerHistoryStatus(sessionId, sessionDoc, userTurnId, status);
       return;
     }
-    const matched = await this.setUserTurnStatus(sessionDoc, userTurnId, status);
+    const matched = await this.setUserTurnStatus(backend, userTurnId, status);
     if (!matched) {
       this.recordTerminalTurnWithoutEntry(sessionId, userTurnId, status);
     }
@@ -3886,7 +3893,8 @@ export class SessionExecutionService {
     sessionDoc: SessionDocument,
     userTurnId: string
   ): Promise<void> {
-    await this.setUserTurnStatus(sessionDoc, userTurnId, 'processing');
+    const backend = await this.getSessionBackend(sessionDoc, sessionDoc.sessionId);
+    await this.setUserTurnStatus(backend, userTurnId, 'processing');
     await this.upsertSessionMeta(sessionId, {
       // Dispatch producers own `latestUserMsgId`. Execution only claims its
       // own processing slot, so an awaited status write can never overwrite a
@@ -3949,7 +3957,15 @@ export class SessionExecutionService {
   }
 
   private async getSessionHistory(sessionDoc: SessionDocument): Promise<SessionHistoryInput[]> {
-    return readSessionHistory(sessionDoc.sessionData.history);
+    const backend = await this.getSessionBackend(sessionDoc, sessionDoc.sessionId);
+    return backend.readHistory();
+  }
+
+  private async getSessionBackend(
+    sessionDoc: SessionDocument,
+    sessionId: SessionId
+  ): Promise<SessionBackend> {
+    return createSessionBackend(sessionDoc, await this.getSessionMeta(sessionId));
   }
 
   /**
@@ -4490,10 +4506,11 @@ export class SessionExecutionService {
             // to resume, even though the user turn is durable in Loro history.
             // This freshly created ACP session has no knowledge of that turn,
             // so reconstruct its context before sending the current request.
-            const history = readSessionHistory(sessionDoc.sessionData.history);
-            if (history.length > 0) {
+            const history = self.getSessionHistory(sessionDoc);
+            const historySnapshot = yield* self.tryPromise(() => history);
+            if (historySnapshot.length > 0) {
               replayPromptResult = buildReplayPromptFromHistory({
-                history,
+                history: historySnapshot,
                 excludeTurnId: message.userTurnId,
               });
               if (replayPromptResult.stats.messagesIncluded > 0) {
@@ -4686,7 +4703,7 @@ export class SessionExecutionService {
             if (!usedHistoryReplay || !replayPromptResult) {
               return undefined;
             }
-            const history = readSessionHistory(sessionDoc.sessionData.history);
+            const history = yield* self.tryPromise(() => self.getSessionHistory(sessionDoc));
             if (hasRecentResumeNotice(history)) {
               return undefined;
             }
@@ -4716,8 +4733,11 @@ export class SessionExecutionService {
               fileDiff: [],
               items: [noticeItem],
             };
+            const backend = yield* self.tryPromise(() =>
+              self.getSessionBackend(sessionDoc, sessionId)
+            );
             yield* self.tryPromise(() =>
-              sessionDoc.sessionData.commands.applyHistoryAction({
+              backend.applyHistoryAction({
                 kind: 'upsert-turn',
                 turn: systemNotice,
                 beforeLastUser: true,
@@ -5722,7 +5742,8 @@ export class SessionExecutionService {
               this.currentTurnBySession.get(sessionId) ??
               this.turnRuntimeBySession.get(sessionId)?.turnId;
             if (liveTurnId == null) {
-              const history = readSessionHistory(sessionDoc.sessionData.history);
+              const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+              const history = backend.readHistory();
               const hasUnfinishedRequestedTurn = history.some(
                 (entry) =>
                   entry.id === turnId &&
@@ -5741,7 +5762,10 @@ export class SessionExecutionService {
                   `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
                 );
                 this.deps.clearSessionActivePresence(sessionId);
-                await sessionDoc.sessionData.commands.applyHistoryAction({
+                await createSessionBackend(
+                  sessionDoc,
+                  await sessionDoc.getMetaState()
+                ).applyHistoryAction({
                   kind: 'finish-assistant',
                   turnId,
                   endedAt: getServerNow(),

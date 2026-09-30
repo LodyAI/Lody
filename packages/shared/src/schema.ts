@@ -893,6 +893,23 @@ export type PendingScheduledTask = {
   timeZone?: string;
 };
 
+export type SessionHistoryBackendKind = 'loro' | 'roost';
+
+export const DEFAULT_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+
+export type SessionQueuePromotionState =
+  | 'prepared'
+  | 'history_accepted'
+  | 'activation_published'
+  | 'queue_consumed';
+
+export type SessionQueuePromotionRecord = {
+  queueCid: string;
+  userTurnId: string;
+  state: SessionQueuePromotionState;
+  updatedAt: number;
+};
+
 export type SessionMeta = {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
@@ -922,6 +939,8 @@ export type SessionMeta = {
   isPinned?: boolean;
   cliType: AgentConfigCliType;
   agentType: AgentType;
+  /** Backend selected when this session was created. Missing means legacy Loro. */
+  historyBackend?: SessionHistoryBackendKind;
   agentConfigId?: AgentConfigId;
   /**
    * Agent Role this session was created from, and the Role revision that was
@@ -974,6 +993,8 @@ export type SessionMeta = {
     string,
     'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown'
   >;
+  /** Recoverable queue promotion receipts, keyed by the stable operation id. */
+  queuePromotionLedger?: Record<string, SessionQueuePromotionRecord>;
   /** Assistant turn id the client wants to stop; cancel is ignored unless it matches the machine's in-memory active turn. */
   lastCanceledTurn?: string;
   /** Latest user history entry id that the machine has fully handled. */
@@ -1129,6 +1150,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   project: schema.Any({ required: false }),
   userId: schema.String(),
   userTurnId: schema.String({ required: false }),
+  /** Stable queue promotion identity; legacy rows derive it from userTurnId/$cid. */
+  operationId: schema.String({ required: false }),
   timestamp: schema.String(),
   isEditing: schema.Boolean({ required: false }),
   // Calibrated server time (`getServerNow()`) when the current editor entered the row.
