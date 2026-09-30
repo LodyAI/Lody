@@ -321,7 +321,7 @@ export function isNodeVersionAtLeast(current: string, required: string): boolean
   return true;
 }
 
-const CODEX_DEPENDENCY_VERSION = resolveSingleDependencyVersion(
+export const CODEX_DEPENDENCY_VERSION = resolveSingleDependencyVersion(
   '@openai/codex',
   codexPackageJson.dependencies['@openai/codex']
 );
