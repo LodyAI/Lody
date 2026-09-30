@@ -3,6 +3,16 @@ import { buildSessionLink, parseSessionLink, resolveSessionLinkId } from '../src
 import { normalizeSessionLinksForExport } from '../src/session-link-export';
 
 describe('session resource links', () => {
+  it.each([
+    ['See session://abc.', 'See lody://session/abc?workspace=ws.'],
+    ['**session://abc**', '**lody://session/abc?workspace=ws**'],
+    ['_session://abc_', '_lody://session/abc?workspace=ws_'],
+    ['session://abc，后续', 'lody://session/abc?workspace=ws，后续'],
+    ['https://example.test/session://abc', 'https://example.test/session://abc'],
+    ['No links or only https://example.test', 'No links or only https://example.test'],
+  ])('normalizes prose without absorbing Markdown delimiters: %s', (source, expected) => {
+    expect(normalizeSessionLinksForExport(source, 'ws')).toBe(expected);
+  });
   it('exports portable links without rebinding explicit workspaces or changing code', () => {
     const source = [
       '[@Old](session://Child_A)',

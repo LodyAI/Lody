@@ -33,6 +33,8 @@ import {
   SESSION_DEEP_LINK_EVENT,
   pendingSessionLinkAtom,
   resolveSessionLinkWorkspace,
+  watchSessionLinkRequest,
+  isSessionLinkDestination,
 } from '@/lib/session-deep-link';
 import { formatExplicitSessionTabSearch } from '@/lib/session-tab-url';
 import { usePlatformWorkspaces } from '@lody/platform/react';
@@ -42,7 +44,7 @@ import { useStableSession } from '@/hooks/useStableSession';
 import { normalizeCurrentUserFromSessionUser } from '@/lib/current-user';
 import { writeAuthBootstrapSnapshot } from '@/lib/auth-bootstrap';
 import { toast } from '@/lib/toast';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   authTokenAtom,
   electronDeepLinkSignInInProgressAtom,
@@ -413,23 +415,58 @@ function navigateToResolvedPath(navigate: ReturnType<typeof useNavigate>, path: 
 }
 
 function SessionDeepLinkRouter() {
+  const store = useStore();
+  const navigationTarget = useAtomValue(pendingSessionLinkAtom);
+  const location = useLocation();
+  const [settledNavigation, setSettledNavigation] = useState<{
+    target: SessionLink;
+    slug: string;
+  } | null>(null);
   const setNavigationTarget = useSetAtom(pendingSessionLinkAtom);
   const workspaces = usePlatformWorkspaces();
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const navigate = useNavigate();
   const [pending, setPending] = useState<SessionLink | null>(null);
   useEffect(() => {
+    if (!navigationTarget) return undefined;
+    return watchSessionLinkRequest(store, navigationTarget, () => {
+      toast.error(i18next.t('deepLink.openFailed', 'Unable to open this conversation.'));
+    });
+  }, [navigationTarget, store]);
+  useEffect(() => {
+    if (!settledNavigation || settledNavigation.target !== navigationTarget) return;
+    if (
+      !isSessionLinkDestination(
+        navigationTarget,
+        settledNavigation.slug,
+        location.pathname,
+        location.search.tab
+      )
+    ) {
+      setNavigationTarget(null);
+    }
+  }, [
+    navigationTarget,
+    settledNavigation,
+    location.pathname,
+    location.search,
+    setNavigationTarget,
+  ]);
+  useEffect(() => {
     const receive = (raw: unknown) => {
       if (typeof raw !== 'string') return;
       const link = parseSessionLink(raw);
-      if (link) setPending(link);
+      if (link) {
+        setNavigationTarget(null);
+        setPending(link);
+      }
     };
     const onOpen = (event: Event) => receive((event as CustomEvent<unknown>).detail);
     window.addEventListener(SESSION_DEEP_LINK_EVENT, onOpen);
     return () => {
       window.removeEventListener(SESSION_DEEP_LINK_EVENT, onOpen);
     };
-  }, []);
+  }, [setNavigationTarget]);
   useEffect(() => {
     // Let auth/provisioning and the default landing settle before applying the explicit target.
     if (!pending) return;
@@ -473,16 +510,24 @@ function SessionDeepLinkRouter() {
           .catch(() => {});
       return;
     }
-    setNavigationTarget({ ...pending, workspaceId });
+    const target = { ...pending, workspaceId };
+    setNavigationTarget(target);
     void navigate({
       to: '/$workspaceName/sessions/$sessionId',
       params: { workspaceName: resolution.slug, sessionId: pending.sessionId },
       search: { tab: formatExplicitSessionTabSearch(pending.tabSessionId ?? pending.sessionId) },
-    }).catch(() => {
-      setNavigationTarget(null);
-      toast.error(i18next.t('deepLink.openFailed', 'Unable to open this conversation.'));
-    });
-  }, [pending, workspaces, currentWorkspaceId, navigate, setNavigationTarget]);
+    })
+      .then(() => {
+        if (store.get(pendingSessionLinkAtom) === target)
+          setSettledNavigation({ target, slug: resolution.slug });
+      })
+      .catch(() => {
+        if (store.get(pendingSessionLinkAtom) === target) {
+          setNavigationTarget(null);
+          toast.error(i18next.t('deepLink.openFailed', 'Unable to open this conversation.'));
+        }
+      });
+  }, [pending, workspaces, currentWorkspaceId, navigate, setNavigationTarget, store]);
   return null;
 }
 

@@ -991,10 +991,10 @@ export function buildConversationMarkdown(
   const history = sourceHistory.map((entry) => ({
     ...entry,
     items: (entry.items ?? []).map((item) => {
-      if (item.type === 'text' || item.type === 'thought') {
+      if ((item.type === 'text' || item.type === 'thought') && typeof item.text === 'string') {
         return { ...item, text: normalizeSessionLinksForExport(item.text, options.workspaceId) };
       }
-      if (item.type === 'proposed_plan') {
+      if (item.type === 'proposed_plan' && typeof item.markdown === 'string') {
         return {
           ...item,
           markdown: normalizeSessionLinksForExport(item.markdown, options.workspaceId),

@@ -1840,6 +1840,25 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
   });
 };
 
+const readMcpSessionStatusTargets = async (
+  ids: readonly string[],
+  ctx: ReturnType<typeof getSessionContext>,
+  read: (id: SessionId) => Promise<SessionMeta | undefined>
+) =>
+  Promise.all(
+    ids.map(async (rawSessionId) => {
+      let sessionId: SessionId;
+      try {
+        sessionId = resolveMcpSessionId(rawSessionId, ctx) as SessionId;
+      } catch {
+        // Status-many is ordered and independently fallible. Invalid/foreign references
+        // must neither abort valid siblings nor reach the authorized workspace reader.
+        return { sessionId: rawSessionId, session: undefined };
+      }
+      return { sessionId, session: await read(sessionId) };
+    })
+  );
+
 const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promise<unknown> => {
   assertBatchSize(input.sessionIds.length, MAX_MCP_STATUS_BATCH_SIZE);
   const ctx = getSessionContext();
@@ -1847,24 +1866,21 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     await syncWorkspaceMetaForRead(manager, `mcp.session_status_many:${ctx.sessionId}`);
-    const sessions = await Promise.all(
-      input.sessionIds.map(
-        async (rawSessionId) =>
-          await readCurrentSessionMeta(manager, resolveMcpSessionId(rawSessionId, ctx) as SessionId)
-      )
+    const targets = await readMcpSessionStatusTargets(input.sessionIds, ctx, (id) =>
+      readCurrentSessionMeta(manager, id)
     );
     const liveStatuses = await readSessionLiveStatusesMany({
       auth,
       workspaceId: workspace.id as WorkspaceId,
-      sessions: sessions.filter((session): session is SessionMeta => session !== undefined),
+      sessions: targets
+        .map(({ session }) => session)
+        .filter((session): session is SessionMeta => session !== undefined),
     });
     const presence = manager.getPresenceStates() ?? {};
     const nowMs = getServerNow();
     const viewed = collectViewedSessionIdsFromPresence(presence, nowMs);
     const items = await Promise.all(
-      input.sessionIds.map(async (rawSessionId, index) => {
-        const sessionId = resolveMcpSessionId(rawSessionId, ctx) as SessionId;
-        const session = sessions[index];
+      targets.map(async ({ sessionId, session }) => {
         if (!session) {
           return {
             sessionId,
@@ -3524,6 +3540,7 @@ export const __lodyMcpServerInternals = {
   truncateUtf8HeadTail,
   SESSION_CONTROL_TIMEOUT_MS,
   resolveMcpSessionId,
+  readMcpSessionStatusTargets,
 };
 
 export function buildLodyMcpServer(): McpServer {

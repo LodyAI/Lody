@@ -1,5 +1,5 @@
 import { assertProductWindowSender } from '../assert-sender'
-import { parseSessionLink } from '@lody/shared/session-link'
+import { parseSessionLink, INSTALLATION_LINK_SCHEMES } from '@lody/shared/session-link'
 import { desktopInstallationProfile } from '../../platform'
 import { getDesktopCallbackProtocol } from '../../desktop-channel'
 import { isDefaultLodyProtocolClient, setDefaultLodyProtocolClient } from '../../protocol-client'
@@ -131,7 +131,7 @@ export class AppIpc extends IpcService {
   @IpcMethod()
   async getLinkInstallations() {
     assertProductWindowSender(getIpcContext().event)
-    return ['lody-oss', 'ai.lody.nightly', 'ai.lody.stable'].flatMap((scheme) => {
+    return INSTALLATION_LINK_SCHEMES.flatMap((scheme) => {
       if (scheme === getDesktopCallbackProtocol(desktopInstallationProfile)) return []
       const name = app.getApplicationNameForProtocol(`${scheme}://session/probe`)
       return name ? [{ scheme, name }] : []
@@ -142,7 +142,7 @@ export class AppIpc extends IpcService {
   async openSessionInInstallation(raw: string, scheme: string) {
     assertProductWindowSender(getIpcContext().event)
     if (
-      !['lody-oss', 'ai.lody.nightly', 'ai.lody.stable'].includes(scheme) ||
+      !INSTALLATION_LINK_SCHEMES.includes(scheme) ||
       typeof raw !== 'string' ||
       !parseSessionLink(raw)?.workspaceId
     ) {

@@ -16,6 +16,8 @@ New Stable attempts return to `ai.lody.stable://auth/callback`; Nightly keeps
 `ai.lody.nightly://auth/callback`. Both explicitly carry their browser channel.
 Stable retains legacy `lody://auth/callback` reads, but new resource links use
 that common scheme and may open any user-selected default installation.
+Non-Stable receivers hand legacy common callbacks to Stable's private alias,
+without exchanging credentials locally; unavailable handoff shows a redacted error.
 Update browser callback pages and packaged protocol declarations together;
 see [resource deep links](deep-links.md).
 

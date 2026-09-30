@@ -14,6 +14,8 @@ Translation: current
 `ai.lody.nightly://auth/callback`，两者都显式携带浏览器 channel。
 Stable 继续读取旧 `lody://auth/callback`，但新的资源链接使用公共 lody 协议，
 可能由用户选择的任意默认安装接收。浏览器回调页面和安装包协议声明须一起更新；
+非 Stable 接收方把旧公共回调交给 Stable 专属别名，不在本地交换凭据；
+无法交接时显示脱敏错误。
 见[资源深链接](deep-links.zh.md)。
 
 可独立安装的云端桌面通道使用各自的回调协议和桌面凭据目录。每次登录携带经过校验的桌面通道选择，只接受发给本应用协议的回调。

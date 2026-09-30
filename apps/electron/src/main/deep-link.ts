@@ -1,6 +1,7 @@
 import { desktopInstallationProfile } from './platform'
 import { getDesktopCallbackProtocol } from './desktop-channel'
-import { parseDeepLinkArg } from './deep-link-url'
+import { parseDeepLinkArg, resolveDesktopDeepLink } from './deep-link-url'
+import { app, dialog, shell } from 'electron'
 import { consumePendingDeepLink, getMainWindow, setPendingDeepLink } from './window-state'
 import { readDesktopLoginCallback } from './services/desktop-login'
 import { focusMainWindow } from './window'
@@ -40,7 +41,35 @@ export function handleDeepLink(url: string): void {
   logAuthDebug('handleDeepLink received URL', {
     deepLink: describeDeepLinkForAuthDebug(url)
   })
-  const parsedDeepLink = parseDeepLinkArg(url)
+  const intake = parseDeepLinkArg(url)
+  const route = intake ? resolveDesktopDeepLink(intake) : null
+  if (route?.kind === 'forward' || route?.kind === 'unsupported') {
+    // Never bounce to the shared scheme: only Stable's private alias is a handoff.
+    // Do not include URLs/tokens in native error messages or rejected-promise logs.
+    void app
+      .whenReady()
+      .then(async () => {
+        try {
+          if (route.kind === 'forward' && app.getApplicationNameForProtocol(route.url)) {
+            await shell.openExternal(route.url)
+            return
+          }
+        } catch {
+          /* Report a redacted failure below. */
+        }
+        await dialog.showMessageBox({
+          type: 'error',
+          title: 'Unable to open Lody link',
+          message:
+            route.kind === 'forward'
+              ? 'This link requires Lody Stable. Install or open the latest Stable version and try again.'
+              : 'This version of Lody does not support this link. Update Lody and try again.'
+        })
+      })
+      .catch(() => {})
+    return
+  }
+  const parsedDeepLink = route?.kind === 'local' ? route.url : null
   if (!parsedDeepLink) {
     logAuthDebug('handleDeepLink ignored URL because parseDeepLinkArg returned null', {
       deepLink: describeDeepLinkForAuthDebug(url)

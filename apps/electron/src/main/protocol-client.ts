@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { LODY_PROTOCOLS } from '@lody/shared/session-link'
 
 type ProtocolRegistrationLogger = (message: string, meta?: Record<string, unknown>) => void
 
@@ -298,10 +299,18 @@ export function registerLodyProtocolClient(options: RegisterProtocolClientOption
   const appEntry = resolveDefaultAppEntryPath()
   let registrationResult = false
 
-  // Installing advertises support; launching must never reclaim the shared scheme.
-  if (protocol === 'lody') {
-    registerLinuxAppImageProtocolHandler(options)
-    return
+  // NSIS protocol declarations are not a Windows registration guarantee. Repair
+  // first-launch registration only when there is no handler; never reclaim one.
+  if (process.platform === 'win32' && app.isPackaged) {
+    void app
+      .whenReady()
+      .then(() => {
+        if (!app.getApplicationNameForProtocol(`${LODY_PROTOCOLS.resource}://`)) {
+          const registered = app.setAsDefaultProtocolClient(LODY_PROTOCOLS.resource)
+          log('registered previously unhandled resource scheme', { registered })
+        }
+      })
+      .catch(() => log('unable to check resource scheme registration'))
   }
 
   if (!app.isPackaged && appEntry) {

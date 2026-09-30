@@ -1,4 +1,5 @@
 import type { InstallationProfile } from '@lody/shared/node/installation-profile'
+import { LODY_PROTOCOLS } from '../../../../packages/shared/src/session-link-schemes.mjs'
 
 export type DesktopProfile = Omit<
   InstallationProfile,
@@ -16,7 +17,9 @@ export type DesktopProfile = Omit<
 export function getDesktopCallbackProtocol(
   profile: Pick<DesktopProfile, 'desktopProtocol'>
 ): string {
-  return profile.desktopProtocol === 'lody' ? 'ai.lody.stable' : profile.desktopProtocol
+  return profile.desktopProtocol === LODY_PROTOCOLS.resource
+    ? LODY_PROTOCOLS.stable
+    : profile.desktopProtocol
 }
 
 /** Desktop identity is separate from the CLI's shared installation namespace. */

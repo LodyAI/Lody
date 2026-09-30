@@ -1,3 +1,10 @@
+import { LODY_PROTOCOLS, SESSION_LINK_SCHEMES } from './session-link-schemes.mjs';
+export {
+  LODY_PROTOCOLS,
+  SESSION_LINK_SCHEMES,
+  INSTALLATION_LINK_SCHEMES,
+} from './session-link-schemes.mjs';
+
 /** Public resource links are independent of the installed desktop channel. */
 export type SessionLink = {
   sessionId: string;
@@ -6,7 +13,7 @@ export type SessionLink = {
 };
 
 const ID = /^[A-Za-z0-9_-]+$/u;
-const SCHEMES = new Set(['lody:', 'lody-oss:', 'ai.lody.nightly:', 'ai.lody.stable:']);
+const SCHEMES = new Set(SESSION_LINK_SCHEMES.map((scheme) => `${scheme}:`));
 
 export function buildSessionLink(target: SessionLink): string {
   for (const value of [target.sessionId, target.workspaceId, target.tabSessionId]) {
@@ -17,7 +24,7 @@ export function buildSessionLink(target: SessionLink): string {
   if (target.tabSessionId && target.tabSessionId !== target.sessionId) {
     query.set('tab', target.tabSessionId);
   }
-  const url = `lody://session/${target.sessionId}${query.size ? `?${query}` : ''}`;
+  const url = `${LODY_PROTOCOLS.resource}://session/${target.sessionId}${query.size ? `?${query}` : ''}`;
   if (url.length > 8192) throw new Error('Session link is too long');
   return url;
 }

@@ -3810,7 +3810,7 @@ const SessionDetail = ({
     )
       return;
     // A direct child URL first resolves its parent; let that existing redirect finish.
-    if (activeSession?.parentSessionId) return;
+    if (!activeSession || activeSession.parentSessionId) return;
     const exactId = pendingSessionLink.tabSessionId ?? pendingSessionLink.sessionId;
     const sideTarget = sideSessions.find((item) => item.id === exactId);
     const isRootTarget = pendingSessionLink.sessionId === sessionId;
@@ -3818,27 +3818,30 @@ const SessionDetail = ({
       !pendingSessionLink.tabSessionId &&
       (allOrderedSessionTabIdSet.has(pendingSessionLink.sessionId) || sideTarget !== undefined);
     if (!isRootTarget && !isChildTarget) return;
-    clearPendingSessionLink(null);
     if (sideTarget) {
+      clearPendingSessionLink(null);
       selectSidePanelTab(getSideSessionPanelTabId(sideTarget.id));
       revealRightSidebar();
       return;
     }
     const archivedTarget = closedConversations.find((item) => item.id === exactId);
     if (archivedTarget && isArchivedOutsideWorkspace(archivedTarget, isWorkspaceArchived)) {
+      clearPendingSessionLink(null);
       toast.error(t('deepLink.archived', 'Restore this archived conversation before opening it.'));
       return;
     }
     if (!allOrderedSessionTabIdSet.has(exactId) && exactId !== sessionId) {
-      toast.error(t('deepLink.openFailed', 'Unable to open this conversation.'));
+      // A ready catalog is a snapshot, not proof that this child has synced yet.
+      // Keep waiting; the root request owner reports and clears a bounded timeout.
       return;
     }
+    clearPendingSessionLink(null);
     handleNavigateSession({ sessionId, tabSessionId: exactId as SessionId });
   }, [
     pendingSessionLink,
     docMetaCacheReady,
     currentWorkspaceId,
-    activeSession?.parentSessionId,
+    activeSession,
     sessionId,
     allOrderedSessionTabIdSet,
     clearPendingSessionLink,
