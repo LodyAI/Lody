@@ -559,6 +559,14 @@ End of synthetic document.`,
     expect(container?.querySelectorAll('.katex').length).toBeGreaterThan(1);
   });
 
+  it('renders same-line bracket math after prose with the inline preference off', async () => {
+    await renderMarkdown(String.raw`令\[x+y\]。`);
+
+    expect(container?.querySelectorAll('.katex')).toHaveLength(1);
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(0);
+    expect(container?.textContent).toContain('x+y');
+  });
+
   it('renders later inline math after prose-positioned display delimiters while streaming', async () => {
     const store = createStore();
     await renderMarkdownWithStore(INLINE_DISPLAY_MATH_CONTEXT_MARKDOWN, store, {
