@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+Follow-up PR: [#1166](https://github.com/LodyAI/Lody/pull/1166)
+
 [English](2026-09-26-boot-shell-first-paint.md)
 
 ## 摘要
