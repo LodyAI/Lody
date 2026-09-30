@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
+import { Either } from 'effect';
 import {
   encodeSignedRecord,
   joinRequestSigningBytes,
@@ -7,6 +8,7 @@ import {
   sealEpochEnvelope,
   signingBytesForBody,
 } from '@lody/e2ee-core/ledger';
+import { contentAuthorKey } from '@lody/e2ee-core/streams-content';
 import { createAttackLab, inspectClient } from '../src/attack-lab';
 import { maliciousAppendCas } from '../src/attacks';
 import { recordContentWrite } from '../src/content-trace';
@@ -150,6 +152,76 @@ describe('design probes: binding, host cache, guest content', () => {
     };
     await writeLoro(bob, 'guest-injected-pwn');
     await expect(readLoro(alice)).resolves.toContain('guest-injected-pwn');
+
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'hidden-none',
+      genesisHex: alice.genesisHex,
+      inspectHonest: inspectClient(alice, host),
+    });
+    const report = await lab.finish();
+    expect(report.integrity).toBe('outside-model');
+    expect(report.detectability).toBe('outside-model');
+  });
+
+  it('merges a removed member old-epoch update after rotation when Riverrun is malicious', async () => {
+    const runtime = new LabRuntime({ mode: 'auto' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    const bob = await labClient({ host, account: 'bob', runtime });
+    await alice.createSpace();
+    const admitted = await alice.approveJoin(await bob.requestJoin(alice.genesisHex!), 'member');
+    expect(admitted.status).toBe('committed');
+    await bob.readLedger();
+    await bob.receiveEpochKey(alice.device, 0, await alice.deliverEpochKey(bob.device, 0));
+    await writeLoro(bob, 'before-removal|');
+
+    expect((await alice.removeMember(admitted.membershipId)).status).toBe('committed');
+    // The removed device loses gateway read before the seal gate runs.
+    await expect(writeLoro(bob, 'honest-after-removal|')).rejects.toThrow(
+      /rotation-required|stream-read-forbidden/
+    );
+    const removed = await alice.readLedger();
+    expect(
+      Either.isRight(
+        contentAuthorKey(
+          removed.state,
+          {
+            genesis: alice.genesisHex!,
+            actor: 'ab'.repeat(32),
+            memberInstance: 'cd'.repeat(32),
+            device: toHex(bob.device.publicKey),
+          },
+          (id) => removed.wasDeviceAdmitted(id)
+        )
+      )
+    ).toBe(true);
+
+    // Modified client: ignore the seal gate and append the old epoch straight to Riverrun.
+    // Gateway read is already forbidden, so the last seal-time grant is still the
+    // pre-removal one. Record the post-removal reference decision on the writes below.
+    bob.authenticatedWriterMayWrite = false;
+    bob.prepareWrite = async () => undefined;
+    bob.canWriteDocument = true;
+    const orig = bob.fetch.bind(bob);
+    bob.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${LORO_STREAM}`) && init?.method === 'POST') {
+        return fetch(url.replace(host.baseUrl, host.riverrunUrl.replace(/\/$/, '')), init);
+      }
+      return orig(input, init);
+    };
+    await writeLoro(bob, 'injected-after-removal|');
+    expect(await readLoro(alice)).toContain('injected-after-removal|');
+
+    expect((await alice.publishEpoch()).status).toBe('committed');
+    await writeLoro(alice, 'after-rotation-secret|');
+    await writeLoro(bob, 'old-epoch-after-rotation|');
+    const merged = await readLoro(alice);
+    expect(merged).toContain('old-epoch-after-rotation|');
+    expect(merged).toContain('after-rotation-secret|');
 
     const lab = createAttackLab({
       host,

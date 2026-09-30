@@ -610,6 +610,12 @@ Current spec §8.3 and `policy.ts` allow an Owner/Admin personal device with `ca
 - **Evidence:** core `streams-content.test.ts` (seal gate before/after revoke and rotation); Lab `host-lifecycle.test.ts` "refuses new content after removeMember until the epoch rotates". Two existing tests that wrote after revoke now rotate first.
 - **Lab gap exposed:** AttackLab confidentiality only scans Riverrun for plaintext or accepts an exact plaintext claim, and the attacker holds no member key. A removed member colluding with the server is therefore unmeasurable. Two real-model runs (`deepseek-chat`, temperature 0) chose the same drop-plus-XOR attack and found nothing; the collab script never removes a member.
 
+### 2026-09-28 — Old-epoch writes still merge after rotation
+
+- **Finding:** `maySealNewContent` stops an honest writer during `rotationRequired`. It does not stop a modified client that seals with the retained epoch key and appends straight to Riverrun. After `removeMember` and again after `publishEpoch`, Alice's client merges those updates into the current document. `contentAuthorKey` still accepts any actor and member instance for that revoked device because `wasAdmitted` skips the current-member check.
+- **Decision:** keep this `outside-model`. A delayed update sealed before rotation is the same frame shape as a new update sealed with the old key after rotation, and open does not re-check current write rights. Rejecting every old epoch would also drop honest delayed sync. No wire change.
+- **Evidence:** `design-probes.test.ts` "merges a removed member old-epoch update after rotation when Riverrun is malicious". Honest `writeLoro` throws `stream-read-forbidden` (the gateway read fails before the seal gate). Both injected sentences appear in Alice's document. The removed client cannot refresh, so its last seal-time grant stays true and an unadjusted `finish()` returns `pass`. The probe records the post-removal reference decision on those writes; `finish().integrity` is then `outside-model`.
+
 ### 2026-09-28 — Excluded insider, per-client views and per-property verdicts
 
 - **Problem:** the removal gap above was found by hand. AttackLab could not measure it: the attacker held no member key, the collab script never removed a member, and the model agent chose one plan with at most two steps at temperature 0.

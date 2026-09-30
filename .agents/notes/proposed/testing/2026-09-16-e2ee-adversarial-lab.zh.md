@@ -614,6 +614,12 @@ v1 `possessionSigningBytes` 为 `[genesis, signPub, encPub, kind, canManage]`。
 - **证据：** 核心 `streams-content.test.ts`（撤权与换代前后的密封判定）；Lab `host-lifecycle.test.ts`「refuses new content after removeMember until the epoch rotates」。两个撤权后写入的旧测试改为先换代。
 - **暴露的 Lab 盲区：** AttackLab 的保密判定只扫描 Riverrun 明文或接受精确明文声明，攻击者不持有任何成员密钥，因此"被移除者与服务器串通"无法衡量。两次真实模型运行（`deepseek-chat`，temperature 0）选了相同的丢弃加 XOR 攻击，未发现问题；协作剧本也从不移除成员。
 
+### 2026-09-28 — 换代后，旧代更新仍会并进当前文档
+
+- **发现：** `maySealNewContent` 只挡住 `rotationRequired` 期间的诚实写者。被改过的客户端仍可用留下的代密钥密封，并直接追加到 Riverrun。`removeMember` 之后，以及 `publishEpoch` 之后，Alice 的客户端都会把这些更新并进当前文档。该设备已被撤销时，`contentAuthorKey` 因 `wasAdmitted` 跳过当前成员核对，仍接受任意 actor 和 member instance。
+- **决定：** 保持 `outside-model`。换代前签好、换代后才送达的更新，和换代后用旧钥新签的更新，帧形状相同；open 不复查当前写权。拒绝所有旧代会同时丢掉合法的延迟同步。不改线格式。
+- **证据：** `design-probes.test.ts`「merges a removed member old-epoch update after rotation when Riverrun is malicious」。诚实 `writeLoro` 抛出 `stream-read-forbidden`（网关读失败先于密封门）。两句注入都出现在 Alice 的文档里。被移除的客户端无法刷新，上次密封时的写权仍为 true，不修正时 `finish()` 返回 `pass`。探针把这些写入标成移除后的对照判定，此时 `finish().integrity` 为 `outside-model`。
+
 ### 2026-09-28 — 被排除的内部人、按客户端视图与逐属性判定
 
 - **问题：** 上面的移除窗口缺口是手工找到的，AttackLab 测不到：攻击者不持有任何成员密钥，协作剧本从不移除成员，模型 Agent 只做一次计划、最多两步、temperature 0。

@@ -2,10 +2,6 @@ import { Either } from 'effect';
 import * as pureCrypto from '../pure/wire-crypto';
 import { SigningFacts } from '../pure/signing-facts';
 import type { ValidationError } from '../pure/errors';
-function unwrap<A>(value: Either.Either<A, ValidationError>): A {
-  if (Either.isLeft(value)) fail(value.left.code, value.left.position);
-  return value.right;
-}
 import { hashes, Point, verify as nobleVerify } from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
 import type { SignatureJob, SignatureVerifyExecutor } from '../capabilities';
@@ -21,6 +17,12 @@ export const MEMBERSHIP_ID_BYTES = 16;
 export const REQUEST_ID_BYTES = 16;
 export const USER_ID_BYTES = 32;
 export const HISTORY_PACKET_BYTES = 72;
+
+function unwrap<A>(value: Either.Either<A, ValidationError>): A {
+  if (Either.isLeft(value)) fail(value.left.code, value.left.position);
+  return value.right;
+}
+
 const text = new TextEncoder();
 hashes.sha512 = (message) => sha512(message);
 export const DEFAULT_SIGNING_POINT_CACHE_LIMIT = 8192;
