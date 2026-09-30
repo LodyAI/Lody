@@ -59,6 +59,15 @@ import {
   type AcpCapabilitiesResult,
 } from '@/agent/acp-capability-normalization';
 
+/** One run of `Session.terminate`, shared by the calls that arrive while it runs. */
+type SessionTermination = {
+  force: boolean;
+  /** Settles when a forced call joins, ending the graceful waits early. */
+  readonly escalated: Promise<void>;
+  readonly escalate: () => void;
+  done: Promise<void>;
+};
+
 type SessionEvents = {
   output: (event: SessionOutputEvent) => void;
   error: (event: SessionErrorEvent) => void;
@@ -121,7 +130,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private readonly startedAtMs = getServerNow();
   private activeProcess: SessionProcessHandle | null = null;
   private agentProcess: SessionProcessHandle | null = null;
-  private termination: Promise<void> | null = null;
+  private termination: SessionTermination | null = null;
   private readonly sandbox: SessionSandbox;
   private gitIdentity: { id: string; name: string; email: string };
   public agentClient: AgentClient | null = null;
@@ -251,36 +260,73 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   /**
    * Terminate every process this Session started and release its sandbox.
    *
-   * Concurrent calls share one termination, so `terminated` is emitted once.
-   * Each process tree gets a bounded SIGTERM grace (none when `force`) and a
-   * bounded wait after SIGKILL. A tree that survives both still ends the
-   * Session's bookkeeping, but the returned promise rejects with the
+   * Concurrent calls share one termination, so `terminated` is emitted once; a
+   * forced call during a graceful one escalates it at once. A call after a
+   * termination finished starts a new one: the Session may have started
+   * processes since, and a failed attempt deserves a retry rather than its
+   * stale rejection. Each process tree gets a bounded SIGTERM grace (none when
+   * forced) and a bounded wait after SIGKILL. A tree that survives both still
+   * ends the Session's bookkeeping, but the returned promise rejects with the
    * `TerminationFailed`: a caller must not treat that agent as idle and reuse it.
    */
   terminate(force: boolean = false): Promise<void> {
-    this.termination ??= this.terminateOnce(force);
-    return this.termination;
+    const current = this.termination;
+    if (current) {
+      if (force && !current.force) this.escalateTermination(current);
+      return current.done;
+    }
+    let escalate = (): void => {};
+    const escalated = new Promise<void>((resolve) => {
+      escalate = resolve;
+    });
+    const termination: SessionTermination = { force, escalated, escalate, done: Promise.resolve() };
+    this.termination = termination;
+    termination.done = this.terminateOnce(termination).finally(() => {
+      if (this.termination === termination) this.termination = null;
+    });
+    return termination.done;
   }
 
-  private async terminateOnce(force: boolean): Promise<void> {
-    this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
+  /** Force an in-flight graceful termination: SIGKILL everything now. */
+  private escalateTermination(termination: SessionTermination): void {
+    this.logger.debug(`[${this.sessionId}] Escalating in-flight termination to force`);
+    termination.force = true;
+    termination.escalate();
+    // The in-flight termination's own forced calls below report any survivor.
+    void Promise.allSettled([
+      this.activeProcess?.terminate(true),
+      this.agentProcess?.terminate(true),
+      this.sandbox.terminate(true),
+    ]);
+  }
+
+  private async terminateOnce(termination: SessionTermination): Promise<void> {
+    this.logger.debug(
+      `[${this.sessionId}] Terminating session${termination.force ? ' (force)' : ''}`
+    );
     this.status = 'stopping';
 
-    if (this.acpSessionId && this.terminalManager.disposeAll) {
-      try {
-        await this.terminalManager.disposeAll(this.acpSessionId);
-      } catch (error) {
-        this.logger.debug(
-          `[${
-            this.sessionId
-          }] Failed to dispose ACP terminals during terminate: ${formatErrorMessage(error)}`
-        );
-      }
+    const acpSessionId = this.acpSessionId;
+    const disposeAll = this.terminalManager.disposeAll?.bind(this.terminalManager);
+    const terminalsDisposed =
+      acpSessionId && disposeAll
+        ? disposeAll(acpSessionId).catch((error: unknown) => {
+            this.logger.debug(
+              `[${
+                this.sessionId
+              }] Failed to dispose ACP terminals during terminate: ${formatErrorMessage(error)}`
+            );
+          })
+        : Promise.resolve();
+    // A graceful stop lets terminal commands wind down before the agent. A
+    // forced one does not wait on them: the sandbox SIGKILLs them below.
+    if (!termination.force) {
+      await Promise.race([terminalsDisposed, termination.escalated]);
     }
 
-    if (!force && this.acpSessionId && this.agentClient?.isCreated()) {
+    if (!termination.force && acpSessionId && this.agentClient?.isCreated()) {
       try {
-        await this.agentClient.closeSession(this.acpSessionId);
+        await Promise.race([this.agentClient.closeSession(acpSessionId), termination.escalated]);
       } catch (error) {
         this.logger.debug(
           `[${this.sessionId}] Failed to close ACP session during terminate: ${formatErrorMessage(
@@ -298,16 +344,17 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     // reaches terminal commands and groups whose leader already exited.
     const failures: unknown[] = [];
     for (const outcome of await Promise.allSettled([
-      activeProcess?.terminate(force),
-      agentProcess?.terminate(force),
+      activeProcess?.terminate(termination.force),
+      agentProcess?.terminate(termination.force),
     ])) {
       if (outcome.status === 'rejected') failures.push(outcome.reason);
     }
     try {
-      await this.sandbox.terminate(force);
+      await this.sandbox.terminate(termination.force);
     } catch (error) {
       failures.push(error);
     }
+    await terminalsDisposed;
     for (const failure of failures) {
       this.logger.error(
         `[${this.sessionId}] Session process termination failed: ${formatErrorMessage(failure)}`

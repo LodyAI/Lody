@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { startProcess, type ProcessHandle } from '@/platform/promise-facade';
-import type { NodeProcessApi } from '@/platform/process/node-process';
-import type { TerminationPolicy } from '@/platform/process/process-tree';
+import type { NodeProcessApi } from '@lody/shared/node/process';
+import type { TerminationPolicy } from '@lody/shared/node/process';
 
 export class CloudflaredError extends Error {
   constructor(

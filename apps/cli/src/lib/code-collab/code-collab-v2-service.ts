@@ -54,7 +54,7 @@ import {
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
 import { getLogger } from '@/utils/logger';
-import { runCommandOk } from '@/platform/process/command';
+import { runCommandOk } from '@lody/shared/node/process';
 import { makePlatformRunner, runCommandText } from '@/platform/promise-facade';
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import { CodeCollabFileIndexChangedPublishError } from './code-collab-flock-publish';

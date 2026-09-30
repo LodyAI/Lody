@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { getLogger } from '@/utils/logger';
 import { startProcess } from '@/platform/promise-facade';
-import { FakeProcessTable } from '../../../tests/fake-process-table';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import {
   WorkspaceWatchCoordinator,
   buildWorkspaceWatchWorkerEnvironment,

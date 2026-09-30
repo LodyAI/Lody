@@ -5,7 +5,7 @@ import type { ChildProcess } from 'child_process';
 
 import type realSpawn from 'cross-spawn';
 
-import { TerminationFailed } from '../src/platform/process/errors';
+import { TerminationFailed } from '@lody/shared/node/process';
 import { Session } from '../src/session/session';
 import type { TerminalManager } from '../src/session/terminal-manager';
 import {
@@ -14,7 +14,7 @@ import {
   type SessionSandbox,
 } from '../src/session/session-sandbox';
 import type { Logger } from '../src/utils/logger';
-import { FakeProcessTable } from './fake-process-table';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -182,11 +182,92 @@ describe('Session terminate cleanup', () => {
     const terminated: unknown[] = [];
     session.on('terminated', (event) => terminated.push(event));
 
-    await Promise.all([session.terminate(false), session.terminate(true)]);
+    await Promise.all([session.terminate(false), session.terminate(false)]);
 
     expect(terminated).toHaveLength(1);
     expect(table.isAlive(descendant)).toBe(false);
     expect(table.delivered).toEqual([{ target: -(agent.child.pid ?? -1), signal: 'SIGTERM' }]);
+  });
+
+  // Quitting the desktop forces teardown while a graceful stop may be running;
+  // waiting on it outlasts the desktop's own kill deadline.
+  it('escalates an in-flight graceful termination when a forced call joins', async () => {
+    const table = new FakeProcessTable('darwin');
+    table.queueSpawn({ ignores: ['SIGTERM'] });
+    const sandbox = await createProcessTableSandbox(table);
+    const session = createSession(sandbox);
+    const agent = await sandbox.spawn('agent', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const leader = agent.child.pid ?? -1;
+    // @ts-expect-error - exercising private process handle wiring
+    session.agentProcess = agent;
+    // A wedged agent never answers the graceful session/close.
+    const closeRequested = Promise.withResolvers<void>();
+    session.acpSessionId = 'acp-session-1' as ACPSessionId;
+    session.agentClient = {
+      isCreated: () => true,
+      closeSession: async () => {
+        closeRequested.resolve();
+        return await new Promise<boolean>(() => {});
+      },
+    } as never;
+    const terminated: unknown[] = [];
+    session.on('terminated', (event) => terminated.push(event));
+
+    const graceful = session.terminate(false);
+    await closeRequested.promise;
+    await session.terminate(true);
+    await graceful;
+
+    expect(table.isAlive(leader)).toBe(false);
+    expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGKILL' }]);
+    expect(terminated).toHaveLength(1);
+  });
+
+  it('kills the agent under a forced terminate without waiting for terminal disposal', async () => {
+    const table = new FakeProcessTable('darwin');
+    const sandbox = await createProcessTableSandbox(table);
+    const session = createSession(sandbox);
+    const agent = await sandbox.spawn('agent', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const agentExited = new Promise<void>((resolve) => agent.onExit(() => resolve()));
+    // A terminal command slow to stop: disposal completes only once the agent is gone.
+    session.terminalManager = createTerminalManager({ disposeAll: async () => await agentExited });
+    session.acpSessionId = 'acp-session-1' as ACPSessionId;
+    // @ts-expect-error - exercising private process handle wiring
+    session.agentProcess = agent;
+
+    await session.terminate(true);
+
+    expect(table.isAlive(agent.child.pid ?? -1)).toBe(false);
+  });
+
+  it('terminates an agent started after an earlier termination finished', async () => {
+    const table = new FakeProcessTable('darwin');
+    const sandbox = await createProcessTableSandbox(table);
+    const session = createSession(sandbox);
+    await session.terminate(true);
+    const lateAgent = await sandbox.spawn('agent', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    // @ts-expect-error - exercising private process handle wiring
+    session.agentProcess = lateAgent;
+
+    await session.terminate(true);
+
+    expect(table.isAlive(lateAgent.child.pid ?? -1)).toBe(false);
+  });
+
+  // A reused Session's agent can exit on its own (clearing agentProcess) and
+  // leave its children in the sandbox; a later terminate must still end them.
+  it('ends what a later agent left in the sandbox after an earlier termination', async () => {
+    const table = new FakeProcessTable('darwin');
+    const sandbox = await createProcessTableSandbox(table);
+    const session = createSession(sandbox);
+    await session.terminate(true);
+    const lateAgent = await sandbox.spawn('agent', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const orphan = table.addDescendant(lateAgent.child.pid ?? -1);
+    table.exitOnItsOwn(lateAgent.child.pid ?? -1);
+
+    await session.terminate(true);
+
+    expect(table.isAlive(orphan)).toBe(false);
   });
 
   it('reports the agent exit code, not a finished command, in terminated', async () => {

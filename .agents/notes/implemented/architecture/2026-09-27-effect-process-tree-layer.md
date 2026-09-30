@@ -177,16 +177,165 @@ Trade-offs of giving commands their own process group:
 - Waits after SIGKILL are now bounded everywhere, so, for example,
   `cloudflared stop()` can reject instead of hanging.
 
-Not covered: Electron main, `packages/cli-supervisor` and `packages/shared`
-(13 files) run outside the CLI and still start processes directly. Bringing
-them onto the same layer requires moving it into a package they can import.
-That is a separate decision.
+## Follow-up: one layer for the whole repository
+
+A further stacked PR moves the layer into `packages/shared/src/node/process.ts`
+(`@lody/shared/node/process`), with its facades and the fake process table
+(`process-testing.ts`). Electron main, the CLI supervisor and the shared Node
+helpers now use it too. The CLI keeps only its session containers and a thin
+facade that adds its logger.
+
+The boundary guard now covers:
+- `apps/cli/src`;
+- `apps/electron/src/main`;
+- `packages/cli-supervisor/src`;
+- `packages/shared/src/node`, including `.cjs` files.
+
+It also flags `<child>.kill(` calls, so every termination path is the layer's.
+The rules moved with the code to `packages/shared/src/node/AGENTS.md`.
+
+Decisions:
+- **One module, no relative imports.** Electron runs its tests with plain
+  `node --test --experimental-strip-types`, which cannot resolve extensionless
+  relative imports. `process.ts` is therefore one module, and
+  `process-testing.ts` avoids TypeScript parameter properties.
+- **The three `.cjs` twins were deleted.** The hand-maintained CommonJS copies of
+  `cli-detection`, `local-project` and `file-lock` duplicated their process
+  logic. A repository search found only their own parity tests loading them.
+  Unique cases from those tests were moved onto the TypeScript modules.
+- **Lock liveness is three-state.** `file-lock` asks `probePid`, which returns
+  `ours`, `foreign` or `missing`. A lock is valid only while its pid is still a
+  process of ours: EPERM means the pid now belongs to another user, so the
+  owner is gone. The earlier `kill(pid, 0)` code had the same outcome. The first
+  migration briefly treated EPERM as alive, which a test now rules out.
+- **`signalChildTreeNow` runs synchronously.** Exit handlers cannot await, so
+  it signals without waiting for the tree to disappear. A forked fiber would
+  send nothing before the process exits; on Windows the `taskkill` starts
+  inside the synchronous step.
+- **The supervisor ends the tree its launcher describes.** `LaunchHandle` states
+  whether its child leads a process group; neither the CLI nor Electron
+  launches the supervised CLI detached. If there is no shutdown channel, or it
+  fails, the supervisor sends SIGTERM through the tree and cuts the grace period
+  short when that SIGTERM cannot be delivered. A child whose tree survives
+  SIGKILL makes the supervisor fatal.
+- **Electron quit uses bounded tree termination.** It keeps quit-time ownership:
+  a survivor still fails quit. On Windows it now ends the whole tree instead of
+  only the root.
+
+## Follow-up: correctness review
+
+A review of the stacked PRs against the code they replaced found regressions,
+all fixed on the top PR with a failing-first test each unless noted:
+
+- **A failed spawn never reaches the caller's own group.** Until Node reports
+  a failed spawn, `child.kill()` signals pid 0: the daemon's (or Electron
+  main's) whole process group. `childTree` treats a child without a pid as
+  gone. The test runs the race in a real, isolated process group.
+- **Abandoned commands get a SIGTERM grace.** A timed-out command was
+  SIGKILLed at once, so git left `index.lock` behind and blocked every later
+  index write. `ABANDONED_COMMAND_POLICY` now gives 2 s of SIGTERM first.
+- **Waits inside finalizers are bounded by the clock, not by interruption.**
+  The abandoned-command termination runs in a scope finalizer, where nothing
+  is interruptible, so a `timeoutTo` there waited forever for a tree that
+  survived SIGKILL (a zombie under a PID-1 daemon, a D-state process).
+  `waitUntilGone` polls against a clock deadline, and the `taskkill` deadline
+  completes the awaited Deferred from a separate interruptible timer fiber.
+- **EPERM from a group signal waits instead of failing.** On macOS a group
+  whose only member is an exited, not yet reaped leader answers EPERM; the
+  layer now lets the bounded wait decide. A group that truly belongs to
+  another user still ends in `TerminationFailed` after the wait.
+- **Windows commands never resolve from the working directory.** `cross-spawn`
+  searched cwd first with every PATHEXT extension, so a repository's
+  `git.cmd` would run during an automatic git refresh. `nodeProcessLive`
+  resolves bare names through absolute PATH entries only. When nothing
+  matches, Node's own spawn reports ENOENT. Before, cross-spawn wrapped the
+  missing command in cmd.exe, which lost `git_executable_not_found` and made
+  a missing launcher `.exe` look launched. Unit tested only: no Windows run.
+- **`Session.terminate` escalates and does not wait on terminals when forced.**
+  A forced call joining a graceful one now SIGKILLs at once and ends the
+  graceful waits (terminals, `session/close`). A forced teardown no longer
+  waits for terminal commands' graceful stop, since the sandbox kills them.
+  A finished termination is reused only while no process was started since.
+- **Archive releases a Session even when a tree survives.** The failure is
+  logged at warn; the archive, its idle status and local-project removal
+  continue.
+- **Smaller fixes.** The PTY hangup is the polite signal: a 2 s wait, then
+  SIGKILL. SIGTERM right after SIGHUP made fish skip forwarding the hangup to
+  its jobs; this one has no test because the race is timing-dependent. Other
+  fixes:
+  - the shell-env probe allows 15 s and does not cache a failure;
+  - `rundll32` gets a visible show state;
+  - the cgroup container refuses spawns after cleanup and treats a populated
+    nested cgroup as alive;
+  - the supervisor no longer retains every run through a shared
+    never-settling promise;
+  - process-layer warnings reach the daemon's root logger (or the console)
+    when a caller passes no logger.
+
+## Follow-up: the last process callers
+
+A repository-wide audit after the review found three processes still outside
+the layer, all moved in the same PR:
+
+- **The CLI's login-shell probe used the `shell-env` library.** It spawned the
+  shell through execa, so the 3 s timeout could stop waiting but not end the
+  shell: a hung rc file kept it alive until the daemon exited. The desktop ran
+  a second, different probe. Both now call one probe,
+  `@lody/shared/node/login-shell-env`, which runs through `runCommandText`,
+  bounded at 15 s. It keeps `shell-env`'s delimiters, its oh-my-zsh and tmux
+  guards and its zsh/bash fallback for non-POSIX shells. It also keeps the
+  desktop's `env -0` and `~/.bashrc` sourcing, falling back to plain `env`
+  where `-0` is missing (BusyBox). The CLI still lets ACP spawns go ahead after
+  3 s and replaces the cached value when the probe finishes. The dependency is
+  removed.
+- **`@lody/code-review-helper` ran git with `execFile`** for `lody review`,
+  with no timeout. It now uses `runCommandText` with a 60 s bound, which also
+  applies the Windows rule that commands never resolve from the repository.
+- **The guard missed several shapes:** optional-chained and parenthesized
+  `.kill(` calls, dynamic and `createRequire` imports of `child_process`,
+  re-exports, and process libraries other than cross-spawn. It now matches
+  module specifiers in any import position, a list of process libraries, and
+  any `.kill(` receiver. It also scans `packages/code-review-helper/src`. A
+  probe file with each shape confirmed every one is reported, and that type
+  imports, `np.kill` and non-import strings are not.
+
+A second review of that work found, and the same PR fixed:
+- **Probe output was lost.** macOS `/bin/sh` prints `echo -n` literally, which
+  broke the first variable after the delimiter, so the delimiters go through
+  `printf`. The probe's own oh-my-zsh and tmux guards no longer leak into the
+  returned environment.
+- **A failed desktop probe is cached again.** 15 s already covers a slow cold
+  login, and retrying stalled every CLI launch.
+- **Preparation cleanup no longer rejects** when a tree survives, so the cold
+  fallback still runs. This one has no test: the real preparation runtime has
+  no test harness.
+- **A finished `Session.terminate` is never reused**, so what a later agent
+  leaves in the sandbox is ended and a failed attempt is retried.
+- **`windowsTree.signal` does nothing for an exited root.** Its pid may already
+  belong to another process.
+- **Read-only probes** (memory pressure, process table, login shell) pass
+  `READ_ONLY_ABANDON_POLICY`: SIGKILL at the deadline, with no SIGTERM grace
+  stretching their tight budgets. Commands that may hold locks keep the
+  default grace. The trade-off is deliberate: a caller learns of a timeout
+  only after the tree is proven gone, so an immediate retry cannot race a
+  dying git.
+- **Duplication removed.** ACP and supervisor force kills use
+  `terminateChildTree`; the CLI facade gained `logPrefix` so the ACP label
+  survives. The session sandbox reuses `unwrapSpawnFailure`, and the unused
+  shared `withSpawn` is gone.
+
+Left out on purpose:
+- scripts generated for their own processes (already allowlisted);
+- node-pty, the only PTY spawner, whose groups end through the layer;
+- build scripts and ACP extension submodules;
+- Electron `shell.openExternal`/`openPath`;
+- worker threads.
 
 ## Verification
 
-- `@effect/vitest` 0.26 was added. The new tests in `tests/platform-process.test.ts`
+- `@effect/vitest` 0.26 was added. The new tests (now `packages/shared/tests/process.test.ts`)
   drive time with `TestClock` over an in-memory process table,
-  `tests/fake-process-table.ts`, that models groups, ignored signals and
+  `packages/shared/src/node/process-testing.ts`, that models groups, ignored signals and
   `taskkill`. They cover:
   - a descendant that outlives its leader;
   - escalation exactly at the end of the grace period;

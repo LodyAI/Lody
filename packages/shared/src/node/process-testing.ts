@@ -1,12 +1,18 @@
+/**
+ * Test support for the process layer (`./process`): an in-memory OS process
+ * table. Import it only from tests.
+ */
 import { EventEmitter } from 'node:events';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
-import type { NodeProcessApi } from '../src/platform/process/node-process';
+import type { NodeProcessApi } from './process';
 
 type FakeProcess = {
   pid: number;
   pgid: number;
   alive: boolean;
+  /** Exited but not yet reaped by its parent. */
+  zombie?: boolean;
   ignores: Set<NodeJS.Signals>;
   child?: FakeChildProcess;
 };
@@ -23,11 +29,15 @@ export class FakeChildProcess extends EventEmitter {
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
 
-  constructor(
-    readonly pid: number | undefined,
-    private readonly table: FakeProcessTable
-  ) {
+  readonly pid: number | undefined;
+  private readonly table: FakeProcessTable;
+
+  // Plain fields, not parameter properties: Electron's `node --test` runs this
+  // file with type stripping, which rejects parameter properties.
+  constructor(pid: number | undefined, table: FakeProcessTable) {
     super();
+    this.pid = pid;
+    this.table = table;
   }
 
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
@@ -48,6 +58,9 @@ export class FakeChildProcess extends EventEmitter {
 const missingProcess = (): Error & { code: string } =>
   Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
 
+const notPermitted = (): Error & { code: string } =>
+  Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+
 /**
  * An in-memory OS process table with POSIX process-group semantics. Signals
  * reach every live member of a group, members may ignore SIGTERM, and a group
@@ -56,6 +69,8 @@ const missingProcess = (): Error & { code: string } =>
  */
 export class FakeProcessTable {
   readonly delivered: DeliveredSignal[] = [];
+  /** Signals the table refused with EPERM. */
+  readonly refused: DeliveredSignal[] = [];
   readonly spawned: Array<{ command: string; args: readonly string[]; options: SpawnOptions }> = [];
   private readonly processes = new Map<number, FakeProcess>();
   private nextPid = 1000;
@@ -63,7 +78,10 @@ export class FakeProcessTable {
 
   readonly api: NodeProcessApi;
 
-  constructor(readonly platform: NodeJS.Platform = 'linux') {
+  readonly platform: NodeJS.Platform;
+
+  constructor(platform: NodeJS.Platform = 'linux') {
+    this.platform = platform;
     this.api = {
       platform,
       spawn: (command, args, options) => this.spawn(command, args, options),
@@ -154,6 +172,25 @@ export class FakeProcessTable {
     this.terminate(process, null, code);
   }
 
+  /**
+   * The leader exits but Node has not reaped it yet. Like macOS, signalling
+   * a group whose only member is such a zombie fails with EPERM until `reap`.
+   */
+  exitUnreaped(pid: number): void {
+    const process = this.processes.get(pid);
+    if (!process?.alive) return;
+    process.alive = false;
+    process.zombie = true;
+  }
+
+  /** Node reaps an `exitUnreaped` child: it leaves the table and reports its exit. */
+  reap(pid: number, code = 0): void {
+    const process = this.processes.get(pid);
+    if (!process?.zombie) return;
+    process.zombie = false;
+    this.terminate(process, null, code);
+  }
+
   childOf(pid: number): FakeChildProcess | undefined {
     return this.processes.get(pid)?.child;
   }
@@ -167,7 +204,17 @@ export class FakeProcessTable {
       target < 0
         ? Array.from(this.processes.values()).filter((p) => p.alive && p.pgid === -target)
         : [this.processes.get(target)].filter((p): p is FakeProcess => p?.alive === true);
-    if (members.length === 0) throw missingProcess();
+    if (members.length === 0) {
+      const zombie = Array.from(this.processes.values()).some((p) =>
+        p.zombie === true && (target < 0 ? p.pgid === -target : p.pid === target)
+      );
+      if (zombie && target < 0) {
+        if (signal !== 0) this.refused.push({ target, signal });
+        throw notPermitted();
+      }
+      if (zombie) return;
+      throw missingProcess();
+    }
     if (signal === 0) return;
     this.delivered.push({ target, signal });
     for (const member of members) {

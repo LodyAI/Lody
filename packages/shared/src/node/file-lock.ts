@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getLodyDataDir } from './installation-profile';
+import { probePidSync } from './process';
 
 /**
  * Lock file directory:
@@ -54,13 +55,9 @@ function isLockStale(lockPath: string, maxAgeMs: number = 30 * 60 * 1000): boole
       return true;
     }
 
-    // Check if the process is still running
-    try {
-      process.kill(lockInfo.pid, 0); // Signal 0 just checks if process exists
-      return false; // Process exists, lock is valid
-    } catch {
-      return true; // Process doesn't exist, lock is stale
-    }
+    // Locks are written by this user's processes. A pid we may not signal
+    // (EPERM) now belongs to another user, so the original owner is gone.
+    return probePidSync(lockInfo.pid) !== 'ours';
   } catch {
     // Can't read lock file, consider it stale
     return true;

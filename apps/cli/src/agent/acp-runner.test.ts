@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { __test__, shutdownLocalAcpAgent, spawnAcpProcess } from './acp-runner';
 import type { Logger } from '@/utils/logger';
-import { FakeProcessTable } from '../../tests/fake-process-table';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},

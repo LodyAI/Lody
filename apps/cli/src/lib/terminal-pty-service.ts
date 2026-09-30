@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { IPty } from '@lydell/node-pty';
-import { Effect } from 'effect';
+import { Duration, Effect } from 'effect';
 import {
   type SessionId,
   type TerminalDataEvent,
@@ -21,12 +21,9 @@ import { clearManagedGhTokenEnv, LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/lib/
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { makePlatformRunner } from '@/platform/promise-facade';
-import { NodeProcess } from '@/platform/process/node-process';
-import {
-  posixGroupTree,
-  terminateTree,
-  type TerminationPolicy,
-} from '@/platform/process/process-tree';
+import { NodeProcess } from '@lody/shared/node/process';
+import { posixGroupTree, terminateTree, waitUntilGone } from '@lody/shared/node/process';
+import type { TerminationPolicy } from '@lody/shared/node/process';
 
 const SCROLLBACK_MAX_CHARS = 512 * 1024;
 const TITLE_PARSE_BUFFER_MAX_CHARS = 4096;
@@ -45,8 +42,13 @@ const TERMINAL_ENV_BLOCKLIST = new Set([
   LODY_MANAGED_GH_TOKEN_SHA256_ENV,
 ]);
 const require = createRequire(import.meta.url);
-/** A shell that ignores its hangup gets SIGTERM, then SIGKILL 2 s later. */
-const PTY_TERMINATION_POLICY: TerminationPolicy = { graceMs: 2_000, killWaitMs: 2_000 };
+/**
+ * The hangup is the polite signal: a shell's SIGHUP path forwards the hangup to
+ * its jobs (fish sends no SIGHUP to them when SIGTERM ends it first). A shell
+ * still running after the grace is SIGKILLed.
+ */
+const PTY_HANGUP_GRACE = Duration.seconds(2);
+const PTY_KILL_POLICY: TerminationPolicy = { graceMs: 0, killWaitMs: 2_000 };
 
 // @lydell/node-pty ships its binding through per-platform optional dependencies and
 // never compiles from source, so hosts it has no prebuild for (musl, armv7, …) resolve
@@ -162,9 +164,11 @@ function extractLatestTitle(record: TerminalRecord, data: string): string | null
  */
 const terminatePtyProcessGroup = (pid: number, logger: Logger): Promise<void> =>
   makePlatformRunner({ logger })(
-    Effect.flatMap(NodeProcess, (np) =>
-      terminateTree(posixGroupTree(np, pid), PTY_TERMINATION_POLICY)
-    )
+    Effect.gen(function* () {
+      const tree = posixGroupTree(yield* NodeProcess, pid);
+      if (yield* waitUntilGone(tree, PTY_HANGUP_GRACE)) return;
+      yield* terminateTree(tree, PTY_KILL_POLICY);
+    })
   );
 
 class TerminalPtyServiceImpl implements TerminalPtyServiceApi {

@@ -58,7 +58,7 @@ describe.skipIf(process.platform === 'win32')('terminal PTY termination', () => 
 
     const exit = await exited.promise;
     expect(exit.terminalId).toBe(terminalId);
-    // Neither the hangup nor SIGTERM ended it; the process layer's SIGKILL did.
+    // The hangup did not end it; the process layer's SIGKILL did.
     expect(exit.signal).toBe('9');
     expect(service.list('session-pty')).toEqual([]);
   });

@@ -15,7 +15,7 @@ import {
   EXECUTION_PLANE_RESOURCE_PROFILE,
 } from '../src/utils/process-resource-profile';
 import type { Logger } from '../src/utils/logger';
-import { FakeProcessTable } from './fake-process-table';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
 
 const createSilentLogger = (warnings: string[] = []): Logger => ({
   info: () => {},
@@ -109,7 +109,9 @@ class FakeCgroupFs {
 
     this.files.set(normalized, value);
     if (path.basename(normalized) === 'cgroup.kill' && value.trim() === '1') {
+      // cgroup.kill ends the whole subtree, nested cgroups included.
       this.files.set(path.join(path.dirname(normalized), 'cgroup.procs'), '');
+      this.files.set(path.join(path.dirname(normalized), 'cgroup.events'), 'populated 0\nfrozen 0\n');
     }
   }
 
@@ -151,6 +153,7 @@ class FakeCgroupFs {
     const defaults: Array<[string, string]> = [
       [path.join(dir, 'cgroup.procs'), ''],
       [path.join(dir, 'cgroup.kill'), ''],
+      [path.join(dir, 'cgroup.events'), 'populated 0\nfrozen 0\n'],
       [path.join(dir, 'memory.max'), 'max\n'],
       [path.join(dir, 'memory.high'), 'max\n'],
       [path.join(dir, 'memory.events'), 'max 0\noom 0\noom_kill 0\noom_group_kill 0\n'],
@@ -293,6 +296,63 @@ describe('session sandbox', () => {
 
     await sandbox.cleanup();
     expect(fakeFs.hasDir(sessionDir)).toBe(false);
+  });
+
+  // A session process may move itself into a nested cgroup; cgroup.procs then
+  // lists nobody, but the subtree is still populated.
+  it('kills members of nested cgroups under a forced terminate', async () => {
+    const cgroupMount = path.join(path.sep, 'mock', 'sys', 'fs', 'cgroup');
+    const fakeFs = new FakeCgroupFs(cgroupMount);
+    const sandbox = await createSessionSandboxFactory({
+      logger: createSilentLogger(),
+      deps: {
+        platform: 'linux',
+        cgroupMount,
+        fs: fakeFs,
+        readSelfCgroupPath: async () => '/system.slice/lody.service',
+        configureExecutionProcess: vi.fn(async () => {}),
+        killPid: vi.fn(),
+      },
+    })('session-1' as SessionId);
+    const sessionDir = path.join(
+      cgroupMount,
+      'system.slice',
+      'lody.service',
+      'lody-sessions',
+      'lody-session-session-1'
+    );
+    fakeFs.writeText(path.join(sessionDir, 'cgroup.events'), 'populated 1\nfrozen 0\n');
+
+    await sandbox.terminate(true);
+
+    expect(fakeFs.readText(path.join(sessionDir, 'cgroup.events'))).toContain('populated 0');
+  });
+
+  it('refuses to start a process once cleanup has removed the session cgroup', async () => {
+    const cgroupMount = path.join(path.sep, 'mock', 'sys', 'fs', 'cgroup');
+    const fakeFs = new FakeCgroupFs(cgroupMount);
+    const started: string[] = [];
+    const sandbox = await createSessionSandboxFactory({
+      logger: createSilentLogger(),
+      deps: {
+        platform: 'linux',
+        cgroupMount,
+        fs: fakeFs,
+        spawnProcess: ((command: string) => {
+          started.push(command);
+          return new FakeChildProcess(4321) as unknown as ChildProcess;
+        }) as unknown as typeof realSpawn,
+        readSelfCgroupPath: async () => '/system.slice/lody.service',
+        configureExecutionProcess: vi.fn(async () => {}),
+        killPid: vi.fn(),
+      },
+    })('session-1' as SessionId);
+    await sandbox.cleanup();
+
+    await expect(sandbox.spawn('agent', [], { cwd: process.cwd(), env: {} })).rejects.toThrow(
+      'Session sandbox is not initialized'
+    );
+    expect(started).toEqual([]);
   });
 
   it('replays buffered exit and close events when the process exits during cgroup attach', async () => {

@@ -106,13 +106,110 @@ CLI 时按 Ctrl-C 不再能传到这些命令；打开 `/dev/tty` 的提示（�
 提示输入。daemon 本身没有终端，所以只影响前台 CLI 运行。SIGKILL 之后的等待现在处处都有上限，
 因此像 `cloudflared stop()` 这样的调用可能会 reject，而不是一直挂起。
 
-未覆盖：Electron main、`packages/cli-supervisor` 和 `packages/shared`（共 13 个文件）运行在 CLI
-之外，仍然直接启动进程。要让它们也使用这一层，需要把它移到它们能导入的包里，这是另一项决定。
+## 后续：整个仓库只用一层
+
+又一个叠加 PR 把这一层移到 `packages/shared/src/node/process.ts`（`@lody/shared/node/process`），
+连同门面和假进程表（`process-testing.ts`）一起。Electron main、CLI supervisor 与 shared 的 Node
+辅助模块现在也都经由它。CLI 只保留自己的会话容器，以及一个只负责加上 CLI 日志器的薄门面。
+边界守卫现在覆盖 `apps/cli/src`、`apps/electron/src/main`、`packages/cli-supervisor/src` 和
+`packages/shared/src/node`（包括 `.cjs` 文件），并且也会标记 `<child>.kill(` 调用，确保所有终止
+路径都走这一层。规则随代码一起移到 `packages/shared/src/node/AGENTS.md`。
+
+决定：
+
+- **单个模块，不用相对导入。** Electron 用原生的 `node --test --experimental-strip-types` 跑测试，
+  无法解析省略扩展名的相对导入。因此 `process.ts` 保持为单个模块，`process-testing.ts` 也不用
+  TypeScript 参数属性。
+- **删除三份 `.cjs` 双胞胎文件。** `cli-detection`、`local-project`、`file-lock` 的手写 CommonJS
+  副本重复实现了各自的进程逻辑。在仓库里搜索后，只找到它们自己的对照测试在加载它们。那些测试中
+  独有的用例已改到 TypeScript 模块上。
+- **锁的存活判断分三态。** `file-lock` 调用 `probePid`，结果为 `ours`、`foreign` 或 `missing`。
+  只有 pid 仍属于本用户的存活进程时，锁才有效：EPERM 说明这个 pid 已经属于另一个用户，原持有者
+  已不在。原来的 `kill(pid, 0)` 实现也是这个结果。首次迁移时曾短暂把 EPERM 视为存活，现在有测试
+  排除这种情况。
+- **`signalChildTreeNow` 同步执行。** 退出处理器无法 await，所以它只发信号，不等整棵树消失。
+  如果用 fork 出去的 fiber，进程退出前一个信号都发不出去；在 Windows 上，`taskkill` 在同步步骤
+  内就已启动。
+- **supervisor 终止启动方描述的那棵树。** `LaunchHandle` 会说明它的子进程是否自成进程组；CLI 和
+  Electron 都不以 detached 方式启动被监管的 CLI。如果没有关停通道或关停通道失败，supervisor 会
+  通过进程树发送 SIGTERM；若这个 SIGTERM 无法送达，就提前结束宽限期。子进程树在 SIGKILL 后仍然
+  存活，会让 supervisor 进入 fatal 状态。
+- **Electron 退出使用有上限的进程树终止。** 退出时的所有权保持不变：仍有进程残留时，退出会失败。
+  在 Windows 上现在会结束整棵树，而不只是根进程。
+
+## 后续：正确性审查
+
+对这组叠加 PR 与其所替换代码的审查发现了若干回归，均已在最上层 PR 中修复；除特别说明外，每项都先写了会失败的测试：
+
+- **失败的 spawn 绝不会波及调用方自己的进程组。** 在 Node 报告 spawn 失败之前，`child.kill()` 会向
+  pid 0 发信号，也就是 daemon（或 Electron main）所在的整个进程组。现在 `childTree` 把没有 pid 的子进程视为已结束。
+  测试在一个真实且隔离的进程组中复现这个竞态。
+- **被放弃的命令先有 SIGTERM 宽限。** 超时的命令过去会被立即 SIGKILL，git 因而留下 `index.lock`，
+  阻塞之后所有写 index 的操作。`ABANDONED_COMMAND_POLICY` 现在先给 2 秒 SIGTERM。
+- **finalizer 内的等待靠时钟限时，而不是靠中断。** 被放弃命令的终止在作用域 finalizer 中运行，那里什么都
+  不可中断，所以一旦进程树挺过 SIGKILL（PID 1 daemon 下的僵尸进程、D 状态进程），`timeoutTo` 就会永远
+  等下去。`waitUntilGone` 现在对照时钟截止时间轮询；`taskkill` 的截止时间由一个独立的可中断计时 fiber
+  完成被等待的 Deferred。
+- **进程组信号返回 EPERM 时改为等待，而不是失败。** 在 macOS 上，唯一成员是已退出但尚未被回收的 leader
+  的进程组会返回 EPERM；现在交给有上限的等待来判定。真正属于其他用户的进程组在等待结束后仍以
+  `TerminationFailed` 结束。
+- **Windows 命令绝不从工作目录解析。** `cross-spawn` 会先在 cwd 中按所有 PATHEXT 扩展名查找，于是仓库里的
+  `git.cmd` 会在自动 git 刷新时被执行。现在 `nodeProcessLive` 只通过 PATH 中的绝对路径条目解析裸命令名。
+  找不到时，由 Node 自己的 spawn 报告 ENOENT。此前 cross-spawn 会用 cmd.exe 包装缺失的命令，导致
+  `git_executable_not_found` 丢失，缺失的启动器 `.exe` 也被当成已启动。仅有单元测试：未在 Windows 上实际运行。
+- **强制调用时 `Session.terminate` 会立即升级，也不等待终端。** 在温和终止进行中到来的强制调用现在立即
+  SIGKILL，并结束温和流程中的等待（终端、`session/close`）。强制拆除不再等待终端命令的温和停止，因为
+  sandbox 会直接杀掉它们。已完成的终止只有在此后没有启动新进程时才会被复用。
+- **即使有进程树残留，归档也会释放 Session。** 这个失败以 warn 级别记录；归档、空闲状态写入与本地项目移除都会继续。
+- **较小的修复。** PTY 的挂断信号就是温和信号：等待 2 秒，然后 SIGKILL。在 SIGHUP 之后立即发送 SIGTERM
+  会让 fish 来不及把挂断转发给它的作业；这一项没有测试，因为竞态依赖时序。其他修复：
+  - shell 环境探测允许 15 秒，且不缓存失败结果；
+  - `rundll32` 使用可见的显示状态；
+  - cgroup 容器在清理后拒绝 spawn，并把有成员的嵌套 cgroup 视为存活；
+  - supervisor 不再通过一个共享的永不 settle 的 promise 保留每一次运行；
+  - 调用方未传入 logger 时，进程层的警告会进入 daemon 的根 logger（或控制台）。
+
+## 后续：最后几处进程调用
+
+审查之后的全仓库排查发现还有三处进程不经过这一层，都在同一个 PR 中迁移：
+
+- **CLI 的登录 shell 探测用的是 `shell-env` 库。** 它通过 execa 启动 shell，3 秒超时只能停止等待，不能结束
+  shell：rc 文件卡住时，这个 shell 会一直存活到 daemon 退出。桌面端另有一套不同的探测。两者现在调用同一个探测
+  `@lody/shared/node/login-shell-env`，它经由 `runCommandText` 运行，上限 15 秒。它保留了 `shell-env` 的分隔符、
+  oh-my-zsh 与 tmux 防护，以及非 POSIX shell 的 zsh/bash 回退；也保留了桌面端的 `env -0` 与 `~/.bashrc` 加载，
+  在不支持 `-0` 的环境（BusyBox）回退到普通 `env`。CLI 仍在 3 秒后放行 ACP 启动，探测结束后替换缓存值。
+  该依赖已删除。
+- **`@lody/code-review-helper` 用 `execFile` 跑 git**（供 `lody review` 使用），没有超时。现在改用
+  `runCommandText`，上限 60 秒，同时适用 Windows 上命令绝不从仓库目录解析的规则。
+- **守卫漏掉了几种写法：** 可选链与带括号的 `.kill(` 调用、`child_process` 的动态 import 与 `createRequire`
+  导入、re-export，以及 cross-spawn 以外的进程库。现在它匹配任意导入位置上的模块名、一组进程库，以及任意接收者的
+  `.kill(`，并且也扫描 `packages/code-review-helper/src`。用一个包含每种写法的探针文件验证过：每种都会被报告，
+  而类型导入、`np.kill` 和非导入位置的字符串不会。
+
+对这部分工作的二次审查又发现以下问题，均在同一个 PR 中修复：
+- **探测输出丢失。** macOS 的 `/bin/sh` 会把 `echo -n` 原样打印，分隔符后的第一个变量因此损坏，所以分隔符改用 `printf` 输出。
+  探测为自身设置的 oh-my-zsh 与 tmux 防护变量不再泄漏到返回的环境中。
+- **桌面端探测失败的结果重新缓存。** 15 秒已足以覆盖冷登录较慢的情况，重试反而会拖慢每一次 CLI 启动。
+- **预备阶段的清理在进程树残留时不再 reject**，冷启动回退仍会执行。这一项没有测试：真实的预备运行时没有测试入口。
+- **已完成的 `Session.terminate` 不再复用。** 后来的 agent 留在 sandbox 里的进程也会被结束，失败的尝试会重试。
+- **`windowsTree.signal` 对已退出的根进程不做任何操作。** 它的 pid 可能已经属于别的进程。
+- **只读探测**（内存压力、进程表、登录 shell）使用 `READ_ONLY_ABANDON_POLICY`：到期直接 SIGKILL，不加 SIGTERM 宽限，
+  免得撑长它们本就很紧的时间预算。可能持有锁的命令保留默认宽限。这是有意的取舍：调用方收到超时时，进程树已确认结束，
+  立即重试不会与尚未退出的 git 竞争。
+- **去除重复。** ACP 与 supervisor 的强制结束改用 `terminateChildTree`；CLI 门面新增 `logPrefix` 以保留 ACP 标签。
+  会话 sandbox 复用 `unwrapSpawnFailure`，删除未被使用的共享版 `withSpawn`。
+
+有意不迁的：
+- 为独立进程生成的脚本（已在白名单中）；
+- node-pty：唯一的 PTY 启动方式，它的进程组经由这一层结束；
+- 构建脚本与 ACP 扩展子模块；
+- Electron 的 `shell.openExternal`/`openPath`；
+- worker 线程。
 
 ## 验证
 
-- 新增 `@effect/vitest` 0.26。新测试 `tests/platform-process.test.ts` 用 `TestClock` 驱动时间，
-  跑在内存进程表 `tests/fake-process-table.ts` 上（模拟进程组、被忽略的信号与 `taskkill`），覆盖：
+- 新增 `@effect/vitest` 0.26。新测试（现为 `packages/shared/tests/process.test.ts`） 用 `TestClock` 驱动时间，
+  跑在内存进程表 `packages/shared/src/node/process-testing.ts` 上（模拟进程组、被忽略的信号与 `taskkill`），覆盖：
   比 leader 活得久的后代、恰好在宽限期结束时升级、SIGKILL 被忽略时失败、强制终止、已空的树、
   温和终止进行中到来的强制终止立即升级、不等宽限期、作用域释放、温和 `taskkill` 被拒、`taskkill` 卡住、残留组先被跟踪后被
   移除，以及一棵真实的 POSIX 进程树。

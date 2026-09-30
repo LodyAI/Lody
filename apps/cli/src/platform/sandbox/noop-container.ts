@@ -1,9 +1,9 @@
 import { Duration, Effect, Either, HashMap, Option, Ref, type Scope } from 'effect';
 
-import type { TerminationFailed } from '../process/errors';
-import { spawnProcess } from '../process/managed-process';
-import { NodeProcess } from '../process/node-process';
-import { terminateTree, type ProcessTree } from '../process/process-tree';
+import type { TerminationFailed } from '@lody/shared/node/process';
+import { spawnProcess } from '@lody/shared/node/process';
+import { NodeProcess } from '@lody/shared/node/process';
+import { terminateTree, type ProcessTree } from '@lody/shared/node/process';
 
 import type { ProcessContainer } from './types';
 

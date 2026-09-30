@@ -7,14 +7,15 @@ import type {
   CodeCollabV2FileTreeValue,
 } from '@lody/shared';
 
-import { runCommandText } from '@/platform/promise-facade';
+// The shared facade directly: the CLI one loads the daemon's winston logger.
+import { runCommandText } from '@lody/shared/node/process';
 
 import { countTextLines } from './diff-line-counts';
 
 // Pure Git-backed scanning + All Changes computation shared by the file-index
 // Tinypool worker (`file-index-scan-worker.ts`) and the main-thread fallback in
 // `code-collab-v2-service.ts`. Keep this module dependency-light (node builtins,
-// `@lody/shared` types and the platform process facade only) so the worker bundle stays
+// `@lody/shared` types and the shared process facade only) so the worker bundle stays
 // free of wasm/top-level-await imports. The filesystem (`opendir`) directory-scan fallback is intentionally NOT
 // here: its error classification differs between the worker and the service.
 

@@ -15,7 +15,7 @@ import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { requestLocalCliHostShutdown } from '@lody/shared/node/local-cli-host-lease';
 import { calculateWorkerMaxOldSpaceMiB } from '@lody/cli-supervisor';
 import { startProcess, type ProcessHandle } from '@/platform/promise-facade';
-import type { NodeProcessApi } from '@/platform/process/node-process';
+import type { NodeProcessApi } from '@lody/shared/node/process';
 export { LODY_LOG_DIR } from '@/utils/log-retention';
 
 export const DAEMON_PID_FILE = path.join(getLodyDataDir(), 'daemon.pid');

@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { spawn } from 'node:child_process'
+import { runCommandText } from '@lody/shared/node/process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -118,48 +118,23 @@ function runDesktopIntegrationCommand(
   args: string[],
   onComplete: (result: DesktopIntegrationCommandResult) => void
 ): void {
-  let child: ReturnType<typeof spawn>
-  try {
-    child = spawn(command, args, {
-      stdio: ['ignore', 'ignore', 'pipe']
-    })
-  } catch (error) {
-    onComplete({
-      ok: false,
-      status: null,
-      error: error instanceof Error ? error.message : String(error)
-    })
-    return
-  }
-
-  let stderr = ''
-  const stderrStream = child.stderr
-  if (stderrStream) {
-    stderrStream.setEncoding('utf8')
-    stderrStream.on('data', (chunk: string) => {
-      stderr = `${stderr}${chunk}`
-      if (stderr.length > MAX_DESKTOP_COMMAND_STDERR_LENGTH) {
-        stderr = stderr.slice(-MAX_DESKTOP_COMMAND_STDERR_LENGTH)
-      }
-    })
-  }
-
-  child.on('error', (error) => {
-    onComplete({
-      ok: false,
-      status: null,
-      error: error.message
-    })
-  })
-
-  child.on('close', (status, signal) => {
-    onComplete({
-      ok: status === 0,
-      status,
-      signal,
-      stderr: stderr.trim() || undefined
-    })
-  })
+  void runCommandText({ command, args, check: 'none' }).then(
+    ({ code, signal, stderr }) => {
+      onComplete({
+        ok: code === 0,
+        status: code,
+        signal,
+        stderr: stderr.slice(-MAX_DESKTOP_COMMAND_STDERR_LENGTH).trim() || undefined
+      })
+    },
+    (error: unknown) => {
+      onComplete({
+        ok: false,
+        status: null,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+  )
 }
 
 function registerLinuxAppImageProtocolHandler({

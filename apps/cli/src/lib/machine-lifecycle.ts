@@ -18,8 +18,8 @@ import {
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { startProcess } from '@/platform/promise-facade';
-import type { NodeProcessApi } from '@/platform/process/node-process';
-import type { TerminationPolicy } from '@/platform/process/process-tree';
+import type { NodeProcessApi } from '@lody/shared/node/process';
+import type { TerminationPolicy } from '@lody/shared/node/process';
 
 // The reserved Worker exit codes are part of the shared Supervisor<->Worker
 // contract; Electron consumes the same values from @lody/shared.

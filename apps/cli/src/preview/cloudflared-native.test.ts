@@ -1,7 +1,7 @@
 import { ChildProcess } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { NodeProcessApi } from '@/platform/process/node-process';
+import type { NodeProcessApi } from '@lody/shared/node/process';
 import { startCloudflaredNative, type CloudflaredProcess } from './cloudflared-native';
 
 class ControlledChild extends ChildProcess {
@@ -15,6 +15,9 @@ class ControlledChild extends ChildProcess {
     null,
     null,
   ];
+  // A started child always has a pid; `launch` routes the process layer's
+  // signals for it back to `kill` below.
+  override pid: number | undefined = 4242;
   signals: Array<NodeJS.Signals | number> = [];
   exitOnSignal = true;
   override kill(signal: NodeJS.Signals | number = 'SIGTERM'): boolean {
@@ -45,6 +48,7 @@ afterEach(async () => {
 
 function launch() {
   const spawned = Promise.withResolvers<ControlledChild>();
+  let current: ControlledChild | undefined;
   const result = startCloudflaredNative({
     binary: '/managed/cloudflared',
     proxyOrigin: 'http://127.0.0.1:5173',
@@ -53,14 +57,24 @@ function launch() {
       platform: 'linux',
       spawn: () => {
         const child = new ControlledChild();
+        current = child;
         spawned.resolve(child);
         return child;
       },
       spawnSync: () => {
         throw new Error('cloudflared is never run synchronously');
       },
-      kill: () => {
-        throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+      kill: (target, signal) => {
+        const child = current;
+        if (
+          !child ||
+          Math.abs(target) !== child.pid ||
+          child.exitCode !== null ||
+          child.signalCode !== null
+        ) {
+          throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+        }
+        if (signal !== 0) child.kill(signal);
       },
     } satisfies NodeProcessApi,
   });

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId, RepoId, SessionId, WorkspaceId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
-import type { NodeProcessApi } from '@/platform/process/node-process';
+import type { NodeProcessApi } from '@lody/shared/node/process';
 import {
   buildCredentialHelperValueForHost,
   ensureCredentialHelperScript,

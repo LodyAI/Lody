@@ -220,7 +220,7 @@ Flock 新鲜度同步用 `timeout` + `orElse` 回落本地副本。约束：**�
 - 位置：`apps/electron/src/main/services/cli-service.ts`、`loro-data-plane-relay.ts`、
   `packages/cli-supervisor/src/supervisor.ts`。
 - 证据：#849、#742；开放 #448、#938、#1054。
-- 目标：CLI 子进程用 ProcessService（需要把它移到 supervisor 可依赖的位置）；每个 sender 一个
+- 目标：CLI 子进程与各处进程终止已迁到共享进程层（[#1070](https://github.com/LodyAI/Lody/pull/1070)，`@lody/shared/node/process`）；每个 sender 一个
   作用域；代理设置放进 `SubscriptionRef` 并定义重启语义；supervisor 改为单个 fiber + `Schedule`。
 - 约束：`apps/electron/AGENTS.md` 已在 8 KiB 上限边缘；electron main 的 `node --test` 对 shared
   的无扩展名导入会失败。
@@ -238,8 +238,8 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 
 ## 建议顺序
 
-1. L0 + L1 ProcessService，迁移全部 ACP 相关进程（Turn 提案第一个 PR）。
-2. L1 其余 spawn 调用方。
+1. L0 + L1 ProcessService，迁移全部 ACP 相关进程（Turn 提案第一个 PR，#1065）。
+2. L1 其余 spawn 调用方（#1069），并把进程层移入共享包、覆盖 Electron main、supervisor 与 shared（#1070）。
 3. 与 1–2 并行：loro-repo Flock 持久化迁移。
 4. loro-repo 与 streams-crdt 的 Effect 内核与 `loro-repo/effect` 入口（各自仓库）。
 5. Lody L2：可在第 2 步后基于临时 `LoroRepo` Layer 开始，第 4 步完成后替换 Layer；同期完成

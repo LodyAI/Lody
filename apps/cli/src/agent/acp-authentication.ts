@@ -35,8 +35,8 @@ import {
   BuiltinAuthenticationOutputParser,
 } from './acp-authentication-output';
 import { shutdownLocalAcpAgent, spawnAcpProcess, terminateAcpProcessTree } from './acp-runner';
-import { startProcess, withSpawn } from '@/platform/promise-facade';
-import type { NodeProcessApi } from '@/platform/process/node-process';
+import { startProcess } from '@/platform/promise-facade';
+import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { ManagedRuntimeProgressEvent } from './managed-agent-runtime';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { getLoginShellEnv } from './login-shell-env';
@@ -179,7 +179,7 @@ const AcpAuthenticationInteractionInputSchema = z.discriminatedUnion('action', [
 type AcpAuthenticationManagerOptions = {
   authenticationTimeoutMs?: number;
   terminationGraceMs?: number;
-  spawnProcess?: NodeProcessApi['spawn'];
+  nodeProcess?: NodeProcessApi;
   resolveLoginShellEnv?: typeof getLoginShellEnv;
   resolveAuthenticationProcessLaunch?: typeof resolveBuiltinAuthenticationProcessLaunch;
 };
@@ -200,7 +200,7 @@ type ProbeBuiltinAuthenticationOptions = {
   logger: Logger;
   signal?: AbortSignal;
   statusProbeTimeoutMs?: number;
-  spawnProcess?: NodeProcessApi['spawn'];
+  nodeProcess?: NodeProcessApi;
   resolveLoginShellEnv?: typeof getLoginShellEnv;
 };
 
@@ -452,7 +452,7 @@ export async function probeBuiltinAuthentication(
       options: { cwd: os.homedir(), env, stdio: 'ignore' },
       processGroup: true,
     },
-    withSpawn(options.spawnProcess)
+    { nodeProcess: options.nodeProcess }
   );
   let termination: Promise<void> | undefined;
   const terminateProbe = (): void => {
@@ -461,6 +461,7 @@ export async function probeBuiltinAuthentication(
       sessionLabel: `acp-auth:${options.agentType}:status`,
       exitTimeoutMs: STATUS_PROBE_KILL_WAIT_MS,
       force: true,
+      nodeProcess: options.nodeProcess,
     });
   };
   const timeoutMs = Math.max(1, options.statusProbeTimeoutMs ?? DEFAULT_STATUS_PROBE_TIMEOUT_MS);
@@ -534,7 +535,7 @@ export class AcpAuthenticationManager {
   private readonly runningByAgentType = new Map<string, RunningAuthentication>();
   private readonly authenticationTimeoutMs: number;
   private readonly terminationGraceMs: number;
-  private readonly spawnProcess: NodeProcessApi['spawn'] | undefined;
+  private readonly nodeProcess: NodeProcessApi | undefined;
   private readonly resolveLoginShellEnv: typeof getLoginShellEnv;
   private readonly resolveAuthenticationProcessLaunch: typeof resolveBuiltinAuthenticationProcessLaunch;
 
@@ -550,7 +551,7 @@ export class AcpAuthenticationManager {
       1,
       options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS
     );
-    this.spawnProcess = options.spawnProcess;
+    this.nodeProcess = options.nodeProcess;
     this.resolveLoginShellEnv = options.resolveLoginShellEnv ?? getLoginShellEnv;
     this.resolveAuthenticationProcessLaunch =
       options.resolveAuthenticationProcessLaunch ?? resolveBuiltinAuthenticationProcessLaunch;
@@ -709,7 +710,7 @@ export class AcpAuthenticationManager {
           options: { cwd: os.homedir(), env, stdio: ['pipe', 'pipe', 'pipe'] },
           processGroup: true,
         },
-        withSpawn(this.spawnProcess)
+        { nodeProcess: this.nodeProcess }
       );
       running.child = child;
       releaseProfile?.recordNativePid(child.pid);
@@ -978,7 +979,7 @@ export class AcpAuthenticationManager {
               env,
               command: launch.command,
               args: [...args],
-              spawnImpl: this.spawnProcess,
+              spawnImpl: this.nodeProcess?.spawn,
             });
             running.child = child;
             running.terminating = false;
@@ -1187,6 +1188,7 @@ export class AcpAuthenticationManager {
                 logger: this.logger,
                 sessionLabel: `acp-auth:${options.agentType}:protocol`,
                 exitTimeoutMs: this.terminationGraceMs,
+                nodeProcess: this.nodeProcess,
               }).catch((error: unknown) => {
                 this.logger.debug(
                   `[acp-auth] Failed to terminate protocol authentication process: ${formatErrorMessage(error)}`
@@ -1221,6 +1223,7 @@ export class AcpAuthenticationManager {
       logger: this.logger,
       sessionLabel: `acp-auth:${agentType}:${reason}`,
       exitTimeoutMs: this.terminationGraceMs,
+      nodeProcess: this.nodeProcess,
     }).catch((error: unknown) => {
       this.logger.debug(
         `[acp-auth] Failed to terminate authentication process: ${formatErrorMessage(error)}`

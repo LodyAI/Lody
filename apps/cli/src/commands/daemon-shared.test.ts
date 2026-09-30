@@ -4,8 +4,8 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startProcess } from '@/platform/promise-facade';
-import type { NodeProcessApi } from '@/platform/process/node-process';
-import { FakeProcessTable } from '../../tests/fake-process-table';
+import type { NodeProcessApi } from '@lody/shared/node/process';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import {
   interpretDaemonRunnerLaunchOutcome,
   readPidFileRecord,

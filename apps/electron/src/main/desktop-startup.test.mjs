@@ -63,7 +63,10 @@ before(async () => {
       lib: {
         entry: join(electronRoot, '../../packages/cli-supervisor/src/supervisor.ts'),
         formats: ['cjs']
-      }
+      },
+      // The process layer is Node code: keep Node built-ins and its runtime
+      // packages as real modules instead of browser stubs.
+      rollupOptions: { external: [/^node:/, /^effect(\/|$)/, 'cross-spawn'] }
     }
   })
   const supervisorExports = {}
@@ -73,12 +76,17 @@ before(async () => {
     ).code,
     {
       exports: supervisorExports,
+      // Resolve the externals where the process layer itself resolves them.
+      require: createRequire(join(electronRoot, '../../packages/shared/package.json')),
+      process,
       setTimeout,
       clearTimeout,
       setInterval,
       clearInterval,
+      queueMicrotask,
       AbortController,
       DOMException,
+      URL,
       console
     }
   )

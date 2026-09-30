@@ -4,7 +4,8 @@ import path from 'node:path';
 
 import { diffLines } from 'diff';
 
-import { runCommandTextSync } from '@/platform/promise-facade';
+// The shared facade directly: the CLI one loads the daemon's winston logger.
+import { runCommandTextSync } from '@lody/shared/node/process';
 
 /**
  * Added/deleted line counts for a single file change, as `[add, del]`.
@@ -23,7 +24,7 @@ import { runCommandTextSync } from '@/platform/promise-facade';
  *   3. otherwise the cheap prefix/suffix estimate as a last resort.
  *
  * This module is intentionally dependency-light (`diff`, node builtins and the
- * platform process facade) so it can be bundled into the standalone diff worker entry.
+ * shared process facade) so it can be bundled into the standalone diff worker entry.
  */
 
 /**

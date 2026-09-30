@@ -27,7 +27,9 @@ export async function openBrowser(url: string): Promise<void> {
   const handle = startProcess({
     command,
     args,
-    options: { stdio: 'ignore' },
+    // rundll32 passes its show state on to ShellExecute: hidden, a browser or
+    // the desktop app cold-started for the URL would open without a window.
+    options: { stdio: 'ignore', windowsHide: false },
     processGroup: false,
   });
   let spawnError: unknown;

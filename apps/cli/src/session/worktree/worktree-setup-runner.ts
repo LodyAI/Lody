@@ -12,7 +12,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { startProcess } from '@/platform/promise-facade';
-import type { TerminationPolicy } from '@/platform/process/process-tree';
+import type { TerminationPolicy } from '@lody/shared/node/process';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { FakeProcessTable } from '../../tests/fake-process-table';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
 
 const fixture = vi.hoisted(() => ({ home: '' }));
 

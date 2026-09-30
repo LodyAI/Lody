@@ -1,15 +1,9 @@
-import { Cause, HashMap, Layer, Logger, LogLevel, Option } from 'effect';
+import { Cause, Layer, Logger, LogLevel } from 'effect';
 
 import type { Logger as LodyLogger } from '@/utils/logger';
 
 const formatLogMessage = (message: unknown): string =>
   Array.isArray(message) ? message.map((part) => String(part)).join(' ') : String(message);
-
-/**
- * Annotate an Effect's logs with the owner label Lody log lines start with,
- * e.g. `[session-id]`, so process-layer diagnostics stay attributable.
- */
-export const LOG_PREFIX_ANNOTATION = 'lody.logPrefix';
 
 /**
  * Route Effect's `Effect.log*` calls into the daemon's Lody logger.
@@ -18,19 +12,16 @@ export const LOG_PREFIX_ANNOTATION = 'lody.logPrefix';
  * own level and file-sink policy; filtering here too would silently drop debug
  * diagnostics the daemon file log is required to keep.
  */
-export const lodyLoggerLayer = (logger: LodyLogger): Layer.Layer<never> =>
+export const lodyLoggerLayer = (logger: LodyLogger, prefix?: string): Layer.Layer<never> =>
   Layer.merge(
     Logger.replace(
       Logger.defaultLogger,
-      Logger.make(({ logLevel, message, cause, annotations }) => {
-        const prefix = Option.match(HashMap.get(annotations, LOG_PREFIX_ANNOTATION), {
-          onNone: () => '',
-          onSome: (value) => `${String(value)} `,
-        });
+      Logger.make(({ logLevel, message, cause }) => {
+        const head = prefix === undefined ? '' : `${prefix} `;
         const body = Cause.isEmpty(cause)
           ? formatLogMessage(message)
           : `${formatLogMessage(message)} ${Cause.pretty(cause)}`;
-        const text = `${prefix}${body}`;
+        const text = `${head}${body}`;
         switch (logLevel._tag) {
           case 'Fatal':
           case 'Error':

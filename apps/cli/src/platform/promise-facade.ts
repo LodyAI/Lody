@@ -1,43 +1,57 @@
 import type { ChildProcess } from 'node:child_process';
 
-import { Cause, type Duration, Effect, Exit, Layer, Logger } from 'effect';
+import type { Duration, Layer } from 'effect';
+import * as processLayer from '@lody/shared/node/process';
+import {
+  nodeProcessLive,
+  type CommandSpec,
+  type CommandText,
+  type NodeProcess,
+  type NodeProcessApi,
+  type ProcessHandle,
+  type ProcessRunner,
+  type SpawnSpec,
+  type TerminationPolicy,
+} from '@lody/shared/node/process';
 
-import type { Logger as LodyLogger } from '@/utils/logger';
+import { getLogger, type Logger as LodyLogger } from '@/utils/logger';
 
 import { lodyLoggerLayer } from './logger';
-import {
-  isPidAlive,
-  runCommand,
-  runCommandOk,
-  runCommandSync,
-  runCommandSyncOk,
-  type CommandOutput,
-  type CommandSpec,
-} from './process/command';
-import { SpawnFailed } from './process/errors';
-import {
-  spawnProcess,
-  type ManagedProcess,
-  type ProcessExit,
-  type SpawnSpec,
-} from './process/managed-process';
-import { NodeProcess, nodeProcessLive, type NodeProcessApi } from './process/node-process';
-import type { TerminationPolicy } from './process/process-tree';
 
-/**
- * TEMPORARY: the door from Promise code to Effect services that it has not
- * been migrated onto yet. Each caller is an upper layer that will become an
- * Effect itself and then provide these services through its own Layer; see
+/*
+ * TEMPORARY: the CLI's door to the shared process layer's Promise facades
+ * (`@lody/shared/node/process`), adding only the CLI logger. Each caller is an
+ * upper layer that will become an Effect itself; see
  * `.agents/docs/cli-effect-ts.md#temporary-promise-facades`.
- *
- * Failures reject with the typed error itself (`Cause.squash`), not a
- * `FiberFailure` wrapper, so `instanceof` and `error.message` keep working for
- * Promise callers.
  */
+
+export type { CommandText, ProcessHandle };
+export type PlatformRunner = ProcessRunner;
+
 export interface PlatformFacadeOptions {
   readonly logger?: LodyLogger;
+  /** Owner label the process layer's log lines start with, e.g. `[session-id]`. */
+  readonly logPrefix?: string;
   readonly nodeProcess?: NodeProcessApi;
 }
+
+// Without a caller's logger the daemon's root logger still records process
+// diagnostics, such as a tree that survived termination. Exported for shared
+// helpers that run commands themselves (the login-shell probe).
+export const toShared = (
+  options: PlatformFacadeOptions = {}
+): processLayer.ProcessFacadeOptions => ({
+  nodeProcess: options.nodeProcess,
+  loggerLayer: lodyLoggerLayer(options.logger ?? getLogger(), options.logPrefix),
+});
+
+export const platformLayer = (options: PlatformFacadeOptions): Layer.Layer<NodeProcess> =>
+  processLayer.processLayer(toShared(options));
+
+export const makePlatformRunner = (options: PlatformFacadeOptions): PlatformRunner =>
+  processLayer.makeProcessRunner(toShared(options));
+
+export const runPromiseSquashed = processLayer.runPromiseSquashed;
 
 /** Facade options that swap only the spawn function, for callers with a spawn test seam. */
 export const withSpawn = (
@@ -46,118 +60,27 @@ export const withSpawn = (
 ): PlatformFacadeOptions =>
   spawnImpl ? { ...options, nodeProcess: { ...nodeProcessLive, spawn: spawnImpl } } : options;
 
-export type PlatformRunner = <A, E>(effect: Effect.Effect<A, E, NodeProcess>) => Promise<A>;
-
-export const platformLayer = (options: PlatformFacadeOptions): Layer.Layer<NodeProcess> =>
-  Layer.merge(
-    Layer.succeed(NodeProcess, options.nodeProcess ?? nodeProcessLive),
-    options.logger
-      ? lodyLoggerLayer(options.logger)
-      : Logger.replace(Logger.defaultLogger, Logger.none)
-  );
-
-export const makePlatformRunner = (options: PlatformFacadeOptions): PlatformRunner => {
-  const layer = platformLayer(options);
-  return (effect) => runPromiseSquashed(Effect.provide(effect, layer));
-};
-
-export const runPromiseSquashed = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
-  Effect.runPromiseExit(effect).then((exit) => {
-    if (Exit.isSuccess(exit)) return exit.value;
-    throw Cause.squash(exit.cause);
-  });
-
-/**
- * A spawn failure surfaces as the OS error itself (`code: 'ENOENT'`), as it did
- * before these callers moved onto the process layer.
- */
-const unwrapSpawnFailure = (error: unknown): unknown =>
-  error instanceof SpawnFailed && error.cause instanceof Error ? error.cause : error;
-
-const runSyncSquashed = <A, E>(effect: Effect.Effect<A, E>): A => {
-  const exit = Effect.runSyncExit(effect);
-  if (Exit.isSuccess(exit)) return exit.value;
-  throw Cause.squash(exit.cause);
-};
-
-export interface CommandText {
-  readonly code: number | null;
-  readonly signal: NodeJS.Signals | null;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-const toText = (output: CommandOutput): CommandText => ({
-  code: output.code,
-  signal: output.signal,
-  stdout: output.stdout.toString('utf8'),
-  stderr: output.stderr.toString('utf8'),
-});
-
-/**
- * TEMPORARY facade over `runCommand` / `runCommandOk` for Promise callers.
- * `check: 'exit-0'` rejects with `CommandFailed` on a non-zero exit, like
- * `execFile`; `check: 'none'` resolves with any exit status.
- */
-export const runCommandText = async (
+export const runCommandText = (
   spec: CommandSpec & { readonly check: 'exit-0' | 'none' },
   options: PlatformFacadeOptions = {}
-): Promise<CommandText> => {
-  const run = makePlatformRunner(options);
-  try {
-    return toText(await run(spec.check === 'exit-0' ? runCommandOk(spec) : runCommand(spec)));
-  } catch (error) {
-    throw unwrapSpawnFailure(error);
-  }
-};
+): Promise<CommandText> => processLayer.runCommandText(spec, toShared(options));
 
-/** TEMPORARY synchronous facade over `runCommandSync`; blocks the event loop. */
 export const runCommandTextSync = (
   spec: CommandSpec & {
     readonly timeout: Duration.DurationInput;
     readonly check: 'exit-0' | 'none';
   },
   options: PlatformFacadeOptions = {}
-): CommandText => {
-  const effect = spec.check === 'exit-0' ? runCommandSyncOk(spec) : runCommandSync(spec);
-  try {
-    return toText(runSyncSquashed(Effect.provide(effect, platformLayer(options))));
-  } catch (error) {
-    throw unwrapSpawnFailure(error);
-  }
-};
+): CommandText => processLayer.runCommandTextSync(spec, toShared(options));
 
-export interface ProcessHandle {
-  readonly child: ChildProcess;
-  /** Resolves with the root's exit; never rejects. */
-  readonly exited: Promise<ProcessExit>;
-  /** Terminate the whole tree; rejects with `TerminationFailed` if it survives. */
-  terminate(policy: TerminationPolicy): Promise<void>;
-}
+export const startProcess = (spec: SpawnSpec, options: PlatformFacadeOptions = {}): ProcessHandle =>
+  processLayer.startProcess(spec, toShared(options));
 
-/**
- * TEMPORARY facade over `spawnProcess` for long-lived children owned by Promise
- * code. Synchronous like `spawn`: a start failure arrives on `child`'s `error`
- * event, and `exited` then resolves with nulls.
- */
-export const startProcess = (
-  spec: SpawnSpec,
+export const terminateChildTree = (
+  child: ChildProcess,
+  policy: TerminationPolicy & { readonly processGroup: boolean },
   options: PlatformFacadeOptions = {}
-): ProcessHandle => {
-  let managed: ManagedProcess;
-  try {
-    managed = runSyncSquashed(Effect.provide(spawnProcess(spec), platformLayer(options)));
-  } catch (error) {
-    throw unwrapSpawnFailure(error);
-  }
-  const run = makePlatformRunner(options);
-  return {
-    child: managed.child,
-    exited: runPromiseSquashed(managed.exited),
-    terminate: (policy) => run(managed.terminate(policy)),
-  };
-};
+): Promise<void> => processLayer.terminateChildTree(child, policy, toShared(options));
 
-/** TEMPORARY synchronous facade over `isPidAlive`. */
 export const isPidAliveSync = (pid: number, options: PlatformFacadeOptions = {}): boolean =>
-  runSyncSquashed(Effect.provide(isPidAlive(pid), platformLayer(options)));
+  processLayer.isPidAliveSync(pid, toShared(options));

@@ -322,8 +322,8 @@ The turn layer depends on L2 and, by the layering rule, finishes last.
   `packages/cli-supervisor/src/supervisor.ts`.
 - **Evidence:** #849, #742; open #448, #938, #1054.
 - **Target:**
-  - the CLI child process uses ProcessService, which must move somewhere the supervisor can
-    depend on;
+  - process spawning and termination already use the shared process layer
+    (`@lody/shared/node/process`, [#1070](https://github.com/LodyAI/Lody/pull/1070));
   - one scope per sender;
   - proxy settings go into a `SubscriptionRef`, with defined restart semantics;
   - the supervisor becomes one fiber + `Schedule`.
@@ -349,8 +349,9 @@ Migrate these only when touched:
 
 ## Suggested order
 
-1. L0 + L1 ProcessService, migrating every ACP-related process (the turn proposal's first PR).
-2. The remaining L1 spawn callers.
+1. L0 + L1 ProcessService, migrating every ACP-related process (the turn proposal's first PR, #1065).
+2. The remaining L1 spawn callers (#1069), then the layer moved into the shared package and
+   extended to Electron main, the supervisor and shared helpers (#1070).
 3. In parallel with 1–2: the loro-repo Flock persistence migration.
 4. The Effect core and `loro-repo/effect` entry for loro-repo and streams-crdt, each in its own
    repository.

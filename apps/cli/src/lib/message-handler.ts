@@ -4077,7 +4077,7 @@ export class MessageHandler {
 
     if (this.sessionManager.hasSession(sessionId)) {
       this.logger.debug(`[${sessionId}] Terminating active session`);
-      await this.sessionManager.terminateSession(sessionId, true);
+      await this.terminateSessionForRelease(sessionId);
       if (options.writeIdleStatus !== false) {
         await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
           status: SessionStatusFactory.idle(),
@@ -4358,6 +4358,21 @@ export class MessageHandler {
     return cleanupResult;
   }
 
+  /**
+   * Archive and delete release the Session whether or not every process tree
+   * could be proven gone: the Session is not reused, so a survivor is an
+   * orphan to report, not a reason to leave the archive half done.
+   */
+  private async terminateSessionForRelease(sessionId: SessionId): Promise<void> {
+    try {
+      await this.sessionManager.terminateSession(sessionId, true);
+    } catch (error) {
+      this.logger.warn(
+        `[${sessionId}] Releasing the session although its processes could not all be terminated: ${formatErrorMessage(error)}`
+      );
+    }
+  }
+
   private async terminateActiveChildSessions(
     parentSessionId: SessionId,
     reason: string
@@ -4376,7 +4391,7 @@ export class MessageHandler {
         this.closeSessionTerminals?.(childSessionId);
         await this.finalizeACPState(childSessionId);
         await this.previewService.closeSessionPreviewForCleanup(childSessionId, reason);
-        await this.sessionManager.terminateSession(childSessionId, true);
+        await this.terminateSessionForRelease(childSessionId);
         this.store.get(childSessionId).logger = null;
       })
     );

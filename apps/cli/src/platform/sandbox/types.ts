@@ -2,9 +2,9 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
 import { Data, type Effect } from 'effect';
 
-import type { SpawnFailed, TerminationFailed } from '../process/errors';
-import type { ManagedProcess, ProcessExit } from '../process/managed-process';
-import type { TerminationPolicy } from '../process/process-tree';
+import type { SpawnFailed, TerminationFailed } from '@lody/shared/node/process';
+import type { ManagedProcess, ProcessExit } from '@lody/shared/node/process';
+import type { TerminationPolicy } from '@lody/shared/node/process';
 
 export interface SessionSandboxLimits {
   memoryMaxBytes?: number;

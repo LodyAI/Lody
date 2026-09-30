@@ -1,10 +1,17 @@
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import { totalmem } from 'node:os'
 import { basename, join, resolve as resolvePath } from 'node:path'
 import { app, powerSaveBlocker, type WebContents } from 'electron'
-import { Effect } from 'effect'
+import { Effect, Layer, Logger, LogLevel } from 'effect'
+import {
+  signalChildTreeNow,
+  startProcess,
+  type ProcessFacadeOptions,
+  type ProcessHandle,
+  type TerminationPolicy
+} from '@lody/shared/node/process'
 import { isLocalSessionControlRequest } from '@lody/shared/node/local-session-control'
 import { isLocalProjectControlRequest } from '@lody/shared/node/local-project-control'
 import {
@@ -72,6 +79,30 @@ const CLI_OUTPUT_BUFFER_MAX_EVENTS = 2000
 // force-killing it. Kept short so Command+Q feels responsive; with the CLI's own
 // fast socket teardown a clean exit normally lands well under this.
 const CLI_QUIT_GRACE_MS = 3000
+// How long a SIGKILLed embedded CLI may take to be reaped before quit reports it.
+const CLI_FORCE_KILL_WAIT_MS = 5000
+// The embedded CLI shares Electron's process group: it is not spawned detached,
+// so termination reaches it (and on Windows its tree) through its own pid. The
+// supervisor must be told the same thing through `LaunchHandle.processGroup`.
+const EMBEDDED_CLI_PROCESS_GROUP = false
+// Process-layer diagnostics (a tree that survived termination) go to the daily log.
+const CLI_PROCESS_OPTIONS: ProcessFacadeOptions = {
+  loggerLayer: Layer.merge(
+    Logger.replace(
+      Logger.defaultLogger,
+      Logger.make(({ logLevel, message }) => {
+        const text = (Array.isArray(message) ? message : [message]).map(String).join(' ')
+        if (LogLevel.greaterThanEqual(logLevel, LogLevel.Warning)) {
+          getDesktopLog().warn('cli-process', text)
+        } else {
+          getDesktopLog().debug('cli-process', text)
+        }
+      })
+    ),
+    // The desktop log applies its own level; keep the escalation diagnostics.
+    Logger.minimumLogLevel(LogLevel.Debug)
+  )
+}
 const CLI_ELECTRON_BOOTSTRAP_ENV = 'LODY_ELECTRON_BOOTSTRAP'
 const CLI_ELECTRON_SESSION_TOKEN_ENV = 'LODY_ELECTRON_SESSION_TOKEN'
 // See apps/cli/src/commands/start.ts:ELECTRON_SESSION_USER_ID_ENV for rationale.
@@ -346,6 +377,21 @@ function resolveRepoRoot(): string | null {
   return null
 }
 
+/**
+ * Best-effort signal from `process.on('exit')`, where no later tick runs, so it
+ * must be delivered synchronously and cannot escalate or wait. Like Node's
+ * default child kill, it asks POSIX trees to exit and force-kills on Windows,
+ * where a console-less CLI refuses a graceful `taskkill`.
+ */
+function signalCliTreeOnExit(child: ChildProcess): void {
+  signalChildTreeNow(
+    child,
+    process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM',
+    { processGroup: EMBEDDED_CLI_PROCESS_GROUP },
+    CLI_PROCESS_OPTIONS
+  )
+}
+
 function formatUnknownError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -450,7 +496,7 @@ function readMachineIdFromCliCredentials(): string | null {
 }
 
 export class CliService {
-  private readonly trackedCliChildren = new Set<ChildProcess>()
+  private readonly trackedCliChildren = new Map<ChildProcess, ProcessHandle>()
   private autoStartSender: WebContents | undefined
   private readonly cliOutputBuffer: CliOutputEvent[] = []
   private readonly cliStateSenders = new Set<WebContents>()
@@ -514,6 +560,7 @@ export class CliService {
         }
       },
       decideExit: (result) => traceEmbeddedCliExitDecision(result, decideEmbeddedCliExit(result)),
+      processOptions: CLI_PROCESS_OPTIONS,
       existingRuntimePolicy:
         desktopInstallationProfile.releaseChannel === 'nightly' ? 'reject' : 'attach',
       ownership: this.executionHost?.ownership ?? {
@@ -881,12 +928,8 @@ export class CliService {
       this.supervisor = null
     }
     this.clearMachineIdCache()
-    for (const child of this.trackedCliChildren) {
-      try {
-        child.kill()
-      } catch {
-        // best effort
-      }
+    for (const child of this.trackedCliChildren.keys()) {
+      signalCliTreeOnExit(child)
     }
     this.trackedCliChildren.clear()
     this.updatePowerSaveBlocker()
@@ -896,16 +939,17 @@ export class CliService {
   /**
    * Gracefully terminate the embedded CLI for app quit, then guarantee it is dead.
    *
-   * `killAllProcesses()` only sends SIGTERM and never waits, so on Command+Q the
-   * app would exit while the CLI was still shutting down — orphaning it holding the
-   * local probe/session-control ports and the terminal socket, which then breaks
-   * the next launch. Here we send SIGTERM, wait up to `graceMs` for a clean exit,
-   * then SIGKILL anything still alive so nothing is left holding resources.
+   * `killAllProcesses()` never waits, so on Command+Q the app would exit while
+   * the CLI was still shutting down — orphaning it holding the local
+   * probe/session-control ports and the terminal socket, which then breaks the
+   * next launch. Here every tracked CLI process tree gets SIGTERM, up to
+   * `graceMs` for a clean exit, then SIGKILL; a tree that is still running
+   * after that bounded wait fails quit instead of being orphaned.
    */
   async shutdownForQuit(graceMs = CLI_QUIT_GRACE_MS): Promise<void> {
     if (this.supervisor) {
       // Stop polling/retry first so the supervisor does not relaunch the child
-      // after we signal it. (This also sends SIGTERM to its active child.)
+      // after we signal it. (This also asks its active child to shut down.)
       try {
         await this.supervisor.stop({ terminationGraceMs: graceMs })
       } catch (error) {
@@ -915,52 +959,33 @@ export class CliService {
     }
     this.clearMachineIdCache()
 
-    const children = Array.from(this.trackedCliChildren)
-    for (const child of children) {
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        // best effort
-      }
-    }
-
-    await Promise.race([
-      Promise.all(children.map((child) => this.waitForChildExit(child))),
-      new Promise<void>((resolve) => setTimeout(resolve, graceMs))
-    ])
-
-    for (const child of this.trackedCliChildren) {
-      try {
-        child.kill('SIGKILL')
-      } catch {
-        // best effort
-      }
-    }
-    await Promise.race([
-      Promise.all(Array.from(this.trackedCliChildren, (child) => this.waitForChildExit(child))),
-      new Promise<void>((resolve) => setTimeout(resolve, 5000))
-    ])
-    const survivors = Array.from(this.trackedCliChildren).filter(
-      (child) => child.exitCode === null && child.signalCode === null
-    )
+    const survivors = await this.terminateTrackedCliChildren({
+      graceMs,
+      killWaitMs: CLI_FORCE_KILL_WAIT_MS
+    })
     this.updatePowerSaveBlocker()
     this.publishCliState()
     if (survivors.length > 0) {
       const error = new Error(
-        `Embedded CLI did not confirm exit after SIGKILL (${survivors.map((child) => child.pid ?? 'unknown').join(', ')})`
+        `Embedded CLI did not confirm exit after SIGKILL (${survivors.join('; ')})`
       )
       console.error('[Electron]', error.message)
       throw error
     }
   }
 
-  private waitForChildExit(child: ChildProcess): Promise<void> {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      return Promise.resolve()
+  /** Terminate every tracked CLI tree in parallel; resolves with each survivor's reason. */
+  private async terminateTrackedCliChildren(policy: TerminationPolicy): Promise<string[]> {
+    const outcomes = await Promise.allSettled(
+      Array.from(this.trackedCliChildren.values(), (handle) => handle.terminate(policy))
+    )
+    const survivors = outcomes.flatMap((outcome) =>
+      outcome.status === 'rejected' ? [formatUnknownError(outcome.reason)] : []
+    )
+    for (const survivor of survivors) {
+      getDesktopLog().warn('cli', `embedded CLI survived termination: ${survivor}`)
     }
-    return new Promise<void>((resolve) => {
-      child.once('close', () => resolve())
-    })
+    return survivors
   }
 
   autoStart(sender: WebContents | undefined): void {
@@ -1021,11 +1046,17 @@ export class CliService {
       chunk: `$ ${formatCommandForDisplay(command, args)}\n`
     })
 
-    const child = spawn(command, args, {
-      ...spawnOptions,
-      shell: shouldUseWindowsShell(command)
-    })
-    this.trackedCliChildren.add(child)
+    const processHandle = startProcess(
+      {
+        command,
+        args,
+        options: { ...spawnOptions, shell: shouldUseWindowsShell(command) },
+        processGroup: EMBEDDED_CLI_PROCESS_GROUP
+      },
+      CLI_PROCESS_OPTIONS
+    )
+    const { child } = processHandle
+    this.trackedCliChildren.set(child, processHandle)
     options?.onSpawn?.(child)
 
     const result = new Promise<CliRunResult>((resolvePromise, reject) => {
@@ -1084,6 +1115,7 @@ export class CliService {
     return {
       child,
       result,
+      processGroup: EMBEDDED_CLI_PROCESS_GROUP,
       ...(options?.supervisorControl
         ? {
             requestShutdown: async () => {

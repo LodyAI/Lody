@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest';
 import { Cause, Effect, Exit, Fiber, Option, TestClock } from 'effect';
 import type { Readable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 
 import {
   CommandFailed,
@@ -9,16 +10,12 @@ import {
   runCommand,
   runCommandOk,
   type CommandSpec,
-} from '../src/platform/process/command';
-import { SpawnFailed, TerminationFailed } from '../src/platform/process/errors';
-import { spawnProcess, spawnScoped, type SpawnSpec } from '../src/platform/process/managed-process';
-import { NodeProcess, NodeProcessLive } from '../src/platform/process/node-process';
-import { TREE_POLL_INTERVAL } from '../src/platform/process/process-tree';
-import {
-  LINGERING_GROUP_PROBE_INTERVAL,
-  makeNoopContainer,
-} from '../src/platform/sandbox/noop-container';
-import { FakeProcessTable } from './fake-process-table';
+} from '../src/node/process';
+import { signalChildTreeNow, SpawnFailed, TerminationFailed } from '../src/node/process';
+import { spawnProcess, spawnScoped, type SpawnSpec } from '../src/node/process';
+import { NodeProcess, NodeProcessLive } from '../src/node/process';
+import { READ_ONLY_ABANDON_POLICY, resolveWindowsCommand, TREE_POLL_INTERVAL } from '../src/node/process';
+import { FakeProcessTable } from '../src/node/process-testing';
 
 const GRACEFUL = { graceMs: 5_000, killWaitMs: 5_000 };
 const FORCED = { graceMs: 0, killWaitMs: 5_000 };
@@ -28,12 +25,6 @@ const agentSpec: SpawnSpec = {
   options: { stdio: 'pipe' },
   processGroup: true,
 };
-
-/** Let queued exit/close events fire and the fibers they wake run. */
-const settleEvents = Effect.zipRight(
-  Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve))),
-  Effect.yieldNow()
-);
 
 const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.failureOption(exit.cause)) : undefined;
@@ -132,6 +123,25 @@ describe('process tree termination (POSIX groups)', () => {
     }).pipe(Effect.provideService(NodeProcess, table.api));
   });
 
+  // macOS: kill(-pgid) fails with EPERM while the group's only member is an
+  // exited leader Node has not reaped yet; the reap happens during the wait.
+  it.effect('waits for an exited, unreaped leader instead of failing on EPERM', () => {
+    const table = new FakeProcessTable('darwin');
+    return Effect.gen(function* () {
+      const managed = yield* spawnProcess(agentSpec);
+      const leader = managed.child.pid ?? -1;
+      table.exitUnreaped(leader);
+      const termination = yield* Effect.fork(managed.terminate(GRACEFUL));
+      while (table.refused.length === 0) yield* Effect.yieldNow();
+      expect(table.refused).toEqual([{ target: -leader, signal: 'SIGTERM' }]);
+
+      table.reap(leader);
+      yield* TestClock.adjust(TREE_POLL_INTERVAL);
+
+      expect(Exit.isSuccess(yield* Fiber.await(termination))).toBe(true);
+    }).pipe(Effect.provideService(NodeProcess, table.api));
+  });
+
   it.effect('terminates a scoped process when its scope closes', () => {
     const table = new FakeProcessTable('linux');
     return Effect.gen(function* () {
@@ -201,56 +211,23 @@ describe('process tree termination (Windows)', () => {
     }).pipe(Effect.provideService(NodeProcess, table.api));
   });
 
+  // Windows reuses pids quickly; an exit handler must not taskkill whatever
+  // process now holds the exited child's pid.
+  it('never runs taskkill for a root that has already exited', () => {
+    const table = new FakeProcessTable('win32');
+    const child = table.api.spawn('cli', [], {});
+    table.exitOnItsOwn(child.pid ?? -1);
+
+    signalChildTreeNow(child, 'SIGKILL', { processGroup: false }, { nodeProcess: table.api });
+
+    expect(table.spawned.filter((call) => call.command === 'taskkill')).toEqual([]);
+  });
+
   it.effect('leaves POSIX detachment to the process group', () => {
     const table = new FakeProcessTable('linux');
     return Effect.gen(function* () {
       yield* spawnProcess({ ...agentSpec, processGroup: false, windowsDetached: true });
       expect(table.spawned.map((call) => call.options.detached)).toEqual([false]);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
-  });
-});
-
-describe('noop process container', () => {
-  it.scoped('keeps a group whose leader exited until its last member is gone', () => {
-    const table = new FakeProcessTable('linux');
-    return Effect.gen(function* () {
-      const container = yield* makeNoopContainer({
-        description: 'test',
-        configureProcess: () => Effect.void,
-      });
-      const contained = yield* container.spawn({ command: 'agent', args: [], options: {} });
-      const leader = contained.child.pid ?? -1;
-      const descendant = table.addDescendant(leader);
-      table.exitOnItsOwn(leader);
-      yield* settleEvents;
-
-      const tracked = yield* container.readAccounting;
-      expect(tracked.kind === 'process-tree' && tracked.rootPids).toEqual([leader]);
-
-      table.kill(descendant, 'SIGKILL');
-      yield* TestClock.adjust(LINGERING_GROUP_PROBE_INTERVAL);
-
-      const after = yield* container.readAccounting;
-      expect(after.kind === 'process-tree' && after.rootPids).toEqual([]);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
-  });
-
-  it.scoped('terminates a lingering group left by an exited leader', () => {
-    const table = new FakeProcessTable('linux');
-    return Effect.gen(function* () {
-      const container = yield* makeNoopContainer({
-        description: 'test',
-        configureProcess: () => Effect.void,
-      });
-      const contained = yield* container.spawn({ command: 'agent', args: [], options: {} });
-      const leader = contained.child.pid ?? -1;
-      const descendant = table.addDescendant(leader);
-      table.exitOnItsOwn(leader);
-      yield* settleEvents;
-
-      yield* container.terminateAll(FORCED);
-
-      expect(table.isAlive(descendant)).toBe(false);
     }).pipe(Effect.provideService(NodeProcess, table.api));
   });
 });
@@ -302,6 +279,27 @@ describe('process tree termination (real processes)', () => {
         expect(isRunning(grandchild)).toBe(false);
       }).pipe(Effect.provide(NodeProcessLive))
   );
+
+  // Until Node reports a failed spawn, `child.kill()` reaches pid 0: the
+  // caller's own process group (the daemon, or Electron main with it).
+  it.live.skipIf(process.platform === 'win32')(
+    'never signals its own process group when terminating a child that failed to spawn',
+    () =>
+      Effect.gen(function* () {
+        const output = yield* runCommand({
+          command: process.execPath,
+          args: [
+            '--experimental-strip-types',
+            '--no-warnings',
+            fileURLToPath(new URL('./fixtures/terminate-failed-spawn.mjs', import.meta.url)),
+            fileURLToPath(new URL('../src/node/process.ts', import.meta.url)),
+          ],
+          timeout: '20 seconds',
+        });
+        expect(output.stdout.toString('utf8').trim()).toBe('survived');
+        expect(output.code).toBe(0);
+      }).pipe(Effect.provide(NodeProcessLive))
+  );
 });
 
 describe('runCommand', () => {
@@ -351,6 +349,21 @@ describe('runCommand', () => {
     }).pipe(Effect.provide(NodeProcessLive))
   );
 
+  // A caller that persists the pid (Codex profile logout) needs it at spawn.
+  it.live('hands the started child to onSpawned', () =>
+    Effect.gen(function* () {
+      let spawnedPid: number | undefined;
+      yield* runCommand({
+        command: process.execPath,
+        args: ['-e', ''],
+        onSpawned: (child) => {
+          spawnedPid = child.pid;
+        },
+      });
+      expect(spawnedPid).toBeGreaterThan(0);
+    }).pipe(Effect.provide(NodeProcessLive))
+  );
+
   it.effect('ends the command tree and fails when it outlives its timeout', () => {
     const table = new FakeProcessTable('linux');
     return Effect.gen(function* () {
@@ -363,7 +376,47 @@ describe('runCommand', () => {
       expect(failure).toBeInstanceOf(CommandTimedOut);
       const pid = table.spawned.length === 1 ? 1000 : -1;
       expect(table.isAlive(pid)).toBe(false);
-      expect(table.delivered).toEqual([{ target: -pid, signal: 'SIGKILL' }]);
+      // SIGTERM first: a git killed outright leaves its index.lock behind.
+      expect(table.delivered).toEqual([{ target: -pid, signal: 'SIGTERM' }]);
+    }).pipe(Effect.provideService(NodeProcess, table.api));
+  });
+
+  // A read-only probe's caller should not wait out a grace period it has no use for.
+  it.effect('skips the SIGTERM grace under a read-only abandon policy', () => {
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGTERM'] });
+    return Effect.gen(function* () {
+      const command = yield* Effect.fork(
+        runCommand({
+          command: 'sysctl',
+          args: [],
+          timeout: '1 second',
+          abandonPolicy: READ_ONLY_ABANDON_POLICY,
+        })
+      );
+      yield* TestClock.adjust('1 second');
+      const failure = failureOf(yield* Fiber.await(command));
+
+      expect(failure).toBeInstanceOf(CommandTimedOut);
+      expect(table.delivered.map((delivery) => delivery.signal)).toEqual(['SIGKILL']);
+    }).pipe(Effect.provideService(NodeProcess, table.api));
+  });
+
+  // The abandoned tree is ended in a scope finalizer, where nothing can be
+  // interrupted: the waits there must be bounded without interruption.
+  it.effect('still settles when the abandoned tree survives SIGKILL', () => {
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGTERM', 'SIGKILL'] });
+    return Effect.gen(function* () {
+      const command = yield* Effect.fork(
+        runCommand({ command: 'git', args: ['fetch'], timeout: '1 second' })
+      );
+      yield* TestClock.adjust('1 second');
+      yield* TestClock.adjust('5 seconds');
+      const failure = failureOf(yield* Fiber.await(command));
+
+      expect(failure).toBeInstanceOf(CommandTimedOut);
+      expect(table.delivered.map((delivery) => delivery.signal)).toEqual(['SIGTERM', 'SIGKILL']);
     }).pipe(Effect.provideService(NodeProcess, table.api));
   });
 });
@@ -401,5 +454,64 @@ describe('runCommand process-tree ownership', () => {
       expect(failure).toBeInstanceOf(CommandOutputTooLarge);
       expect(table.isAlive(leader)).toBe(false);
     }).pipe(Effect.provideService(NodeProcess, table.api));
+  });
+});
+
+describe('signalChildTreeNow', () => {
+  it('signals the whole group before returning, for exit handlers that cannot wait', () => {
+    const table = new FakeProcessTable('linux');
+    const child = table.api.spawn('cli', [], { detached: true });
+    const leader = child.pid ?? -1;
+    const descendant = table.addDescendant(leader);
+
+    signalChildTreeNow(child, 'SIGTERM', { processGroup: true }, { nodeProcess: table.api });
+
+    expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGTERM' }]);
+    expect(table.isAlive(descendant)).toBe(false);
+  });
+});
+
+describe('resolveWindowsCommand', () => {
+  const files = new Set([
+    'C:\\repo\\git.cmd',
+    'C:\\repo\\tools\\build.cmd',
+    'C:\\Program Files\\Git\\cmd\\git.exe',
+    'C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd',
+  ]);
+  // Windows file names are case-insensitive; PATHEXT entries are upper case.
+  const isFile = (filePath: string) =>
+    Array.from(files).some((file) => file.toLowerCase() === filePath.toLowerCase());
+  const env = {
+    Path: 'C:\\Program Files\\Git\\cmd;.;"C:\\Users\\me\\AppData\\Roaming\\npm"',
+    PATHEXT: '.COM;.EXE;.BAT;.CMD',
+  };
+
+  // A repository cannot make Lody run its own `git.cmd`.
+  it('resolves a bare name from absolute PATH entries only, never the working directory', () => {
+    expect(resolveWindowsCommand('git', { cwd: 'C:\\repo', env }, isFile)).toBe(
+      'C:\\Program Files\\Git\\cmd\\git.EXE'
+    );
+    expect(resolveWindowsCommand('claude', { cwd: 'C:\\repo', env }, isFile)).toBe(
+      'C:\\Users\\me\\AppData\\Roaming\\npm\\claude.CMD'
+    );
+  });
+
+  it('reports nothing for a command found only in the working directory', () => {
+    expect(
+      resolveWindowsCommand('git', { cwd: 'C:\\repo', env: { PATHEXT: env.PATHEXT } }, isFile)
+    ).toBeNull();
+  });
+
+  it('resolves an explicit path against the working directory, and a missing one to nothing', () => {
+    expect(resolveWindowsCommand('tools\\build', { cwd: 'C:\\repo', env }, isFile)).toBe(
+      'C:\\repo\\tools\\build.CMD'
+    );
+    expect(
+      resolveWindowsCommand(
+        'C:\\Program Files\\Microsoft VS Code\\Code.exe',
+        { cwd: 'C:\\repo', env },
+        isFile
+      )
+    ).toBeNull();
   });
 });

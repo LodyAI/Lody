@@ -180,6 +180,7 @@
     "loro-repo": "catalog:"
   },
   "devDependencies": {
+    "@effect/vitest": "~0.26.0",
     "@types/cross-spawn": "^6.0.6",
     "@types/dockerode": "^3.3.47",
     "@types/node": "catalog:",

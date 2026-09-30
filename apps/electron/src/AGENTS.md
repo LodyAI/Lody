@@ -17,6 +17,9 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
 - Put domain services in `src/main/services/*`, IPC handlers and input validation in
   `src/main/ipc/*`, and local-project worker/storage code in
   `src/main/local-project/*`.
+- Main starts, awaits and signals processes only through `@lody/shared/node/process`
+  (never `child_process` or `kill`); `check:cli-process-boundary` enforces it.
+  Rules: [process layer](../../../packages/shared/src/node/AGENTS.md).
 - Main-process-only helpers belong in `src/main/utils.ts`. Put cross-runtime types and
   pure logic in `@lody/shared`; shared Electron IPC contracts live in the narrow
   `@lody/shared/electron-ipc` export.

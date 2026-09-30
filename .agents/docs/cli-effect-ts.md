@@ -5,7 +5,7 @@ meets the Promise code it has not replaced yet. The migration order and the
 layer map live in the
 [lifecycle migration roadmap](../notes/proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.md);
 binding rules for already-migrated directories live in their `AGENTS.md`
-(for example [`apps/cli/src/platform`](../../apps/cli/src/platform/AGENTS.md)).
+(for example [the shared process layer](../../packages/shared/src/node/AGENTS.md)).
 The pinned version is `effect` 3.18 (`pnpm-workspace.yaml` catalog).
 
 ## When to use Effect
@@ -54,9 +54,10 @@ Effect overhead matters (the per-token ACP update path, CRDT import/export).
 ## Temporary Promise facades
 
 A migrated layer is consumed by callers that are still Promise-based. Such a
-caller reaches the new service through a facade built on
-`makePlatformRunner` (`apps/cli/src/platform/promise-facade.ts`), which provides
-the service Layers and applies the failure rule above. A facade is temporary:
+caller reaches the new service through a facade: the process layer's own
+facades at the end of `packages/shared/src/node/process.ts`, which the CLI
+reaches through `apps/cli/src/platform/promise-facade.ts` (adding its logger).
+They provide the service Layers and apply the failure rule above. A facade is temporary:
 it is deleted when its caller migrates, and it never appears inside an already
 migrated layer. Current facades:
 
@@ -64,11 +65,12 @@ migrated layer. Current facades:
 | --- | --- | --- |
 | `apps/cli/src/session/session-sandbox.ts` (`SessionSandbox`) | `Session`, `TerminalManager` | the session resource layer owns process containers directly |
 | `terminateAcpProcessTree` in `apps/cli/src/agent/acp-runner.ts` | auxiliary ACP agents | auxiliary ACP agents become scoped processes |
-| `runCommandText` / `runCommandTextSync` / `startProcess` / `isPidAliveSync` in `apps/cli/src/platform/promise-facade.ts` | every other CLI process caller (git, gh, daemon/worker/MCP children, tunnels, setup scripts) | each caller's own layer migrates |
+| `runCommandText` / `runCommandTextSync` / `startProcess` / `terminateChildTree` / `signalChildTreeNow` / `isPidAliveSync` / `probePidSync` and the runners `makeProcessRunner` / `runPromiseSquashed` in `@lody/shared/node/process` (CLI: via `apps/cli/src/platform/promise-facade.ts`, whose `makePlatformRunner` adds the daemon logger; worker bundles use the shared ones directly to stay free of it) | every other process caller in the CLI, Electron main, the CLI supervisor and `packages/shared/src/node` | each caller's own layer migrates |
 | `terminatePtyProcessGroup` in `apps/cli/src/lib/terminal-pty-service.ts` | local terminal PTYs | terminal/PTY ownership becomes an Effect layer |
 
-`pnpm check:cli-process-boundary` fails when CLI code bypasses these and reaches
-`child_process`, `cross-spawn`, `node-pty` or `process.kill` directly.
+`pnpm check:cli-process-boundary` fails when code in those packages bypasses
+these and reaches `child_process`, `cross-spawn`, `node-pty`, `process.kill` or
+a child's `kill` directly.
 
 ## Testing
 
@@ -77,7 +79,7 @@ migrated layer. Current facades:
   join or await the fiber.
 - Replace services with test Layers or `Effect.provideService`, and assert the
   resulting state (which processes are alive, what was written), not how often a
-  mock was called. `apps/cli/tests/fake-process-table.ts` models the OS process
+  mock was called. `@lody/shared/node/process-testing` models the OS process
   table for the process layer.
 - `vi.useFakeTimers()` with default options also fakes the timers Effect's
   clock uses. It drives Effect sleeps only when the test advances timers

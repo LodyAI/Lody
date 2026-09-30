@@ -2,7 +2,7 @@ import { constants as fsConstants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { app, shell } from 'electron'
-import { spawn } from 'node:child_process'
+import { runCommandText, startProcess } from '@lody/shared/node/process'
 import type {
   LaunchLocalPathInput,
   LaunchLocalPathResult,
@@ -47,15 +47,20 @@ async function hasPath(filePath: string): Promise<boolean> {
   )
 }
 
+/** Whether a probe command exits 0; a command that cannot start counts as no. */
+async function commandSucceeds(
+  command: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv
+): Promise<boolean> {
+  return await runCommandText({ command, args, env, check: 'none' }).then(
+    ({ code }) => code === 0,
+    () => false
+  )
+}
+
 async function hasMacApp(name: string): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    const child = spawn('/usr/bin/open', ['-Ra', name], {
-      shell: false,
-      stdio: 'ignore'
-    })
-    child.once('error', () => resolve(false))
-    child.once('close', (code) => resolve(code === 0))
-  })
+  return await commandSucceeds('/usr/bin/open', ['-Ra', name])
 }
 
 async function hasCommand(command: string, args?: readonly string[]): Promise<boolean> {
@@ -129,17 +134,7 @@ async function canResolveWindowsShellCommand(
     return true
   }
 
-  return await new Promise<boolean>((resolve) => {
-    const child = spawn('where.exe', [command], {
-      env,
-      shell: false,
-      stdio: 'ignore',
-      windowsHide: true
-    })
-
-    child.once('error', () => resolve(false))
-    child.once('close', (code) => resolve(code === 0))
-  })
+  return await commandSucceeds('where.exe', [command], env)
 }
 
 async function spawnDetached(
@@ -175,18 +170,26 @@ async function spawnDetached(
 
     try {
       const useWindowsShell = shouldUseWindowsShell(spec.command)
-      const child = spawn(spec.command, spec.args ?? [], {
-        detached: true,
-        // Windows `.cmd`/`.bat` shims (e.g. the `code` shim) can't be spawned
-        // with shell:false; everywhere else keep the shell out of the loop.
-        shell: useWindowsShell,
-        env,
-        stdio: 'ignore',
-        // Only hide the cmd.exe wrapper window. libuv maps windowsHide to
-        // SW_HIDE as well, which would start a directly spawned native editor
-        // (sublime_text.exe, idea64.exe, ...) with no visible window; and
-        // DETACHED_PROCESS already suppresses console allocation here.
-        windowsHide: useWindowsShell
+      // The launched editor outlives this app: nothing here ever terminates it.
+      const { child } = startProcess({
+        command: spec.command,
+        args: spec.args ?? [],
+        options: {
+          // Windows `.cmd`/`.bat` shims (e.g. the `code` shim) can't be spawned
+          // with shell:false; everywhere else keep the shell out of the loop.
+          shell: useWindowsShell,
+          env,
+          stdio: 'ignore',
+          // Only hide the cmd.exe wrapper window. libuv maps windowsHide to
+          // SW_HIDE as well, which would start a directly spawned native editor
+          // (sublime_text.exe, idea64.exe, ...) with no visible window; and
+          // DETACHED_PROCESS already suppresses console allocation here.
+          windowsHide: useWindowsShell
+        },
+        // `detached: true` on every platform: its own session on POSIX, its
+        // own console-less process on Windows.
+        processGroup: true,
+        windowsDetached: true
       })
 
       child.once('spawn', () => {
