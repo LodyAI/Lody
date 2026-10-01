@@ -111,7 +111,6 @@ const styles = stylex.create({
     fontVariantNumeric: 'tabular-nums',
   },
   priceUnit: { fontSize: type.caption, color: colors.secondaryLabel },
-  promise: { color: colors.label },
   action: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[2] },
   perks: {
     display: 'grid',
@@ -421,8 +420,6 @@ export function BillingSettingsView({
 
   const monthlyPrice = formatUsd(overview.pricing.monthlyAmountCents);
   const yearlyPerMonthPrice = formatUsd(Math.round(overview.pricing.yearlyAmountCents / 12));
-  const yearlyEarlyBirdSelected =
-    interval === 'year' && overview.pricing.yearlyOfferKey === 'early_bird_yearly_6000_forever';
   const selectedOfferLabel =
     interval === 'month' && overview.pricing.monthlyOfferKey ? t('billing.founderPrice') : null;
 
@@ -503,13 +500,7 @@ export function BillingSettingsView({
         upcomingInvoice.discount
           ? {
               key: 'discount',
-              // The invoice discount line is offer-agnostic; only name the
-              // campaign when this account's offer actually is early bird.
-              label: t(
-                overview.offerKey === 'early_bird_yearly_6000_forever'
-                  ? 'billing.upcomingDiscountEarlyBird'
-                  : 'billing.upcomingDiscount'
-              ),
+              label: t('billing.upcomingDiscount'),
               amount: upcomingInvoice.discount.amount,
             }
           : null,
@@ -592,9 +583,6 @@ export function BillingSettingsView({
             {checkoutInProgress ? <Badge>{t('billing.checkoutPending')}</Badge> : null}
             {hasGiftTimeline && overview.autoRenewAfterGift ? (
               <Badge>{t('billing.postGiftBillingScheduled')}</Badge>
-            ) : null}
-            {overview.yearlyEarlyBirdEligible ? (
-              <Badge>{t('billing.yearlyPromoPrice')}</Badge>
             ) : null}
           </div>
           <div {...stylex.props(styles.statusLine)}>
@@ -732,14 +720,8 @@ export function BillingSettingsView({
                   <span {...stylex.props(styles.priceUnit)}>{t('billing.perSeatMonth')}</span>
                   {selectedOfferLabel ? <Badge>{selectedOfferLabel}</Badge> : null}
                 </div>
-                <p {...stylex.props(styles.helper, yearlyEarlyBirdSelected && styles.promise)}>
-                  {yearlyEarlyBirdSelected
-                    ? overview.yearlyEarlyBirdEligible
-                      ? t('billing.yearlyEarlyBirdAlreadyLocked')
-                      : t('billing.yearlyEarlyBirdCheckoutPromise')
-                    : interval === 'year'
-                      ? t('billing.billedYearly')
-                      : t('billing.billedMonthly')}
+                <p {...stylex.props(styles.helper)}>
+                  {interval === 'year' ? t('billing.billedYearly') : t('billing.billedMonthly')}
                 </p>
               </Tabs.Panel>
             </Tabs.Root>
@@ -767,15 +749,11 @@ export function BillingSettingsView({
                   onClick={onUpgrade}
                 >
                   {pendingAction === 'checkout' ? <Spinner size="small" /> : null}
-                  {yearlyEarlyBirdSelected
-                    ? overview.yearlyEarlyBirdEligible
-                      ? t('billing.subscribeLockedEarlyBird')
-                      : t('billing.upgradeEarlyBird')
-                    : checkoutInProgress
-                      ? t('billing.continueCheckout')
-                      : canScheduleAfterGift
-                        ? t('billing.subscribeAfterGift')
-                        : t('billing.upgrade')}
+                  {checkoutInProgress
+                    ? t('billing.continueCheckout')
+                    : canScheduleAfterGift
+                      ? t('billing.subscribeAfterGift')
+                      : t('billing.upgrade')}
                 </Button>
                 <SubscribeConsentNotice />
               </div>

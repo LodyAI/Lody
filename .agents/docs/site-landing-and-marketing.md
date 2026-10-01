@@ -29,10 +29,11 @@ them into a cheaper finite difference.
 
 ## Why pricing carries no clock
 
-The public Plus early-bird end date is one line of static copy. An earlier
-`Date.now()` gate caused a visible `$8`→`$5` flash on paint, because the server
-render and the hydrated render disagreed. The yearly note already says the price
-locks forever, so the date is deliberately not repeated in the note or an FAQ.
+Public Plus displays standard pricing: $8 per seat per month billed yearly
+($96 per year), or $10 billed monthly. The early-bird campaign has ended and
+its banners, strike-through references, and deadline copy have been removed.
+Pricing remains static across server rendering and hydration; no client clock
+or campaign environment variable is needed.
 
 ## Why the underwater background starts in three stages
 
