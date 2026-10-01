@@ -20,7 +20,8 @@ PR：[#1199](https://github.com/LodyAI/Lody/pull/1199)（draft）。
 `web-workspace-layout.tsx` 的紧凑分支只是两个普通 motion 元素：点击关闭的遮罩和侧栏。
 二者均没有模态焦点约束，相邻内容区域仍可交互。所属布局回归因内容区域没有 inert 而失败。
 当前开放 PR 列表及 sidebar/navigation/focus 检索没有发现该分支的有效修复；
-PR #1177 的图片预览焦点修复属于另一界面。
+最后核对的 main `993cb8c8c1ed56d16c5833e72576c12a4d112588` 与截图基线的布局 blob 相同。
+已合入的 PR #1177 图片预览焦点修复及 PR #1198 窄 Settings 面板修复均属于其他界面。
 
 `CompactNavigationDialog` 复用产品 Dialog 适配层，处理焦点约束、外部点击、嵌套弹层顺序和
 弹出控件的 portal 容器。面板挂载在工作区布局内，保留紧凑宽度与滑动过渡。
@@ -45,6 +46,14 @@ Escape、遮罩和布局动作关闭导航均写入已有的持久化收起状�
 - 所属侧栏 Playwright 测试的紧凑分组：500×745 Chromium 下 4 项通过，含减少动态效果及动画关闭，覆盖
   两次 Tab／Shift+Tab 循环、背景聚焦被拒绝、遮罩关闭、背景恢复交互、嵌套 Popover／Dialog
   Escape 顺序、打开控件恢复及控件被移除后的回退。
+- 修改前后截图验收在独立浏览器上下文中，分别运行 main
+  `93545f01b69cb0c98ddd3f19d46540decd95a007` 的未改动布局与当前布局（代码提交
+  `9be4c58a19f157d607ab6e75c75f7a30f75c4918`）。两版使用相同的合成侧栏／工作区／机器数据、
+  浅色主题与 500×745 视口。Playwright 两次执行打开导航 → Shift+Tab → Tab → Enter：
+  修改前焦点到达 Machine，内容没有 inert，并在导航之上打开机器选择器；修改后焦点回到
+  New Chat，内容为 inert，背景选择器不打开。随后 Escape 恢复打开控件并释放 inert。
+  截图等待选择器淡入结束，对比图及原始 PNG 仅通过用户要求的 Lody 会话上传分享，
+  不包含生产页面或凭据。
 - `pnpm format` 通过。现有依赖条件下，全仓 `pnpm check`、`pnpm check:quick` 和组件类型检查
   未通过：缺失包类型及旧版已安装依赖在未改动源码中产生错误。组件类型检查中本项文件没有
   诊断，但不能将其报告为全量检查通过。
@@ -52,7 +61,9 @@ Escape、遮罩和布局动作关闭导航均写入已有的持久化收起状�
   源码的断链，本项文档没有错误；仓库没有已注册的 SHA 保护主题。
   `pnpm check:public-boundary` 报告六个来自未初始化 ACP 子模块的工作区依赖无法解析。
 - 浏览器回归使用真实紧凑模态组件的合成 Storybook 场景；布局集成由 jsdom 中的合成侧栏独立
-  覆盖。未操作生产登录、真实机器选择或云端账号数据；未验证屏幕阅读器、打包 Electron、
+  覆盖。截图验收还运行两版真实布局，使用合成侧栏／路由、固定的紧凑视口 hook 及无操作的
+  全局键盘 hook，因此不证明完整侧栏或全局快捷键行为。未操作生产登录、真实机器选择或
+  云端账号数据；未验证屏幕阅读器、打包 Electron、
   原生 iOS。
 
 证据：[布局测试](../../../../packages/components/tests/web-workspace-sidebar-toggle.test.tsx)、

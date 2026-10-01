@@ -23,7 +23,9 @@ At main `7d502f3d99fdcdbbdd43d032c6d903d4ed497e04`, the compact branch in
 scrim and the sidebar. Neither owned modal focus; the adjacent content scope stayed
 interactive. The owning layout regression failed because that scope was not inert.
 The current open PR list and sidebar/navigation/focus searches contained no effective
-fix for this branch. Image-preview focus work in PR #1177 concerns another surface.
+fix for this branch. The final main check at `993cb8c8c1ed56d16c5833e72576c12a4d112588`
+has the same layout blob as the screenshot baseline. The merged image-preview focus
+work in PR #1177 and narrow Settings panel work in PR #1198 concern other surfaces.
 
 `CompactNavigationDialog` reuses the product Dialog adapter for focus containment,
 outside presses, nested overlay ownership and popup portal containment. Its panel
@@ -54,6 +56,16 @@ without changing its breakpoint or suppression policy. Intent remains a
   with reduced motion and an animated-close case. Covers Tab/Shift+Tab wrapping twice, rejected background focus,
   backdrop dismissal, background reactivation, nested popup/Dialog Escape order,
   opener restoration and removed-opener fallback.
+- Before/after screenshot acceptance separately runs the unchanged layout from main
+  `93545f01b69cb0c98ddd3f19d46540decd95a007` and the current layout (code commit
+  `9be4c58a19f157d607ab6e75c75f7a30f75c4918`) in isolated browser contexts. Both use
+  the same synthetic sidebar/workspace/machine data, light theme and 500×745 viewport.
+  Playwright executes Show navigation → Shift+Tab → Tab → Enter twice: before, focus
+  reaches Machine with no content inert and opens its picker over navigation; after,
+  focus wraps to New Chat, content is inert and no background picker opens. Escape
+  then restores the opener and releases inert. Captures wait for the picker fade to
+  finish; the comparison and original PNGs are shared only through the requested
+  Lody conversation upload. No production page or credential is captured.
 - `pnpm format` passes. Full `pnpm check`, `pnpm check:quick` and components typecheck
   do not pass with the available dependency setup: missing package types and outdated
   installed dependencies produce errors in untouched sources. Changed files have no
@@ -64,6 +76,9 @@ without changing its breakpoint or suppression policy. Intent remains a
   workspace dependencies from uninitialized ACP submodules.
 - Browser coverage uses the actual compact modal in a synthetic Storybook harness;
   layout integration is exercised separately with a synthetic sidebar in jsdom.
+  Screenshot acceptance also uses both actual layout implementations with a
+  synthetic sidebar and route, fixed compact viewport hook and no-op global
+  keyboard hook; it does not establish full-sidebar/global-shortcut behavior.
   No production login, real machine selection, cloud account mutation, screen reader,
   packaged Electron or native iOS was exercised.
 
