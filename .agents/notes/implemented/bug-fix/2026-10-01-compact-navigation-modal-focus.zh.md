@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-01-compact-navigation-modal-focus.md) | 中文
 
+PR：[#1199](https://github.com/LodyAI/Lody/pull/1199)（draft）。
+
 ## 摘要
 
 窄桌面浏览器打开导航时，背景控件仍在键盘焦点顺序内，机器选择器因此能在导航遮罩上打开。

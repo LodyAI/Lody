@@ -5,6 +5,8 @@ Translation: current
 
 English | [中文](2026-10-01-compact-navigation-modal-focus.zh.md)
 
+PR: [#1199](https://github.com/LodyAI/Lody/pull/1199) (draft).
+
 ## Abstract
 
 Opening navigation in a narrow desktop browser left background controls in the
