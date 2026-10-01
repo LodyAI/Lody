@@ -467,3 +467,41 @@ z-index or pointer-events overrides. The mobile story now includes the actual Va
 drawer/body; regression tests cover initially open and trigger-opened menus, focus,
 selection, dismissal and preserved drawer state. Existing narrower providers still
 win through normal context nesting.
+
+### Concurrent local and remote viewers (2026-10-01)
+
+Status previously returned the operation's first viewer URL to every authorized
+requester. A phone opening an operation created by local Electron therefore received
+Mac loopback coordinates and showed Direct followed by a blank frame. Transport is
+now a property of each lazy endpoint; one operation, lease, native process and gateway
+remain shared. Local and remote requests receive independent preparation/failure state
+and URLs. The gateway's separate remote path chooses remote flow budgets while sharing
+control serialization, replay protection and the once-per-operation portrait baseline.
+
+```text
+Session operation → one native process + one control gateway
+  local request  → local proxy → local gateway path
+  remote request → Quick Tunnel + private proxy → remote gateway path
+```
+
+A tunnel failure leaves the local endpoint running. Explicit start retries a failed
+endpoint after its cleanup, without restarting the operation; polling never retries
+failed connections or renews their idle deadline. Stop and session cleanup join both
+endpoint owners before releasing the lease. Remote revocation conservatively closes
+the whole operation if it has a remote attachment, retaining the prior fail-closed
+lifecycle guarantee. Independent gateway instances were rejected because they would
+reset and diverge native orientation/control state. No new DTO or runtime artifact is
+required. Service regression tests cover both opening orders, concurrent starts,
+proof denial, pending-tunnel revocation and failure/retry isolation; real HTTP/WS tests
+verify distinct stream budgets, private admission and a single control baseline.
+Physical phone/tunnel end-to-end behavior still requires field verification.
+
+The tunnel close result now explicitly distinguishes failed resource cleanup from a
+connection failure whose resources were already joined. Only cleanup failure aborts
+the remaining local endpoint. An isolated iPhone 16/iOS 26.2 run using the pinned
+Baguette artifact delivered H.264 on both gateway paths simultaneously (172 local and
+20 remote-profile frames); after closing the remote socket, the local stream delivered
+10 further frames. The temporary device and owned processes were cleaned up. This
+checks native multi-view capture, not a physical phone or a real Internet tunnel.
+
+Validation: the standalone public full check passed before the final cleanup-outcome refinement (CLI 3,366 tests plus four skipped; components 4,640). The final refinement passed all 208 simulator/preview tests, CLI typecheck/build and quick checks; formatting passed. Outer affected checking remains blocked by existing ACP type/dependency errors, and docs checking retains the existing oversized MCP AGENTS file. This increment was self-reviewed without subagents.

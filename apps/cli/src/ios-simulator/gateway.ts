@@ -59,6 +59,7 @@ export async function createSimulatorGateway(options: {
   renew(): void;
 }) {
   const path = `/simulator/${randomBytes(32).toString('hex')}/`;
+  const remotePath = `${path}remote/`;
   let origin: string | undefined;
   const validOrigin = (host: string | undefined, requestOrigin: string | undefined) =>
     origin !== undefined &&
@@ -93,7 +94,11 @@ export async function createSimulatorGateway(options: {
       res.writeHead(410).end();
       return;
     }
-    const requestedPath = new URL(req.url ?? '/', 'http://localhost').pathname;
+    const requestPath = new URL(req.url ?? '/', 'http://localhost').pathname;
+    const remote = requestPath.startsWith(remotePath) || (options.remote ?? false);
+    const requestedPath = requestPath.startsWith(remotePath)
+      ? path + requestPath.slice(remotePath.length)
+      : requestPath;
     if (
       req.method === 'GET' &&
       validOrigin(req.headers.host, req.headers.origin) &&
@@ -197,7 +202,7 @@ export async function createSimulatorGateway(options: {
     if (
       req.method !== 'GET' ||
       !validOrigin(req.headers.host, req.headers.origin) ||
-      new URL(req.url ?? '/', 'http://localhost').pathname !== path
+      requestedPath !== path
     ) {
       res.writeHead(404).end();
       return;
@@ -209,17 +214,19 @@ export async function createSimulatorGateway(options: {
       'Content-Security-Policy':
         "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src blob:",
     });
-    res.end(simulatorViewerHtml(options.operationId, controls.rotation(), options.remote ?? false));
+    res.end(simulatorViewerHtml(options.operationId, controls.rotation(), remote));
   });
   server.on('connection', (socket) => {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
   });
   server.on('upgrade', (req, socket, head) => {
+    const requestPath = new URL(req.url ?? '/', 'http://localhost').pathname;
+    const remote = requestPath === `${remotePath}stream` || (options.remote ?? false);
     if (
       !options.active() ||
       !validOrigin(req.headers.host, req.headers.origin) ||
-      new URL(req.url ?? '/', 'http://localhost').pathname !== `${path}stream`
+      (requestPath !== `${path}stream` && requestPath !== `${remotePath}stream`)
     ) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       return;
@@ -234,9 +241,9 @@ export async function createSimulatorGateway(options: {
       let touch: z.infer<typeof Input> | undefined;
       let shuttingDown: Promise<void> | undefined;
       const now = () => performance.now();
-      const jpegFlow = new SimulatorFrameFlow(options.remote ?? false, now());
+      const jpegFlow = new SimulatorFrameFlow(remote, now());
       const videoFlow = h264
-        ? new SimulatorH264Flow(options.remote ?? false, now(), () => {
+        ? new SimulatorH264Flow(remote, now(), () => {
             if (upstream.readyState === WebSocket.OPEN && upstream.bufferedAmount < 65536)
               upstream.send(JSON.stringify({ type: 'force_idr' }));
           })
@@ -285,7 +292,7 @@ export async function createSimulatorGateway(options: {
           now() - lastScaleAt < 1000
         )
           return;
-        const viewportScale = simulatorScale(nativeSize, viewport, options.remote ?? false);
+        const viewportScale = simulatorScale(nativeSize, viewport, remote);
         const next = videoFlow
           ? Math.min(2, viewportScale)
           : jpegFlow.recommendedScale(viewportScale, observedScale);
@@ -317,7 +324,7 @@ export async function createSimulatorGateway(options: {
           return;
         const packet = flow.take(now());
         if (packet) client.send(packet, { binary: true });
-        if (!videoFlow && options.remote && nativeSize && !pendingControl)
+        if (!videoFlow && remote && nativeSize && !pendingControl)
           idle.tick(
             now(),
             simulatorScale(nativeSize, viewport, true),
@@ -342,7 +349,7 @@ export async function createSimulatorGateway(options: {
           codecH264: h264 ? 1 : 0,
           ...flow.snapshot(now()),
           scale,
-          remote: options.remote ?? false,
+          remote,
         };
         if (++samples % 15 === 0)
           options.logger?.debug('[iOS Simulator media] ' + JSON.stringify(stats));
@@ -504,6 +511,7 @@ export async function createSimulatorGateway(options: {
   return {
     port: address.port,
     path,
+    remotePath,
     close: async () => {
       controlAbort.abort();
       await pendingControl;

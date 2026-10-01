@@ -5,6 +5,15 @@ sessions across workspaces, and `devices.ts` is the simctl boundary. Lifecycle R
 uses the shared `iosSimulator: 1` capability and `ios-simulator/control` command
 union. Browser owns a separate service and separate transport instances.
 
+An operation shares its native process and control gateway across local and remote
+viewers of the same authorized session. Endpoints are created lazily per transport;
+status/start returns only the caller's endpoint, never another device's loopback URL.
+The gateway has separate local/remote paths so each stream retains its own flow
+budget while controls and portrait initialization remain operation-owned. Tunnel
+failure does not interrupt local viewing; explicit start retries that endpoint.
+Stop ends both endpoints. Remote revocation conservatively ends any operation with
+a remote attachment, including its local endpoint. Device shutdown is never implied.
+
 The pinned Baguette executable runs in an IPC-owned worker. The native HTTP API
 stays on loopback; only the bound device's MJPEG stream and validated single-pointer
 input cross `gateway.ts`, along with typed device controls on the private preview

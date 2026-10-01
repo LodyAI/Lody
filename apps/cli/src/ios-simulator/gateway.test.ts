@@ -27,8 +27,10 @@ async function setup(
   hostControl: (control: SimulatorHostControl) => Promise<void> = async () => {},
   remote = false
 ) {
+  let initializations = 0;
   const server = http.createServer((req, res) => {
     if (req.url?.endsWith('/orientation?value=portrait')) {
+      initializations++;
       res.end('{"ok":true}');
     } else if (handler) handler(req, res);
     else res.writeHead(404).end();
@@ -71,6 +73,8 @@ async function setup(
   return {
     upstream,
     gateway,
+    proxy,
+    initializations: () => initializations,
     url,
     stream,
     control,
@@ -81,6 +85,55 @@ async function setup(
   };
 }
 describe('simulator media boundary', () => {
+  it('serves local and remote routes with independent media budgets and one control baseline', async () => {
+    const f = await setup();
+    const remoteEndpoint = await f.proxy.acquire({
+      sessionId: 'remote-viewer' as SessionId,
+      target: {
+        protocol: 'http',
+        host: '127.0.0.1',
+        port: f.gateway.port,
+        path: f.gateway.remotePath,
+      },
+      visualAnnotation: false,
+    });
+    const remoteUrl = new URL(remoteEndpoint.viewerUrl);
+    expect((await fetch(remoteUrl)).status).toBe(200);
+    const denied = new URL(remoteUrl);
+    denied.search = '';
+    expect((await fetch(denied)).status).toBe(403);
+    const streamUrl = new URL('stream', remoteUrl);
+    streamUrl.protocol = 'ws:';
+    streamUrl.search = remoteUrl.search;
+    const peers: WebSocket[] = [];
+    for (const [url, bitrate] of [
+      [f.stream, 4_000_000],
+      [streamUrl, 600_000],
+    ] as const) {
+      url.searchParams.set('codec', 'h264');
+      const configured = new Promise<unknown>((resolve) => {
+        f.upstream.once('connection', (native) => {
+          native.once('message', (data) => resolve(JSON.parse(String(data))));
+        });
+      });
+      const client = new WebSocket(url);
+      peers.push(client);
+      cleanups.push(async () => {
+        client.terminate();
+      });
+      await once(client, 'open');
+      expect(await configured).toEqual({ type: 'set_bitrate', bps: bitrate });
+    }
+    expect(peers.map((peer) => peer.readyState)).toEqual([WebSocket.OPEN, WebSocket.OPEN]);
+    expect(f.initializations()).toBe(1);
+    // Closing one route's media connection leaves the other route connected.
+    const closed = once(peers[1]!, 'close');
+    peers[1]!.close();
+    await closed;
+    expect(peers[0]!.readyState).toBe(WebSocket.OPEN);
+    expect(f.renewals()).toBe(0);
+  });
+
   it('derives native scale from the bounded viewport and denies forged receiver credit', async () => {
     const f = await setup(undefined, undefined, true);
     const incoming = once(f.upstream, 'connection');

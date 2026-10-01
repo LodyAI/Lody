@@ -17,6 +17,13 @@ import { createSimulatorGateway } from './gateway';
 import { listSimulatorDevices, bootSimulator } from './devices';
 import { simulatorControlLeases, type SimulatorControlLeases } from './control-leases';
 
+type ViewerEndpoint = {
+  phase: IosSimulatorPreview['phase'];
+  viewerUrl?: string;
+  message?: string;
+  done: Promise<void>;
+  renew?: () => void;
+};
 type Operation = {
   state: IosSimulatorPreview;
   owner: string;
@@ -24,7 +31,8 @@ type Operation = {
   done: Promise<void>;
   deadline: number;
   timer?: ReturnType<typeof setTimeout>;
-  renewTunnel?: () => void;
+  endpoints: Map<boolean, ViewerEndpoint>;
+  connect?: (remote: boolean, endpoint: ViewerEndpoint) => Promise<void>;
   attachViewer?: (remote: boolean) => void;
   viewerAttached?: Promise<void>;
 };
@@ -42,7 +50,9 @@ type Dependencies = {
   process?: typeof startBaguetteProcess;
   gateway?: typeof createSimulatorGateway;
   localProxy?: Pick<LocalPreviewProxyManager, 'acquire' | 'closeSession'>;
-  tunnel?: (options: ConstructorParameters<typeof QuickTunnelSession>[0]) => QuickTunnelSession;
+  tunnel?: (
+    options: ConstructorParameters<typeof QuickTunnelSession>[0]
+  ) => Pick<QuickTunnelSession, 'ready' | 'closed' | 'cancel' | 'activity'>;
 };
 /** Simulator state is ephemeral, never Browser metadata or a second durable owner. */
 export class IosSimulatorService {
@@ -150,8 +160,8 @@ export class IosSimulatorService {
           op && (!command.operationId || op.state.operationId === command.operationId);
         // Agent starts have no viewer location. The first authenticated panel
         // selects its own local/remote plane; agent status reads never attach it.
-        if (matches && !fromAgent && !op.abort.signal.aborted) op.attachViewer?.(remote);
-        const preview = matches ? this.snapshot(op) : undefined;
+        if (matches && !fromAgent && !op.abort.signal.aborted) this.attachViewer(op, remote);
+        const preview = matches ? this.snapshot(op, fromAgent ? undefined : remote) : undefined;
         return { ...base, success: true, preview };
       }
       // Cancellation is eager, before joining an earlier replacement's cleanup barrier.
@@ -164,7 +174,10 @@ export class IosSimulatorService {
         return {
           ...base,
           success: true,
-          preview: op?.state.operationId === command.operationId ? this.snapshot(op) : undefined,
+          preview:
+            op?.state.operationId === command.operationId
+              ? this.snapshot(op, fromAgent ? undefined : remote)
+              : undefined,
         };
       }
       return await this.serialize(request.sessionId, async () => {
@@ -175,10 +188,12 @@ export class IosSimulatorService {
           !existing.abort.signal.aborted &&
           existing.state.udid.toUpperCase() === command.udid.toUpperCase()
         ) {
-          if (!fromAgent) existing.attachViewer?.(remote);
-          if (!fromAgent && existing.state.transport !== (remote ? 'remote' : 'local'))
-            throw new Error('Stop the existing preview before changing its connection transport.');
-          return { ...base, success: true, preview: this.snapshot(existing) };
+          if (!fromAgent) this.attachViewer(existing, remote, true);
+          return {
+            ...base,
+            success: true,
+            preview: this.snapshot(existing, fromAgent ? undefined : remote),
+          };
         }
         if (existing) {
           existing.abort.abort();
@@ -195,6 +210,7 @@ export class IosSimulatorService {
           };
         const op: Operation = {
           owner,
+          endpoints: new Map(),
           state: {
             operationId,
             udid: command.udid,
@@ -218,9 +234,14 @@ export class IosSimulatorService {
           op.timer = setTimeout(() => op.abort.abort(), DEFAULT_PREVIEW_IDLE_TIMEOUT_MS);
           op.timer.unref?.();
         }
+        if (!fromAgent) this.attachViewer(op, remote);
         this.operations.set(request.sessionId, op);
         op.done = this.run(request.sessionId, op);
-        return { ...base, success: true, preview: this.snapshot(op) };
+        return {
+          ...base,
+          success: true,
+          preview: this.snapshot(op, fromAgent ? undefined : remote),
+        };
       });
     } catch {
       return {
@@ -232,8 +253,33 @@ export class IosSimulatorService {
       };
     }
   }
-  private snapshot(op: Operation): IosSimulatorPreview {
-    return { ...op.state, viewerUrl: op.abort.signal.aborted ? undefined : op.state.viewerUrl };
+  private attachViewer(op: Operation, remote: boolean, retry = false): void {
+    if (op.abort.signal.aborted) return;
+    op.attachViewer?.(remote);
+    const previous = op.endpoints.get(remote);
+    if (previous && !(retry && previous.phase === 'failed')) return;
+    const endpoint: ViewerEndpoint = { phase: 'connecting', done: Promise.resolve() };
+    op.endpoints.set(remote, endpoint);
+    if (op.connect) {
+      const connect = op.connect;
+      endpoint.done = previous
+        ? previous.done.then(() => connect(remote, endpoint))
+        : connect(remote, endpoint);
+      void endpoint.done.catch(() => op.abort.abort());
+    }
+  }
+  private snapshot(op: Operation, remote = op.state.transport === 'remote'): IosSimulatorPreview {
+    const endpoint = op.endpoints.get(remote);
+    const terminal =
+      op.abort.signal.aborted || op.state.phase === 'failed' || op.state.phase === 'closed';
+    return {
+      ...op.state,
+      transport: remote ? 'remote' : 'local',
+      ...(op.state.phase === 'ready' && !terminal
+        ? { phase: endpoint?.phase ?? 'connecting', message: endpoint?.message }
+        : {}),
+      viewerUrl: terminal ? undefined : endpoint?.viewerUrl,
+    };
   }
   private serialize<T>(sessionId: string, action: () => Promise<T>): Promise<T> {
     const pending = (this.queues.get(sessionId) ?? Promise.resolve()).catch(() => {}).then(action);
@@ -257,11 +303,10 @@ export class IosSimulatorService {
       clearTimeout(op.timer);
       op.timer = setTimeout(() => op.abort.abort(), DEFAULT_PREVIEW_IDLE_TIMEOUT_MS);
       op.timer.unref?.();
-      op.renewTunnel?.();
+      for (const endpoint of op.endpoints.values()) endpoint.renew?.();
     };
     let process: Awaited<ReturnType<typeof startBaguetteProcess>> | undefined;
     let gateway: Awaited<ReturnType<typeof createSimulatorGateway>> | undefined;
-    let tunnel: QuickTunnelSession | undefined;
     try {
       const devices = await (this.deps.list ?? listSimulatorDevices)(signal);
       signal.throwIfAborted();
@@ -296,7 +341,6 @@ export class IosSimulatorService {
         udid: device.udid,
         port: process.port,
         softwareKeyboard: /iphone|ipad/i.test(device.deviceType ?? ''),
-        remote: op.state.transport === 'remote',
         logger: this.deps.logger,
         signal,
         hostControl: (control) => nativeProcess.control(device.udid, control),
@@ -304,41 +348,74 @@ export class IosSimulatorService {
         renew,
       });
       signal.throwIfAborted();
-      const target: PreviewTarget = {
-        protocol: 'http',
-        host: '127.0.0.1',
-        port: gateway.port,
-        path: gateway.path,
-      };
-      if (op.state.transport === 'remote') {
-        tunnel = (this.deps.tunnel ?? ((options) => new QuickTunnelSession(options)))({
-          sessionId: sessionId as SessionId,
-          target,
-          runtimeBaseUrl: this.deps.runtimeBaseUrl,
-          logger: this.deps.logger,
-          now: this.now,
-          visualAnnotation: false,
-          renewOnTraffic: false,
-        });
-        const cancel = () => tunnel?.cancel('revoked');
-        signal.addEventListener('abort', cancel, { once: true });
-        if (signal.aborted) cancel();
-        op.renewTunnel = () => {
-          tunnel?.activity(true);
+      const boundGateway = gateway;
+      op.connect = async (remote, endpoint) => {
+        const target: PreviewTarget = {
+          protocol: 'http',
+          host: '127.0.0.1',
+          port: boundGateway.port,
+          path: remote ? boundGateway.remotePath : boundGateway.path,
         };
-        void tunnel.closed.then(() => op.abort.abort());
-        const endpoint = await tunnel.ready;
-        op.state.viewerUrl = endpoint.viewerUrl;
-      } else {
-        const endpoint = await this.local.acquire({
-          sessionId: sessionId as SessionId,
-          target,
-          visualAnnotation: false,
-          onActivity: () => active(),
-        });
-        op.state.viewerUrl = endpoint.viewerUrl;
+        let tunnel: ReturnType<NonNullable<Dependencies['tunnel']>> | undefined;
+        const cancel = () => tunnel?.cancel('revoked');
+        try {
+          signal.throwIfAborted();
+          if (remote) {
+            tunnel = (this.deps.tunnel ?? ((options) => new QuickTunnelSession(options)))({
+              sessionId: sessionId as SessionId,
+              target,
+              runtimeBaseUrl: this.deps.runtimeBaseUrl,
+              logger: this.deps.logger,
+              now: this.now,
+              visualAnnotation: false,
+              renewOnTraffic: false,
+            });
+            signal.addEventListener('abort', cancel, { once: true });
+            if (signal.aborted) cancel();
+            endpoint.renew = () => {
+              tunnel?.activity(true);
+            };
+            endpoint.viewerUrl = (await tunnel.ready).viewerUrl;
+          } else {
+            endpoint.viewerUrl = (
+              await this.local.acquire({
+                sessionId: sessionId as SessionId,
+                target,
+                visualAnnotation: false,
+                onActivity: () => active(),
+              })
+            ).viewerUrl;
+          }
+          signal.throwIfAborted();
+          endpoint.phase = 'ready';
+          // A second viewer must not reset the operation's expiry merely by polling.
+          if (tunnel) await tunnel.closed;
+          else
+            await new Promise<void>((resolve) => {
+              if (signal.aborted) resolve();
+              else signal.addEventListener('abort', () => resolve(), { once: true });
+            });
+          if (!signal.aborted) throw new Error('Simulator tunnel closed.');
+        } catch {
+          endpoint.phase = signal.aborted ? 'closed' : 'failed';
+          endpoint.message =
+            'Simulator preview connection failed. Check network access, then retry.';
+        }
+        endpoint.viewerUrl = undefined;
+        endpoint.renew = undefined;
+        signal.removeEventListener('abort', cancel);
+        if (tunnel) {
+          tunnel.cancel('revoked');
+          const closed = await tunnel.closed;
+          if (closed.cleanupFailed)
+            throw closed.error ?? new Error('Simulator tunnel cleanup failed.');
+        } else if (!remote)
+          await this.local.closeSession(sessionId as SessionId, 'Simulator stopped');
+      };
+      for (const [remote, endpoint] of op.endpoints) {
+        endpoint.done = op.connect(remote, endpoint);
+        void endpoint.done.catch(() => op.abort.abort());
       }
-      signal.throwIfAborted();
       op.state.phase = 'ready';
       renew();
       await new Promise<void>((resolve) => {
@@ -359,8 +436,7 @@ export class IosSimulatorService {
       op.state.viewerUrl = undefined;
       // Revoke viewers before relinquishing the machine-wide input lease.
       const results = await Promise.allSettled([
-        tunnel?.close('revoked'),
-        this.local.closeSession(sessionId as SessionId, 'Simulator stopped'),
+        ...[...op.endpoints.values()].map((endpoint) => endpoint.done),
         gateway?.close(),
       ]);
       results.push(...(await Promise.allSettled([process?.stop()])));
@@ -389,7 +465,7 @@ export class IosSimulatorService {
     this.remoteEnabled = false;
     this.remoteGeneration++;
     for (const op of this.operations.values())
-      if (op.state.transport === 'remote') op.abort.abort();
+      if (op.endpoints.has(true) || op.state.transport === 'remote') op.abort.abort();
   }
   async closeAll(): Promise<void> {
     this.disposed = true;

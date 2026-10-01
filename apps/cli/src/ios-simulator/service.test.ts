@@ -6,6 +6,7 @@ import {
   type IosSimulatorDevice,
 } from '@lody/shared';
 import { IosSimulatorService } from './service';
+import type { QuickTunnelClosed } from '@/preview/quick-tunnel-session';
 import { SimulatorControlLeases } from './control-leases';
 import { parseSimulatorDevices } from './devices';
 import { MessageHandler } from '@/lib/message-handler';
@@ -41,7 +42,20 @@ afterEach(async () => {
   await Promise.all(services.splice(0).map((s) => s.closeAll()));
   vi.useRealTimers();
 });
-function fixture(workspaceId = 'w', leases = new SimulatorControlLeases(), boot = async () => {}) {
+function fixture(
+  workspaceId = 'w',
+  leases = new SimulatorControlLeases(),
+  boot = async () => {},
+  tunnelGate: Promise<void> | (() => Promise<void>) = Promise.resolve()
+) {
+  const remoteReady = deferred<void>();
+  const tunnelClosed = deferred<QuickTunnelClosed>();
+  let tunnelOutcome: QuickTunnelClosed = {};
+  let starts = 0;
+  let tunnels = 0;
+  let localClosed = 0;
+  let tunnelTarget: string | undefined;
+  let finishTunnel: () => void = () => {};
   const ready = deferred<void>();
   const processClosed = deferred<void>();
   let active: (() => boolean) | undefined;
@@ -59,6 +73,7 @@ function fixture(workspaceId = 'w', leases = new SimulatorControlLeases(), boot 
     boot,
     binary: async () => '/managed/Baguette',
     process: async (_binary, signal) => {
+      starts++;
       captureSignal = signal;
       return {
         port: 1,
@@ -75,6 +90,7 @@ function fixture(workspaceId = 'w', leases = new SimulatorControlLeases(), boot 
       return {
         port: 2,
         path: '/simulator/secret/',
+        remotePath: '/simulator/secret/remote/',
         close: async () => {
           captureAbortedBeforeGatewayClose = captureSignal?.aborted;
           released = true;
@@ -92,7 +108,37 @@ function fixture(workspaceId = 'w', leases = new SimulatorControlLeases(), boot 
           createdAt: 0,
         };
       },
-      closeSession: async () => {},
+      closeSession: async () => {
+        localClosed++;
+      },
+    },
+    tunnel: (options) => {
+      tunnels++;
+      tunnelTarget = options.target.path;
+      const closed = deferred<QuickTunnelClosed>();
+      finishTunnel = () => {
+        closed.resolve(tunnelOutcome);
+        tunnelClosed.resolve(tunnelOutcome);
+      };
+      const finish = finishTunnel;
+      return {
+        ready: (typeof tunnelGate === 'function' ? tunnelGate() : tunnelGate).then(() => {
+          remoteReady.resolve();
+          return {
+            endpointId: 'remote',
+            kind: 'quick-tunnel' as const,
+            viewerUrl: 'https://preview.example.test/?token=remote',
+            capabilities: { visualAnnotation: false, shareable: false },
+            createdAt: 0,
+          };
+        }),
+        closed: closed.promise,
+        cancel: finish,
+        close: async () => {
+          finish();
+        },
+        activity: () => true,
+      };
     },
   });
   services.push(service);
@@ -103,6 +149,18 @@ function fixture(workspaceId = 'w', leases = new SimulatorControlLeases(), boot 
     call,
     agentCall: (command: IosSimulatorRequest['command']) =>
       service.controlFromAgent({ sessionId: 's', requestedByUserId: 'u', command }),
+    remoteCall: (command: IosSimulatorRequest['command']) =>
+      service.control({ sessionId: 's', requestedByUserId: 'u', command }, true, async () => {}),
+    remoteReady,
+    tunnelClosed: tunnelClosed.promise,
+    setTunnelOutcome: (outcome: QuickTunnelClosed) => {
+      tunnelOutcome = outcome;
+    },
+    finishTunnel: () => finishTunnel(),
+    starts: () => starts,
+    tunnels: () => tunnels,
+    tunnelTarget: () => tunnelTarget,
+    localClosed: () => localClosed,
     captureStarted: () => captureSignal !== undefined,
     ready,
     active: () => active?.(),
@@ -112,6 +170,182 @@ function fixture(workspaceId = 'w', leases = new SimulatorControlLeases(), boot 
   };
 }
 describe('simulator ownership and lifecycle', () => {
+  it.each(['local', 'remote'] as const)(
+    'keeps both viewer routes on one operation when %s opens first',
+    async (first) => {
+      const a = fixture();
+      a.service.enableRemote();
+      const start = await (first === 'local' ? a.call : a.remoteCall)({ action: 'start', udid });
+      await (first === 'local' ? a.ready : a.remoteReady).promise;
+      const attach = first === 'local' ? a.remoteCall : a.call;
+      const replies = await Promise.all(
+        Array.from({ length: 4 }, () => attach({ action: 'status' }))
+      );
+      expect(replies.every((r) => r.preview?.operationId === start.preview?.operationId)).toBe(
+        true
+      );
+      await Promise.all([a.ready.promise, a.remoteReady.promise]);
+      const local = (await a.call({ action: 'status' })).preview;
+      const remote = (await a.remoteCall({ action: 'status' })).preview;
+      expect(local).toMatchObject({
+        phase: 'ready',
+        transport: 'local',
+        viewerUrl: 'http://127.0.0.1:2/?token=secret',
+      });
+      expect(remote).toMatchObject({
+        phase: 'ready',
+        transport: 'remote',
+        viewerUrl: 'https://preview.example.test/?token=remote',
+      });
+      expect(remote?.operationId).toBe(local?.operationId);
+      expect(a.starts()).toBe(1);
+      expect(a.tunnels()).toBe(1);
+      expect(a.tunnelTarget()).toBe('/simulator/secret/remote/');
+      await a.remoteCall({ action: 'stop', operationId: start.preview!.operationId });
+      expect((await a.call({ action: 'status' })).preview).toMatchObject({
+        phase: 'closed',
+        viewerUrl: undefined,
+      });
+      expect((await a.remoteCall({ action: 'status' })).preview).toMatchObject({
+        phase: 'closed',
+        viewerUrl: undefined,
+      });
+      expect(a.captureAbortedBeforeGatewayClose()).toBe(false);
+      expect((await a.call({ action: 'list' })).devices?.[0]?.occupancy).toBe('available');
+    }
+  );
+
+  it('never leaks the local URL while a remote endpoint connects or after a stale status read', async () => {
+    const gate = deferred<void>();
+    const a = fixture('w', undefined, undefined, gate.promise);
+    a.service.enableRemote();
+    const start = await a.call({ action: 'start', udid });
+    await a.ready.promise;
+    expect(
+      (await a.remoteCall({ action: 'status', operationId: 'stale' })).preview
+    ).toBeUndefined();
+    expect(a.tunnels()).toBe(0);
+    expect((await a.remoteCall({ action: 'status' })).preview).toMatchObject({
+      phase: 'connecting',
+      transport: 'remote',
+      viewerUrl: undefined,
+      operationId: start.preview!.operationId,
+    });
+    expect((await a.call({ action: 'status' })).preview?.phase).toBe('ready');
+    a.service.revokeRemote();
+    gate.resolve();
+    await a.service.closeSession('s');
+    expect(a.active()).toBe(false);
+    expect((await a.remoteCall({ action: 'status' })).error).toBe('denied');
+    expect((await a.call({ action: 'list' })).devices?.[0]?.occupancy).toBe('available');
+  });
+
+  it('keeps the local viewer alive when tunnel preparation fails', async () => {
+    const gate = deferred<void>();
+    const a = fixture(
+      'w',
+      undefined,
+      undefined,
+      gate.promise.then(() => {
+        throw new Error('offline');
+      })
+    );
+    a.service.enableRemote();
+    await a.call({ action: 'start', udid });
+    await a.ready.promise;
+    await a.remoteCall({ action: 'status' });
+    a.setTunnelOutcome({ error: new Error('connection failed after cleanup') });
+    gate.resolve();
+    await a.tunnelClosed;
+    expect((await a.remoteCall({ action: 'status' })).preview).toMatchObject({
+      phase: 'failed',
+      viewerUrl: undefined,
+    });
+    expect((await a.call({ action: 'status' })).preview).toMatchObject({
+      phase: 'ready',
+      transport: 'local',
+    });
+    expect(a.localClosed()).toBe(0);
+    expect(a.active()).toBe(true);
+  });
+
+  it('retries only the failed remote endpoint without restarting the local operation', async () => {
+    let attempt = 0;
+    const a = fixture('w', undefined, undefined, () =>
+      attempt++ === 0 ? Promise.reject(new Error('unreachable')) : Promise.resolve()
+    );
+    a.service.enableRemote();
+    const local = await a.call({ action: 'start', udid });
+    await a.ready.promise;
+    await a.remoteCall({ action: 'status' });
+    await a.tunnelClosed;
+    const retry = await a.remoteCall({ action: 'start', udid });
+    expect(retry.preview?.operationId).toBe(local.preview?.operationId);
+    await a.remoteReady.promise;
+    expect((await a.remoteCall({ action: 'status' })).preview).toMatchObject({
+      phase: 'ready',
+      transport: 'remote',
+    });
+    expect((await a.call({ action: 'status' })).preview).toMatchObject({
+      phase: 'ready',
+      transport: 'local',
+    });
+    expect(a.starts()).toBe(1);
+    expect(a.tunnels()).toBe(2);
+    expect(a.localClosed()).toBe(0);
+  });
+
+  it('coalesces simultaneous local and remote starts during boot and denies unauthorized attachments', async () => {
+    const boot = deferred<void>();
+    const a = fixture('w', undefined, () => boot.promise);
+    a.service.enableRemote();
+    const [local, remote] = await Promise.all([
+      a.call({ action: 'start', udid }),
+      a.remoteCall({ action: 'start', udid }),
+    ]);
+    expect(local.preview?.operationId).toBe(remote.preview?.operationId);
+    boot.resolve();
+    await Promise.all([a.ready.promise, a.remoteReady.promise]);
+    expect(a.starts()).toBe(1);
+    expect(a.tunnels()).toBe(1);
+    a.service.revokeRemote();
+    await a.service.closeSession('s');
+    const next = await a.call({ action: 'start', udid });
+    a.service.enableRemote();
+    const denied = await a.service.control(
+      { sessionId: 's', requestedByUserId: 'u', command: { action: 'status' } },
+      true,
+      async () => {
+        throw new Error('denied');
+      }
+    );
+    expect(denied).toMatchObject({ success: false, error: 'denied' });
+    expect(denied.preview).toBeUndefined();
+    expect(a.tunnels()).toBe(1);
+    expect((await a.call({ action: 'status' })).preview?.operationId).toBe(
+      next.preview?.operationId
+    );
+  });
+
+  it('fails the whole operation if tunnel resource cleanup fails', async () => {
+    const a = fixture();
+    a.service.enableRemote();
+    const start = await a.call({ action: 'start', udid });
+    await a.ready.promise;
+    await a.remoteCall({ action: 'status' });
+    await a.remoteReady.promise;
+    a.setTunnelOutcome({ cleanupFailed: true, error: new Error('cleanup failed') });
+    a.finishTunnel();
+    const stopped = await a.call({ action: 'stop', operationId: start.preview!.operationId });
+    expect(stopped.preview).toMatchObject({
+      phase: 'failed',
+      viewerUrl: undefined,
+      message: 'Simulator resource cleanup failed.',
+    });
+    expect(a.active()).toBe(false);
+    expect(a.localClosed()).toBe(1);
+  });
+
   it('local agent ingress derives the active user and fails closed without that identity', async () => {
     const service = new IosSimulatorService({
       workspaceId: 'w',

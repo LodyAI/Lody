@@ -13,7 +13,12 @@ import { LocalPreviewProxyManager } from './local-preview-proxy';
 import { verifyPreviewTunnelRoundTrip } from './preview-tunnel-readiness';
 
 export type { PreviewCloseReason } from '@lody/shared';
-export type QuickTunnelClosed = { reason?: PreviewCloseReason; error?: Error };
+export type QuickTunnelClosed = {
+  reason?: PreviewCloseReason;
+  error?: Error;
+  /** Distinguishes resource cleanup failure from an already-cleaned connection failure. */
+  cleanupFailed?: true;
+};
 
 type Options = {
   sessionId: SessionId;
@@ -195,6 +200,7 @@ export class QuickTunnelSession {
       );
       if (failures.length) {
         outcome = {
+          cleanupFailed: true,
           error: new AggregateError(
             [...(outcome.error ? [outcome.error] : []), ...failures],
             'Quick Tunnel resource cleanup failed',

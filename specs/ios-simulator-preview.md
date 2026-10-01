@@ -38,6 +38,15 @@ access; remote control binds a short-lived proof to the exact session, device/op
 action and daemon instance. OS controls discoverability; a versioned machine capability
 controls compatibility. Public local-only builds make no authenticated cloud calls.
 
+
+The same authorized session may view one operation from multiple devices. Local
+Electron and remote viewers use separate lazily created endpoints; status and start
+return the caller's transport, including during preparation. Opening another device
+must not restart capture or reset orientation. Concurrent attachment requests coalesce.
+A failed remote connection can be retried without interrupting local viewing. Stop
+ends the shared operation on every device; remote revocation also closes both routes
+of an operation with a remote attachment. This does not grant access to other sessions.
+
 Each device allows only one controlling Lody session across all workspaces on the
 machine. Other sessions show occupied, with no takeover. Native Simulator tools remain
 outside this coordination. Browser and simulator previews coexist independently.

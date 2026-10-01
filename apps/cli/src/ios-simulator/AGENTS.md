@@ -82,7 +82,12 @@
   verification as well as startup; owner/machine reassignment closes existing viewers.
   Browser and Simulator have independent service/proxy owners and share only transport
   primitives. There is no simulator sharing route or anonymous viewer grant.
-- Agent starts reserve/prepare but defer capture and transport selection to the first
+- One operation owns one native process and gateway, with lazy local and remote
+  endpoints. Return only the requesting plane's URL/status, including while connecting.
+  The remote gateway path selects remote flow budgets without reinitializing controls.
+  Concurrent attachments coalesce; tunnel failure/retry leaves a local viewer running.
+  Stop and remote revocation of an attached operation close both planes before release.
+- Agent starts reserve/prepare but defer capture until the first
   authorized panel start/status. Agent reads never attach or renew; cancellation and
   idle expiry must settle that wait and release its lease. Agent ingress derives the
   active invocation user in the daemon; never accept an agent-supplied requester.
