@@ -1,3 +1,5 @@
+import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
+import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import type { IosSimulatorDevice } from '@lody/shared';
 import { fn } from 'storybook/test';
@@ -185,6 +187,21 @@ export const ControlsNeedUpdate: Story = {
 
 /** Mobile: every control lives in one More menu beside the status. */
 export const MobileControlsMenu: Story = {
+  decorators: [
+    (Story) => (
+      <Drawer direction="right" open repositionInputs={false}>
+        <DrawerContent
+          className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+          aria-describedby={undefined}
+        >
+          <DrawerTitle className="sr-only">iOS Simulator</DrawerTitle>
+          <VaulDrawerBody topInset="0px">
+            <Story />
+          </VaulDrawerBody>
+        </DrawerContent>
+      </Drawer>
+    ),
+  ],
   args: { status: ready('remote'), viewerState: 'ready', controls, controlsLayout: 'menu' },
 };
 

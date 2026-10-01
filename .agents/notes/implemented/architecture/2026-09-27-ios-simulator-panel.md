@@ -454,3 +454,16 @@ into 750 ms batches for 45 seconds. H.264 stayed at 590×1278 with zero recoveri
 fallbacks or decode errors despite over 2,500 submission pauses. Latest-only drawing
 was only 2–3.5 FPS in the final samples, as expected under deliberately batched
 delivery; this verifies burst tolerance, not smooth playback or the real WAN path.
+
+### Mobile drawer popup ownership (2026-10-01)
+
+The simulator's mobile More menu rendered visibly above its iframe but inherited
+`pointer-events: none` from Vaul's body lock: its portal was outside the modal.
+Browser hit testing at Home/App switcher rows hit the underlying iframe. The shared
+`DrawerContent` now supplies the existing PopupContainerProvider with a boxless
+no-drag host inside the drawer, outside scrolling content. This also keeps device
+and status pickers within the same focus/interaction boundary without per-control
+z-index or pointer-events overrides. The mobile story now includes the actual Vaul
+drawer/body; regression tests cover initially open and trigger-opened menus, focus,
+selection, dismissal and preserved drawer state. Existing narrower providers still
+win through normal context nesting.
