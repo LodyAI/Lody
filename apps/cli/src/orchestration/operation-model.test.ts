@@ -34,6 +34,35 @@ describe('Operation delivery executable model', () => {
     expect(stepOrchestrationModel(started, 'complete_turn').delivery).toBe('consumed');
   });
 
+  it('persists a Stop pause until another user turn takes ownership', () => {
+    const stopped = trace(
+      'accept',
+      'materialize_success',
+      'finish',
+      'enqueue_user',
+      'schedule',
+      'stop_user_turn',
+      'restart',
+      'schedule'
+    );
+    expect(stopped).toMatchObject({
+      delivery: 'pending',
+      deliveryPaused: true,
+      activeTurn: 'none',
+      completionTurnWrites: 0,
+    });
+
+    const resumed = stepOrchestrationModel(
+      stepOrchestrationModel(stopped, 'enqueue_user'),
+      'schedule'
+    );
+    expect(resumed).toMatchObject({
+      delivery: 'pending',
+      deliveryPaused: false,
+      activeTurn: 'user',
+    });
+  });
+
   it('keeps archived delivery pending until restore', () => {
     const archived = trace('accept', 'materialize_success', 'archive', 'finish', 'schedule');
     expect(archived).toMatchObject({ delivery: 'pending', completionTurnWrites: 0 });

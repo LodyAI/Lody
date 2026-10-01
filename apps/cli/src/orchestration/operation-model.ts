@@ -24,6 +24,7 @@ export type OrchestrationModelState = {
   targetTerminal: boolean;
   activeTurn: 'none' | 'user' | 'delivery';
   queuedUsers: number;
+  deliveryPaused: boolean;
   archived: boolean;
   configurationAvailable: boolean;
   completionTurnWrites: number;
@@ -47,6 +48,7 @@ export type OrchestrationModelAction =
   | 'complete_turn'
   | 'interrupt_turn'
   | 'cancel_turn'
+  | 'stop_user_turn'
   | 'complete_finalization'
   | 'finalization_consume_fail'
   | 'restart'
@@ -65,6 +67,7 @@ export const initialOrchestrationModelState = (): OrchestrationModelState => ({
   targetTerminal: false,
   activeTurn: 'none',
   queuedUsers: 0,
+  deliveryPaused: false,
   archived: false,
   configurationAvailable: true,
   completionTurnWrites: 0,
@@ -131,6 +134,9 @@ export const stepOrchestrationModel = (
       if (next.queuedUsers > 0) {
         next.queuedUsers -= 1;
         next.activeTurn = 'user';
+        next.deliveryPaused = false;
+      } else if (next.deliveryPaused) {
+        break;
       } else if (next.delivery === 'uncertain') {
         next.delivery = 'uncertain_finalizing';
         next.deliveryClaimOwner = 'current';
@@ -212,6 +218,12 @@ export const stepOrchestrationModel = (
         next.deliveryClaimOwner = 'none';
       }
       next.activeTurn = 'none';
+      break;
+    case 'stop_user_turn':
+      if (next.activeTurn === 'user') {
+        next.activeTurn = 'none';
+        next.deliveryPaused = true;
+      }
       break;
     case 'finalization_consume_fail':
       if (
@@ -336,6 +348,7 @@ export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationMode
     'complete_turn',
     'interrupt_turn',
     'cancel_turn',
+    'stop_user_turn',
     'complete_finalization',
     'finalization_consume_fail',
     'restart',

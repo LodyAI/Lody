@@ -49,6 +49,8 @@ Root and `apps/cli/AGENTS.md` apply; `specs/session-orchestration.md` owns behav
   exploration and concrete traces whenever scheduling semantics change.
 - Delivery never writes user dispatch pointers; pending users win idle boundaries. Completion owns
   one stable system Turn under the Session mutex and Assistant `assistant:<systemTurnId>`;
+  Stop pauses delivery until a user Turn owns Session; delivery/goal Turns cannot resume it. A failed
+  marker write retains the Stop request and local barrier; restart heals before consuming the request.
   `finished`/`endedAt` is not evidence because teardown writes it too. Host lease, Worker boot id,
   and attempt token fence execution. Fields remain in `delivery_execution_state` because stable
   binaries parse `SELECT * FROM deliveries`; its insert trigger atomically covers current and legacy
