@@ -12,11 +12,10 @@ Translation: current
 | 用途               | 地址                                                            |
 | ------------------ | --------------------------------------------------------------- |
 | 会话（所有版本）   | `lody://session/<sessionId>?workspace=<workspaceId>`            |
-| 指定根会话的子标签 | `lody://session/<rootId>?workspace=<workspaceId>&tab=<childId>` |
 | Stable 新登录回调  | `ai.lody.stable://auth/callback#token=…`                        |
 | Nightly 登录回调   | `ai.lody.nightly://auth/callback#token=…`                       |
 
-workspace 使用稳定 ID；UI 解析为当前 slug。复制会话和 mention 生成器携带 workspace，子会话直接用其真实 ID，因此 agent 可以读取精确会话。tab 为真实子会话 ID，不能用数组位置。裸 ID 和不带 workspace 的旧引用只在既有调用上下文解析，不跨安装搜索。
+workspace 使用稳定 ID；UI 解析为当前 slug。复制、mention 和 Markdown 导出的所有新链接都直接使用目标对话的真实 ID。父子关系和 UI 标签属于内部导航细节，不是公开地址的一部分。早期 root+tab 链接仅保留读取兼容，重新生成或导出时转换为直接目标 ID，不再输出 tab 参数。裸 ID 和不带 workspace 的旧引用只在既有调用上下文解析，不跨安装搜索。
 
 `lody-oss://session/…`、`ai.lody.nightly://session/…` 和 `ai.lody.stable://session/…` 仅作为定向打开入口；新资源链接统一生成 `lody://`。保留应用内旧 `session://<id>` 读取兼容，不注册 OS 的 session 协议，不重写历史。消息复制和 UI/CLI Markdown 导出将正文引用转换成统一协议，仅在来源 workspace 已知时补上缺失的 ID。保留显式外部 workspace ID、代码示例和工具数据。匿名导出不从访问者推断来源 workspace；编辑重发保留存储原文。应用外旧链接无法保证打开 Lody。
 

@@ -35,10 +35,21 @@ describe('session resource links', () => {
     );
     expect(normalizeSessionLinksForExport('[Old](session://A)')).toBe('[Old](lody://session/A)');
   });
-  it('round trips an exact workspace and child target without changing ID case', () => {
+  it('emits only the exact conversation ID, including when normalizing a legacy selector', () => {
     const target = { sessionId: 'Root_A', workspaceId: 'lw_One', tabSessionId: 'Child_B' };
-    expect(buildSessionLink(target)).toBe('lody://session/Root_A?workspace=lw_One&tab=Child_B');
-    expect(parseSessionLink(buildSessionLink(target))).toEqual(target);
+    const canonical = 'lody://session/Child_B?workspace=lw_One';
+    expect(buildSessionLink(target)).toBe(canonical);
+    expect(parseSessionLink(canonical)).toEqual({ sessionId: 'Child_B', workspaceId: 'lw_One' });
+    expect(resolveSessionLinkId(canonical, 'lw_One')).toBe('Child_B');
+    const legacy = 'lody://session/Root_A?workspace=lw_One&tab=Child_B';
+    expect(parseSessionLink(legacy)).toEqual(target);
+    expect(buildSessionLink(parseSessionLink(legacy)!)).toBe(canonical);
+    expect(normalizeSessionLinksForExport(`[Conversation](${legacy})`)).toBe(
+      `[Conversation](${canonical})`
+    );
+    expect(buildSessionLink({ sessionId: 'Root_A', workspaceId: 'lw_One' })).toBe(
+      'lody://session/Root_A?workspace=lw_One'
+    );
   });
 
   it.each(['lody', 'lody-oss', 'ai.lody.nightly'])(

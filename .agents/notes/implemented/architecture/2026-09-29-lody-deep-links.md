@@ -23,6 +23,8 @@ Registering the generic session OS handler was rejected because it competes with
 
 ## Review corrections
 
+Canonical output now always names the target conversation directly. The initial root+tab alternative exposed internal containment and was redundant; it is no longer a public format. The shared builder flattens legacy selectors, so copy/export and regenerated links cannot emit a parent ID plus tab. Parsing remains backward compatible, while internal navigation resolves containment from metadata. Tests cover canonical construction, legacy reading, export normalization and MCP use of the resulting direct ID.
+
 The shared scheme remains available to every channel. Legacy common cloud routes now hand off only to Stable's private alias, with a visible redacted failure if unavailable; chat/new stays local. This compatibility handoff is separate from explicit user-directed session workspace handoff. Windows startup fills an absent common handler but preserves existing defaults; it does not establish installer registration before first launch. The channel catalog is shared by runtime parsing, IPC and packaging.
 
 Batch status isolates invalid references; compound paste mentions the child. Partial text export skips absent strings, normalizes punctuation/emphasis-wrapped legacy links and bypasses Markdown parsing for unrelated schemes. Pending session restoration waits for child synchronization, expires after 15 seconds and cancels on departure or superseding navigation.

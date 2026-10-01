@@ -9,6 +9,7 @@ export {
 export type SessionLink = {
   sessionId: string;
   workspaceId?: string;
+  /** Legacy read compatibility only; new links address this ID directly. */
   tabSessionId?: string;
 };
 
@@ -21,10 +22,8 @@ export function buildSessionLink(target: SessionLink): string {
   }
   const query = new URLSearchParams();
   if (target.workspaceId) query.set('workspace', target.workspaceId);
-  if (target.tabSessionId && target.tabSessionId !== target.sessionId) {
-    query.set('tab', target.tabSessionId);
-  }
-  const url = `${LODY_PROTOCOLS.resource}://session/${target.sessionId}${query.size ? `?${query}` : ''}`;
+  const sessionId = target.tabSessionId ?? target.sessionId;
+  const url = `${LODY_PROTOCOLS.resource}://session/${sessionId}${query.size ? `?${query}` : ''}`;
   if (url.length > 8192) throw new Error('Session link is too long');
   return url;
 }
