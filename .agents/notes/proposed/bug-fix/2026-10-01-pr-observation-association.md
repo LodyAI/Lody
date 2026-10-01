@@ -50,6 +50,28 @@ repository and is not part of this patch. The trade-off is a visible summary who
 hosted webhook linkage may still be unavailable; detail and mutation operations
 retain their own authorization requirements.
 
+Publishing the observation makes the rejected-association case reach the PR tab,
+so the tab's failure face is part of the same correction. A failed or
+identity-blocked detail load now degrades instead of dead-ending: the tab keeps
+its recorded repository and PR number, and the failure renders as the surface's
+existing danger notice band — the load failure titled in red, the body stating
+that a pull request was found and where it can still be viewed, and the two
+actions that can still work — open on GitHub, or retry the load with visible
+pending feedback. The verbatim error stays visible as a quiet detail line —
+when the block is repository identity, that message IS the verified cause and
+names who can repair it (reconnect, or a workspace administrator for a removed
+or renamed repository); when the error is a GitHub 404, a hedged hint adds that
+the Lody GitHub App may simply lack repo access, with a link to the install
+page as the one repair the user can actually run. A centred `StatusPage` treatment was explored and set
+aside: its illustration vocabulary has no art matching "found but unreachable"
+(`missing` reads as "can't find" against a found headline), and the in-content
+notice keeps the tab's chrome and context in place. No mutation
+affordance renders without loaded details: the comment composer mounts only
+while a pull request is present, the draft lives in the view so a failed reload
+cannot erase it, and `postComment` now rejects rather than silently resolving
+when it cannot deliver. The notice asserts a recorded observation only — never
+webhook association or write access.
+
 ## Verification
 
 Synthetic scheduler fixtures reproduce failed association with managed and ambient
@@ -72,6 +94,15 @@ not committed. This is component acceptance, not a deployed full-session UI chec
 The reusable browser regression is
 `pnpm --dir packages/components exec playwright test tests/e2e/session-info-bar-observation.spec.ts --workers=1`;
 optional `B08_SCREENSHOT_FIXTURES` supplies captured `before.json` / `after.json`.
+
+The PR-tab degraded state has its own coverage: the view suite exercises the
+notice (recorded-PR statement, GitHub link, pending retry, visible verbatim
+error, no comment composer) and a draft surviving a failed reload; the details
+suite covers `postComment` rejecting while identity is unverified. Component suites run under jsdom; the two error
+stories were additionally captured in fresh Playwright contexts at 480 × 720
+and 300 × 720 (English, light, external destinations blocked) and uploaded to
+the requesting conversation rather than committed. The page's rendering inside
+the real resizable side panel is not separately verified.
 
 The poller suite passes 193 tests; PR selection/action suites pass 21 tests.
 After rebasing onto `93545f01b`, the poller plus command credential-runtime,

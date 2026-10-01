@@ -39,7 +39,10 @@ changes take effect at a subsequent eligible polling attempt, respecting cooldow
 
 The desktop reads the same metadata for local and hosted projects. Without hosted
 GitHub integration, PR links open GitHub in the browser; detailed checks, review
-and mutation APIs are not enabled by local summary access. Branch observation is
+and mutation APIs are not enabled by local summary access. When hosted detail
+reads fail — including an unconfirmed repository identity — a recorded PR keeps
+a recoverable presentation with its GitHub link rather than a bare failure, and
+mutation affordances stay unavailable until details load. Branch observation is
 event-driven; PR discovery and status use bounded background polling, not a new
 polling loop per view. Product-cloud requests remain forbidden in local mode.
 
