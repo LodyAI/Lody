@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1196](https://github.com/LodyAI/Lody/pull/1196)
 
 [English](2026-10-01-usage-timeline-time-basis.md)
 
