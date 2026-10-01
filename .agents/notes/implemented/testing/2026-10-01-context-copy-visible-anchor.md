@@ -18,7 +18,9 @@ the exact source of the small scroll residual is not established by the trace.
 ## Evidence and decision
 
 The [Daily run](https://github.com/LodyAI/Lody/actions/runs/36835904880) tested
-`7d502f3d99fdcdbbdd43d032c6d903d4ed497e04`, still the current main at investigation.
+`7d502f3d99fdcdbbdd43d032c6d903d4ed497e04`, the main at initial investigation.
+Main advanced to `93545f01b69cb0c98ddd3f19d46540decd95a007` during this work;
+the helper remains unchanged there.
 The macOS and Ubuntu failure records point to the exact-zero poll in
 [`ContextCopyPage`](../../../../e2e/src/support/pages/context-copy-page.ts), before
 the Fork menu or clipboard assertions. Both traces record an upward wheel of
@@ -56,10 +58,11 @@ writer, wait, product behavior, or Spec intent is introduced.
   not a real desktop integration run.
 - Local `pnpm e2e:build`, `pnpm check`, and `pnpm format` stop on missing workspace
   tools (`rimraf`, `tsgo`, and `oxfmt`) and unpopulated ACP submodules. Changed
-  files receive a separate Oxfmt check and `git diff --check`. The PR requests
+  TypeScript and notes receive a separate Oxfmt check; all changes pass
+  `git diff --check`. The PR requests
   the hosted full Electron regression; its checks own the subsequent result.
 - The captured failures do not prove that subpixel rounding alone caused the
   residual, nor do they verify clipboard behavior: execution stopped before
   copying. Fresh Windows/Linux integration results remain a separate boundary.
 
-The implementation and hosted validation are linked through this note's PR.
+PR: [#1190](https://github.com/LodyAI/Lody/pull/1190).

@@ -16,7 +16,9 @@ Translation: current
 ## 证据与决策
 
 [Daily 运行](https://github.com/LodyAI/Lody/actions/runs/36835904880)测试了
-`7d502f3d99fdcdbbdd43d032c6d903d4ed497e04`，调查时 main 仍是该提交。
+`7d502f3d99fdcdbbdd43d032c6d903d4ed497e04`，初次调查时 main 仍是该提交。
+工作期间 main 推进到 `93545f01b69cb0c98ddd3f19d46540decd95a007`，该版本的 helper
+仍未改变。
 macOS、Ubuntu 的失败记录均指向
 [`ContextCopyPage`](../../../../e2e/src/support/pages/context-copy-page.ts)
 的精确零值轮询，发生在 Fork 菜单和剪贴板断言之前。两份 trace 都记录了向上
@@ -45,10 +47,10 @@ Markdown 包含、后续消息排除、流式状态、重开、隔离和清理�
   2px 时离屏的 Fork 按钮均在打开菜单或改变剪贴板前失败。探针是合成 helper
   证据，不代表真实桌面集成测试。
 - 本地 `pnpm e2e:build`、`pnpm check`、`pnpm format` 被缺失的 workspace 工具
-  （`rimraf`、`tsgo`、`oxfmt`）及未初始化的 ACP 子模块阻挡。修改文件单独执行
-  Oxfmt 检查和 `git diff --check`。PR 请求托管的真实 Electron 全套回归，后续结果
+  （`rimraf`、`tsgo`、`oxfmt`）及未初始化的 ACP 子模块阻挡。TypeScript 和记录单独
+  执行 Oxfmt 检查，全部改动执行 `git diff --check`。PR 请求托管的真实 Electron 全套回归，后续结果
   由 PR checks 记录。
 - 捕获的失败既不能证明残留只由亚像素取整造成，也未验证剪贴板行为：执行在复制
   前终止。新的 Windows/Linux 集成结果仍是单独的验证边界。
 
-实现和托管验证通过本记录所属 PR 关联。
+PR：[ #1190](https://github.com/LodyAI/Lody/pull/1190)。
