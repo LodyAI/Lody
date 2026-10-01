@@ -793,10 +793,7 @@ export function ChatComposer({
                             <img
                               src={image.previewUrl}
                               alt={image.name}
-                              className={cn(
-                                'h-full w-full object-cover',
-                                image.status !== 'uploaded' && 'grayscale'
-                              )}
+                              className="h-full w-full object-cover"
                             />
                             {image.status === 'draft' ? (
                               <span className="text-[10px] text-muted-foreground">
