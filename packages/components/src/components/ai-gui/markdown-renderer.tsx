@@ -74,6 +74,7 @@ import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-act
 import { ContextMenu } from '@/ui/armed-overlays';
 import { MarkdownFileImage, MarkdownFileResourcesContext } from './markdown-file-image';
 import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
+import { rehypeHeadingAnchors } from './markdown-heading-anchors';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
 
@@ -750,6 +751,11 @@ const KATEX_REHYPE_PLUGIN = [
 ] satisfies NonNullable<StreamdownProps['rehypePlugins']>[number];
 const MARKDOWN_REHYPE_PLUGINS = [KATEX_REHYPE_PLUGIN];
 const HTML_MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize, KATEX_REHYPE_PLUGIN];
+const ANCHORED_MARKDOWN_REHYPE_PLUGINS = [...MARKDOWN_REHYPE_PLUGINS, rehypeHeadingAnchors];
+const ANCHORED_HTML_MARKDOWN_REHYPE_PLUGINS = [
+  ...HTML_MARKDOWN_REHYPE_PLUGINS,
+  rehypeHeadingAnchors,
+];
 
 const STREAMING_HANDOFF_DELAY_MS = 1000;
 
@@ -962,6 +968,7 @@ const createMarkdownComponents = ({
   getAgentFileLinkContextMenuItems,
   readonly,
   theme,
+  headingAnchors,
 }: {
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
@@ -969,6 +976,7 @@ const createMarkdownComponents = ({
   getAgentFileLinkContextMenuItems?: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
   readonly: boolean;
   theme: ResolvedTheme;
+  headingAnchors: boolean;
 }): Components => ({
   p: ({ children, className, node: _node, ...props }) => (
     <p {...props} className={className}>
@@ -994,6 +1002,13 @@ const createMarkdownComponents = ({
   a: (props: MarkdownLinkProps) => {
     const { children, href, node: _node, rel, ...rest } = props;
     if (!href) return <span>{children}</span>;
+    if (headingAnchors && href.startsWith('#')) {
+      return (
+        <a {...rest} href={href}>
+          {children}
+        </a>
+      );
+    }
     const linkedSessionId = parseSessionLinkHref(href);
     if (linkedSessionId) {
       return (
@@ -1180,6 +1195,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   isStreaming = false,
   onAgentFileLinkClick,
   searchBlockId,
+  headingAnchors = false,
 }: {
   text: string;
   size?: MarkdownRendererSize;
@@ -1190,6 +1206,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   isStreaming?: boolean;
   onAgentFileLinkClick?: (href: string) => void;
   searchBlockId?: string;
+  /** Generate document heading ids and leave fragment clicks to the owning surface. */
+  headingAnchors?: boolean;
 }) {
   ({ text, size, allowHtml, isStreaming, searchBlockId } = useSelectionStableValue({
     text,
@@ -1245,6 +1263,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         getAgentFileLinkContextMenuItems,
         readonly: readonly !== null,
         theme: resolvedTheme,
+        headingAnchors,
       }),
     [
       copyAgentFileLabel,
@@ -1253,12 +1272,19 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       openAgentFileLabel,
       readonly,
       resolvedTheme,
+      headingAnchors,
     ]
   );
 
   const components = useSelectionStableValue(currentComponents);
   const remarkPlugins = inlineMathEnabled ? INLINE_MATH_REMARK_PLUGINS : MARKDOWN_REMARK_PLUGINS;
-  const rehypePlugins = allowHtml ? HTML_MARKDOWN_REHYPE_PLUGINS : MARKDOWN_REHYPE_PLUGINS;
+  const rehypePlugins = headingAnchors
+    ? allowHtml
+      ? ANCHORED_HTML_MARKDOWN_REHYPE_PLUGINS
+      : ANCHORED_MARKDOWN_REHYPE_PLUGINS
+    : allowHtml
+      ? HTML_MARKDOWN_REHYPE_PLUGINS
+      : MARKDOWN_REHYPE_PLUGINS;
   const normalizedSize = normalizeMarkdownRendererSize(size);
   // The engine keeps revealing its buffered tail after the stream ends. Staying
   // mounted briefly lets that reveal finish instead of jumping to the full text.
