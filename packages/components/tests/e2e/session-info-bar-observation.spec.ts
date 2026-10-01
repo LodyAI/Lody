@@ -27,9 +27,9 @@ test('observed PR replaces creation actions without granting hosted mutations', 
         ? route.continue()
         : route.abort()
     );
-    await context.routeWebSocket('**/*', (socket) => {
+    await context.routeWebSocket('**/*', async (socket) => {
       if (new URL(socket.url()).host === new URL(baseURL).host) socket.connectToServer();
-      else socket.close();
+      else await socket.close();
     });
     try {
       await page.goto(`/iframe.html?id=${storyId}&viewMode=story&globals=theme:light;locale:en`);
