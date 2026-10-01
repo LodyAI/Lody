@@ -290,7 +290,7 @@ function TwoLevelMentionMenu({
         ],
       },
       emptyState:
-        sessionProjectScope === 'current'
+        sessionProjectScope === 'current' && visibleSessionItems.length === 0
           ? {
               message:
                 sessionProjectKey === 'chat'

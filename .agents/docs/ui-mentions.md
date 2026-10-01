@@ -135,6 +135,13 @@ items separately re-slugged every visible session twice a tick. It reads the
 child-inclusive projection because mentioning is an addressing surface, and
 review/task child sessions are exactly what gets referenced.
 
+The Sessions menu filters that complete list by project before ranking the
+query. Its scope-empty message and "View all projects" action appear only when
+the selected current-project scope has no candidates. If candidates exist but
+the query matches none, the menu shows the localized "Nothing matches" message
+with the query. Scope controls remain available, switching scope retains the
+query and input focus, and clearing the query restores the selected scope's list.
+
 A drop must produce a real range: a token with no range is sent verbatim, so a
 text-only append would look right in the composer and reach the agent as a word.
 The overlay lives on the conversation column rather than inside each keep-alive
