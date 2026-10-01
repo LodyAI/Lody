@@ -1,3 +1,4 @@
+import { description, frame } from './h264.test-fixtures';
 import http from 'node:http';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -366,5 +367,49 @@ describe('simulator media boundary', () => {
     native.send(Buffer.from([1]));
     await closed;
     expect((await fetch(f.url)).status).toBe(410);
+  });
+});
+
+describe('H.264 gateway negotiation', () => {
+  it('selects only the fixed AVCC route, forwards bounded video, and recovers without renewing the lease', async () => {
+    const f = await setup(undefined, undefined, true);
+    f.stream.searchParams.set('codec', 'h264');
+    const incoming = once(f.upstream, 'connection');
+    const client = new WebSocket(f.stream);
+    cleanups.push(async () => {
+      client.terminate();
+    });
+    const packets: Buffer[] = [];
+    let painted: () => void = () => {};
+    client.on('message', (data, binary) => {
+      if (binary) {
+        packets.push(Buffer.from(data as Buffer));
+        painted();
+      }
+    });
+    await once(client, 'open');
+    const [native, request] = (await incoming) as [WebSocket, http.IncomingMessage];
+    expect(request.url).toMatch(/format=avcc&version=1$/);
+    const received = new Promise<void>((resolve) => {
+      painted = resolve;
+    });
+    client.send(JSON.stringify({ type: 'stream-config', width: 300, height: 650, dpr: 1 }));
+    native.send(Buffer.concat([Buffer.from([1]), description]));
+    native.send(frame(0));
+    await received;
+    expect(packets[0]?.readUInt32BE(0)).toBe(0x4c415643);
+    expect(packets[0]?.[8]).toBe(2);
+    const idr = new Promise<void>((resolve) => {
+      native.on('message', (data) => {
+        if (JSON.parse(String(data)).type === 'force_idr') resolve();
+      });
+    });
+    client.send(JSON.stringify({ type: 'frame-ack', sequence: 1 }));
+    client.send(JSON.stringify({ type: 'keyframe-request' }));
+    await idr;
+    expect(f.renewals()).toBe(0);
+    const closed = once(client, 'close');
+    client.send(JSON.stringify({ type: 'frame-ack', sequence: 100 }));
+    await closed;
   });
 });

@@ -1,3 +1,4 @@
+import { simulatorViewerH264Script } from './viewer-h264';
 /** Inline code for the fixed viewer. Kept separate from input/control and executed
  * by viewer.test.ts as the exact shipped artifact. No project scripts or dependencies.
  */
@@ -6,6 +7,7 @@ let drawRequest,moveRequest,queuedMove,statsTimer,resizeTimer,lastServer={},last
 let receivedFrames=0,receivedBytes=0,paintedFrames=0,droppedFrames=0,coalescedMoves=0,decodeErrors=0;
 let decodeSamples=[],sampleAt=performance.now(),sampleReceived=0,sampleBytes=0,samplePainted=0;
 let latestPerformance=null,performanceHistory=[],performanceLogging=false;
+${simulatorViewerH264Script}
 function streamConfig(){
   const width=Math.max(1,Math.min(8192,Math.round(innerWidth))),height=Math.max(1,Math.min(8192,Math.round(innerHeight)));
   send({type:'stream-config',width,height,dpr:Math.max(.5,Math.min(2,devicePixelRatio||1))});
@@ -13,7 +15,7 @@ function streamConfig(){
 function publishPerformance(){
   const now=performance.now(),seconds=Math.max(.001,(now-sampleAt)/1000);
   const sorted=[...decodeSamples].sort((a,b)=>a-b);
-  const stats={...lastServer,remote,receivedFps:(receivedFrames-sampleReceived)/seconds,
+  const stats={...lastServer,codecH264:usingH264?1:0,codecFallback,decoderQueue:videoOutputs.size,remote,receivedFps:(receivedFrames-sampleReceived)/seconds,
     paintedFps:(paintedFrames-samplePainted)/seconds,receivedMbps:(receivedBytes-sampleBytes)*8/seconds/1e6,
     averageFrameBytes:(receivedBytes-sampleBytes)/Math.max(1,receivedFrames-sampleReceived),
     decodeMs:decodeSamples.reduce((a,b)=>a+b,0)/Math.max(1,decodeSamples.length),
@@ -51,6 +53,9 @@ function connect(){
   report('connecting');const url=new URL('stream',location.href);
   url.protocol=location.protocol==='https:'?'wss:':'ws:';
   const token=new URL(location.href).searchParams.get('__lody_preview_token');if(token)url.searchParams.set('__lody_preview_token',token);
+  usingH264=!h264Disabled&&typeof VideoDecoder!=='undefined'&&typeof EncodedVideoChunk!=='undefined';
+  if(usingH264)url.searchParams.set('codec','h264');
+  videoLastSequence=0;videoRecovery=0;
   const socket=new WebSocket(url);ws=socket;socket.binaryType='arraybuffer';
   socket.onopen=()=>{
     if(ws!==socket)return;
@@ -59,7 +64,7 @@ function connect(){
     heartbeat=setInterval(()=>{if(visible&&!document.hidden)send({type:'heartbeat'})},15000);
     lastStatsAt=performance.now();statsTimer=setInterval(publishPerformance,2000);
   };
-  firstFrame=setTimeout(()=>{if(ws===socket){close();report('error')}},20000);
+  firstFrame=setTimeout(()=>{if(ws===socket){if(usingH264)fallbackVideo(4);else{close();report('error')}}},20000);
   socket.onmessage=e=>{
     if(ws!==socket)return;
     if(typeof e.data==='string'){
@@ -67,7 +72,7 @@ function connect(){
       try{const message=JSON.parse(e.data);
         if(message.type==='ping'&&Number.isSafeInteger(message.id)&&message.id>0)send({type:'pong',id:message.id});
         if(message.type==='stream-stats'){
-          const stats={};for(const key of ['sourceFps','sentFps','sourceMbps','sentMbps','sentFrames','idleRefreshFrames','droppedFrames','inFlightFrames','inFlightBytes','oldestFrameMs','ackMs','ackIdleMs','rttMs','targetFps','scale','baseRttMs','deliveryMbps','pacingMbps','windowBytes']){
+          const stats={};for(const key of ['sourceFps','sentFps','sourceMbps','sentMbps','sentFrames','idleRefreshFrames','droppedFrames','inFlightFrames','inFlightBytes','oldestFrameMs','ackMs','ackIdleMs','rttMs','targetFps','scale','baseRttMs','deliveryMbps','pacingMbps','windowBytes','codecH264','encoderBitrate','keyframeRequests','upstreamGaps','queuedFrames','queuedBytes']){
             const value=message[key];if(typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1e12)stats[key]=value;
           }lastServer=stats;lastStatsAt=performance.now();
         }
@@ -77,13 +82,15 @@ function connect(){
     if(!(e.data instanceof ArrayBuffer))return;
     if(e.data.byteLength<9||e.data.byteLength>16*1024*1024+8){close();report('error');return}
     const header=new DataView(e.data);
+    if(header.getUint32(0)===0x4c415643){receiveVideo(e.data);return}
+    if(usingH264){fallbackVideo(2);return}
     if(header.getUint32(0)!==0x4c4f4459||header.getUint32(4)===0){close();report('error');return}
     receivedFrames++;receivedBytes+=e.data.byteLength;
     if(pending)droppedFrames++;
     pending={sequence:header.getUint32(4),jpeg:new Uint8Array(e.data,8)};scheduleDraw();
   };
-  socket.onclose=()=>{if(ws===socket){close();report('disconnected')}};
-  socket.onerror=()=>{if(ws===socket){close();report('error')}};
+  socket.onclose=()=>{if(ws===socket){if(usingH264)fallbackVideo(2);else{close();report('disconnected')}}};
+  socket.onerror=()=>{if(ws===socket){if(usingH264)fallbackVideo(2);else{close();report('error')}}};
 }
 function flushMove(){
   cancelAnimationFrame(moveRequest);moveRequest=undefined;
@@ -94,6 +101,7 @@ function queueMove(){
   queuedMove={...point};if(moveRequest===undefined)moveRequest=requestAnimationFrame(flushMove);
 }
 function closeMedia(){
+  disposeVideo();
   clearInterval(statsTimer);clearTimeout(resizeTimer);cancelAnimationFrame(drawRequest);drawRequest=undefined;
   publishPerformance();
 }

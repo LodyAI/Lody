@@ -30,6 +30,12 @@
   CLI arguments without boot, lease or server. Its bounded static artwork (256 KiB PNG)
   may cross authenticated RPC; never include screen pixels, paths or capabilities.
   Serialize reads, bound the in-memory cache, and recheck authorization before replying.
+- `h264-codec.ts` validates the pinned progressive AVC layout and reference numbers;
+  reject unknown layouts to MJPEG. `h264-flow.ts` owns ordered video credit, bounded
+  queues and IDR recovery. Never latest-drop encoded deltas; native backlog gaps must
+  invalidate the reference chain too. Decoder ACK/recovery/config never renew leases.
+  `viewer-h264.ts` probes the actual avcC configuration, bounds queues, closes all
+  VideoFrames, fences async probes, and falls back once per iframe to MJPEG on failure.
 - `frame-flow.ts` owns sequenced JPEGs, cumulative receiver credit and the latest-only
   pending frame. Keep both frame/byte windows bounded; a local socket's bufferedAmount
   is not receiver backpressure. ACK/config/probe traffic never renews the lease.

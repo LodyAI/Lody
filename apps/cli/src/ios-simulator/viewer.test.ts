@@ -24,6 +24,7 @@ type Wheel = {
 // is the actual WebSocket protocol, not a second implementation of its input logic.
 function viewer(
   options: {
+    videoDecoder?: unknown;
     rotation?: number;
     rotateWithDevice?: boolean;
     fetch?: typeof fetch;
@@ -87,9 +88,10 @@ function viewer(
     readyState = 1;
     bufferedAmount = 0;
     onopen = () => {};
+    onerror = () => {};
     onclose = () => {};
     onmessage = (_event: { data: ArrayBuffer | string }) => {};
-    constructor() {
+    constructor(readonly url: URL) {
       sockets.push(this);
     }
     send(value: string) {
@@ -132,6 +134,12 @@ function viewer(
           )(url, init),
     createImageBitmap: options.decode ?? (async () => ({ width: 1200, height: 2000, close() {} })),
     WebSocket: Socket,
+    VideoDecoder: options.videoDecoder,
+    EncodedVideoChunk: class {
+      constructor(readonly init: Record<string, unknown>) {
+        Object.assign(this, init);
+      }
+    },
     setTimeout,
     clearTimeout,
     setInterval,
@@ -167,6 +175,17 @@ function viewer(
     },
     wire: sent,
     sockets,
+    receiveVideo(id: number, key = false) {
+      const description = key ? new Uint8Array([1, 66, 0, 30, 255, 225, 0]) : new Uint8Array();
+      const data = new ArrayBuffer(12 + description.length),
+        h = new DataView(data);
+      h.setUint32(0, 0x4c415643);
+      h.setUint32(4, id);
+      h.setUint8(8, key ? 2 : 3);
+      h.setUint16(9, description.length);
+      new Uint8Array(data, 11, description.length).set(description);
+      sockets.at(-1)?.onmessage({ data });
+    },
     receiveFrame(id: number) {
       const data = new ArrayBuffer(9),
         header = new DataView(data);
@@ -602,4 +621,137 @@ describe('simulator viewer input', () => {
       expect(v.sent.slice(-2).map(({ type }) => type)).toEqual(['touch1-down', 'touch1-move']);
     }
   );
+});
+
+function fakeVideoCodec(supported = true) {
+  const decoders: Decoder[] = [];
+  const frames: Array<{
+    closed: boolean;
+    timestamp: number;
+    displayWidth: number;
+    displayHeight: number;
+    close(): void;
+  }> = [];
+  class Decoder {
+    static async isConfigSupported() {
+      return { supported };
+    }
+    decodeQueueSize = 0;
+    closed = false;
+    chunks: Array<{ timestamp: number; type: string }> = [];
+    constructor(readonly callbacks: { output(frame: unknown): void; error(): void }) {
+      decoders.push(this);
+    }
+    configure() {}
+    close() {
+      this.closed = true;
+    }
+    decode(chunk: { timestamp: number; type: string }) {
+      this.chunks.push(chunk);
+    }
+    output(index: number) {
+      const chunk = this.chunks[index];
+      if (!chunk) throw Error('chunk');
+      const frame = {
+        closed: false,
+        timestamp: chunk.timestamp,
+        displayWidth: 600,
+        displayHeight: 1300,
+        close() {
+          this.closed = true;
+        },
+      };
+      frames.push(frame);
+      this.callbacks.output(frame);
+    }
+  }
+  return { Decoder, decoders, frames };
+}
+describe('viewer WebCodecs lifecycle', () => {
+  it('decodes dependent frames in order, coalesces only output and ACKs the painted picture', async () => {
+    const codec = fakeVideoCodec(),
+      v = viewer({ videoDecoder: codec.Decoder });
+    expect(v.sockets[0]?.url.searchParams.get('codec')).toBe('h264');
+    v.receiveVideo(1, true);
+    v.receiveVideo(2);
+    v.receiveVideo(3);
+    await vi.advanceTimersByTimeAsync(0);
+    const d = codec.decoders[0];
+    expect(d?.chunks.map((c) => c.type)).toEqual(['key', 'delta', 'delta']);
+    d?.output(0);
+    d?.output(1);
+    d?.output(2);
+    expect(codec.frames.map((f) => f.closed)).toEqual([true, true, false]);
+    expect(v.wire.filter((m) => m.type === 'frame-ack')).toEqual([]);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(v.wire.filter((m) => m.type === 'frame-ack')).toEqual([
+      { type: 'frame-ack', sequence: 3 },
+    ]);
+    expect(v.canvas.width).toBe(600);
+    expect(codec.frames.every((f) => f.closed)).toBe(true);
+    v.visibility(false);
+    expect(d?.closed).toBe(true);
+  });
+  it('falls back once when actual AVC configuration is unsupported and retains JPEG preview', async () => {
+    const codec = fakeVideoCodec(false),
+      v = viewer({ videoDecoder: codec.Decoder });
+    v.receiveVideo(1, true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(v.sockets).toHaveLength(2);
+    expect(v.sockets[0]?.readyState).toBe(3);
+    expect(v.sockets[1]?.url.searchParams.has('codec')).toBe(false);
+    v.sockets[1]?.onopen();
+    await v.paint();
+    expect(v.paints).toBe(1);
+    v.visibility(false);
+    v.visibility(true);
+    expect(v.sockets.at(-1)?.url.searchParams.has('codec')).toBe(false);
+  });
+  it('falls back on native stream errors without reconnect loops', () => {
+    const codec = fakeVideoCodec(),
+      v = viewer({ videoDecoder: codec.Decoder });
+    v.sockets[0]?.onerror();
+    expect(v.sockets).toHaveLength(2);
+    expect(v.sockets[1]?.url.searchParams.has('codec')).toBe(false);
+    v.sockets[1]?.onerror();
+    expect(v.sockets).toHaveLength(2);
+    expect(v.sockets[1]?.readyState).toBe(3);
+  });
+  it('requires a fresh keyframe after decoder overload and releases delayed output after hide', async () => {
+    const codec = fakeVideoCodec(),
+      v = viewer({ videoDecoder: codec.Decoder });
+    v.receiveVideo(1, true);
+    await vi.advanceTimersByTimeAsync(0);
+    const first = codec.decoders[0];
+    if (!first) throw Error('decoder');
+    first.decodeQueueSize = 16;
+    v.receiveVideo(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(first.closed).toBe(true);
+    expect(v.wire.some((m) => m.type === 'keyframe-request')).toBe(true);
+    v.receiveVideo(3);
+    expect(first.chunks).toHaveLength(1);
+    v.receiveVideo(4, true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(codec.decoders).toHaveLength(2);
+    v.visibility(false);
+    codec.decoders[1]?.output(0);
+    expect(codec.frames.at(-1)?.closed).toBe(true);
+    expect(v.paints).toBe(0);
+  });
+  it('does not resurrect a decoder after an asynchronous configuration probe resolves on a hidden viewer', async () => {
+    const codec = fakeVideoCodec();
+    let resolve: (value: { supported: boolean }) => void = () => {};
+    codec.Decoder.isConfigSupported = () =>
+      new Promise((r) => {
+        resolve = r;
+      });
+    const v = viewer({ videoDecoder: codec.Decoder });
+    v.receiveVideo(1, true);
+    v.visibility(false);
+    resolve({ supported: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(codec.decoders).toHaveLength(0);
+    expect(v.paints).toBe(0);
+  });
 });

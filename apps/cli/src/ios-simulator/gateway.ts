@@ -1,3 +1,4 @@
+import { SimulatorH264Flow } from './h264-flow';
 import { SimulatorIdleRefresh, readSimulatorStill } from './idle-refresh';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -28,6 +29,7 @@ const Input = z
   .refine((v) => v.x <= v.width && v.y <= v.height);
 const Heartbeat = z.object({ type: z.literal('heartbeat') }).strict();
 const MediaMessage = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('keyframe-request') }).strict(),
   z
     .object({
       type: z.literal('stream-config'),
@@ -223,15 +225,31 @@ export async function createSimulatorGateway(options: {
       return;
     }
     wss.handleUpgrade(req, socket, head, (client) => {
+      const h264 = new URL(req.url ?? '/', 'http://localhost').searchParams.get('codec') === 'h264';
       const upstream = new WebSocket(
-        `ws://127.0.0.1:${options.port}/simulators/${options.udid}/stream?format=mjpeg&version=1`,
+        `ws://127.0.0.1:${options.port}/simulators/${options.udid}/stream?format=${h264 ? 'avcc' : 'mjpeg'}&version=1`,
         { maxPayload: 16 * 1024 * 1024 }
       );
       upstreams.add(upstream);
       let touch: z.infer<typeof Input> | undefined;
       let shuttingDown: Promise<void> | undefined;
       const now = () => performance.now();
-      const flow = new SimulatorFrameFlow(options.remote ?? false, now());
+      const jpegFlow = new SimulatorFrameFlow(options.remote ?? false, now());
+      const videoFlow = h264
+        ? new SimulatorH264Flow(options.remote ?? false, now(), () => {
+            if (upstream.readyState === WebSocket.OPEN && upstream.bufferedAmount < 65536)
+              upstream.send(JSON.stringify({ type: 'force_idr' }));
+          })
+        : undefined;
+      const flow = videoFlow ?? jpegFlow;
+      let configuredBitrate = 0;
+      upstream.on('open', () => {
+        if (videoFlow && !shuttingDown && options.active()) {
+          configuredBitrate = videoFlow.targetBitrate();
+          upstream.send(JSON.stringify({ type: 'set_bitrate', bps: configuredBitrate }));
+          upstream.send(JSON.stringify({ type: 'set_fps', fps: 30 }));
+        }
+      });
       let viewport: { width: number; height: number; dpr: number } | undefined;
       let nativeSize: { width: number; height: number } | undefined;
       let observedScale = 1;
@@ -250,11 +268,11 @@ export async function createSimulatorGateway(options: {
           }),
         (frame) => {
           if (!shuttingDown && options.active()) {
-            flow.offer(frame, true);
+            jpegFlow.offer(frame, true);
             pump();
           }
         },
-        () => flow.discardStill()
+        () => jpegFlow.discardStill()
       );
       const invalidateStill = () => idle.activity(now());
       invalidateStills.add(invalidateStill);
@@ -267,10 +285,14 @@ export async function createSimulatorGateway(options: {
           now() - lastScaleAt < 1000
         )
           return;
-        const next = flow.recommendedScale(
-          simulatorScale(nativeSize, viewport, options.remote ?? false),
-          observedScale
-        );
+        const viewportScale = simulatorScale(nativeSize, viewport, options.remote ?? false);
+        const next = videoFlow
+          ? Math.min(2, viewportScale)
+          : jpegFlow.recommendedScale(viewportScale, observedScale);
+        if (videoFlow && configuredBitrate !== videoFlow.targetBitrate()) {
+          configuredBitrate = videoFlow.targetBitrate();
+          upstream.send(JSON.stringify({ type: 'set_bitrate', bps: configuredBitrate }));
+        }
         // Lower quality quickly; recover it slowly so content changes do not flap
         // the native encoder. The first viewport adjustment is immediate.
         if (next < scale && now() - lastScaleAt < 10000) return;
@@ -295,8 +317,12 @@ export async function createSimulatorGateway(options: {
           return;
         const packet = flow.take(now());
         if (packet) client.send(packet, { binary: true });
-        if (options.remote && nativeSize && !pendingControl)
-          idle.tick(now(), simulatorScale(nativeSize, viewport, true), flow.drained() && !touch);
+        if (!videoFlow && options.remote && nativeSize && !pendingControl)
+          idle.tick(
+            now(),
+            simulatorScale(nativeSize, viewport, true),
+            jpegFlow.drained() && !touch
+          );
       };
       // A timer flushes the last pending frame even when the simulator becomes static.
       const frameTimer = setInterval(pump, Math.ceil(1000 / flow.targetFps));
@@ -312,7 +338,12 @@ export async function createSimulatorGateway(options: {
           close();
           return;
         }
-        const stats = { ...flow.snapshot(now()), scale, remote: options.remote ?? false };
+        const stats = {
+          codecH264: h264 ? 1 : 0,
+          ...flow.snapshot(now()),
+          scale,
+          remote: options.remote ?? false,
+        };
         if (++samples % 15 === 0)
           options.logger?.debug('[iOS Simulator media] ' + JSON.stringify(stats));
         if (client.readyState !== WebSocket.OPEN || client.bufferedAmount > 64 * 1024) return;
@@ -390,6 +421,8 @@ export async function createSimulatorGateway(options: {
               return;
             }
             pump();
+          } else if (message.type === 'keyframe-request') {
+            videoFlow?.recover(now());
           } else if (ping?.id === message.id) {
             flow.recordRtt(now() - ping.at);
             ping = undefined;
@@ -433,6 +466,18 @@ export async function createSimulatorGateway(options: {
             : data instanceof ArrayBuffer
               ? Buffer.from(data)
               : Buffer.concat(data);
+          if (videoFlow) {
+            try {
+              if (frame[0] === 4) nativeSize ??= jpegDimensions(frame.subarray(1));
+              videoFlow.offer(frame, now());
+              pump();
+            } catch {
+              // The fixed viewer reconnects once in MJPEG mode. No native error
+              // text, bytes or route details cross this boundary.
+              if (client.readyState === WebSocket.OPEN) client.close(4002, 'codec');
+            }
+            return;
+          }
           const size = jpegDimensions(frame);
           nativeSize ??= size;
           if (nativeSize && size)
@@ -443,7 +488,7 @@ export async function createSimulatorGateway(options: {
               )
             );
           invalidateStill();
-          flow.offer(frame);
+          jpegFlow.offer(frame);
           pump();
         }
       });

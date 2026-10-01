@@ -340,3 +340,45 @@ An isolated iPhone 16/26.2 run verified guest landscape content inside an uprigh
 canvas. With deliberately delayed draw ACKs, native JPEGs dropped to 294×640; after the
 scene stopped changing, one real screenshot restored 590×1278 while live scale remained 4. The reader received/acknowledged that still and credit drained. This was a loopback
 functional test with injected feedback delay, not a WAN throughput or H.264 acceptance test.
+
+### H.264 transport adoption (2026-10-01)
+
+The later implementation adopts the previously proposed H.264 path without changing the
+managed runtime or adding a dependency. The private viewer chooses AVCC only when WebCodecs
+exists, probes the actual configuration, and falls back once per iframe to MJPEG on unsupported
+configuration, decode failure or stream failure. Existing mobile orientation, inputs, captures,
+private capability and lease boundaries remain shared. MJPEG retains its sharp idle refresh;
+H.264 uses small repeated native deltas and progressive reference updates instead.
+
+The critical difference is encoded-frame dependency. A bounded parser accepts the pinned
+VideoToolbox progressive AVC layout, validates SPS/PPS and reads reference frame numbers.
+Gaps inside Baguette's own backlog invalidate the downstream chain. Unsupported layouts fail
+to JPEG. A separate controller preserves encoded order, abandons stale/overflowed chains,
+requests rate-limited IDRs after outstanding credit drains, and carries avcC with every IDR.
+The browser decodes in order, drops only decoded output, closes GPU resources, bounds decoder
+work and fences late configuration probes after visibility changes or disconnect.
+
+H.264 starts remotely at 600 kbps and at most 2× downsampling; bitrate adapts from ACK queue
+delay, not tiny delta size divided by RTT. Its 64-frame / 64–256 KiB remote window permits
+pipelining across propagation delay. Quiet small deltas do not justify raising bitrate. At most
+64 unsent packets / 2 MiB / one second are retained; IDRs may exceed credit only alone. This
+retains a bounded latency/quality tradeoff rather than promising a frame rate. The native
+`set_fps` changes the idle pump, not busy surface scheduling; no pre-encode FPS fix is claimed.
+Numeric diagnostics expose codec choice, fallback reason, bitrate, queue depth and recoveries.
+
+Deterministic tests cover reference gaps/wrap, invalid layouts, ordered credit, congestion,
+decoded-frame disposal/coalescing, unsupported configuration fallback and stale async probes.
+An isolated iPhone 16/26.2 plus Chromium decoded 590×1278 H.264 at roughly 30 FPS on loopback
+with no decoder errors. This establishes native/browser compatibility, not actual WAN speed or
+Safari/iOS WebView support; unsupported browsers retain MJPEG. See subsequent field diagnostics
+and the README procedure before drawing conclusions about a particular remote network.
+
+A browser WebSocket shim then imposed 250 ms each way and serialized downstream bytes.
+With a continuously scrolling synthetic UIKit page, the 0.6 Mbps run's final samples painted
+about 49–55 FPS; the 0.3 Mbps run painted about 32–45 FPS after adaptation to 251–289 kbps.
+Both kept 590×1278, no decoder errors or fallback, and bounded queues; keyframe recovery did
+occur during adaptation. These 20/30-second experiments exercise the real native encoder and
+browser decoder under injected delivery conditions, not Cloudflare/TCP loss, a real WAN,
+long-run stability, or arbitrary app complexity. Reproduce on the user's remote link.
+
+Validation isolates inherited Git configuration for Git fixtures; a machine-specific remote URL rewrite otherwise fails an unrelated workspace identity test. The embedded outer check still encounters pre-existing ACP dependency/type errors, and docs check still reports only the existing MCP AGENTS size violation.

@@ -1,5 +1,5 @@
 import { simulatorViewerMediaScript } from './viewer-media';
-/** Fixed Lody artifact, never project HTML. One JPEG decode and one pending frame at most. */
+/** Fixed Lody artifact, never project HTML. Media decoders own bounded queues and disposal. */
 export function simulatorViewerHtml(
   operationId: string,
   initialRotation = 0,

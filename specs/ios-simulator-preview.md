@@ -52,13 +52,14 @@ input; emitted video, polling and probes do not renew it. Devices/frames/endpoin
 in-memory runtime state; selected-device preferences are client-local and scoped to the
 account/workspace/session/machine. Credentials never enter session documents.
 
-The initial stream uses MJPEG with bounded decoding/backpressure and single-pointer
-input, including mouse drag and wheel/trackpad scrolling translated into a finger drag.
+The viewer prefers H.264 with WebCodecs, probes the actual decoder configuration,
+and falls back to MJPEG when unavailable or unsuccessful. Both use bounded queues
+and receiver feedback, with single-pointer input, including mouse drag and wheel/trackpad scrolling translated into a finger drag.
 Scroll input and pointer drag never hold separate simultaneous touches; hiding,
 disconnecting or losing focus releases the active gesture.
 Dragging upward from the bottom edge carries a system-edge gesture for Home;
 ordinary wheel scrolling remains an in-app gesture.
-H.264, multi-touch, physical-key forwarding and advanced device configuration remain later work.
+Multi-touch, physical-key forwarding and advanced device configuration remain later work.
 Each new operation acknowledges a portrait baseline; reconnecting the same operation preserves rotation.
 Readiness separates preparation/transport from the first decoded frame.
 
@@ -89,10 +90,13 @@ Remote authorization depends on the connected Cloud backend understanding the ex
 
 Size remote video for its visible viewport with bounded pixel density and frame rate.
 On slow links, reduce sharpness and pace bytes using receiver feedback; recover quality
-slowly. After input and animation settle, refresh one sharper still even when the
-native stream emits no new frames; discard stale capture when activity resumes.
+slowly. In MJPEG mode, after input and animation settle, refresh one sharper still
+even when the native stream emits no new frames; discard stale capture when activity
+resumes. H.264 continues refining its reference picture through the video stream.
 Congestion-inflated RTT must not increase the outstanding byte budget.
-Bound unconfirmed video and prefer the latest unsent screen over stale queued frames;
+Bound unconfirmed video. JPEG may replace unsent frames; H.264 must preserve encoded
+references or discard the affected chain and resume on a keyframe, including upstream
+loss. Only decoded video pictures may be coalesced;
 retain final pointer positions and releases when merging high-frequency moves.
 Same-machine preview preserves native resolution. No new cloud service participates
 in the media path. Connection status exposes numeric performance diagnostics, with
