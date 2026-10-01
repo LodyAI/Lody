@@ -37,3 +37,5 @@ lint, formatting, documentation checks, and boundary guards; Electron's 199 test
 also pass. `pnpm check` stops at the existing boot-shell storage-unavailable test
 (1 failure, 4592 passing component tests), reproduced with the original component
 code on Node 26.10.0. No manual application UI verification was performed.
+
+PR: [#1201](https://github.com/LodyAI/Lody/pull/1201).

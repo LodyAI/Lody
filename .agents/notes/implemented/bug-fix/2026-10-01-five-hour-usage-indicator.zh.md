@@ -32,3 +32,5 @@ Translation: current
 Electron 的 199 项测试也全部通过。`pnpm check` 停在既有的 boot-shell 存储不可用测试
 （组件测试 1 项失败、4592 项通过）；在 Node 26.10.0 下恢复原始组件代码后仍复现。
 未进行应用界面手动验证。
+
+PR：[ #1201](https://github.com/LodyAI/Lody/pull/1201)。
