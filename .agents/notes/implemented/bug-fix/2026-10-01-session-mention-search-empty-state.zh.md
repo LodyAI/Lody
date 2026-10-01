@@ -48,6 +48,7 @@ Sessions 引用菜单在搜索未命中时，会将已有候选的项目作用�
 
 ## 所有者
 
+- [Draft PR #1189](https://github.com/LodyAI/Lody/pull/1189)
 - [输入框源码](../../../../packages/components/src/components/mentions/combined-mention-textarea.tsx)
 - [回归测试](../../../../packages/components/tests/combined-mention-textarea-activation.test.tsx)
 - [会话引用流程说明](../../../docs/ui-mentions.md#sessions)

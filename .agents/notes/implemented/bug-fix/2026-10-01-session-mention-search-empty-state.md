@@ -61,6 +61,7 @@ warnings remain.
 
 ## Owners
 
+- [Draft PR #1189](https://github.com/LodyAI/Lody/pull/1189)
 - [Composer source](../../../../packages/components/src/components/mentions/combined-mention-textarea.tsx)
 - [Regression suite](../../../../packages/components/tests/combined-mention-textarea-activation.test.tsx)
 - [Session pipeline explanation](../../../docs/ui-mentions.md#sessions)
