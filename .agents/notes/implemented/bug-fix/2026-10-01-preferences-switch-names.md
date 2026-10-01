@@ -61,5 +61,5 @@ from main; subsequent Electron tests in the root command did not run.
 
 These tests establish browser semantics and UI state, not spoken output from
 VoiceOver/NVDA, packaged Electron behavior, real permission dialogs, or delivery.
-No production account or preference was used. Repository check results and the
-final commit are recorded in the PR.
+No production account or preference was used. Repository check results are
+recorded in [Draft PR #1191](https://github.com/LodyAI/Lody/pull/1191).
