@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1187
 
 [English](2026-10-01-session-search-public-scope.md)
 
