@@ -137,7 +137,7 @@ const styles = stylex.create({
   compactNavGroup: { display: 'flex', alignItems: 'stretch' },
   /**
    * A category on the strip: a word, not a key in a track. The pointer hints a
-   * line in ink; the current one keeps it in accent. Its bottom edge is the
+   * line in faint ink; the current one keeps it solid. Its bottom edge is the
    * strip's, so the line lands on the seam between navigation and page.
    */
   compactNavItem: {
@@ -177,9 +177,9 @@ const styles = stylex.create({
       ':focus-visible': colors.label,
     },
     boxShadow: {
-      default: `inset 0 -2px 0 ${colors.accent}`,
-      ':hover': `inset 0 -2px 0 ${colors.accent}`,
-      ':focus-visible': `inset 0 -2px 0 ${colors.accent}`,
+      default: `inset 0 -2px 0 ${colors.label}`,
+      ':hover': `inset 0 -2px 0 ${colors.label}`,
+      ':focus-visible': `inset 0 -2px 0 ${colors.label}`,
     },
   },
   navScroll: {
