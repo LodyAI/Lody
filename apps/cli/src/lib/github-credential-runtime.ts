@@ -3,18 +3,52 @@ export const githubCredentialRuntime = String.raw`
 const readCredentialPolicy = async () => {
   const contextToken = getContextToken();
   if (!contextToken) throw new Error('Lody did not supply a GitHub credential context for this operation. No GitHub credential was selected. Update Lody; if this persists, report this startup/context error.');
-  let response;
-  let policy;
-  try {
-    response = await requestBroker('/github-auth-context', { contextToken }, 10000);
-    policy = response ? await response.json() : null;
-  } catch {}
-  if (!response?.ok || !policy || typeof policy.allowLocalAuth !== 'boolean' || typeof policy.personalEnabled !== 'boolean') {
+  // Retry only the read-only policy lookup, before selecting any identity. Each
+  // request rereads workspace broker state, but keeps this helper's requester.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response;
+    let policy;
+    let failure = 'broker_unavailable';
+    let retryable = true;
+    try {
+      response = await requestBroker('/github-auth-context', { contextToken }, 10000);
+      if (response) {
+        failure = 'HTTP ' + response.status;
+        retryable = [500, 502, 503, 504].includes(response.status);
+        policy = await response.json();
+      }
+    } catch (error) {
+      // Never echo exception messages, response bodies, URLs or token material.
+      // Invalid JSON/config is not a connection failure and cannot select auth.
+      if (!response || response.ok) {
+        const code = error?.cause?.code || error?.code;
+        if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+          failure = 'policy_timeout';
+          retryable = true;
+        } else if (['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'].includes(code)) {
+          failure = 'broker_connection_failed (' + code + ')';
+          retryable = true;
+        } else if (code === 'ENOENT') {
+          failure = 'broker_state_missing';
+        } else {
+          failure = 'invalid_broker_response';
+          retryable = false;
+        }
+      }
+    }
     if (policy?.error === 'invalid_context') throw new Error('GitHub credential context expired or the requester changed. Restart this session.');
     if (response?.status === 401) throw new Error('Lody credential broker authentication failed. Reconnect this machine to Lody before retrying; no GitHub operation was attempted.');
-    throw new Error('Cannot verify GitHub identity preferences with Lody. Check the Lody connection and machine access, then retry; no GitHub operation was attempted.');
+    if (response?.ok && policy && typeof policy.allowLocalAuth === 'boolean' && typeof policy.personalEnabled === 'boolean') return policy;
+    if (response?.ok && !retryable) {
+      failure = 'invalid_policy_response';
+      retryable = false;
+    }
+    if (attempt === 0 && retryable) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      continue;
+    }
+    throw new Error('Cannot verify GitHub identity preferences with Lody (' + failure + ', ' + (attempt + 1) + ' attempt(s)). Check the Lody connection and machine access, then retry; no GitHub operation was attempted.');
   }
-  return policy;
 };
 
 const readManagedCandidate = async (repoFullName, source, invalidatedPersonalToken) => {

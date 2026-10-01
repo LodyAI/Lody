@@ -72,6 +72,7 @@ describe('per-command GitHub credential policy', () => {
       const readPolicy = vm.runInNewContext(githubCredentialRuntime + '\nreadCredentialPolicy', {
         getContextToken: () => 'context',
         requestBroker: async () => response,
+        setTimeout: (resolve: () => void) => resolve(),
       }) as () => Promise<unknown>;
       await expect(readPolicy()).rejects.toThrow('Check the Lody connection and machine access');
     }
@@ -86,6 +87,118 @@ describe('per-command GitHub credential policy', () => {
       }),
     }) as () => Promise<unknown>;
     await expect(readPolicy()).rejects.toThrow('Restart this session');
+  });
+  it.each([
+    { personalEnabled: true, allowLocalAuth: true, expected: 'personal' },
+    { personalEnabled: false, allowLocalAuth: true, expected: 'local' },
+    { personalEnabled: false, allowLocalAuth: false, expected: 'app' },
+  ])('preserves $expected priority after policy recovery', async (policy) => {
+    let policyRequests = 0;
+    const credentials: string[] = [];
+    const select = vm.runInNewContext(
+      githubCredentialRuntime +
+        '\n(async () => selectGitHubCredential("org/repo", await readCredentialPolicy(), local, true))',
+      {
+        getContextToken: () => 'original-requester',
+        requestBroker: async (endpoint: string, body: { contextToken: string; source: string }) => {
+          expect(body.contextToken).toBe('original-requester');
+          if (endpoint === '/github-auth-context') {
+            policyRequests++;
+            return policyRequests === 1
+              ? Response.json({ error: 'policy_unavailable' }, { status: 503 })
+              : Response.json(policy);
+          }
+          credentials.push(body.source);
+          return Response.json({ token: 'fixture-token', tokenSource: body.source });
+        },
+        local: async () => {
+          credentials.push('local');
+          return { token: 'local-token' };
+        },
+        fetch: async () => Response.json({ permissions: { push: true } }),
+        setTimeout: (resolve: () => void) => resolve(),
+        URL,
+        AbortSignal,
+        console: { error: vi.fn() },
+      }
+    ) as () => Promise<{ source: string }>;
+    expect(await select()).toMatchObject({ source: policy.expected });
+    expect(credentials).toEqual([policy.expected]);
+  });
+  it.each([
+    {
+      failure: Object.assign(new Error('SECRET'), { cause: { code: 'ECONNREFUSED' } }),
+      reason: 'ECONNREFUSED',
+      attempts: 2,
+    },
+    {
+      failure: Object.assign(new Error('SECRET'), { name: 'TimeoutError' }),
+      reason: 'policy_timeout',
+      attempts: 2,
+    },
+    {
+      failure: Object.assign(new Error('SECRET'), { code: 'ENOENT' }),
+      reason: 'broker_state_missing',
+      attempts: 2,
+    },
+    { failure: new SyntaxError('SECRET'), reason: 'invalid_broker_response', attempts: 1 },
+    { failure: 503, reason: 'HTTP 503', attempts: 2 },
+    { failure: 500, reason: 'HTTP 500', attempts: 2 },
+    { failure: 403, reason: 'HTTP 403', attempts: 1 },
+    { failure: 429, reason: 'HTTP 429', attempts: 1 },
+    { failure: 401, reason: 'broker authentication failed', attempts: 1 },
+    { failure: 200, reason: 'invalid_policy_response', attempts: 1 },
+  ])(
+    'bounds policy failures and redacts their details: $reason',
+    async ({ failure, reason, attempts }) => {
+      let requests = 0;
+      const readPolicy = vm.runInNewContext(githubCredentialRuntime + '\nreadCredentialPolicy', {
+        getContextToken: () => 'context',
+        requestBroker: async (endpoint: string) => {
+          expect(endpoint).toBe('/github-auth-context');
+          requests++;
+          if (failure instanceof Error) throw failure;
+          return Response.json({ message: 'SECRET' }, { status: failure });
+        },
+        setTimeout: (resolve: () => void) => resolve(),
+      }) as () => Promise<unknown>;
+      const error = await readPolicy().catch((failureResult: Error) => failureResult);
+      expect(error).toHaveProperty('message', expect.stringContaining(reason));
+      expect(error).toHaveProperty('message', expect.not.stringContaining('SECRET'));
+      expect(requests).toBe(attempts);
+    }
+  );
+  it('rejects a revoked context on retry without reading the replacement requester', async () => {
+    let requests = 0;
+    const readPolicy = vm.runInNewContext(githubCredentialRuntime + '\nreadCredentialPolicy', {
+      getContextToken: () => (requests === 0 ? 'original' : 'replacement'),
+      requestBroker: async (_endpoint: string, body: { contextToken: string }) => {
+        expect(body.contextToken).toBe('original');
+        return ++requests === 1
+          ? Response.json({ error: 'policy_unavailable' }, { status: 503 })
+          : Response.json({ error: 'invalid_context' }, { status: 403 });
+      },
+      setTimeout: (resolve: () => void) => resolve(),
+    }) as () => Promise<unknown>;
+    await expect(readPolicy()).rejects.toThrow('requester changed');
+  });
+  it('recovers a timeout while reading the policy response body', async () => {
+    let requests = 0;
+    const readPolicy = vm.runInNewContext(githubCredentialRuntime + '\nreadCredentialPolicy', {
+      getContextToken: () => 'context',
+      requestBroker: async () =>
+        ++requests === 1
+          ? {
+              ok: true,
+              status: 200,
+              json: async () => {
+                throw Object.assign(new Error('SECRET'), { name: 'TimeoutError' });
+              },
+            }
+          : Response.json({ personalEnabled: true, allowLocalAuth: false }),
+      setTimeout: (resolve: () => void) => resolve(),
+    }) as () => Promise<unknown>;
+    expect(await readPolicy()).toEqual({ personalEnabled: true, allowLocalAuth: false });
   });
   it('follows public rename redirects without credentials and rejects a different API origin', async () => {
     const fetch = vi

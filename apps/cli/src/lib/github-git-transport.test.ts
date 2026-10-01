@@ -179,9 +179,9 @@ describe('GitHub per-remote transport', () => {
       execFileSync(realGit, ['--git-dir', remote, 'for-each-ref'], { env, encoding: 'utf8' })
     ).toBe('');
   });
-  it.skipIf(process.platform === 'win32')(
-    'routes a native recursive submodule clone through the same transport',
-    async () => {
+  it.skipIf(process.platform === 'win32').each([false, true])(
+    'routes a native recursive submodule clone through the same transport (policy retry: %s)',
+    async (retryPolicy) => {
       const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
       const fixtureEnv = {
         ...process.env,
@@ -236,15 +236,33 @@ const child = spawnSync(${JSON.stringify(realGit)}, [match[1].replace('git-', ''
 process.exit(child.status ?? 1);
 `
       );
-      const server = createServer((_req, res) => {
+      let firstPolicy = true;
+      let brokerToken = 'fixture';
+      const state = path.join(directory, 'broker.json');
+      const server = createServer((req, res) => {
         res.setHeader('Content-Type', 'application/json');
+        if (req.headers.authorization !== 'Bearer ' + brokerToken) {
+          res.writeHead(401);
+          res.end(JSON.stringify({ error: 'unauthorized' }));
+          return;
+        }
+        if (retryPolicy && firstPolicy) {
+          firstPolicy = false;
+          // Simulate broker recovery between attempts. Reusing the original
+          // state/token instead of rereading this workspace's file must fail.
+          brokerToken = 'recovered';
+          const previous = JSON.parse(fs.readFileSync(state, 'utf8'));
+          fs.writeFileSync(state, JSON.stringify({ ...previous, token: brokerToken }));
+          res.writeHead(503);
+          res.end(JSON.stringify({ error: 'policy_unavailable' }));
+          return;
+        }
         res.end(JSON.stringify({ allowLocalAuth: true, personalEnabled: false }));
       });
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
       try {
         const address = server.address();
         if (!address || typeof address === 'string') throw new Error('Missing broker port');
-        const state = path.join(directory, 'broker.json');
         fs.writeFileSync(
           state,
           JSON.stringify({ url: `http://127.0.0.1:${address.port}`, token: 'fixture' })
