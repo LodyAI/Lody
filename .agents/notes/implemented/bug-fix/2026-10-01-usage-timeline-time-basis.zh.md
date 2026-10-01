@@ -21,6 +21,8 @@ main `7d502f3d99fdcdbbdd43d032c6d903d4ed497e04` 仍存在两套口径。
 桶大小，但仓库没有服务端实现。
 最后刷新到的 main `93545f01b69cb0c98ddd3f19d46540decd95a007` 仅修改
 GitHub policy 恢复，用量实现没有变化。
+截图验收阶段再次核对 main `993cb8c8c1ed56d16c5833e72576c12a4d112588` 及开放的
+用量相关 PR：新增的图片预览/搜索改动不涉及用量实现，也未发现另一份时间口径修复。
 
 合成 UTC 23:00 桶在 UTC+08 下显示为 08:00，最后一个不完整的 00:00 桶显示为
 08:17。新增回归在旧代码上失败：即使传入 UTC 格式化器，23:00 仍变成 00:00。
@@ -42,6 +44,11 @@ GitHub policy 恢复，用量实现没有变化。
 渲染测试检查实际 skyline 横轴、峰值、窗口标题，以及滚动七日矩阵的最后一天。
 四个相关套件在 UTC、Asia/Singapore 和 America/Los_Angeles 下均通过全部 36 项测试。
 浏览器检查了合成跨日 Story 的 1200px 和 390px 宽度；长日期标签需要按宽度避让刻度。
+Playwright 使用相同合成时间线、1200×1400 视口和 Asia/Singapore 浏览器时区，
+分别捕获 main `93545f0` 与修复后的页面。断言检查了 24 个 skyline 单元、两条曲线及
+峰值 tooltip：修改前为本地 08:00，修改后为 Sep 30, 23:00 UTC。
+基线运行原始图表/helper 源码及原始容器的本地 formatter；两次均使用同一个跨日 Story。
+两次均无页面错误。前后 PNG 和并排对比图已上传 Lody 会话，不作为仓库资源提交。
 根 `pnpm check` 通过类型检查及 lint，随后在未改动的 boot-shell 存储不可用测试失败
 （组件 4596 通过、1 失败），单独复跑也失败。另跑的 Electron 套件 199 项全通过。
 格式化、最终组件类型检查及 lint、i18n、import/platform/public-boundary 守卫和

@@ -24,6 +24,9 @@ cached timeline. The public query requests hour granularity for day/week and
 exposes the range endpoints and bucket size, but contains no service implementation.
 The final main refresh, `93545f01b69cb0c98ddd3f19d46540decd95a007`, changes only
 GitHub policy recovery; the usage implementation is unchanged.
+The screenshot acceptance refresh checked main `993cb8c8c1ed56d16c5833e72576c12a4d112588`
+and open usage PRs again: its newer image-preview/search changes do not touch
+the usage implementation, and no competing time-basis fix was found.
 
 A synthetic UTC 23:00 bucket appeared as 08:00 in UTC+08, and a partial final
 00:00 bucket appeared as 08:17. An added regression failed on the old code even
@@ -51,6 +54,13 @@ peak and window title, plus the final date of a rolling seven-day matrix.
 The four relevant suites passed all 36 tests under UTC, Asia/Singapore and
 America/Los_Angeles. Browser inspection of the synthetic cross-day story checked
 1200px and 390px widths; long date labels required width-aware tick thinning.
+Playwright captured main `93545f0` and the repaired view with the same synthetic
+timeline, 1200×1400 viewport and Asia/Singapore browser timezone. Its assertions
+checked 24 skyline cells, both curves and the peak tooltip: local 08:00 before,
+Sep 30, 23:00 UTC after. The baseline used the original chart/helper sources and
+the original container's local formatter; both runs used the same cross-day Story.
+Both runs reported no page errors. The before/after PNGs and side-by-side image
+were uploaded to the Lody conversation, not committed as repository assets.
 Root `pnpm check` passed typecheck and lint, then failed the unchanged boot-shell
 storage-unavailable test (components: 4596 passed, one failed); its isolated run
 also failed. Electron's separately run suite passed all 199 tests. Formatting,

@@ -262,7 +262,7 @@ export const CrossDayUTC: Story = {
         const tokens = index === 7 ? 500 : 0;
         return {
           bucketStartMs: startMs + index * 3_600_000,
-          bucketLabel: '',
+          bucketLabel: new Date(startMs + index * 3_600_000).toISOString().slice(11, 16),
           tokens,
           costUSD: tokens / 100_000,
           byModel: [{ modelId: 'synthetic-model', tokens, costUSD: tokens / 100_000 }],
