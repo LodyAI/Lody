@@ -365,7 +365,10 @@ export function UsageStackedAreaChart({
 
   // Keep the x-axis to ~8 labels regardless of bucket count so the "All time"
   // range (which can have many daily buckets) does not crowd the axis.
-  const xInterval = Math.max(0, Math.ceil(prepared.data.length / 8) - 1);
+  const xTickStep = Math.max(1, Math.ceil(prepared.data.length / 8));
+  const xTicks = prepared.data
+    .filter((_, index) => index % xTickStep === 0)
+    .map((row) => row.label);
 
   return (
     <div className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}>
@@ -393,7 +396,8 @@ export function UsageStackedAreaChart({
 
             <XAxis
               dataKey="label"
-              interval={xInterval}
+              ticks={xTicks}
+              interval="preserveStartEnd"
               tickLine={false}
               axisLine={{ stroke: GRID_COLOR, strokeOpacity: 0.6 }}
               tick={{ fill: AXIS_COLOR, fontSize: 10 }}

@@ -29,7 +29,6 @@ import { stripRecommended } from '@/components/shared/acp-selector-options';
 import type {
   SettingsUsageCalendarData,
   SettingsUsageDayData,
-  SettingsUsageTimelineBucket,
   SettingsUsageTimelineData,
 } from './settings-data-cache';
 import {
@@ -52,10 +51,14 @@ import {
   type UsageCalendarMetric,
   type UsageCalendarModel,
 } from './usage-calendar-model';
+import { HEATMAP_COLUMN_TEMPLATE, HEATMAP_MIN_TRACK_WIDTH } from './usage-calendar-geometry';
 import {
-  HEATMAP_COLUMN_TEMPLATE,
-  HEATMAP_MIN_TRACK_WIDTH,
-} from './usage-calendar-geometry';
+  createUsageTimelineFormatter,
+  formatUsageTimelineBucketLabel,
+  formatUsageTimelineBucketInterval,
+  formatUsageTimelineWindow,
+  usageTimelineHourLabels,
+} from './usage-timeline-bucket-label';
 // Export generation remains available in code while the settings UI focuses on the active views.
 const SHOW_SKYLINE_EXPORTS = false;
 
@@ -161,6 +164,7 @@ function useCalendarFormats() {
   return useMemo(
     () => ({
       locale,
+      timeline: createUsageTimelineFormatter(locale),
       month: new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' }),
       weekday: new Intl.DateTimeFormat(locale, { weekday: 'short', timeZone: 'UTC' }),
       /** Compact span endpoints such as "Jul 20"; the year lives in the range label. */
@@ -301,19 +305,23 @@ const HOUR_LABEL_STEP = 3;
 /** 24 hour tracks, shared by the 24h bars, the 7d dot rows, and the hour axis. */
 const HOUR_COLUMNS_CLASS = 'grid grid-cols-[repeat(24,minmax(0,1fr))] gap-[3px]';
 
-function hourLabel(hour: number): string {
-  return `${String(hour).padStart(2, '0')}:00`;
-}
-
-function HourAxis() {
+function HourAxis({
+  labels = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0')),
+}: {
+  labels?: string[];
+}) {
   return (
-    <div aria-hidden="true" className={cn(HOUR_COLUMNS_CLASS, 'mt-1.5')}>
-      {Array.from({ length: 24 }, (_, hour) => (
+    <div
+      aria-hidden="true"
+      className={cn(HOUR_COLUMNS_CLASS, 'mt-1.5')}
+      style={{ gridTemplateColumns: `repeat(${Math.max(1, labels.length)}, minmax(0, 1fr))` }}
+    >
+      {labels.map((label, index) => (
         <span
-          key={hour}
+          key={index}
           className="text-center text-[9px] leading-none tabular-nums text-muted-foreground/60"
         >
-          {hour % HOUR_LABEL_STEP === 0 ? String(hour).padStart(2, '0') : ''}
+          {index % HOUR_LABEL_STEP === 0 ? label : ''}
         </span>
       ))}
     </div>
@@ -329,14 +337,14 @@ const DAY_BAR_TRACK_PX = 148;
  * share of the peak. Every bar opens the breakdown of the day it belongs to.
  */
 function UsageDayMatrix({
-  buckets,
+  timeline,
   metric,
   intensityOf,
   reduced,
   selectedCellMs,
   onToggleDay,
 }: {
-  buckets: SettingsUsageTimelineBucket[];
+  timeline: SettingsUsageTimelineData;
   metric: UsageCalendarMetric;
   intensityOf: (value: number) => number;
   reduced: boolean;
@@ -344,6 +352,8 @@ function UsageDayMatrix({
   selectedCellMs: number | null;
   onToggleDay: (dayStartMs: number, cellMs: number, element: HTMLElement | null) => void;
 }) {
+  const { buckets } = timeline;
+  const formats = useCalendarFormats();
   const maxValue = buckets.reduce(
     (peak, bucket) => Math.max(peak, metric === 'tokens' ? bucket.tokens : bucket.costUSD),
     0
@@ -375,12 +385,16 @@ function UsageDayMatrix({
 
   return (
     <div>
-      <div className={HOUR_COLUMNS_CLASS} role="row">
+      <div
+        className={HOUR_COLUMNS_CLASS}
+        role="row"
+        style={{ gridTemplateColumns: `repeat(${Math.max(1, buckets.length)}, minmax(0, 1fr))` }}
+      >
         {buckets.map((bucket, index) => {
           const value = metric === 'tokens' ? bucket.tokens : bucket.costUSD;
           const intensity = intensityOf(value);
           const height = value > 0 && maxValue > 0 ? Math.max(7, (value / maxValue) * 100) : 0;
-          const label = `${bucket.bucketLabel} · ${formatMetric(value, metric)}`;
+          const label = `${formatUsageTimelineBucketInterval(timeline, bucket, formats.timeline)} · ${formatMetric(value, metric)}`;
           const dayStartMs = Math.floor(bucket.bucketStartMs / DAY_MS) * DAY_MS;
           const selected = bucket.bucketStartMs === selectedCellMs;
           return (
@@ -435,7 +449,7 @@ function UsageDayMatrix({
         })}
       </div>
       <div aria-hidden="true" className="h-px w-full bg-border/70" />
-      <HourAxis />
+      <HourAxis labels={usageTimelineHourLabels(buckets)} />
     </div>
   );
 }
@@ -444,7 +458,6 @@ function UsageDayMatrix({
 const WEEK_ROW_PX = 18;
 const WEEK_DOT_MIN_PX = 5;
 const WEEK_DOT_MAX_PX = 13;
-const WEEK_CELL_COUNT = 7 * 24;
 
 /**
  * 7d: the same 24 hour tracks as the 24h view, stacked seven deep. Dots rather
@@ -473,7 +486,13 @@ function UsageWeekMatrix({
   onToggleDay: (dayStartMs: number, cellMs: number, element: HTMLElement | null) => void;
 }) {
   const startDayMs = Math.floor(timeline.startMs / DAY_MS) * DAY_MS;
-  const dayStarts = Array.from({ length: 7 }, (_, index) => startDayMs + index * DAY_MS);
+  const lastDayMs = Math.floor(Math.max(timeline.startMs, timeline.endMs - 1) / DAY_MS) * DAY_MS;
+  const dayStarts = Array.from(
+    { length: Math.floor((lastDayMs - startDayMs) / DAY_MS) + 1 },
+    (_, index) => startDayMs + index * DAY_MS
+  );
+  const cellCount = dayStarts.length * 24;
+  const formats = useCalendarFormats();
   const valuesByBucket = useMemo(() => {
     const values = new Map<number, number>();
     for (const bucket of timeline.buckets) {
@@ -485,11 +504,14 @@ function UsageWeekMatrix({
   // Roving tabindex: the 7×24 grid is one tab stop, arrow keys walk cells.
   const cellRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [focusIndex, setFocusIndex] = useState(0);
-  const focusCell = useCallback((index: number) => {
-    const next = Math.min(Math.max(index, 0), WEEK_CELL_COUNT - 1);
-    setFocusIndex(next);
-    cellRefs.current[next]?.focus();
-  }, []);
+  const focusCell = useCallback(
+    (index: number) => {
+      const next = Math.min(Math.max(index, 0), cellCount - 1);
+      setFocusIndex(next);
+      cellRefs.current[next]?.focus();
+    },
+    [cellCount]
+  );
   const onKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
     const deltas: Record<string, number> = {
       ArrowUp: -24,
@@ -505,7 +527,7 @@ function UsageWeekMatrix({
     }
     if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
-      focusCell(event.key === 'Home' ? 0 : WEEK_CELL_COUNT - 1);
+      focusCell(event.key === 'Home' ? 0 : cellCount - 1);
     }
   };
 
@@ -540,7 +562,7 @@ function UsageWeekMatrix({
                     intensity > 0
                       ? WEEK_DOT_MIN_PX + (WEEK_DOT_MAX_PX - WEEK_DOT_MIN_PX) * intensity
                       : WEEK_DOT_MIN_PX - 1;
-                  const label = `${weekdayFormat.format(new Date(dayStartMs))} ${hourLabel(hour)} · ${formatMetric(value, metric)}`;
+                  const label = `${formatUsageTimelineBucketLabel(timeline, { bucketStartMs: cellMs, bucketLabel: '' }, formats.timeline)} · ${formatMetric(value, metric)}`;
                   const selected = cellMs === selectedCellMs;
                   return (
                     <button
@@ -1001,12 +1023,7 @@ function UsageRangePanel({
   const peakBucket = timeline.buckets[peakIndex];
   const activeCount = values.filter((value) => value > 0).length;
 
-  const spanLabel =
-    timeline.range === 'day'
-      ? formats.day.format(new Date(timeline.startMs))
-      : `${formats.dayShort.format(new Date(timeline.startMs))} – ${formats.dayShort.format(
-          new Date(Math.max(timeline.startMs, timeline.endMs - DAY_MS))
-        )}`;
+  const spanLabel = formatUsageTimelineWindow(timeline, formats.timeline);
 
   /** Caret x for a cell, in coordinates of the panel root the detail panel shares. */
   const measureAnchorX = useCallback((element: HTMLElement | null) => {
@@ -1071,7 +1088,10 @@ function UsageRangePanel({
   return (
     <div ref={rootRef} className="min-w-0">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <p className="min-w-0 truncate text-[11px] tabular-nums text-muted-foreground">
+        <p
+          title={spanLabel}
+          className="min-w-0 truncate text-[11px] tabular-nums text-muted-foreground"
+        >
           {spanLabel}
           <span className="text-muted-foreground/60">
             {` · ${t('workspace.usage.skyline.activeIntervals')} ${activeCount}/${values.length}`}
@@ -1084,7 +1104,7 @@ function UsageRangePanel({
               <span className="font-normal text-foreground">
                 {formatMetric(values[peakIndex] ?? 0, metric)}
               </span>
-              <span className="text-muted-foreground/60">{` · ${peakBucket.bucketLabel}`}</span>
+              <span className="text-muted-foreground/60">{` · ${formatUsageTimelineBucketLabel(timeline, peakBucket, formats.timeline)}`}</span>
             </p>
           ) : null}
           <HeatLegend />
@@ -1122,7 +1142,7 @@ function UsageRangePanel({
                 />
               ) : (
                 <UsageDayMatrix
-                  buckets={timeline.buckets}
+                  timeline={timeline}
                   metric={metric}
                   intensityOf={intensityOf}
                   reduced={reduced}
@@ -1941,7 +1961,15 @@ function UsageTimelineSummary({
       <SummaryStat
         label={t('workspace.usage.skyline.peakInterval')}
         value={formatMetric(values[peakIndex] ?? 0, metric)}
-        detail={peakBucket?.bucketLabel ?? t('workspace.usage.skyline.noUsage')}
+        detail={
+          peakBucket
+            ? formatUsageTimelineBucketLabel(
+                timeline,
+                peakBucket,
+                createUsageTimelineFormatter(usageIntlLocale())
+              )
+            : t('workspace.usage.skyline.noUsage')
+        }
       />
       <SummaryStat
         label={t('workspace.usage.skyline.activeIntervals')}
@@ -2326,14 +2354,18 @@ export function UsageCalendarVisualization({
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <Tooltip.Root>
-                  <Tooltip.Trigger render={<Button
-                      icon
-                      variant="ghost"
-                      onClick={() => void copyAscii()}
-                      aria-label={t('workspace.usage.skyline.copyAscii')}
-                    >
-                      <Copy />
-                    </Button>}/>
+                  <Tooltip.Trigger
+                    render={
+                      <Button
+                        icon
+                        variant="ghost"
+                        onClick={() => void copyAscii()}
+                        aria-label={t('workspace.usage.skyline.copyAscii')}
+                      >
+                        <Copy />
+                      </Button>
+                    }
+                  />
                   <Tooltip.Content>{t('workspace.usage.skyline.copyAscii')}</Tooltip.Content>
                 </Tooltip.Root>
                 <Button size="small" variant="secondary" onClick={exportAscii}>

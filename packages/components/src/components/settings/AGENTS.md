@@ -53,9 +53,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   verification.
 - Keep three.js/R3F behind the lazy usage-calendar module so lightweight and SSR
   consumers never evaluate its renderer graph.
-- Usage day details persist bounded snapshots per auth session, workspace, and
-  date. Reuse for one hour; refresh expired selections without blanking cached
-  data. Preserve auth/capability gates; see [contract](../../../../../specs/usage-detail-cache.md).
+- Charts use [UTC](../../../../../specs/usage-timeline.md).
+  Cache bounded day snapshots per auth session/workspace/date for one hour;
+  refresh expiry without blanking data. Keep auth/capability gates
+  ([cache](../../../../../specs/usage-detail-cache.md)).
 - Interface/terminal fonts exclude symbol families in `lib/local-fonts.ts`; option
   names stay on the default interface font. Font size is five named tiers writing
   `--ui-font-size`. Font ligatures is a boolean in the Text group, writing
