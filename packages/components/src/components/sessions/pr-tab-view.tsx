@@ -42,6 +42,7 @@ import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Avatar, type AvatarSize } from '@lody/ui/avatar';
 import { Button, ButtonGroup } from '@lody/ui/button';
+import { Tabs } from '@lody/ui/tabs';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Textarea } from '@lody/ui/textarea';
@@ -52,6 +53,9 @@ import {
 } from '@/ui/diff-viewer/github-comment-thread';
 import { PR_STATUS_META, PullRequestBadge } from '@/components/sessions/pull-request-badge';
 import { Menu } from '@/ui/menu';
+import { PrChangesView } from './pr-changes-view';
+import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
+import type { PrCommitSelection } from '@/lib/github-pr-diff';
 
 /** The tab's own width, not the window's: the PR tab lives in a resizable side panel. */
 const NARROW = '@container pr-tab (width < 420px)';
@@ -533,11 +537,17 @@ export interface PrTabViewData {
   reviews: GitHubReview[];
   issueComments: GitHubIssueComment[];
   checkRuns: GitHubCheckRunsSummary;
+  changes?: UseGitHubPrDiffResult & {
+    selection: PrCommitSelection;
+    onSelectionChange: (selection: PrCommitSelection) => void;
+  };
 }
 
 export interface PrTabViewProps {
   repoFullName: string;
   prNumber: number;
+  /** Optional initial sub-tab for embedded fixtures and previews. */
+  initialTab?: 'summary' | 'changes';
   state: PrTabViewState;
   data?: PrTabViewData | null;
   error?: string | null;
@@ -1242,7 +1252,7 @@ function PrPrimaryAction({
         </Menu.GroupLabel>
         <Menu.RadioGroup
           value={mergeMethod}
-          onValueChange={(value) => onSelectMergeMethod?.(value as GitHubMergeMethod)}
+          onValueChange={(value: string) => onSelectMergeMethod?.(value as GitHubMergeMethod)}
         >
           {HEADER_MERGE_METHODS.map((method) => (
             <Menu.RadioItem key={method.value} value={method.value}>
@@ -1739,6 +1749,7 @@ function resolveMergeKind(pr: GitHubPullRequestDetails): MergeKind {
 export const PrTabView = memo(function PrTabView({
   repoFullName,
   prNumber,
+  initialTab = 'summary',
   state,
   data,
   error,
@@ -1766,7 +1777,13 @@ export const PrTabView = memo(function PrTabView({
   className,
 }: PrTabViewProps) {
   const { t } = useTranslation();
+  const [activeTab, setActiveTab] = useState<'summary' | 'changes'>(initialTab);
   const pr = data?.pullRequest;
+  const changes = data?.changes;
+  const changesAvailable = changes != null;
+  useEffect(() => {
+    setActiveTab(initialTab === 'changes' && changesAvailable ? 'changes' : 'summary');
+  }, [changesAvailable, initialTab, prNumber, repoFullName]);
   const conversation = data
     ? buildConversation(data.issueComments, data.reviewThreads, data.reviews)
     : [];
@@ -1799,7 +1816,7 @@ export const PrTabView = memo(function PrTabView({
       />
     ) : null;
 
-  const body = (
+  const summaryBody = (
     <div {...stylex.props(styles.gutter, embedded && styles.gutterEmbedded)}>
       <div {...stylex.props(styles.column, styles.body, embedded && styles.bodyEmbedded)}>
         {state === 'loading' && !pr && <PrBodySkeleton />}
@@ -1896,6 +1913,53 @@ export const PrTabView = memo(function PrTabView({
     </div>
   );
 
+  const changesBody = changes ? (
+    <div {...stylex.props(styles.gutter, embedded && styles.gutterEmbedded)}>
+      <div {...stylex.props(styles.column, styles.body, embedded && styles.bodyEmbedded)}>
+        <PrChangesView
+          state={changes.state}
+          commits={changes.commits}
+          files={changes.files}
+          selection={changes.selection}
+          onSelectionChange={changes.onSelectionChange}
+          contentByPath={changes.contentByPath}
+          onLoadFile={changes.loadFile}
+          onRefresh={() => void changes.refresh()}
+          error={changes.error}
+          historical={Boolean(changes.range?.historical)}
+        />
+      </div>
+    </div>
+  ) : null;
+
+  const body = (
+    <Tabs.Root
+      value={activeTab}
+      onValueChange={(value: string) => setActiveTab(value as 'summary' | 'changes')}
+      orientation="horizontal"
+    >
+      <div {...stylex.props(styles.gutter)}>
+        <div {...stylex.props(styles.column)}>
+          <Tabs.List size="small">
+            <Tabs.Tab value="summary">{t('sessions.prTab.summary', 'Summary')}</Tabs.Tab>
+            <Tabs.Tab value="changes" disabled={!changes}>
+              {t('sessions.prTab.changes', 'Changes')}
+              {pr && (
+                <>
+                  {' '}
+                  <span {...stylex.props(styles.additions)}>+{pr.additions}</span>{' '}
+                  <span {...stylex.props(styles.deletions)}>−{pr.deletions}</span>
+                </>
+              )}
+            </Tabs.Tab>
+          </Tabs.List>
+        </div>
+      </div>
+      <Tabs.Panel value="summary">{summaryBody}</Tabs.Panel>
+      {changesBody && <Tabs.Panel value="changes">{changesBody}</Tabs.Panel>}
+    </Tabs.Root>
+  );
+
   return (
     <div {...withClassName(stylex.props(styles.root), className)}>
       {embedded ? (
@@ -1967,7 +2031,7 @@ export const PrTabView = memo(function PrTabView({
         {body}
       </ScrollArea>
 
-      {!embedded && onPostComment && (
+      {!embedded && onPostComment && activeTab === 'summary' && (
         <div data-pr-comment-composer="" {...stylex.props(styles.composerDock, styles.gutter)}>
           <div {...stylex.props(styles.column)}>
             <Composer

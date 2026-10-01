@@ -11,6 +11,8 @@ import {
   githubFetchPRReviewComments,
   githubFetchProjectSkillsAtCommit,
   githubFetchPullRequestDetails,
+  githubFetchPullRequestCommits,
+  githubCompareCommits,
   githubFetchPullRequestReviews,
   normalizeCheckRunsSummary,
 } from '../src/github-api';
@@ -31,7 +33,7 @@ describe('GitHub PR live reads', () => {
             title: 'Fresh pull request',
             state: 'open',
             html_url: 'https://github.com/owner/repo/pull/42',
-            base: { ref: 'main' },
+            base: { ref: 'main', sha: 'base-sha' },
             head: { ref: 'fix/refresh', sha: 'head-sha' },
             user: null,
             created_at: '2026-07-19T00:00:00.000Z',
@@ -63,6 +65,103 @@ describe('GitHub PR live reads', () => {
       'reload',
       'reload',
     ]);
+    await expect(githubFetchPullRequestDetails('token', 'owner/repo', 42)).resolves.toMatchObject({
+      baseSha: 'base-sha',
+    });
+  });
+});
+
+describe('GitHub PR changes reads', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('normalizes commits and compare files', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/commits')) {
+        return new Response(
+          JSON.stringify([
+            {
+              sha: 'head',
+              html_url: 'https://github.com/o/r/commit/head',
+              commit: {
+                message: 'Add changes\n\nDetails',
+                author: { date: '2026-09-30T00:00:00Z' },
+              },
+              author: { login: 'alice' },
+              parents: [{ sha: 'parent' }],
+            },
+          ])
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          files: [
+            {
+              filename: 'src/a.ts',
+              status: 'modified',
+              additions: 2,
+              deletions: 1,
+              changes: 3,
+              sha: 'blob',
+              blob_url: 'https://github.com/o/r/blob/head/src/a.ts',
+              raw_url: 'https://github.com/o/r/raw/head/src/a.ts',
+              patch: '@@ -1 +1 @@',
+            },
+            {
+              filename: 'src/old.ts',
+              status: 'deleted',
+              additions: 0,
+              deletions: 2,
+              changes: 2,
+            },
+          ],
+          merge_base_commit: { sha: 'parent' },
+        })
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(githubFetchPullRequestCommits('token', 'o/r', 42)).resolves.toEqual([
+      {
+        sha: 'head',
+        message: 'Add changes',
+        authorLogin: 'alice',
+        authoredAt: '2026-09-30T00:00:00Z',
+        htmlUrl: 'https://github.com/o/r/commit/head',
+        parentSha: 'parent',
+      },
+    ]);
+    await expect(githubCompareCommits('token', 'o/r', 'parent', 'head')).resolves.toEqual({
+      mergeBaseSha: 'parent',
+      files: [
+        {
+          path: 'src/a.ts',
+          previousPath: null,
+          status: 'modified',
+          additions: 2,
+          deletions: 1,
+          changes: 3,
+          sha: 'blob',
+          blobUrl: 'https://github.com/o/r/blob/head/src/a.ts',
+          rawUrl: 'https://github.com/o/r/raw/head/src/a.ts',
+          patch: '@@ -1 +1 @@',
+        },
+        {
+          path: 'src/old.ts',
+          previousPath: null,
+          status: 'removed',
+          additions: 0,
+          deletions: 2,
+          changes: 2,
+          sha: null,
+          blobUrl: null,
+          rawUrl: null,
+          patch: null,
+        },
+      ],
+    });
   });
 });
 
