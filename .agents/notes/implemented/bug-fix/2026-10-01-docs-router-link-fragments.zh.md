@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-01-docs-router-link-fragments.md)
 
+[Draft PR #1194](https://github.com/LodyAI/Lody/pull/1194)
+
 ## 摘要
 
 Introduction 的 Daemon Mode 链接渲染成 `#daemon-mode/`，点击或刷新时无法定位
@@ -61,6 +63,8 @@ href 保留原生导航，[App 路径导航边界](2026-09-14-docs-web-app-links
 - 根 `pnpm format` 通过。根 `pnpm check` 因其他 workspace 缺少依赖而在
   typecheck 停止；文档检查报告未初始化 ACP 子模块造成的 62 项既有断链，
   本次修改的文档没有错误。
+- 公开边界检查报告 9 项无法解析的 workspace 引用，均指向这些未初始化的 ACP
+  子模块；没有修改 package manifest。
 
 仅安装站点的冻结依赖时，需要通过被忽略的 worktree 本地链接提供现有隐式
 样式依赖 `tw-animate-css@1.4.0`，没有修改 manifest 或 lockfile。浏览器检查

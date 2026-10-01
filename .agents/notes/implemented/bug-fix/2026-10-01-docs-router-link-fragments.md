@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-01-docs-router-link-fragments.zh.md)
 
+[Draft PR #1194](https://github.com/LodyAI/Lody/pull/1194)
+
 ## Abstract
 
 Introduction's Daemon Mode link rendered `#daemon-mode/`, so clicking or refreshing
@@ -71,6 +73,8 @@ all docs would discard existing client navigation, so the fix stays at the adapt
 - Root `pnpm format` passed. Root `pnpm check` stopped in unrelated workspace
   typechecking with missing dependencies; the document check reports 62 existing
   links into uninitialized ACP submodules and no errors in this change's documents.
+- The public-boundary check reports nine unresolved workspace references into
+  those uninitialized ACP submodules. No package manifest changed.
 
 A site-only frozen installation requires the existing implicit stylesheet
 dependency `tw-animate-css@1.4.0` supplied through an ignored worktree-local link;
