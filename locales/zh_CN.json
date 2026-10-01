@@ -2917,7 +2917,7 @@
   "settings.fontLigatures.label": "字体连字",
   "settings.inlineMath.helper": "在 Markdown 中排版 $...$ 和 \\(...\\) 行内公式。",
   "settings.inlineMath.label": "渲染行内公式",
-  "settings.autoArchive.description": "在以下情况发生时，自动归档 session 对话。仅对你自己创建的 session 生效，且仅在当前设备上启用。",
+  "settings.autoArchive.description": "当前设备在 PR 状态变化时自动归档你拥有的会话。对话历史和本地分支会保留。所属机器可在提交非 ignored 改动后移除托管工作树；被 Git 忽略或被 cleanup 脚本删除的文件不在备份范围内。请先把需要的文件另存到工作树之外。",
   "settings.autoArchive.onPrClosed": "PR 被关闭时",
   "settings.autoArchive.onPrMerged": "PR 被合并时",
   "settings.autoArchive.title": "自动归档 session",

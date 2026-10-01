@@ -16,6 +16,7 @@ import type { Logger } from '../src/utils/logger';
 import {
   createLocalRepo,
   createRemoteRepo,
+  gitCommit,
   runGit,
   toFileUrl,
 } from './worktree-manager-test-helpers';
@@ -76,7 +77,7 @@ describe('WorktreeGarbageCollector', () => {
       logger: createSilentLogger(),
     });
     const worktree = await manager.createWorktree(sessionId);
-    return { rootPath, worktree };
+    return { rootPath, worktree, manager };
   };
 
   const createGitHubWorktree = async (sessionId: SessionId) => {
@@ -87,7 +88,7 @@ describe('WorktreeGarbageCollector', () => {
       logger: createSilentLogger(),
     });
     const worktree = await manager.createWorktree(sessionId);
-    return { worktree, bareGitDir: path.join(reposDir, `gh-${sessionId}`, 'bare.git') };
+    return { worktree, manager, bareGitDir: path.join(reposDir, `gh-${sessionId}`, 'bare.git') };
   };
 
   const createGc = (
@@ -109,41 +110,112 @@ describe('WorktreeGarbageCollector', () => {
     return { gc, runCleanupScript, recordArchivedBranch };
   };
 
-  it('removes an archived local-project worktree, commits pending work, and keeps the branch', async () => {
-    const sessionId = 'gc-archived-local' as SessionId;
+  it.each(['local', 'github'] as const)(
+    'backs up and restores non-ignored work in a %s worktree without preserving ignored files',
+    async (kind) => {
+      const sessionId = `gc-retention-${kind}` as SessionId;
+      const fixture =
+        kind === 'local'
+          ? await createLocalWorktree(sessionId)
+          : await createGitHubWorktree(sessionId);
+      const { worktree, manager } = fixture;
+      const repoPath = 'rootPath' in fixture ? fixture.rootPath : fixture.bareGitDir;
+      fs.writeFileSync(path.join(worktree.hostPath, '.gitignore'), '.env\nbuild/\n', 'utf8');
+      fs.writeFileSync(path.join(worktree.hostPath, 'deleted.txt'), 'remove later\n', 'utf8');
+      gitCommit(worktree.hostPath, 'prepare retention fixture');
+      const previousHead = runGit(repoPath, ['rev-parse', worktree.branch]);
+      fs.writeFileSync(path.join(worktree.hostPath, 'README.md'), '# edited\n', 'utf8');
+      fs.rmSync(path.join(worktree.hostPath, 'deleted.txt'));
+      fs.writeFileSync(path.join(worktree.hostPath, 'pending.txt'), 'untracked work\n', 'utf8');
+      fs.writeFileSync(path.join(worktree.hostPath, '.env'), 'SYNTHETIC_FIXTURE=1\n', 'utf8');
+      fs.mkdirSync(path.join(worktree.hostPath, 'build'));
+      fs.writeFileSync(path.join(worktree.hostPath, 'build', 'output.txt'), 'generated\n', 'utf8');
+      const states: Record<string, WorktreeOwnerState> = {
+        [sessionId]: {
+          kind: 'archived',
+          meta: sessionMeta(sessionId, { isArchived: true, branchName: worktree.branch }),
+        },
+      };
+      const { gc } = createGc(states);
+
+      expect((await gc.sweep()).removed).toEqual([sessionId]);
+      expect(fs.existsSync(worktree.hostPath)).toBe(false);
+      const backupHead = runGit(repoPath, ['rev-parse', worktree.branch]);
+      expect(backupHead).not.toBe(previousHead);
+      expect(runGit(repoPath, ['show', `${worktree.branch}:README.md`])).toBe('# edited');
+      expect(runGit(repoPath, ['show', `${worktree.branch}:pending.txt`])).toBe('untracked work');
+      const files = runGit(repoPath, ['ls-tree', '-r', '--name-only', worktree.branch]).split('\n');
+      expect(files).not.toContain('deleted.txt');
+      expect(files).not.toContain('.env');
+      expect(files).not.toContain('build/output.txt');
+
+      states[sessionId] = { kind: 'active' };
+      const restored = await manager.createWorktree(sessionId, undefined, worktree.branch);
+      expect(restored.branch).toBe(worktree.branch);
+      expect(fs.readFileSync(path.join(restored.hostPath, 'README.md'), 'utf8')).toBe('# edited\n');
+      expect(fs.readFileSync(path.join(restored.hostPath, 'pending.txt'), 'utf8')).toBe(
+        'untracked work\n'
+      );
+      expect(fs.existsSync(path.join(restored.hostPath, 'deleted.txt'))).toBe(false);
+      expect(fs.existsSync(path.join(restored.hostPath, '.env'))).toBe(false);
+      expect(fs.existsSync(path.join(restored.hostPath, 'build'))).toBe(false);
+      expect((await gc.sweep()).removed).toEqual([]);
+      if ('rootPath' in fixture) {
+        expect(fs.readFileSync(path.join(fixture.rootPath, 'README.md'), 'utf8')).toBe('# local\n');
+      }
+
+      // A deleted owner still gets directory cleanup without deleting its backup branch.
+      states[sessionId] = { kind: 'deleted', meta: undefined };
+      expect((await gc.sweep()).removed).toEqual([sessionId]);
+      expect(fs.existsSync(restored.hostPath)).toBe(false);
+      expect(runGit(repoPath, ['rev-parse', worktree.branch])).toBe(backupHead);
+    }
+  );
+
+  it('preserves pending files when the archive backup commit fails', async () => {
+    const sessionId = 'gc-backup-fails' as SessionId;
     const { rootPath, worktree } = await createLocalWorktree(sessionId);
-    fs.writeFileSync(path.join(worktree.hostPath, 'pending.txt'), 'unsaved\n', 'utf8');
-    const { gc, runCleanupScript } = createGc({
-      [sessionId]: {
-        kind: 'archived',
-        meta: sessionMeta(sessionId, { isArchived: true, isWorktree: true }),
-      },
-    });
-
-    const result = await gc.sweep();
-
-    expect(result.removed).toEqual([sessionId]);
-    expect(fs.existsSync(worktree.hostPath)).toBe(false);
-    expect(runGit(rootPath, ['branch', '--list', worktree.branch])).toContain(worktree.branch);
-    expect(runGit(rootPath, ['show', `${worktree.branch}:pending.txt`])).toBe('unsaved');
-    expect(runCleanupScript).toHaveBeenCalledTimes(1);
-    expect(runCleanupScript.mock.calls[0]?.[0]).toMatchObject({
-      sessionId,
-      worktreePath: worktree.hostPath,
-    });
-  });
-
-  it('removes an archived GitHub worktree and keeps its branch in the bare clone', async () => {
-    const sessionId = 'gc-archived-github' as SessionId;
-    const { worktree, bareGitDir } = await createGitHubWorktree(sessionId);
+    const originalHead = runGit(rootPath, ['rev-parse', worktree.branch]);
+    const hooksDir = path.join(testDir, 'reject-commit-hooks');
+    fs.mkdirSync(hooksDir);
+    fs.writeFileSync(path.join(hooksDir, 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    runGit(rootPath, ['config', 'core.hooksPath', hooksDir]);
+    fs.writeFileSync(path.join(worktree.hostPath, 'pending.txt'), 'only copy\n', 'utf8');
     const { gc } = createGc({
       [sessionId]: { kind: 'archived', meta: sessionMeta(sessionId, { isArchived: true }) },
     });
 
-    await gc.sweep();
+    const result = await gc.sweep();
 
+    expect(result.removed).toEqual([]);
+    expect(result.failed).toEqual([sessionId]);
+    expect(fs.readFileSync(path.join(worktree.hostPath, 'pending.txt'), 'utf8')).toBe(
+      'only copy\n'
+    );
+    expect(runGit(rootPath, ['rev-parse', worktree.branch])).toBe(originalHead);
+  });
+
+  it('backs up the state left by the cleanup script even when that script fails', async () => {
+    const sessionId = 'gc-script-before-backup' as SessionId;
+    const { rootPath, worktree } = await createLocalWorktree(sessionId);
+    fs.writeFileSync(path.join(worktree.hostPath, 'pending.txt'), 'before cleanup\n', 'utf8');
+    const { gc } = createGc(
+      { [sessionId]: { kind: 'archived', meta: sessionMeta(sessionId, { isArchived: true }) } },
+      {
+        runCleanupScript: async ({ worktreePath }) => {
+          fs.rmSync(path.join(worktreePath, 'pending.txt'));
+          fs.writeFileSync(path.join(worktreePath, 'README.md'), '# after cleanup\n', 'utf8');
+          throw new Error('synthetic cleanup failure');
+        },
+      }
+    );
+
+    expect((await gc.sweep()).removed).toEqual([sessionId]);
     expect(fs.existsSync(worktree.hostPath)).toBe(false);
-    expect(runGit(bareGitDir, ['branch', '--list', worktree.branch])).toContain(worktree.branch);
+    expect(runGit(rootPath, ['show', `${worktree.branch}:README.md`])).toBe('# after cleanup');
+    expect(
+      runGit(rootPath, ['ls-tree', '-r', '--name-only', worktree.branch]).split('\n')
+    ).not.toContain('pending.txt');
   });
 
   it('leaves active and unknown worktrees alone', async () => {
@@ -249,24 +321,6 @@ describe('WorktreeGarbageCollector', () => {
     expect(runGit(repoRoot, ['show', `${worktree.branch}:pending.txt`])).toBe('unsaved');
   });
 
-  it('still removes the worktree when the cleanup script fails', async () => {
-    const sessionId = 'gc-script-fails' as SessionId;
-    const { worktree } = await createLocalWorktree(sessionId);
-    const failingScript = vi.fn(async () => {
-      throw new Error('script exploded');
-    });
-    const { gc } = createGc(
-      { [sessionId]: { kind: 'archived', meta: sessionMeta(sessionId, { isArchived: true }) } },
-      { runCleanupScript: failingScript }
-    );
-
-    const result = await gc.sweep();
-
-    expect(result.removed).toEqual([sessionId]);
-    expect(fs.existsSync(worktree.hostPath)).toBe(false);
-    expect(failingScript).toHaveBeenCalledTimes(1);
-  });
-
   it('records the branch git reports when it differs from session metadata', async () => {
     const sessionId = 'gc-renamed-branch' as SessionId;
     const { rootPath, worktree } = await createLocalWorktree(sessionId);
@@ -314,11 +368,15 @@ describe('WorktreeGarbageCollector', () => {
 
   it('coalesces overlapping schedule() calls into one follow-up sweep', async () => {
     const sessionId = 'gc-coalesce' as SessionId;
-    await createLocalWorktree(sessionId);
+    const { worktree } = await createLocalWorktree(sessionId);
     let sweeps = 0;
     let release: () => void = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
+    });
+    let finish: () => void = () => {};
+    const removed = new Promise<void>((resolve) => {
+      finish = resolve;
     });
     const { gc } = createGc(
       {},
@@ -326,8 +384,11 @@ describe('WorktreeGarbageCollector', () => {
         readOwnerState: async () => {
           sweeps += 1;
           await gate;
-          return { kind: 'active' };
+          return sweeps === 1
+            ? { kind: 'active' }
+            : { kind: 'archived', meta: sessionMeta(sessionId, { isArchived: true }) };
         },
+        recordArchivedBranch: async () => finish(),
       }
     );
 
@@ -338,8 +399,8 @@ describe('WorktreeGarbageCollector', () => {
     expect(third).toBe(first);
     release();
     await first;
-    await vi.waitFor(() => expect(sweeps).toBe(2));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await removed;
     expect(sweeps).toBe(2);
+    expect(fs.existsSync(worktree.hostPath)).toBe(false);
   });
 });

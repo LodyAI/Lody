@@ -1,5 +1,14 @@
+// @vitest-environment jsdom
+
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { createStore, Provider } from 'jotai';
 import { describe, expect, it } from 'vitest';
 import type { SessionPullRequestMeta } from '@lody/shared';
+
+import { autoArchiveOnPrClosedAtom, autoArchiveOnPrMergedAtom } from '../src/atoms/settings';
+import { AutoArchiveSection } from '../src/components/settings/auto-archive-setting';
+import { initI18n } from '../src/i18n';
 
 import {
   getAutoArchivePrDecision,
@@ -142,4 +151,53 @@ describe('getAutoArchivePrDecision', () => {
       }).shouldArchive
     ).toBe(false);
   });
+});
+
+describe('AutoArchiveSection', () => {
+  it.each([
+    {
+      language: 'en',
+      notice: [
+        'local branches are kept',
+        'ignored files',
+        'cleanup scripts',
+        'outside the worktree',
+      ],
+    },
+    { language: 'zh_CN', notice: ['本地分支会保留', '被 Git 忽略', 'cleanup 脚本', '工作树之外'] },
+  ])(
+    'shows retention limits in $language while keeping the rules independent',
+    async ({ language, notice }) => {
+      Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
+      await initI18n(language);
+      const store = createStore();
+      store.set(autoArchiveOnPrMergedAtom, false);
+      store.set(autoArchiveOnPrClosedAtom, false);
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      const root = createRoot(container);
+      try {
+        await act(async () => {
+          root.render(createElement(Provider, { store }, createElement(AutoArchiveSection)));
+        });
+        for (const boundary of notice) expect(container.textContent).toContain(boundary);
+        const switches = container.querySelectorAll<HTMLElement>('[role="switch"]');
+        expect(switches).toHaveLength(2);
+        await act(async () => switches[0]?.click());
+        expect(store.get(autoArchiveOnPrMergedAtom)).toBe(true);
+        expect(store.get(autoArchiveOnPrClosedAtom)).toBe(false);
+        expect(switches[0]?.getAttribute('aria-checked')).toBe('true');
+        await act(async () => switches[1]?.click());
+        expect(store.get(autoArchiveOnPrMergedAtom)).toBe(true);
+        expect(store.get(autoArchiveOnPrClosedAtom)).toBe(true);
+        expect(switches[1]?.getAttribute('aria-checked')).toBe('true');
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
+        localStorage.removeItem('lody-auto-archive-on-pr-merged');
+        localStorage.removeItem('lody-auto-archive-on-pr-closed');
+        await initI18n('en');
+      }
+    }
+  );
 });

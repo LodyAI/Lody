@@ -14,7 +14,7 @@ export function AutoArchiveSection() {
       title={t('settings.autoArchive.title', 'Auto-archive sessions')}
       description={t(
         'settings.autoArchive.description',
-        'Automatically archive a session conversation when one of the following happens. Applies to sessions you own and only on this device.'
+        'This device automatically archives sessions you own when a PR status changes. Conversation history and local branches are kept. The owning machine can remove managed worktrees after committing non-ignored changes; ignored files and files removed by cleanup scripts are not backed up. Save needed files outside the worktree first.'
       )}
     >
       <CompactRow label={t('settings.autoArchive.onPrMerged', 'When the PR is merged')}>
