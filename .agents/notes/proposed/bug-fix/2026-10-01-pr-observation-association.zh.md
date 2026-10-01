@@ -22,6 +22,10 @@ PR: https://github.com/LodyAI/Lody/pull/1192
 但不能证明服务端拒绝原因或最初创建 PR 使用的凭据。GitHub App 仓库列表
 不能单独证明实际个人凭据是否具备读取权限。
 
+最终再次核对 main `993cb8c8c`：在已测试的 `93545f01b` 基线之后合并了 #1177
+（All Changes 基准／图片模态焦点）和 #1187（搜索文档），两者都没有改动 PR
+发现发布或 info-bar 动作门控；开放 PR 中未发现其他 B08 实现。本分支保留已测试基线。
+
 把托管 webhook 关联保留为独立的幂等效果。成功确认仅保存在工作区运行时；
 已发布元数据不等于 webhook 已关联。拒绝及传输失败仍发布经验证的胜出 PR，
 同时保留发现目标的重试资格。失败时清除旧上下文指纹，让新发布的终态 PR
@@ -41,13 +45,26 @@ PR: https://github.com/LodyAI/Lody/pull/1192
 失败。组件测试从精简 owner 元数据走到 PR 选择和 root/child 动作门控。
 没有提交捕获的对话或生产夹具。
 
+隔离浏览器验收使用真实 Session info bar、PR 选择和动作门控，关闭托管修改能力。
+把同一 ambient 凭据／关联拒绝夹具在 `93545f01b` 与补丁上生成的元数据，分别交给
+全新的 Playwright context，以 1000 × 640、英语、浅色主题渲染。修改前无 PR，显示
+Create PR，展开菜单含 Create Draft PR；修改后显示 draft #55、精简 CI 失败状态和
+Commit & Push，不再显示创建入口或托管修改入口。两张图仅含合成的 `owner/repo`、
+`feat/x` 和 +12/−3 数据；外部 HTTP 与 WebSocket 目的地均被阻断。
+before/after Playwright 用例通过，截图上传到发起请求的 Lody 对话，不提交图片。
+这是组件验收，不是已部署完整会话 UI 验证。可复用浏览器回归命令为
+`pnpm --dir packages/components exec playwright test tests/e2e/session-info-bar-observation.spec.ts --workers=1`；
+可选的 `B08_SCREENSHOT_FIXTURES` 指定生成的 `before.json` / `after.json`。
+
 poller 套件 193 项通过；PR 选择及动作套件 21 项通过。更新到 `93545f01b` 后，
 poller 加命令凭据运行时、Git transport 和 gh-shim 套件共 266 项通过；UI 21 项、
-CLI 类型及改动文件格式检查再次通过。更新基线后未重跑完整门禁。完整 CLI 套件 3289 项
+CLI 类型及改动文件格式检查再次通过；独立浏览器回归与捕获的 before/after 验收分别
+通过 1 项 Playwright 测试，组件类型及改动文件 lint 通过。基于补丁后 `7d502f3d` 的完整 CLI 套件 3289 项
 通过、4 项跳过。根类型检查和 lint、i18n、格式化及 code-collab/platform/public
 边界检查通过。完整工作区检查未全绿：未改动的 `boot-shell.test.tsx` 存储不可用
 用例在 Node 26.10.0 下独立运行也失败；组件套件 4591 项通过、仅此 1 项失败，
-门禁在 Electron 测试前停止。完整门禁基于打补丁后的 `7d502f3d` 运行。
+门禁在 Electron 测试前停止。更新基线并补浏览器覆盖后再次运行 `pnpm check`，根类型
+与 lint 通过，仍在同一组件用例失败（4591 项通过／1 项失败）。
 文档检查剩余 6 个指向未初始化 Kimi/Pi
 子模块的既有断链，本任务文档未新增错误；没有登记的 SHA 保护主题。
 
