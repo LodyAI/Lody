@@ -358,13 +358,13 @@ function SettingsModalBody() {
     scopeId: compactNavigationScopeId,
   });
   /**
-   * Arrow keys never leave a dialog: Base UI's popup stops composite keys at
-   * the portal edge, so the scope-level navigation above only ever sees J/K
-   * here. The strip handles the arrows itself — Left/Right included, which the
-   * global scope switcher cannot see either — as the horizontal row they lay out.
+   * A horizontal strip moves on Left/Right — the keys the scope switcher would
+   * otherwise claim. Up/Down, J/K and Home/End fall through to the scope's own
+   * navigation above.
    */
   const handleCompactNavKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       if (
         event.defaultPrevented ||
         event.altKey ||
@@ -382,25 +382,14 @@ function SettingsModalBody() {
       const current =
         active instanceof HTMLElement ? active.closest<HTMLElement>('[data-scope-item]') : null;
       const currentIndex = current ? items.indexOf(current) : -1;
-      let nextIndex: number;
-      switch (event.key) {
-        case 'ArrowRight':
-        case 'ArrowDown':
-          nextIndex = currentIndex < 0 ? 0 : currentIndex + 1;
-          break;
-        case 'ArrowLeft':
-        case 'ArrowUp':
-          nextIndex = currentIndex < 0 ? items.length - 1 : currentIndex - 1;
-          break;
-        case 'Home':
-          nextIndex = 0;
-          break;
-        case 'End':
-          nextIndex = items.length - 1;
-          break;
-        default:
-          return;
-      }
+      const nextIndex =
+        event.key === 'ArrowRight'
+          ? currentIndex < 0
+            ? 0
+            : currentIndex + 1
+          : currentIndex < 0
+            ? items.length - 1
+            : currentIndex - 1;
       const next = items[(nextIndex + items.length) % items.length];
       if (!next) return;
       event.preventDefault();

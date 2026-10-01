@@ -113,6 +113,28 @@ test('scrolls overflow categories without changing the page and supports keyboar
   await expectInside(about, viewport);
 });
 
+test('moves through sidebar categories with arrow keys inside the dialog', async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 800 });
+  await page.goto(rolesStory);
+  const navigation = page.getByRole('navigation', { name: 'Settings' });
+  const roles = navigation.locator('button[data-settings-tab-id="agent-roles"]');
+  await roles.click();
+  // A dialog popup stops composite keys at the portal edge; the scope element
+  // still has to move the selection on them.
+  await page.keyboard.press('ArrowDown');
+  const mcp = navigation.locator('button[data-settings-tab-id="mcp"]');
+  await expect(mcp).toBeFocused();
+  await expect(mcp).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('dialog', { name: 'MCP', exact: true })).toBeVisible();
+  await page.keyboard.press('ArrowUp');
+  await expect(roles).toBeFocused();
+  await expect(roles).toHaveAttribute('aria-current', 'page');
+  await page.keyboard.press('End');
+  const about = navigation.locator('button[data-settings-tab-id="about"]');
+  await expect(about).toBeFocused();
+  await expect(about).toHaveAttribute('aria-current', 'page');
+});
+
 test('keeps the selected category visible in a single row in a short window', async ({ page }) => {
   await page.setViewportSize({ width: 707, height: 394 });
   await page.goto(rolesStory);

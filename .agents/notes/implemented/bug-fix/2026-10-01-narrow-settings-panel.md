@@ -33,11 +33,14 @@ buttons like the sidebar rows — Account and each available category, retaining
 capability/member/native-shell filtering — grouped as the sidebar groups them and
 underlined at the current category. A fading edge mask marks overflow in place of
 scroll buttons; selection and rail resizing reveal the active item. Only the rail
-scrolls, never the page. Arrow keys cannot leave a Base UI dialog — its popup
-stops composite-key propagation — so the strip moves and selects on arrows and
-Home/End itself, while the shared focus scope still provides J/K. Bug report
-remains an accessible button when available. Header titles and action clusters
-wrap; narrow headers remove the redundant inner column padding.
+scrolls, never the page. A Base UI dialog popup stops composite keys (arrows,
+Home/End) at the portal edge, so window-level scope navigation had never seen
+them — the sidebar's arrow keys were inert inside the overlay. `FocusScope` now
+runs a scope's navigation and the Left/Right scope switch on the scope element's
+own keydown, after controls inside it and before the popup's stop; the
+horizontal strip additionally keeps Left/Right for itself. Bug report remains an
+accessible button when available. Header titles and action clusters wrap; narrow
+headers remove the redundant inner column padding.
 
 Shrinking the sidebar alone leaves too little reading width. A full multi-row
 navigation above the page would consume the short window's scrolling area. A
