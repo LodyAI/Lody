@@ -11,12 +11,12 @@ PR: [#1198](https://github.com/LodyAI/Lody/pull/1198)
 Desktop Settings kept a fixed 240px navigation column even when its panel was
 only 420px wide, squeezing Role names and clipping the Add role button. The panel
 now uses a single horizontally scrolling row of category items above the page
-when it is at most 720px wide — text items grouped like the sidebar, the current
-category underlined — and its header actions wrap. Both navigation presentations
-use the same filtered items and selection handler; resizing preserves the page
-and open editor draft. Browser regression coverage exercises geometry and
-nested-editor interaction with synthetic catalog data; packaged Electron and live
-cloud workspaces remain outside this check.
+when it is at most 720px wide — an edge-to-edge band that is the tab strip's
+tray, scroll arrows at its ends — and its header actions wrap. Both navigation
+presentations use the same filtered items and selection handler; resizing
+preserves the page and open editor draft. Browser regression coverage exercises
+geometry and nested-editor interaction with synthetic catalog data; packaged
+Electron and live cloud workspaces remain outside this check.
 
 ## Cause and decision
 
@@ -28,28 +28,29 @@ keep the desktop renderer at narrow widths, per the
 
 [`desktop-settings-modal.tsx`](../../../../packages/components/src/components/settings/desktop-settings-modal.tsx)
 owns the named inline-size container and both navigation presentations. A container
-query selects the layout without remounting the page. The strip renders plain
-buttons like the sidebar rows — Account and each available category, retaining
-capability/member/native-shell filtering — grouped as the sidebar groups them and
-underlined at the current category. A fading edge mask marks overflow in place of
-scroll buttons; selection and rail resizing reveal the active item. Only the rail
-scrolls, never the page. A Base UI dialog popup stops composite keys (arrows,
-Home/End) at the portal edge, so window-level scope navigation had never seen
-them — the sidebar's arrow keys were inert inside the overlay. `FocusScope` now
-runs a scope's navigation and the Left/Right scope switch on the scope element's
-own keydown, after controls inside it and before the popup's stop; the
-horizontal strip additionally keeps Left/Right for itself. Bug report remains an
-accessible button when available. Header titles and action clusters wrap; narrow
-headers remove the redundant inner column padding.
+query selects the layout without remounting the page. The compact presentation is
+the `Tabs` strip flush against the panel: its band is the tray itself, without
+inset, holding Account and each available category — retaining
+capability/member/native-shell filtering. End arrows page the overflow and a
+fading edge mask marks it; selection and rail resizing reveal the active item.
+Only the rail scrolls, never the page. A Base UI dialog popup stops composite
+keys (arrows, Home/End) at the portal edge, so window-level scope navigation had
+never seen them — the sidebar's arrow keys were inert inside the overlay.
+`FocusScope` now runs a scope's navigation and the Left/Right scope switch on the
+scope element's own keydown, after controls inside it and before the popup's
+stop; the tab strip's composite handles its own Left/Right before either. Bug
+report remains an accessible button when available. Header titles and action
+clusters wrap; narrow headers remove the redundant inner column padding.
 
 Shrinking the sidebar alone leaves too little reading width. A full multi-row
 navigation above the page would consume the short window's scrolling area. A
 dropdown was considered but hides adjacent categories behind another click; a
-segmented tab track with scroll arrows was tried and read as cluttered chrome.
-The underline row costs one line and keeps neighbouring categories directly
-selectable; its trade-off is that distant categories require horizontal
-scrolling, marked by the fading edge. Nested editor sizing, focus management and
-scrolling remain with the existing dialog and form, including
+strip floating in a padded bar and a grouped underline row were both tried and
+rejected for their chrome; the tray as the band itself keeps the control's
+affordance without any inset. Its trade-off is that distant categories require
+horizontal scrolling, marked by arrows and the fading edge. Nested editor sizing,
+focus management and scrolling remain with the existing dialog and form,
+including
 [pane-centred placement](2026-09-26-settings-editor-dialog-placement.md).
 
 ## Verification

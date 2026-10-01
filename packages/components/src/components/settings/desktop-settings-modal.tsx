@@ -1,16 +1,8 @@
-import {
-  useCallback,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useState,
-  type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from 'react';
-import { Bug, X } from 'lucide-react';
+import { useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
+import { Bug, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { duration, ease, space } from '@lody/ui/tokens/scales.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
 import { useTranslation } from 'react-i18next';
@@ -106,13 +98,16 @@ const styles = stylex.create({
     flexShrink: 0,
     width: '240px',
   },
+  /**
+   * The compact nav is one edge-to-edge tray: the band itself is the tab
+   * strip's track, with no inset of its own, so the strip reads as the panel's
+   * own header band rather than a control floating in one.
+   */
   compactNav: {
     display: { default: 'none', [NARROW]: 'flex' },
-    alignItems: 'center',
-    gap: space[1],
+    alignItems: 'stretch',
     flexShrink: 0,
-    paddingInline: space[2],
-    paddingBlock: space[1],
+    backgroundColor: colors.trayBackground,
   },
   compactNavViewport: {
     flexGrow: 1,
@@ -120,68 +115,14 @@ const styles = stylex.create({
     overflowX: 'auto',
     scrollbarWidth: 'none',
   },
-  /**
-   * One line of categories: the sidebar's sections become groups set apart by
-   * space alone, so the strip keeps its order without gaining labels it has no
-   * room for.
-   */
-  compactNavRow: {
-    boxSizing: 'border-box',
+  compactNavStrip: {
     display: 'flex',
     alignItems: 'stretch',
-    gap: space[4],
     width: 'max-content',
     minWidth: '100%',
-    paddingInline: space[1],
   },
-  compactNavGroup: { display: 'flex', alignItems: 'stretch' },
-  /**
-   * A category on the strip: a word, not a key in a track. The pointer hints a
-   * line in faint ink; the current one keeps it solid. Its bottom edge is the
-   * strip's, so the line lands on the seam between navigation and page.
-   */
-  compactNavItem: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    margin: 0,
-    paddingInline: space[2],
-    paddingBlock: space[2],
-    borderWidth: 0,
-    borderStyle: 'none',
-    backgroundColor: 'transparent',
-    boxShadow: {
-      default: null,
-      ':hover': `inset 0 -2px 0 color-mix(in oklab, transparent, ${colors.label} 20%)`,
-      ':focus-visible': `inset 0 -2px 0 color-mix(in oklab, transparent, ${colors.label} 20%)`,
-    },
-    outlineStyle: 'none',
-    color: {
-      default: colors.secondaryLabel,
-      ':hover': colors.label,
-      ':focus-visible': colors.label,
-    },
-    fontFamily: 'inherit',
-    fontSize: '1em',
-    fontWeight: 400,
-    lineHeight: type.leading,
-    whiteSpace: 'nowrap',
-    cursor: 'pointer',
-    transitionProperty: 'color, box-shadow',
-    transitionDuration: duration.fast,
-    transitionTimingFunction: ease.standard,
-  },
-  compactNavItemSelected: {
-    color: {
-      default: colors.label,
-      ':hover': colors.label,
-      ':focus-visible': colors.label,
-    },
-    boxShadow: {
-      default: `inset 0 -2px 0 ${colors.label}`,
-      ':hover': `inset 0 -2px 0 ${colors.label}`,
-      ':focus-visible': `inset 0 -2px 0 ${colors.label}`,
-    },
-  },
+  /** The scroll arrows and the bug entry keep their own height on the band. */
+  compactNavEdge: { flexShrink: 0, alignSelf: 'center' },
   navScroll: {
     display: 'flex',
     flexDirection: 'column',
@@ -356,49 +297,8 @@ function SettingsModalBody() {
   useListKeyboardNavigation({
     onItemFocus: handleNavigationItemFocus,
     scopeId: compactNavigationScopeId,
+    itemSelector: '[role="tab"]',
   });
-  /**
-   * A horizontal strip moves on Left/Right — the keys the scope switcher would
-   * otherwise claim. Up/Down, J/K and Home/End fall through to the scope's own
-   * navigation above.
-   */
-  const handleCompactNavKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-      if (
-        event.defaultPrevented ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.shiftKey
-      ) {
-        return;
-      }
-      const items = Array.from(
-        event.currentTarget.querySelectorAll<HTMLElement>('[data-scope-item]')
-      );
-      if (items.length === 0) return;
-      const active = document.activeElement;
-      const current =
-        active instanceof HTMLElement ? active.closest<HTMLElement>('[data-scope-item]') : null;
-      const currentIndex = current ? items.indexOf(current) : -1;
-      const nextIndex =
-        event.key === 'ArrowRight'
-          ? currentIndex < 0
-            ? 0
-            : currentIndex + 1
-          : currentIndex < 0
-            ? items.length - 1
-            : currentIndex - 1;
-      const next = items[(nextIndex + items.length) % items.length];
-      if (!next) return;
-      event.preventDefault();
-      next.focus({ preventScroll: true });
-      next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      handleNavigationItemFocus(next);
-    },
-    [handleNavigationItemFocus]
-  );
   const [navViewport, setNavViewport] = useState<HTMLDivElement | null>(null);
   const [navOverflow, setNavOverflow] = useState({ before: false, after: false });
   useLayoutEffect(() => {
@@ -411,7 +311,7 @@ function SettingsModalBody() {
       );
     };
     const revealSelected = () => {
-      const selected = navViewport.querySelector<HTMLElement>('[aria-current="page"]');
+      const selected = navViewport.querySelector<HTMLElement>('[aria-selected="true"]');
       if (selected && navViewport.clientWidth > 0) {
         const viewportBox = navViewport.getBoundingClientRect();
         const selectedBox = selected.getBoundingClientRect();
@@ -457,14 +357,6 @@ function SettingsModalBody() {
     { id: 'workspace', label: t('settings.sections.workspace', 'Workspace') },
     { id: 'other', label: t('settings.sections.misc', 'Other') },
   ];
-  /** The strip keeps the sidebar's order and grouping; the groups just lose their headings. */
-  const compactNavGroups = [
-    { id: 'account' as const, tabs: navigationTabs.filter((tab) => tab.section === 'account') },
-    ...groupedSections.map((section) => ({
-      id: section.id,
-      tabs: navigationTabs.filter((tab) => tab.section === section.id),
-    })),
-  ].filter((group) => group.tabs.length > 0);
   const usesInternalScrolling = resolvedActiveTab === 'projects';
   // Every page's actions and lead are drawn in this one header.
   const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
@@ -492,42 +384,49 @@ function SettingsModalBody() {
             id={compactNavigationScopeId}
             role="navigation"
             aria-label={t('settings.title')}
-            onKeyDown={handleCompactNavKeyDown}
-            {...stylex.props(styles.compactNav, surface.nav)}
+            {...stylex.props(styles.compactNav)}
           >
+            <Button
+              variant="ghost"
+              size="small"
+              icon
+              aria-label={t('settings.navigation.previousCategories')}
+              disabled={!navOverflow.before}
+              onClick={() => navViewport?.scrollBy({ left: -navViewport.clientWidth * 0.7 })}
+            >
+              <ChevronLeft aria-hidden="true" />
+            </Button>
             <div
               ref={setNavViewport}
               data-settings-nav-viewport=""
               {...stylex.props(styles.compactNavViewport)}
               style={{ maskImage: navMask, WebkitMaskImage: navMask }}
             >
-              <div {...stylex.props(styles.compactNavRow)}>
-                {compactNavGroups.map((group) => (
-                  <div key={group.id} {...stylex.props(styles.compactNavGroup)}>
-                    {group.tabs.map((tab) => {
-                      const active = resolvedActiveTab === tab.id;
-                      return (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          aria-current={active ? 'page' : undefined}
-                          data-id={`settings:${tab.id}`}
-                          data-scope-item="row"
-                          data-settings-tab-id={tab.id}
-                          {...stylex.props(
-                            styles.compactNavItem,
-                            active && styles.compactNavItemSelected
-                          )}
-                          onClick={() => selectTab(tab.id)}
-                        >
-                          {t(tab.labelKey)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
+              <div {...stylex.props(styles.compactNavStrip)}>
+                <Tabs.List size="medium" activateOnFocus aria-label={t('settings.title')}>
+                  {navigationTabs.map((tab) => (
+                    <Tabs.Tab
+                      key={tab.id}
+                      value={tab.id}
+                      data-id={`settings:${tab.id}`}
+                      data-settings-tab-id={tab.id}
+                    >
+                      {t(tab.labelKey)}
+                    </Tabs.Tab>
+                  ))}
+                </Tabs.List>
               </div>
             </div>
+            <Button
+              variant="ghost"
+              size="small"
+              icon
+              aria-label={t('settings.navigation.nextCategories')}
+              disabled={!navOverflow.after}
+              onClick={() => navViewport?.scrollBy({ left: navViewport.clientWidth * 0.7 })}
+            >
+              <ChevronRight aria-hidden="true" />
+            </Button>
             {canReportBug ? (
               <Button
                 variant="ghost"
