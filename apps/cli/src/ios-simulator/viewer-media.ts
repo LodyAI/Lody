@@ -67,7 +67,7 @@ function connect(){
       try{const message=JSON.parse(e.data);
         if(message.type==='ping'&&Number.isSafeInteger(message.id)&&message.id>0)send({type:'pong',id:message.id});
         if(message.type==='stream-stats'){
-          const stats={};for(const key of ['sourceFps','sentFps','sourceMbps','sentMbps','sentFrames','droppedFrames','inFlightFrames','inFlightBytes','oldestFrameMs','ackMs','ackIdleMs','rttMs','targetFps','scale','baseRttMs','deliveryMbps','pacingMbps','windowBytes']){
+          const stats={};for(const key of ['sourceFps','sentFps','sourceMbps','sentMbps','sentFrames','idleRefreshFrames','droppedFrames','inFlightFrames','inFlightBytes','oldestFrameMs','ackMs','ackIdleMs','rttMs','targetFps','scale','baseRttMs','deliveryMbps','pacingMbps','windowBytes']){
             const value=message[key];if(typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1e12)stats[key]=value;
           }lastServer=stats;lastStatsAt=performance.now();
         }

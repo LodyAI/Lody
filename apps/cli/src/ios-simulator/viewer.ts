@@ -8,12 +8,13 @@ export function simulatorViewerHtml(
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body,canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111}body{display:flex;align-items:center;justify-content:center}canvas{max-width:100%;max-height:100%;object-fit:contain;touch-action:none;display:block}</style></head><body><canvas draggable="false"></canvas><script>
 'use strict';
 const operationId=${JSON.stringify(operationId)};
-let rotation=${JSON.stringify(initialRotation)};
+let rotation=${JSON.stringify(initialRotation)},rotateWithDevice=true;
+function displayRotation(){return rotateWithDevice?rotation:0}
 const remote=${JSON.stringify(remote)};
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');
 let parentOrigin,visible=false,ws,pending,decoding=false,generation=0,point,pointer,wheelEnd,heartbeat,firstFrame,lastReport,painted=false,commandAbort,capturing=false;
-function layout(){if(!painted)return;const swap=rotation%180!==0;const scale=Math.min((swap?innerHeight:innerWidth)/canvas.width,(swap?innerWidth:innerHeight)/canvas.height);Object.assign(canvas.style,{width:canvas.width*scale+'px',height:canvas.height*scale+'px',maxWidth:'none',maxHeight:'none',flexShrink:'0',transform:'rotate('+rotation+'deg)'})}
-function report(state){const swap=rotation%180!==0,width=swap?canvas.height:canvas.width,height=swap?canvas.width:canvas.height;const key=state+':'+width+':'+height+':'+rotation;if(parentOrigin&&key!==lastReport){lastReport=key;parent.postMessage({type:'lody:ios-simulator:state',operationId,state,width,height,rotation},parentOrigin)}}
+function layout(){if(!painted)return;const angle=displayRotation(),swap=angle%180!==0;const scale=Math.min((swap?innerHeight:innerWidth)/canvas.width,(swap?innerWidth:innerHeight)/canvas.height);Object.assign(canvas.style,{width:canvas.width*scale+'px',height:canvas.height*scale+'px',maxWidth:'none',maxHeight:'none',flexShrink:'0',transform:'rotate('+angle+'deg)'})}
+function report(state){const rotation=displayRotation(),swap=rotation%180!==0,width=swap?canvas.height:canvas.width,height=swap?canvas.width:canvas.height;const key=state+':'+width+':'+height+':'+rotation;if(parentOrigin&&key!==lastReport){lastReport=key;parent.postMessage({type:'lody:ios-simulator:state',operationId,state,width,height,rotation},parentOrigin)}}
 function send(value){if(ws?.readyState===1){if(ws.bufferedAmount>65536){const old=ws;ws=undefined;old.close();close();report('error');return}ws.send(JSON.stringify(value))}}
 function lift(){clearTimeout(wheelEnd);flushMove();if(point){const up={...point,type:'touch1-up'};point=undefined;pointer=undefined;send(up)}}
 function close(){lift();generation++;painted=false;commandAbort?.abort();clearInterval(heartbeat);clearTimeout(firstFrame);pending=undefined;if(ws){const old=ws;ws=undefined;old.close()}closeMedia();report('disconnected')}
@@ -28,7 +29,7 @@ async function sendExterior(){
     parent.postMessage({type:'lody:ios-simulator:exterior',operationId,geometry,png},parentOrigin,[png]);
   }catch{/* Missing DeviceKit assets keep the simple fallback frame. */}
 }
-addEventListener('message',e=>{if(e.source!==parent||e.origin==='null'||!e.data||e.data.operationId!==operationId)return;const d=e.data;if(d.type==='lody:ios-simulator:init'&&!parentOrigin)parentOrigin=e.origin;if(e.origin!==parentOrigin||!['lody:ios-simulator:init','lody:ios-simulator:visibility'].includes(d.type)||typeof d.visible!=='boolean')return;visible=d.visible;if(visible){connect();void sendExterior()}else close()});
+addEventListener('message',e=>{if(e.source!==parent||e.origin==='null'||!e.data||e.data.operationId!==operationId)return;const d=e.data;if(d.type==='lody:ios-simulator:init'&&!parentOrigin)parentOrigin=e.origin;if(e.origin!==parentOrigin||!['lody:ios-simulator:init','lody:ios-simulator:visibility'].includes(d.type)||typeof d.visible!=='boolean')return;if(d.type==='lody:ios-simulator:init'&&typeof d.rotateWithDevice==='boolean'){lift();rotateWithDevice=d.rotateWithDevice;layout();lastReport=undefined;if(painted)report('ready')}visible=d.visible;if(visible){connect();void sendExterior()}else close()});
 // These messages use the private preview plane. Never put text, URLs or pixels in RPC streams.
 addEventListener('message',async e=>{
   if(!parentOrigin||e.source!==parent||e.origin!==parentOrigin||e.data?.operationId!==operationId)return;
@@ -41,9 +42,9 @@ addEventListener('message',async e=>{
     if(capturing){reply({error:'failed'});return}
     capturing=true;const g=generation;
     try{
-      const output=document.createElement('canvas'),swap=rotation%180!==0;
+      const output=document.createElement('canvas'),angle=displayRotation(),swap=angle%180!==0;
       output.width=swap?canvas.height:canvas.width;output.height=swap?canvas.width:canvas.height;
-      const context=output.getContext('2d');context.translate(output.width/2,output.height/2);context.rotate(rotation*Math.PI/180);context.drawImage(canvas,-canvas.width/2,-canvas.height/2);
+      const context=output.getContext('2d');context.translate(output.width/2,output.height/2);context.rotate(angle*Math.PI/180);context.drawImage(canvas,-canvas.width/2,-canvas.height/2);
       const blob=await new Promise(resolve=>output.toBlob(resolve,'image/png'));
       if(!blob)throw Error('capture');
       if(blob.size>16*1024*1024){reply({error:'too-large'});return}
@@ -68,7 +69,7 @@ addEventListener('message',async e=>{
 });
 addEventListener('visibilitychange',()=>{if(document.hidden)close();else connect()});addEventListener('pagehide',close);addEventListener('blur',lift);
 
-function position(e){const r=canvas.getBoundingClientRect(),u=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),v=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));const p=rotation===90?{x:v,y:1-u}:rotation===180?{x:1-u,y:1-v}:rotation===270?{x:1-v,y:u}:{x:u,y:v};return{x:p.x*canvas.width,y:p.y*canvas.height,width:canvas.width,height:canvas.height}}
+function position(e){const r=canvas.getBoundingClientRect(),u=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),v=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));const rotation=displayRotation(),p=rotation===90?{x:v,y:1-u}:rotation===180?{x:1-u,y:1-v}:rotation===270?{x:1-v,y:u}:{x:u,y:v};return{x:p.x*canvas.width,y:p.y*canvas.height,width:canvas.width,height:canvas.height}}
 canvas.onpointerdown=e=>{if(commandAbort||e.button!==0||pointer!==undefined||!canvas.width||ws?.readyState!==1)return;lift();pointer=e.pointerId;point=position(e);if(point.y>=point.height*.93)point.edge='bottom';canvas.setPointerCapture(pointer);send({...point,type:'touch1-down'});e.preventDefault()};canvas.onpointermove=e=>{if(pointer!==e.pointerId)return;point={...point,...position(e)};queueMove()};canvas.onpointerup=e=>{if(pointer===e.pointerId){point={...point,...position(e)};lift()}};canvas.onpointercancel=e=>{if(pointer===e.pointerId)lift()};canvas.onlostpointercapture=e=>{if(pointer===e.pointerId)lift()};
 // Wheel deltas describe content scrolling; a finger moves in the opposite direction.
 // Reuse the single-touch protocol, and lift before restarting at a screen boundary.

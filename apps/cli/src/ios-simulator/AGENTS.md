@@ -39,7 +39,9 @@
   congested RTT must not expand credit. Scale combines viewport/SOF with network
   feedback, capped at 4; never forward arbitrary native reconfiguration. Recover
   quality slowly and keep browser sampling independent of queued gateway reports.
-  Native MJPEG FPS remains unfixed.
+  Native MJPEG FPS remains unfixed. `idle-refresh.ts` owns one bounded sharp JPEG
+  after a drained quiet period; input/source changes revoke pending stills, and
+  disconnect joins cancelled capture. Fixed loopback capture never renews a lease.
 - `viewer.ts` is the fixed iframe artifact, without React or annotation injection.
   Parent commands bind source, origin and operation id. Decode at most one JPEG
   with one replaceable pending frame; release touches on blur/cancel/disconnect.
@@ -49,8 +51,9 @@
   The gateway accepts only that edge, validates its start band and rejects changes
   mid-gesture; disconnect cleanup preserves the edge on the final touch-up.
   Capture transfers bounded PNG bytes only to the exact parent that requested it;
-  never send pixels through state messages. Rotation applies to display, inverse
-  pointer coordinates and capture; changing orientation alone does not resize raw frames.
+  never send pixels through state messages. The authenticated init selects mobile
+  upright display or desktop device-following rotation. Display angle consistently
+  controls layout, pointer mapping and capture; native device rotation stays independent.
 - `baguette-worker.ts` owns the native process through an IPC lease. Owner loss must
   reap it and join pending host controls; never terminate the worker as normal cleanup. All build compositions emit
   the same sibling worker entry. No user simulator is shut down during cleanup.

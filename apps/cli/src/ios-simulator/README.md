@@ -120,13 +120,24 @@ byte-paced, with no accumulated idle credit. The minimum observed RTT prevents
 queue-inflated probes from increasing the budget; an initial probe precedes JPEGs.
 Generic proxy behavior is unchanged.
 
+After two seconds without changed frames or input, and once receiver credit drains,
+`idle-refresh.ts` captures one viewport/DPR-sized JPEG at quality 0.85 through the
+bound device's fixed loopback screenshot route. MJPEG's native `snapshot` is a no-op,
+and changing scale alone cannot refresh a static screen. The still is capped at
+512 KiB, sent through the same private/ACK path, and never renews the lease. New
+frames, input or viewport changes cancel stale work; close aborts and joins the read.
+A failed read keeps the last live image and waits for new activity before retrying.
+Mobile init keeps the canvas and exterior upright; guest orientation still changes.
+Input coordinates and captured pixels follow the chosen display angle consistently.
+
 Open the connection-status popover for resolution, painted FPS, Mbps, RTT, ACK delay
 and the in-flight queue. **Copy diagnostics** includes up to two minutes of numeric
 samples. Record 10 seconds idle, 20 seconds of continuous scrolling, then 10 seconds
 idle, and copy the report while the panel remains open. Compare local and remote runs
 of the same screen. Static screens correctly report zero FPS.
 
-- `sourceFps/sourceMbps`: encoded JPEGs reaching the gateway, not capture/encoder timing.
+- `sourceFps/sourceMbps`: JPEGs offered to the gateway, including idle stills, not
+  capture/encoder timing. `idleRefreshFrames` counts sharp stills actually sent.
 - `sentFps/sentMbps`: packets the gateway sends; `receivedFps/paintedFps` distinguish
   receipt from drawing. Browser rates use an independent two-second clock, so
   burst-delivered gateway reports cannot create artificial FPS spikes. The server

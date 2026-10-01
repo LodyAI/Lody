@@ -22,7 +22,7 @@ preview connection, never retained workspace RPC. New controls require the indep
 Use the target Mac’s DeviceKit exterior through Baguette, preserving exact screen and
 button geometry; show content without a drawn shell if those assets are unavailable.
 Transfer bounded images privately, without publishing or bundling Apple assets.
-The exterior follows actual display aspect/rotation; do not cover streamed pixels with another notch or
+Desktop follows actual display aspect/rotation. Mobile keeps the exterior and canvas upright while native orientation changes the guest interface; do not cover streamed pixels with another notch or
 Home indicator. Fit and expanded views are local UI state. Capture can save a PNG or
 attach it to the current composer draft; it never automatically sends a message.
 Only the bound iframe and matching request may return bounded screenshot bytes.
@@ -89,7 +89,9 @@ Remote authorization depends on the connected Cloud backend understanding the ex
 
 Size remote video for its visible viewport with bounded pixel density and frame rate.
 On slow links, reduce sharpness and pace bytes using receiver feedback; recover quality
-slowly. Congestion-inflated RTT must not increase the outstanding byte budget.
+slowly. After input and animation settle, refresh one sharper still even when the
+native stream emits no new frames; discard stale capture when activity resumes.
+Congestion-inflated RTT must not increase the outstanding byte budget.
 Bound unconfirmed video and prefer the latest unsent screen over stale queued frames;
 retain final pointer positions and releases when merging high-frequency moves.
 Same-machine preview preserves native resolution. No new cloud service participates

@@ -25,6 +25,7 @@ type Wheel = {
 function viewer(
   options: {
     rotation?: number;
+    rotateWithDevice?: boolean;
     fetch?: typeof fetch;
     decode?: () => Promise<{ width: number; height: number; close(): void }>;
   } = {}
@@ -142,7 +143,12 @@ function viewer(
     void emit('message', {
       source: parent,
       origin: 'https://lody.example',
-      data: { type, operationId: 'test-operation', visible },
+      data: {
+        type,
+        operationId: 'test-operation',
+        visible,
+        rotateWithDevice: options.rotateWithDevice,
+      },
     });
   }
   visibility(true, 'lody:ios-simulator:init');
@@ -404,6 +410,35 @@ describe('simulator viewer input', () => {
       width: 2000,
       height: 1200,
     });
+  });
+
+  it('keeps mobile pixels, touch coordinates and capture upright while rotating the guest', async () => {
+    const controls: unknown[] = [];
+    const v = viewer({
+      rotateWithDevice: false,
+      fetch: async (_url, init) => {
+        controls.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ success: true, rotation: 90 }));
+      },
+    });
+    await v.paint();
+    await v.command({
+      type: 'lody:ios-simulator:control',
+      control: { kind: 'rotate', direction: 'right' },
+    });
+    expect(controls).toEqual([
+      expect.objectContaining({ control: { kind: 'rotate', direction: 'right' } }),
+    ]);
+    expect(v.canvas.style).toMatchObject({ transform: 'rotate(0deg)' });
+    expect(v.messages.filter((m) => m.state === 'ready').at(-1)).toMatchObject({
+      width: 1200,
+      height: 2000,
+      rotation: 0,
+    });
+    v.canvas.onpointerdown(v.pointer({ clientX: 250, clientY: 800 }));
+    expect(v.sent.at(-1)).toMatchObject({ x: 300, y: 1500 });
+    await v.command({ type: 'lody:ios-simulator:capture' });
+    expect(v.captures).toEqual([{ width: 1200, height: 2000 }]);
   });
 
   it('lifts and suspends gestures until a discrete control finishes', async () => {

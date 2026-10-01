@@ -359,7 +359,15 @@ describe('SessionIosSimulatorPanel', () => {
       frame.dispatchEvent(new Event('load'));
     });
     expect(posted).toEqual([
-      [{ type: 'lody:ios-simulator:init', operationId: 'op-1', visible: true }, VIEWER_ORIGIN],
+      [
+        {
+          type: 'lody:ios-simulator:init',
+          operationId: 'op-1',
+          visible: true,
+          rotateWithDevice: true,
+        },
+        VIEWER_ORIGIN,
+      ],
     ]);
 
     const dropped = {
@@ -719,6 +727,22 @@ describe('SessionIosSimulatorPanel controls', () => {
     expect(
       machine.commands.every((command) => command.action === 'list' || command.action === 'status')
     ).toBe(true);
+  });
+
+  it('negotiates an upright device on the mobile surface', async () => {
+    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
+    await renderPanel({ machine, meta: CONTROLS_META, controlsLayout: 'menu' });
+    const frame = container?.querySelector('iframe');
+    if (!frame?.contentWindow) throw new Error('missing viewer');
+    const post = vi.spyOn(frame.contentWindow, 'postMessage');
+    await act(async () => frame.dispatchEvent(new Event('load')));
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'lody:ios-simulator:init', rotateWithDevice: false }),
+      VIEWER_ORIGIN
+    );
+    expect(
+      container?.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns')
+    ).toBe('0');
   });
 
   it('turns the exterior only after the machine confirms a rotation', async () => {

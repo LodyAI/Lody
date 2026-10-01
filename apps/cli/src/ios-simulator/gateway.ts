@@ -1,3 +1,4 @@
+import { SimulatorIdleRefresh, readSimulatorStill } from './idle-refresh';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
@@ -62,6 +63,7 @@ export async function createSimulatorGateway(options: {
     host === new URL(origin).host &&
     (!requestOrigin || requestOrigin === origin);
   const sockets = new Set<Socket>();
+  const invalidateStills = new Set<() => void>();
   const upstreams = new Set<WebSocket>();
   const connections = new Set<() => Promise<void>>();
   const controlAbort = new AbortController();
@@ -163,6 +165,7 @@ export async function createSimulatorGateway(options: {
               : { success: false, error: 'failed' }
           );
         if (pendingControl) return reply({ success: false, error: 'busy' });
+        for (const invalidate of invalidateStills) invalidate();
         const task = controls
           .execute(control)
           .then((): IosSimulatorDeviceControlResult => {
@@ -236,6 +239,25 @@ export async function createSimulatorGateway(options: {
         pingId = 0,
         samples = 0;
       let ping: { id: number; at: number } | undefined;
+      const idle = new SimulatorIdleRefresh(
+        (stillScale, signal) =>
+          readSimulatorStill({
+            port: options.port,
+            udid: options.udid,
+            scale: stillScale,
+            signal,
+            active: options.active,
+          }),
+        (frame) => {
+          if (!shuttingDown && options.active()) {
+            flow.offer(frame, true);
+            pump();
+          }
+        },
+        () => flow.discardStill()
+      );
+      const invalidateStill = () => idle.activity(now());
+      invalidateStills.add(invalidateStill);
       let lastScaleAt = -Infinity;
       const configure = () => {
         if (
@@ -273,6 +295,8 @@ export async function createSimulatorGateway(options: {
           return;
         const packet = flow.take(now());
         if (packet) client.send(packet, { binary: true });
+        if (options.remote && nativeSize && !pendingControl)
+          idle.tick(now(), simulatorScale(nativeSize, viewport, true), flow.drained() && !touch);
       };
       // A timer flushes the last pending frame even when the simulator becomes static.
       const frameTimer = setInterval(pump, Math.ceil(1000 / flow.targetFps));
@@ -299,13 +323,14 @@ export async function createSimulatorGateway(options: {
         if (shuttingDown) return shuttingDown;
         clearInterval(frameTimer);
         clearInterval(statsTimer);
+        invalidateStills.delete(invalidateStill);
+        const idleClosed = idle.close();
         shuttingDown = new Promise<void>((resolve) => {
           const finish = () => {
             clearTimeout(timer);
             upstream.terminate();
             client.terminate();
             upstreams.delete(upstream);
-            connections.delete(shutdown);
             resolve();
           };
           const timer = setTimeout(finish, 1000);
@@ -317,6 +342,9 @@ export async function createSimulatorGateway(options: {
             // close() drains the touch-up before its Close frame; terminate() would discard it.
             upstream.close();
           } else finish();
+        }).then(async () => {
+          await idleClosed;
+          connections.delete(shutdown);
         });
         return shuttingDown;
       };
@@ -352,6 +380,7 @@ export async function createSimulatorGateway(options: {
         if (media.success) {
           const message = media.data;
           if (message.type === 'stream-config') {
+            invalidateStill();
             viewport = message;
             configure();
             pump();
@@ -384,6 +413,7 @@ export async function createSimulatorGateway(options: {
           close();
           return;
         }
+        invalidateStill();
         touch = input.type === 'touch1-up' ? undefined : input;
         options.renew();
         if (upstream.bufferedAmount > 64 * 1024) {
@@ -412,6 +442,7 @@ export async function createSimulatorGateway(options: {
                 Math.max(nativeSize.width, nativeSize.height) / Math.max(size.width, size.height)
               )
             );
+          invalidateStill();
           flow.offer(frame);
           pump();
         }

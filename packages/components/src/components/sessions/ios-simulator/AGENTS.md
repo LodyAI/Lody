@@ -32,7 +32,8 @@ Decision and rationale:
   request id; bound waits and cancel pending replies on navigation/unmount.
 - Viewer state is the sole rotation authority: width/height are display-oriented,
   and `rotation` is the acknowledged absolute angle. Never rotate again on a
-  control acknowledgement.
+  control acknowledgement. Mobile init disables display rotation: bezel/canvas remain
+  upright while native orientation commands still run. Desktop follows the device.
 - Prefer DeviceKit geometry/PNG supplied by the bound viewer; never fetch asset URLs
   from upstream metadata. Validate frame/origin/operation and PNG bounds, and revoke
   generated object URLs on replacement/unmount. Before preview, request static artwork

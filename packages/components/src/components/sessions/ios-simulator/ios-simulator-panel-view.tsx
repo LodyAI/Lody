@@ -513,7 +513,7 @@ export function IosSimulatorPanelView({
             </div>
           ) : null}
           <IosSimulatorViewer
-            key={`${status.operationId}:${viewerReloadKey}`}
+            key={`${status.operationId}:${viewerReloadKey}:${controlsLayout}`}
             ref={viewerRef}
             viewerUrl={status.viewerUrl}
             viewerOrigin={status.viewerOrigin}
@@ -527,6 +527,7 @@ export function IosSimulatorPanelView({
               statusDevice?.name ?? ''
             )}
             turns={turns}
+            rotateWithDevice={controlsLayout !== 'menu'}
             bezel={bezel}
             visible={active}
             onStateChange={onViewerStateChange}

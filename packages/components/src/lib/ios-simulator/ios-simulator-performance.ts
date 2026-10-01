@@ -7,6 +7,7 @@ const fields = [
   'sourceMbps',
   'sentMbps',
   'sentFrames',
+  'idleRefreshFrames',
   'droppedFrames',
   'inFlightFrames',
   'inFlightBytes',

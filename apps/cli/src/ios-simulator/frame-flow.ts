@@ -6,6 +6,8 @@ export const SIMULATOR_FRAME_MAGIC = 0x4c4f4459;
 
 export class SimulatorFrameFlow {
   private pending?: Buffer;
+  private pendingStill = false;
+  private idleRefreshFrames = 0;
   private sequence = 0;
   private acknowledged = 0;
   private lastSent = -Infinity;
@@ -34,12 +36,24 @@ export class SimulatorFrameFlow {
     this.targetFps = remote ? 30 : 60;
   }
 
-  offer(frame: Buffer) {
+  offer(frame: Buffer, still = false) {
     this.latestFrameBytes = frame.length;
     this.received++;
     this.receivedBytes += frame.length;
     if (this.pending) this.dropped++;
     this.pending = frame;
+    this.pendingStill = still;
+  }
+
+  drained() {
+    return this.inFlight.size === 0 && !this.pending;
+  }
+
+  discardStill() {
+    if (!this.pendingStill || !this.pending) return;
+    this.pending = undefined;
+    this.pendingStill = false;
+    this.dropped++;
   }
 
   /** One frame may exceed the byte budget, but never alongside another frame. */
@@ -66,6 +80,8 @@ export class SimulatorFrameFlow {
     packet.writeUInt32BE(sequence, 4);
     frame.copy(packet, 8);
     this.pending = undefined;
+    if (this.pendingStill) this.idleRefreshFrames++;
+    this.pendingStill = false;
     this.inFlight.set(sequence, { bytes: frame.length, at: now });
     this.lastSent = now;
     // No saved-up tokens: idle time must not buy a burst of stale frames.
@@ -156,6 +172,7 @@ export class SimulatorFrameFlow {
       sourceMbps: ((this.receivedBytes - this.sample.receivedBytes) * 8) / seconds / 1e6,
       sentMbps: ((this.sentBytes - this.sample.sentBytes) * 8) / seconds / 1e6,
       sentFrames: this.sent,
+      idleRefreshFrames: this.idleRefreshFrames,
       droppedFrames: this.dropped,
       inFlightFrames: this.inFlight.size,
       inFlightBytes: this.inFlightBytes(),

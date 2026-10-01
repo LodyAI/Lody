@@ -304,3 +304,39 @@ reports. These establish controller behavior, not actual WAN speed. JPEG size,
 propagation RTT and return-path/decode delay still limit this transport; the estimate
 is not a measurement of raw link capacity. Native encode scheduling and H.264 remain
 outside this change. Real remote comparison still uses the README field procedure.
+
+### Upright mobile display and idle quality (2026-10-01)
+
+Mobile presentation now opts out of canvas/exterior rotation through the bound init
+handshake. Native left/right controls still change guest orientation. A single display
+angle controls layout, reported aspect, inverse touch mapping and capture; desktop keeps
+following the native direction. This avoids squeezing a landscape phone into a portrait
+mobile page and does not simulate gyroscope input.
+
+The adaptive MJPEG version exposed an idle-quality deadlock: SeedFilter suppresses
+unchanged surfaces, MJPEGStream.apply only changes config, and its requestSnapshot is
+a no-op. Merely increasing resolution therefore never redraws a static screen. The gateway
+now reads one bounded, higher-quality JPEG from the bound loopback screenshot route after
+two quiet seconds and drained receiver credit. Source/input/config changes fence late
+results and cancel queued stills; shutdown joins capture cancellation. No public endpoint,
+lease renewal, runtime rebuild or dependency was added. The still shares ordinary frame
+credit and can arrive later on a slow connection; continuous animation is not idle.
+
+H.264 remains a recommended next transport, not implemented by this correction. The pinned
+Baguette AVCCStream already supplies avcC metadata, key/delta frames, bitrate/scale controls
+and force_idr. However, JPEG's arbitrary latest-only drop policy cannot preserve an H.264
+reference chain. Integration needs WebCodecs configuration probing, bounded decode queues,
+keyframe recovery after drops/reconnect/reconfiguration, bitrate feedback separate from
+paint-ACK latency, and MJPEG fallback. Upstream FrameBacklog drops arbitrary old chunks
+under pressure, so preserving references only in Lody's downstream queue is insufficient.
+The current tiny JPEG window can also become stop-and-wait when a whole JPEG exceeds the
+byte budget; a codec switch must revisit this, not copy the controller unchanged.
+
+Sources: pinned `db17446e` MJPEGStream/AVCCStream/FrameBacklog and
+[WebCodecs](https://www.w3.org/TR/webcodecs/). Mobile rotation and idle refresh have deterministic
+coverage, including late results and close/revocation; real WAN codec benefit is unmeasured.
+
+An isolated iPhone 16/26.2 run verified guest landscape content inside an upright browser
+canvas. With deliberately delayed draw ACKs, native JPEGs dropped to 294×640; after the
+scene stopped changing, one real screenshot restored 590×1278 while live scale remained 4. The reader received/acknowledged that still and credit drained. This was a loopback
+functional test with injected feedback delay, not a WAN throughput or H.264 acceptance test.

@@ -65,6 +65,8 @@ export type IosSimulatorViewerProps = {
   hardware: IosSimulatorHardware;
   turns: IosSimulatorQuarterTurns;
   bezel: boolean;
+  /** Mobile keeps the hardware upright while the guest interface changes orientation. */
+  rotateWithDevice?: boolean;
   /** The panel is on screen. Combined with the document's own visibility. */
   visible: boolean;
   onStateChange: (state: IosSimulatorViewerState) => void;
@@ -108,6 +110,7 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       hardware,
       turns,
       bezel,
+      rotateWithDevice = true,
       visible,
       onStateChange,
       onRotationChange,
@@ -376,7 +379,12 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       for (const cancel of [...pendingReplies.current]) cancel();
       sentVisibleRef.current = visibleRef.current;
       frameRef.current?.contentWindow?.postMessage(
-        { type: IOS_SIMULATOR_VIEWER_INIT, operationId, visible: visibleRef.current },
+        {
+          type: IOS_SIMULATOR_VIEWER_INIT,
+          operationId,
+          visible: visibleRef.current,
+          rotateWithDevice,
+        },
         viewerOrigin
       );
       setLoaded(true);
@@ -388,7 +396,7 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
         hardware={hardware}
         exterior={exterior}
         screenAspect={screenAspect ?? getIosSimulatorAspectRatio(hardware.family)}
-        turns={turns}
+        turns={rotateWithDevice ? turns : 0}
         bezel={bezel && !!exterior}
         fullscreen={fullscreen}
         onPress={onPressButton}
