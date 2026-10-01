@@ -238,3 +238,9 @@ continuous CoreMotion/gyroscope simulator. Whole Electron and mobile E2E remain 
 Workspace Streams can be read by other workspace members. Remote viewer URLs therefore travel only as P-256/AES-GCM envelopes to an ephemeral per-request recipient, whose public key is bound into the signed operation. The local direct DTO stays unchanged. Revocation now spans proof validation and startup, stays disabled until explicit re-enable, and owner/machine reassignment closes existing capabilities. Tests reject recipient/context substitution, plaintext wire URLs, and a start resumed after revocation.
 
 The UI contribution was integrated from its dedicated design branch; its Storybook checks covered light/dark, English/Chinese, device selection and interrupted/preparing states. Wire-to-view mapping remains in one model module. Parent integration adds actual frame dimensions, a first-frame timeout, account-scoped preferences and redaction in on-screen errors.
+
+### Idle artwork and authorization diagnostics (2026-10-01)
+
+The earlier CSS fallback is superseded: idle/preparing states also use real DeviceKit assets. Baguette already exposes read-only chrome commands, so an independently gated exterior RPC reads one selected device without starting a viewer or acquiring its control lease. Static artwork is bounded to 256 KiB, strips paths/URLs, and uses a bounded service cache; no frames or secrets enter this response. UI revokes its object URL and rejects stale selections. Missing assets show content without a drawn chassis.
+
+The reported authorization 400 occurs at request-token body validation, before the simulator RPC. Current shared schemas accept signed simulator commands and their recipient key; a deployment retaining the older Browser-only schema rejects them. Local validation plus an explicit backend update diagnostic distinguishes this from Xcode failure. Which deployed backend the report used remains unconfirmed; no deployment was performed.

@@ -1,3 +1,4 @@
+import { readIdleSimulatorExterior } from './exterior';
 import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_PREVIEW_IDLE_TIMEOUT_MS,
@@ -36,6 +37,7 @@ type Dependencies = {
   now?: () => number;
   list?: typeof listSimulatorDevices;
   boot?: typeof bootSimulator;
+  exterior?: typeof readIdleSimulatorExterior;
   binary?: (signal: AbortSignal) => Promise<string>;
   process?: typeof startBaguetteProcess;
   gateway?: typeof createSimulatorGateway;
@@ -50,6 +52,11 @@ export class IosSimulatorService {
   private readonly local: Pick<LocalPreviewProxyManager, 'acquire' | 'closeSession'>;
   private readonly now: () => number;
   private disposed = false;
+  private readonly exteriorAbort = new AbortController();
+  private readonly exteriors = new Map<
+    string,
+    Awaited<ReturnType<typeof readIdleSimulatorExterior>>
+  >();
   private remoteGeneration = 0;
   private remoteEnabled = false;
   private readonly generations = new Map<string, number>();
@@ -111,6 +118,31 @@ export class IosSimulatorService {
             occupancy: this.leases.occupancy(device.udid, owner),
           })),
         };
+      }
+      if (command.action === 'exterior') {
+        if (fromAgent) return { ...base, success: false, error: 'unsupported' };
+        return await this.serialize('device-exterior', async () => {
+          if (this.disposed || !current()) throw new Error('Simulator authorization changed.');
+          const devices = await (this.deps.list ?? listSimulatorDevices)();
+          if (!devices.some((device) => device.udid === command.udid))
+            return { ...base, success: false, error: 'unavailable' as const };
+          let exterior = this.exteriors.get(command.udid);
+          if (!exterior) {
+            const signal = AbortSignal.any([this.exteriorAbort.signal, AbortSignal.timeout(30000)]);
+            const binary = await (this.deps.binary?.(signal) ??
+              ensureBaguetteBinary(signal, this.deps.runtimeBaseUrl));
+            exterior = await (this.deps.exterior ?? readIdleSimulatorExterior)(
+              binary,
+              command.udid,
+              signal
+            );
+            if (this.exteriors.size >= 16) this.exteriors.clear();
+            this.exteriors.set(command.udid, exterior);
+          }
+          await this.deps.authorize(request);
+          if (this.disposed || !current()) throw new Error('Simulator authorization changed.');
+          return { ...base, success: true, exterior };
+        });
       }
       if (command.action === 'status') {
         const op = this.operations.get(request.sessionId);
@@ -359,6 +391,8 @@ export class IosSimulatorService {
   }
   async closeAll(): Promise<void> {
     this.disposed = true;
+    this.exteriorAbort.abort();
+    this.exteriors.clear();
     for (const op of this.operations.values()) op.abort.abort();
     await Promise.all([...this.operations.values()].map((op) => op.done));
     await Promise.allSettled(this.queues.values());

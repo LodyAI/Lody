@@ -20,8 +20,8 @@ preview connection, never retained workspace RPC. New controls require the indep
 `iosSimulatorControls: 1` capability.
 
 Use the target Mac’s DeviceKit exterior through Baguette, preserving exact screen and
-button geometry; use the drawn shell only if those assets are unavailable. Transfer
-bounded images through the private viewer, without publishing or bundling Apple assets.
+button geometry; show content without a drawn shell if those assets are unavailable.
+Transfer bounded images privately, without publishing or bundling Apple assets.
 The exterior follows actual display aspect/rotation; do not cover streamed pixels with another notch or
 Home indicator. Fit and expanded views are local UI state. Capture can save a PNG or
 attach it to the current composer draft; it never automatically sends a message.
@@ -78,3 +78,9 @@ Evidence: [design note](../.agents/notes/implemented/architecture/2026-09-27-ios
 recorded in the note; this draft does not claim human approval or deployment.
 
 Remote viewer credentials are encrypted to an ephemeral requester key bound into the signed command. Other workspace members cannot recover them by reading retained RPC streams. Revocation covers in-flight authorization; owner or machine reassignment invalidates existing viewers.
+
+## Exterior before preview
+
+Selecting a device loads its real DeviceKit artwork before starting preview. The separately negotiated, authenticated `exterior {udid}` command reads Baguette chrome layout/composite without booting, reserving the device, streaming or opening a tunnel. One bounded immutable PNG and normalized geometry may cross RPC; live screen pixels and input never do. Resources are not published or persisted in Repo metadata. While artwork is loading or unavailable, show content without an artificial hardware frame.
+
+Remote authorization depends on the connected Cloud backend understanding the exact signed simulator operation. Validate outgoing intents locally; a 400 for a valid simulator request indicates a backend protocol rejection, with a matching-backend update hint and no insecure fallback.

@@ -23,6 +23,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   previewControl: 'previewControl',
   iosSimulator: 'iosSimulator',
   iosSimulatorControls: 'iosSimulatorControls',
+  iosSimulatorExterior: 'iosSimulatorExterior',
   piExtensions: 'piExtensions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
 } as const;
@@ -98,6 +99,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulator]: IOS_SIMULATOR_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls]: IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
 };
@@ -277,5 +279,15 @@ export function machineSupportsHistoryProviderSelection(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.localProjectHistoryProvider,
     LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsIosSimulatorExterior(
+  machine: Parameters<typeof machineSupportsIosSimulatorProtocol>[0]
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorExterior,
+    1
   );
 }

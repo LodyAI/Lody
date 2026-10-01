@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { readSimulatorExterior } from './exterior';
+import { readSimulatorExterior, parseIdleSimulatorExterior } from './exterior';
 
 const definition = {
   screen: {
@@ -88,4 +88,25 @@ it('discards asset bytes if ownership was revoked during the read', async () => 
       },
     })
   ).rejects.toThrow('unavailable');
+});
+
+it('normalizes CLI chrome layout without accepting upstream URLs or oversized PNGs', () => {
+  const layout = JSON.stringify({
+    composite: { width: 447, height: 888 },
+    screen: { x: 27, y: 18, width: 393, height: 852 },
+    innerCornerRadius: 57,
+    imageUrl: 'https://untrusted.invalid',
+    buttons: [{ arbitrary: 'ignored' }],
+  });
+  expect(parseIdleSimulatorExterior(layout, png)).toEqual({
+    geometry: {
+      width: 447,
+      height: 888,
+      screen: { x: 27, y: 18, width: 393, height: 852, radius: 57 },
+      buttons: [],
+    },
+    pngBase64: png.toString('base64'),
+  });
+  expect(() => parseIdleSimulatorExterior(layout, Buffer.alloc(256 * 1024 + 1))).toThrow();
+  expect(() => parseIdleSimulatorExterior(layout.replace('393', '500'), png)).toThrow();
 });

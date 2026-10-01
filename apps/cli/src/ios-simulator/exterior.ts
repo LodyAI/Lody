@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import {
   IosSimulatorExteriorSchema,
@@ -101,4 +103,41 @@ export async function readSimulatorExterior(options: {
   const png = await read('bezel.png', IOS_SIMULATOR_BEZEL_MAX_BYTES);
   if (!isIosSimulatorBezelPng(png, geometry)) throw new Error('Invalid device exterior.');
   return { geometry, png };
+}
+
+/** Read immutable DeviceKit artwork without booting, streaming, leasing or opening a server. */
+export async function readIdleSimulatorExterior(binary: string, udid: string, signal: AbortSignal) {
+  const exec = promisify(execFile);
+  const target = z.string().uuid().parse(udid);
+  const { stdout: layout } = await exec(binary, ['chrome', 'layout', '--udid', target], {
+    signal,
+    timeout: 10000,
+    maxBuffer: 65536,
+    encoding: 'utf8',
+  });
+  const { stdout: png } = await exec(binary, ['chrome', 'composite', '--udid', target], {
+    signal,
+    timeout: 10000,
+    maxBuffer: 256 * 1024,
+    encoding: 'buffer',
+  });
+  return parseIdleSimulatorExterior(layout, png);
+}
+
+export function parseIdleSimulatorExterior(layout: string, png: Buffer) {
+  const parsed = z
+    .object({
+      composite: Size,
+      screen: Rect,
+      innerCornerRadius: z.number().nonnegative(),
+    })
+    .parse(JSON.parse(layout));
+  const geometry = IosSimulatorExteriorSchema.parse({
+    ...parsed.composite,
+    screen: { ...parsed.screen, radius: parsed.innerCornerRadius },
+    buttons: [],
+  });
+  if (png.length > 256 * 1024 || !isIosSimulatorBezelPng(png, geometry))
+    throw new Error('Invalid device exterior.');
+  return { geometry, pngBase64: png.toString('base64') };
 }

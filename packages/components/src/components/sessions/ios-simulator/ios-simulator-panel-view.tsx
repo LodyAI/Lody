@@ -1,3 +1,4 @@
+import type { IosSimulatorExterior } from '@lody/shared';
 import type { ReactNode, Ref } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Check, Copy } from 'lucide-react';
@@ -54,6 +55,7 @@ export type IosSimulatorPanelBlocker =
   | 'offline';
 
 export type IosSimulatorPanelViewProps = {
+  deviceExterior?: { udid: string; geometry: IosSimulatorExterior; imageUrl: string };
   machineName: string;
   blocker: IosSimulatorPanelBlocker | null;
   catalog: IosSimulatorCatalogState;
@@ -284,10 +286,12 @@ function Message({
 }
 
 function DeviceSlot({
+  exterior,
   device,
   bezel,
   children,
 }: {
+  exterior?: IosSimulatorPanelViewProps['deviceExterior'];
   device: IosSimulatorDeviceEntry | null;
   bezel: boolean;
   children: ReactNode;
@@ -301,9 +305,10 @@ function DeviceSlot({
   return (
     <IosSimulatorDeviceFrame
       hardware={hardware}
+      exterior={exterior?.udid === device?.udid ? exterior : undefined}
       screenAspect={getIosSimulatorAspectRatio(hardware.family)}
       turns={0}
-      bezel={bezel}
+      bezel={bezel && exterior?.udid === device?.udid && !!exterior}
       buttonLabel={buttonLabel}
     >
       <div {...stylex.props(styles.slot)} data-testid="ios-simulator-slot">
@@ -362,6 +367,7 @@ function PreparingSteps({
  * remembered device; this decides what the stage says for each state.
  */
 export function IosSimulatorPanelView({
+  deviceExterior,
   machineName,
   blocker,
   catalog,
@@ -538,7 +544,7 @@ export function IosSimulatorPanelView({
     }
     if (showingStatusDevice && status.phase === 'preparing') {
       return (
-        <DeviceSlot device={statusDevice} bezel={bezel}>
+        <DeviceSlot exterior={deviceExterior} device={statusDevice} bezel={bezel}>
           <p {...stylex.props(styles.deviceName)}>{statusDevice?.name}</p>
           <PreparingSteps stage={status.stage} includeBoot={bootExpected} />
           <Button
@@ -556,7 +562,7 @@ export function IosSimulatorPanelView({
     }
     if (showingStatusDevice && status.phase === 'closed') {
       return (
-        <DeviceSlot device={statusDevice} bezel={bezel}>
+        <DeviceSlot exterior={deviceExterior} device={statusDevice} bezel={bezel}>
           <p {...stylex.props(styles.deviceName)}>{statusDevice?.name}</p>
           <p {...stylex.props(styles.detail)}>
             {t('sessions.iosSimulator.closed.detail', 'The preview ended.')}{' '}
@@ -610,7 +616,7 @@ export function IosSimulatorPanelView({
       statusDevice.udid !== selected.udid &&
       (status.phase === 'ready' || status.phase === 'preparing');
     return (
-      <DeviceSlot device={selected} bezel={bezel}>
+      <DeviceSlot exterior={deviceExterior} device={selected} bezel={bezel}>
         <div {...stylex.props(styles.message)}>
           <p {...stylex.props(styles.deviceName)}>{selected.name}</p>
           <p {...stylex.props(styles.deviceMeta)}>

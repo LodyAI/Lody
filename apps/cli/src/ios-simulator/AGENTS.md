@@ -26,6 +26,10 @@
 - `exterior.ts` reads only the bound device's fixed definition/bezel routes, strips all
   upstream URLs, and validates geometry plus bounded PNG dimensions. The gateway serves
   these behind the same private capability; resource reads never renew the lease.
+  The separately negotiated `exterior {udid}` read uses fixed `chrome layout/composite`
+  CLI arguments without boot, lease or server. Its bounded static artwork (256 KiB PNG)
+  may cross authenticated RPC; never include screen pixels, paths or capabilities.
+  Serialize reads, bound the in-memory cache, and recheck authorization before replying.
 - `viewer.ts` is the fixed iframe artifact, without React or annotation injection.
   Parent commands bind source, origin and operation id. Decode at most one JPEG
   with one replaceable pending frame; release touches on blur/cancel/disconnect.

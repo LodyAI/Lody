@@ -3,6 +3,10 @@ import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import {
   machineSupportsIosSimulatorControls,
+  machineSupportsIosSimulatorExterior,
+  IosSimulatorExteriorAssetSchema,
+  isIosSimulatorBezelPng,
+  type IosSimulatorExterior,
   type IosSimulatorCommand,
   type IosSimulatorDeviceControl,
   type IosSimulatorResponse,
@@ -164,6 +168,7 @@ function SessionIosSimulatorPanelController({
         sessionId: session.id,
         requestedByUserId: requesterUserId,
         command,
+        timeoutMs: command.action === 'exterior' ? 45000 : undefined,
       });
     },
     [requesterUserId, runtime, session.id, session.machineId]
@@ -278,6 +283,35 @@ function SessionIosSimulatorPanelController({
     preferredUdid,
     status,
   });
+
+  const [deviceExterior, setDeviceExterior] = useState<{
+    udid: string;
+    geometry: IosSimulatorExterior;
+    imageUrl: string;
+  }>();
+  const exteriorUdid = selectedUdid;
+  const supportsExterior = machineSupportsIosSimulatorExterior(machine);
+  useEffect(() => {
+    if (!live || !exteriorUdid || !supportsExterior) return undefined;
+    let cancelled = false;
+    let imageUrl: string | undefined;
+    void request({ action: 'exterior', udid: exteriorUdid })
+      .then((response) => {
+        if (cancelled || !response?.success) return;
+        const parsed = IosSimulatorExteriorAssetSchema.safeParse(response.exterior);
+        if (!parsed.success) return;
+        const bytes = Uint8Array.from(atob(parsed.data.pngBase64), (char) => char.charCodeAt(0));
+        if (!isIosSimulatorBezelPng(bytes, parsed.data.geometry)) return;
+        imageUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+        setDeviceExterior({ udid: exteriorUdid, geometry: parsed.data.geometry, imageUrl });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+      setDeviceExterior(undefined);
+    };
+  }, [exteriorUdid, live, request, supportsExterior]);
 
   const handleSelectDevice = useCallback(
     (udid: string) => {
@@ -611,6 +645,7 @@ function SessionIosSimulatorPanelController({
   return (
     <>
       <IosSimulatorPanelView
+        deviceExterior={deviceExterior}
         machineName={machineName}
         blocker={blocker}
         catalog={catalog}

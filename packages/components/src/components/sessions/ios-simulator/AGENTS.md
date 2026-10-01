@@ -35,7 +35,9 @@ Decision and rationale:
   control acknowledgement.
 - Prefer DeviceKit geometry/PNG supplied by the bound viewer; never fetch asset URLs
   from upstream metadata. Validate frame/origin/operation and PNG bounds, and revoke
-  generated object URLs on replacement/unmount. CSS profiles are the missing-asset fallback.
+  generated object URLs on replacement/unmount. Before preview, request static artwork
+  with `exterior {udid}` only when `iosSimulatorExterior: 1` is advertised.
+  Product states never substitute drawn hardware; while missing/loading show only content.
 - Hardware outlines and buttons stay outside streamed pixels. Use deviceType as
   model identity, with device name only as fallback; no duplicate notch/island.
 - Desktop controls use a second toolbar row and fold with width; mobile puts them

@@ -56,6 +56,7 @@ export const IosSimulatorUdidSchema = z.string().uuid();
 /** Lifecycle commands are separate from media/input. No caller-supplied ports or commands. */
 export const IosSimulatorCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('list') }).strict(),
+  z.object({ action: z.literal('exterior'), udid: IosSimulatorUdidSchema }).strict(),
   z.object({ action: z.literal('start'), udid: IosSimulatorUdidSchema }).strict(),
   z.object({ action: z.literal('status'), operationId: id.optional() }).strict(),
   z.object({ action: z.literal('stop'), operationId: id }).strict(),
@@ -89,37 +90,6 @@ export const IosSimulatorPreviewSchema = z
     message: z.string().optional(),
   })
   .strict();
-export const IosSimulatorResponseSchema = z
-  .object({
-    type: z.literal('ios-simulator/control_response'),
-    sessionId: id,
-    success: z.boolean(),
-    devices: z.array(IosSimulatorDeviceSchema).optional(),
-    preview: IosSimulatorPreviewSchema.optional(),
-    error: z
-      .enum(['unsupported', 'environment', 'occupied', 'unavailable', 'denied', 'failed'])
-      .optional(),
-    message: z.string().optional(),
-  })
-  .strict();
-export type IosSimulatorCommand = z.infer<typeof IosSimulatorCommandSchema>;
-export type IosSimulatorRequest = z.infer<typeof IosSimulatorRequestSchema>;
-export type IosSimulatorDevice = z.infer<typeof IosSimulatorDeviceSchema>;
-export type IosSimulatorPreview = z.infer<typeof IosSimulatorPreviewSchema>;
-export type IosSimulatorResponse = z.infer<typeof IosSimulatorResponseSchema>;
-
-/** Workspace streams are shared: never put a bearer viewer URL in a remote result. */
-export const IosSimulatorRemoteResponseSchema = IosSimulatorResponseSchema.extend({
-  preview: IosSimulatorPreviewSchema.omit({ viewerUrl: true })
-    .extend({
-      viewerUrlEnvelope: RpcSecretEnvelopeSchema.optional(),
-    })
-    .strict()
-    .refine((p) => p.phase !== 'ready' || p.viewerUrlEnvelope !== undefined)
-    .optional(),
-}).strict();
-export type IosSimulatorRemoteResponse = z.infer<typeof IosSimulatorRemoteResponseSchema>;
-
 /** DeviceKit geometry only; private viewer messages carry the PNG separately. */
 const ExteriorSize = z.number().finite().positive().max(16384);
 const ExteriorPosition = z.number().finite().min(0).max(16384);
@@ -176,3 +146,48 @@ export function isIosSimulatorBezelPng(bytes: Uint8Array, geometry: IosSimulator
     geometry.width * geometry.height <= 16 * 1024 * 1024
   );
 }
+
+/** Immutable native artwork, never screen pixels, credentials or upstream URLs. */
+export const IosSimulatorExteriorAssetSchema = z
+  .object({
+    geometry: IosSimulatorExteriorSchema,
+    pngBase64: z
+      .string()
+      .min(32)
+      .max(350_000)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+  })
+  .strict();
+export type IosSimulatorExteriorAsset = z.infer<typeof IosSimulatorExteriorAssetSchema>;
+
+export const IosSimulatorResponseSchema = z
+  .object({
+    type: z.literal('ios-simulator/control_response'),
+    sessionId: id,
+    success: z.boolean(),
+    devices: z.array(IosSimulatorDeviceSchema).optional(),
+    exterior: IosSimulatorExteriorAssetSchema.optional(),
+    preview: IosSimulatorPreviewSchema.optional(),
+    error: z
+      .enum(['unsupported', 'environment', 'occupied', 'unavailable', 'denied', 'failed'])
+      .optional(),
+    message: z.string().optional(),
+  })
+  .strict();
+export type IosSimulatorCommand = z.infer<typeof IosSimulatorCommandSchema>;
+export type IosSimulatorRequest = z.infer<typeof IosSimulatorRequestSchema>;
+export type IosSimulatorDevice = z.infer<typeof IosSimulatorDeviceSchema>;
+export type IosSimulatorPreview = z.infer<typeof IosSimulatorPreviewSchema>;
+export type IosSimulatorResponse = z.infer<typeof IosSimulatorResponseSchema>;
+
+/** Workspace streams are shared: never put a bearer viewer URL in a remote result. */
+export const IosSimulatorRemoteResponseSchema = IosSimulatorResponseSchema.extend({
+  preview: IosSimulatorPreviewSchema.omit({ viewerUrl: true })
+    .extend({
+      viewerUrlEnvelope: RpcSecretEnvelopeSchema.optional(),
+    })
+    .strict()
+    .refine((p) => p.phase !== 'ready' || p.viewerUrlEnvelope !== undefined)
+    .optional(),
+}).strict();
+export type IosSimulatorRemoteResponse = z.infer<typeof IosSimulatorRemoteResponseSchema>;

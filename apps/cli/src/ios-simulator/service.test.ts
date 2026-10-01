@@ -350,3 +350,69 @@ describe('simulator ownership and lifecycle', () => {
     expect(() => parseSimulatorDevices({ devices: { ios: [{ udid: '../../bad' }] } })).toThrow();
   });
 });
+
+it('reads idle artwork without acquiring a lease or starting a preview, and fences revoked reads', async () => {
+  const leases = new SimulatorControlLeases();
+  const pending = deferred<{
+    geometry: {
+      width: number;
+      height: number;
+      screen: { x: number; y: number; width: number; height: number; radius: number };
+      buttons: [];
+    };
+    pngBase64: string;
+  }>();
+  const entered = deferred<void>();
+  const asset = {
+    geometry: {
+      width: 100,
+      height: 200,
+      screen: { x: 10, y: 10, width: 80, height: 180, radius: 5 },
+      buttons: [] as [],
+    },
+    pngBase64: 'synthetic',
+  };
+  const service = new IosSimulatorService({
+    workspaceId: 'idle',
+    logger,
+    leases,
+    runtimeBaseUrl: 'https://example.test',
+    authorize: async () => {},
+    list: async () => [{ ...device, state: 'Shutdown' }],
+    binary: async () => '/managed/Baguette',
+    boot: async () => {
+      throw new Error('Must not boot');
+    },
+    process: async () => {
+      throw new Error('Must not stream');
+    },
+    exterior: async () => {
+      entered.resolve();
+      return pending.promise;
+    },
+  });
+  services.push(service);
+  service.enableRemote();
+  const response = service.control(
+    { sessionId: 's', requestedByUserId: 'u', command: { action: 'exterior', udid } },
+    true,
+    async () => {}
+  );
+  await entered.promise;
+  expect(leases.occupancy(udid, 'other')).toBe('available');
+  expect(
+    await service.control(
+      { sessionId: 's', requestedByUserId: 'u', command: { action: 'status' } },
+      false
+    )
+  ).toMatchObject({ success: true, preview: undefined });
+  service.revokeRemote();
+  pending.resolve(asset);
+  expect(await response).toMatchObject({ success: false });
+  expect(
+    await service.control(
+      { sessionId: 's', requestedByUserId: 'u', command: { action: 'exterior', udid } },
+      false
+    )
+  ).toMatchObject({ success: true, exterior: asset });
+});

@@ -630,10 +630,7 @@ describe('SessionIosSimulatorPanel controls', () => {
     await act(async () => labelled('Shake')?.click());
     await flush();
     await viewer.reply();
-    // The exterior's side button presses the real one.
-    await act(async () =>
-      container?.querySelector<HTMLButtonElement>('[data-hardware-button="side"]')?.click()
-    );
+    await act(async () => labelled('Lock')?.click());
     await flush();
 
     expect(viewer.requests.map(({ operationId, control }) => ({ operationId, control }))).toEqual([
@@ -801,9 +798,7 @@ describe('SessionIosSimulatorPanel controls', () => {
     await renderPanel({ machine: old, meta: macMeta({ iosSimulator: 1 }) });
     expect(text()).toContain('Update Lody on Studio to use simulator controls');
     expect(labelled('Home')).toBeNull();
-    expect(
-      container?.querySelector<HTMLButtonElement>('[data-hardware-button="side"]')?.disabled
-    ).toBe(true);
+    expect(container?.querySelector<HTMLButtonElement>('[data-hardware-button="side"]')).toBeNull();
     expect(
       old.commands.every((command) => command.action === 'list' || command.action === 'status')
     ).toBe(true);
@@ -945,4 +940,54 @@ describe('SessionIosSimulatorPanel controls', () => {
     expect(vi.mocked(downloadBytesAsFile)).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+});
+
+it('loads real Kit artwork before preview without a start and releases it on unmount', async () => {
+  const OriginalURL = URL;
+  const revoke = vi.fn();
+  vi.stubGlobal(
+    'URL',
+    class extends OriginalURL {
+      static createObjectURL = () => 'blob:idle-devicekit';
+      static revokeObjectURL = revoke;
+    }
+  );
+  try {
+    const udid = '5519CB11-71C9-46D9-AEFF-73C96F1104E0';
+    const machine = createFakeMachine({ devices: [device({ udid, name: 'iPhone 16' })] });
+    await renderPanel({
+      machine,
+      meta: macMeta({ iosSimulator: 1, iosSimulatorExterior: 1 }),
+      localMachine: true,
+    });
+    expect(container?.querySelector('[data-bezel="on"]')).toBeNull();
+    expect(machine.commands).toContainEqual({ action: 'exterior', udid });
+    const bytes = new Uint8Array(24);
+    bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+    bytes.set([73, 72, 68, 82], 12);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(16, 100);
+    view.setUint32(20, 200);
+    await machine.answerNext(
+      answer({
+        exterior: {
+          geometry: {
+            width: 100,
+            height: 200,
+            screen: { x: 10, y: 10, width: 80, height: 180, radius: 5 },
+            buttons: [],
+          },
+          pngBase64: btoa(String.fromCharCode(...bytes)),
+        },
+      })
+    );
+    expect(container?.querySelector('img')?.getAttribute('src')).toBe('blob:idle-devicekit');
+    expect(container?.querySelector('iframe')).toBeNull();
+    expect(machine.commands.some((c) => c.action === 'start')).toBe(false);
+    await act(async () => root?.unmount());
+    root = undefined;
+    expect(revoke).toHaveBeenCalledWith('blob:idle-devicekit');
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
