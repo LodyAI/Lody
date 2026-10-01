@@ -407,3 +407,29 @@ roughly 8.5–9 FPS at 590×1278 while decoding 53–57 FPS. An injected all-mes
 blackout triggered the silence watchdog and one H.264 reconnect; subsequent samples
 retained that resolution, no decode errors and no JPEG fallback. This is controlled
 fault injection, not proof of the cause of the reported WAN interruption.
+
+### Jitter-tolerant video feedback (2026-10-01)
+
+Later field samples stayed in H.264 with no transport retries or decoder errors,
+but bitrate fell from 690 to 150 kbps while ACKs repeatedly returned near the
+333 ms baseline. The old controller could cut on one slow ACK after two seconds;
+its test called that sustained congestion even though it exercised one keyframe.
+A synthetic ordered burst-ACK regression reproduced the collapse.
+
+Decisions now require a complete two-second, eight-ACK window, with 75% slow
+observations before a cut. Healthy demand can recover quality slowly; idle gaps
+reset evidence and tiny static deltas still cannot justify growth. Existing byte,
+frame and age limits bound safety independently. This deliberately tolerates short
+bursts while reacting more slowly to newly sustained congestion. Deterministic
+tests cover outliers, recurring bursts, sustained congestion and recovery.
+
+Drawing stays latest-only: receiving 30 FPS but drawing fewer does not prove a
+rendering fault when packets arrive in bursts. Separate RAF/timer draw counts,
+scheduling delay and maximum arrival gap now expose that distinction. Do not claim
+that the rendering or real network bottleneck is resolved from these counters alone.
+
+An isolated native iPhone 16/26.2 and Chromium run with injected 500 ms RTT and
+0.3 Mbps downstream retained 590×1278, zero decode errors/fallback/retries. Its final
+four samples painted about 22–38 FPS; bitrate adapted to 218 kbps and then recovered
+to 251 kbps. RAF scheduling averaged 3–5 ms and no timer fallback was needed. This
+checks adaptation on a constrained link, not the user's actual WAN or mobile renderer.

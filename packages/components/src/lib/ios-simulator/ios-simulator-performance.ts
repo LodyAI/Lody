@@ -23,6 +23,14 @@ const fields = [
 
   'decoderQueue',
   'encoderBitrate',
+  'feedbackSamples',
+  'slowAckPercent',
+  'feedbackMinAckMs',
+  'rafPaints',
+  'timerPaints',
+  'paintScheduleMs',
+  'receiveGapMaxMs',
+
   'keyframeRequests',
   'upstreamGaps',
   'queuedFrames',

@@ -108,7 +108,7 @@ support for the actual avcC configuration; unsupported configurations and decode
 reconnect once using MJPEG. Transport interruption retries H.264 with a bounded budget. Existing private capability, operation,
 origin and touch-release boundaries apply. No runtime rebuild/mirror or new dependency
 is required. Remote H.264 targets viewport resolution with scale at most 2, starts at
-600 kbps, and adapts between 150 kbps and 2 Mbps from ACK queue delay; same-machine
+600 kbps, and adapts between 150 kbps and 2 Mbps from sustained ACK queue delay; same-machine
 video retains native resolution at 4 Mbps. These are encoder targets, not guarantees.
 Tiny static deltas do not count as evidence that a higher bitrate will fit the link.
 
@@ -197,3 +197,18 @@ Additional numeric diagnostics: `transportRetries`; `transportFailure` (1 close,
 `lastReceivedSequence`, `lastAckSequence` (H.264, reset per connection),
 and `paintPending` (0/1). These distinguish network silence from decode/paint
 starvation. H.264 ACK delay now excludes RAF waiting, while JPEG still includes draw.
+
+H.264 bitrate decisions use complete two-second feedback windows with at least
+eight ACKs. At least 75% must exceed minimum RTT + 350 ms before reducing the
+bitrate; a slow outlier is insufficient. Recovery requires at most 10% slow ACKs,
+a near-baseline minimum, actual payload demand, and five seconds since the last
+change. A two-second ACK gap resets the observation. The independent frame/byte/age
+limits still apply during sparse feedback or a stall. `feedbackSamples`,
+`slowAckPercent` and `feedbackMinAckMs` describe the last completed window.
+
+`rafPaints` and `timerPaints` are cumulative H.264 draw counts, `paintScheduleMs`
+is average scheduling-to-draw delay per browser sample, and `receiveGapMaxMs` is
+the largest inter-frame arrival gap in that sample. Coalesced decoded pictures
+are intentional freshness drops; a low draw rate alone does not establish slow
+decoding or RAF suspension. Gateway and browser counters use different sample
+times; consult `gatewaySampleAgeMs` before comparing sequences or FPS.

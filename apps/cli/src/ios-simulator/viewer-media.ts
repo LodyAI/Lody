@@ -13,6 +13,7 @@ function retryVideo(reason,code=0){
   const delay=++transportRetries===1?500:1500;
   report('connecting');retryTimer=setTimeout(()=>{retryTimer=undefined;connect()},delay);
 }
+let rafPaints=0,timerPaints=0,paintScheduleTotal=0,paintScheduleCount=0,receiveGapMaxMs=0;
 let receivedFrames=0,receivedBytes=0,paintedFrames=0,droppedFrames=0,coalescedMoves=0,decodeErrors=0;
 let decodeSamples=[],sampleAt=performance.now(),sampleReceived=0,sampleBytes=0,samplePainted=0;
 let latestPerformance=null,performanceHistory=[],performanceLogging=false;
@@ -25,7 +26,7 @@ function publishPerformance(){
   const now=performance.now(),seconds=Math.max(.001,(now-sampleAt)/1000);
   const sorted=[...decodeSamples].sort((a,b)=>a-b);
   const age=at=>at?Math.max(0,now-at):0;
-  const stats={...lastServer,transportRetries,transportFailure,transportCloseCode,
+  const stats={...lastServer,rafPaints,timerPaints,paintScheduleMs:paintScheduleTotal/Math.max(1,paintScheduleCount),receiveGapMaxMs,transportRetries,transportFailure,transportCloseCode,
     messageIdleMs:age(lastMessageAt),frameIdleMs:age(lastFrameAt),decodeIdleMs:age(lastDecodeAt),paintIdleMs:age(lastPaintAt),
     lastReceivedSequence:videoLastSequence,lastAckSequence,paintPending:videoPending?1:0,codecH264:usingH264?1:0,codecFallback,decoderQueue:videoOutputs.size,remote,receivedFps:(receivedFrames-sampleReceived)/seconds,
     paintedFps:(paintedFrames-samplePainted)/seconds,receivedMbps:(receivedBytes-sampleBytes)*8/seconds/1e6,
@@ -34,7 +35,7 @@ function publishPerformance(){
     decodeP95Ms:sorted[Math.max(0,Math.ceil(sorted.length*.95)-1)]||0,
     viewerDroppedFrames:droppedFrames,decodeErrors,coalescedMoves,width:canvas.width,height:canvas.height,
     inputBufferedBytes:ws?.bufferedAmount||0,gatewaySampleAgeMs:Math.max(0,now-lastStatsAt),connected:ws?.readyState===1,elapsedMs:now};
-  sampleAt=now;sampleReceived=receivedFrames;sampleBytes=receivedBytes;samplePainted=paintedFrames;decodeSamples=[];
+  sampleAt=now;sampleReceived=receivedFrames;sampleBytes=receivedBytes;samplePainted=paintedFrames;decodeSamples=[];paintScheduleTotal=paintScheduleCount=receiveGapMaxMs=0;
   latestPerformance=stats;performanceHistory.push(stats);performanceHistory=performanceHistory.filter(s=>now-s.elapsedMs<=120000).slice(-60);
   if(parentOrigin)parent.postMessage({type:'lody:ios-simulator:performance',operationId,stats},parentOrigin);
   if(performanceLogging)console.info('[Lody iOS Simulator performance]',stats);
@@ -67,7 +68,7 @@ function connect(){
   const token=new URL(location.href).searchParams.get('__lody_preview_token');if(token)url.searchParams.set('__lody_preview_token',token);
   usingH264=!h264Disabled&&typeof VideoDecoder!=='undefined'&&typeof EncodedVideoChunk!=='undefined';
   if(usingH264)url.searchParams.set('codec','h264');
-  videoLastSequence=0;videoRecovery=0;lastAckSequence=0;lastFrameAt=0;lastDecodeAt=0;lastPaintAt=0;
+  videoLastSequence=0;videoRecovery=0;lastAckSequence=0;lastFrameAt=0;lastDecodeAt=0;lastPaintAt=0;paintScheduleTotal=paintScheduleCount=receiveGapMaxMs=0;
   const socket=new WebSocket(url);ws=socket;socket.binaryType='arraybuffer';
   socket.onopen=()=>{
     if(ws!==socket)return;
@@ -88,7 +89,7 @@ function connect(){
       try{const message=JSON.parse(e.data);
         if(message.type==='ping'&&Number.isSafeInteger(message.id)&&message.id>0)send({type:'pong',id:message.id});
         if(message.type==='stream-stats'){
-          const stats={};for(const key of ['sourceFps','sentFps','sourceMbps','sentMbps','sentFrames','idleRefreshFrames','droppedFrames','inFlightFrames','inFlightBytes','oldestFrameMs','ackMs','ackIdleMs','rttMs','targetFps','scale','baseRttMs','deliveryMbps','pacingMbps','windowBytes','codecH264','encoderBitrate','keyframeRequests','upstreamGaps','queuedFrames','queuedBytes']){
+          const stats={};for(const key of ['sourceFps','sentFps','sourceMbps','sentMbps','sentFrames','idleRefreshFrames','droppedFrames','inFlightFrames','inFlightBytes','oldestFrameMs','ackMs','ackIdleMs','rttMs','targetFps','scale','baseRttMs','deliveryMbps','pacingMbps','windowBytes','codecH264','encoderBitrate','feedbackSamples','slowAckPercent','feedbackMinAckMs','keyframeRequests','upstreamGaps','queuedFrames','queuedBytes']){
             const value=message[key];if(typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1e12)stats[key]=value;
           }lastServer=stats;lastStatsAt=performance.now();
         }
@@ -97,6 +98,7 @@ function connect(){
     }
     if(!(e.data instanceof ArrayBuffer))return;
     if(e.data.byteLength<9||e.data.byteLength>16*1024*1024+8){close();report('error');return}
+    if(lastFrameAt)receiveGapMaxMs=Math.max(receiveGapMaxMs,performance.now()-lastFrameAt);
     lastFrameAt=performance.now();const header=new DataView(e.data);
     if(header.getUint32(0)===0x4c415643){receiveVideo(e.data);return}
     if(usingH264){fallbackVideo(2);return}

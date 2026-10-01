@@ -32,7 +32,8 @@
   Serialize reads, bound the in-memory cache, and recheck authorization before replying.
 - `h264-codec.ts` validates the pinned progressive AVC layout and reference numbers;
   reject unknown layouts to MJPEG. `h264-flow.ts` owns ordered video credit, bounded
-  queues and IDR recovery. Never latest-drop encoded deltas; native backlog gaps must
+  queues and IDR recovery. Change bitrate from multi-sample ACK windows, never a
+  single delayed ACK; idle deltas do not prove spare bandwidth. Never latest-drop encoded deltas; native backlog gaps must
   invalidate the reference chain too. Decoder ACK/recovery/config never renew leases.
   `viewer-h264.ts` probes the actual avcC configuration, bounds queues, closes all
   VideoFrames and fences async probes. ACK decoded H.264 output independently of RAF;

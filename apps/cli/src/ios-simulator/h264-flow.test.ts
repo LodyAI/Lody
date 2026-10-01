@@ -90,7 +90,7 @@ describe('AVC private stream', () => {
     f.offer(frame(0), 1340);
     expect(f.take(1340)?.[8]).toBe(2);
   });
-  it('keeps bounded byte credit and reduces encoder bitrate on sustained queue delay', () => {
+  it('keeps bounded byte credit without treating one slow keyframe as sustained congestion', () => {
     const { f } = flow();
     f.recordRtt(400);
     f.offer(frame(0, true, 100_000), 0);
@@ -98,7 +98,7 @@ describe('AVC private stream', () => {
     f.offer(frame(1), 10);
     expect(f.take(100)).toBeUndefined();
     expect(f.acknowledge(1, 2500)).toBe(true);
-    expect(f.targetBitrate()).toBe(450_000);
+    expect(f.targetBitrate()).toBe(600_000);
     f.recordRtt(4000);
     expect(f.snapshot(2500).windowBytes).toBe(64 * 1024);
     f.offer(frame(0), 2600);
@@ -128,5 +128,48 @@ describe('AVC private stream', () => {
       f.acknowledge(packet.readUInt32BE(4), i * 1000 + 510);
     }
     expect(f.targetBitrate()).toBe(600_000);
+  });
+  it('does not collapse bitrate on recurring short ACK bursts with a healthy baseline', () => {
+    const { f } = flow();
+    f.recordRtt(350);
+    const pending: Array<{ sequence: number; at: number }> = [];
+    let deliveredAt = 0;
+    for (let now = 0; now <= 30000; now += 10) {
+      while (pending[0] && pending[0].at <= now) {
+        const ack = pending.shift();
+        if (ack) expect(f.acknowledge(ack.sequence, now)).toBe(true);
+      }
+      if (now % 50) continue;
+      f.offer(frame(0, true, 1000), now);
+      const packet = f.take(now);
+      if (packet) {
+        // Ordered delivery with a short stall every two seconds, then a burst.
+        const stalled = now % 2000 >= 1500 ? 800 : 350;
+        deliveredAt = Math.max(deliveredAt, now + stalled);
+        pending.push({ sequence: packet.readUInt32BE(4), at: deliveredAt });
+      }
+    }
+    expect(f.targetBitrate()).toBeGreaterThanOrEqual(600_000);
+  });
+  it('reduces bitrate for sustained delayed ACKs and raises it only with healthy payload demand', () => {
+    const { f } = flow();
+    f.recordRtt(350);
+    const pending: Array<{ sequence: number; at: number }> = [];
+    let low = 600_000;
+    for (let now = 0; now <= 20000; now += 10) {
+      while (pending[0] && pending[0].at <= now) {
+        const ack = pending.shift();
+        if (ack) expect(f.acknowledge(ack.sequence, now)).toBe(true);
+      }
+      if (now === 10000) low = f.targetBitrate();
+      if (now % 50) continue;
+      f.offer(frame(0, true, 3000), now);
+      const packet = f.take(now);
+      if (packet)
+        pending.push({ sequence: packet.readUInt32BE(4), at: now + (now < 10000 ? 850 : 360) });
+    }
+    expect(low).toBeLessThan(600_000);
+    expect(f.targetBitrate()).toBeGreaterThan(low);
+    expect(f.snapshot(20000).inFlightBytes).toBeLessThanOrEqual(65536);
   });
 });

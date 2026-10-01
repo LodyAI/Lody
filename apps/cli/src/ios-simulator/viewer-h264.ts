@@ -3,7 +3,7 @@
  */
 export const simulatorViewerH264Script = `
 let h264Disabled=false,codecFallback=0,usingH264=false,videoDecoder,videoEpoch=0,videoQueue=[],videoBytes=0,videoReading=false;
-let videoPending,videoDraw,videoPaintTimer,videoWaiting=true,videoRecovery=0,videoLastSequence=0,videoOutputs=new Map();
+let videoPending,videoDraw,videoDrawAt=0,videoPaintTimer,videoWaiting=true,videoRecovery=0,videoLastSequence=0,videoOutputs=new Map();
 function disposeVideo(){
   videoEpoch++;videoQueue=[];videoBytes=0;videoReading=false;videoWaiting=true;videoOutputs.clear();
   cancelAnimationFrame(videoDraw);clearTimeout(videoPaintTimer);videoDraw=undefined;videoPaintTimer=undefined;videoPending?.frame.close();videoPending=undefined;
@@ -24,7 +24,7 @@ function recoverVideo(){
   send({type:'keyframe-request'});
   if(++videoRecovery>3)fallbackVideo(3);
 }
-function paintVideo(){
+function paintVideo(timer=false){
   cancelAnimationFrame(videoDraw);clearTimeout(videoPaintTimer);videoDraw=undefined;videoPaintTimer=undefined;const entry=videoPending;videoPending=undefined;if(!entry)return;
   const image=entry.frame;
   try{
@@ -33,7 +33,10 @@ function paintVideo(){
     if(!width||!height||width>16384||height>16384){fallbackVideo(3);return}
     const resized=canvas.width!==width||canvas.height!==height;
     if(resized){canvas.width=width;canvas.height=height}
-    ctx.drawImage(image,0,0);const first=!painted;painted=true;
+    ctx.drawImage(image,0,0);
+    if(timer)timerPaints++;else rafPaints++;
+    paintScheduleTotal+=performance.now()-videoDrawAt;paintScheduleCount++;
+    const first=!painted;painted=true;
     if(resized||first)layout();paintedFrames++;
     lastPaintAt=performance.now();clearTimeout(firstFrame);report('ready');
   }finally{image.close()}
@@ -65,8 +68,8 @@ async function readVideo(){
             // decoder output continues: receiver credit must not wait for painting.
             ackVideo(entry.sequence);
             if(videoDraw===undefined){
-              videoDraw=requestAnimationFrame(paintVideo);
-              videoPaintTimer=setTimeout(paintVideo,100);
+              videoDrawAt=performance.now();videoDraw=requestAnimationFrame(()=>paintVideo());
+              videoPaintTimer=setTimeout(()=>paintVideo(true),100);
             }
           },
           error:()=>{if(epoch===videoEpoch&&g===generation&&videoDecoder===decoder){decodeErrors++;recoverVideo()}}

@@ -692,6 +692,10 @@ describe('viewer WebCodecs lifecycle', () => {
     expect(codec.frames.every((f) => f.closed)).toBe(true);
     v.visibility(false);
     expect(d?.closed).toBe(true);
+    const stats = v.messages
+      .filter((m) => m.type === 'lody:ios-simulator:performance')
+      .at(-1)?.stats;
+    expect(stats).toMatchObject({ rafPaints: 1, timerPaints: 0, paintScheduleMs: 16 });
   });
   it('falls back once when actual AVC configuration is unsupported and retains JPEG preview', async () => {
     const codec = fakeVideoCodec(false),
@@ -726,6 +730,10 @@ describe('viewer WebCodecs lifecycle', () => {
     expect(codec.frames.filter((f) => !f.closed).length).toBeLessThanOrEqual(1);
     expect(v.paints).toBeGreaterThan(10);
     v.visibility(false);
+    const stats = v.messages
+      .filter((m) => m.type === 'lody:ios-simulator:performance')
+      .at(-1)?.stats;
+    expect(stats).toMatchObject({ rafPaints: 0, timerPaints: v.paints, paintScheduleMs: 100 });
     const paints = v.paints;
     await vi.advanceTimersByTimeAsync(1000);
     expect(v.paints).toBe(paints);

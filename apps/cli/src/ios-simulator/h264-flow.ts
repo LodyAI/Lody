@@ -22,7 +22,14 @@ export class SimulatorH264Flow {
   private lastAck = 0;
   private nextSend = 0;
   private lastTune = 0;
-  private tuneBytes = 0;
+  private feedbackAt: number | undefined;
+  private feedbackCount = 0;
+  private slowFeedback = 0;
+  private feedbackBytes = 0;
+  private minFeedback = Infinity;
+  private feedbackSamples = 0;
+  private slowAckPercent = 0;
+  private feedbackMinAckMs = 0;
   private lastRecovery = -Infinity;
   private recoveries = 0;
   private upstreamGaps = 0;
@@ -156,27 +163,49 @@ export class SimulatorH264Flow {
     const frame = this.inFlight.get(sequence);
     if (!frame) return false;
     this.ackMs = Math.max(0, now - frame.at);
+    if (!this.feedbackCount || now - this.lastAck >= 2000) {
+      this.feedbackAt = now;
+      this.feedbackCount = this.slowFeedback = this.feedbackBytes = 0;
+      this.minFeedback = Infinity;
+    }
     this.lastAck = now;
+    this.feedbackCount++;
+    if (this.ackMs > this.baseRtt + 350) this.slowFeedback++;
+    this.minFeedback = Math.min(this.minFeedback, this.ackMs);
     this.acknowledged = sequence;
     for (const [id, entry] of this.inFlight)
       if (id <= sequence) {
-        this.tuneBytes += entry.bytes;
+        this.feedbackBytes += entry.bytes;
         this.inFlight.delete(id);
       }
-    // Do not estimate capacity from tiny delta size / full RTT. That is application
-    // limited and collapses a video stream's window. Tune the encoder on queue delay.
-    if (this.remote && now - this.lastTune >= 2000 && this.ackMs > this.baseRtt + 350) {
-      this.bitrate = Math.max(150_000, Math.round(this.bitrate * 0.75));
-      this.lastTune = now;
-      this.tuneBytes = 0;
-    } else if (this.remote && now - this.lastTune >= 5000) {
-      if (
-        this.ackMs < this.baseRtt + 150 &&
-        (this.tuneBytes * 8) / Math.max(1, (now - this.lastTune) / 1000) > this.bitrate * 0.4
-      )
+    // One slow ACK after a healthy interval is jitter, not sustained congestion.
+    // Use a complete feedback window; idle gaps begin a fresh observation instead
+    // of turning one large keyframe into evidence about the whole link.
+    const elapsed = now - (this.feedbackAt ?? now);
+    if (elapsed >= 2000) {
+      this.feedbackSamples = this.feedbackCount;
+      this.slowAckPercent = (this.slowFeedback * 100) / this.feedbackCount;
+      this.feedbackMinAckMs = this.minFeedback;
+      const enough = this.feedbackCount >= 8;
+      const slowFraction = this.slowFeedback / this.feedbackCount;
+      if (this.remote && enough && slowFraction >= 0.75) {
+        this.bitrate = Math.max(150_000, Math.round(this.bitrate * 0.75));
+        this.lastTune = now;
+      } else if (
+        this.remote &&
+        enough &&
+        slowFraction <= 0.1 &&
+        now - this.lastTune >= 5000 &&
+        this.minFeedback < this.baseRtt + 150 &&
+        (this.feedbackBytes * 8000) / elapsed > this.bitrate * 0.4
+      ) {
+        // Tiny static deltas are not a bandwidth probe. Raise only with demand.
         this.bitrate = Math.min(2_000_000, Math.round(this.bitrate * 1.15));
-      this.lastTune = now;
-      this.tuneBytes = 0;
+        this.lastTune = now;
+      }
+      this.feedbackCount = this.slowFeedback = this.feedbackBytes = 0;
+      this.feedbackAt = undefined;
+      this.minFeedback = Infinity;
     }
     return true;
   }
@@ -225,6 +254,9 @@ export class SimulatorH264Flow {
       windowBytes: this.budget(),
       pacingMbps: (this.bitrate * 1.3) / 1e6,
       encoderBitrate: this.bitrate,
+      feedbackSamples: this.feedbackSamples,
+      slowAckPercent: this.slowAckPercent,
+      feedbackMinAckMs: this.feedbackMinAckMs,
       keyframeRequests: this.recoveries,
       upstreamGaps: this.upstreamGaps,
       queuedFrames: this.queue.length,
