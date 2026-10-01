@@ -44,7 +44,7 @@ Supported native artifact: Apple Silicon, macOS 15+, Xcode and an installed iOS
 runtime. Intel has no pinned artifact. Local smoke evidence used Xcode 26.6 / iOS
 26.5 and verified device enumeration, managed installation, real JPEG delivery and
 preview cleanup. Full Electron sidebar, remote Quick Tunnel and mobile E2E remain
-unverified. H.264, multitouch, physical-key forwarding and advanced device configuration are later work.
+unverified. Multitouch, physical-key forwarding and advanced device configuration are later work.
 
 ## Maintaining the patched build
 
@@ -104,8 +104,8 @@ The frontend controller/facade tests cover routing and the exact-origin handshak
 ## Media performance diagnostics
 
 The fixed viewer prefers Baguette AVCC/H.264 when WebCodecs is available. It probes
-support for the actual avcC configuration; unsupported configurations, decode failures
-or stream failure reconnect once using MJPEG. Existing private capability, operation,
+support for the actual avcC configuration; unsupported configurations and decode/protocol failures
+reconnect once using MJPEG. Transport interruption retries H.264 with a bounded budget. Existing private capability, operation,
 origin and touch-release boundaries apply. No runtime rebuild/mirror or new dependency
 is required. Remote H.264 targets viewport resolution with scale at most 2, starts at
 600 kbps, and adapts between 150 kbps and 2 Mbps from ACK queue delay; same-machine
@@ -133,7 +133,7 @@ not an encoder FPS fix. No new runtime artifact or mirror is required.
 The gateway sends sequenced JPEG packets through the existing private proxy. A bounded
 receiver-confirmation window (2–8 frame cap, remote byte budget estimated from one
 base RTT plus 150 ms, clamped to 8–128 KiB; 2 MiB locally; one oversized frame alone) and a single replaceable pending frame prevent unlimited stale
-video from entering the tunnel. A drawn frame acknowledges its sequence and superseded predecessors; H.264 recovery also explicitly acknowledges discarded work before requesting an IDR. A 10-second receiver stall closes the stream for Restore;
+video from entering the tunnel. JPEG acknowledges a drawn frame; H.264 acknowledges decoded output independently of RAF and retains only one unpainted picture. Visible H.264 painting uses RAF with a 100 ms timer fallback. Recovery explicitly acknowledges discarded work before requesting an IDR. A 10-second receiver stall closes the stream;
 credits and timing probes never count as control activity. Remote sends are also
 byte-paced, with no accumulated idle credit. The minimum observed RTT prevents
 queue-inflated probes from increasing the budget; an initial probe precedes JPEGs.
@@ -155,7 +155,7 @@ samples. Record 10 seconds idle, 20 seconds of continuous scrolling, then 10 sec
 idle, and copy the report while the panel remains open. Compare local and remote runs
 of the same screen. Static MJPEG screens correctly report zero FPS; H.264 emits small repeated deltas to keep the decoder progressing.
 
-- `codecH264`: 1 for H.264, 0 for MJPEG. `codecFallback`: 0 none/API absent, 1 unsupported configuration, 2 stream failure, 3 decode/protocol failure, 4 first-frame timeout.
+- `codecH264`: 1 for H.264, 0 for MJPEG. `codecFallback`: 0 none/API absent, 1 unsupported configuration, 2 explicit native codec rejection, 3 decode/protocol failure. Transport errors never permanently downgrade the codec.
 - `encoderBitrate`, `keyframeRequests`, `upstreamGaps`, `queuedFrames/queuedBytes` describe H.264 encoder control and pending reference chains. `decoderQueue` counts submitted pictures awaiting output.
 - `sourceFps/sourceMbps`: encoded pictures offered to the gateway, including idle stills, not
   capture/encoder timing. `idleRefreshFrames` counts sharp stills actually sent.
@@ -170,7 +170,7 @@ of the same screen. Static MJPEG screens correctly report zero FPS; H.264 emits 
 - `deliveryMbps`: effective payload-rate estimate from frame completion minus base
   RTT; includes queue/decode/return-path effects, not measured link capacity.
   `pacingMbps` reserves 15% headroom, `windowBytes` is the current credit budget.
-- `ackMs`: gateway send to browser draw and returning confirmation, **not one-way latency**.
+- `ackMs`: gateway send to browser H.264 decode / JPEG draw and returning confirmation, **not one-way latency**.
   `ackIdleMs` is time since that ACK; an idle screen retains the last ACK value.
 - `oldestFrameMs/inFlightBytes/inFlightFrames`: outstanding receiver work;
   `droppedFrames/viewerDroppedFrames`: cumulative intentional freshness drops.
@@ -184,3 +184,16 @@ In browser DevTools, select the simulator iframe and run `lodySimulator.stats()`
 `false` disables it. The daemon writes `[iOS Simulator media]` numeric summaries every
 30 seconds. No per-frame logs, automatic upload, URLs, input text or pixels. Existing
 cloudflared connection logs identify QUIC/HTTP2; the viewer does not guess that protocol.
+
+H.264 transport recovery retries twice per iframe (500/1500 ms), then leaves Restore
+visible. An eight-second absence of all socket messages also triggers recovery;
+receiving gateway statistics alone does not prove that video is progressing. Hide
+cancels pending retries. Every new socket revalidates the existing private capability.
+
+Additional numeric diagnostics: `transportRetries`; `transportFailure` (1 close,
+2 socket error, 3 no messages for eight seconds, 4 first-frame timeout);
+`transportCloseCode` (0 if unavailable); `messageIdleMs`, `frameIdleMs`,
+`decodeIdleMs`, `paintIdleMs` (0 before the first corresponding event);
+`lastReceivedSequence`, `lastAckSequence` (H.264, reset per connection),
+and `paintPending` (0/1). These distinguish network silence from decode/paint
+starvation. H.264 ACK delay now excludes RAF waiting, while JPEG still includes draw.

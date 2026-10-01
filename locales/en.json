@@ -4638,7 +4638,7 @@
   "sessions.iosSimulator.connection.stopFact": "Stopping ends the preview; the simulator keeps running.",
   "sessions.iosSimulator.connection.thisDevice": "the simulator",
   "sessions.iosSimulator.performance.title": "Performance",
-  "sessions.iosSimulator.performance.detail": "ACK includes drawing and the return trip. Copy diagnostics for the last two minutes.",
+  "sessions.iosSimulator.performance.detail": "ACK includes decoding (H.264) or drawing (JPEG) and the return trip. Copy diagnostics for the last two minutes.",
   "sessions.iosSimulator.performance.paused": "No fresh sample",
   "sessions.iosSimulator.diagnosticsCopied": "Diagnostics copied",
   "sessions.iosSimulator.diagnosticsCopyFailed": "Couldn’t copy diagnostics",

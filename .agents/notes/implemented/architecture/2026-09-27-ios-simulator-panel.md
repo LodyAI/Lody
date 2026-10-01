@@ -382,3 +382,28 @@ browser decoder under injected delivery conditions, not Cloudflare/TCP loss, a r
 long-run stability, or arbitrary app complexity. Reproduce on the user's remote link.
 
 Validation isolates inherited Git configuration for Git fixtures; a machine-specific remote URL rewrite otherwise fails an unrelated workspace identity test. The embedded outer check still encounters pre-existing ACP dependency/type errors, and docs check still reports only the existing MCP AGENTS size violation.
+
+### H.264 stall recovery correction (2026-10-01)
+
+Field feedback showed successful H.264 decoding followed by paint/ACK starvation and
+eventually generic stream failure, which permanently downgraded the iframe to JPEG.
+The report cannot distinguish RAF suspension from a tunnel outage: gateway samples
+also became stale. The initial policy conflated transport failure with codec failure.
+
+Decoded output now releases cumulative credit without waiting for RAF. One latest
+decoded picture is retained and painted by RAF or a 100 ms visible-only fallback.
+Transport failure or eight seconds without socket messages retries H.264 twice with
+backoff, then stops for Restore. Unsupported codecs still fall back to JPEG. New
+numeric diagnostics separate receive/decode/paint silence and transport outcomes.
+No additional dependency, runtime artifact or cloud deployment is required.
+
+Deterministic artifact tests reproduce suspended RAF and transient/silent sockets,
+verify bounded resources and retries, and fence hide/old callbacks. These tests do
+not establish the cause or resolve every stall on the user's real remote network.
+
+A real isolated iPhone 16/26.2 encoder and Chromium test imposed 500 ms round-trip
+delay, 0.6 Mbps delivery, and suspended RAF throughout. The 100 ms fallback painted
+roughly 8.5–9 FPS at 590×1278 while decoding 53–57 FPS. An injected all-message
+blackout triggered the silence watchdog and one H.264 reconnect; subsequent samples
+retained that resolution, no decode errors and no JPEG fallback. This is controlled
+fault injection, not proof of the cause of the reported WAN interruption.

@@ -625,7 +625,7 @@ function SessionIosSimulatorPanelController({
     const performance = readPerformance();
     const report = performance
       ? text +
-        '\nmedia-performance (2s samples; ACK includes return path and drawing):\n' +
+        '\nmedia-performance (2s samples; ACK includes return path + H264 decode / JPEG draw):\n' +
         JSON.stringify(performance, null, 2)
       : text;
     if (await writeTextToClipboard(report)) {

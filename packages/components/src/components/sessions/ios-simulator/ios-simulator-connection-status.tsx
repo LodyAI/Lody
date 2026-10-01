@@ -249,7 +249,7 @@ export function IosSimulatorConnectionStatus({
               <div>
                 {t(
                   'sessions.iosSimulator.performance.detail',
-                  'ACK includes drawing and the return trip. Copy diagnostics for the last two minutes.'
+                  'ACK includes decoding (H.264) or drawing (JPEG) and the return trip. Copy diagnostics for the last two minutes.'
                 )}
               </div>
               {!stats.connected || (performance?.ageMs ?? 0) > 6000 ? (

@@ -53,7 +53,9 @@ in-memory runtime state; selected-device preferences are client-local and scoped
 account/workspace/session/machine. Credentials never enter session documents.
 
 The viewer prefers H.264 with WebCodecs, probes the actual decoder configuration,
-and falls back to MJPEG when unavailable or unsuccessful. Both use bounded queues
+and falls back to MJPEG on codec incompatibility or decode failure. Transient transport
+failures get bounded H.264 reconnection before requiring Restore, without permanent
+codec downgrade. Hiding cancels recovery; controls are never replayed. Both use bounded queues
 and receiver feedback, with single-pointer input, including mouse drag and wheel/trackpad scrolling translated into a finger drag.
 Scroll input and pointer drag never hold separate simultaneous touches; hiding,
 disconnecting or losing focus releases the active gesture.
@@ -96,7 +98,8 @@ resumes. H.264 continues refining its reference picture through the video stream
 Congestion-inflated RTT must not increase the outstanding byte budget.
 Bound unconfirmed video. JPEG may replace unsent frames; H.264 must preserve encoded
 references or discard the affected chain and resume on a keyframe, including upstream
-loss. Only decoded video pictures may be coalesced;
+loss. Only decoded video pictures may be coalesced; decoding confirmation releases video
+credit independently of the browser paint cadence, with at most one unpainted picture;
 retain final pointer positions and releases when merging high-frequency moves.
 Same-machine preview preserves native resolution. No new cloud service participates
 in the media path. Connection status exposes numeric performance diagnostics, with

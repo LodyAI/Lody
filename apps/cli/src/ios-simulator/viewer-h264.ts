@@ -3,11 +3,15 @@
  */
 export const simulatorViewerH264Script = `
 let h264Disabled=false,codecFallback=0,usingH264=false,videoDecoder,videoEpoch=0,videoQueue=[],videoBytes=0,videoReading=false;
-let videoPending,videoDraw,videoWaiting=true,videoRecovery=0,videoLastSequence=0,videoOutputs=new Map();
+let videoPending,videoDraw,videoPaintTimer,videoWaiting=true,videoRecovery=0,videoLastSequence=0,videoOutputs=new Map();
 function disposeVideo(){
   videoEpoch++;videoQueue=[];videoBytes=0;videoReading=false;videoWaiting=true;videoOutputs.clear();
-  cancelAnimationFrame(videoDraw);videoDraw=undefined;videoPending?.frame.close();videoPending=undefined;
+  cancelAnimationFrame(videoDraw);clearTimeout(videoPaintTimer);videoDraw=undefined;videoPaintTimer=undefined;videoPending?.frame.close();videoPending=undefined;
   if(videoDecoder){try{videoDecoder.close()}catch{}videoDecoder=undefined}
+}
+function ackVideo(sequence){
+  if(ws?.readyState!==1)return;
+  send({type:'frame-ack',sequence});lastAckSequence=Math.max(lastAckSequence,sequence);
 }
 function fallbackVideo(reason){
   if(!usingH264)return;
@@ -16,12 +20,12 @@ function fallbackVideo(reason){
 function recoverVideo(){
   if(!usingH264)return;
   const last=videoLastSequence;disposeVideo();
-  if(last)send({type:'frame-ack',sequence:last});
+  if(last)ackVideo(last);
   send({type:'keyframe-request'});
   if(++videoRecovery>3)fallbackVideo(3);
 }
 function paintVideo(){
-  videoDraw=undefined;const entry=videoPending;videoPending=undefined;if(!entry)return;
+  cancelAnimationFrame(videoDraw);clearTimeout(videoPaintTimer);videoDraw=undefined;videoPaintTimer=undefined;const entry=videoPending;videoPending=undefined;if(!entry)return;
   const image=entry.frame;
   try{
     if(!visible||document.hidden||!usingH264)return;
@@ -31,7 +35,7 @@ function paintVideo(){
     if(resized){canvas.width=width;canvas.height=height}
     ctx.drawImage(image,0,0);const first=!painted;painted=true;
     if(resized||first)layout();paintedFrames++;
-    send({type:'frame-ack',sequence:entry.sequence});clearTimeout(firstFrame);report('ready');
+    lastPaintAt=performance.now();clearTimeout(firstFrame);report('ready');
   }finally{image.close()}
 }
 async function readVideo(){
@@ -56,14 +60,20 @@ async function readVideo(){
             if(!entry){frame.close();recoverVideo();return}
             decodeSamples.push(performance.now()-entry.at);if(decodeSamples.length>120)decodeSamples.shift();
             if(videoPending){videoPending.frame.close();droppedFrames++}
-            videoPending={frame,sequence:entry.sequence};
-            if(videoDraw===undefined)videoDraw=requestAnimationFrame(paintVideo);
+            videoPending={frame,sequence:entry.sequence};lastDecodeAt=performance.now();
+            // Only one decoded picture is retained. RAF may pause on mobile while
+            // decoder output continues: receiver credit must not wait for painting.
+            ackVideo(entry.sequence);
+            if(videoDraw===undefined){
+              videoDraw=requestAnimationFrame(paintVideo);
+              videoPaintTimer=setTimeout(paintVideo,100);
+            }
           },
           error:()=>{if(epoch===videoEpoch&&g===generation&&videoDecoder===decoder){decodeErrors++;recoverVideo()}}
         });
         videoDecoder=decoder;decoder.configure(config);videoWaiting=false;
       }
-      if(videoWaiting||!videoDecoder){send({type:'frame-ack',sequence:packet.sequence});continue}
+      if(videoWaiting||!videoDecoder){ackVideo(packet.sequence);continue}
       if(videoDecoder.decodeQueueSize>=16||videoOutputs.size>=32){droppedFrames++;recoverVideo();return}
       const timestamp=packet.sequence*16667;
       videoOutputs.set(timestamp,{sequence:packet.sequence,at:performance.now()});
@@ -78,7 +88,7 @@ function receiveVideo(data){
   if(!sequence||sequence<=videoLastSequence||![2,3].includes(tag)||descriptionLength>4096||
     (key?descriptionLength<7:descriptionLength!==0)||11+descriptionLength>=data.byteLength){fallbackVideo(3);return}
   videoLastSequence=sequence;
-  if(videoWaiting&&!key&&!videoReading){droppedFrames++;send({type:'frame-ack',sequence});return}
+  if(videoWaiting&&!key&&!videoReading){droppedFrames++;ackVideo(sequence);return}
   receivedFrames++;receivedBytes+=data.byteLength;
   if(videoQueue.length>=32||videoBytes+data.byteLength>2*1024*1024){droppedFrames++;recoverVideo();return}
   videoQueue.push({data,sequence,key,descriptionLength});videoBytes+=data.byteLength;void readVideo();

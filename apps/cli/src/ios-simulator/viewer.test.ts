@@ -25,6 +25,7 @@ type Wheel = {
 function viewer(
   options: {
     videoDecoder?: unknown;
+    suspendRaf?: boolean;
     rotation?: number;
     rotateWithDevice?: boolean;
     fetch?: typeof fetch;
@@ -89,7 +90,7 @@ function viewer(
     bufferedAmount = 0;
     onopen = () => {};
     onerror = () => {};
-    onclose = () => {};
+    onclose = (_event?: { code: number }) => {};
     onmessage = (_event: { data: ArrayBuffer | string }) => {};
     constructor(readonly url: URL) {
       sockets.push(this);
@@ -117,7 +118,8 @@ function viewer(
     DataView,
     performance: { now: () => Date.now() },
     devicePixelRatio: 2,
-    requestAnimationFrame: (callback: () => void) => setTimeout(callback, 16),
+    requestAnimationFrame: (callback: () => void) =>
+      setTimeout(callback, options.suspendRaf ? 60000 : 16),
     cancelAnimationFrame: clearTimeout,
     AbortController,
     AbortSignal,
@@ -668,7 +670,7 @@ function fakeVideoCodec(supported = true) {
   return { Decoder, decoders, frames };
 }
 describe('viewer WebCodecs lifecycle', () => {
-  it('decodes dependent frames in order, coalesces only output and ACKs the painted picture', async () => {
+  it('decodes dependent frames in order, coalesces only output and ACKs decoded pictures independently of painting', async () => {
     const codec = fakeVideoCodec(),
       v = viewer({ videoDecoder: codec.Decoder });
     expect(v.sockets[0]?.url.searchParams.get('codec')).toBe('h264');
@@ -682,11 +684,10 @@ describe('viewer WebCodecs lifecycle', () => {
     d?.output(1);
     d?.output(2);
     expect(codec.frames.map((f) => f.closed)).toEqual([true, true, false]);
-    expect(v.wire.filter((m) => m.type === 'frame-ack')).toEqual([]);
+    expect(v.wire.filter((m) => m.type === 'frame-ack')).toEqual(
+      [1, 2, 3].map((sequence) => ({ type: 'frame-ack', sequence }))
+    );
     await vi.advanceTimersByTimeAsync(16);
-    expect(v.wire.filter((m) => m.type === 'frame-ack')).toEqual([
-      { type: 'frame-ack', sequence: 3 },
-    ]);
     expect(v.canvas.width).toBe(600);
     expect(codec.frames.every((f) => f.closed)).toBe(true);
     v.visibility(false);
@@ -707,15 +708,67 @@ describe('viewer WebCodecs lifecycle', () => {
     v.visibility(true);
     expect(v.sockets.at(-1)?.url.searchParams.has('codec')).toBe(false);
   });
-  it('falls back on native stream errors without reconnect loops', () => {
+  it('keeps decoded credit and bounded painting progressing while RAF is suspended', async () => {
+    const codec = fakeVideoCodec(),
+      v = viewer({ videoDecoder: codec.Decoder, suspendRaf: true });
+    v.receiveVideo(1, true);
+    await vi.advanceTimersByTimeAsync(0);
+    const decoder = codec.decoders[0];
+    for (let i = 0; i < 90; i++) {
+      if (i) v.receiveVideo(i + 1);
+      decoder?.output(i);
+      await vi.advanceTimersByTimeAsync(17);
+    }
+    expect(v.wire.filter((m) => m.type === 'frame-ack').at(-1)).toEqual({
+      type: 'frame-ack',
+      sequence: 90,
+    });
+    expect(codec.frames.filter((f) => !f.closed).length).toBeLessThanOrEqual(1);
+    expect(v.paints).toBeGreaterThan(10);
+    v.visibility(false);
+    const paints = v.paints;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(v.paints).toBe(paints);
+    expect(codec.frames.every((f) => f.closed)).toBe(true);
+  });
+  it('retries transient transport failures with H264 twice, then stops without JPEG downgrade', async () => {
     const codec = fakeVideoCodec(),
       v = viewer({ videoDecoder: codec.Decoder });
-    v.sockets[0]?.onerror();
+    for (let i = 0; i < 3; i++) {
+      v.sockets.at(-1)?.onerror();
+      await vi.advanceTimersByTimeAsync(2000);
+      if (i < 2) v.sockets.at(-1)?.onopen();
+    }
+    expect(v.sockets).toHaveLength(3);
+    expect(v.sockets.every((s) => s.url.searchParams.get('codec') === 'h264')).toBe(true);
+    expect(v.sockets.at(-1)?.readyState).toBe(3);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(v.sockets).toHaveLength(3);
+  });
+  it('cancels a pending transport retry when hidden and fences callbacks from the old socket', async () => {
+    const codec = fakeVideoCodec(),
+      v = viewer({ videoDecoder: codec.Decoder });
+    const old = v.sockets[0];
+    old?.onerror();
+    v.visibility(false);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(v.sockets).toHaveLength(1);
+    v.visibility(true);
+    v.sockets.at(-1)?.onopen();
+    old?.onclose({ code: 4002 });
     expect(v.sockets).toHaveLength(2);
-    expect(v.sockets[1]?.url.searchParams.has('codec')).toBe(false);
-    v.sockets[1]?.onerror();
+    expect(v.sockets.at(-1)?.url.searchParams.get('codec')).toBe('h264');
+  });
+  it('reconnects a silent H264 socket but treats an explicit codec rejection as fallback', async () => {
+    const codec = fakeVideoCodec(),
+      v = viewer({ videoDecoder: codec.Decoder });
+    await vi.advanceTimersByTimeAsync(8500);
     expect(v.sockets).toHaveLength(2);
-    expect(v.sockets[1]?.readyState).toBe(3);
+    expect(v.sockets[1]?.url.searchParams.get('codec')).toBe('h264');
+    v.sockets[1]?.onopen();
+    v.sockets[1]?.onclose({ code: 4002 });
+    expect(v.sockets).toHaveLength(3);
+    expect(v.sockets[2]?.url.searchParams.has('codec')).toBe(false);
   });
   it('requires a fresh keyframe after decoder overload and releases delayed output after hide', async () => {
     const codec = fakeVideoCodec(),
