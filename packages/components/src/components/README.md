@@ -85,6 +85,10 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
 - Sidebar toggle: `WebWorkspaceLayout` retains the full-width sidebar, animates
   its transform and the adjacent content width together, and honors reduced motion.
   `SidebarVisibilityGate` pauses sidebar-only sources while hidden. Compact
+  navigation uses [`CompactNavigationDialog`](compact-navigation-dialog.tsx) for
+  focus containment, nested dismissal and return focus; its content scope is inert
+  while open. See [desktop layout intent](../../../../specs/desktop-windows.md).
+  Compact
   presentation and settings navigation can still remount it: `LoroSidebar` saves
   its viewport offset by workspace in `atoms/sidebar-state.ts` and restores it
   before paint. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-26-sidebar-content-width-animation.md).
