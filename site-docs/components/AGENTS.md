@@ -16,6 +16,8 @@ Demo sequencing and screenshot notes live in
   `APP_OWNED_PATHS` (`/login`) stay plain anchors, because the client router owns no
   such route and would render the site 404 over the web app. Register new web-app
   paths there rather than patching one link.
+- RouterLink `to` receives only a pathname; pass search and hash separately so
+  `trailingSlash` cannot rewrite a fragment or query.
 
 ## Marketing landing
 
