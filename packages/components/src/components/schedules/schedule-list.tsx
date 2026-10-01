@@ -50,6 +50,7 @@ export function matchingScheduleRuntime(row: ScheduleRegistryRow, runtimes: Sche
 
 export type ScheduleRowContext = {
   machine: string;
+  timeZone?: string;
   agent: string;
   /** `null` for a chat-only schedule that is not bound to any project. */
   project: string | null;
@@ -146,7 +147,7 @@ function ScheduleListRow({
   onOpenSession?: (id: string) => void;
 }) {
   const { t, i18n } = useTranslation();
-  const zone = triggerTimeZone(row.trigger);
+  const zone = triggerTimeZone(row.trigger, context?.timeZone);
   const status = describeStatus(t, row.enabled, runtime?.queueState);
   const next = row.enabled ? runtime?.nextScheduledAt : undefined;
   // A run that is appended to a chat has that chat's workspace, so the
@@ -192,7 +193,7 @@ function ScheduleListRow({
       </button>
 
       <div className={cn(cell.frequency, 'min-w-0 truncate text-muted-foreground')}>
-        {describeTrigger(row.trigger, t, i18n.language)}
+        {describeTrigger(row.trigger, t, i18n.language, zone)}
       </div>
 
       <div className={cn(cell.next, 'flex min-w-0 items-center gap-2 text-muted-foreground')}>

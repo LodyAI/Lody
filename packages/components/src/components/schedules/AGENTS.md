@@ -58,10 +58,9 @@
   removes the popup. The prompt has no resize handle: it grows with its text
   from 4 to 6 lines (`[field-sizing:content]` + `lh` bounds), then scrolls.
   Field marks float (`absolute`) so they never narrow the text.
-- No time zone control. Wall-clock rules and one-off times are read on the owning
-  machine's clock (`MachineMeta.timeZone`, device zone for older CLIs) via
-  `withScheduleRecurrenceTimeZone` / `zonedLocalInputToInstant`. The preview names
-  the machine.
+- No time zone control. Input, preview and kind changes use `MachineMeta.timeZone`
+  (device zone for older CLIs). Once retains its instant across machine changes;
+  calendar rules retain wall time. [Time contract](../../../../../specs/schedule-time.md).
 - Frequency is a short menu, never cron: every day / weekday / week (days) / month
   (dates) / few hours / few minutes / once, plus Manual. A stored rule the menu
   cannot name is `unsupported`: read-only summary plus Replace, re-emitted
