@@ -37,7 +37,10 @@
   invalidate the reference chain too. Decoder ACK/recovery/config never renew leases.
   `viewer-h264.ts` probes the actual avcC configuration, bounds queues, closes all
   VideoFrames and fences async probes. ACK decoded H.264 output independently of RAF;
-  retain only one unpainted picture with a bounded paint timer. Codec failures fall back
+  retain only one unpainted picture with a bounded paint timer. Decoder pressure waits
+  for capacity; encoded overflow or missing decoded progress invalidates the chain.
+  Reset the recovery budget only after sustained decoded progress, never idle time or
+  one output. Fence dequeue callbacks and cancel progress timers on hide. Codec failures fall back
   once to MJPEG; transport failures retry H.264 at most twice per iframe, then stop.
   Hiding cancels retry/paint timers; reconnect never replays controls or touches.
 - `frame-flow.ts` owns sequenced JPEGs, cumulative receiver credit and the latest-only

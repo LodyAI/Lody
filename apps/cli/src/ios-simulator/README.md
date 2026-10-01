@@ -120,7 +120,13 @@ outstanding credit drains. Every IDR carries its avcC. The outstanding window is
 bounded by 64 frames and 64–256 KiB remotely (2 MiB locally; an oversized IDR alone).
 Bitrate pacing and receiver credit are separate from JPEG's size/RTT estimator.
 The browser bounds configuration/decode work and coalesces only decoded VideoFrames;
-all discarded GPU frames close. Three decoder recoveries are allowed before MJPEG.
+all discarded GPU frames close. At 16 pending decode requests or 32 pending outputs,
+submission waits for dequeue/output rather than resetting the reference chain. The
+encoded queue remains bounded to 32 packets / 2 MiB. Overflow or three seconds
+without decoded progress requests a fresh IDR; hiding cancels the watchdog.
+Three unsuccessful recoveries are allowed before MJPEG. Thirty decoded pictures
+spanning at least three seconds, with no output gap over one second, reset that
+budget. A lone successful picture or an idle interval does not.
 Unexpected reference layouts fail to the known JPEG path rather than guessing.
 
 MJPEG fallback uses viewport/DPR-based integer downsampling (1–4, DPR capped at 2),
@@ -156,6 +162,9 @@ idle, and copy the report while the panel remains open. Compare local and remote
 of the same screen. Static MJPEG screens correctly report zero FPS; H.264 emits small repeated deltas to keep the decoder progressing.
 
 - `codecH264`: 1 for H.264, 0 for MJPEG. `codecFallback`: 0 none/API absent, 1 unsupported configuration, 2 explicit native codec rejection, 3 decode/protocol failure. Transport errors never permanently downgrade the codec.
+- `codecFailure`: detail for fallback 3: 1 invalid packet, 2 invalid dimensions, 3 configuration/decode exception, 4 exhausted recovery budget.
+- `videoRecoveries` is total recovery attempts; `videoRecoveryStreak` is the current failure budget. `videoRecoveryReason`: 1 encoded queue overflow, 2 no decoded progress, 3 unmatched decoder output, 4 decoder error.
+- `videoBackpressure` counts submission pauses; `encodedQueue/encodedQueueBytes` expose bounded browser buffering. These are numeric diagnostics, never input contents or exception text.
 - `encoderBitrate`, `keyframeRequests`, `upstreamGaps`, `queuedFrames/queuedBytes` describe H.264 encoder control and pending reference chains. `decoderQueue` counts submitted pictures awaiting output.
 - `sourceFps/sourceMbps`: encoded pictures offered to the gateway, including idle stills, not
   capture/encoder timing. `idleRefreshFrames` counts sharp stills actually sent.

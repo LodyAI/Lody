@@ -28,7 +28,7 @@ function publishPerformance(){
   const age=at=>at?Math.max(0,now-at):0;
   const stats={...lastServer,rafPaints,timerPaints,paintScheduleMs:paintScheduleTotal/Math.max(1,paintScheduleCount),receiveGapMaxMs,transportRetries,transportFailure,transportCloseCode,
     messageIdleMs:age(lastMessageAt),frameIdleMs:age(lastFrameAt),decodeIdleMs:age(lastDecodeAt),paintIdleMs:age(lastPaintAt),
-    lastReceivedSequence:videoLastSequence,lastAckSequence,paintPending:videoPending?1:0,codecH264:usingH264?1:0,codecFallback,decoderQueue:videoOutputs.size,remote,receivedFps:(receivedFrames-sampleReceived)/seconds,
+    lastReceivedSequence:videoLastSequence,lastAckSequence,paintPending:videoPending?1:0,codecH264:usingH264?1:0,codecFallback,codecFailure,videoRecoveries,videoRecoveryReason,videoRecoveryStreak:videoRecovery,videoBackpressure,encodedQueue:videoQueue.length,encodedQueueBytes:videoBytes,decoderQueue:videoOutputs.size,remote,receivedFps:(receivedFrames-sampleReceived)/seconds,
     paintedFps:(paintedFrames-samplePainted)/seconds,receivedMbps:(receivedBytes-sampleBytes)*8/seconds/1e6,
     averageFrameBytes:(receivedBytes-sampleBytes)/Math.max(1,receivedFrames-sampleReceived),
     decodeMs:decodeSamples.reduce((a,b)=>a+b,0)/Math.max(1,decodeSamples.length),

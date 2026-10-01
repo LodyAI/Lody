@@ -639,6 +639,7 @@ function fakeVideoCodec(supported = true) {
       return { supported };
     }
     decodeQueueSize = 0;
+    ondequeue?: () => void;
     closed = false;
     chunks: Array<{ timestamp: number; type: string }> = [];
     constructor(readonly callbacks: { output(frame: unknown): void; error(): void }) {
@@ -778,7 +779,7 @@ describe('viewer WebCodecs lifecycle', () => {
     expect(v.sockets).toHaveLength(3);
     expect(v.sockets[2]?.url.searchParams.has('codec')).toBe(false);
   });
-  it('requires a fresh keyframe after decoder overload and releases delayed output after hide', async () => {
+  it('requires a fresh keyframe after a stalled decoder and releases delayed output after hide', async () => {
     const codec = fakeVideoCodec(),
       v = viewer({ videoDecoder: codec.Decoder });
     v.receiveVideo(1, true);
@@ -788,6 +789,8 @@ describe('viewer WebCodecs lifecycle', () => {
     first.decodeQueueSize = 16;
     v.receiveVideo(2);
     await vi.advanceTimersByTimeAsync(0);
+    expect(first.closed).toBe(false);
+    await vi.advanceTimersByTimeAsync(3000);
     expect(first.closed).toBe(true);
     expect(v.wire.some((m) => m.type === 'keyframe-request')).toBe(true);
     v.receiveVideo(3);
@@ -799,6 +802,105 @@ describe('viewer WebCodecs lifecycle', () => {
     codec.decoders[1]?.output(0);
     expect(codec.frames.at(-1)?.closed).toBe(true);
     expect(v.paints).toBe(0);
+  });
+  it('drains a bounded burst in reference order when decoder capacity becomes available', async () => {
+    const codec = fakeVideoCodec(),
+      v = viewer({ videoDecoder: codec.Decoder });
+    v.receiveVideo(1, true);
+    await vi.advanceTimersByTimeAsync(0);
+    const d = codec.decoders[0]!;
+    d.decodeQueueSize = 16;
+    for (let i = 2; i <= 33; i++) v.receiveVideo(i);
+    expect(d.chunks).toHaveLength(1);
+    expect(d.closed).toBe(false);
+    d.decodeQueueSize = 0;
+    d.ondequeue?.();
+    expect(d.chunks).toHaveLength(32);
+    d.output(0);
+    expect(d.chunks).toHaveLength(33);
+    for (let i = 1; i < 33; i++) d.output(i);
+    expect(d.chunks.map((c) => c.timestamp)).toEqual(
+      Array.from({ length: 33 }, (_, i) => (i + 1) * 16667)
+    );
+    expect(v.wire.filter((m) => m.type === 'keyframe-request')).toHaveLength(0);
+    expect(v.wire.filter((m) => m.type === 'frame-ack').at(-1)?.sequence).toBe(33);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(d.closed).toBe(false);
+    v.visibility(false);
+    expect(codec.frames.every((f) => f.closed)).toBe(true);
+  });
+  it('forgives separate recoveries only after sustained healthy decoded progress', async () => {
+    const codec = fakeVideoCodec(),
+      v = viewer({ videoDecoder: codec.Decoder });
+    let sequence = 0;
+    for (let cycle = 0; cycle < 5; cycle++) {
+      v.receiveVideo(++sequence, true);
+      await vi.advanceTimersByTimeAsync(0);
+      const d = codec.decoders.at(-1)!;
+      for (let i = 0; i < 32; i++) {
+        if (i) v.receiveVideo(++sequence);
+        d.output(i);
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      d.callbacks.error();
+      expect(v.sockets).toHaveLength(1);
+    }
+    v.visibility(false);
+    expect(
+      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
+    ).toMatchObject({
+      codecFallback: 0,
+      videoRecoveries: 5,
+      videoRecoveryStreak: 1,
+      videoRecoveryReason: 4,
+    });
+  });
+  it('bounds repeated failures even if each decoder outputs one picture', async () => {
+    const codec = fakeVideoCodec(),
+      v = viewer({ videoDecoder: codec.Decoder });
+    for (let i = 1; i <= 4; i++) {
+      v.receiveVideo(i, true);
+      await vi.advanceTimersByTimeAsync(0);
+      const d = codec.decoders.at(-1)!;
+      d.output(0);
+      d.callbacks.error();
+    }
+    expect(v.sockets).toHaveLength(2);
+    expect(v.sockets[1]?.url.searchParams.has('codec')).toBe(false);
+    expect(
+      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
+    ).toMatchObject({
+      codecFallback: 3,
+      codecFailure: 4,
+      videoRecoveryStreak: 4,
+      videoRecoveryReason: 4,
+    });
+  });
+  it('bounds encoded buffering and requires a new reference chain after overflow', async () => {
+    const codec = fakeVideoCodec(),
+      v = viewer({ videoDecoder: codec.Decoder });
+    v.receiveVideo(1, true);
+    await vi.advanceTimersByTimeAsync(0);
+    const d = codec.decoders[0]!;
+    d.decodeQueueSize = 16;
+    for (let i = 2; i <= 34; i++) v.receiveVideo(i);
+    expect(d.closed).toBe(true);
+    expect(v.wire.filter((m) => m.type === 'keyframe-request')).toHaveLength(1);
+    d.decodeQueueSize = 0;
+    d.ondequeue?.();
+    d.output(0);
+    expect(d.chunks).toHaveLength(1);
+    expect(codec.frames[0]?.closed).toBe(true);
+    v.receiveVideo(35);
+    v.receiveVideo(36, true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(codec.decoders).toHaveLength(2);
+    v.visibility(false);
+    await vi.advanceTimersByTimeAsync(12000);
+    expect(v.sockets).toHaveLength(1);
+    expect(
+      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
+    ).toMatchObject({ videoRecoveryReason: 1, encodedQueue: 0, encodedQueueBytes: 0 });
   });
   it('does not resurrect a decoder after an asynchronous configuration probe resolves on a hidden viewer', async () => {
     const codec = fakeVideoCodec();

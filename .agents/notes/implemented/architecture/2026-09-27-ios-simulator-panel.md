@@ -433,3 +433,24 @@ An isolated native iPhone 16/26.2 and Chromium run with injected 500 ms RTT and
 four samples painted about 22–38 FPS; bitrate adapted to 218 kbps and then recovered
 to 251 kbps. RAF scheduling averaged 3–5 ms and no timer fallback was needed. This
 checks adaptation on a constrained link, not the user's actual WAN or mobile renderer.
+
+### Burst-tolerant decoder recovery (2026-10-01)
+
+A later field report fell back with code 3 despite zero decoder errors, after several
+independent bursts. The viewer counted recoveries over the whole connection and
+reset a healthy reference chain immediately at decoder capacity. It now waits for
+dequeue/output while preserving encoded order and the existing 32-packet / 2 MiB
+queue bound. Overflow or three seconds without decoded progress still recovers via
+IDR. Three unsuccessful recoveries remain the limit; 30 outputs over three seconds
+with gaps no longer than one second clear the budget. One picture or idle time
+cannot forgive persistent failure. Reason-specific numeric diagnostics distinguish
+queue overflow, stalled output, decoder errors and protocol failures. Deterministic
+artifact tests cover burst drain, five separated healthy recoveries, persistent
+failure, overflow, stale callbacks and cleanup. This addresses confirmed recovery
+policy defects; the report alone does not locate the network batching stage.
+
+A real isolated iPhone 16/26.2 and Chromium test buffered incoming WebSocket messages
+into 750 ms batches for 45 seconds. H.264 stayed at 590×1278 with zero recoveries,
+fallbacks or decode errors despite over 2,500 submission pauses. Latest-only drawing
+was only 2–3.5 FPS in the final samples, as expected under deliberately batched
+delivery; this verifies burst tolerance, not smooth playback or the real WAN path.
