@@ -10,9 +10,15 @@ conversation text: your messages, the agent's replies, its thinking, and propose
 including the progress text and thinking folded inside a finished turn's collapsed work
 group.
 
-Tool calls are not searchable. Tool titles, file paths, JSON input/output, terminal output,
-and diffs stay out of the index so results only contain what was actually written in the
-conversation.
+Tool calls are not searchable: their titles, file paths, JSON input/output, terminal
+commands/output, and diffs stay out of the index. Structured plan checklists, goals, and
+worktree script output are also excluded. A file path or code snippet written in a message
+or proposed plan is still searchable as conversation text.
+
+This differs from [global session navigation search](/docs/keyboard-shortcuts#open-the-command-palette):
+the sidebar **Search** entry and `Cmd/Ctrl+K` open the command palette, which finds sessions
+by title, project/repository label, or branch name. It switches between sessions without
+searching their conversation text.
 
 ## Open search
 
