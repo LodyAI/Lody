@@ -175,3 +175,17 @@ iPhone/iPad 准备阶段由所属 worker 写入设备内 `com.apple.Preferences 
 此前 CSS 回退方案被替代：未启动和准备状态也使用真实 DeviceKit 资源。Baguette 已提供只读 chrome 命令，单独协商的外壳 RPC 只读取选中设备，不创建 viewer 或获取控制租约。静态图片限制为 256 KiB，去除路径和 URL，并使用有界服务缓存；响应中没有实时画面或凭证。界面释放对象 URL 并丢弃过时选择。无资源时只显示内容，不绘制机身。
 
 报告的授权 400 出现在 request-token 请求体校验，早于模拟器 RPC。当前共享协议接受签名的模拟器命令和接收方公钥；仍运行仅 Browser 协议的部署会拒绝它们。本地校验和明确后端更新提示将此问题与 Xcode 故障区分。报告实际使用哪个后端尚未确认，本次没有部署。
+
+### 远端延迟分析（2026-10-01；优化提议，尚未实现）
+
+持续画面路径是 SimulatorKit → Baguette JPEG 编码/WebSocket → 模拟器网关 → 已授权 LocalPreviewProxy → cloudflared → Cloudflare 网络 → viewer WebSocket → createImageBitmap/canvas。Convex 和工作区 RPC 负责生命周期授权，不转发画面和指针移动。指针沿 WebSocket 反向传输，离散控件通过同一隧道中的私有 HTTP 发送。
+
+固定版本 db17446e 的 streamWS 使用原始分辨率 scale=1、JPEG quality=0.5。StreamConfig 虽声明 fps=60，MJPEGStream 却没有执行限帧：每次变化的 surface 都排队编码，所以单发 set_fps 不会限制该路径。set_scale 已实现，但 Lody 目前没有发送，受限网关也不允许任意重配置。未变化的静态画面已经过滤。
+
+网关在下游 WebSocket bufferedAmount 达到 2 MiB 后丢弃新 JPEG，但该 socket 的对端是本地代理，并非浏览器。代理的无损 pause/send/resume 适合通用网页流量，却可能让旧视频积压在下游。viewer 单个可替换待解码帧只限制收到数据后的工作。Baguette 还有 4 MiB 编码后队列，MJPEG 编码调度队列没有 latest-only 上限。这些是源码风险，并非报告中 WAN 的实测积压。
+
+建议顺序：记录帧大小/帧率、解码绘制耗时、网关到浏览器 RTT/确认帧年龄、隧道实际协议；按显示尺寸降低远端分辨率；限制发送帧率并只保留一个可替换待发送 JPEG；用有界接收确认窗口限制发送，不能简单逐帧停等，否则帧率上限约为 RTT 的倒数；只有尺寸变化才重设 canvas，并合并 move、保留下压和抬起。若上游不变，原生编码前限帧和 latest-only 调度需更新维护的 runtime。
+
+下一步可协商 Baguette 已有 AVCC/H.264 与浏览器 WebCodecs，保留 MJPEG 回退。固定版本已使用低延迟编码和五秒 GOP，不能照搬 JPEG 的任意丢帧：需保留配置、用 IDR 恢复、限制解码队列。本质上不需要新增 npm 依赖。WebRTC/直连属于后续网络架构变化，增加信令和 STUN/TURN 成本。隧道底层使用 QUIC 不代表 WebSocket 视频成为不可靠数据报。
+
+验证范围：固定版本源码追踪、官方 Cloudflare 与浏览器 API 文档。没有测量报告中客户端的 RTT、吞吐、帧年龄或丢包，不声称已有性能提升；讨论中的带宽和排队耗时数字仅为示例。
