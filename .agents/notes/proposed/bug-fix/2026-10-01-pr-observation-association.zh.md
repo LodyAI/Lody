@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1192
 
 [English](2026-10-01-pr-observation-association.md)
 
@@ -40,7 +41,9 @@ Translation: current
 失败。组件测试从精简 owner 元数据走到 PR 选择和 root/child 动作门控。
 没有提交捕获的对话或生产夹具。
 
-poller 套件 193 项通过；PR 选择及动作套件 21 项通过。完整 CLI 套件 3289 项
+poller 套件 193 项通过；PR 选择及动作套件 21 项通过。更新到 `93545f01b` 后，
+poller 加命令凭据运行时、Git transport 和 gh-shim 套件共 266 项通过；UI 21 项、
+CLI 类型及改动文件格式检查再次通过。更新基线后未重跑完整门禁。完整 CLI 套件 3289 项
 通过、4 项跳过。根类型检查和 lint、i18n、格式化及 code-collab/platform/public
 边界检查通过。完整工作区检查未全绿：未改动的 `boot-shell.test.tsx` 存储不可用
 用例在 Node 26.10.0 下独立运行也失败；组件套件 4591 项通过、仅此 1 项失败，

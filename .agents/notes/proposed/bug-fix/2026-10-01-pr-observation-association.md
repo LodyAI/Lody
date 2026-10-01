@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1192
 
 [中文](2026-10-01-pr-observation-association.zh.md)
 
@@ -54,6 +55,10 @@ selection and action gating for root and child views. No captured transcripts or
 production fixtures are committed.
 
 The poller suite passes 193 tests; PR selection/action suites pass 21 tests.
+After rebasing onto `93545f01b`, the poller plus command credential-runtime,
+Git transport and gh-shim suites pass 266 tests; the 21 UI tests, CLI typecheck
+and changed-file formatting checks pass again. The full gate was not repeated
+after rebase.
 The full CLI suite passes 3289 tests with four skipped. Root typecheck and lint,
 i18n, formatting and code-collab/platform/public-boundary checks pass. Full
 workspace checking is not green: the unchanged `boot-shell.test.tsx` storage
