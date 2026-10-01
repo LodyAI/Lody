@@ -1440,14 +1440,16 @@ export const updatePermissionOutcomeInHistory = async (
   outcome: RequestPermissionResponse['outcome'],
   logger: Logger,
   backend?: Pick<SessionBackend, 'respondPermission'>
-) => {
+): Promise<boolean> => {
   // Domain command instead of a whole-history callback: the adapter locates the
   // matching tool call by request id and writes only that turn's outcome.
   const boundBackend = resolveBoundHistoryBackend(doc, backend);
   const result = boundBackend
     ? await boundBackend.respondPermission(requestId, outcome as PermissionOutcome)
     : await doc.sessionData.commands.respondPermission(requestId, outcome as PermissionOutcome);
-  if (!result) logger.debug(`Permission outcome for ${requestId} not applied: not_found`);
+  if (!result)
+    logger.debug(`Permission outcome for ${requestId} not applied: not_found_or_already_set`);
+  return result;
 };
 
 /**

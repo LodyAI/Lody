@@ -537,12 +537,14 @@ export class LodyOperationCoordinator {
       );
       const backend = await createSessionBackend(sessionDoc, meta);
       this.subscribeTarget(target.sessionId, sessionDoc, backend);
-      const [userRead, assistantRead] = await Promise.all([
-        backend.readTurn(target.userTurnId),
-        backend.readTurn(`assistant:${target.userTurnId}`),
-      ]);
-      if (userRead.state !== 'ready' || userRead.turn.role !== 'user') return;
-      const userTurn = userRead.turn;
+      const output = await backend.readTurnOutput(target.userTurnId);
+      const userTurn = output.find(
+        (entry) => entry.id === target.userTurnId && entry.role === 'user'
+      );
+      if (!userTurn) return;
+      const assistantRead = output.find(
+        (entry) => entry.role === 'assistant' && entry.userTurnId === target.userTurnId
+      );
       const key = getOperationProgressTargetKey(target);
       if (userTurn.status === 'failed') {
         statuses.set(key, 'failed');
@@ -552,11 +554,7 @@ export class LodyOperationCoordinator {
         statuses.set(key, 'cancelled');
         return;
       }
-      if (
-        assistantRead.state === 'ready' &&
-        assistantRead.turn.userTurnId === target.userTurnId &&
-        isTerminalAssistantEntry(assistantRead.turn as unknown as SessionHistoryInput)
-      ) {
+      if (assistantRead !== undefined && isTerminalAssistantEntry(assistantRead)) {
         statuses.set(key, 'succeeded');
         return;
       }
@@ -705,18 +703,16 @@ export class LodyOperationCoordinator {
     );
     const backend = await createSessionBackend(sessionDoc, metaRecord.meta as SessionMeta);
     this.subscribeTarget(item.target.sessionId, sessionDoc, backend);
-    const [userRead, assistantRead] = await Promise.all([
-      backend.readTurn(item.target.userTurnId),
-      backend.readTurn(`assistant:${item.target.userTurnId}`),
-    ]);
-    const userTurn =
-      userRead.state === 'ready' && userRead.turn.role === 'user' ? userRead.turn : undefined;
-    const assistant =
-      assistantRead.state === 'ready' &&
-      assistantRead.turn.userTurnId === item.target.userTurnId &&
-      isTerminalAssistantEntry(assistantRead.turn as unknown as SessionHistoryInput)
-        ? (assistantRead.turn as unknown as SessionHistoryInput)
-        : undefined;
+    const targetOutput = await backend.readTurnOutput(item.target.userTurnId);
+    const userTurn = targetOutput.find(
+      (entry) => entry.id === item.target.userTurnId && entry.role === 'user'
+    );
+    const assistant = targetOutput.find(
+      (entry) =>
+        entry.role === 'assistant' &&
+        entry.userTurnId === item.target.userTurnId &&
+        isTerminalAssistantEntry(entry)
+    );
     if (userTurn?.status === 'failed') {
       return {
         status: 'failed',
@@ -766,18 +762,16 @@ export class LodyOperationCoordinator {
     }
     const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const backend = await createSessionBackend(sessionDoc, metaRecord.meta as SessionMeta);
-    const [userRead, assistantRead] = await Promise.all([
-      backend.readTurn(userTurnId),
-      backend.readTurn(`assistant:${userTurnId}`),
-    ]);
-    const userTurn =
-      userRead.state === 'ready' && userRead.turn.role === 'user' ? userRead.turn : undefined;
+    const output = await backend.readTurnOutput(userTurnId);
+    const userTurn = output.find((entry) => entry.id === userTurnId && entry.role === 'user');
     if (!userTurn) return false;
     const meta = metaRecord.meta as SessionMeta;
-    const assistantIsTerminal =
-      assistantRead.state === 'ready' &&
-      assistantRead.turn.userTurnId === userTurnId &&
-      isTerminalAssistantEntry(assistantRead.turn as unknown as SessionHistoryInput);
+    const assistantIsTerminal = output.some(
+      (entry) =>
+        entry.role === 'assistant' &&
+        entry.userTurnId === userTurnId &&
+        isTerminalAssistantEntry(entry)
+    );
     return (
       meta.latestUserMsgId === userTurnId ||
       meta.processingUserMsgId === userTurnId ||

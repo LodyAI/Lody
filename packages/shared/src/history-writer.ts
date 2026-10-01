@@ -712,10 +712,16 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
           // Only the matching turn enters the validated local-update path. The
           // "write the outcome" rule itself is the shared planner, so the Loro
           // and in-memory backends cannot drift.
-          return writer.updateEntry(id, (turn) => {
-            applyRespondPermission(turn as unknown as Record<string, unknown>, requestId, outcome);
+          let applied = false;
+          const updated = writer.updateEntry(id, (turn) => {
+            applied = applyRespondPermission(
+              turn as unknown as Record<string, unknown>,
+              requestId,
+              outcome
+            );
             return turn;
           });
+          return updated && applied;
         }
       }
       return false;

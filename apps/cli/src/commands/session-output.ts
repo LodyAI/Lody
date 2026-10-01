@@ -253,8 +253,9 @@ export async function waitForTurnCompletion(options: {
       if (refreshRunning) return;
       refreshRunning = true;
       void (async () => {
-        while (refreshRequested && !settled) {
+        while (refreshRequested) {
           refreshRequested = false;
+          if (settled) break;
           try {
             inspect(await options.backend.readTurnOutput(options.userTurnId));
           } catch (error) {

@@ -997,6 +997,12 @@ export class LocalProjectHistorySyncService {
       await this.manager.repo.upsertDocMeta(roomId, {
         ...meta,
         status: SessionStatusFactory.initializing(),
+        // The shell is discoverable for retry, but must not look like a
+        // completed import if the process dies before history is committed.
+        externalHistory: {
+          ...meta.externalHistory!,
+          status: 'metadata_only',
+        },
       });
       const sessionDoc = await this.manager.getOrCreateSessionDoc(sessionId, {
         historyBackend: meta.historyBackend,

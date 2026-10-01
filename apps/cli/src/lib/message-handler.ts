@@ -8614,6 +8614,7 @@ export class MessageHandler {
       let unsubscribe: (() => void) | null = null;
       let unsubscribeConfig: (() => void) | undefined;
       let timeoutId: NodeJS.Timeout | null = null;
+      let resolving = false;
 
       const cleanup = () => {
         unsubscribeConfig?.();
@@ -8633,20 +8634,38 @@ export class MessageHandler {
         resolutionSource: string = 'client',
         persistOutcome = false
       ) => {
-        if (resolved) return;
-        resolved = true;
-        cleanup();
+        if (resolved || resolving) return;
+        resolving = true;
+        let effectiveOutcome = outcome;
 
         if (persistOutcome) {
           try {
-            await updatePermissionOutcomeInHistory(doc, requestId, outcome, this.logger, backend);
+            const applied = await updatePermissionOutcomeInHistory(
+              doc,
+              requestId,
+              outcome,
+              this.logger,
+              backend
+            );
+            if (!applied) {
+              // A user decision may have committed while the automatic path was
+              // awaiting its history read. The history writer is conditional;
+              // adopt the already-persisted outcome instead of returning the
+              // automatic result that lost the race.
+              const storedOutcome = await readStoredOutcome();
+              effectiveOutcome = storedOutcome ?? { outcome: 'cancelled' };
+            }
           } catch (error) {
             this.logger.error(
               `[${sessionId}] Failed to persist automatic permission outcome: ${formatErrorMessage(error)}`
             );
-            outcome = { outcome: 'cancelled' };
+            effectiveOutcome = { outcome: 'cancelled' };
           }
         }
+
+        resolved = true;
+        resolving = false;
+        cleanup();
 
         // Accumulate permission wait time for this session
         const requestStartTime = this.permissionRequestStartTimes.get(requestId);
@@ -8673,15 +8692,20 @@ export class MessageHandler {
           }
         }
 
-        this.logger.info(`Permission resolved for session ${sessionId}: ${outcome.outcome}`);
+        this.logger.info(
+          `Permission resolved for session ${sessionId}: ${effectiveOutcome.outcome}`
+        );
         this.logger.debug(
-          `[${sessionId}] Permission request ${requestId} resolved with outcome: ${outcome.outcome}`
+          `[${sessionId}] Permission request ${requestId} resolved with outcome: ${effectiveOutcome.outcome}`
         );
 
         if (!timedOutResolution) {
-          capturePermissionResolved(outcome.outcome === 'selected' ? 'allow' : 'cancelled', {
-            resolutionSource,
-          });
+          capturePermissionResolved(
+            effectiveOutcome.outcome === 'selected' ? 'allow' : 'cancelled',
+            {
+              resolutionSource,
+            }
+          );
         }
         if (notificationService) {
           void permissionInboxRecordPromise.then(async () => {
@@ -8728,11 +8752,21 @@ export class MessageHandler {
           );
         }
 
-        resolve({ outcome });
+        resolve({ outcome: effectiveOutcome });
       };
 
       // Check if outcome already exists (e.g., from a previous device). Reads the
       // exact assistant turn when its identity is available.
+      const readStoredOutcome = async (): Promise<
+        RequestPermissionResponse['outcome'] | undefined
+      > => {
+        const history = permissionTurnId
+          ? await backend
+              .readTurn(permissionTurnId)
+              .then((read) => (read.state === 'ready' ? [read.turn as SessionHistoryInput] : []))
+          : await backend.readHistory();
+        return findPermissionOutcomeInHistory(history, requestId);
+      };
       let checkingHistory = false;
       let historyCheckRequested = false;
       const checkForOutcome = async () => {
@@ -8745,14 +8779,7 @@ export class MessageHandler {
         try {
           do {
             historyCheckRequested = false;
-            const history = permissionTurnId
-              ? await backend
-                  .readTurn(permissionTurnId)
-                  .then((read) =>
-                    read.state === 'ready' ? [read.turn as SessionHistoryInput] : []
-                  )
-              : await backend.readHistory();
-            const outcome = findPermissionOutcomeInHistory(history, requestId);
+            const outcome = await readStoredOutcome();
             if (outcome) {
               await resolveWithOutcome(outcome);
               return;

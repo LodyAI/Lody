@@ -46,12 +46,21 @@ const createMirror = (initialState: MirrorState) => {
   };
 };
 
-const createSessionDoc = (mirror: ReturnType<typeof createMirror>) =>
-  withHistoryPort({
+const createSessionDoc = (mirror: ReturnType<typeof createMirror>) => {
+  const sessionDoc = withHistoryPort({
     sessionId: 'session-1' as SessionId,
     readHistorySnapshot: () => mirror.getState().history ?? [],
     subscribeAll: (listener: () => void) => mirror.subscribe(() => listener()),
   });
+  return {
+    sessionDoc,
+    backend: {
+      readTurnOutput: (userTurnId: string) =>
+        sessionDoc.sessionData.history.readTurnOutput(userTurnId),
+      subscribeHistory: (listener: () => void) => sessionDoc.subscribeAll(listener),
+    },
+  };
+};
 
 describe('session output helpers', () => {
   it('finds the assistant entry linked to the target user turn', () => {
@@ -118,6 +127,10 @@ describe('session output helpers', () => {
         sessionData: data,
         subscribeAll: (notify) => doc.subscribe(() => notify()),
       },
+      backend: {
+        readTurnOutput: (userTurnId: string) => data.history.readTurnOutput(userTurnId),
+        subscribeHistory: (listener: () => void) => doc.subscribe(() => listener()),
+      },
       userTurnId: 'u',
       outputMode: 'jsonl',
       timeoutMs: 0,
@@ -155,8 +168,10 @@ describe('session output helpers', () => {
     });
     const mirror = createMirror({ history: [userTurn] });
     const events: Array<Record<string, unknown>> = [];
+    const { sessionDoc, backend } = createSessionDoc(mirror);
     const completion = waitForTurnCompletion({
-      sessionDoc: createSessionDoc(mirror),
+      sessionDoc,
+      backend,
       userTurnId: 'user-1',
       outputMode: 'jsonl',
       timeoutMs: 5_000,
@@ -176,6 +191,7 @@ describe('session output helpers', () => {
         }),
       ],
     });
+    await Promise.resolve();
     mirror.setState({
       history: [
         userTurn,
@@ -187,6 +203,7 @@ describe('session output helpers', () => {
         }),
       ],
     });
+    await Promise.resolve();
     mirror.setState({
       history: [
         createHistoryEntry({
@@ -236,8 +253,10 @@ describe('session output helpers', () => {
       status: 'processing',
     });
     const mirror = createMirror({ history: [userTurn] });
+    const { sessionDoc, backend } = createSessionDoc(mirror);
     const completion = waitForTurnCompletion({
-      sessionDoc: createSessionDoc(mirror),
+      sessionDoc,
+      backend,
       userTurnId: 'user-1',
       outputMode: 'json',
       timeoutMs: 5_000,
@@ -289,8 +308,10 @@ describe('session output helpers', () => {
       endedAt: Date.parse('2026-03-27T00:00:01.000Z'),
     });
     const mirror = createMirror({ history: [userTurn] });
+    const { sessionDoc, backend } = createSessionDoc(mirror);
     const completion = waitForTurnCompletion({
-      sessionDoc: createSessionDoc(mirror),
+      sessionDoc,
+      backend,
       userTurnId: 'user-1',
       outputMode: 'json',
       timeoutMs: 5_000,
@@ -345,8 +366,10 @@ describe('session output helpers', () => {
       items: [{ type: 'text', text: 'hello' }],
     });
     const mirror = createMirror({ history: [userTurn] });
+    const { sessionDoc, backend } = createSessionDoc(mirror);
     const completion = waitForTurnCompletion({
-      sessionDoc: createSessionDoc(mirror),
+      sessionDoc,
+      backend,
       userTurnId: 'user-1',
       outputMode: 'json',
       timeoutMs: 5_000,
@@ -401,8 +424,10 @@ describe('session output helpers', () => {
         ],
       });
 
+      const { sessionDoc, backend } = createSessionDoc(mirror);
       const completion = waitForTurnCompletion({
-        sessionDoc: createSessionDoc(mirror),
+        sessionDoc,
+        backend,
         userTurnId: 'user-1',
         outputMode: 'json',
         timeoutMs: 1_000,

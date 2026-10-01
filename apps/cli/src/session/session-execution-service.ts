@@ -6094,11 +6094,11 @@ export class SessionExecutionService {
                   `[${sessionId}] Finalizing stale unfinished turn ${turnId} after stop request found no live runtime`
                 );
                 this.deps.clearSessionActivePresence(sessionId);
-                const backend = await createSessionBackend(
+                const finishBackend = await createSessionBackend(
                   sessionDoc,
                   await sessionDoc.getMetaState()
                 );
-                await backend.applyHistoryAction({
+                await finishBackend.applyHistoryAction({
                   kind: 'finish-assistant',
                   turnId,
                   endedAt: getServerNow(),
