@@ -19,8 +19,12 @@ Translation: current
 缺少凭据时可重试，凭据变更无需重启。无法查询 `/user` 不等于没有 PR 读取权限；
 无法识别身份的凭据共享保守的配额桶。
 
-只有存在托管关联端口时，发布前才必须完成托管关联。本地模式直接把成功观测写入
-所属会话元数据。缺少认证、仓库不可访问或查询失败，不得虚构 PR 或删除既有成功观测。
+本地及托管工作区都把经 GitHub 验证的精确分支 PR 观测写入所属会话元数据。
+托管 webhook 关联是独立效果：拒绝或传输失败不得隐藏已验证的 PR，也不得让
+Create PR 继续可用。关联重试遵循既有轮询门控；只有关联及发布均成功才记录
+发现成功时间。发布终态 PR 后，旧发现指纹不得阻止关联重试。关联成功仅在当前
+工作区运行时记忆；重启后，仍有资格发现的 PR 可以幂等地重新关联。
+缺少认证、仓库不可访问或查询失败，不得虚构 PR 或删除既有成功观测。
 登录和权限变更在后续满足冷却条件的轮询中生效。
 
 桌面端对本地与托管项目读取相同的元数据。没有托管 GitHub 集成时，PR 链接在浏览器
@@ -32,3 +36,4 @@ PR 发现与状态使用有界后台轮询，不为每个视图增加轮询循�
 - [协调器边界](../apps/cli/src/lib/pr-poller/AGENTS.md)
 - [工作目录 Git 观测](../apps/cli/src/session/workspace-git-service.ts)
 - [决策](../.agents/notes/implemented/feature/2026-09-24-local-github-pr-observation.zh.md)
+- [托管发布修正](../.agents/notes/proposed/bug-fix/2026-10-01-pr-observation-association.zh.md)
