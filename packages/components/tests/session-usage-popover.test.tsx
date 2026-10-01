@@ -69,7 +69,11 @@ describe('SessionUsagePopover', () => {
   };
 
   it('shows the used context percentage in the composer trigger', async () => {
-    await renderUsage({ contextWindowUsage: { size: 128_000, used: 32_000 } });
+    await renderUsage({
+      contextWindowUsage: { size: 128_000, used: 32_000 },
+      rateLimits,
+      showRateLimitWithoutContext: true,
+    });
 
     const trigger = container.querySelector('button');
     expect(trigger?.textContent).toBe('25%');
@@ -98,6 +102,52 @@ describe('SessionUsagePopover', () => {
 
     expect(container.querySelector('button')).toBeNull();
   });
+
+  it.each([
+    { fiveHourFirst: false, usedPercent: 11 },
+    { fiveHourFirst: true, usedPercent: 0 },
+  ])(
+    'prefers five-hour usage ($usedPercent%) with fiveHourFirst=$fiveHourFirst',
+    async ({ fiveHourFirst, usedPercent }) => {
+      const key = getRateLimitEntryKey('codex', 'codex');
+      const weekly = rateLimits[key]!.windows[0]!;
+      const fiveHour = {
+        usedPercent,
+        windowDurationSeconds: 5 * 60 * 60,
+        resetsAtEpochSeconds: null,
+      };
+      const limits: MachineRateLimits = {
+        [key]: {
+          ...rateLimits[key]!,
+          windows: fiveHourFirst ? [fiveHour, weekly] : [weekly, fiveHour],
+        },
+      };
+      await renderUsage({ rateLimits: limits, showRateLimitWithoutContext: true });
+
+      const trigger = container.querySelector('button');
+      expect(trigger?.textContent).toBe(`${usedPercent}%`);
+      expect(trigger?.getAttribute('aria-label')).toBe(`Open usage details, ${usedPercent}% used`);
+      expect(trigger?.getAttribute('title')).toBe(`Open usage details, ${usedPercent}% used`);
+
+      await act(async () => {
+        trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const meters = document.body
+        .querySelector('[aria-label="Usage"]')
+        ?.querySelectorAll('[role="progressbar"]');
+      expect(Array.from(meters ?? []).map((meter) => meter.getAttribute('aria-label'))).toEqual([
+        'Weekly: 29% used',
+        `5 hours: ${usedPercent}% used`,
+      ]);
+
+      await renderUsage({
+        contextWindowUsage: { size: 128_000, used: 32_000 },
+        rateLimits: limits,
+        showRateLimitWithoutContext: true,
+      });
+      expect(container.querySelector('button')?.textContent).toBe('25%');
+    }
+  );
 
   it('shows Fable weekly as a distinct meter beside shared quotas', async () => {
     await renderUsage({
