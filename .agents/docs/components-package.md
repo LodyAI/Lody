@@ -64,6 +64,13 @@ primitives into product surfaces and may add layout or interaction constraints,
 while the primitive's props remain the owner of its visual variant, size, tone,
 and shape.
 
+Settings' `CompactRow` keeps its label and helper in separate text nodes. Its
+optional `labelId` and `helperId` let a caller associate a control with those
+nodes through `aria-labelledby` and `aria-describedby`; visual adjacency alone
+does not name a control. The Preferences switches use this association with the
+existing translated copy. See the
+[decision and browser regression](../notes/implemented/bug-fix/2026-10-01-preferences-switch-names.md).
+
 `--input` is the theme's raw `input.background` and doubles as a muted chip/composer
 slab, so in a light theme it can sit below the page color and read as a disabled field.
 `--input-field` is derived in `lib/vscode-theme/vscode-theme-css.ts` as the lighter of

@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useId, useMemo, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   GetNotificationPermissionStatusResult,
@@ -126,6 +126,11 @@ function useElectronEnabledSetting(
  */
 export function GeneralSettingsComponent() {
   const { t } = useTranslation();
+  const preferenceId = useId();
+  const codeChangesLabelId = `${preferenceId}-code-changes-label`;
+  const codeChangesHelperId = `${preferenceId}-code-changes-helper`;
+  const notificationLabelId = `${preferenceId}-notification-label`;
+  const notificationHelperId = `${preferenceId}-notification-helper`;
   const githubIntegrationAvailable = useAppCapability('githubIntegration');
   const postHog = usePostHog();
   const user = useAtomValue(userAtom);
@@ -709,6 +714,8 @@ export function GeneralSettingsComponent() {
             </div>
           ) : null}
           <CompactRow
+            labelId={codeChangesLabelId}
+            helperId={codeChangesHelperId}
             label={t(
               'settings.general.sessions.codeOnlyLineChanges.label',
               'Show code-only line changes'
@@ -720,11 +727,15 @@ export function GeneralSettingsComponent() {
           >
             <Switch
               id="session-sidebar-code-changes-only-toggle"
+              aria-labelledby={codeChangesLabelId}
+              aria-describedby={codeChangesHelperId}
               checked={sessionSidebarCodeChangesOnly}
               onCheckedChange={setSessionSidebarCodeChangesOnly}
             />
           </CompactRow>
           <CompactRow
+            labelId={notificationLabelId}
+            helperId={notificationHelperId}
             label={
               isElectron
                 ? t('settings.notifications.enableToggleDesktop')
@@ -740,6 +751,8 @@ export function GeneralSettingsComponent() {
             ) : (
               <Switch
                 id="notification-toggle"
+                aria-labelledby={notificationLabelId}
+                aria-describedby={notificationProblem != null ? notificationHelperId : undefined}
                 checked={notificationsEnabled}
                 disabled={isSwitchDisabled}
                 onCheckedChange={(checked) => {

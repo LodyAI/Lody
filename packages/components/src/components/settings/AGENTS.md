@@ -17,8 +17,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   `settings-page-header.tsx`, never its own title. Groups are flat in `settingsFlat`
   (pane, project window), else cards. Group by meaning, no one-row groups; a helper
   says what the label cannot. Split master/detail by fill; type: `type.stylex.ts`.
-- Model pages on Preferences: each line a `CompactRow`, one answer (value, Switch,
-  Select/menu, button); records too (name, state line; more in its menu/detail).
+- Preferences grammar: `CompactRow`, one answer; records: name, state, menu/detail.
+  Its four switches bind translated labels and rendered helpers.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
