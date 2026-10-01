@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1198](https://github.com/LodyAI/Lody/pull/1198)
 
 [中文](2026-10-01-narrow-settings-panel.zh.md)
 
