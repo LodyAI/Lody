@@ -41,8 +41,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   `listWorkspaceReposWithStatus` to decide whether GitHub exists.
 - Settings rows (`compact-layout.tsx`) give labels remaining width and controls their
   content width. Never size columns from viewport breakpoints: the panel
-  clips controls. Desktop Settings navigation uses panel width; header actions wrap,
-  preserving categories and page state.
+  clips controls. Desktop Settings nav follows panel width; keep categories/drafts,
+  reveal active tabs and wrap actions.
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes

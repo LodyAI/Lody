@@ -1,4 +1,6 @@
 {
+  "settings.navigation.previousCategories": "向前查看设置分类",
+  "settings.navigation.nextCategories": "向后查看设置分类",
   "settings.agent.codex.authentication": "认证方式",
   "settings.agent.codex.storage": "凭据仅保存在所选机器上。每个提供商配置使用独立账户。",
   "settings.agent.codex.customApi": "自定义 API",
