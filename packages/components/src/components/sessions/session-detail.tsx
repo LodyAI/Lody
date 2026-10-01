@@ -2095,6 +2095,23 @@ const SessionDetail = ({
     [closedConversationIds, t]
   );
 
+  // A simulator screenshot joins the composer as an ordinary attachment; the
+  // person decides when, and whether, it is sent.
+  const handleAttachSimulatorScreenshot = useCallback(
+    (targetSessionId: SessionId, file: File) => {
+      const chatRef = chatRefsMap.current.get(targetSessionId);
+      if (
+        closedConversationIds.has(targetSessionId) ||
+        !chatRef ||
+        !('addAttachmentFiles' in chatRef)
+      ) {
+        return false;
+      }
+      return chatRef.addAttachmentFiles([file]);
+    },
+    [closedConversationIds]
+  );
+
   const handleAddPreviewAnnotationToChat = useCallback(
     (targetSessionId: SessionId, reference: VisualAnnotationReferencePayload) => {
       const chatRef = chatRefsMap.current.get(targetSessionId);
@@ -6146,6 +6163,10 @@ const SessionDetail = ({
                 <SessionIosSimulatorPanel
                   session={activeIosSimulatorSession}
                   active={Boolean(urlSimulator)}
+                  controlsLayout="menu"
+                  onAttachScreenshot={(file) =>
+                    handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
+                  }
                   leadingSlot={
                     <Button
                       type="button"
@@ -6288,6 +6309,9 @@ const SessionDetail = ({
           <SessionIosSimulatorPanel
             session={activeIosSimulatorSession}
             active={activeSidebarTab === 'ios-simulator' && isSidebarVisible}
+            onAttachScreenshot={(file) =>
+              handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
+            }
           />
         </div>
       ) : null}

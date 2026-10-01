@@ -258,10 +258,13 @@ export class IosSimulatorService {
         signal.removeEventListener('abort', cancelProcessStartup);
       }
       void process.closed.then(() => op.abort.abort());
+      const nativeProcess = process;
       gateway = await (this.deps.gateway ?? createSimulatorGateway)({
         operationId: op.state.operationId,
         udid: device.udid,
         port: process.port,
+        signal,
+        hostControl: (control) => nativeProcess.control(device.udid, control),
         active,
         renew,
       });

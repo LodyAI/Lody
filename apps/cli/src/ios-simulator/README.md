@@ -7,9 +7,18 @@ union. Browser owns a separate service and separate transport instances.
 
 The pinned Baguette executable runs in an IPC-owned worker. The native HTTP API
 stays on loopback; only the bound device's MJPEG stream and validated single-pointer
-input cross `gateway.ts`. The gateway serves the fixed `viewer.ts` artifact. The
+input cross `gateway.ts`, along with typed device controls on the private preview
+connection. `device-controls.ts` maps these controls to fixed native endpoints;
+text writes the simulator clipboard through the IPC worker, then sends Cmd-V.
+`host-controls.ts` owns fixed xcrun commands for pasteboard, appearance, shake and deep links,
+joining their exit on cancellation. Baguette handles HID only; its Foundation subprocess
+paths are not used because killing the server does not reap their separate process groups. The gateway serves the fixed `viewer.ts` artifact. The
 React iframe validates source/origin/operation before accepting viewer state;
-frames never enter React, RPC, or synchronized documents.
+live frames never enter React, RPC, or synchronized documents. An explicitly requested
+screenshot transfers one bounded PNG to the parent for saving or staging as a composer
+attachment; capture never sends a message automatically. Input text and deep links also
+stay out of workspace RPC. Device controls advertise `iosSimulatorControls: 1` independently
+of lifecycle protocol compatibility.
 
 ## Runtime artifact
 
@@ -35,7 +44,7 @@ Supported native artifact: Apple Silicon, macOS 15+, Xcode and an installed iOS
 runtime. Intel has no pinned artifact. Local smoke evidence used Xcode 26.6 / iOS
 26.5 and verified device enumeration, managed installation, real JPEG delivery and
 preview cleanup. Full Electron sidebar, remote Quick Tunnel and mobile E2E remain
-unverified. H.264, multitouch, keyboard and device configuration are later work.
+unverified. H.264, multitouch, physical-key forwarding and advanced device configuration are later work.
 
 ## Maintaining the patched build
 

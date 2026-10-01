@@ -191,6 +191,7 @@ describe('MessageHandler machine registration', () => {
       acpAuthenticationInteractions: 2,
       previewControl: 1,
       iosSimulator: 1,
+      iosSimulatorControls: 1,
       localProjectRemoval: 1,
       localProjectHistoryProvider: 1,
       localFileResources: 1,

@@ -2,6 +2,56 @@ import { z } from 'zod';
 import { RpcSecretEnvelopeSchema } from './rpc-secret';
 
 const id = z.string().min(1).max(200);
+/** Private preview plane only: text and deep links must never enter workspace RPC streams. */
+export const IosSimulatorDeviceControlSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('button'),
+      button: z.enum(['home', 'app-switcher', 'lock', 'volume-up', 'volume-down', 'action']),
+    })
+    .strict(),
+  z.object({ kind: z.literal('rotate'), direction: z.enum(['left', 'right']) }).strict(),
+  z.object({ kind: z.literal('shake') }).strict(),
+  z.object({ kind: z.literal('text'), text: z.string().min(1).max(16000) }).strict(),
+  z.object({ kind: z.literal('appearance'), appearance: z.enum(['light', 'dark']) }).strict(),
+  z
+    .object({
+      kind: z.literal('open-url'),
+      url: z
+        .string()
+        .min(1)
+        .max(8192)
+        .refine((value) => {
+          for (const char of value) {
+            if (char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127) return false;
+          }
+          try {
+            return !['javascript:', 'vbscript:', 'data:', 'file:', 'blob:', 'about:'].includes(
+              new URL(value).protocol
+            );
+          } catch {
+            return false;
+          }
+        }),
+    })
+    .strict(),
+]);
+export type IosSimulatorDeviceControl = z.infer<typeof IosSimulatorDeviceControlSchema>;
+export const IosSimulatorDeviceControlRequestSchema = z
+  .object({
+    operationId: id,
+    requestId: id,
+    control: IosSimulatorDeviceControlSchema,
+  })
+  .strict();
+export const IosSimulatorDeviceControlResultSchema = z
+  .object({
+    success: z.boolean(),
+    rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]).optional(),
+    error: z.enum(['unavailable', 'unsupported', 'failed', 'busy']).optional(),
+  })
+  .strict();
+export type IosSimulatorDeviceControlResult = z.infer<typeof IosSimulatorDeviceControlResultSchema>;
 export const IosSimulatorUdidSchema = z.string().uuid();
 /** Lifecycle commands are separate from media/input. No caller-supplied ports or commands. */
 export const IosSimulatorCommandSchema = z.discriminatedUnion('action', [

@@ -2,12 +2,56 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
+import { IosSimulatorDeviceControlSchema } from '@lody/shared';
+import { runSimulatorHostControl } from './host-controls';
 
 // IPC is ownership: losing the daemon always reaps the native server.
 const abort = new AbortController();
 const stop = () => abort.abort();
 process.on('disconnect', stop);
-process.on('message', stop);
+let pendingHostControl: Promise<void> | undefined;
+const onMessage = (raw: unknown) => {
+  const request = z
+    .object({
+      type: z.literal('control'),
+      id: z.number().int().positive(),
+      udid: z.string().uuid(),
+      control: IosSimulatorDeviceControlSchema,
+    })
+    .strict()
+    .safeParse(raw);
+  if (!request.success || pendingHostControl || abort.signal.aborted) {
+    stop();
+    return;
+  }
+  const { id, udid, control } = request.data;
+  if (
+    control.kind !== 'text' &&
+    control.kind !== 'appearance' &&
+    control.kind !== 'open-url' &&
+    control.kind !== 'shake'
+  ) {
+    stop();
+    return;
+  }
+  pendingHostControl = runSimulatorHostControl(
+    udid,
+    control,
+    AbortSignal.any([abort.signal, AbortSignal.timeout(10000)])
+  )
+    .then(
+      () => {
+        if (process.connected) process.send?.({ type: 'control-result', id, success: true });
+      },
+      () => {
+        if (process.connected) process.send?.({ type: 'control-result', id, success: false });
+      }
+    )
+    .finally(() => {
+      pendingHostControl = undefined;
+    });
+};
+process.on('message', onMessage);
 process.once('SIGTERM', stop);
 process.once('SIGINT', stop);
 let child: ReturnType<typeof spawn> | undefined;
@@ -28,6 +72,8 @@ try {
   );
   abort.signal.throwIfAborted();
   child = spawn(binary, ['serve', '--host', '127.0.0.1', '--port', String(port), '--no-plugins'], {
+    // Isolate the native server and its xcrun descendants in our own process group.
+    detached: true,
     stdio: 'ignore',
     env: process.env,
   });
@@ -63,13 +109,31 @@ try {
 } catch {
   process.exitCode = 1;
 } finally {
-  if (child && child.exitCode === null && child.signalCode === null) {
-    child.kill('SIGTERM');
-    const kill = setTimeout(() => child?.kill('SIGKILL'), 3000);
+  stop();
+  await pendingHostControl;
+  if (child?.pid !== undefined) {
+    const group = -child.pid;
+    const signalGroup = (signal: NodeJS.Signals | 0): boolean => {
+      try {
+        process.kill(group, signal);
+        return true;
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return false;
+        throw error;
+      }
+    };
+    // Parent exit alone is insufficient: an in-flight simctl can outlive Baguette.
+    // Keep IPC ownership until the whole group is gone, including forced cleanup.
+    if (signalGroup('SIGTERM')) {
+      const killAt = Date.now() + 3000;
+      while (signalGroup(0)) {
+        if (Date.now() >= killAt) signalGroup('SIGKILL');
+        await delay(25);
+      }
+    }
     await exited;
-    clearTimeout(kill);
   }
   process.removeListener('disconnect', stop);
-  process.removeListener('message', stop);
+  process.removeListener('message', onMessage);
   if (process.connected) process.disconnect();
 }

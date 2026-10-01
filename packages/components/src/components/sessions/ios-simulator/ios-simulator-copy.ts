@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getIosSimulatorDeviceAction } from '@/lib/ios-simulator/ios-simulator-model';
+import type { IosSimulatorHardwareButton } from '@/lib/ios-simulator/ios-simulator-hardware';
 import type {
   IosSimulatorDeviceEntry,
   IosSimulatorError,
@@ -150,6 +151,32 @@ export function useIosSimulatorErrorCopy() {
               'Try again, or copy the diagnostics for a bug report.'
             ),
           };
+      }
+    },
+    [t]
+  );
+}
+
+/** What a button on the device's exterior is, and what pressing it does. */
+export function useIosSimulatorButtonLabel() {
+  const { t } = useTranslation();
+  return useCallback(
+    (button: IosSimulatorHardwareButton): string => {
+      switch (button.id) {
+        case 'home':
+          return t('sessions.iosSimulator.hardware.home', 'Home button');
+        case 'crown':
+          return t('sessions.iosSimulator.hardware.crown', 'Digital Crown — Home');
+        case 'action':
+          return t('sessions.iosSimulator.hardware.action', 'Action button');
+        case 'volume-up':
+          return t('sessions.iosSimulator.hardware.volumeUp', 'Volume up');
+        case 'volume-down':
+          return t('sessions.iosSimulator.hardware.volumeDown', 'Volume down');
+        case 'top':
+          return t('sessions.iosSimulator.hardware.top', 'Top button — Lock');
+        default:
+          return t('sessions.iosSimulator.hardware.side', 'Side button — Lock');
       }
     },
     [t]

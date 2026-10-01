@@ -63,6 +63,7 @@ function fixture(workspaceId = 'w', leases = new SimulatorControlLeases(), boot 
       return {
         port: 1,
         closed: processClosed.promise,
+        control: async () => {},
         stop: async () => {
           processClosed.resolve();
         },

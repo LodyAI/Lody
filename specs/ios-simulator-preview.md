@@ -13,7 +13,17 @@ A stopped device offers Start and preview; a running device offers Preview.
 The panel contains a device selector, connection status and an aspect-fit interactive
 screen. Connection details offer cancellation, retry and stop. Hide addresses, browser
 navigation and annotation. Simulator preview has no sharing controls, public links or
-anonymous viewing. Custom hardware/configuration controls are future typed capabilities.
+anonymous viewing. A second desktop toolbar row contains Home, app switcher, lock,
+rotation, shake and device-supported volume/Action controls. Mobile places actions in
+More. Explicit text input, simulator deep links and light/dark settings use the private
+preview connection, never retained workspace RPC. New controls require the independent
+`iosSimulatorControls: 1` capability.
+
+Render a dependency-free hardware shell around the screen, matching its device family
+and actual display aspect/rotation; do not cover streamed pixels with another notch or
+Home indicator. Fit and expanded views are local UI state. Capture can save a PNG or
+attach it to the current composer draft; it never automatically sends a message.
+Only the bound iframe and matching request may return bounded screenshot bytes.
 
 Same-machine Electron uses direct local transport, including offline operation. Remote
 viewing by the authorized session uses Quick Tunnel internally. Both routes authorize
@@ -36,7 +46,13 @@ in-memory runtime state; selected-device preferences are client-local and scoped
 account/workspace/session/machine. Credentials never enter session documents.
 
 The initial stream uses MJPEG with bounded decoding/backpressure and single-pointer
-input. H.264, multi-touch, keyboard and device configuration require separate acceptance.
+input, including mouse drag and wheel/trackpad scrolling translated into a finger drag.
+Scroll input and pointer drag never hold separate simultaneous touches; hiding,
+disconnecting or losing focus releases the active gesture.
+Dragging upward from the bottom edge carries a system-edge gesture for Home;
+ordinary wheel scrolling remains an in-app gesture.
+H.264, multi-touch, physical-key forwarding and advanced device configuration remain later work.
+Each new operation acknowledges a portrait baseline; reconnecting the same operation preserves rotation.
 Readiness separates preparation/transport from the first decoded frame.
 
 Agents use `lody_ios_simulator_preview` for native apps, separate from the web tool

@@ -30,6 +30,8 @@ export type IosSimulatorDeviceEntry = {
   udid: string;
   name: string;
   runtimeKey: string;
+  /** The raw device type, e.g. `…SimDeviceType.iPhone-16-Pro`; the exterior reads it. */
+  deviceType: string;
   family: IosSimulatorDeviceFamily;
   state: IosSimulatorDeviceState;
   available: boolean;

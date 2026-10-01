@@ -7,17 +7,32 @@
   Acquire before boot/download, revoke inputs and join cleanup before release. A stale
   operation must never release a replacement lease. Do not persist devices, frames,
   connection credentials, or heartbeats in Repo metadata.
-- `devices.ts` is the only simctl adapter. Validate foreign JSON and UDIDs; invoke
-  argv directly. Listing never downloads a runtime, starts devices or opens a tunnel.
-- `gateway.ts` exposes only the fixed viewer and the bound device's stream. It is
-  behind the authenticated preview proxy; never forward arbitrary Baguette routes or
+- `devices.ts` owns simctl listing/boot; `host-controls.ts` owns fixed device controls.
+  Validate foreign JSON and UDIDs; invoke argv directly. Listing never downloads a runtime, starts devices or opens a tunnel.
+- `gateway.ts` exposes only the fixed viewer, bound device stream and typed private
+  control endpoint. It is behind the authenticated preview proxy; never forward arbitrary Baguette routes or
   messages. Validate every input and active lease. Frames/status probes do not renew
   idle expiry; only explicit viewer heartbeat or valid input does.
+- `device-controls.ts` maps the shared control union to fixed loopback routes. Text
+  uses `host-controls.ts` to write the device clipboard, then sends acknowledged Cmd-V.
+  The IPC worker directly owns fixed simctl/devicectl commands for text, appearance,
+  shake and deep links; abort joins child close before release. Do not delegate these to
+  Baguette's Foundation.Process paths: those children create separate process groups
+  and can outlive the native server. Control bodies/errors never enter logs or RPC.
+  Negotiate `iosSimulatorControls: 1`.
 - `viewer.ts` is the fixed iframe artifact, without React or annotation injection.
   Parent commands bind source, origin and operation id. Decode at most one JPEG
   with one replaceable pending frame; release touches on blur/cancel/disconnect.
+  Wheel/trackpad scrolling synthesizes the same single-touch protocol; it must
+  release on idle and before pointer takeover, without widening the gateway allowlist.
+  Pointer gestures starting in the bottom 7% retain `edge: bottom` until release.
+  The gateway accepts only that edge, validates its start band and rejects changes
+  mid-gesture; disconnect cleanup preserves the edge on the final touch-up.
+  Capture transfers bounded PNG bytes only to the exact parent that requested it;
+  never send pixels through state messages. Rotation applies to display, inverse
+  pointer coordinates and capture; changing orientation alone does not resize raw frames.
 - `baguette-worker.ts` owns the native process through an IPC lease. Owner loss must
-  reap it; never terminate the worker as normal cleanup. All build compositions emit
+  reap it and join pending host controls; never terminate the worker as normal cleanup. All build compositions emit
   the same sibling worker entry. No user simulator is shut down during cleanup.
 - Keep Baguette version, artifact digest and executable digest pinned in the manifest;
   no PATH/Homebrew discovery or upstream fallback. Fetch through the platform runtime

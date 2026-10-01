@@ -10,7 +10,7 @@ Decision and rationale:
 - The tab exists only when the Session's TARGET machine is a Mac; read that and the
   protocol capability through `getIosSimulatorPanelAvailability` only. An old Mac keeps
   the tab and asks for an update without calling it.
-- Every machine call is `runtime.requestIosSimulatorControl` (`ios-simulator/control`).
+- Lifecycle calls are `runtime.requestIosSimulatorControl` (`ios-simulator/control`).
   The UI never builds proofs or tokens, never displays `viewerUrl` or a tunnel address,
   and maps wire DTOs only in `lib/ios-simulator/ios-simulator-model.ts`.
 - The viewer keeps its own origin for the exact-origin handshake, so a `viewerUrl` that
@@ -24,3 +24,18 @@ Decision and rationale:
   replacements. Preparation polls and Stop stay bound to their exact operation id.
 - Same-machine Electron is never blocked by cloud presence reporting its machine
   offline.
+- Disable browser selection, native dragging and iOS touch callouts on the viewer
+  surface (outer frame and inner CLI canvas document); keep this scoped to the screen.
+
+- Discrete controls and captures use the existing private viewer capability, not
+  lifecycle RPC. Bind replies to the exact iframe window, origin, operation and
+  request id; bound waits and cancel pending replies on navigation/unmount.
+- Viewer state is the sole rotation authority: width/height are display-oriented,
+  and `rotation` is the acknowledged absolute angle. Never rotate again on a
+  control acknowledgement.
+- Hardware outlines and buttons stay outside streamed pixels. Use deviceType as
+  model identity, with device name only as fallback; no duplicate notch/island.
+- Desktop controls use a second toolbar row and fold with width; mobile puts them
+  in More. Unsupported hardware buttons stay disabled.
+- Screenshots are bounded PNG bytes from the viewer; attaching targets the original
+  Session composer and never sends a message. No public preview/share action.

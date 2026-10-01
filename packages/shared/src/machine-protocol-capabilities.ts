@@ -22,6 +22,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
   iosSimulator: 'iosSimulator',
+  iosSimulatorControls: 'iosSimulatorControls',
   piExtensions: 'piExtensions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
 } as const;
@@ -39,6 +40,7 @@ export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
 export const PREVIEW_CONTROL_PROTOCOL_VERSION = 1;
 export const IOS_SIMULATOR_PROTOCOL_VERSION = 1;
+export const IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION = 1;
 export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 export const ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION = 1;
 
@@ -95,6 +97,7 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.previewControl]: PREVIEW_CONTROL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.iosSimulator]: IOS_SIMULATOR_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls]: IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpCapabilityRefreshCache]:
     ACP_CAPABILITY_REFRESH_CACHE_PROTOCOL_VERSION,
 };
@@ -254,6 +257,16 @@ export function machineSupportsIosSimulatorProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.iosSimulator,
     IOS_SIMULATOR_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsIosSimulatorControls(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.iosSimulatorControls,
+    IOS_SIMULATOR_CONTROLS_PROTOCOL_VERSION
   );
 }
 

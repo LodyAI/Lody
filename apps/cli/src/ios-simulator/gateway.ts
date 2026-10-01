@@ -1,9 +1,15 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
 import { simulatorViewerHtml } from './viewer';
+import {
+  IosSimulatorDeviceControlRequestSchema,
+  type IosSimulatorDeviceControlResult,
+} from '@lody/shared';
+import { createSimulatorDeviceControls } from './device-controls';
+import type { SimulatorHostControl } from './host-controls';
 
 const Input = z
   .object({
@@ -12,6 +18,7 @@ const Input = z
     y: z.number().finite().min(0).max(16384),
     width: z.number().int().min(1).max(16384),
     height: z.number().int().min(1).max(16384),
+    edge: z.literal('bottom').optional(),
   })
   .strict()
   .refine((v) => v.x <= v.width && v.y <= v.height);
@@ -21,6 +28,8 @@ export async function createSimulatorGateway(options: {
   operationId: string;
   udid: string;
   port: number;
+  signal?: AbortSignal;
+  hostControl(control: SimulatorHostControl): Promise<void>;
   active(): boolean;
   renew(): void;
 }) {
@@ -33,10 +42,94 @@ export async function createSimulatorGateway(options: {
   const sockets = new Set<Socket>();
   const upstreams = new Set<WebSocket>();
   const connections = new Set<() => Promise<void>>();
+  const controlAbort = new AbortController();
+  const controls = createSimulatorDeviceControls({
+    port: options.port,
+    udid: options.udid,
+    signal: options.signal
+      ? AbortSignal.any([controlAbort.signal, options.signal])
+      : controlAbort.signal,
+    active: () => !controlAbort.signal.aborted && options.active(),
+    hostControl: (control) => options.hostControl(control),
+  });
+  // A device survives Stop. Establish a native baseline once per operation, not per iframe load.
+  await controls.initialize();
+  let pendingControl: Promise<IosSimulatorDeviceControlResult> | undefined;
+  const completedControls = new Map<
+    string,
+    { hash: string; result: IosSimulatorDeviceControlResult }
+  >();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
   const server = createServer((req, res) => {
     if (!options.active()) {
       res.writeHead(410).end();
+      return;
+    }
+    const requestedPath = new URL(req.url ?? '/', 'http://localhost').pathname;
+    if (
+      req.method === 'POST' &&
+      requestedPath === `${path}control` &&
+      validOrigin(req.headers.host, req.headers.origin) &&
+      req.headers.origin === origin
+    ) {
+      const reply = (result: IosSimulatorDeviceControlResult, status = 200) => {
+        res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(result));
+      };
+      void (async () => {
+        if (req.headers['content-type'] !== 'application/json')
+          return reply({ success: false, error: 'failed' }, 400);
+        req.setTimeout(10000, () => req.destroy());
+        const chunks: Buffer[] = [];
+        let size = 0;
+        for await (const chunk of req) {
+          if (!Buffer.isBuffer(chunk)) throw new Error('Invalid request body.');
+          const bytes = chunk;
+          size += bytes.length;
+          if (size > 128 * 1024) return reply({ success: false, error: 'failed' }, 413);
+          chunks.push(bytes);
+        }
+        const parsed = IosSimulatorDeviceControlRequestSchema.safeParse(
+          JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        );
+        if (!parsed.success || parsed.data.operationId !== options.operationId)
+          return reply({ success: false, error: 'failed' }, 400);
+        if (!options.active() || controlAbort.signal.aborted)
+          return reply({ success: false, error: 'unavailable' }, 410);
+        const { requestId, control } = parsed.data;
+        const hash = createHash('sha256').update(JSON.stringify(control)).digest('hex');
+        const prior = completedControls.get(requestId);
+        if (prior)
+          return reply(
+            prior.hash === hash
+              ? { ...prior.result, rotation: controls.rotation() }
+              : { success: false, error: 'failed' }
+          );
+        if (pendingControl) return reply({ success: false, error: 'busy' });
+        const task = controls
+          .execute(control)
+          .then((): IosSimulatorDeviceControlResult => {
+            if (!options.active() || controlAbort.signal.aborted)
+              return { success: false, error: 'unavailable' };
+            options.renew();
+            return { success: true, rotation: controls.rotation() };
+          })
+          .catch((): IosSimulatorDeviceControlResult => ({
+            success: false,
+            error: options.active() && !controlAbort.signal.aborted ? 'failed' : 'unavailable',
+          }));
+        pendingControl = task;
+        const result = await task;
+        pendingControl = undefined;
+        completedControls.set(requestId, { hash, result });
+        if (completedControls.size > 32) {
+          const oldest = completedControls.keys().next().value;
+          if (oldest !== undefined) completedControls.delete(oldest);
+        }
+        reply(result);
+      })().catch(() => {
+        if (!res.headersSent) reply({ success: false, error: 'failed' }, 400);
+      });
       return;
     }
     if (
@@ -54,7 +147,7 @@ export async function createSimulatorGateway(options: {
       'Content-Security-Policy':
         "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src blob:",
     });
-    res.end(simulatorViewerHtml(options.operationId));
+    res.end(simulatorViewerHtml(options.operationId, controls.rotation()));
   });
   server.on('connection', (socket) => {
     sockets.add(socket);
@@ -136,6 +229,14 @@ export async function createSimulatorGateway(options: {
         const input = parsed.data;
         if ((input.type === 'touch1-down' && touch) || (input.type !== 'touch1-down' && !touch))
           return;
+        // An edge belongs to the gesture's starting point, never a mid-drag switch.
+        if (
+          (input.type === 'touch1-down' && input.edge && input.y < input.height * 0.93) ||
+          (touch && input.edge !== touch.edge)
+        ) {
+          close();
+          return;
+        }
         touch = input.type === 'touch1-up' ? undefined : input;
         options.renew();
         if (upstream.bufferedAmount > 64 * 1024) {
@@ -170,6 +271,9 @@ export async function createSimulatorGateway(options: {
     port: address.port,
     path,
     close: async () => {
+      controlAbort.abort();
+      await pendingControl;
+      completedControls.clear();
       await Promise.all([...connections].map((shutdown) => shutdown()));
       for (const ws of upstreams) ws.terminate();
       for (const ws of wss.clients) ws.terminate();
