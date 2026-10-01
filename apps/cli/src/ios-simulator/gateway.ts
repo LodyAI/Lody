@@ -24,6 +24,7 @@ const Input = z
     width: z.number().int().min(1).max(16384),
     height: z.number().int().min(1).max(16384),
     edge: z.literal('bottom').optional(),
+    inputId: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
   })
   .strict()
   .refine((v) => v.x <= v.width && v.y <= v.height);
@@ -442,7 +443,7 @@ export async function createSimulatorGateway(options: {
           close();
           return;
         }
-        const input = parsed.data;
+        const { inputId, ...input } = parsed.data;
         if ((input.type === 'touch1-down' && touch) || (input.type !== 'touch1-down' && !touch))
           return;
         // An edge belongs to the gesture's starting point, never a mid-drag switch.
@@ -461,6 +462,12 @@ export async function createSimulatorGateway(options: {
           return;
         }
         upstream.send(JSON.stringify(input));
+        if (input.type !== 'touch1-move') videoFlow?.prioritizeInteraction(now());
+        // Receipt means forwarded to native, not that the guest rendered a response.
+        // Keep diagnostics off the native input protocol and never queue an echo
+        // behind an already full client socket.
+        if (inputId !== undefined && client.bufferedAmount <= 64 * 1024)
+          client.send(JSON.stringify({ type: 'input-ack', inputId }));
       });
       upstream.on('message', (data, binary) => {
         if (shuttingDown || !options.active()) {

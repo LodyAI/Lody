@@ -2,7 +2,14 @@ import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { simulatorViewerHtml } from './viewer';
 
-type Input = { type: string; x?: number; y?: number; width?: number; height?: number };
+type Input = {
+  type: string;
+  inputId?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+};
 type Pointer = {
   pointerId: number;
   button: number;
@@ -173,7 +180,10 @@ function viewer(
   });
   return {
     get sent() {
-      return sent.filter((input) => input.type.startsWith('touch'));
+      // Gesture assertions ignore the receipt id; wire assertions below cover it.
+      return sent
+        .filter((input) => input.type.startsWith('touch'))
+        .map(({ inputId: _id, ...input }) => input);
     },
     wire: sent,
     sockets,
@@ -254,6 +264,40 @@ afterEach(() => {
 });
 
 describe('simulator viewer input', () => {
+  it('measures correlated input receipts without delaying input or accepting stale receipts', async () => {
+    const v = viewer();
+    const receipt = (inputId: number | undefined) =>
+      v.sockets.at(-1)?.onmessage({
+        data: JSON.stringify({ type: 'input-ack', inputId }),
+      });
+    v.canvas.onpointerdown(v.pointer());
+    const down = v.wire.at(-1);
+    expect(down).toMatchObject({ type: 'touch1-down', inputId: 1 });
+    await vi.advanceTimersByTimeAsync(120);
+    v.canvas.onpointerup(v.pointer());
+    const up = v.wire.at(-1);
+    expect(up).toMatchObject({ type: 'touch1-up', inputId: 2 });
+    await vi.advanceTimersByTimeAsync(180);
+    receipt(down?.inputId);
+    receipt(down?.inputId); // Duplicate and unknown ids cannot skew samples.
+    receipt(999);
+    await vi.advanceTimersByTimeAsync(20);
+    receipt(up?.inputId);
+    await vi.advanceTimersByTimeAsync(1680);
+    expect(
+      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
+    ).toMatchObject({ inputAckMs: 200, inputAckSamples: 2, inputAckP95Ms: 300 });
+    v.canvas.onpointerdown(v.pointer());
+    const stale = v.wire.at(-1)?.inputId;
+    v.visibility(false);
+    v.visibility(true);
+    v.sockets.at(-1)?.onopen();
+    receipt(stale);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(
+      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
+    ).toMatchObject({ inputAckMs: 0, inputAckSamples: 0 });
+  });
   it('keeps one decode and the latest pending frame, and discards an old generation on hide', async () => {
     const decoders: Array<(image: { width: number; height: number; close(): void }) => void> = [];
     let released = 0;

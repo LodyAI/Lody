@@ -114,3 +114,9 @@ Same-machine preview preserves native resolution. No new cloud service participa
 in the media path. Connection status exposes numeric performance diagnostics, with
 an explicit copy action and bounded in-memory history; never collect input or pixels
 in these diagnostics. Disconnected samples remain distinguishable from live measurements.
+
+Interaction feedback takes priority over replaying stale queued animation. Preserve
+H.264 dependency safety and receiver credit when replacing a stale unsent chain;
+never discard a valid chain unless a replacement can be requested immediately.
+Optional numeric input receipt diagnostics measure gateway-forwarding round trips,
+not simulator execution or click-to-visible-response latency.

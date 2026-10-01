@@ -34,7 +34,9 @@
   reject unknown layouts to MJPEG. `h264-flow.ts` owns ordered video credit, bounded
   queues and IDR recovery. Change bitrate from multi-sample ACK windows, never a
   single delayed ACK; idle deltas do not prove spare bandwidth. Never latest-drop encoded deltas; native backlog gaps must
-  invalidate the reference chain too. Decoder ACK/recovery/config never renew leases.
+  invalidate the reference chain too. Optional input-driven resets require immediate IDR
+  eligibility; never discard a valid replacement during cooldown/credit/pacing waits.
+  Decoder ACK/recovery/config never renew leases.
   `viewer-h264.ts` probes the actual avcC configuration, bounds queues, closes all
   VideoFrames and fences async probes. ACK decoded H.264 output independently of RAF;
   retain only one unpainted picture with a bounded paint timer. Decoder pressure waits

@@ -326,8 +326,18 @@ describe('simulator media boundary', () => {
     client.send(JSON.stringify({ type: 'frame-ack', sequence: 1 }));
     expect(f.renewals()).toBe(0);
     const input = once(native, 'message');
-    client.send(JSON.stringify({ type: 'touch1-down', x: 10, y: 20, width: 100, height: 200 }));
-    expect(JSON.parse(String((await input)[0]))).toMatchObject({ type: 'touch1-down', x: 10 });
+    const receipt = once(client, 'message');
+    client.send(
+      JSON.stringify({ type: 'touch1-down', x: 10, y: 20, width: 100, height: 200, inputId: 7 })
+    );
+    expect(JSON.parse(String((await input)[0]))).toEqual({
+      type: 'touch1-down',
+      x: 10,
+      y: 20,
+      width: 100,
+      height: 200,
+    });
+    expect(JSON.parse(String((await receipt)[0]))).toEqual({ type: 'input-ack', inputId: 7 });
     expect(f.renewals()).toBe(1);
     const released = once(native, 'message');
     const closed = once(client, 'close');

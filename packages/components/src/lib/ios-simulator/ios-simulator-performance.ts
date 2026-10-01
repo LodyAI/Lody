@@ -41,6 +41,9 @@ const fields = [
 
   'keyframeRequests',
   'upstreamGaps',
+  'interactionResets',
+  'queueWaitMs',
+  'queuedAgeMs',
   'queuedFrames',
   'queuedBytes',
   'droppedFrames',
@@ -68,6 +71,9 @@ const fields = [
   'width',
   'height',
   'inputBufferedBytes',
+  'inputAckMs',
+  'inputAckSamples',
+  'inputAckP95Ms',
   'elapsedMs',
   'gatewaySampleAgeMs',
 ] as const;

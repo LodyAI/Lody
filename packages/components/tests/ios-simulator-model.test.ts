@@ -325,6 +325,12 @@ describe('simulator performance report boundary', () => {
         connected: true,
         remote: true,
         receivedMbps: 3.5,
+        inputAckMs: 300,
+        inputAckSamples: 2,
+        inputAckP95Ms: 400,
+        queueWaitMs: 5,
+        queuedAgeMs: 0,
+        interactionResets: 1,
         url: 'https://private.example',
         text: 'private input',
         pixels: [1, 2],
@@ -333,6 +339,12 @@ describe('simulator performance report boundary', () => {
       connected: true,
       remote: true,
       receivedMbps: 3.5,
+      inputAckMs: 300,
+      inputAckSamples: 2,
+      inputAckP95Ms: 400,
+      queueWaitMs: 5,
+      queuedAgeMs: 0,
+      interactionResets: 1,
     });
     for (const value of [-1, Infinity, NaN, 'secret', {}, 1e13]) {
       expect(

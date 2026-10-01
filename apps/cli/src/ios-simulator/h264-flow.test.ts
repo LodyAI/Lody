@@ -118,6 +118,82 @@ describe('AVC private stream', () => {
     f.offer(frame(0), 2500);
     expect(f.take(2500)?.[8]).toBe(2);
   });
+  it('recovers a broken chain with available credit without waiting another full RTT', () => {
+    const { f, requests } = flow();
+    f.recordRtt(600);
+    f.offer(frame(0, true, 1000), 0);
+    expect(f.take(0)?.readUInt32BE(4)).toBe(1);
+    // A lost native delta invalidates the chain while the first picture is in flight.
+    f.offer(frame(2), 100);
+    expect(requests).toHaveLength(1);
+    f.offer(frame(0, true, 1000), 110);
+    const fresh = f.take(110);
+    expect(fresh?.[8]).toBe(2);
+    expect(fresh?.readUInt32BE(4)).toBe(2);
+    expect(f.snapshot(110).inFlightFrames).toBe(2);
+    expect(f.acknowledge(2, 710)).toBe(true);
+    expect(f.snapshot(710).inFlightFrames).toBe(0);
+  });
+  it('replaces a stale pre-input backlog with a fresh keyframe without replaying deltas', () => {
+    const { f, requests } = flow();
+    f.recordRtt(600);
+    f.offer(frame(0), 0);
+    f.take(0);
+    f.offer(frame(1), 40);
+    f.offer(frame(2), 80);
+    f.prioritizeInteraction(200);
+    expect(requests).toHaveLength(1);
+    f.offer(frame(3), 210);
+    expect(f.take(210)).toBeUndefined();
+    f.offer(frame(0), 220);
+    expect(f.take(220)?.[8]).toBe(2);
+    expect(f.snapshot(220)).toMatchObject({
+      interactionResets: 1,
+      droppedFrames: 3,
+      queuedFrames: 0,
+      queueWaitMs: 0,
+    });
+    // The new IDR still consumes ordinary receiver credit.
+    expect(f.snapshot(220).inFlightFrames).toBe(2);
+  });
+  it('preserves fresh remote frames and local queues on interaction', () => {
+    for (const remote of [false, true]) {
+      const { f, requests } = flow(remote);
+      f.offer(frame(0), 0);
+      f.prioritizeInteraction(remote ? 100 : 500);
+      expect(requests).toHaveLength(0);
+      expect(f.take(500)?.[8]).toBe(2);
+      expect(f.snapshot(500)).toMatchObject({ interactionResets: 0, queueWaitMs: 500 });
+    }
+  });
+  it('preserves a replacement chain when a quick release falls inside the IDR cooldown', () => {
+    const { f, requests } = flow();
+    f.recordRtt(600);
+    f.offer(frame(0), 0);
+    f.take(0);
+    f.offer(frame(1), 40);
+    f.prioritizeInteraction(200);
+    f.offer(frame(0), 210);
+    f.take(210);
+    f.offer(frame(1), 220);
+    f.prioritizeInteraction(350);
+    expect(f.take(350)?.[8]).toBe(3);
+    expect(requests).toHaveLength(1);
+    expect(f.snapshot(350).interactionResets).toBe(1);
+  });
+  it('preserves pre-input frames while pacing or receiver credit prevents replacement', () => {
+    const { f, requests } = flow();
+    f.offer(frame(0, true, 100_000), 0);
+    f.take(0);
+    f.offer(frame(1), 10);
+    f.prioritizeInteraction(200);
+    expect(requests).toHaveLength(0);
+    expect(f.snapshot(200)).toMatchObject({ interactionResets: 0, queuedFrames: 1 });
+    f.acknowledge(1, 250);
+    // Pacing debt still blocks optional replacement even after receiver credit arrives.
+    f.prioritizeInteraction(300);
+    expect(f.snapshot(300)).toMatchObject({ interactionResets: 0, queuedFrames: 1 });
+  });
   it('does not mistake tiny idle deltas for spare link capacity', () => {
     const { f } = flow();
     f.recordRtt(500);

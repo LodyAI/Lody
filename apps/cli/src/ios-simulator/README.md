@@ -230,3 +230,31 @@ the largest inter-frame arrival gap in that sample. Coalesced decoded pictures
 are intentional freshness drops; a low draw rate alone does not establish slow
 decoding or RAF suspension. Gateway and browser counters use different sample
 times; consult `gatewaySampleAgeMs` before comparing sequences or FPS.
+
+
+### Input feedback latency
+
+Touch down/up are sent immediately on the established media WebSocket; only move
+events coalesce to one animation frame. Remote H.264 may replace an unsent chain
+older than 100 ms at a touch edge, but only when a replacement IDR can be requested
+immediately. The one-second request cooldown, pacing, byte/frame credit and oldest
+in-flight age all remain enforced. A quick release during cooldown preserves the
+replacement chain. Corrupted chains still reset unconditionally. Recovery can
+pipeline an IDR behind acknowledged-or-in-flight pictures instead of waiting for
+all ACKs to drain; ordered delivery and cumulative credit remain unchanged.
+
+- `inputAckMs`: last touch edge sent → gateway validates and forwards it to native
+  → receipt reaches this viewer. Includes both network directions and socket
+  buffering; **does not measure guest execution or visible feedback**.
+- `inputAckSamples` / `inputAckP95Ms`: receipt count and P95 in the current 2-second
+  sample (zero samples means no measurement). Move events do not request receipts.
+- `queueWaitMs`: most recently sent H.264 frame's time in the gateway's unsent queue.
+- `queuedAgeMs`: current oldest unsent H.264 frame age; zero when empty.
+- `interactionResets`: cumulative elective pre-input queue resets for this stream.
+
+Input receipt IDs and timestamps remain private, numeric and bounded (32 pending
+receipts, 120 samples); disconnect clears them. An echo can be skipped under socket
+backpressure. These timings need no clock synchronization. High input RTT with low
+queue wait points toward transport/scheduling; low input RTT does not establish that
+the guest rendered promptly. Network propagation and already-sent bytes cannot be
+removed by dropping an unsent queue.

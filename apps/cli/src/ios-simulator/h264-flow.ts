@@ -33,6 +33,8 @@ export class SimulatorH264Flow {
   private lastRecovery = -Infinity;
   private recoveries = 0;
   private upstreamGaps = 0;
+  private interactionResets = 0;
+  private queueWaitMs = 0;
   private bitrate: number;
   private received = 0;
   private receivedBytes = 0;
@@ -64,10 +66,34 @@ export class SimulatorH264Flow {
   recover(now: number) {
     this.reset();
     // A bad viewer or overloaded source cannot turn recovery into an IDR flood.
-    if (this.inFlight.size === 0 && now >= this.nextSend && now - this.lastRecovery >= 1000) {
+    // An IDR can follow older in-flight pictures on the ordered stream. Waiting
+    // for every ACK adds a whole return trip even when there is usable credit.
+    if (this.canRequestKeyframe(now)) {
       this.lastRecovery = now;
       this.recoveries++;
       this.requestKeyframe();
+    }
+  }
+  private canRequestKeyframe(now: number) {
+    return (
+      this.inFlight.size < 64 &&
+      this.inFlightBytes() < this.budget() &&
+      this.oldestAge(now) <= this.baseRtt + 500 &&
+      now >= this.nextSend &&
+      now - this.lastRecovery >= 1000
+    );
+  }
+  prioritizeInteraction(now: number) {
+    // Do not replay a pre-input backlog before showing the user's next action.
+    // Discard the whole dependent chain; never skip a delta inside a valid chain.
+    if (
+      this.remote &&
+      this.queue[0] &&
+      now - this.queue[0].at > 100 &&
+      this.canRequestKeyframe(now)
+    ) {
+      this.interactionResets++;
+      this.recover(now);
     }
   }
   offer(message: Buffer, now: number) {
@@ -150,6 +176,7 @@ export class SimulatorH264Flow {
     description?.copy(packet, 11);
     next.payload.copy(packet, 11 + (description?.length ?? 0));
     this.queue.shift();
+    this.queueWaitMs = Math.max(0, now - next.at);
     this.queuedBytes -= next.payload.length;
     this.inFlight.set(sequence, { bytes: size, at: now });
     // Native bitrate is a long-term target, not a hard per-frame size limit.
@@ -259,6 +286,9 @@ export class SimulatorH264Flow {
       feedbackMinAckMs: this.feedbackMinAckMs,
       keyframeRequests: this.recoveries,
       upstreamGaps: this.upstreamGaps,
+      interactionResets: this.interactionResets,
+      queueWaitMs: this.queueWaitMs,
+      queuedAgeMs: this.queue[0] ? Math.max(0, now - this.queue[0].at) : 0,
       queuedFrames: this.queue.length,
       queuedBytes: this.queuedBytes,
       codecH264: 1,

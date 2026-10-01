@@ -3,6 +3,7 @@ import { simulatorViewerH264Script } from './viewer-h264';
  * by viewer.test.ts as the exact shipped artifact. No project scripts or dependencies.
  */
 export const simulatorViewerMediaScript = `
+let inputSequence=0,inputPending=new Map(),inputAckSamples=[],inputAckMs=0;
 let drawRequest,moveRequest,queuedMove,statsTimer,resizeTimer,lastServer={},lastStatsAt=performance.now();
 let retryTimer,transportRetries=0,transportFailure=0,transportCloseCode=0,lastMessageAt=0,lastFrameAt=0,lastDecodeAt=0,lastPaintAt=0,lastAckSequence=0;
 // Transport failures do not establish codec incompatibility. Retry the private
@@ -24,9 +25,10 @@ function streamConfig(){
 }
 function publishPerformance(){
   const now=performance.now(),seconds=Math.max(.001,(now-sampleAt)/1000);
+  const inputSorted=[...inputAckSamples].sort((a,b)=>a-b);
   const sorted=[...decodeSamples].sort((a,b)=>a-b);
   const age=at=>at?Math.max(0,now-at):0;
-  const stats={...lastServer,rafPaints,timerPaints,paintScheduleMs:paintScheduleTotal/Math.max(1,paintScheduleCount),receiveGapMaxMs,transportRetries,transportFailure,transportCloseCode,
+  const stats={...lastServer,inputAckMs,inputAckSamples:inputAckSamples.length,inputAckP95Ms:inputSorted[Math.max(0,Math.ceil(inputSorted.length*.95)-1)]||0,rafPaints,timerPaints,paintScheduleMs:paintScheduleTotal/Math.max(1,paintScheduleCount),receiveGapMaxMs,transportRetries,transportFailure,transportCloseCode,
     messageIdleMs:age(lastMessageAt),frameIdleMs:age(lastFrameAt),decodeIdleMs:age(lastDecodeAt),paintIdleMs:age(lastPaintAt),
     lastReceivedSequence:videoLastSequence,lastAckSequence,paintPending:videoPending?1:0,codecH264:usingH264?1:0,codecFallback,codecFailure,videoRecoveries,videoRecoveryReason,videoRecoveryStreak:videoRecovery,videoBackpressure,encodedQueue:videoQueue.length,encodedQueueBytes:videoBytes,decoderQueue:videoOutputs.size,remote,receivedFps:(receivedFrames-sampleReceived)/seconds,
     paintedFps:(paintedFrames-samplePainted)/seconds,receivedMbps:(receivedBytes-sampleBytes)*8/seconds/1e6,
@@ -35,7 +37,7 @@ function publishPerformance(){
     decodeP95Ms:sorted[Math.max(0,Math.ceil(sorted.length*.95)-1)]||0,
     viewerDroppedFrames:droppedFrames,decodeErrors,coalescedMoves,width:canvas.width,height:canvas.height,
     inputBufferedBytes:ws?.bufferedAmount||0,gatewaySampleAgeMs:Math.max(0,now-lastStatsAt),connected:ws?.readyState===1,elapsedMs:now};
-  sampleAt=now;sampleReceived=receivedFrames;sampleBytes=receivedBytes;samplePainted=paintedFrames;decodeSamples=[];paintScheduleTotal=paintScheduleCount=receiveGapMaxMs=0;
+  sampleAt=now;sampleReceived=receivedFrames;sampleBytes=receivedBytes;samplePainted=paintedFrames;decodeSamples=[];inputAckSamples=[];paintScheduleTotal=paintScheduleCount=receiveGapMaxMs=0;
   latestPerformance=stats;performanceHistory.push(stats);performanceHistory=performanceHistory.filter(s=>now-s.elapsedMs<=120000).slice(-60);
   if(parentOrigin)parent.postMessage({type:'lody:ios-simulator:performance',operationId,stats},parentOrigin);
   if(performanceLogging)console.info('[Lody iOS Simulator performance]',stats);
@@ -88,8 +90,12 @@ function connect(){
       if(e.data.length>4096)return;
       try{const message=JSON.parse(e.data);
         if(message.type==='ping'&&Number.isSafeInteger(message.id)&&message.id>0)send({type:'pong',id:message.id});
+        if(message.type==='input-ack'&&Number.isSafeInteger(message.inputId)&&inputPending.has(message.inputId)){
+          inputAckMs=Math.max(0,performance.now()-inputPending.get(message.inputId));inputPending.delete(message.inputId);
+          inputAckSamples.push(inputAckMs);if(inputAckSamples.length>120)inputAckSamples.shift();
+        }
         if(message.type==='stream-stats'){
-          const stats={};for(const key of ['sourceFps','sentFps','sourceMbps','sentMbps','sentFrames','idleRefreshFrames','droppedFrames','inFlightFrames','inFlightBytes','oldestFrameMs','ackMs','ackIdleMs','rttMs','targetFps','scale','baseRttMs','deliveryMbps','pacingMbps','windowBytes','codecH264','encoderBitrate','feedbackSamples','slowAckPercent','feedbackMinAckMs','keyframeRequests','upstreamGaps','queuedFrames','queuedBytes']){
+          const stats={};for(const key of ['sourceFps','sentFps','sourceMbps','sentMbps','sentFrames','idleRefreshFrames','droppedFrames','inFlightFrames','inFlightBytes','oldestFrameMs','ackMs','ackIdleMs','rttMs','targetFps','scale','baseRttMs','deliveryMbps','pacingMbps','windowBytes','codecH264','encoderBitrate','feedbackSamples','slowAckPercent','feedbackMinAckMs','keyframeRequests','upstreamGaps','interactionResets','queueWaitMs','queuedAgeMs','queuedFrames','queuedBytes']){
             const value=message[key];if(typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1e12)stats[key]=value;
           }lastServer=stats;lastStatsAt=performance.now();
         }
@@ -119,7 +125,7 @@ function queueMove(){
   queuedMove={...point};if(moveRequest===undefined)moveRequest=requestAnimationFrame(flushMove);
 }
 function closeMedia(){
-  clearTimeout(retryTimer);retryTimer=undefined;disposeVideo();
+  clearTimeout(retryTimer);retryTimer=undefined;disposeVideo();inputPending.clear();inputAckSamples=[];inputAckMs=0;
   clearInterval(statsTimer);clearTimeout(resizeTimer);cancelAnimationFrame(drawRequest);drawRequest=undefined;
   publishPerformance();
 }
