@@ -12,6 +12,10 @@ export class SimulatorFrameFlow {
   private inFlight = new Map<number, { bytes: number; at: number }>();
   private rttMs = 100;
   private measuredRtt = false;
+  private baseRttMs = 400;
+  private deliveryBytesPerSecond = 0;
+  private lastSentBytes = 0;
+  private latestFrameBytes = 0;
   private ackMs = 0;
   private lastAck = 0;
   private received = 0;
@@ -31,6 +35,7 @@ export class SimulatorFrameFlow {
   }
 
   offer(frame: Buffer) {
+    this.latestFrameBytes = frame.length;
     this.received++;
     this.receivedBytes += frame.length;
     if (this.pending) this.dropped++;
@@ -40,13 +45,19 @@ export class SimulatorFrameFlow {
   /** One frame may exceed the byte budget, but never alongside another frame. */
   take(now: number): Buffer | undefined {
     const frame = this.pending;
-    if (!frame || now - this.lastSent < 1000 / this.targetFps) return undefined;
+    const interval = this.remote
+      ? Math.max(1000 / this.targetFps, (this.lastSentBytes / this.sendRate()) * 1000)
+      : 1000 / this.targetFps;
+    if (!frame || now - this.lastSent < interval) return undefined;
     const bytes = this.inFlightBytes();
-    const window = Math.min(8, Math.max(2, Math.ceil((this.rttMs * this.targetFps) / 1000) + 2));
-    const budget = this.remote ? 512 * 1024 : 2 * 1024 * 1024;
+    const window = Math.min(
+      8,
+      Math.max(2, Math.ceil((this.baseRttMs * this.targetFps) / 1000) + 2)
+    );
+    const budget = this.byteBudget();
     if (this.inFlight.size >= window || (bytes > 0 && bytes + frame.length > budget))
       return undefined;
-    if (this.oldestAge(now) > Math.max(500, this.rttMs * 3)) return undefined;
+    if (this.oldestAge(now) > Math.max(500, this.baseRttMs + 300)) return undefined;
     // An operation cannot realistically send 2^32 frames. Fail closed at wrap.
     if (this.sequence === 0xffffffff) return undefined;
     const sequence = ++this.sequence;
@@ -57,6 +68,8 @@ export class SimulatorFrameFlow {
     this.pending = undefined;
     this.inFlight.set(sequence, { bytes: frame.length, at: now });
     this.lastSent = now;
+    // No saved-up tokens: idle time must not buy a burst of stale frames.
+    this.lastSentBytes = packet.length;
     this.sent++;
     this.sentBytes += packet.length;
     return packet;
@@ -66,6 +79,22 @@ export class SimulatorFrameFlow {
     if (sequence <= this.acknowledged) return true; // delayed duplicate
     const frame = this.inFlight.get(sequence);
     if (!frame) return false; // never grant credit for a frame we did not send
+    // Estimate usable payload rate from this frame's completion time minus the
+    // minimum measured propagation RTT. ACK spacing alone is application-limited
+    // by our own pacer: multiplying that rate by headroom repeatedly would collapse
+    // throughput even on an uncongested link. Queue/decode delay stays conservative.
+    const elapsed = now - frame.at - (this.measuredRtt ? this.baseRttMs : 0);
+    const rate = Math.min(
+      8 * 1024 * 1024,
+      Math.max(8 * 1024, (frame.bytes * 1000) / Math.max(10, elapsed))
+    );
+    this.deliveryBytesPerSecond =
+      this.deliveryBytesPerSecond === 0
+        ? rate
+        : Math.min(
+            this.deliveryBytesPerSecond * 1.2,
+            this.deliveryBytesPerSecond * 0.5 + rate * 0.5
+          );
     this.ackMs = Math.max(0, now - frame.at);
     this.lastAck = now;
     this.acknowledged = sequence;
@@ -74,8 +103,38 @@ export class SimulatorFrameFlow {
   }
 
   recordRtt(ms: number) {
-    this.measuredRtt = true;
     this.rttMs = Math.max(1, Math.min(10000, ms));
+    this.baseRttMs = this.measuredRtt ? Math.min(this.baseRttMs, this.rttMs) : this.rttMs;
+    this.measuredRtt = true;
+  }
+
+  private sendRate() {
+    return this.deliveryBytesPerSecond ? this.deliveryBytesPerSecond * 0.85 : 128 * 1024;
+  }
+
+  private byteBudget() {
+    if (!this.remote) return 2 * 1024 * 1024;
+    // At most one base RTT plus 150 ms of estimated delivery. The hard cap also
+    // protects startup and ACK compression; an oversized frame travels alone.
+    return Math.min(
+      128 * 1024,
+      Math.max(8 * 1024, (this.sendRate() * (Math.min(1000, this.baseRttMs) + 150)) / 1000)
+    );
+  }
+
+  /** Trade remote sharpness for ~8 delivered FPS; native scale is bounded to 1..4.
+   * Use the SOF-observed scale, not a reconfiguration still in flight upstream.
+   */
+  recommendedScale(viewportScale: number, observedScale: number) {
+    if (!this.remote || !this.deliveryBytesPerSecond) return viewportScale;
+    const targetBytes = this.sendRate() / 8;
+    return Math.min(
+      4,
+      Math.max(
+        viewportScale,
+        Math.ceil(observedScale * Math.sqrt(this.latestFrameBytes / targetBytes))
+      )
+    );
   }
 
   private inFlightBytes() {
@@ -105,6 +164,10 @@ export class SimulatorFrameFlow {
       ackIdleMs: this.lastAck ? now - this.lastAck : 0,
       rttMs: this.measuredRtt ? this.rttMs : 0,
       targetFps: this.targetFps,
+      baseRttMs: this.measuredRtt ? this.baseRttMs : 0,
+      deliveryMbps: (this.deliveryBytesPerSecond * 8) / 1e6,
+      pacingMbps: this.remote ? (this.sendRate() * 8) / 1e6 : 0,
+      windowBytes: this.byteBudget(),
     };
     this.sample = {
       at: now,

@@ -336,6 +336,30 @@ describe('simulator viewer input', () => {
     ).toMatchObject({ connected: false });
   });
 
+  it('samples on the viewer clock even when gateway reports arrive in a burst', async () => {
+    const v = viewer();
+    await v.paint();
+    for (let i = 0; i < 4; i++)
+      v.sockets.at(-1)?.onmessage({
+        data: JSON.stringify({
+          type: 'stream-stats',
+          sentFps: i,
+          baseRttMs: 400,
+          windowBytes: 50000,
+        }),
+      });
+    expect(v.messages.filter((m) => m.type === 'lody:ios-simulator:performance')).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    const reports = v.messages.filter((m) => m.type === 'lody:ios-simulator:performance');
+    expect(reports).toHaveLength(1);
+    expect(reports[0]?.stats).toMatchObject({
+      paintedFps: 0.5,
+      sentFps: 3,
+      baseRttMs: 400,
+      windowBytes: 50000,
+    });
+  });
+
   it('only accepts private controls from the bound parent and remaps touches after rotation', async () => {
     const requests: Array<{ url: string; body: unknown }> = [];
     const v = viewer({

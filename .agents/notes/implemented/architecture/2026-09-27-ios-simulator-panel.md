@@ -281,3 +281,26 @@ them, and the queue drained. This is local functional validation of the remote p
 WAN speed claim. Deterministic tests cover stalled/forged ACKs, latest-only replacement, pacing,
 release ordering, numeric-only reports and exact viewer identity. H.264 and native pre-encode
 scheduling remain deferred. See the CLI README for the reproducible field-test procedure.
+
+### Congestion feedback correction (2026-10-01)
+
+The initial 512 KiB remote window could represent several seconds of transmission
+on a 1 Mbps path. Worse, using the latest probe RTT increased credit and frame age
+allowances when the same ordered media connection queued the probe. This corrects
+the first implementation, without changing the four-part scope or runtime pin.
+
+Remote credit now uses minimum observed RTT and a conservative per-frame payload
+completion estimate, capped at 128 KiB, with byte pacing and no saved idle burst.
+Using ACK inter-arrival rate alone was rejected: it measures our own pacing on an
+application-limited path and repeatedly applying headroom collapses throughput.
+JPEG SOF geometry supplies the observed scale; receiver feedback can downsample up
+to 4, aiming for 8 FPS, with slow quality recovery. Local resolution remains native.
+Browser diagnostic windows now run independently of queued gateway reports.
+
+A synthetic FIFO 1 Mbps/400 ms path exercises sustained updates, bounded latency,
+quality adaptation and the final static frame without sleeps or real networking.
+Separate tests cover RTT inflation, idle periods, quality recovery and burst-delivered
+reports. These establish controller behavior, not actual WAN speed. JPEG size,
+propagation RTT and return-path/decode delay still limit this transport; the estimate
+is not a measurement of raw link capacity. Native encode scheduling and H.264 remain
+outside this change. Real remote comparison still uses the README field procedure.

@@ -88,6 +88,8 @@ Remote authorization depends on the connected Cloud backend understanding the ex
 ## Remote responsiveness and diagnostics
 
 Size remote video for its visible viewport with bounded pixel density and frame rate.
+On slow links, reduce sharpness and pace bytes using receiver feedback; recover quality
+slowly. Congestion-inflated RTT must not increase the outstanding byte budget.
 Bound unconfirmed video and prefer the latest unsent screen over stale queued frames;
 retain final pointer positions and releases when merging high-frequency moves.
 Same-machine preview preserves native resolution. No new cloud service participates

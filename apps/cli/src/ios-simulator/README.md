@@ -103,17 +103,22 @@ The frontend controller/facade tests cover routing and the exact-origin handshak
 
 ## Media performance diagnostics
 
-Remote streams use viewport/DPR-based integer downsampling (1–4, DPR capped at 2)
-with a 30 FPS sending ceiling; same-machine streams retain native resolution and a
+Remote streams use viewport/DPR-based integer downsampling (1–4, DPR capped at 2),
+then trade sharpness for responsiveness on slow links, aiming for 8 delivered FPS
+without promising that rate. Quality recovers no faster than every 10 seconds. The
+sending ceiling is 30 FPS; same-machine streams retain native resolution and a
 60 FPS ceiling. The native MJPEG encoder still runs on changed surfaces, so this is
 not an encoder FPS fix. No new runtime artifact or mirror is required.
 
 The gateway sends sequenced JPEG packets through the existing private proxy. A bounded
-receiver-confirmation window (2–8 frames, 512 KiB remotely / 2 MiB locally, allowing one
-oversized frame alone) and a single replaceable pending frame prevent unlimited stale
+receiver-confirmation window (2–8 frame cap, remote byte budget estimated from one
+base RTT plus 150 ms, clamped to 8–128 KiB; 2 MiB locally; one oversized frame alone) and a single replaceable pending frame prevent unlimited stale
 video from entering the tunnel. Only a drawn frame acknowledges its sequence and any
 superseded predecessors. A 10-second receiver stall closes the stream for Restore;
-credits and timing probes never count as control activity. Generic proxy behavior is unchanged.
+credits and timing probes never count as control activity. Remote sends are also
+byte-paced, with no accumulated idle credit. The minimum observed RTT prevents
+queue-inflated probes from increasing the budget; an initial probe precedes JPEGs.
+Generic proxy behavior is unchanged.
 
 Open the connection-status popover for resolution, painted FPS, Mbps, RTT, ACK delay
 and the in-flight queue. **Copy diagnostics** includes up to two minutes of numeric
@@ -123,10 +128,18 @@ of the same screen. Static screens correctly report zero FPS.
 
 - `sourceFps/sourceMbps`: encoded JPEGs reaching the gateway, not capture/encoder timing.
 - `sentFps/sentMbps`: packets the gateway sends; `receivedFps/paintedFps` distinguish
-  receipt from drawing. Rates are per sampling interval, not lifetime averages.
+  receipt from drawing. Browser rates use an independent two-second clock, so
+  burst-delivered gateway reports cannot create artificial FPS spikes. The server
+  and browser intervals are not synchronized; rates are not lifetime averages.
 - `rttMs`: a gateway/browser ping round trip over the media connection (zero before
   the first reply); includes transport queues, not a separate network-only probe.
+- `baseRttMs`: minimum observed probe RTT for this connection; still an estimate,
+  not a guaranteed queue-free network measurement.
+- `deliveryMbps`: effective payload-rate estimate from frame completion minus base
+  RTT; includes queue/decode/return-path effects, not measured link capacity.
+  `pacingMbps` reserves 15% headroom, `windowBytes` is the current credit budget.
 - `ackMs`: gateway send to browser draw and returning confirmation, **not one-way latency**.
+  `ackIdleMs` is time since that ACK; an idle screen retains the last ACK value.
 - `oldestFrameMs/inFlightBytes/inFlightFrames`: outstanding receiver work;
   `droppedFrames/viewerDroppedFrames`: cumulative intentional freshness drops.
 - `decodeMs/decodeP95Ms`: JPEG decode plus canvas draw, excluding RAF wait and network;

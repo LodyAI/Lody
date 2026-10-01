@@ -57,7 +57,7 @@ function connect(){
     lastServer={};sampleAt=performance.now();sampleReceived=receivedFrames;sampleBytes=receivedBytes;samplePainted=paintedFrames;decodeSamples=[];
     streamConfig();send({type:'heartbeat'});
     heartbeat=setInterval(()=>{if(visible&&!document.hidden)send({type:'heartbeat'})},15000);
-    lastStatsAt=performance.now();statsTimer=setInterval(()=>{if(performance.now()-lastStatsAt>=4000)publishPerformance()},2000);
+    lastStatsAt=performance.now();statsTimer=setInterval(publishPerformance,2000);
   };
   firstFrame=setTimeout(()=>{if(ws===socket){close();report('error')}},20000);
   socket.onmessage=e=>{
@@ -67,9 +67,9 @@ function connect(){
       try{const message=JSON.parse(e.data);
         if(message.type==='ping'&&Number.isSafeInteger(message.id)&&message.id>0)send({type:'pong',id:message.id});
         if(message.type==='stream-stats'){
-          const stats={};for(const key of ['sourceFps','sentFps','sourceMbps','sentMbps','sentFrames','droppedFrames','inFlightFrames','inFlightBytes','oldestFrameMs','ackMs','ackIdleMs','rttMs','targetFps','scale']){
+          const stats={};for(const key of ['sourceFps','sentFps','sourceMbps','sentMbps','sentFrames','droppedFrames','inFlightFrames','inFlightBytes','oldestFrameMs','ackMs','ackIdleMs','rttMs','targetFps','scale','baseRttMs','deliveryMbps','pacingMbps','windowBytes']){
             const value=message[key];if(typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1e12)stats[key]=value;
-          }lastServer=stats;lastStatsAt=performance.now();publishPerformance();
+          }lastServer=stats;lastStatsAt=performance.now();
         }
       }catch{/* Ignore malformed numeric diagnostics. */}
       return;

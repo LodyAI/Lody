@@ -35,8 +35,11 @@
   is not receiver backpressure. ACK/config/probe traffic never renews the lease.
   `viewer-media.ts` owns RAF decoding, bounded numeric diagnostics and move coalescing;
   preserve touch-up/final coordinates and cancel scheduled work on disconnect.
-  Remote scale derives only from bounded viewport/DPR and native SOF dimensions;
-  never forward arbitrary Baguette reconfiguration. Native MJPEG FPS remains unfixed.
+  Remote pacing/byte credit use conservative payload completion and minimum RTT;
+  congested RTT must not expand credit. Scale combines viewport/SOF with network
+  feedback, capped at 4; never forward arbitrary native reconfiguration. Recover
+  quality slowly and keep browser sampling independent of queued gateway reports.
+  Native MJPEG FPS remains unfixed.
 - `viewer.ts` is the fixed iframe artifact, without React or annotation injection.
   Parent commands bind source, origin and operation id. Decode at most one JPEG
   with one replaceable pending frame; release touches on blur/cancel/disconnect.

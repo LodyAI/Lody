@@ -231,6 +231,7 @@ export async function createSimulatorGateway(options: {
       const flow = new SimulatorFrameFlow(options.remote ?? false, now());
       let viewport: { width: number; height: number; dpr: number } | undefined;
       let nativeSize: { width: number; height: number } | undefined;
+      let observedScale = 1;
       let scale = 1,
         pingId = 0,
         samples = 0;
@@ -244,7 +245,13 @@ export async function createSimulatorGateway(options: {
           now() - lastScaleAt < 1000
         )
           return;
-        const next = simulatorScale(nativeSize, viewport, options.remote ?? false);
+        const next = flow.recommendedScale(
+          simulatorScale(nativeSize, viewport, options.remote ?? false),
+          observedScale
+        );
+        // Lower quality quickly; recover it slowly so content changes do not flap
+        // the native encoder. The first viewport adjustment is immediate.
+        if (next < scale && now() - lastScaleAt < 10000) return;
         if (next !== scale) {
           scale = next;
           lastScaleAt = now();
@@ -269,6 +276,13 @@ export async function createSimulatorGateway(options: {
       };
       // A timer flushes the last pending frame even when the simulator becomes static.
       const frameTimer = setInterval(pump, Math.ceil(1000 / flow.targetFps));
+      const probe = () => {
+        if (ping || client.readyState !== WebSocket.OPEN) return;
+        ping = { id: ++pingId, at: now() };
+        client.send(JSON.stringify({ type: 'ping', id: ping.id }));
+      };
+      // Establish a propagation baseline ahead of the first (native-sized) JPEG.
+      probe();
       const statsTimer = setInterval(() => {
         if (shuttingDown || !options.active()) {
           close();
@@ -279,10 +293,7 @@ export async function createSimulatorGateway(options: {
           options.logger?.debug('[iOS Simulator media] ' + JSON.stringify(stats));
         if (client.readyState !== WebSocket.OPEN || client.bufferedAmount > 64 * 1024) return;
         client.send(JSON.stringify({ type: 'stream-stats', ...stats }));
-        if (!ping) {
-          ping = { id: ++pingId, at: now() };
-          client.send(JSON.stringify({ type: 'ping', id: ping.id }));
-        }
+        probe();
       }, 2000);
       const shutdown = (): Promise<void> => {
         if (shuttingDown) return shuttingDown;
@@ -392,8 +403,15 @@ export async function createSimulatorGateway(options: {
             : data instanceof ArrayBuffer
               ? Buffer.from(data)
               : Buffer.concat(data);
-          nativeSize ??= jpegDimensions(frame);
-          configure();
+          const size = jpegDimensions(frame);
+          nativeSize ??= size;
+          if (nativeSize && size)
+            observedScale = Math.max(
+              1,
+              Math.round(
+                Math.max(nativeSize.width, nativeSize.height) / Math.max(size.width, size.height)
+              )
+            );
           flow.offer(frame);
           pump();
         }

@@ -14,7 +14,7 @@ describe('simulator receiver credit and freshness', () => {
     expect(flow.acknowledge(1000, 900)).toBe(false);
     expect(flow.take(900)).toBeUndefined();
     expect(flow.acknowledge(1, 900)).toBe(true);
-    expect(flow.take(900)?.subarray(8)).toEqual(Buffer.alloc(300 * 1024, 20));
+    expect(flow.take(2500)?.subarray(8)).toEqual(Buffer.alloc(300 * 1024, 20));
   });
 
   it('paces to 30 FPS and flushes the final pending frame without another source event', () => {
@@ -45,6 +45,99 @@ describe('simulator receiver credit and freshness', () => {
     expect(flow.take(750)).toBeUndefined(); // oldest frame is too old, even with a credit
     flow.acknowledge(8, 800);
     expect(flow.take(800)?.subarray(8)).toEqual(Buffer.from([9]));
+  });
+
+  it('uses fast first-frame feedback without retaining the conservative startup wait', () => {
+    const flow = new SimulatorFrameFlow(true, 0);
+    flow.recordRtt(30);
+    flow.offer(Buffer.alloc(200000));
+    flow.take(0);
+    flow.acknowledge(1, 60);
+    flow.offer(Buffer.alloc(50000));
+    expect(flow.take(70)?.readUInt32BE(4)).toBe(2);
+  });
+
+  it('does not enlarge the queue when congested probes inflate RTT', () => {
+    const flow = new SimulatorFrameFlow(true, 0);
+    flow.recordRtt(400);
+    const initial = flow.snapshot(0).windowBytes;
+    flow.recordRtt(4500);
+    expect(flow.snapshot(1)).toMatchObject({ rttMs: 4500, baseRttMs: 400, windowBytes: initial });
+  });
+
+  it('paces a synthetic 1 Mbps path, lowers resolution and drains the final frame', () => {
+    const flow = new SimulatorFrameFlow(true, 0);
+    flow.recordRtt(400);
+    let scale = 2,
+      wireFreeAt = 0,
+      lastAcked = 0,
+      lastSent = 0;
+    const arrivals: Array<{ at: number; sequence: number; latency: number }> = [];
+    const steadyLatencies: number[] = [];
+    // A FIFO bottleneck plus 400 ms propagation/return/draw, driven by an injected
+    // clock. Scale changes affect future JPEG sizes, as in the native encoder.
+    for (let now = 0; now <= 32000; now += 10) {
+      while (arrivals[0] && arrivals[0].at <= now) {
+        const ack = arrivals.shift();
+        if (!ack) throw new Error('missing scheduled ACK');
+        expect(flow.acknowledge(ack.sequence, now)).toBe(true);
+        lastAcked = ack.sequence;
+        if (now >= 20000 && now < 30000) steadyLatencies.push(ack.latency);
+      }
+      if (now % 2000 === 0) flow.recordRtt(400 + Math.max(0, wireFreeAt - now));
+      if (now % 1000 === 0) scale = flow.recommendedScale(2, scale);
+      if (now < 30000 && now % 40 === 0) flow.offer(Buffer.alloc(Math.ceil(300000 / scale ** 2)));
+      const packet = flow.take(now);
+      if (packet) {
+        lastSent = packet.readUInt32BE(4);
+        wireFreeAt = Math.max(wireFreeAt, now) + (packet.length / 125000) * 1000;
+        arrivals.push({
+          at: wireFreeAt + 400,
+          sequence: lastSent,
+          latency: wireFreeAt + 400 - now,
+        });
+      }
+    }
+    expect(scale).toBe(4);
+    expect(steadyLatencies.length).toBeGreaterThanOrEqual(30); // >=3 painted FPS
+    expect(Math.max(...steadyLatencies)).toBeLessThan(1000);
+    expect(lastAcked).toBe(lastSent);
+    expect(flow.snapshot(32000).inFlightFrames).toBe(0);
+  });
+
+  it('excludes idle time from delivery estimates and preserves local full resolution', () => {
+    const flow = new SimulatorFrameFlow(true, 0);
+    flow.recordRtt(100);
+    flow.offer(Buffer.alloc(50000));
+    flow.take(0);
+    flow.acknowledge(1, 200);
+    const before = flow.snapshot(200).deliveryMbps;
+    flow.offer(Buffer.alloc(50000));
+    flow.take(60000);
+    flow.acknowledge(2, 60200);
+    expect(flow.snapshot(60200).deliveryMbps).toBe(before);
+    expect(flow.recommendedScale(2, 2)).toBe(2);
+    const local = new SimulatorFrameFlow(false, 0);
+    local.offer(Buffer.alloc(50000));
+    local.take(0);
+    local.acknowledge(1, 5000);
+    expect(local.recommendedScale(1, 1)).toBe(1);
+  });
+
+  it('recovers viewport quality after payload completion gets faster', () => {
+    const flow = new SimulatorFrameFlow(true, 0);
+    flow.recordRtt(400);
+    flow.offer(Buffer.alloc(75000));
+    flow.take(0);
+    flow.acknowledge(1, 1400);
+    expect(flow.recommendedScale(2, 2)).toBe(4);
+    for (let sequence = 2; sequence < 30; sequence++) {
+      const at = sequence * 2000;
+      flow.offer(Buffer.alloc(19000));
+      expect(flow.take(at)).toBeDefined();
+      flow.acknowledge(sequence, at + 410);
+    }
+    expect(flow.recommendedScale(2, 4)).toBe(2);
   });
 
   it('allows one oversized JPEG but cannot accumulate another', () => {
