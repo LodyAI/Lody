@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-01-schedule-once-clock.zh.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1197
+
 ## Abstract
 
 Once input converted the selected machine's wall time into an absolute instant,

@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-01-schedule-once-clock.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1197
+
 ## 摘要
 
 Once 输入按目标机器的墙上时间转换为绝对时刻，预览和摘要却按查看者时区
