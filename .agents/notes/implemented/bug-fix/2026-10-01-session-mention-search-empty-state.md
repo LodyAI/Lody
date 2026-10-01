@@ -23,6 +23,9 @@ empty state before its query-miss fallback, so no matching rows incorrectly
 implied no underlying sessions. Three composer tests failed before the fix,
 including a No project draft with 14 candidates.
 
+Main `93545f01b69cb0c98ddd3f19d46540decd95a007` still contains that condition;
+the later main update does not cover this fix.
+
 Gate that source-owned empty state on `visibleSessionItems.length === 0` as
 well as current scope. The list is already filtered by project before query
 ranking. A real empty scope retains its explanatory message and "View all
@@ -46,9 +49,23 @@ checks scope reset after closing and reopening the menu.
 
 The targeted composer, registry, menu, and session insertion run passed
 93 tests in four files; the session-source and item suites passed another
-30 tests in two files. Native Electron rendering, mobile layout, and real
-workspace catalog loading were not exercised; candidate catalogs are injected
-at the composer boundary. No captured user sessions are test fixtures.
+30 tests in two files. A Playwright Chromium test also passes against the real
+landing composer and catalog pipeline in a local Storybook fixture seeded with
+14 No project session metadata records and one other-project record. It checks
+both query misses, clearing back to 14 candidates, widening with query/focus
+retained, and clearing All projects back to 15 candidates. Non-loopback requests
+are blocked in a fresh browser context.
+
+The [before/after capture](2026-10-01-session-mention-search-empty-state.png)
+uses the same synthetic data and 1440 × 900 viewport. Both capture runs passed
+their phase-specific assertions. The before run temporarily restored the original
+composer source (Git blob `8a3e82c2e8423dca7cc7a1f16cf995bfcc06335a`, identical
+to the baseline source); the after run restored the committed fix. The comparison
+uses identical crops of the original screenshots, without changing their content.
+Run the browser regression with
+`pnpm --filter @lody/components exec playwright test --grep 'No project session searches'`.
+Native Electron rendering, mobile layout, and real workspace catalog loading
+remain unverified. No captured user sessions are test fixtures.
 
 Root `pnpm check` passed typechecking and lint but failed at the unchanged
 boot-shell storage-unavailable test: components had 4,594 passing tests and
@@ -64,4 +81,6 @@ warnings remain.
 - [Draft PR #1189](https://github.com/LodyAI/Lody/pull/1189)
 - [Composer source](../../../../packages/components/src/components/mentions/combined-mention-textarea.tsx)
 - [Regression suite](../../../../packages/components/tests/combined-mention-textarea-activation.test.tsx)
+- [Browser regression](../../../../packages/components/tests/e2e/composer-mention-placement.spec.ts)
+- [Synthetic local scene](../../../../packages/components/src/stories/SessionMentionSearch.stories.tsx)
 - [Session pipeline explanation](../../../docs/ui-mentions.md#sessions)
