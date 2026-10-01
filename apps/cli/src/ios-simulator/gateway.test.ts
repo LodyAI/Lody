@@ -78,6 +78,52 @@ async function setup(
   };
 }
 describe('simulator media boundary', () => {
+  it('serves only bounded DeviceKit resources behind the existing private preview capability', async () => {
+    const requests: string[] = [];
+    const png = Buffer.alloc(24);
+    png.set([137, 80, 78, 71, 13, 10, 26, 10]);
+    png.write('IHDR', 12);
+    png.writeUInt32BE(440, 16);
+    png.writeUInt32BE(900, 20);
+    const g = await setup((req, res) => {
+      requests.push(req.url ?? '');
+      if (req.url?.endsWith('/definition.json'))
+        res.end(
+          JSON.stringify({
+            screen: {
+              viewport: { width: 440, height: 900 },
+              rect: { x: 20, y: 20, width: 400, height: 860 },
+              clipRadius: 40,
+              buttonMargins: { left: 0, right: 0, top: 0, bottom: 0 },
+            },
+            buttons: [],
+          })
+        );
+      else if (req.url?.endsWith('/bezel.png')) res.end(png);
+      else res.writeHead(404).end();
+    });
+    const asset = new URL('exterior.json', g.url);
+    asset.search = g.url.search;
+    const unauthorized = new URL(asset);
+    unauthorized.search = '';
+    expect((await fetch(unauthorized)).ok).toBe(false);
+    const response = await fetch(asset);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ width: 440, height: 900, buttons: [] });
+    const image = new URL('bezel.png', asset);
+    image.search = asset.search;
+    expect(Buffer.from(await (await fetch(image)).arrayBuffer())).toEqual(png);
+    const arbitrary = new URL('definition.json', asset);
+    arbitrary.search = asset.search;
+    expect((await fetch(arbitrary)).status).toBe(404);
+    expect(requests).toEqual([
+      '/simulators/5519CB11-71C9-46D9-AEFF-73C96F1104E0/definition.json',
+      '/simulators/5519CB11-71C9-46D9-AEFF-73C96F1104E0/bezel.png',
+    ]);
+    expect(g.renewals()).toBe(0);
+    g.revoke();
+    expect((await fetch(image)).status).toBe(410);
+  });
   it('serializes host controls and fences their completion after ownership is revoked', async () => {
     let began: () => void = () => {};
     let complete: () => void = () => {};

@@ -98,10 +98,18 @@ function viewer(options: { rotation?: number; fetch?: typeof fetch } = {}) {
     Blob,
     ArrayBuffer,
     AbortController,
+    AbortSignal,
+    TextDecoder,
+    Uint8Array,
     innerWidth: 600,
     innerHeight: 1000,
-    fetch:
-      options.fetch ?? (async () => new Response(JSON.stringify({ success: true, rotation: 90 }))),
+    fetch: (url: string, init?: RequestInit) =>
+      String(url).includes('exterior.json')
+        ? Promise.resolve(new Response('', { status: 404 }))
+        : (
+            options.fetch ??
+            (async () => new Response(JSON.stringify({ success: true, rotation: 90 })))
+          )(url, init),
     createImageBitmap: async () => ({ width: 1200, height: 2000, close() {} }),
     WebSocket: Socket,
     setTimeout,

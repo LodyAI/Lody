@@ -13,6 +13,7 @@ const Orientations = [
 /** Fixed routes against an owned loopback process. Never proxy a caller's path or URL. */
 export function createSimulatorDeviceControls(options: {
   port: number;
+  softwareKeyboard?: boolean;
   udid: string;
   signal: AbortSignal;
   active(): boolean;
@@ -85,6 +86,7 @@ export function createSimulatorDeviceControls(options: {
   };
   return {
     initialize: async () => {
+      if (options.softwareKeyboard) await options.hostControl({ kind: 'prepare-keyboard' });
       Ack.parse(await post('orientation?value=portrait'));
       orientation = 0;
     },

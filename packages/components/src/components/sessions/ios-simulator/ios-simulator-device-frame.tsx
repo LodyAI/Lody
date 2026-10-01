@@ -1,3 +1,4 @@
+import type { IosSimulatorExterior } from '@lody/shared';
 import { forwardRef, type CSSProperties, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -5,6 +6,7 @@ import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, radius, space } from '@lody/ui/tokens/scales.stylex';
 import {
   getIosSimulatorDeviceGeometry,
+  getIosSimulatorExteriorGeometry,
   type IosSimulatorButtonName,
   type IosSimulatorHardware,
   type IosSimulatorHardwareButton,
@@ -94,10 +96,28 @@ const styles = stylex.create({
     cornerShape: corner.round,
   },
   screenAlone: { boxShadow: shadow.card },
+  nativeImage: {
+    position: 'absolute',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none',
+    userSelect: 'none',
+  },
+  nativeButton: {
+    position: 'absolute',
+    padding: 0,
+    margin: 0,
+    border: 0,
+    backgroundColor: 'transparent',
+    pointerEvents: 'auto',
+    cursor: 'pointer',
+  },
 });
 
 export type IosSimulatorDeviceFrameProps = {
   hardware: IosSimulatorHardware;
+  exterior?: { geometry: IosSimulatorExterior; imageUrl: string };
   /** Width / height of the screen as it is shown, after any rotation. */
   screenAspect: number;
   turns: IosSimulatorQuarterTurns;
@@ -192,6 +212,7 @@ export const IosSimulatorDeviceFrame = forwardRef<HTMLDivElement, IosSimulatorDe
   function IosSimulatorDeviceFrame(
     {
       hardware,
+      exterior,
       screenAspect,
       turns,
       bezel,
@@ -203,7 +224,10 @@ export const IosSimulatorDeviceFrame = forwardRef<HTMLDivElement, IosSimulatorDe
     },
     ref
   ) {
-    const geometry = getIosSimulatorDeviceGeometry(hardware, screenAspect, turns, bezel);
+    const native = bezel ? exterior : undefined;
+    const geometry = native
+      ? getIosSimulatorExteriorGeometry(native.geometry, turns)
+      : getIosSimulatorDeviceGeometry(hardware, screenAspect, turns, bezel);
     const sideways = turns % 2 === 1;
     const unit = (value: number) => `calc(100cqw * ${value / geometry.width})`;
     const deviceStyle: CSSProperties = {
@@ -220,7 +244,7 @@ export const IosSimulatorDeviceFrame = forwardRef<HTMLDivElement, IosSimulatorDe
       right: percent(geometry.screen.right / geometry.width),
       top: percent(geometry.screen.top / geometry.height),
       bottom: percent(geometry.screen.bottom / geometry.height),
-      borderRadius: unit(hardware.screenRadius),
+      borderRadius: unit(native?.geometry.screen.radius ?? hardware.screenRadius),
     };
     return (
       <div
@@ -238,21 +262,57 @@ export const IosSimulatorDeviceFrame = forwardRef<HTMLDivElement, IosSimulatorDe
           >
             {bezel ? (
               <div {...stylex.props(styles.chassis)} style={chassisStyle} aria-hidden={!onPress}>
-                <div
-                  {...stylex.props(styles.body)}
-                  style={{ borderRadius: unit(hardware.bodyRadius) }}
-                />
-                {hardware.buttons.map((button) => (
-                  <HardwareButton
-                    key={button.id}
-                    button={button}
-                    portrait={geometry.portrait}
-                    hardware={hardware}
-                    label={buttonLabel(button)}
-                    onPress={onPress}
-                    enabled={button.press ? isPressAvailable(button.press) : false}
-                  />
-                ))}
+                {native ? (
+                  <>
+                    <img
+                      {...stylex.props(styles.nativeImage)}
+                      src={native.imageUrl}
+                      alt=""
+                      draggable={false}
+                    />
+                    {native.geometry.buttons.map((button, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        {...stylex.props(styles.nativeButton)}
+                        style={{
+                          left: percent(button.x / geometry.portrait.width),
+                          top: percent(button.y / geometry.portrait.height),
+                          width: percent(button.width / geometry.portrait.width),
+                          height: percent(button.height / geometry.portrait.height),
+                        }}
+                        aria-label={buttonLabel({
+                          id: button.button === 'lock' ? 'side' : button.button,
+                          edge: 'left',
+                          at: 0,
+                          length: 0,
+                          press: button.button,
+                        })}
+                        disabled={!onPress || !isPressAvailable(button.button)}
+                        data-hardware-button={button.button}
+                        onClick={() => onPress?.(button.button)}
+                      />
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <div
+                      {...stylex.props(styles.body)}
+                      style={{ borderRadius: unit(hardware.bodyRadius) }}
+                    />
+                    {hardware.buttons.map((button) => (
+                      <HardwareButton
+                        key={button.id}
+                        button={button}
+                        portrait={geometry.portrait}
+                        hardware={hardware}
+                        label={buttonLabel(button)}
+                        onPress={onPress}
+                        enabled={button.press ? isPressAvailable(button.press) : false}
+                      />
+                    ))}
+                  </>
+                )}
               </div>
             ) : null}
             <div {...stylex.props(styles.screen, !bezel && styles.screenAlone)} style={screenStyle}>

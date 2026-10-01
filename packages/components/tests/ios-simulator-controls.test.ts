@@ -9,6 +9,7 @@ import {
 import {
   getIosSimulatorControlAvailability,
   getIosSimulatorDeviceGeometry,
+  getIosSimulatorExteriorGeometry,
   getIosSimulatorHardware,
 } from '../src/lib/ios-simulator/ios-simulator-hardware';
 
@@ -210,5 +211,36 @@ describe('iOS Simulator capture replies', () => {
       ok: false,
       error: 'failed',
     });
+  });
+});
+
+it('preserves exact DeviceKit screen insets through every rotation', () => {
+  const exterior = {
+    width: 450,
+    height: 900,
+    screen: { x: 30, y: 20, width: 390, height: 850, radius: 50 },
+    buttons: [],
+  };
+  expect(getIosSimulatorExteriorGeometry(exterior, 0)).toMatchObject({
+    width: 450,
+    height: 900,
+    screen: { top: 20, right: 30, bottom: 30, left: 30 },
+  });
+  expect(getIosSimulatorExteriorGeometry(exterior, 1)).toMatchObject({
+    width: 900,
+    height: 450,
+    screen: { top: 30, right: 20, bottom: 30, left: 30 },
+  });
+  expect(getIosSimulatorExteriorGeometry(exterior, 2).screen).toEqual({
+    top: 30,
+    right: 30,
+    bottom: 20,
+    left: 30,
+  });
+  expect(getIosSimulatorExteriorGeometry(exterior, 3).screen).toEqual({
+    top: 30,
+    right: 30,
+    bottom: 30,
+    left: 20,
   });
 });

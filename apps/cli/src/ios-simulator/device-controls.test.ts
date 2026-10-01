@@ -102,6 +102,27 @@ describe('simulator device controls', () => {
     expect(nativeOrientation).toBe('landscape-right');
   });
 
+  it('prepares the device software keyboard before establishing a preview baseline', async () => {
+    let keyboardReady = false;
+    const controls = createSimulatorDeviceControls({
+      udid: 'device',
+      port: 1234,
+      softwareKeyboard: true,
+      signal: new AbortController().signal,
+      active: () => true,
+      hostControl: async (control) => {
+        expect(control).toEqual({ kind: 'prepare-keyboard' });
+        keyboardReady = true;
+      },
+      fetch: async () => {
+        expect(keyboardReady).toBe(true);
+        return new Response('{"ok":true}');
+      },
+    });
+    await controls.initialize();
+    expect(controls.rotation()).toBe(0);
+  });
+
   it('rejects revoked ownership, bad acknowledgements and oversized native responses', async () => {
     let active = false;
     const calls: string[] = [];

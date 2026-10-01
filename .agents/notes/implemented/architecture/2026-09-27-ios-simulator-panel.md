@@ -49,7 +49,7 @@ Home/app switcher/lock, rotation, shake, supported volume/Action buttons, explic
 Unicode input, appearance and simulator deep links. Capture saves a PNG or stages a
 composer attachment without sending. Fit/expanded view and the dependency-free device
 shell stay local; the shell preserves actual screen bounds and adds no duplicate island
-or Home bar. Model styling is illustrative, not a bundled DeviceKit asset.
+or Home bar. DeviceKit assets are loaded privately from the target Mac; illustrative CSS is only a missing-asset fallback.
 
 Controls require `iosSimulatorControls: 1` independently of basic preview support.
 Text and deep links can contain credentials, so device actions use exact-origin
@@ -204,12 +204,34 @@ processes were removed. This checks native command acceptance and selected readb
 it does not prove every visible button effect or remote/mobile end-to-end behavior.
 
 The controls UI adds a responsive second toolbar row, mobile More menu, model-aware
-CSS hardware exterior and draft-only screenshot attachment. It adds no dependency.
+DeviceKit hardware exterior (with a CSS fallback) and draft-only screenshot attachment. It adds no dependency.
 The final bridge tests cover exact reply identity, serial controls, timeout and
 navigation/unmount cancellation, and state-before-ack rotation without a double turn.
 The viewer's acknowledged absolute angle is the only orientation authority. The UI
 Designer checked hardware/control stories in light/dark and narrow/wide layouts;
 these checks do not replace a live Electron or mobile acceptance pass.
+
+### DeviceKit exterior and guest keyboard
+
+The panel now reads the bound simulator’s DeviceKit layout and merged bezel through
+fixed Baguette routes, normalizes geometry/button hit regions and drops upstream URLs.
+The private gateway caches bounded geometry/PNG bytes; the initialized viewer transfers
+them to its exact parent. The renderer checks identity, geometry and PNG dimensions,
+creates a revocable object URL and rotates the exterior independently of screen pixels.
+Missing assets retain the drawn fallback. No asset is bundled or publicly published.
+
+For iPhone/iPad, the owned worker writes device-local
+`com.apple.Preferences AutomaticMinimizationEnabled=false` and posts
+`com.apple.keyboard.preferences.changed` before the native portrait baseline. This lets
+the iOS software keyboard appear with hardware input connected, without device restart
+or host-global Simulator preference changes. It does not add host keyboard forwarding.
+
+A temporary native UIKit probe was exercised through the real private viewer: device and
+interface orientation changed to landscape, application bounds changed from 393×852 to
+852×393, and the software keyboard used landscape layout. The DeviceKit frame aligned in
+both directions. The native orientation route is therefore more than canvas rotation;
+orientation-locked apps and SpringBoard may decline interface rotation. This is not a
+continuous CoreMotion/gyroscope simulator. Whole Electron and mobile E2E remain unverified.
 
 ## PR security review
 

@@ -1,5 +1,11 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import type { IosSimulatorDeviceControl } from '@lody/shared';
+import {
+  IosSimulatorExteriorSchema,
+  IOS_SIMULATOR_BEZEL_MAX_BYTES,
+  isIosSimulatorBezelPng,
+  type IosSimulatorExterior,
+  type IosSimulatorDeviceControl,
+} from '@lody/shared';
 import * as stylex from '@stylexjs/stylex';
 import {
   IOS_SIMULATOR_VIEWER_INIT,
@@ -112,6 +118,18 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
     const [loaded, setLoaded] = useState(false);
     const loadedRef = useRef(false);
     loadedRef.current = loaded;
+    const [exterior, setExterior] = useState<{
+      geometry: IosSimulatorExterior;
+      imageUrl: string;
+    }>();
+    const exteriorUrl = useRef<string | undefined>(undefined);
+    useEffect(
+      () => () => {
+        if (exteriorUrl.current) URL.revokeObjectURL(exteriorUrl.current);
+        exteriorUrl.current = undefined;
+      },
+      [operationId, viewerUrl]
+    );
     const [screenAspect, setScreenAspect] = useState<number | null>(null);
     const [fullscreen, setFullscreen] = useState(false);
     const firstFrameTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -131,6 +149,26 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       const receive = (event: MessageEvent) => {
         const frameWindow = frameRef.current?.contentWindow;
         if (!frameWindow || event.source !== frameWindow || event.origin !== viewerOrigin) return;
+        if (
+          event.data?.type === 'lody:ios-simulator:exterior' &&
+          event.data.operationId === operationId
+        ) {
+          const parsed = IosSimulatorExteriorSchema.safeParse(event.data.geometry);
+          const png: unknown = event.data.png;
+          if (
+            !parsed.success ||
+            !(png instanceof ArrayBuffer) ||
+            png.byteLength > IOS_SIMULATOR_BEZEL_MAX_BYTES ||
+            png.byteLength < 8
+          )
+            return;
+          if (!isIosSimulatorBezelPng(new Uint8Array(png), parsed.data)) return;
+          if (exteriorUrl.current) URL.revokeObjectURL(exteriorUrl.current);
+          const imageUrl = URL.createObjectURL(new Blob([png], { type: 'image/png' }));
+          exteriorUrl.current = imageUrl;
+          setExterior({ geometry: parsed.data, imageUrl });
+          return;
+        }
         const state = parseIosSimulatorViewerState(event.data, operationId);
         if (!state) return;
         if (state !== 'connecting') clearTimeout(firstFrameTimer.current);
@@ -170,6 +208,7 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
     useEffect(() => {
       setLoaded(false);
       setScreenAspect(null);
+      setExterior(undefined);
     }, [viewerUrl]);
 
     useEffect(() => {
@@ -305,6 +344,7 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       <IosSimulatorDeviceFrame
         ref={stageRef}
         hardware={hardware}
+        exterior={exterior}
         screenAspect={screenAspect ?? getIosSimulatorAspectRatio(hardware.family)}
         turns={turns}
         bezel={bezel}

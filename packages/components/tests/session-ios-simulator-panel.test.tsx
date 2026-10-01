@@ -726,6 +726,55 @@ describe('SessionIosSimulatorPanel controls', () => {
     expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
   });
 
+  it('uses authenticated DeviceKit pixels and releases their object URL on unmount', async () => {
+    const create = vi.fn(() => 'blob:devicekit');
+    const revoke = vi.fn();
+    const OriginalURL = URL;
+    vi.stubGlobal(
+      'URL',
+      class extends OriginalURL {
+        static createObjectURL = create;
+        static revokeObjectURL = revoke;
+      }
+    );
+    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
+    await renderPanel({ machine, meta: CONTROLS_META });
+    const viewer = await connectControlViewer();
+    const png = new Uint8Array(24);
+    png.set([137, 80, 78, 71, 13, 10, 26, 10]);
+    png.set([73, 72, 68, 82], 12);
+    const bytes = new DataView(png.buffer);
+    bytes.setUint32(16, 440);
+    bytes.setUint32(20, 900);
+    const data = {
+      type: 'lody:ios-simulator:exterior',
+      operationId: 'op-1',
+      geometry: {
+        width: 440,
+        height: 900,
+        screen: { x: 20, y: 20, width: 400, height: 860, radius: 40 },
+        buttons: [],
+      },
+      png: png.buffer,
+    };
+    const receive = async (source: MessageEventSource | null, payload = data) =>
+      act(async () => {
+        window.dispatchEvent(
+          new MessageEvent('message', { origin: VIEWER_ORIGIN, source, data: payload })
+        );
+      });
+    await receive(window);
+    expect(create).not.toHaveBeenCalled();
+    await receive(viewer.frame.contentWindow, { ...data, operationId: 'wrong' });
+    expect(create).not.toHaveBeenCalled();
+    await receive(viewer.frame.contentWindow);
+    expect(container?.querySelector('img')?.getAttribute('src')).toBe('blob:devicekit');
+    await act(async () => root?.unmount());
+    root = undefined;
+    expect(revoke).toHaveBeenCalledWith('blob:devicekit');
+    vi.unstubAllGlobals();
+  });
+
   it('disables what the device lacks and says once why a Mac cannot take controls', async () => {
     const machine = createFakeMachine({
       devices: [

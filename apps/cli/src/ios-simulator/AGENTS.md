@@ -19,7 +19,13 @@
   shake and deep links; abort joins child close before release. Do not delegate these to
   Baguette's Foundation.Process paths: those children create separate process groups
   and can outlive the native server. Control bodies/errors never enter logs or RPC.
+  iPhone/iPad preparation disables device-local `AutomaticMinimizationEnabled` and
+  notifies keyboard preferences so the guest software keyboard remains available.
+  Never rewrite host-global Simulator preferences or reboot to change keyboards.
   Negotiate `iosSimulatorControls: 1`.
+- `exterior.ts` reads only the bound device's fixed definition/bezel routes, strips all
+  upstream URLs, and validates geometry plus bounded PNG dimensions. The gateway serves
+  these behind the same private capability; resource reads never renew the lease.
 - `viewer.ts` is the fixed iframe artifact, without React or annotation injection.
   Parent commands bind source, origin and operation id. Decode at most one JPEG
   with one replaceable pending frame; release touches on blur/cancel/disconnect.

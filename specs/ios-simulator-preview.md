@@ -19,11 +19,18 @@ More. Explicit text input, simulator deep links and light/dark settings use the 
 preview connection, never retained workspace RPC. New controls require the independent
 `iosSimulatorControls: 1` capability.
 
-Render a dependency-free hardware shell around the screen, matching its device family
-and actual display aspect/rotation; do not cover streamed pixels with another notch or
+Use the target Mac’s DeviceKit exterior through Baguette, preserving exact screen and
+button geometry; use the drawn shell only if those assets are unavailable. Transfer
+bounded images through the private viewer, without publishing or bundling Apple assets.
+The exterior follows actual display aspect/rotation; do not cover streamed pixels with another notch or
 Home indicator. Fit and expanded views are local UI state. Capture can save a PNG or
 attach it to the current composer draft; it never automatically sends a message.
 Only the bound iframe and matching request may return bounded screenshot bytes.
+
+On iPhone/iPad preview preparation, enable the guest software keyboard to appear when
+an input is focused, even with a hardware keyboard attached. Change only that device’s
+keyboard preference; do not reboot it or change host-global Simulator settings. Rotation
+sends the native device-orientation event; apps may restrict their supported orientations.
 
 Same-machine Electron uses direct local transport, including offline operation. Remote
 viewing by the authorized session uses Quick Tunnel internally. Both routes authorize

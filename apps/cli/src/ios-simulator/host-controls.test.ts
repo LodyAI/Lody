@@ -35,6 +35,7 @@ it('uses fixed argv and stdin for Unicode, falling back when devicectl is unavai
       executable
     );
     await runSimulatorHostControl('device', { kind: 'shake' }, signal, executable);
+    await runSimulatorHostControl('device', { kind: 'prepare-keyboard' }, signal, executable);
     expect(
       (await readFile(record, 'utf8'))
         .trim()
@@ -50,6 +51,31 @@ it('uses fixed argv and stdin for Unicode, falling back when devicectl is unavai
       { args: ['simctl', 'ui', 'device', 'appearance', 'dark'], input: '' },
       {
         args: ['simctl', 'spawn', 'device', 'notifyutil', '-p', 'com.apple.UIKit.SimulatorShake'],
+        input: '',
+      },
+      {
+        args: [
+          'simctl',
+          'spawn',
+          'device',
+          'defaults',
+          'write',
+          'com.apple.Preferences',
+          'AutomaticMinimizationEnabled',
+          '-bool',
+          'false',
+        ],
+        input: '',
+      },
+      {
+        args: [
+          'simctl',
+          'spawn',
+          'device',
+          'notifyutil',
+          '-p',
+          'com.apple.keyboard.preferences.changed',
+        ],
         input: '',
       },
     ]);

@@ -16,7 +16,10 @@ const onMessage = (raw: unknown) => {
       type: z.literal('control'),
       id: z.number().int().positive(),
       udid: z.string().uuid(),
-      control: IosSimulatorDeviceControlSchema,
+      control: z.union([
+        IosSimulatorDeviceControlSchema,
+        z.object({ kind: z.literal('prepare-keyboard') }).strict(),
+      ]),
     })
     .strict()
     .safeParse(raw);
@@ -29,7 +32,8 @@ const onMessage = (raw: unknown) => {
     control.kind !== 'text' &&
     control.kind !== 'appearance' &&
     control.kind !== 'open-url' &&
-    control.kind !== 'shake'
+    control.kind !== 'shake' &&
+    control.kind !== 'prepare-keyboard'
   ) {
     stop();
     return;

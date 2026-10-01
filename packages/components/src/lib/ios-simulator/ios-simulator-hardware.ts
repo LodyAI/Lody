@@ -297,3 +297,19 @@ export function getIosSimulatorDeviceGeometry(
       };
   }
 }
+
+/** Exact DeviceKit rects, rotated around the original composite centre. */
+export function getIosSimulatorExteriorGeometry(
+  exterior: import('@lody/shared').IosSimulatorExterior,
+  turns: IosSimulatorQuarterTurns
+): IosSimulatorDeviceGeometry {
+  const { width: w, height: h, screen: s } = exterior;
+  const inset = [s.y, w - s.x - s.width, h - s.y - s.height, s.x]; // top/right/bottom/left
+  const rotated = (index: number) => inset[(index - turns + 4) % 4] ?? 0;
+  return {
+    width: turns % 2 ? h : w,
+    height: turns % 2 ? w : h,
+    screen: { top: rotated(0), right: rotated(1), bottom: rotated(2), left: rotated(3) },
+    portrait: { width: w, height: h },
+  };
+}

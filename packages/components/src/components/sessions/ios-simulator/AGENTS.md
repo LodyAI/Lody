@@ -33,6 +33,9 @@ Decision and rationale:
 - Viewer state is the sole rotation authority: width/height are display-oriented,
   and `rotation` is the acknowledged absolute angle. Never rotate again on a
   control acknowledgement.
+- Prefer DeviceKit geometry/PNG supplied by the bound viewer; never fetch asset URLs
+  from upstream metadata. Validate frame/origin/operation and PNG bounds, and revoke
+  generated object URLs on replacement/unmount. CSS profiles are the missing-asset fallback.
 - Hardware outlines and buttons stay outside streamed pixels. Use deviceType as
   model identity, with device name only as fallback; no duplicate notch/island.
 - Desktop controls use a second toolbar row and fold with width; mobile puts them

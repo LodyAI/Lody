@@ -4,6 +4,7 @@ import type { Socket } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
 import { simulatorViewerHtml } from './viewer';
+import { readSimulatorExterior } from './exterior';
 import {
   IosSimulatorDeviceControlRequestSchema,
   type IosSimulatorDeviceControlResult,
@@ -28,6 +29,7 @@ export async function createSimulatorGateway(options: {
   operationId: string;
   udid: string;
   port: number;
+  softwareKeyboard?: boolean;
   signal?: AbortSignal;
   hostControl(control: SimulatorHostControl): Promise<void>;
   active(): boolean;
@@ -45,6 +47,7 @@ export async function createSimulatorGateway(options: {
   const controlAbort = new AbortController();
   const controls = createSimulatorDeviceControls({
     port: options.port,
+    softwareKeyboard: options.softwareKeyboard,
     udid: options.udid,
     signal: options.signal
       ? AbortSignal.any([controlAbort.signal, options.signal])
@@ -60,12 +63,46 @@ export async function createSimulatorGateway(options: {
     { hash: string; result: IosSimulatorDeviceControlResult }
   >();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
+  let exterior: ReturnType<typeof readSimulatorExterior> | undefined;
   const server = createServer((req, res) => {
     if (!options.active()) {
       res.writeHead(410).end();
       return;
     }
     const requestedPath = new URL(req.url ?? '/', 'http://localhost').pathname;
+    if (
+      req.method === 'GET' &&
+      validOrigin(req.headers.host, req.headers.origin) &&
+      (requestedPath === `${path}exterior.json` || requestedPath === `${path}bezel.png`)
+    ) {
+      exterior ??= readSimulatorExterior({
+        port: options.port,
+        udid: options.udid,
+        signal: options.signal
+          ? AbortSignal.any([controlAbort.signal, options.signal])
+          : controlAbort.signal,
+        active: options.active,
+      });
+      void exterior
+        .then((asset) => {
+          if (!options.active() || controlAbort.signal.aborted) {
+            res.writeHead(410).end();
+            return;
+          }
+          const png = requestedPath.endsWith('bezel.png');
+          res.writeHead(200, {
+            'Content-Type': png ? 'image/png' : 'application/json',
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+          });
+          res.end(png ? asset.png : JSON.stringify(asset.geometry));
+        })
+        .catch(() => {
+          res.writeHead(404).end();
+        });
+      return;
+    }
+
     if (
       req.method === 'POST' &&
       requestedPath === `${path}control` &&

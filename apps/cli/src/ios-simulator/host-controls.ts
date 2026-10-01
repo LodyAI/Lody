@@ -1,10 +1,9 @@
 import { spawn } from 'node:child_process';
 import type { IosSimulatorDeviceControl } from '@lody/shared';
 
-export type SimulatorHostControl = Extract<
-  IosSimulatorDeviceControl,
-  { kind: 'text' | 'appearance' | 'open-url' | 'shake' }
->;
+export type SimulatorHostControl =
+  | Extract<IosSimulatorDeviceControl, { kind: 'text' | 'appearance' | 'open-url' | 'shake' }>
+  | { kind: 'prepare-keyboard' };
 
 /** Run only fixed simctl/devicectl commands, inside the IPC lifecycle worker.
  * Unlike Foundation.Process children, these direct children can be cancelled and joined. */
@@ -47,6 +46,28 @@ export async function runSimulatorHostControl(
   }
   let code: number | null;
   switch (control.kind) {
+    case 'prepare-keyboard':
+      code = await run([
+        'simctl',
+        'spawn',
+        udid,
+        'defaults',
+        'write',
+        'com.apple.Preferences',
+        'AutomaticMinimizationEnabled',
+        '-bool',
+        'false',
+      ]);
+      if (code === 0)
+        code = await run([
+          'simctl',
+          'spawn',
+          udid,
+          'notifyutil',
+          '-p',
+          'com.apple.keyboard.preferences.changed',
+        ]);
+      break;
     case 'text':
       // Xcode 27 devicectl fixes pbcopy's silent no-op; older Xcodes use simctl.
       code = await run(

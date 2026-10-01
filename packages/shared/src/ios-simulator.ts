@@ -119,3 +119,60 @@ export const IosSimulatorRemoteResponseSchema = IosSimulatorResponseSchema.exten
     .optional(),
 }).strict();
 export type IosSimulatorRemoteResponse = z.infer<typeof IosSimulatorRemoteResponseSchema>;
+
+/** DeviceKit geometry only; private viewer messages carry the PNG separately. */
+const ExteriorSize = z.number().finite().positive().max(16384);
+const ExteriorPosition = z.number().finite().min(0).max(16384);
+export const IosSimulatorExteriorSchema = z
+  .object({
+    width: ExteriorSize,
+    height: ExteriorSize,
+    screen: z
+      .object({
+        x: ExteriorPosition,
+        y: ExteriorPosition,
+        width: ExteriorSize,
+        height: ExteriorSize,
+        radius: ExteriorPosition,
+      })
+      .strict(),
+    buttons: z
+      .array(
+        z
+          .object({
+            button: z.enum(['home', 'lock', 'volume-up', 'volume-down', 'action']),
+            x: ExteriorPosition,
+            y: ExteriorPosition,
+            width: ExteriorSize,
+            height: ExteriorSize,
+          })
+          .strict()
+      )
+      .max(16),
+  })
+  .strict()
+  .refine((value) => {
+    const inside = (r: { x: number; y: number; width: number; height: number }) =>
+      r.x + r.width <= value.width && r.y + r.height <= value.height;
+    return (
+      inside(value.screen) &&
+      value.buttons.every(inside) &&
+      value.screen.radius <= Math.min(value.screen.width, value.screen.height) / 2
+    );
+  });
+export type IosSimulatorExterior = z.infer<typeof IosSimulatorExteriorSchema>;
+export const IOS_SIMULATOR_BEZEL_MAX_BYTES = 4 * 1024 * 1024;
+
+/** Reject compressed images with dimensions unrelated to the bounded DeviceKit layout. */
+export function isIosSimulatorBezelPng(bytes: Uint8Array, geometry: IosSimulatorExterior): boolean {
+  if (bytes.byteLength < 24 || bytes.byteLength > IOS_SIMULATOR_BEZEL_MAX_BYTES) return false;
+  if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => bytes[index] === byte))
+    return false;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return (
+    view.getUint32(12) === 0x49484452 &&
+    view.getUint32(16) === geometry.width &&
+    view.getUint32(20) === geometry.height &&
+    geometry.width * geometry.height <= 16 * 1024 * 1024
+  );
+}
