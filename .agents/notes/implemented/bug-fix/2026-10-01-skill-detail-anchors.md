@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1193](https://github.com/LodyAI/Lody/pull/1193)
+
 [中文版](2026-10-01-skill-detail-anchors.zh.md)
 
 ## Abstract
