@@ -118,7 +118,7 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   dispatch or revive the old turn.
 - User rows show names right of time; desktop avatars open accessible name/email
   cards, mobile avatars do not.
-- Attachment and mobile image-preview invariants live in
+- Attachment layout, preview continuity, and mobile previews follow
   [session-files-rendering.md](session-files-rendering.md).
 - Markdown images remember each source's natural size or failure for the page's
   life: a virtualized remount must render at its final height (failed sources show alt text).

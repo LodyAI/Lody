@@ -234,7 +234,11 @@ import { Button } from '@lody/ui/button';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { Skeleton } from '@lody/ui/skeleton';
-import { getSessionImageBlobUrl, getSessionImageDataUrl } from '@/lib/session-image-cache';
+import {
+  getSessionImageBlobUrl,
+  getSessionImageDataUrl,
+  peekSessionImageUrl,
+} from '@/lib/session-image-cache';
 import { SessionFileCard, SessionFileCardList } from './session-file-card';
 import {
   SessionFilePreviewDialog,
@@ -5839,7 +5843,7 @@ const UserImageBlock = (props: Parameters<typeof WorkspaceUserImageBlock>[0]) =>
   );
 };
 
-const WorkspaceUserImageBlock = ({
+export const WorkspaceUserImageBlock = ({
   entry,
   onPreviewRequest,
   variant = 'full',
@@ -5872,6 +5876,14 @@ const WorkspaceUserImageBlock = ({
     entry.fileName || entry.alt || t('sessions.uploadedImage', 'Uploaded image');
   const imageLoadUnavailableLabel = t('sessions.imageLoadUnavailable', 'Unable to load image');
   const imageLoadFailedLabel = t('sessions.imageLoadFailed', 'Failed to load image');
+  const cachedThumbnailUrl =
+    workspaceId && authToken
+      ? peekSessionImageUrl(
+          { workspaceId, sessionId: entry.sessionId, imageId: entry.imageId },
+          useNativeIOSShareSafeImageUrl
+        )
+      : null;
+  const displayedThumbnailUrl = cachedThumbnailUrl ?? thumbnailBlobUrl;
 
   useEffect(() => {
     let active = true;
@@ -5882,6 +5894,19 @@ const WorkspaceUserImageBlock = ({
       setThumbnailBlobUrl(null);
       setIsThumbnailLoading(false);
       setThumbnailLoadingError(imageLoadUnavailableLabel);
+      return () => {
+        active = false;
+      };
+    }
+
+    const cachedUrl = peekSessionImageUrl(
+      { workspaceId, sessionId: entry.sessionId, imageId: entry.imageId },
+      useNativeIOSShareSafeImageUrl
+    );
+    if (cachedUrl) {
+      setThumbnailBlobUrl(cachedUrl);
+      setThumbnailLoadingError(null);
+      setIsThumbnailLoading(false);
       return () => {
         active = false;
       };
@@ -5949,13 +5974,13 @@ const WorkspaceUserImageBlock = ({
         isThumbnail ? `${thumbnailFrameClass} shrink-0` : 'inline-flex max-w-full flex-col'
       )}
     >
-      {isThumbnailLoading && (
+      {!cachedThumbnailUrl && isThumbnailLoading && (
         <Skeleton
           shape="block"
           className={cn(isThumbnail ? thumbnailFrameClass : `h-36 ${fullFrameWidthClass}`)}
         />
       )}
-      {!isThumbnailLoading && thumbnailLoadingError && (
+      {!cachedThumbnailUrl && !isThumbnailLoading && thumbnailLoadingError && (
         <div
           className={cn(
             'flex items-center justify-center px-3 py-4 text-xs text-muted-foreground',
@@ -5965,35 +5990,38 @@ const WorkspaceUserImageBlock = ({
           {thumbnailLoadingError}
         </div>
       )}
-      {!isThumbnailLoading && !thumbnailLoadingError && thumbnailBlobUrl && (
-        <>
-          <button
-            type="button"
-            className={cn(isThumbnail ? `block ${thumbnailFrameClass}` : 'inline-flex max-w-full')}
-            onClick={() => {
-              if (onPreviewRequest) {
-                onPreviewRequest(entry.key);
-                return;
-              }
-              if (sessionImagePreview) {
-                sessionImagePreview.openImagePreview(entry.key);
-                return;
-              }
-              setLocalActiveImageKey(entry.key);
-            }}
-          >
-            <img
-              src={thumbnailBlobUrl}
-              alt={previewImageAlt}
+      {(cachedThumbnailUrl || (!isThumbnailLoading && !thumbnailLoadingError)) &&
+        displayedThumbnailUrl && (
+          <>
+            <button
+              type="button"
               className={cn(
-                isThumbnail
-                  ? `${thumbnailFrameClass} object-cover`
-                  : 'block max-h-[10.5rem] max-w-full object-contain'
+                isThumbnail ? `block ${thumbnailFrameClass}` : 'inline-flex max-w-full'
               )}
-            />
-          </button>
-        </>
-      )}
+              onClick={() => {
+                if (onPreviewRequest) {
+                  onPreviewRequest(entry.key);
+                  return;
+                }
+                if (sessionImagePreview) {
+                  sessionImagePreview.openImagePreview(entry.key);
+                  return;
+                }
+                setLocalActiveImageKey(entry.key);
+              }}
+            >
+              <img
+                src={displayedThumbnailUrl}
+                alt={previewImageAlt}
+                className={cn(
+                  isThumbnail
+                    ? `${thumbnailFrameClass} object-cover`
+                    : 'block max-h-[10.5rem] max-w-full object-contain'
+                )}
+              />
+            </button>
+          </>
+        )}
       {!sessionImagePreview && !onPreviewRequest ? (
         <ImagePreviewDialog
           open={localActiveImageKey !== null}

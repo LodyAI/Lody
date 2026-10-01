@@ -154,6 +154,13 @@ Local acceptance, synchronization and daemon execution are distinct facts. UI mu
 | Written             | An ordinary turn or queue row; a ready send shows no pending state unless it waits behind a held send |
 | Desktop sidebar     | One status mark for held sends (sending or failed); a held new conversation's title stays muted       |
 
+Attachment preparation, readiness, and history publication keep the delivered
+attachment's frame, sizing, and spacing. Status text, glyphs, and progress may
+change inside that frame; progress does not add a layout row. A locally uploaded
+image reuses its existing preview bytes at publication while they remain cached,
+instead of showing another loading placeholder or fetching them again. Cache
+misses after eviction or page restart retain ordinary image loading.
+
 Use i18n and accessible status names. Subscribe to progress per affected row, not the whole list. Completion never navigates.
 
 ### 8.1 Browser and application navigation
