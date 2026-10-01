@@ -4,6 +4,7 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
+import { Select } from '@lody/ui/select';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useSetAtom } from 'jotai';
 import {
@@ -61,7 +62,12 @@ const PANEL_STYLE: CSSProperties = {
   padding: 0,
   gap: 0,
   overflow: 'hidden',
+  containerType: 'inline-size',
+  containerName: 'desktop-settings',
 };
+
+// The 240px nav needs a readable page beside it; the panel is narrower than the window.
+const NARROW = '@container desktop-settings (max-width: 720px)';
 
 /** The close button's inset, equal from the top and the end of the right pane. */
 const CLOSE_INSET = space[2];
@@ -80,17 +86,26 @@ const styles = stylex.create({
   },
   body: {
     display: 'flex',
+    flexDirection: { default: 'row', [NARROW]: 'column' },
     flexGrow: 1,
     minHeight: 0,
     overflow: 'hidden',
   },
   /** The nav: its fill (`surface.nav`) is what splits it from the page. */
   nav: {
-    display: 'flex',
+    display: { default: 'flex', [NARROW]: 'none' },
     flexDirection: 'column',
     flexShrink: 0,
     width: '240px',
   },
+  compactNav: {
+    display: { default: 'none', [NARROW]: 'flex' },
+    alignItems: 'center',
+    gap: space[2],
+    flexShrink: 0,
+    padding: space[3],
+  },
+  compactPicker: { flexGrow: 1, minWidth: 0 },
   navScroll: {
     display: 'flex',
     flexDirection: 'column',
@@ -135,15 +150,23 @@ const styles = stylex.create({
     paddingTop: '20px',
   },
   header: { flexShrink: 0 },
-  /** The page's name and its actions, on one line. */
+  /** Page actions wrap below the title when the pane cannot fit both. */
   headerRow: {
     display: 'flex',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[3],
     minHeight: '40px',
   },
-  headerActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
+  headerTitle: { minWidth: 0, overflowWrap: 'anywhere' },
+  headerActions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: space[2],
+  },
   /** The page's lead, under its name; empty on a page without one. */
   headerLead: {
     margin: 0,
@@ -162,7 +185,7 @@ const styles = stylex.create({
     width: '100%',
     maxWidth: '760px',
     marginInline: 'auto',
-    paddingInline: space[4],
+    paddingInline: { default: space[4], [NARROW]: 0 },
   },
   paneBody: { flexGrow: 1, minHeight: 0 },
   fill: { height: '100%' },
@@ -277,6 +300,56 @@ function SettingsModalBody() {
         {t('settings.title')}
       </Dialog.Description>
       <div {...stylex.props(styles.body)}>
+        <div
+          role="navigation"
+          aria-label={t('settings.title')}
+          {...stylex.props(styles.compactNav, surface.nav)}
+        >
+          <div {...stylex.props(styles.compactPicker)}>
+            <Select.Root
+              value={resolvedActiveTab}
+              items={navigationTabs.map((tab) => ({ value: tab.id, label: t(tab.labelKey) }))}
+              onValueChange={(value) => {
+                if (value !== null) selectTab(value);
+              }}
+            >
+              <Select.Trigger aria-label={t('settings.title')} style={{ width: '100%' }}>
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                {groupedSections.map((section) => {
+                  const tabs = navigationTabs.filter(
+                    (tab) =>
+                      tab.section === section.id ||
+                      (section.id === 'personal' && tab.section === 'account')
+                  );
+                  if (tabs.length === 0) return null;
+                  return (
+                    <Select.Group key={section.id}>
+                      <Select.GroupLabel>{section.label}</Select.GroupLabel>
+                      {tabs.map((tab) => (
+                        <Select.Item key={tab.id} value={tab.id}>
+                          {t(tab.labelKey)}
+                        </Select.Item>
+                      ))}
+                    </Select.Group>
+                  );
+                })}
+              </Select.Content>
+            </Select.Root>
+          </div>
+          {canReportBug ? (
+            <Button
+              variant="ghost"
+              size="small"
+              icon
+              aria-label={t('bugReport.title', 'Report a bug')}
+              onClick={handleReportBug}
+            >
+              <Bug aria-hidden="true" />
+            </Button>
+          ) : null}
+        </div>
         <FocusScope
           id={navigationScopeId}
           role="navigation"
@@ -385,7 +458,7 @@ function SettingsModalBody() {
                 <div {...stylex.props(styles.headerRow)}>
                   {/* The dialog's title style would tie with this one on the same
                     element; the page title's size lives on its own box. */}
-                  <Dialog.Title>
+                  <Dialog.Title {...stylex.props(styles.headerTitle)}>
                     <span {...stylex.props(surface.pageTitle)}>{t(activeTabConfig.labelKey)}</span>
                   </Dialog.Title>
                   <div ref={setActionsSlot} {...stylex.props(styles.headerActions)} />

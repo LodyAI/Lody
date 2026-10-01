@@ -34,6 +34,12 @@ taking columns and float over the content until dismissed, and widening the
 window restores them. Mobile devices keep the breakpoint: the mobile layout
 below it, and the desktop layout when the viewport is wide enough.
 
+Desktop Settings adapts to its panel width: a narrow panel puts category navigation
+above the page so content and page actions remain reachable; a wide panel retains
+the sidebar. Resizing keeps the selected category and open editor draft. Nested
+settings editors retain keyboard focus containment, Escape returning to Settings,
+and a scrolling form with visible footer actions in short windows.
+
 The optional developer window warm-up prepares the shell and, in local mode, the
 implicit workspace runtime, Repo, and metadata sync before a target is selected.
 A matching claim retains that runtime, including initialization still in flight.
