@@ -206,7 +206,7 @@ export class TurnPostProcessingService {
     if (options.skipHistoryFileDiff !== true) {
       try {
         const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+        const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
         await backend.applyHistoryAction({
           kind: 'assistant-file-diff',
           change: { kind: 'set', value: fileDiff },

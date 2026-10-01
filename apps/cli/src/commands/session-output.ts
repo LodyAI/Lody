@@ -1,9 +1,11 @@
 import type { MessageContent, SessionHistoryInput, SessionId } from '@lody/shared';
 import type { SessionDocument } from '@/lib/loro/doc';
+import type { SessionBackend } from '@/session/session-backend';
 
 export type StructuredSessionOutputMode = 'json' | 'jsonl';
 
-type SessionDocForOutput = Pick<SessionDocument, 'sessionId' | 'sessionData' | 'subscribeAll'>;
+type SessionDocForOutput = Pick<SessionDocument, 'sessionId'>;
+type SessionOutputBackend = Pick<SessionBackend, 'readTurnOutput' | 'subscribeHistory'>;
 
 export type SessionTurnOutputEvent =
   | {
@@ -123,22 +125,21 @@ export function calculateTurnDurationMs(
 
 export async function waitForTurnCompletion(options: {
   sessionDoc: SessionDocForOutput;
+  backend: SessionOutputBackend;
   userTurnId: string;
   outputMode: StructuredSessionOutputMode;
   timeoutMs: number;
   signal?: AbortSignal;
   onEvent?: (event: SessionTurnOutputEvent) => void;
 }): Promise<CompletedAssistantTurn> {
-  if (!options.sessionDoc.sessionData || !options.sessionDoc.subscribeAll) {
-    throw new Error('SessionDocument not initialized');
-  }
-
   return await new Promise<CompletedAssistantTurn>((resolve, reject) => {
     let settled = false;
     let lastAssistantTurnId: string | undefined;
     let lastSerializedItems: string[] = [];
     let unsubscribe = () => {};
     let timeoutId: NodeJS.Timeout | undefined;
+    let refreshRunning = false;
+    let refreshRequested = false;
 
     const cleanup = () => {
       unsubscribe();
@@ -248,18 +249,28 @@ export async function waitForTurnCompletion(options: {
     // The in-process reader captures and inspects one observation synchronously.
     const refresh = () => {
       if (settled) return;
-      try {
-        inspect(options.sessionDoc.sessionData.history.readTurnOutput(options.userTurnId));
-      } catch (error) {
-        rejectWith(error instanceof Error ? error : new Error(String(error)));
-      }
+      refreshRequested = true;
+      if (refreshRunning) return;
+      refreshRunning = true;
+      void (async () => {
+        while (refreshRequested && !settled) {
+          refreshRequested = false;
+          try {
+            inspect(await options.backend.readTurnOutput(options.userTurnId));
+          } catch (error) {
+            rejectWith(error instanceof Error ? error : new Error(String(error)));
+          }
+        }
+        refreshRunning = false;
+        if (refreshRequested && !settled) refresh();
+      })();
     };
 
     const handleAbort = () => {
       rejectWith(new Error('Turn completion wait aborted.'));
     };
 
-    unsubscribe = options.sessionDoc.subscribeAll(refresh);
+    unsubscribe = options.backend.subscribeHistory(refresh);
     options.signal?.addEventListener('abort', handleAbort, { once: true });
 
     if (options.timeoutMs > 0) {

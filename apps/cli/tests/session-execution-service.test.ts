@@ -23,6 +23,7 @@ import {
   ACP_CAPABILITY_REFRESH_CACHE_TTL_MS,
   type AcpCapabilityCacheEntry,
   getMachineRoomId,
+  getSessionRoomId,
   SessionStatusFactory,
   type ACPSessionId,
   type AgentConfigMeta,
@@ -105,11 +106,56 @@ const createSilentLogger = (): Logger => ({
   close: async () => {},
 });
 
-const ensureSessionDocDefaults = <T>(doc: T): T => {
+type SessionMetaTestRepo = {
+  getDocMeta?: (roomId: string) => Promise<{ meta?: unknown } | undefined>;
+  upsertDocMeta?: (roomId: string, patch: Partial<SessionMeta>) => Promise<void>;
+};
+
+const fixtureSessionMeta = new WeakMap<object, Partial<SessionMeta>>();
+
+const ensureSessionDocDefaults = <T>(
+  doc: T,
+  repo?: SessionMetaTestRepo,
+  sessionIdHint?: unknown
+): T => {
   if (doc && typeof doc === 'object') {
-    if (!('waitUntilSynced' in doc)) {
-      Object.assign(doc, { waitUntilSynced: vi.fn(async () => {}) });
-    }
+    const target = doc as unknown as Record<string, unknown> & { sessionId?: string };
+    const fixtureMeta = fixtureSessionMeta.get(target) ?? {};
+    fixtureSessionMeta.set(target, fixtureMeta);
+    const sessionId =
+      target.sessionId ?? (typeof sessionIdHint === 'string' ? sessionIdHint : undefined);
+    const roomId = sessionId ? getSessionRoomId(sessionId as SessionId) : undefined;
+    const originalGetMetaState = target.getMetaState;
+    const readMeta = async (): Promise<SessionMeta | undefined> => {
+      const local =
+        typeof originalGetMetaState === 'function'
+          ? ((await originalGetMetaState.call(target)) as SessionMeta | undefined)
+          : undefined;
+      const fromRepo = !local && roomId ? await repo?.getDocMeta?.(roomId) : undefined;
+      const base = local ?? (fromRepo?.meta as SessionMeta | undefined);
+      return base || Object.keys(fixtureMeta).length > 0 ? { ...base, ...fixtureMeta } : undefined;
+    };
+    const writeMeta = async (patch: Partial<SessionMeta>) => {
+      if (roomId) await repo?.upsertDocMeta?.(roomId, patch);
+      Object.assign(fixtureMeta, patch);
+    };
+    target.waitUntilSynced ??= vi.fn(async () => {});
+    target.getMetaState ??= readMeta;
+    target.getSteerTurnStatuses ??= async () => (await readMeta())?.steerTurnStatuses;
+    target.replaceSteerTurnStatuses ??= async (statuses: SessionMeta['steerTurnStatuses']) =>
+      writeMeta({ steerTurnStatuses: statuses });
+    target.getSteerOperationRecord ??= async (operationId: string) =>
+      (await readMeta())?.steerOperationLedger?.[operationId];
+    target.getSteerOperationLedger ??= async () => (await readMeta())?.steerOperationLedger;
+    target.setSteerOperationRecord ??= async (
+      operationId: string,
+      record: NonNullable<SessionMeta['steerOperationLedger']>[string] | undefined
+    ) => {
+      const ledger = { ...((await readMeta())?.steerOperationLedger ?? {}) };
+      if (record) ledger[operationId] = record;
+      else delete ledger[operationId];
+      await writeMeta({ steerOperationLedger: ledger });
+    };
   }
   return doc;
 };
@@ -262,7 +308,11 @@ const createBaseDeps = (
   };
   const originalGetOrCreateSessionDoc = workspaceWithDocFactory.getOrCreateSessionDoc;
   workspaceWithDocFactory.getOrCreateSessionDoc = vi.fn(async (...args: unknown[]) =>
-    ensureSessionDocDefaults(await originalGetOrCreateSessionDoc(...args))
+    ensureSessionDocDefaults(
+      await originalGetOrCreateSessionDoc(...args),
+      (deps.workspaceDocument as unknown as { repo?: SessionMetaTestRepo }).repo,
+      args[0]
+    )
   );
 
   return deps;
@@ -1924,6 +1974,14 @@ describe('SessionExecutionService', () => {
       );
       await steering;
       expect(released).toBe(outcome === 'applied');
+      expect(meta.steerOperationLedger?.['steer:B']).toMatchObject({
+        operationId: 'steer:B',
+        userTurnId: 'B',
+        expectedTurnId: 'assistant:A',
+        phase: 'settled',
+        delivery:
+          outcome === 'not-applied' ? 'not_applied' : outcome === 'applied' ? 'applied' : 'unknown',
+      });
       const expected =
         outcome === 'not-applied'
           ? 'pending'
@@ -1954,6 +2012,71 @@ describe('SessionExecutionService', () => {
       expect(meta.steerTurnStatuses).toEqual(outcome === 'not-applied' ? { B: 'pending' } : {});
     }
   );
+
+  it('recovers provider-confirmed steer delivery without degrading it to unknown', async () => {
+    const sessionId = 'recover-applied-steer' as SessionId;
+    let meta: Partial<SessionMeta> = {
+      latestUserMsgId: 'newer-user',
+      steerTurnStatuses: { 'steer-user': 'processing' },
+      steerOperationLedger: {
+        'steer:steer-user': {
+          operationId: 'steer:steer-user',
+          userTurnId: 'steer-user',
+          expectedTurnId: 'assistant:previous-user',
+          cancellationPolicy: 'promote',
+          phase: 'submitted',
+          delivery: 'applied',
+          status: 'processing',
+          updatedAt: 10,
+        },
+      },
+    };
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_roomId: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+    };
+    const sessionDoc = new SessionDocument(
+      repo as never,
+      sessionId,
+      async () => {},
+      createSilentLogger()
+    );
+    composeTestSessionDoc(sessionDoc, {
+      history: [
+        {
+          id: 'steer-user',
+          role: 'user',
+          timestamp: '2026-09-30T00:00:00.000Z',
+          status: 'pending_apply',
+          items: [{ type: 'text', text: 'continue the accepted steer' }],
+        } as SessionHistoryInput,
+      ],
+    });
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          repo,
+          getOrCreateSessionDoc: async () => sessionDoc,
+        } as unknown as LoroDocumentManager,
+      })
+    );
+
+    await service.reconcileSteerHistory(sessionId, sessionDoc);
+
+    expect(meta.steerOperationLedger?.['steer:steer-user']).toMatchObject({
+      phase: 'settled',
+      delivery: 'applied',
+      status: 'handled',
+    });
+    expect(meta.steerTurnStatuses).toEqual({});
+    expect(await sessionDoc.sessionData.history.readTurn('steer-user')).toMatchObject({
+      state: 'ready',
+      turn: { status: 'handled' },
+    });
+    expect(meta.latestUserMsgId).toBe('newer-user');
+  });
 
   it('notifies when a prompt completes while a persistent goal remains active', async () => {
     let history: Array<Record<string, unknown>> = [
@@ -9210,8 +9333,10 @@ describe('SessionExecutionService initialization deadline', () => {
         refreshGhTokenForSession: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument,
-      startSessionActivePresence: (sessionId: SessionId, phase?: SessionActivePresencePhase | null) =>
-        presence.start(sessionId, phase),
+      startSessionActivePresence: (
+        sessionId: SessionId,
+        phase?: SessionActivePresencePhase | null
+      ) => presence.start(sessionId, phase),
       setSessionActivePresencePhase: (
         sessionId: SessionId,
         phase: SessionActivePresencePhase | null,
@@ -9298,9 +9423,9 @@ describe('SessionExecutionService initialization deadline', () => {
 
       // The turn runtime is released, so the session stops counting as active
       // and becomes collectable again.
-      expect(harness.service.getExecutionSnapshot('session-stalled-init' as SessionId).hasActiveTurn).toBe(
-        false
-      );
+      expect(
+        harness.service.getExecutionSnapshot('session-stalled-init' as SessionId).hasActiveTurn
+      ).toBe(false);
     } finally {
       vi.useRealTimers();
     }

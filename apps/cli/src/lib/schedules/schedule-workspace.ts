@@ -22,11 +22,11 @@ import {
   hasExplicitSchedulePermission,
   hasPendingUserTurnActivation,
 } from '@lody/shared';
-import { readSessionHistory } from '@lody/shared/session-data';
 import type { AuthContext } from '../command-runtime';
 import type { WorkspaceSummary } from '../workspace';
 import type { LoroDocumentManager } from '../loro/doc';
 import type { Logger } from '@/utils/logger';
+import { createSessionBackend } from '@/session/session-backend';
 import { streamsRoomBinding } from '../loro/streams-room-binding';
 import {
   buildScheduleRunTarget,
@@ -216,18 +216,21 @@ export async function createScheduleWorkspace(args: {
       )
         return false;
       const session = await manager.getOrCreateSessionDoc(id);
-      if ((await session.getMessageQueue()).length) return false;
-      const history = readSessionHistory(session.sessionData.history);
+      const backend = await createSessionBackend(session, meta);
+      if ((await backend.getMessageQueue()).length) return false;
+      const [userRead, assistantRead] = await Promise.all([
+        backend.readTurn(run.userTurnId),
+        backend.readTurn(`assistant:${run.userTurnId}`),
+      ]);
+      const userTurn = userRead.state === 'ready' ? userRead.turn : undefined;
+      const assistantTurn = assistantRead.state === 'ready' ? assistantRead.turn : undefined;
       return (
         !args.hasSessionWork(id) &&
-        history.some(
-          (entry) =>
-            (entry.id === run.userTurnId &&
-              ['handled', 'failed', 'canceled'].includes(entry.status ?? '')) ||
-            (entry.role === 'assistant' &&
-              entry.userTurnId === run.userTurnId &&
-              (entry.finished === true || typeof entry.endedAt === 'number'))
-        )
+        ((userTurn?.id === run.userTurnId &&
+          ['handled', 'failed', 'canceled'].includes(userTurn.status ?? '')) ||
+          (assistantTurn?.role === 'assistant' &&
+            assistantTurn.userTurnId === run.userTurnId &&
+            (assistantTurn.finished === true || typeof assistantTurn.endedAt === 'number')))
       );
     },
     publish: async (runtime) => {

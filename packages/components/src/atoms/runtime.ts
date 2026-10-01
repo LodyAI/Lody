@@ -27,6 +27,7 @@ import type {
   SessionTurnInputConfig,
   SessionId,
   SessionMeta,
+  SessionHistoryBackendKind,
   SessionOperation,
   MachineId,
   AgentConfigId,
@@ -103,6 +104,8 @@ export type SessionDocUpdater =
 export type SessionDocStore = {
   readonly sessionId: SessionId;
   readonly roomId: string;
+  /** Immutable history ownership selected from the session catalog. */
+  readonly historyBackend: SessionHistoryBackendKind;
   readonly doc: LoroDoc;
   readonly firstSynced: Promise<void>;
   acquireSync: () => () => void;

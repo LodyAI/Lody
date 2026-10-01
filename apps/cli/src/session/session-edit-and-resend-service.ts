@@ -105,8 +105,8 @@ export class SessionEditAndResendService {
       );
     }
 
-    const backend = createSessionBackend(sessionDoc, meta);
-    const history = backend.readHistory();
+    const backend = await createSessionBackend(sessionDoc, meta);
+    const history = await backend.readHistory();
     const lastUser = lastUserIndex(history);
     if (history[lastUser]?.id === spec.replacementUserTurnId) {
       return this.success(spec);

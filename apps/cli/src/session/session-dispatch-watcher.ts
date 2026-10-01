@@ -1833,7 +1833,7 @@ export class SessionDispatchWatcher {
     this.deps.logger.warn(`[${sessionId}] Refusing dispatch: ${message}`);
 
     let entryMatched = false;
-    const backend = createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+    const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
     await backend
       .applyHistoryAction({ kind: 'user-status', turnId: userTurnId, status: 'failed' })
       .then((result) => {
@@ -2134,7 +2134,7 @@ export class SessionDispatchWatcher {
     );
     if (!releaseQueueMutation) return;
     try {
-      const backend = createSessionBackend(sessionDoc, meta);
+      const backend = await createSessionBackend(sessionDoc, meta);
       const currentMeta = await backend.getMetaState();
       const ledger = currentMeta?.queuePromotionLedger;
       if (!ledger) return;
@@ -2271,7 +2271,7 @@ export class SessionDispatchWatcher {
       return null;
     }
     try {
-      const backend = createSessionBackend(sessionDoc, meta);
+      const backend = await createSessionBackend(sessionDoc, meta);
       const queuedItem = await backend.peekReadyMessageQueue();
       if (!queuedItem) {
         return null;
@@ -2904,9 +2904,9 @@ export class SessionDispatchWatcher {
     const repairedTurnIds = new Set<string>();
     while (true) {
       await this.deps.executionService.reconcileSteerHistory(meta.id, sessionDoc);
-      const backend = createSessionBackend(sessionDoc, meta);
+      const backend = await createSessionBackend(sessionDoc, meta);
       await this.recoverIncompleteQueuePromotions(sessionDoc, meta);
-      const history = backend.readHistory();
+      const history = await backend.readHistory();
       if (!isActive()) {
         return { turn: null, history };
       }
@@ -3004,7 +3004,7 @@ export class SessionDispatchWatcher {
     this.deps.logger.debug(
       `[${sessionId}] Repairing late-arriving user turn ${turn.id} to '${status}' (already executed via fast path)`
     );
-    const backend = createSessionBackend(sessionDoc, meta);
+    const backend = await createSessionBackend(sessionDoc, meta);
     await backend.applyHistoryAction({
       kind: 'user-status',
       turnId: turn.id,

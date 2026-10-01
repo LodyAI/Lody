@@ -895,7 +895,22 @@ export type PendingScheduledTask = {
 
 export type SessionHistoryBackendKind = 'loro' | 'roost';
 
-export const DEFAULT_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+/** Backend selected for newly created sessions. Flip only after its adapter is ready. */
+export const NEW_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+
+/** Missing discriminator means a legacy session and must remain pinned to Loro. */
+export const LEGACY_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+
+/**
+ * Resolve the immutable history backend choice for an opened session.
+ *
+ * Keep this policy in the shared package so the CLI and renderer cannot
+ * accidentally assign different meanings to a missing discriminator while a
+ * document is still being bootstrapped.
+ */
+export const resolveSessionHistoryBackendKind = (
+  meta?: Pick<{ historyBackend?: SessionHistoryBackendKind }, 'historyBackend'> | null
+): SessionHistoryBackendKind => meta?.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND;
 
 export type SessionQueuePromotionState =
   | 'prepared'
@@ -907,6 +922,17 @@ export type SessionQueuePromotionRecord = {
   queueCid: string;
   userTurnId: string;
   state: SessionQueuePromotionState;
+  updatedAt: number;
+};
+
+export type SessionSteerOperationRecord = {
+  operationId: string;
+  userTurnId: string;
+  expectedTurnId: string;
+  cancellationPolicy: 'promote' | 'preserve';
+  phase: 'prepared' | 'submitted' | 'settled';
+  delivery: 'not_submitted' | 'applied' | 'not_applied' | 'unknown';
+  status: 'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown';
   updatedAt: number;
 };
 
@@ -993,6 +1019,8 @@ export type SessionMeta = {
     string,
     'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown'
   >;
+  /** Durable provider-delivery evidence, keyed by stable steer operation id. */
+  steerOperationLedger?: Record<string, SessionSteerOperationRecord>;
   /** Recoverable queue promotion receipts, keyed by the stable operation id. */
   queuePromotionLedger?: Record<string, SessionQueuePromotionRecord>;
   /** Assistant turn id the client wants to stop; cancel is ignored unless it matches the machine's in-memory active turn. */

@@ -1089,7 +1089,7 @@ export class MessageHandler {
   }
 
   private async getSessionBackend(sessionDoc: SessionDocument): Promise<SessionBackend> {
-    return createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+    return createSessionBackend(sessionDoc);
   }
 
   private async flushTurnTokenUsage(sessionId: SessionId, assistantEntryId: string) {
@@ -1128,7 +1128,7 @@ export class MessageHandler {
 
       let userId = latestAssistant?.userId;
       if (!userId) {
-        const history = backend.readHistory();
+        const history = await backend.readHistory();
         for (let i = history.length - 1; i >= 0; i--) {
           const entry = history[i];
           if (entry?.userId) {
@@ -1523,7 +1523,7 @@ export class MessageHandler {
       const meta = await backend.getMetaState();
       const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
       const current =
-        resolveLatestSessionGoalFromHistory(backend.readHistory()) ??
+        resolveLatestSessionGoalFromHistory(await backend.readHistory()) ??
         legacyMeta?.latestGoal ??
         null;
       // Skip both the history sweep and the meta write when the snapshot is
@@ -1674,7 +1674,8 @@ export class MessageHandler {
       const persistRuntimeConfig = async (): Promise<void> => {
         await this.awaitTurnHistoryGate(session.sessionId);
         if (context.signal?.aborted) return;
-        context.sessionDoc.applyAcpRuntimeConfigPatch(basedOnUserTurnId, runtimeConfigPatch);
+        const backend = await this.getSessionBackend(context.sessionDoc);
+        await backend.applyAcpRuntimeConfigPatch(basedOnUserTurnId, runtimeConfigPatch);
       };
       void persistRuntimeConfig().catch((error) => {
         this.logger.warn(
@@ -4023,7 +4024,7 @@ export class MessageHandler {
         sessionId,
         phase: 'cleanup',
         logger: this.logger,
-        backend: createSessionBackend(sessionDoc, meta),
+        backend: await createSessionBackend(sessionDoc, meta),
       }),
     });
   }
@@ -4420,7 +4421,11 @@ export class MessageHandler {
         }
       );
     }
-    this.store.get(sessionId).acpUpdateBuffer.push({ notification: update, target });
+    this.store.get(sessionId).acpUpdateBuffer.push({
+      operationId: uuidV4(),
+      notification: update,
+      target,
+    });
     this.scheduleFlushACPUpdates(sessionId);
   }
 
@@ -4791,10 +4796,11 @@ export class MessageHandler {
     // deduplicated) would duplicate on retry.
     progress?: { persistedNotifications: number };
   }): Promise<void> {
-    const persistNotifications = async (notifications: AcpSessionNotification[]) => {
-      if (notifications.length === 0) {
+    const persistNotifications = async (updates: BufferedACPUpdate[]) => {
+      if (updates.length === 0) {
         return;
       }
+      const notifications = updates.map(({ notification }) => notification);
       const lateEvidenceOwners = new Set<string>();
       try {
         const backend = await this.getSessionBackend(args.sessionDoc);
@@ -4804,6 +4810,7 @@ export class MessageHandler {
           args.assistantEntryId,
           {
             logger: this.logger,
+            operationIds: updates.map(({ operationId }) => operationId),
             editCallback: async (edits, assistantEntryId) => {
               // Edit tool calls (Codex apply_patch et al) bypass `fs/write_text_file` and
               // standard ACP diff blocks. Collect them so the turn-end persist can gap-fill
@@ -4827,7 +4834,7 @@ export class MessageHandler {
         // The writer rejects before committing history. Isolate deterministic
         // poison inputs instead of retaining them ahead of every later chunk.
         if (notifications.length > 1) {
-          for (const notification of notifications) await persistNotifications([notification]);
+          for (const update of updates) await persistNotifications([update]);
           return;
         }
         this.logger.error(
@@ -4848,31 +4855,32 @@ export class MessageHandler {
       }
     };
 
-    const flushNotifications = async (notifications: AcpSessionNotification[]) => {
+    const flushNotifications = async (updates: BufferedACPUpdate[]) => {
       // Plan persistence has a second doc write (`setPlan`) after the history
       // batch. Keep plan and non-plan notifications at separate progress
       // boundaries, while retaining the existing coalescing semantics for
       // consecutive plan snapshots (only the latest snapshot is written).
-      let batch: AcpSessionNotification[] = [];
-      for (const notification of notifications) {
-        const isPlan = notification.update.sessionUpdate === 'plan';
-        const batchIsPlan = batch[0]?.update.sessionUpdate === 'plan';
+      let batch: BufferedACPUpdate[] = [];
+      for (const update of updates) {
+        const isPlan = update.notification.update.sessionUpdate === 'plan';
+        const batchIsPlan = batch[0]?.notification.update.sessionUpdate === 'plan';
         if (batch.length > 0 && isPlan !== batchIsPlan) {
           await persistNotifications(batch);
           batch = [];
         }
-        batch.push(notification);
+        batch.push(update);
       }
       await persistNotifications(batch);
     };
 
-    const appendContents = async (contents: MessageContent[]) => {
+    const appendContents = async (contents: MessageContent[], operationIds: readonly string[]) => {
       if (contents.length === 0) {
         return;
       }
       const backend = await this.getSessionBackend(args.sessionDoc);
       await backend.applyAgentBatch({
         contents,
+        operationIds,
         targetAssistantEntryId: args.assistantEntryId,
         createId: () => args.assistantEntryId,
         now: () => new Date(getServerNow()).toISOString(),
@@ -4880,11 +4888,11 @@ export class MessageHandler {
       });
     };
 
-    let pendingNotifications: AcpSessionNotification[] = [];
+    let pendingNotifications: BufferedACPUpdate[] = [];
     for (const update of args.updates) {
       const { notification } = update;
       if (!isACPAgentRichContentNotification(notification)) {
-        pendingNotifications.push(notification);
+        pendingNotifications.push(update);
         continue;
       }
 
@@ -4910,7 +4918,7 @@ export class MessageHandler {
         }));
       update.materializedContents = contents;
       try {
-        await appendContents(contents);
+        await appendContents(contents, [update.operationId]);
       } catch (error) {
         if (!(error instanceof HistoryWriteError)) throw error;
         this.logger.error(
@@ -4972,6 +4980,7 @@ export class MessageHandler {
     let failedGroupPersisted = 0;
     try {
       sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const backend = await this.getSessionBackend(sessionDoc);
       for (const group of groups) {
         const progress = { persistedNotifications: 0 };
         try {
@@ -4979,7 +4988,7 @@ export class MessageHandler {
             group.updates.map((update) => update.notification)
           );
           if (runtimeConfigPatch && group.target.userTurnId) {
-            sessionDoc.applyAcpRuntimeConfigPatch(group.target.userTurnId, runtimeConfigPatch);
+            await backend.applyAcpRuntimeConfigPatch(group.target.userTurnId, runtimeConfigPatch);
           } else if (runtimeConfigPatch) {
             this.logger.debug(
               `[${sessionId}] Ignoring ACP runtime config update without a driving user turn`
@@ -5033,7 +5042,7 @@ export class MessageHandler {
       );
       try {
         const history = sessionDoc
-          ? (await this.getSessionBackend(sessionDoc)).readHistory()
+          ? await (await this.getSessionBackend(sessionDoc)).readHistory()
           : undefined;
         this.logger.error(
           `[${sessionId}] ACP history diagnostics: ${
@@ -5330,7 +5339,7 @@ export class MessageHandler {
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       const backend = await this.getSessionBackend(sessionDoc);
       const recordedAtMs = getServerNow();
-      const turnStorageMetadata = sessionDoc.getAssistantHistoryEntryTurnStorageMetadata(turnId);
+      const turnStorageMetadata = await backend.getTurnStorageMetadata(turnId);
       const capturedAtMs = turnStorageMetadata?.capturedAtMs ?? recordedAtMs;
       const fileDiff = await this.codeCollabV2DiffStore.recordTurnDiffs({
         workspaceRoot: resolved.workspaceRoot,
@@ -7633,7 +7642,7 @@ export class MessageHandler {
     }
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const backend = await this.getSessionBackend(sessionDoc);
-    const history = backend.readHistory();
+    const history = await backend.readHistory();
 
     // Find the persisted block so we upload with its real metadata.
     let target: Extract<SessionInputBlock, { type: 'file' }> | null = null;
@@ -8357,7 +8366,7 @@ export class MessageHandler {
       sessionTitle = meta?.title;
       metaUserId = meta?.userId;
 
-      const history = backend.readHistory();
+      const history = await backend.readHistory();
       for (let i = history.length - 1; i >= 0; i -= 1) {
         const entry = history[i];
         if (!entry || entry.role !== 'user') continue;
@@ -8617,25 +8626,52 @@ export class MessageHandler {
       };
 
       // Check if outcome already exists (e.g., from a previous device). Reads the
-      // whole history through the document's explicit full-history API.
-      const checkForOutcome = () => {
+      // exact assistant turn when its identity is available.
+      let checkingHistory = false;
+      let historyCheckRequested = false;
+      const checkForOutcome = async () => {
         if (resolved) return;
-        const history = backend.readHistory();
-        const outcome = findPermissionOutcomeInHistory(history, requestId);
-        if (outcome) void resolveWithOutcome(outcome);
+        if (checkingHistory) {
+          historyCheckRequested = true;
+          return;
+        }
+        checkingHistory = true;
+        try {
+          do {
+            historyCheckRequested = false;
+            const history = permissionTurnId
+              ? await backend
+                  .readTurn(permissionTurnId)
+                  .then((read) =>
+                    read.state === 'ready' ? [read.turn as SessionHistoryInput] : []
+                  )
+              : await backend.readHistory();
+            const outcome = findPermissionOutcomeInHistory(history, requestId);
+            if (outcome) {
+              await resolveWithOutcome(outcome);
+              return;
+            }
+          } while (historyCheckRequested);
+        } catch (error) {
+          this.logger.debug(
+            `[${sessionId}] Failed to read permission outcome ${requestId}: ${formatErrorMessage(error)}`
+          );
+        } finally {
+          checkingHistory = false;
+        }
       };
 
       // Subscribe to control and history changes alike.
       unsubscribe = subscribeSessionChanges(doc, () => {
-        checkForOutcome();
+        void checkForOutcome();
       });
 
-      const checkAutomaticOutcome = (pending: boolean) => {
+      const checkAutomaticOutcome = async (pending: boolean) => {
         // A client decision already written to history wins over a later mode toggle.
-        checkForOutcome();
+        await checkForOutcome();
         if (resolved || isAskUserQuestionRequest) return;
         const outcome = agentClient?.getAutomaticToolPermissionOutcome(request, pending);
-        if (outcome) void resolveWithOutcome(outcome, 'run_config_auto_approve', true);
+        if (outcome) await resolveWithOutcome(outcome, 'run_config_auto_approve', true);
       };
       if (agentClient && !isAskUserQuestionRequest) {
         let wasAutomatic =
@@ -8646,14 +8682,13 @@ export class MessageHandler {
           const enabled = isAutomatic && !wasAutomatic;
           wasAutomatic = isAutomatic;
           // Unrelated config updates must not drain a request queued while YOLO was already on.
-          if (enabled) checkAutomaticOutcome(true);
+          if (enabled) void checkAutomaticOutcome(true);
         });
       }
 
       // Check immediately in case outcome was already written
       // or the config changed while history/status/notifications were being prepared.
-      checkAutomaticOutcome(false);
-      if (resolved) return;
+      void checkAutomaticOutcome(false);
 
       // Setup timeout
       timeoutId = setTimeout(() => {
@@ -9704,7 +9739,7 @@ export class MessageHandler {
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
     const backend = await this.getSessionBackend(sessionDoc);
-    const historyGoal = resolveLatestSessionGoalFromHistory(backend.readHistory());
+    const historyGoal = resolveLatestSessionGoalFromHistory(await backend.readHistory());
     return isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal);
   }
 

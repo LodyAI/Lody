@@ -45,7 +45,7 @@ class WorktreeScriptHistoryRecorder implements WorktreeScriptEvents {
       phase: WorktreeScriptPhase;
       logger: Logger;
       insertBeforeEntryId?: string;
-      backend?: Pick<SessionBackend, 'applyHistoryAction'>;
+      backend: Pick<SessionBackend, 'applyHistoryAction'>;
     }
   ) {
     this.historyId = `worktree-script-${args.phase}-${uuidv4()}`;
@@ -135,15 +135,7 @@ class WorktreeScriptHistoryRecorder implements WorktreeScriptEvents {
     finished?: boolean;
   }): Promise<void> {
     const entry = this.buildEntry(options);
-    if (this.args.backend) {
-      await this.args.backend.applyHistoryAction({
-        kind: 'upsert-turn',
-        turn: entry,
-        beforeTurnId: this.args.insertBeforeEntryId,
-      });
-      return;
-    }
-    await this.args.sessionDoc.sessionData.commands.applyHistoryAction({
+    await this.args.backend.applyHistoryAction({
       kind: 'upsert-turn',
       turn: entry,
       beforeTurnId: this.args.insertBeforeEntryId,
@@ -187,7 +179,7 @@ export function createWorktreeScriptHistoryRecorder(args: {
   phase: WorktreeScriptPhase;
   logger: Logger;
   insertBeforeEntryId?: string;
-  backend?: Pick<SessionBackend, 'applyHistoryAction'>;
+  backend: Pick<SessionBackend, 'applyHistoryAction'>;
 }): WorktreeScriptEvents {
   return new WorktreeScriptHistoryRecorder(args);
 }

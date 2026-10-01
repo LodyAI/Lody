@@ -1,18 +1,23 @@
 import {
-  DEFAULT_SESSION_HISTORY_BACKEND,
+  resolveSessionHistoryBackendKind,
   type MessageQueueItem,
   type SessionHistoryBackendKind,
   type SessionHistoryInput,
   type SessionMeta,
   type SessionQueuePromotionRecord,
+  type SessionAcpRuntimeConfigPatch,
+  type SessionSteerOperationRecord,
   type SessionPlanEntry,
 } from '@lody/shared';
 import {
   readSessionHistory,
   readLatestTurn as readLatestHistoryTurn,
+  type HistoryImportInput,
   type HistoryAction,
   type ReplaceEditableTailInput,
+  type SessionImportResult,
   type SessionActionResult,
+  type SessionHistoryReader,
   type SessionDirectoryRow,
   type SessionEditableTailResult,
   type SessionTurn,
@@ -21,6 +26,7 @@ import {
 } from '@lody/shared/session-data';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { AcpSessionNotification, MessageContent, ModelInfo } from '@lody/shared';
+import type { SessionSnapshot } from '@lody/shared/session-data';
 
 /**
  * Logical history and delivery operations consumed by session orchestration.
@@ -32,13 +38,31 @@ import type { AcpSessionNotification, MessageContent, ModelInfo } from '@lody/sh
  */
 export interface SessionBackend {
   readonly kind: SessionHistoryBackendKind;
+  readonly history: SessionHistoryReader;
 
-  readHistory(): SessionHistoryInput[];
+  initialize(options: { skipAutoRead: boolean }): Promise<void>;
+  readHistory(): Promise<SessionHistoryInput[]>;
+  captureForkSnapshot(): Promise<SessionBackendForkSnapshot>;
+  importForkHistory(
+    snapshot: SessionBackendForkSnapshot,
+    selection: readonly SessionHistoryInput[]
+  ): Promise<void>;
   readHistoryCount(): Promise<number>;
   readHistoryDirectory(from: number, to: number): Promise<readonly SessionDirectoryRow[]>;
   readLatestTurn(role: SessionTurn['role']): Promise<SessionTurn | undefined>;
   readTurn(turnId: string): Promise<SessionTurnRead>;
+  readTurnOutput(userTurnId: string): Promise<SessionHistoryInput[]>;
+  /** Stable logical ordering metadata used to persist turn-scoped diff evidence. */
+  getTurnStorageMetadata(
+    turnId: string
+  ): Promise<{ readonly capturedAtMs: number; readonly orderKey: string } | undefined>;
+  subscribeHistory(listener: () => void): () => void;
   applyHistoryAction(action: HistoryAction): Promise<SessionActionResult>;
+  applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult>;
+  applyAcpRuntimeConfigPatch(
+    basedOnUserTurnId: string,
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean>;
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult>;
   openAssistantTurn(input: OpenAssistantTurnInput): Promise<void>;
   respondPermission(
@@ -63,10 +87,29 @@ export interface SessionBackend {
   ): Promise<void>;
   getSteerTurnStatuses(): Promise<SessionMeta['steerTurnStatuses']>;
   replaceSteerTurnStatuses(statuses: SessionMeta['steerTurnStatuses']): Promise<void>;
+  getSteerOperationRecord(operationId: string): Promise<SessionSteerOperationRecord | undefined>;
+  getSteerOperationLedger(): Promise<SessionMeta['steerOperationLedger']>;
+  setSteerOperationRecord(
+    operationId: string,
+    record: SessionSteerOperationRecord | undefined
+  ): Promise<void>;
+  flushLocalWrites(): Promise<void>;
+  waitUntilSynced(options?: { timeoutMs?: number }): Promise<boolean>;
+  dispose?(): void | Promise<void>;
 
   /** Stable identity used to correlate queue retries with one logical turn. */
   getQueueOperationId(item: MessageQueueItem): string;
 }
+
+/** Opaque source snapshot plus the logical rows needed to select a fork range. */
+export type SessionBackendForkSnapshot = {
+  readonly backendKind: SessionHistoryBackendKind;
+  readonly history: readonly SessionHistoryInput[];
+  /** Passed through to the destination backend; callers must not inspect it. */
+  readonly storageSnapshot: unknown;
+};
+
+export const getSteerOperationId = (userTurnId: string): string => `steer:${userTurnId.trim()}`;
 
 export type QueuePromotionInput = {
   item: MessageQueueItem;
@@ -83,6 +126,12 @@ export type QueuePromotionInput = {
 export type SessionAgentBatchInput = {
   readonly notifications?: readonly AcpSessionNotification[];
   readonly contents?: readonly MessageContent[];
+  /**
+   * Stable per-item identities aligned with `notifications` or `contents`.
+   * Backends must make a retry with the same identity idempotent, including
+   * when an earlier item in the batch committed before a later item failed.
+   */
+  readonly operationIds?: readonly string[];
   readonly targetAssistantEntryId?: string;
   readonly entryBound?: boolean;
   readonly model?: ModelInfo;
@@ -112,7 +161,21 @@ export class SessionBackendUnavailableError extends Error {
 class LoroSessionBackend implements SessionBackend {
   readonly kind = 'loro' as const;
 
-  constructor(private readonly sessionDoc: SessionDocument) {}
+  constructor(
+    private readonly sessionDoc: SessionDocument,
+    private readonly fallbackMeta?: Pick<SessionMeta, 'historyBackend'> | SessionMeta | null
+  ) {}
+
+  get history(): SessionHistoryReader {
+    return this.sessionDoc.sessionData.history;
+  }
+
+  async initialize(options: { skipAutoRead: boolean }): Promise<void> {
+    if (options.skipAutoRead) return;
+    this.sessionDoc.attachAutoRead();
+    this.sessionDoc.attachModelSummary();
+    await this.sessionDoc.markLatestUserHistoryAsSeenIfNeeded();
+  }
 
   /** Compatibility surface for older data-only SessionDocument fixtures. */
   private get queuePort() {
@@ -130,11 +193,45 @@ class LoroSessionBackend implements SessionBackend {
         operationId: string,
         record: SessionQueuePromotionRecord | undefined
       ) => Promise<void>;
+      getSteerTurnStatuses?: () => Promise<SessionMeta['steerTurnStatuses']>;
+      replaceSteerTurnStatuses?: (statuses: SessionMeta['steerTurnStatuses']) => Promise<void>;
+      getSteerOperationRecord?: (
+        operationId: string
+      ) => Promise<SessionSteerOperationRecord | undefined>;
+      getSteerOperationLedger?: () => Promise<SessionMeta['steerOperationLedger']>;
+      setSteerOperationRecord?: (
+        operationId: string,
+        record: SessionSteerOperationRecord | undefined
+      ) => Promise<void>;
     };
   }
 
-  readHistory(): SessionHistoryInput[] {
+  async readHistory(): Promise<SessionHistoryInput[]> {
     return readSessionHistory(this.sessionDoc.sessionData.history) as SessionHistoryInput[];
+  }
+
+  async captureForkSnapshot(): Promise<SessionBackendForkSnapshot> {
+    const storageSnapshot = await this.sessionDoc.sessionData.snapshots.capture();
+    return {
+      backendKind: this.kind,
+      history: storageSnapshot.history,
+      storageSnapshot,
+    };
+  }
+
+  async importForkHistory(
+    snapshot: SessionBackendForkSnapshot,
+    selection: readonly SessionHistoryInput[]
+  ): Promise<void> {
+    if (snapshot.backendKind !== this.kind) {
+      throw new Error(
+        `Cannot import ${snapshot.backendKind} fork snapshot into ${this.kind} history`
+      );
+    }
+    await this.sessionDoc.sessionData.snapshots.copyFrom(
+      snapshot.storageSnapshot as SessionSnapshot,
+      selection as unknown as readonly SessionTurn[]
+    );
   }
 
   async readHistoryCount(): Promise<number> {
@@ -153,8 +250,42 @@ class LoroSessionBackend implements SessionBackend {
     return Promise.resolve(this.sessionDoc.sessionData.history.readTurn(turnId));
   }
 
+  async readTurnOutput(userTurnId: string): Promise<SessionHistoryInput[]> {
+    return (await this.sessionDoc.sessionData.history.readTurnOutput(
+      userTurnId
+    )) as SessionHistoryInput[];
+  }
+
+  async getTurnStorageMetadata(
+    turnId: string
+  ): Promise<{ readonly capturedAtMs: number; readonly orderKey: string } | undefined> {
+    return (
+      this.sessionDoc as unknown as {
+        getAssistantHistoryEntryTurnStorageMetadata?: (
+          turnId: string
+        ) => { readonly capturedAtMs: number; readonly orderKey: string } | undefined;
+      }
+    ).getAssistantHistoryEntryTurnStorageMetadata?.(turnId);
+  }
+
+  subscribeHistory(listener: () => void): () => void {
+    const observation = this.sessionDoc.sessionData.history.observe(() => listener());
+    return () => observation.unsubscribe();
+  }
+
   applyHistoryAction(action: HistoryAction): Promise<SessionActionResult> {
     return this.sessionDoc.sessionData.commands.applyHistoryAction(action);
+  }
+
+  applyHistoryImport(input: HistoryImportInput): Promise<SessionImportResult> {
+    return this.sessionDoc.sessionData.commands.applyHistoryImport(input);
+  }
+
+  async applyAcpRuntimeConfigPatch(
+    basedOnUserTurnId: string,
+    patch: SessionAcpRuntimeConfigPatch
+  ): Promise<boolean> {
+    return this.sessionDoc.applyAcpRuntimeConfigPatch(basedOnUserTurnId, patch);
   }
 
   replaceEditableTail(input: ReplaceEditableTailInput): Promise<SessionEditableTailResult> {
@@ -297,7 +428,10 @@ class LoroSessionBackend implements SessionBackend {
   }
 
   getMetaState(): Promise<SessionMeta | undefined> {
-    return this.queuePort.getMetaState?.() ?? Promise.resolve(undefined);
+    return (
+      this.queuePort.getMetaState?.() ??
+      Promise.resolve(this.fallbackMeta as SessionMeta | undefined)
+    );
   }
 
   getQueuePromotionRecord(operationId: string): Promise<SessionQueuePromotionRecord | undefined> {
@@ -312,11 +446,60 @@ class LoroSessionBackend implements SessionBackend {
   }
 
   getSteerTurnStatuses(): Promise<SessionMeta['steerTurnStatuses']> {
-    return this.sessionDoc.getSteerTurnStatuses();
+    return (
+      this.queuePort.getSteerTurnStatuses?.() ??
+      Promise.resolve((this.fallbackMeta as SessionMeta | undefined)?.steerTurnStatuses)
+    );
   }
 
   replaceSteerTurnStatuses(statuses: SessionMeta['steerTurnStatuses']): Promise<void> {
-    return this.sessionDoc.replaceSteerTurnStatuses(statuses);
+    if (this.queuePort.replaceSteerTurnStatuses) {
+      return this.queuePort.replaceSteerTurnStatuses(statuses);
+    }
+    if (this.fallbackMeta) {
+      (this.fallbackMeta as SessionMeta).steerTurnStatuses = statuses;
+    }
+    return Promise.resolve();
+  }
+
+  getSteerOperationRecord(operationId: string): Promise<SessionSteerOperationRecord | undefined> {
+    return (
+      this.queuePort.getSteerOperationRecord?.(operationId) ??
+      Promise.resolve(
+        (this.fallbackMeta as SessionMeta | undefined)?.steerOperationLedger?.[operationId]
+      )
+    );
+  }
+
+  getSteerOperationLedger(): Promise<SessionMeta['steerOperationLedger']> {
+    return (
+      this.queuePort.getSteerOperationLedger?.() ??
+      Promise.resolve((this.fallbackMeta as SessionMeta | undefined)?.steerOperationLedger)
+    );
+  }
+
+  setSteerOperationRecord(
+    operationId: string,
+    record: SessionSteerOperationRecord | undefined
+  ): Promise<void> {
+    if (this.queuePort.setSteerOperationRecord) {
+      return this.queuePort.setSteerOperationRecord(operationId, record);
+    }
+    if (this.fallbackMeta) {
+      const ledger = { ...((this.fallbackMeta as SessionMeta).steerOperationLedger ?? {}) };
+      if (record) ledger[operationId] = record;
+      else delete ledger[operationId];
+      (this.fallbackMeta as SessionMeta).steerOperationLedger = ledger;
+    }
+    return Promise.resolve();
+  }
+
+  flushLocalWrites(): Promise<void> {
+    return this.sessionDoc.flushLocalWrites();
+  }
+
+  waitUntilSynced(options?: { timeoutMs?: number }): Promise<boolean> {
+    return this.sessionDoc.waitUntilSynced(options);
   }
 
   getQueueOperationId(item: MessageQueueItem): string {
@@ -324,43 +507,92 @@ class LoroSessionBackend implements SessionBackend {
   }
 }
 
+export type SessionBackendFactory = (
+  sessionDoc: SessionDocument,
+  meta?: Pick<SessionMeta, 'historyBackend'> | null
+) => SessionBackend | Promise<SessionBackend>;
+
 type SessionBackendBinding = {
   readonly kind: SessionHistoryBackendKind;
-  readonly backend: SessionBackend;
+  readonly backend: Promise<SessionBackend>;
 };
 
 /** One backend instance owns one opened session document for its whole lifetime. */
 const sessionBackendBindings = new WeakMap<object, SessionBackendBinding>();
+const sessionBackendFactories = new Map<SessionHistoryBackendKind, SessionBackendFactory>();
+
+sessionBackendFactories.set('loro', (sessionDoc, meta) => new LoroSessionBackend(sessionDoc, meta));
+
+/** Register a backend without importing its storage library into session orchestration. */
+export function registerSessionBackendFactory(
+  kind: SessionHistoryBackendKind,
+  factory: SessionBackendFactory
+): () => void {
+  if (kind === 'loro') throw new Error('The Loro backend factory is built in');
+  if (sessionBackendFactories.has(kind)) {
+    throw new Error(`A session backend factory is already registered for ${kind}`);
+  }
+  sessionBackendFactories.set(kind, factory);
+  return () => {
+    if (sessionBackendFactories.get(kind) === factory) sessionBackendFactories.delete(kind);
+  };
+}
 
 /** Legacy documents without a discriminator remain Loro-backed. */
 export function resolveSessionBackendKind(
   meta?: Pick<SessionMeta, 'historyBackend'> | null
 ): SessionHistoryBackendKind {
-  return meta?.historyBackend ?? DEFAULT_SESSION_HISTORY_BACKEND;
+  return resolveSessionHistoryBackendKind(meta);
 }
 
 /**
  * Build the backend for one already-open session. Backend choice is fixed by
  * session metadata; there is deliberately no per-operation fallback.
  */
-export function createSessionBackend(
+export async function createSessionBackend(
   sessionDoc: SessionDocument,
   meta?: Pick<SessionMeta, 'historyBackend'> | null
-): SessionBackend {
-  const kind = resolveSessionBackendKind(meta);
+): Promise<SessionBackend> {
   const existing = sessionBackendBindings.get(sessionDoc);
   if (existing) {
-    if (existing.kind !== kind) {
+    if (meta !== undefined) {
+      const requestedKind = resolveSessionBackendKind(meta);
+      if (existing.kind !== requestedKind) {
+        throw new Error(
+          `Session backend changed for ${sessionDoc.sessionId}: ${existing.kind} -> ${requestedKind}`
+        );
+      }
+    }
+    return await existing.backend;
+  }
+  const sessionMeta =
+    meta === undefined ? await (sessionDoc.getMetaState?.() ?? Promise.resolve(undefined)) : meta;
+  const kind = resolveSessionBackendKind(sessionMeta);
+  const factory = sessionBackendFactories.get(kind);
+  if (!factory) throw new SessionBackendUnavailableError(kind, sessionDoc.sessionId);
+  const backend = Promise.resolve().then(() => factory(sessionDoc, sessionMeta));
+  const binding = { kind, backend };
+  sessionBackendBindings.set(sessionDoc, binding);
+  try {
+    const resolved = await backend;
+    if (resolved.kind !== kind) {
       throw new Error(
-        `Session backend changed for ${sessionDoc.sessionId}: ${existing.kind} -> ${kind}`
+        `Session backend factory returned ${resolved.kind} for ${sessionDoc.sessionId}; expected ${kind}`
       );
     }
-    return existing.backend;
+    return resolved;
+  } catch (error) {
+    if (sessionBackendBindings.get(sessionDoc) === binding)
+      sessionBackendBindings.delete(sessionDoc);
+    throw error;
   }
-  if (kind !== 'loro') {
-    throw new SessionBackendUnavailableError(kind, sessionDoc.sessionId);
-  }
-  const backend = new LoroSessionBackend(sessionDoc);
-  sessionBackendBindings.set(sessionDoc, { kind, backend });
-  return backend;
+}
+
+/** Release backend-owned observers and storage handles before the session doc closes. */
+export async function disposeSessionBackend(sessionDoc: SessionDocument): Promise<void> {
+  const binding = sessionBackendBindings.get(sessionDoc);
+  if (!binding) return;
+  sessionBackendBindings.delete(sessionDoc);
+  const backend = await binding.backend;
+  await backend.dispose?.();
 }

@@ -8,11 +8,11 @@ Translation: current
 
 ## 摘要
 
-Lody 目前把 queue 提升、steer 和 ACP 输出处理直接绑定在 Loro 历史与会话本地生命周期上；在新会话改用 Roost、旧会话继续使用 Loro 之前，必须先把这条耦合边界显式化。本提案建立由 Lody 持有的 session backend 边界，并先把 queue promotion、steer reconcile、历史读取和主要 assistant 写入迁移到现有 Loro 路径。未来的 Roost backend 实现同一组契约而不改变 queue 或 steer 状态机；独立的 steer 持久 operation ledger 和 Roost 跨存储投影仍是后续工作。
+Lody 目前把 queue 提升、steer 和 ACP 输出处理直接绑定在 Loro 历史与会话本地生命周期上；在新会话改用 Roost、旧会话继续使用 Loro 之前，必须先把这条耦合边界显式化。本提案建立由 Lody 持有的 session backend 边界，并先把 queue promotion、steer reconcile、历史读取和主要 assistant 写入迁移到现有 Loro 路径。Loro 实现现在已经包含持久 queue receipt、steer operation identity 与投递证据、backend lifecycle ownership 以及 renderer composition seam。未来的 Roost backend 实现同一组契约而不改变 queue 或 steer 状态机；剩下未确定的只有 Roost 自身的存储与 projection 选择。
 
 ## 决策与范围
 
-眼下的目标是建立内部过渡边界，而不是迁移存储。已有会话继续使用 Loro。在 Roost 正式启用之前，新建会话也继续使用 Loro；启用之后，backend 在会话创建时一次性选择：新会话使用 Roost，已有会话继续使用 Loro。之后所有历史、queue、steer 和 assistant 输出操作都通过会话保存的选择解析 backend，调用方不再分别判断 Roost 或 Loro。
+眼下的目标是建立内部过渡边界，而不是迁移存储。已有会话继续使用 Loro。在 Roost 正式启用之前，新建会话也继续使用 Loro，并且所有创建入口都会显式写入 discriminator；启用之后，backend 在会话创建时一次性选择：新会话使用 Roost，已有会话继续使用 Loro。之后所有历史、queue、steer 和 assistant 输出操作都通过会话保存的选择解析 backend，调用方不再分别判断 Roost 或 Loro。
 
 过渡必须保持现在的产品契约：
 
@@ -23,6 +23,8 @@ Lody 目前把 queue 提升、steer 和 ACP 输出处理直接绑定在 Loro 历
 - UI 继续消费现有的 `SessionHistoryInput` 形状和状态词汇。backend 选择、Roost 物理 segment、恢复记录和 operation identifier 都是内部细节。
 
 本提案不迁移旧 Loro 历史、不修改 Loro 上游库、不修改 Roost Rust core，也不引入第二种用户可见的会话模型。范围覆盖 Lody CLI/session execution 路径及其客户端使用的共享会话 API。平台客户端使用同一组契约，不各自实现 queue 或 steer 协议。
+
+这条过渡边界现在同时覆盖会话两端：CLI 为每个打开的文档绑定一个 backend，并在文档销毁时释放；renderer 根据持久 discriminator 组合 `SessionData`，没有 renderer factory 时会拒绝 Roost 会话。CLI 选择 Roost 时只组合控制面，不创建 Loro history reader/writer，由 adapter 完全负责 history 存储。会话创建先写 metadata，再接受首个文档或 history 写入，因此 backend 选择不会从半成品会话中推断。
 
 ## 四个过渡边界
 
@@ -119,7 +121,7 @@ response disposition（`applied`、`no-active-turn`、`stale-turn`、`busy`、`u
 
 ### Loro 优先实现
 
-Loro backend 继续保存现有 user history row 和 `steerTurnStatuses` metadata，并增加以下 backend 方法：
+Loro backend 继续保存现有 user history row 和 `steerTurnStatuses` metadata，并额外按稳定 operation ID 持久化有界的 steer operation ledger。它提供以下 backend 方法：
 
 - 用 `userTurnId` 和 `operationId` 记录 steer intent；
 - 为精确标识记录 provider delivery result；
@@ -127,7 +129,7 @@ Loro backend 继续保存现有 user history row 和 `steerTurnStatuses` metadat
 - 读取 history evidence 做 reconcile；
 - 只有 row 已经 terminal 或已经交给普通执行后才清理 status。
 
-`reconcileSteerHistory` 调用 backend 方法，而不是直接调用 `sessionDoc.sessionData.history.readTurn`。现有顺序不能改变：先检查 settled history evidence，再决定 hold 或 requeue refused/pending steer；恢复逻辑先写 tombstone，再清理 steer status。当前 Loro 实现仍只有紧凑的 `steerTurnStatuses` mirror，还没有独立的 steer operation identity 或 provider result ledger；Roost adapter 在重启后恢复 steer 投递前必须补上这层持久身份。
+`reconcileSteerHistory` 调用 backend 方法，而不是直接调用 `sessionDoc.sessionData.history.readTurn`。现有顺序不能改变：先检查 settled history evidence，再决定 hold 或 requeue refused/pending steer；恢复逻辑先写 operation record，再清理 steer status。若取消在 history document 打开期间获胜，会先在 control plane 写入这条记录，不等待 document；document 可用后再由绑定的 backend 做投影。若精确 history row 已经越过 requeue fence，则清理紧凑 status mirror，不重新唤醒该输入。
 
 Loro 实现可以继续把 status mirror 放在 session metadata 中，因为这已经是持久 control plane；抽象边界保证调用方不依赖这种表示方式。
 
@@ -151,7 +153,7 @@ Loro control plane 可以继续携带用于唤醒和兼容现有客户端的精�
 
 ### Target 创建与关联
 
-ACP run 开始时，MessageHandler 创建 assistant target，包含逻辑 `userTurnId`、`assistantEntryId`、`turnId` 和单调递增的本地 `turnEpoch`，同时创建 ACP run token。provider 暴露 run identity 时将其纳入 token；没有时由 AgentClient 生成 token，并在整个 provider invocation 期间保持不变。
+ACP run 开始时，MessageHandler 创建 assistant target，包含逻辑 `userTurnId`、`assistantEntryId`、`turnId` 和单调递增的本地 `turnEpoch`，同时创建 ACP run token。provider 暴露 run identity 时将其纳入 token；没有时由 AgentClient 生成 token，并在整个 provider invocation 期间保持不变。每条缓冲通知还会获得独立且稳定的 operation ID。backend 部分提交一个批次后重试时会复用原 ID，backend 不得重复应用已接受的 ID。过滤和拆分批次必须保持 ID 对应关系；分别入队的通知仍是不同事件。
 
 每个 ACP notification 在进入 `acpUpdateBuffer` 前都带上 target。这个标记贯穿 batching、retry、finalization 和 shutdown。flush 不能通过读取 `getCurrentACPUpdateTarget` 把旧事件重新绑定到当前 turn；即使 provider 发送稀疏更新，或者在 prompt 完成后才回调，也必须如此。
 
@@ -218,12 +220,17 @@ Roost projection 必须增量化且有界。它应缓存 `businessId` 到逻辑 
 - 保持现有 UI protocol 以及 status/disposition 词汇不变。
 - 增加 session backend discriminator，并把旧会话默认解释为 `loro`。
 
+阶段 1 已在当前 Lody 分支完成。contract 现在包含历史读写、queue promotion receipt、steer operation record、fork snapshot、lifecycle 初始化与释放、同步以及稳定的 turn 排序元数据。renderer 也有对应的 `SessionData` factory seam，CLI 在 Roost 选择下不会组合 Loro history，所有新会话创建入口都会在接受首条消息前写入 discriminator。
+
 ### 阶段 2：契约与故障测试
 
-- 用 fake backend 和真实 Loro backend 跑同一组 queue、steer、MessageHandler 场景。
-- 覆盖 forked Loro replica 上的重复 queue promotion、activation 发布重试、settled/refused steer race、unknown delivery、handoff 中 Stop、Edit & Resend conflict、晚到 ACP 输出、batch 部分失败和 session deletion。
-- 断言逻辑 history 和用户可见 status，不断言 Loro container ID 或实现调用次数。
-- 添加 long-history benchmark，对比当前 Loro 路径与 adapter 路径；adapter 不能引入第二次全文档读取，也不能在约定的 batching overhead 之外造成可测量的 streaming 回归。
+adapter 开始前的 Lody 侧准备已经完成：
+
+- `apps/cli/tests/session-backend-contract.ts` 定义可复用的 queue 契约，分别对注入故障的命令 harness 和真实 `LoroRepo`/`LoroDoc` storage 运行；在每个 durable receipt、history acceptance、activation 发布及 queue 消费后注入失败，并检查逻辑 turn、剩余队列、activation 和最终 receipt。
+- 聚焦测试覆盖 settled/refused/unknown steer 结果、handoff 中 Stop、Edit & Resend conflict、dispatch 恢复、forked replica 上重复 turn 副本、ACP 晚到输出、batch 重试和 session deletion。ACP operation ID 在无效输入过滤和 history compaction 后仍正确对齐，部分提交的批次重试时保持原 ID。
+- backend selection 与文档生命周期测试覆盖旧数据默认 Loro、每个打开文档绑定唯一 backend、初始化前显式选择、未注册 factory 时关闭失败，以及 renderer factory composition。生产 history 访问已路由到 backend；剩余直接访问只在 Loro 实现内部和 ACP 对 data-only 测试 fixture 的受保护兼容分支。
+
+Phase 3 的 adapter fixture 可直接复用 queue 契约。这些 Lody 测试不能验证 Roost durable record 的存放方式或 branch projection。long-history 对比也必须等两种实现都存在：adapter 就绪后先测 Loro baseline，再以同一负载比较 Roost。
 
 ### 阶段 3：不启用生产选择的 Roost adapter
 
@@ -242,11 +249,11 @@ Roost projection 必须增量化且有界。它应缓存 `businessId` 到逻辑 
 最低验收套件分四层：
 
 1. queue 与 steer identity、状态转换、retry 分类和 operation 幂等的纯状态机测试。
-2. 使用 `SessionDocument`、`HistoryWriter`、metadata 和 forked replica 的真实 Loro 集成测试，验证抽象保留 last-copy lookup、activation 语义和现有 duplicate-copy 防护；当前 steer ledger 尚未完整，测试必须明确这一边界。
+2. 使用 `SessionDocument`、`HistoryWriter`、metadata 和 forked replica 的真实 Loro 集成测试，验证抽象保留 last-copy lookup、activation 语义、duplicate-copy 防护以及持久 steer ledger。
 3. 使用 fake ACP provider 的 MessageHandler 生命周期测试，覆盖 history sync 前输出、prompt 完成后输出、新 turn 期间输出、部分持久化后输出和 deletion 期间输出；断言逻辑 assistant ID 与内容顺序。
 4. 对 Loro 和 Roost adapter 运行相同的 backend contract test。Roost 用 crash injection 覆盖每个跨存储阶段；Loro 覆盖 receipt 阶段、定向重试读取、activation 修复和 queue 顺序保持。
 
-long-history benchmark 和真实 provider lifecycle test 运行前不宣称任何性能数字。Roost adapter 在生产 Roost library 上实际运行前，不把任何 Roost-specific API 当作已确认事实。这些是验证边界，不是改变 Loro-first 方案的理由。
+Roost adapter 存在并且 long-history benchmark 同时跑过两种 backend 前，不宣称性能对比结果。Roost adapter 在生产 Roost library 上实际运行前，不把任何 Roost-specific API 当作已确认事实。这些是验证边界，不是改变 Loro-first 方案的理由。
 
 ## 仍需证据的事项
 
@@ -254,7 +261,6 @@ long-history benchmark 和真实 provider lifecycle test 运行前不宣称任�
 
 - Roost 哪个 persistence hook 和 metadata 形状适合承载 delivery ledger，既保证 operation recovery 持久化，又不强制新增顶层 message kind。
 - Roost 是否能提供高效的 active-branch projection hook，还是需要 Lody adapter 自己维护增量 business-ID index。
-- 哪些 provider adapter 会提供稳定 run identity；没有时由 Lody 生成的 run token 作为本地关联依据。
 - 长 streaming response 下的 segment/projection 和持久化实测成本，尤其是 finalization 后仍有晚到输出时的成本。
 
 这些事项不会改变 Loro 实施计划；它们是启用 Roost 新生产会话前必须完成的 adapter 验证工作。

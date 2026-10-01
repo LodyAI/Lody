@@ -2125,7 +2125,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             sessionId: config.sessionId!,
             phase: 'setup',
             logger: this.logger,
-            backend: createSessionBackend(sessionDoc, await sessionDoc.getMetaState()),
+            backend: await createSessionBackend(sessionDoc, await sessionDoc.getMetaState()),
             insertBeforeEntryId: config.worktreeScriptHistoryInsertBeforeEntryId,
           }),
         });

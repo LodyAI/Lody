@@ -8,11 +8,11 @@ Translation: current
 
 ## Abstract
 
-Lody currently couples queue promotion, steering, and ACP output handling to Loro history and session-local lifecycle state. That coupling is the main integration boundary that must be made explicit before new sessions can use Roost while existing sessions remain on Loro. This proposal introduces a Lody-owned session backend boundary and moves queue promotion, steer reconciliation, history reads, and the main assistant writes behind it on the existing Loro path. A future Roost backend will implement the same contract without changing the queue or steer state machines; durable steer operation records and Roost cross-store projection remain future work.
+Lody currently couples queue promotion, steering, and ACP output handling to Loro history and session-local lifecycle state. That coupling is the main integration boundary that must be made explicit before new sessions can use Roost while existing sessions remain on Loro. This proposal introduces a Lody-owned session backend boundary and moves queue promotion, steer reconciliation, history reads, and the main assistant writes behind it on the existing Loro path. The Loro implementation now includes durable queue receipts, steer operation identity and delivery evidence, backend lifecycle ownership, and renderer composition seams. A future Roost backend will implement the same contract without changing the queue or steer state machines; only Roost-specific storage and projection decisions remain outside this boundary.
 
 ## Decision and scope
 
-The immediate goal is an internal transition boundary, not a storage migration. Existing sessions continue to use Loro. Until Roost is enabled for production, newly created sessions also use Loro. After enablement, the backend is selected once when a session is created: new sessions use Roost and existing sessions keep Loro. Every later history, queue, steer, and assistant-output operation resolves the backend through the session's stored choice; call sites do not branch on Roost versus Loro.
+The immediate goal is an internal transition boundary, not a storage migration. Existing sessions continue to use Loro. Until Roost is enabled for production, newly created sessions also use Loro; every creation path writes the discriminator explicitly. After enablement, the backend is selected once when a session is created: new sessions use Roost and existing sessions keep Loro. Every later history, queue, steer, and assistant-output operation resolves the backend through the session's stored choice; call sites do not branch on Roost versus Loro.
 
 The transition must preserve the current product contract:
 
@@ -23,6 +23,8 @@ The transition must preserve the current product contract:
 - The UI continues to render the existing `SessionHistoryInput` shape and current status vocabulary. Backend choice, physical Roost segments, recovery records, and operation identifiers are internal.
 
 This proposal does not migrate old Loro history, change the Loro upstream library, change the Roost Rust core, or introduce a second user-visible conversation model. It covers the Lody CLI/session execution path and the shared session-facing APIs used by its clients. Platform-specific clients consume the same contracts; they do not implement a separate queue or steer protocol.
+
+The transition boundary is wired at both sides of the session: the CLI binds one backend instance to each opened document and releases it with the document, while the renderer composes `SessionData` from the persisted discriminator and rejects a Roost document when no renderer factory is installed. The CLI composes the Loro history surface only for a Loro selection; a Roost open gets the control plane and lets the adapter own history storage. Session creation writes metadata before the first document or history write, so backend selection cannot be inferred from a partially-created conversation.
 
 ## The four transition boundaries
 
@@ -120,7 +122,7 @@ The response dispositions (`applied`, `no-active-turn`, `stale-turn`, `busy`, `u
 
 ### Loro-first implementation
 
-The Loro backend keeps the existing user history row and `steerTurnStatuses` metadata. It adds backend methods for:
+The Loro backend keeps the existing user history row and `steerTurnStatuses` metadata. It also persists a bounded steer operation ledger keyed by a stable operation ID. It exposes backend methods for:
 
 - recording a steer intent with its `userTurnId` and `operationId`;
 - recording a provider delivery result for that exact identity;
@@ -128,7 +130,7 @@ The Loro backend keeps the existing user history row and `steerTurnStatuses` met
 - reading history evidence for reconciliation;
 - clearing the status only after the row is terminal or has been handed to ordinary execution.
 
-`reconcileSteerHistory` calls the backend methods rather than directly calling `sessionDoc.sessionData.history.readTurn`. The current ordering remains significant: settled history evidence is checked before a refused/pending steer is held or requeued; recovery writes its tombstone before clearing the steer status. The current Loro implementation still stores only the compact `steerTurnStatuses` mirror; it does not yet persist a separate steer operation identity or provider result ledger. Those durable identities are required before a Roost adapter can recover steer delivery across restart.
+`reconcileSteerHistory` calls the backend methods rather than directly calling `sessionDoc.sessionData.history.readTurn`. The current ordering remains significant: settled history evidence is checked before a refused/pending steer is held or requeued; recovery writes its operation record before clearing the steer status. A cancellation that wins while the history document is opening writes this control-plane record without waiting for the document; reconciliation later projects it through the bound backend. If the exact history row has already crossed the requeue fence, the compact status mirror is removed rather than resurrecting the input.
 
 The Loro implementation may keep the status mirror in session metadata because that is already the durable control plane. The abstraction prevents callers from depending on that representation.
 
@@ -152,7 +154,7 @@ The following rules are mandatory in both backends:
 
 ### Target creation and correlation
 
-At the beginning of an ACP run, MessageHandler creates an assistant target containing the logical `userTurnId`, `assistantEntryId`, `turnId`, and a monotonic local `turnEpoch`. It also creates an ACP run token. If a provider exposes a run identity, the token incorporates it; otherwise AgentClient generates the token locally and keeps it for the complete provider invocation.
+At the beginning of an ACP run, MessageHandler creates an assistant target containing the logical `userTurnId`, `assistantEntryId`, `turnId`, and a monotonic local `turnEpoch`. It also creates an ACP run token. If a provider exposes a run identity, the token incorporates it; otherwise AgentClient generates the token locally and keeps it for the complete provider invocation. Each buffered notification receives its own stable operation ID. A retry after a backend partially commits a batch reuses the same IDs, and backend implementations must not apply an accepted ID twice. Filtering and batch splitting preserve ID alignment; separately enqueued notifications remain distinct.
 
 Every ACP notification is stamped with that target before it enters `acpUpdateBuffer`. The stamp travels through batching, retry, finalization, and shutdown. A flush does not call `getCurrentACPUpdateTarget` to rebind old events to the current turn. This is required even when the provider sends sparse updates or sends callbacks after prompt completion.
 
@@ -219,12 +221,17 @@ Instrumentation should record backend-independent operation timings and outcome 
 - Keep the current UI protocol and status/disposition vocabulary unchanged.
 - Add the session backend discriminator with legacy default `loro`.
 
+Phase 1 is implemented in the current Lody branch. The contract now includes history reads and commands, queue promotion receipts, steer operation records, fork snapshots, lifecycle initialization/disposal, synchronization, and stable turn-order metadata. The renderer has a matching `SessionData` factory seam, the CLI avoids composing Loro history for a Roost selection, and every new-session creation path writes the discriminator before accepting the first turn.
+
 ### Phase 2: contract and failure tests
 
-- Run the same queue, steer, and MessageHandler scenarios through a fake backend and the real Loro backend; the current fake contract must reflect the partial steer ledger boundary explicitly.
-- Exercise duplicate queue promotion on forked Loro replicas, activation publication retry, settled/refused steer races, unknown delivery, Stop during handoff, Edit & Resend conflicts, late ACP output, partial batch failure, and session deletion.
-- Assert logical history and user-visible statuses, not Loro container IDs or implementation call counts.
-- Add long-history benchmarks comparing the current Loro path with the adapter path. The adapter path must not introduce a second full-document read or a measurable streaming regression beyond the agreed batch overhead.
+The Lody-side preparation is complete for starting the adapter:
+
+- `apps/cli/tests/session-backend-contract.ts` defines one reusable queue contract. It runs against an injected command harness and real `LoroRepo`/`LoroDoc` storage, injecting failure after every durable receipt, history acceptance, activation publication, and queue consumption. It checks the logical turn, remaining queue rows, activation, and final receipt.
+- Focused tests cover settled/refused/unknown steer results, Stop during handoff, Edit & Resend conflicts, dispatch recovery, forked-replica duplicate turn copies, late ACP output, partial batch retry, and session deletion. ACP operation IDs remain aligned through invalid-input filtering and history compaction, and remain unchanged when a partially applied batch is retried.
+- Backend selection and document lifecycle tests cover legacy Loro defaulting, one backend per opened document, explicit selection before initialization, closed failure when no factory exists, and renderer factory composition. Production history accesses are routed through the backend; the remaining raw access is confined to the Loro implementation and the guarded data-only ACP fixture fallback.
+
+The queue contract can run unchanged against the adapter fixture in Phase 3. These Lody tests do not validate Roost's durable record placement or branch projection. A long-history comparison also requires both implementations: measure Loro as the baseline when the adapter is ready, then compare Roost under the same workload.
 
 ### Phase 3: Roost adapter without production selection
 
@@ -243,11 +250,11 @@ Instrumentation should record backend-independent operation timings and outcome 
 The minimum acceptance suite has four layers:
 
 1. Pure state-machine tests for queue and steer identity, status transitions, retry classification, and operation idempotence.
-2. Real Loro integration tests using `SessionDocument`, `HistoryWriter`, metadata, and forked replicas. These verify that the abstraction preserves last-copy lookup, activation semantics, and existing duplicate-copy safeguards.
+2. Real Loro integration tests using `SessionDocument`, `HistoryWriter`, metadata, and forked replicas. These verify that the abstraction preserves last-copy lookup, activation semantics, duplicate-copy safeguards, and the persisted steer ledger.
 3. MessageHandler lifecycle tests with a fake ACP provider that emits output before history sync, after prompt completion, during a new turn, after partial persistence, and during deletion. Assertions use logical assistant IDs and content order.
 4. Backend contract tests run unchanged against Loro and Roost adapters. Roost-specific crash injection covers each cross-store phase; Loro-specific tests cover the receipt phases, targeted retry reads, activation repair, and queue-order preservation.
 
-No performance number is claimed until the long-history benchmark and real provider lifecycle test run. No Roost-specific API is treated as confirmed until the adapter is exercised against the production Roost library. These are verification limits, not reasons to change the Loro-first boundary.
+No comparative performance number is claimed until the adapter exists and the long-history benchmark runs against both backends. No Roost-specific API is treated as confirmed until the adapter is exercised against the production Roost library. These are verification limits, not reasons to change the Loro-first boundary.
 
 ## Open points that require evidence
 
@@ -255,7 +262,6 @@ Only the following items remain genuinely Roost-specific and unverified:
 
 - Which Roost persistence hook and metadata shape should carry the delivery ledger so operation recovery is durable without adding a mandatory top-level message kind.
 - Whether Roost can expose an efficient active-branch projection hook, or whether the Lody adapter must maintain its own incremental business-ID index.
-- Which provider adapters expose a stable run identity; where they do not, the Lody-generated run token is authoritative for local correlation.
 - Measured segment/projection and persistence costs under a long streaming response, especially after finalization with late output.
 
 These points do not alter the Loro implementation plan. They are adapter validation tasks to complete before enabling Roost for new production sessions.

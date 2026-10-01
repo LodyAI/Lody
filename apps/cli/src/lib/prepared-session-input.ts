@@ -6,8 +6,8 @@ import {
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
-import { readSessionHistory, type SessionTurn } from '@lody/shared/session-data';
 import type { LoroDocumentManager } from './loro/doc';
+import { createSessionBackend } from '@/session/session-backend';
 
 /** JSON-only preparation, persisted before any Session mutation. */
 export type PreparedSessionInput = {
@@ -54,9 +54,10 @@ export async function isPreparedSessionDispatched(
   const record = await manager.repo.getDocMeta(getSessionRoomId(prepared.sessionId));
   if (!record?.meta || isLoroRepoDocDeleted(record)) return false;
   const session = await manager.getOrCreateSessionDoc(prepared.sessionId);
+  const backend = await createSessionBackend(session, record.meta as SessionMeta);
   return hasSessionDispatchEvidence(
     record.meta as SessionMeta,
-    readSessionHistory(session.sessionData.history),
+    await backend.readHistory(),
     prepared.userTurn.id
   );
 }
@@ -81,7 +82,11 @@ export async function materializePreparedSessionInput(
     }
   } else await manager.repo.upsertDocMeta(roomId, prepared.meta);
   const session = await manager.getOrCreateSessionDoc(prepared.sessionId);
-  const history = readSessionHistory(session.sessionData.history);
+  const backend = await createSessionBackend(
+    session,
+    (existing?.meta as SessionMeta | undefined) ?? prepared.meta
+  );
+  const history = await backend.readHistory();
   for (const entry of [prepared.source, prepared.userTurn]) {
     if (!entry) continue;
     const prior = history.find((item) => item.id === entry.id);
@@ -95,7 +100,7 @@ export async function materializePreparedSessionInput(
         )
       )
         throw new Error('Prepared Session Turn identity conflict');
-    } else await session.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
+    } else await backend.appendHistoryTurn(entry);
   }
   await manager.repo.flush();
 }

@@ -27,6 +27,8 @@ import type { MessageContent, ModelInfo, AcpSessionNotification } from '@lody/sh
 export type ApplyAgentBatchInput = {
   readonly notifications?: readonly AcpSessionNotification[];
   readonly contents?: readonly MessageContent[];
+  /** Stable per-item retry identities; the Loro writer applies a batch atomically. */
+  readonly operationIds?: readonly string[];
   readonly targetAssistantEntryId?: string;
   readonly entryBound?: boolean;
   readonly model?: ModelInfo;

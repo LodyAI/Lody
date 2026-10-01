@@ -1002,6 +1002,7 @@ describe('useSessionActions', () => {
     expect(result.sessionMeta).toMatchObject({
       id: sessionId,
       machineId: 'machine-1',
+      historyBackend: 'loro',
       lastMessageAt: expect.any(Number),
     });
     expect(result.historyEntry.inputConfig?.inputBlocks).toEqual([{ type: 'text', text: 'hi' }]);
