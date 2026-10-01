@@ -78,8 +78,8 @@ export async function activateUserTurn(
 
 /**
  * The local accept boundary: creation metadata, then the turn (or queue row),
- * then activation, as local commits on the live document. Nothing here waits
- * for the network; the transports upload local commits.
+ * then activation, as local commits on the live document. Repo persistence and
+ * transport upload run independently; unrelated dirty documents must not delay dispatch.
  */
 export async function writeUserTurn(
   runtime: SessionSendRuntime,
@@ -106,7 +106,6 @@ export async function writeUserTurn(
   if (send.queue) await runtime.writer.enqueueSessionMessage(sessionId, send.queue);
   else await runtime.writer.appendSessionTurn(sessionId, entry);
   if (send.delivery.kind === 'dispatch') await activateUserTurn(runtime, sessionId, entry.id);
-  await runtime.repo.flush();
 }
 
 async function readUserTurn(runtime: SessionSendRuntime, sessionId: SessionId, turnId: string) {

@@ -34,6 +34,9 @@ for, and never move unless the user or the arrival of new output asks it to.
   is added to the conversation itself. Routine opens that catch up quickly show
   neither (a status must persist briefly before it appears, and stays long enough not
   to flash). A lost connection is not announced here: reconnecting is automatic.
+- **Switching tabs.** A conversation in a tab the user switches away from keeps
+  receiving output. Switching back shows it where the user left it: at the latest
+  output if they were following, otherwise with the same row at the top.
 - **Opening** shows the conversation in its first painted frame and never hides it.
   A conversation left while following opens at its end; one left while reading opens
   with the row the reader was reading at the top, even if rows above it changed since.

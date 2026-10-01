@@ -40,6 +40,11 @@ const stripFence = (value: string) => {
   return inline ? (inline[1] ?? '') : value;
 };
 
+const visibleCommandText = (value: string) =>
+  // A provider can link a file path inside a textual command echo. The reader
+  // sees the link label, so compare that visible text with the structured command.
+  stripFence(value).replace(/\[([^\]\n]+)\]\((?:<[^>\n]+>|[^)\n]+)\)/gu, '$1');
+
 /**
  * Whether a tool's text block only restates its command. Some agents send the
  * command as a text block beside the structured one, and that block used to
@@ -47,7 +52,7 @@ const stripFence = (value: string) => {
  * first copy with `*` read as emphasis and paths turned into file chips.
  */
 export function isToolCommandEcho(text: string, commands: readonly string[]): boolean {
-  const echoed = collapseWhitespace(normalizeWorktreePathsInText(stripFence(text)));
+  const echoed = collapseWhitespace(normalizeWorktreePathsInText(visibleCommandText(text)));
   if (!echoed) return false;
   return commands.some((command) => collapseWhitespace(command) === echoed);
 }

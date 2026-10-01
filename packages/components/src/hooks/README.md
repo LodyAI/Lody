@@ -11,7 +11,7 @@ that carry an invariant — the directory itself is the list of hooks.
 for creation, initial history, continuation, dispatch, and guide. It has no React
 lifetime or second writer. `lib/session-send-admission.ts` is the one admission for
 every user message. A ready send is written at once as local commits (creation
-meta, turn or queue row, activation, flush); the dispatch/steer RPC in
+meta, turn or queue row, activation); Repo persistence runs independently. The dispatch/steer RPC in
 `lib/session-send-delivery.ts` is a best-effort fast path, because the CLI starts
 pending turns from synchronized history. A send whose attachments are still
 preparing, or one queued behind such a send in the same conversation, is held
@@ -21,11 +21,12 @@ Archive and delete cancel held sends of their targets and join in-flight writes.
 `use-session-preparation` holds an owned warmup lease; attachment takeover cancels
 and joins it. See the [attachment draft Spec](../../../../specs/session-files.md).
 
-| Area                   | Entry point                                                                                | Responsibility                                              |
-| ---------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| Session lifecycle      | [`use-session-actions.ts`](use-session-actions.ts)                                         | Bind operation targets and writes to one workspace runtime. |
-| Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)       | Reconcile owned Roles after matching runtime probes.        |
-| Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication. |
+| Area                   | Entry point                                                                                                        | Responsibility                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Session lifecycle      | [`use-session-actions.ts`](use-session-actions.ts)                                                                 | Bind operation targets and writes to one workspace runtime.                                |
+| Composer configuration | [`use-session-pending-config.ts`](use-session-pending-config.ts)                                                   | Bridge frozen held-send configuration to history/queue without consuming next-draft edits. |
+| Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)                               | Reconcile owned Roles after matching runtime probes.                                       |
+| Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication.                                   |
 
 ## Session lifecycle
 

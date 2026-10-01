@@ -72,7 +72,7 @@ const codexMachine: MachineViewMeta = {
   os: 'macOS',
   sessions: [],
   raceLimits: {
-    [getRateLimitEntryKey('codex', 'codex')]: {
+    [getRateLimitEntryKey('codex', 'codex', 'cfg-codex' as AgentConfigId)]: {
       limitId: 'codex',
       scope: { providerId: 'codex' },
       planName: 'ChatGPT Plus',
@@ -120,6 +120,7 @@ function EntryPoints({ state }: StoryProps) {
             contextWindowUsage={{ size: 258_400, used: 203_700 }}
             rateLimits={codexMachine.raceLimits}
             agentType="codex"
+            agentConfigId={codexConfig.id}
             modelId="codex"
             modelLabel="5.6-Sol"
             showCodexResetForecast

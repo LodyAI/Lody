@@ -15,6 +15,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
+  ACP_CAPABILITY_ROW_FAMILIES,
   buildSessionPreparationRunConfig,
   buildSessionTurnInputConfig,
   evaluateSessionCreateQuota,
@@ -529,7 +530,7 @@ const LOCAL_PROJECT_GIT_STATE_RPC_TIMEOUT_MS = 30_000;
 const CHAT_LANDING_MACHINE_FLOCK_FAMILIES = [
   'localProject',
   'deleteLocalProjectCommand',
-  'acpCapability',
+  ...ACP_CAPABILITY_ROW_FAMILIES,
   'rateLimit',
   'agentConfig',
   'providerSetup',
@@ -3879,6 +3880,7 @@ function WorkspaceChatLanding({
         <SessionUsagePopover
           rateLimits={selectedRateLimits}
           agentType={selectedConfig?.agentType ?? ''}
+          agentConfigId={selectedConfig?.id}
           modelId={selectedModelId}
           modelLabel={selectedModelLabel}
           showCodexResetForecast={showCodexResetForecast}
@@ -4166,6 +4168,7 @@ function WorkspaceChatLanding({
         <SessionUsagePopover
           rateLimits={selectedRateLimits}
           agentType={selectedConfig?.agentType ?? ''}
+          agentConfigId={selectedConfig?.id}
           modelId={selectedModelId}
           modelLabel={selectedModelLabel}
           showCodexResetForecast={showCodexResetForecast}

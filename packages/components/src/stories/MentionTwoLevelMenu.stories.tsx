@@ -428,11 +428,16 @@ const FLOATING_CATEGORIES: MentionCategory[] = CATEGORIES.map((entry) =>
 );
 
 /**
- * The real floating menu in a composer-shaped frame: type `@`, `$` or `/` in
- * the textarea. The menu follows the caret while typing and flips above it
- * when there is not enough room below.
+ * Type `@`, `$` or `/` in a framed editor. The main chat composer anchors its
+ * menu to the frame above; the caret variant shows inline-editor placement.
  */
-function FloatingHarness({ atTop = false }: { atTop?: boolean }) {
+function FloatingHarness({
+  atTop = false,
+  mainComposer = false,
+}: {
+  atTop?: boolean;
+  mainComposer?: boolean;
+}) {
   const [value, setValue] = React.useState('');
   const [mentions, setMentions] = React.useState<MentionRange[]>([]);
   const [selected, setSelected] = React.useState<string[]>([]);
@@ -464,7 +469,12 @@ function FloatingHarness({ atTop = false }: { atTop?: boolean }) {
             aria-label="composer"
             rows={3}
           />
-          <MentionTwoLevelMenu categories={FLOATING_CATEGORIES} surface="unknown" />
+          <MentionTwoLevelMenu
+            categories={FLOATING_CATEGORIES}
+            surface="unknown"
+            anchor={mainComposer ? 'composer' : 'caret'}
+            menuSide={mainComposer ? 'top' : 'bottom'}
+          />
         </Mention>
       </div>
     </div>
@@ -618,13 +628,19 @@ export const AgentRoleAvailabilityNarrow: Story = {
   args: { ...AgentRoleAvailability.args, narrow: true },
 };
 
-/** The real popup over a composer at the page's foot: type `@`, `$` or `/`. */
+/** The inline editor's caret menu at the page's foot. */
 export const FloatingInComposer: Story = {
   args: { search: '' },
   render: () => <FloatingHarness />,
 };
 
-/** The same composer at the top of the page: the popup stays with the caret. */
+/** The main desktop chat composer keeps its menu above the whole frame. */
+export const MainComposerAboveFrame: Story = {
+  args: { search: '' },
+  render: () => <FloatingHarness mainComposer />,
+};
+
+/** The caret editor at the top of the page: the popup stays with the caret. */
 export const FloatingComposerAtTop: Story = {
   args: { search: '' },
   render: () => <FloatingHarness atTop />,

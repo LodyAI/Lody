@@ -91,22 +91,6 @@ export const PlusRequired: Story = {
   },
 };
 
-export const PlusRequiredEarlyBird: Story = {
-  args: {
-    workspaceName: 'New paid workspace',
-    workspaceSlug: 'new-paid-workspace',
-    slugAvailable: true,
-    paidRequired: true,
-    billingInterval: 'year',
-    pricing: {
-      monthlyAmountCents: 1000,
-      yearlyAmountCents: 6000,
-      yearlyOfferKey: 'early_bird_yearly_6000_forever',
-    },
-    onBillingIntervalChange: fn(),
-  },
-};
-
 /* Pricing query still loading — interval options render without price lines. */
 export const PlusRequiredPricingLoading: Story = {
   args: {

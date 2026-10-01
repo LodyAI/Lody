@@ -96,6 +96,15 @@ const samplePastedText = [
 ].join('\n');
 
 const samplePromptPlaceholder = "Press '/' for commands, '@' for mentions.";
+const mentionStressCommands = Array.from({ length: 24 }, (_, index) => ({
+  name: `command-${String(index + 1).padStart(2, '0')}`,
+  description:
+    index % 3 === 0
+      ? 'Review the current changes, include relevant context, and explain the next action. '.repeat(
+          12
+        )
+      : `Synthetic command ${index + 1}`,
+}));
 
 // Inline SVG data-URI thumbnails so image attachment cards render without any
 // network/fetch mock (the composer just needs a non-empty previewUrl).
@@ -164,6 +173,7 @@ function DemoComposer({
   imageItems,
   fileItems,
   initialPrompt,
+  showMentionCommands = false,
 }: {
   tone: 'light' | 'dark';
   variant: 'landing' | 'session' | 'dialog';
@@ -175,6 +185,7 @@ function DemoComposer({
   imageItems?: ChatComposerImageItem[];
   fileItems?: ChatComposerFileItem[];
   initialPrompt?: string;
+  showMentionCommands?: boolean;
 }) {
   const inlinePastedTextLabel = `[Pasted ${getPastedTextCharacterCount(samplePastedText)} chars]`;
   const inlinePastedTextPrompt = `Investigate this context ${inlinePastedTextLabel} and help me extract the root cause.`;
@@ -303,6 +314,7 @@ function DemoComposer({
       promptRef={promptRef}
       promptValue={prompt}
       onPromptChange={setPrompt}
+      availableCommands={showMentionCommands ? mentionStressCommands : undefined}
       promptPlaceholder={samplePromptPlaceholder}
       promptRows={promptRows ?? 3}
       pastedTextDrafts={pastedTextDrafts}
@@ -346,6 +358,22 @@ export const LandingDark: Story = {
   ),
 };
 
+export const LandingMentionStress: Story = {
+  render: () => (
+    <div className="relative flex min-h-screen items-center bg-[#050b1d] px-4 text-white">
+      <div className="mx-auto w-full max-w-3xl">
+        <DemoComposer
+          tone="dark"
+          variant="landing"
+          title="Let's ship something"
+          initialPrompt=""
+          showMentionCommands
+        />
+      </div>
+    </div>
+  ),
+};
+
 export const DialogLight: Story = {
   render: () => (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
@@ -357,11 +385,57 @@ export const DialogLight: Story = {
   ),
 };
 
+export const DialogMentionStress: Story = {
+  render: () => (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
+      <div className="w-full max-w-xl rounded-2xl border bg-white p-6 shadow-lg">
+        <h2 className="mb-4 text-lg font-semibold text-slate-900">Start a new chat</h2>
+        <DemoComposer
+          tone="light"
+          variant="dialog"
+          showSecondary
+          promptRows={4}
+          initialPrompt=""
+          showMentionCommands
+        />
+      </div>
+    </div>
+  ),
+};
+
 export const SessionDark: Story = {
   render: () => (
     <div className="min-h-screen bg-[#050b1d] px-4 py-12 text-white">
       <div className="mx-auto w-full max-w-3xl">
         <DemoComposer tone="dark" variant="session" />
+      </div>
+    </div>
+  ),
+};
+
+/** Long command lists against the bottom-docked business composer. */
+export const SessionMentionStress: Story = {
+  render: () => (
+    <div className="flex min-h-screen flex-col justify-end bg-background px-4 pb-6">
+      <div className="mx-auto w-full max-w-3xl">
+        <DemoComposer tone="light" variant="session" initialPrompt="" showMentionCommands />
+      </div>
+    </div>
+  ),
+};
+
+/** The wide bottom-docked composer seen in a full-size desktop window. */
+export const SessionMentionWideDark: Story = {
+  render: () => (
+    <div className="flex min-h-screen flex-col justify-end bg-[#111315] px-[9vw] pb-6 text-white">
+      <div className="w-full max-w-[90rem]">
+        <DemoComposer
+          tone="dark"
+          variant="session"
+          initialPrompt=""
+          promptRows={4}
+          showMentionCommands
+        />
       </div>
     </div>
   ),

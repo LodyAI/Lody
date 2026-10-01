@@ -79,6 +79,31 @@ minimumReleaseAge: 10080
 
 # Grandfather versions already locked on main; later releases remain quarantined.
 minimumReleaseAgeExclude:
+  # Electron 43 desktop runtime. 43.7.6 carries the WASM code-cache fix
+  # (electron/electron#54234); electron-vite 6.0.0-beta.2+ is the first release
+  # with Electron 42-44 build targets. rolldown and magic-string come with it.
+  # Every rolldown platform binding is listed: a quarantined optional binding is
+  # dropped from the lockfile without an error, and rolldown then loads another
+  # version's binding and fails while bundling electron.vite.config.ts.
+  - 'electron@43.7.6'
+  - 'electron-vite@6.0.0-beta.5'
+  - 'magic-string@1.4.2'
+  - 'rolldown@1.2.11'
+  - '@rolldown/binding-android-arm-eabi@1.2.11'
+  - '@rolldown/binding-android-arm64@1.2.11'
+  - '@rolldown/binding-darwin-arm64@1.2.11'
+  - '@rolldown/binding-darwin-x64@1.2.11'
+  - '@rolldown/binding-freebsd-x64@1.2.11'
+  - '@rolldown/binding-linux-arm-gnueabihf@1.2.11'
+  - '@rolldown/binding-linux-arm64-gnu@1.2.11'
+  - '@rolldown/binding-linux-arm64-musl@1.2.11'
+  - '@rolldown/binding-linux-ppc64-gnu@1.2.11'
+  - '@rolldown/binding-linux-s390x-gnu@1.2.11'
+  - '@rolldown/binding-linux-x64-gnu@1.2.11'
+  - '@rolldown/binding-linux-x64-musl@1.2.11'
+  - '@rolldown/binding-openharmony-arm64@1.2.11'
+  - '@rolldown/binding-win32-arm64-msvc@1.2.11'
+  - '@rolldown/binding-win32-x64-msvc@1.2.11'
   # Exact pins required by the reviewed Claude upstream 0.84.0 source sync.
   - '@agentclientprotocol/sdk@1.5.1'
   - '@anthropic-ai/claude-agent-sdk@0.3.284'

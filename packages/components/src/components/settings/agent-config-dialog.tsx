@@ -1008,6 +1008,16 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
   },
   {
     kind: 'builtin',
+    value: 'builtin:devin',
+    label: 'Devin',
+    descriptionKey: 'settings.agent.dialog.option.devin.description',
+    descriptionDefault: 'Cognition Devin coding agent runtime',
+    cliType: 'builtin',
+    agentType: 'devin',
+    searchKeys: 'devin cognition',
+  },
+  {
+    kind: 'builtin',
     value: 'builtin:grok',
     label: 'Grok',
     descriptionKey: 'settings.agent.dialog.option.grok.description',
@@ -1722,7 +1732,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // answers "Authentication is not supported"; do not offer a button that can
   // only fail.
   const usesProtocolAuthentication =
-    usesAcpProtocolAuthentication(formData.cliType) &&
+    usesAcpProtocolAuthentication(formData.cliType, formData.agentType) &&
     machineSupportsAcpProtocolAuthentication(machine);
   const boundChatgptCodex =
     mode.kind === 'edit' && managedCodexForm && codexAuth?.mode === 'chatgpt';
@@ -1737,7 +1747,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         }) ||
           (authRequired && usesProtocolAuthentication))
       : authRequired &&
-        ((isManagedBuiltin && formData.agentType !== 'pi') || usesProtocolAuthentication);
+        ((isManagedBuiltin && formData.agentType !== 'pi' && formData.agentType !== 'devin') ||
+          usesProtocolAuthentication);
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
@@ -1747,9 +1758,11 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           ? 'claudeCodeExecutable'
           : formData.agentType === 'kimi'
             ? 'kimiPath'
-            : formData.agentType === 'grok'
-              ? 'grokPath'
-              : null;
+            : formData.agentType === 'devin'
+              ? 'devinPath'
+              : formData.agentType === 'grok'
+                ? 'grokPath'
+                : null;
   const builtinRuntimeOverrideValue = builtinRuntimeOverrideKey
     ? (formData.runtimeOverrides?.[builtinRuntimeOverrideKey] ?? '')
     : '';
@@ -2993,15 +3006,20 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                               'settings.agent.dialog.runtimeOverride.kimiPlaceholder',
                               '/path/to/kimi'
                             )
-                          : formData.agentType === 'grok'
+                          : formData.agentType === 'devin'
                             ? t(
-                                'settings.agent.dialog.runtimeOverride.grokPlaceholder',
-                                '/path/to/grok'
+                                'settings.agent.dialog.runtimeOverride.devinPlaceholder',
+                                '/path/to/devin'
                               )
-                            : t(
-                                'settings.agent.dialog.runtimeOverride.claudePlaceholder',
-                                '/path/to/claude'
-                              )
+                            : formData.agentType === 'grok'
+                              ? t(
+                                  'settings.agent.dialog.runtimeOverride.grokPlaceholder',
+                                  '/path/to/grok'
+                                )
+                              : t(
+                                  'settings.agent.dialog.runtimeOverride.claudePlaceholder',
+                                  '/path/to/claude'
+                                )
                     }
                     autoComplete="off"
                     spellCheck={false}

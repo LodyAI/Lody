@@ -111,6 +111,7 @@ export function EngineConversationScroller({
   item,
   keepMounted,
   initialWindowReady,
+  hidden = false,
   suppressAutoScrollRef,
   onAtBottomChange,
   onScroll,
@@ -240,6 +241,7 @@ export function EngineConversationScroller({
     },
   };
   controller.setCallbacks(callbacks);
+  controller.setHidden(hidden);
   controller.syncRows(rowMeta, 1);
   controller.setMustMount(keepMounted ?? []);
   const plan = controller.plan();
@@ -342,7 +344,8 @@ export function EngineConversationScroller({
     if (!element || typeof ResizeObserver === 'undefined') return undefined;
     let previous = { width: element.clientWidth, height: element.clientHeight };
     widthRef.current = previous.width;
-    controller.setLayoutVersion(layoutVersion(previous.width));
+    // A list mounted hidden has no width yet; showing it resizes the viewport.
+    if (previous.width > 0) controller.setLayoutVersion(layoutVersion(previous.width));
     const observer = new ResizeObserver(() => {
       const next = { width: element.clientWidth, height: element.clientHeight };
       if (next.width === previous.width && next.height === previous.height) return;

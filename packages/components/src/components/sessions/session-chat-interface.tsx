@@ -218,6 +218,7 @@ import { Input } from '@lody/ui/input';
 import { Separator } from '@lody/ui/separator';
 import { Tooltip } from '@lody/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
+import { useSessionPendingConfig } from '@/hooks/use-session-pending-config';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
 import { UserAvatar } from '@/components/user-avatar';
@@ -2118,6 +2119,7 @@ export const SessionChatInterface = memo(
       [postHog, sessionAnalyticsProperties]
     );
 
+    const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
     const localMachineId = useAtomValue(localMachineIdAtom);
     const localHomeDir = useAtomValue(localHomeDirAtom);
     const liveSessionPresence = useAtomValue(sessionLivePresenceAtomFamily(session.id));
@@ -2167,14 +2169,26 @@ export const SessionChatInterface = memo(
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [conversationVersion, conversationView, sessionTailFrom]
     );
-    const sessionConversationConfig = useMemo(
+    const durableConversationConfig = useMemo(
       () => resolveSessionConversationConfig(conversationConfigSources, sessionDoc?.mq ?? []),
       [conversationConfigSources, sessionDoc?.mq]
     );
-    const sessionConversationSourceFence = useMemo(
+    const durableConversationSourceFence = useMemo(
       () => resolveSessionConversationSourceFence(conversationConfigSources, sessionDoc?.mq ?? []),
       [conversationConfigSources, sessionDoc?.mq]
     );
+    const {
+      config: sessionConversationConfig,
+      sourceFence: sessionConversationSourceFence,
+      hasPendingConfig,
+    } = useSessionPendingConfig({
+      sessionId: session.id,
+      pendingSends: runtime?.pendingSends,
+      history: conversationView,
+      config: durableConversationConfig,
+      sourceFence: durableConversationSourceFence,
+      documentReady: sessionDocReady,
+    });
     const sessionRuntimeConfig = useMemo(
       () =>
         resolveSessionAcpRuntimeConfig(
@@ -2184,10 +2198,10 @@ export const SessionChatInterface = memo(
         ),
       [sessionDoc?.acpRuntimeConfig, sessionTailHistory, sessionDoc?.mq]
     );
-    // `sourceConfigKey` identifies the durable turn selected by the resolver,
-    // so there is no need to hash its mode/model/option values separately.
+    // A local send and its history/queue row share one fence, so landing the
+    // send cannot consume edits made for the next draft during its upload.
     const sessionConversationConfigRevision = `${session.id}:${
-      sessionConversationConfig.sourceConfigKey ?? ''
+      sessionConversationSourceFence.currentTurnKey ?? ''
     }`;
     const sessionConfigPreferences = useMemo(
       () => ({
@@ -2214,11 +2228,11 @@ export const SessionChatInterface = memo(
       selectModel: handleModelChange,
       selectConfigOption: handleConfigOptionChange,
     } = useAcpSessionConfigSelectionState({
-      enabled: !hideMessageArea && sessionDocReady,
+      enabled: !hideMessageArea && (sessionDocReady || hasPendingConfig),
       targetKey: `${session.id}:${session.cliType}:${session.agentType}`,
       preferenceRevision: sessionConversationConfigRevision,
       preferences: sessionConfigPreferences,
-      runtimePreferences: sessionRuntimeConfig,
+      runtimePreferences: hasPendingConfig ? null : sessionRuntimeConfig,
       preserveUnsentUserEdits: true,
     });
     const {
@@ -2226,11 +2240,10 @@ export const SessionChatInterface = memo(
       capabilityAuthority,
       configOptionSelectors,
       defaultModeId,
-      defaultModelId,
       machineFlockRows,
       modeOptions,
       modelOptions,
-      modelReasoningEfforts,
+      selectorOptions,
       sessionMachine,
     } = useSessionAcpSelectorContext({
       machineId: session.machineId,
@@ -2248,28 +2261,8 @@ export const SessionChatInterface = memo(
       capabilityAuthority,
       steerCapability
     );
-    const sessionSelectorOptions = useMemo(
-      () => ({
-        capabilityAuthority,
-        configOptionSelectors,
-        defaultModeId,
-        defaultModelId,
-        modeOptions,
-        modelOptions,
-        modelReasoningEfforts,
-      }),
-      [
-        capabilityAuthority,
-        configOptionSelectors,
-        defaultModeId,
-        defaultModelId,
-        modeOptions,
-        modelOptions,
-        modelReasoningEfforts,
-      ]
-    );
     const { selectedModeId, selectedModelId, configOptionValues } =
-      useResolvedAcpSessionConfigSelection(sessionConfigSelection, sessionSelectorOptions, {
+      useResolvedAcpSessionConfigSelection(sessionConfigSelection, selectorOptions, {
         cliType: session.cliType,
         agentType: session.agentType,
       });
@@ -2498,7 +2491,6 @@ export const SessionChatInterface = memo(
     const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
     const lastSearchAnalyticsKeyRef = useRef<string | null>(null);
 
-    const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
     const queuedMessageBehavior = useAtomValue(queuedMessageBehaviorAtom);
     const {
       markSessionRead,
@@ -6249,6 +6241,7 @@ export const SessionChatInterface = memo(
                                 workspaceId={workspaceId}
                                 showSenderIdentity={isMultiMember}
                                 view={conversationView}
+                                isVisible={isVisible}
                                 sessionCreatedAt={session?.createdAt}
                                 dividerLabel={sessionDividerLabel}
                                 className="h-full"
@@ -6511,7 +6504,7 @@ export const SessionChatInterface = memo(
                           durableAgentRoleKnownTurnKeys={
                             sessionConversationSourceFence.knownTurnKeys
                           }
-                          durableAgentRoleReady={sessionDocReady}
+                          durableAgentRoleReady={sessionDocReady || hasPendingConfig}
                           runConfigHasUserEdits={sessionRunConfigHasUserEdits}
                           modeOptions={modeOptions}
                           modelOptions={modelOptions}

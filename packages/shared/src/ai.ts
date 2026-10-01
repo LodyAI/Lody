@@ -1,3 +1,4 @@
+import type { AcpModelControls } from './acp-model-capabilities';
 import {
   AvailableCommand,
   PermissionOption,
@@ -21,6 +22,7 @@ import {
 
 export const MANAGED_BUILTIN_RUNTIMES = [
   { runtimeName: 'kimi-code', agentType: 'kimi', displayName: 'Kimi Code' },
+  { runtimeName: 'devin', agentType: 'devin', displayName: 'Devin' },
   { runtimeName: 'grok-build', agentType: 'grok', displayName: 'Grok' },
   { runtimeName: 'claude-code', agentType: 'claude', displayName: 'Claude Code' },
   { runtimeName: 'codex', agentType: 'codex', displayName: 'Codex' },
@@ -66,6 +68,7 @@ export type AgentType = string;
  */
 const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' | 'tagged'> = {
   pi: 'none',
+  devin: 'none',
   claude: 'untagged',
   codex: 'tagged',
   grok: 'untagged',
@@ -141,6 +144,7 @@ export type BuiltinRuntimeOverrides = {
   claudeCodeExecutable?: string;
   kimiPath?: string;
   grokPath?: string;
+  devinPath?: string;
   piExtensions?: string[];
 };
 
@@ -156,6 +160,7 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     claudeCodeExecutable?: unknown;
     kimiPath?: unknown;
     grokPath?: unknown;
+    devinPath?: unknown;
     piExtensions?: unknown;
   };
   return (
@@ -163,6 +168,7 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     (record.claudeCodeExecutable === undefined ||
       typeof record.claudeCodeExecutable === 'string') &&
     (record.kimiPath === undefined || typeof record.kimiPath === 'string') &&
+    (record.devinPath === undefined || typeof record.devinPath === 'string') &&
     (record.grokPath === undefined || typeof record.grokPath === 'string') &&
     (record.piExtensions === undefined ||
       (Array.isArray(record.piExtensions) &&
@@ -398,6 +404,12 @@ export type AcpCapabilityCacheEntry = {
    * `configOptions` is a snapshot that only describes `currentValue`'s model.
    */
   modelReasoningEfforts?: Record<string, string[]>;
+  /**
+   * Per-model controls from the config's `acpModelCapability` row, attached by
+   * `getMachineFlockAcpCapabilities` when its source version matches. Never
+   * stored in the capability row itself; see `acp-model-capabilities.ts`.
+   */
+  declaredModelControls?: Record<string, AcpModelControls>;
   /** Available slash commands advertised by the agent. */
   availableCommands?: AcpCommandSummary[];
   /** True only when the runtime initialize response advertised `sessionCapabilities.fork`. */

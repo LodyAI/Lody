@@ -388,3 +388,68 @@ describe('agent run config selection', () => {
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
   });
 });
+
+describe('MCP run config against declared per-model controls', () => {
+  // A Claude probe that ran on model-a: no effort option, no Fast option.
+  const probedClaudeCapability = (): AcpCapabilityCacheEntry => ({
+    cliType: 'builtin',
+    agentType: 'claude',
+    modes: [],
+    models: [
+      { modelId: 'model-a', name: 'A' },
+      { modelId: 'model-b', name: 'B' },
+    ],
+    configOptions: [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'model-a',
+        options: [
+          { value: 'model-a', name: 'A' },
+          { value: 'model-b', name: 'B' },
+        ],
+      },
+    ],
+    declaredModelControls: {
+      'model-a': { fastMode: false },
+      'model-b': { effortValues: ['low', 'high'], fastMode: true },
+    },
+    fetchedAt: 1,
+  });
+
+  it("maps effort and Fast onto the adapter's own ids for the target model", () => {
+    const resolution = resolveAgentRunConfigSelection(
+      { modelId: 'model-b', reasoningEffort: 'default', fastMode: true },
+      probedClaudeCapability()
+    );
+    expect(resolution.configOptionValues).toEqual({ effort: 'default', fast: true });
+    expect(resolution.validatedConfigIds).toEqual(expect.arrayContaining(['effort', 'fast']));
+    expect(summarizeAgentRunConfigCapabilities(probedClaudeCapability()).models).toEqual([
+      { id: 'model-a', name: 'A', reasoningEffortValues: [] },
+      { id: 'model-b', name: 'B', reasoningEffortValues: ['default', 'low', 'high'] },
+    ]);
+  });
+
+  it('rejects what the target model declares it does not have', () => {
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'model-a', reasoningEffort: 'low' },
+        probedClaudeCapability()
+      )
+    ).toThrow(/does not offer a reasoning effort/);
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'model-a', fastMode: true },
+        probedClaudeCapability()
+      )
+    ).toThrow(/does not offer fast mode/);
+    expect(
+      resolveAgentRunConfigSelection(
+        { modelId: 'model-a', fastMode: false },
+        probedClaudeCapability()
+      ).configOptionValues
+    ).toBeUndefined();
+  });
+});

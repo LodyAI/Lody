@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentConfigMeta } from '@lody/shared';
 import { CodexProfileStore } from './codex-profile-store';
+import { codexProfileConfig } from './codex-profile-runtime';
 import type { CodexCredentialVault } from './codex-credential-vault';
 import {
   registerCodexProfileProcess,
@@ -54,6 +55,73 @@ async function fixture() {
 }
 
 describe('Codex profile ownership and generation publication', () => {
+  it('uses isolated Codex default storage for new and unfinished ChatGPT profiles', async () => {
+    const { root, store, config } = await fixture();
+    const chatgpt = {
+      ...config,
+      id: randomUUID() as AgentConfigMeta['id'],
+      codexAuth: { mode: 'chatgpt' as const, profileId: randomUUID() },
+    };
+    const pending = await store.resolve('workspace-fixture', chatgpt, true);
+    if (!pending) throw new Error('Missing ChatGPT profile');
+    expect(pending.authStore).toBe('codex-default');
+    expect(codexProfileConfig(pending)).not.toHaveProperty('cli_auth_credentials_store');
+
+    const recordPath = path.join(root, pending.profile.profileId, 'profile.json');
+    const record = JSON.parse(await readFile(recordPath, 'utf8'));
+    delete record.authStore;
+    await writeFile(recordPath, JSON.stringify(record));
+    const upgradedPending = await store.resolve('workspace-fixture', chatgpt, true);
+    expect(upgradedPending?.authStore).toBe('codex-default');
+    if (!upgradedPending) throw new Error('Missing upgraded ChatGPT profile');
+    await store.markChatgptReady(upgradedPending);
+    expect((await store.resolve('workspace-fixture', chatgpt))?.authStore).toBe('codex-default');
+  });
+
+  it('keeps old ready ChatGPT profiles on their existing keyring through removal', async () => {
+    const { root, vault, config } = await fixture();
+    const chatgpt = {
+      ...config,
+      id: randomUUID() as AgentConfigMeta['id'],
+      codexAuth: { mode: 'chatgpt' as const, profileId: randomUUID() },
+    };
+    let cleanupAttempts = 0;
+    const store = new CodexProfileStore(root, vault, async (profile) => {
+      expect(profile.authStore).toBe('keyring');
+      cleanupAttempts += 1;
+      if (cleanupAttempts === 1) throw new Error('Credential store temporarily unavailable');
+    });
+    const pending = await store.resolve('workspace-fixture', chatgpt, true);
+    if (!pending) throw new Error('Missing ChatGPT profile');
+    const recordPath = path.join(root, pending.profile.profileId, 'profile.json');
+    const record = JSON.parse(await readFile(recordPath, 'utf8'));
+    delete record.authStore;
+    await writeFile(recordPath, JSON.stringify({ ...record, state: 'ready' }));
+
+    const legacy = await store.resolve('workspace-fixture', chatgpt);
+    if (!legacy) throw new Error('Missing legacy ChatGPT profile');
+    expect(legacy.authStore).toBe('keyring');
+    expect(codexProfileConfig(legacy)).toHaveProperty('cli_auth_credentials_store', 'keyring');
+    expect(
+      (await store.list('workspace-fixture')).find(
+        (profile) => profile.profile.profileId === legacy.profile.profileId
+      )?.authStore
+    ).toBe('keyring');
+    await expect(store.remove(legacy)).rejects.toThrow('temporarily unavailable');
+    const removed = (await store.list('workspace-fixture')).find(
+      (profile) => profile.profile.profileId === legacy.profile.profileId
+    );
+    expect(removed?.authStore).toBe('keyring');
+    if (!removed) throw new Error('Missing removed ChatGPT profile');
+    await store.remove(removed);
+    expect(cleanupAttempts).toBe(2);
+    expect(JSON.parse(await readFile(recordPath, 'utf8'))).toMatchObject({
+      state: 'removed',
+      authStore: 'keyring',
+      credentialsRemoved: true,
+    });
+  });
+
   it('rejects a new profile identity for an already bound provider, including concurrent binds', async () => {
     const { store, config } = await fixture();
     await expect(

@@ -279,7 +279,7 @@ export const composerSurface = stylex.create({
   /**
    * The list's own box inside a `Popover.Content`. The popover pads prose by
    * 12px and sets prose type; a list of rows takes the popup's 4px inset and
-   * the control type instead, so this box reaches back out to that inset.
+   * the menu's regular-weight labels, so this box reaches back out to that inset.
    */
   popupList: {
     display: 'flex',
@@ -289,24 +289,14 @@ export const composerSurface = stylex.create({
     color: colors.label,
     fontSize: text.subheadlineSize,
     lineHeight: text.subheadlineLeading,
-    fontWeight: 500,
+    fontWeight: 400,
     letterSpacing: text.controlTracking,
   },
-  /**
-   * The list's own box inside a selector `Menu.Content`. A selector menu is
-   * not an independent surface: its edge is the edge of the trigger it hangs
-   * from, and the rows' leading column is that same edge plus one item pad —
-   * the X the trigger's own leading mark holds. `Menu.Content` insets its
-   * rows by `popup.inset` (4px) though, so the list reaches back out to the
-   * inset's edge, the same reach `popupList` makes inside a `Popover.Content`.
-   * The popup clips `overflowX`, so a separator inside still reads as the
-   * edge-to-edge line it already is.
-   */
+  /** Groups selector rows without overriding `Menu.Content`'s inset. */
   menuList: {
     display: 'flex',
     flexDirection: 'column',
     minWidth: 0,
-    marginInline: `calc(-1 * ${space[1]})`,
   },
   /** The scrolling region under the search field. */
   popupScroll: {

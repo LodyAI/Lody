@@ -20,6 +20,8 @@ const meta = {
   component: McpServerRow,
   args: {
     server: base,
+    onDiscoverTools: () => undefined,
+    canDiscoverTools: true,
     onEdit: () => undefined,
     onToggleDefault: () => undefined,
     onRemove: () => undefined,
@@ -61,6 +63,30 @@ export const WithoutConnection: Story = {
       id: 'draft' as McpServerId,
       name: 'Not configured yet',
       connection: undefined,
+    },
+  },
+};
+
+export const Connected: Story = {
+  args: {
+    toolList: {
+      status: 'success',
+      tools: [
+        { name: 'read_file', description: 'Read a project file.' },
+        { name: 'list_directory', description: 'List files in a directory.' },
+        { name: 'search_files' },
+      ],
+    },
+  },
+};
+export const Connecting: Story = { args: { toolList: { status: 'loading' } } };
+export const ConnectionFailed: Story = { args: { toolList: { status: 'error' } } };
+export const NoTools: Story = { args: { toolList: { status: 'success', tools: [] } } };
+export const ManyTools: Story = {
+  args: {
+    toolList: {
+      status: 'success',
+      tools: Array.from({ length: 24 }, (_, i) => ({ name: `workspace_project_tool_${i}` })),
     },
   },
 };

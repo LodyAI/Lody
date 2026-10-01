@@ -20,7 +20,9 @@ import type { EngineRow, FixedRowKind } from '../../src/lib/conversation-scroll/
  * - the observer delivers a mounted row only when its size differs from the
  *   size last delivered for it;
  * - commits requested during a task run at the end of that task, in order
- *   (React processes layout-effect updates before paint).
+ *   (React processes layout-effect updates before paint);
+ * - a hidden viewport (`display: none`) has no box: every offset and size reads
+ *   0, writes are dropped, and hiding loses the scroll offset.
  *
  * Rows have a true height the engine never sees except by measuring mounted
  * rows. The scroll range is the content top, the rows container (its extent,
@@ -56,6 +58,7 @@ export class ScrollSim implements ScrollHost {
   pendingScroll = false;
   suppressed = false;
   reducedMotion = true;
+  hidden = false;
   /** Applied to every `scrollBy`: models a scrollbar drag overriding it. */
   dragOverride: number | null = null;
   private queued = false;
@@ -76,23 +79,28 @@ export class ScrollSim implements ScrollHost {
   // ---- ScrollHost ---------------------------------------------------------
 
   readScrollTop() {
-    return Math.min(this.top, this.maxTop());
+    return this.hidden ? 0 : Math.min(this.top, this.maxTop());
   }
   readScrollHeight() {
+    if (this.hidden) return 0;
     return this.contentTop + this.extent + this.replyRoom + this.paddingBottom;
   }
   readViewportHeight() {
-    return this.viewport;
+    return this.hidden ? 0 : this.viewport;
   }
   readContentTop() {
-    return this.contentTop;
+    return this.hidden ? 0 : this.contentTop;
   }
   readPaddingBottom() {
     return this.paddingBottom;
   }
   measure(keys: readonly string[]) {
     return keys.map((key) =>
-      this.mounted.has(key) ? this.rows.find((row) => row.key === key)?.height : undefined
+      this.mounted.has(key)
+        ? this.hidden
+          ? 0
+          : this.rows.find((row) => row.key === key)?.height
+        : undefined
     );
   }
   setExtent(px: number) {
@@ -105,10 +113,12 @@ export class ScrollSim implements ScrollHost {
   }
   writeScrollTop(value: number) {
     this.writes.push({ kind: 'write', value });
+    if (this.hidden) return;
     this.setTop(value);
   }
   scrollBy(delta: number) {
     this.writes.push({ kind: 'by', value: delta });
+    if (this.hidden) return;
     if (this.dragOverride !== null) {
       // A held scrollbar thumb maps to an absolute offset and wins.
       this.setTop(this.dragOverride);
@@ -176,7 +186,8 @@ export class ScrollSim implements ScrollHost {
     }
     const entries: Array<{ key: string; height: number }> = [];
     for (const key of this.mounted.keys()) {
-      const height = this.rows.find((row) => row.key === key)?.height;
+      const found = this.rows.find((row) => row.key === key)?.height;
+      const height = found === undefined ? undefined : this.hidden ? 0 : found;
       if (height === undefined) continue;
       if (this.delivered.get(key) === height) continue;
       this.delivered.set(key, height);
@@ -195,6 +206,17 @@ export class ScrollSim implements ScrollHost {
   /** The reader scrolls natively (no engine write). */
   nativeScroll(offset: number) {
     this.setTop(offset);
+  }
+
+  /**
+   * Hide or show the viewport as an inactive tab is (`display: none` in the
+   * commit that deactivates it), then deliver the viewport's resize.
+   */
+  setHidden(hidden: boolean) {
+    this.hidden = hidden;
+    if (hidden) this.top = 0;
+    this.render();
+    this.task(() => this.controller.onViewportResized());
   }
 
   resizeViewport(height: number) {
@@ -242,6 +264,7 @@ export class ScrollSim implements ScrollHost {
     this.commits += 1;
     this.commitsThisTask += 1;
     if (this.commitsThisTask > 50) throw new Error('commit loop');
+    this.controller.setHidden(this.hidden);
     this.controller.syncRows(this.engineRows(), this.sourceGeneration);
     const plan: RenderPlan = this.controller.plan();
     this.mounted = new Map(plan.keys.map((key, position) => [key, plan.offsets[position]!]));

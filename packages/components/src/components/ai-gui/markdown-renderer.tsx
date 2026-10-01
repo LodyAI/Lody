@@ -198,11 +198,11 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
   '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
   '[&_[data-streamdown="code-block"]]:!my-4 ' +
-  '[&_table]:!my-0 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +
+  '[&_table]:!my-0 [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +
   // Lines are foreground tints (the theme border melts into the canvas). No
   // column or row is assumed to be a label: cells share one color and weight;
   // only the header row, which Markdown always has, gets a faint band.
-  '[&_thead]:bg-muted/80 [&_:is(th,td)]:text-sm [&_th]:whitespace-nowrap ' +
+  '[&_thead]:bg-muted/80 [&_:is(th,td)]:text-sm ' +
   '[&_th]:border-b [&_th]:border-foreground/[0.14] [&_th]:bg-foreground/[0.035] [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-normal [&_th]:align-top ' +
   '[&_td]:border-b [&_td]:border-foreground/[0.08] [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
   '[&_:is(th,td)+:is(th,td)]:border-l [&_:is(th,td)+:is(th,td)]:border-l-foreground/[0.08] ' +
@@ -826,10 +826,6 @@ function MarkdownPre({
   return <MarkdownFencedCodeBlock {...block} />;
 }
 
-type MarkdownTableProps = ComponentPropsWithoutRef<'table'> & {
-  node?: unknown;
-};
-
 const AgentFileLink = ({
   href,
   children,
@@ -873,19 +869,30 @@ const AgentFileLink = ({
       aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
       className={cn(
         'm-0 inline-flex max-w-full items-baseline gap-1 rounded-sm border-0 bg-transparent p-0 align-baseline font-[inherit] leading-[inherit] text-markdown-link no-underline shadow-none transition-colors',
-        'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+        'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        // In a table cell the chip flows as inline text so the cell decides
+        // whether the path wraps (see `markdown-table.tsx`); a truncated path
+        // there would dictate the column's minimum width.
+        '[:is(th,td)_&]:inline [:is(th,td)_&]:text-start'
       )}
     >
       <MonochromeFileIcon
         filePath={iconPath}
-        className="h-[1.38em] w-[1.38em] shrink-0 self-center"
+        className="h-[1.38em] w-[1.38em] shrink-0 self-center [:is(th,td)_&]:mr-1 [:is(th,td)_&]:inline-block [:is(th,td)_&]:align-[-0.33em]"
       />
-      <span className="min-w-0 truncate">{children}</span>
+      <span
+        className={cn(
+          'min-w-0 truncate',
+          '[:is(th,td)_&]:overflow-visible [:is(th,td)_&]:text-clip [:is(th,td)_&]:[white-space:inherit] [:is(th,td)_&]:[line-break:anywhere]'
+        )}
+      >
+        {children}
+      </span>
       {!hasOpenAction ? (
         didCopy ? (
-          <Check className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
+          <Check className="h-[0.85em] w-[0.85em] shrink-0 self-center [:is(th,td)_&]:ml-1 [:is(th,td)_&]:inline-block [:is(th,td)_&]:align-[-0.1em]" />
         ) : (
-          <Copy className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
+          <Copy className="h-[0.85em] w-[0.85em] shrink-0 self-center [:is(th,td)_&]:ml-1 [:is(th,td)_&]:inline-block [:is(th,td)_&]:align-[-0.1em]" />
         )
       ) : null}
     </button>
@@ -983,7 +990,7 @@ const createMarkdownComponents = ({
       </code>
     );
   },
-  table: (props: MarkdownTableProps) => <MarkdownTable {...props} />,
+  table: (props) => <MarkdownTable {...props} />,
   a: (props: MarkdownLinkProps) => {
     const { children, href, node: _node, rel, ...rest } = props;
     if (!href) return <span>{children}</span>;

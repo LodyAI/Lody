@@ -49,6 +49,16 @@ type GitHubTokenResponse = {
   rateLimitScope?: string;
 };
 
+/**
+ * Result of a per-command candidate lookup. `null` means the repository is not
+ * linked at all; `available: false` means the requested source exists as a
+ * policy but cannot mint a token right now, with the backend's reason.
+ */
+export type GitHubCredentialCandidate =
+  | { token: string; tokenSource: 'personal' | 'app' }
+  | { available: false; reason: string }
+  | null;
+
 export type GitHubWriteTokenContext = {
   requesterUserId: string;
   machineId: string;
@@ -131,7 +141,7 @@ export class GitHubTokenManager {
     context: GitHubWriteTokenContext,
     source: 'personal' | 'app',
     invalidatedPersonalToken?: string
-  ): Promise<{ token: string; tokenSource: 'personal' | 'app' } | null> {
+  ): Promise<GitHubCredentialCandidate> {
     const result = GitHubTokenResponseSchema.parse(
       await this.client.action(api.github.getOperationAccessTokenByRepoNameForCli, {
         cliToken: this.cliToken,
@@ -145,11 +155,16 @@ export class GitHubTokenManager {
       })
     );
     if (!result.success) {
-      if (
-        result.errorCode === 'repo_not_linked' ||
-        (source === 'personal' && result.errorCode === 'personal_unavailable')
-      )
-        return null;
+      if (result.errorCode === 'repo_not_linked') return null;
+      if (source === 'personal' && result.errorCode === 'personal_unavailable') {
+        // The message carries the backend fallback reason (auth missing, token
+        // expired, refresh rejected). It is not a secret; keep it for the helper's
+        // stderr so a silent App fallback can be explained and repaired.
+        this.logger.debug(
+          `[github-token] Personal GitHub identity unavailable for ${repoFullName} (requester ${context.requesterUserId}): ${result.errorMessage}`
+        );
+        return { available: false, reason: result.errorMessage };
+      }
       throw new GitHubTokenFetchError(result.errorCode, result.errorMessage);
     }
     return { token: result.token, tokenSource: result.tokenSource ?? 'app' };

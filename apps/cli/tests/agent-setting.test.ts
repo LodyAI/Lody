@@ -392,6 +392,53 @@ describe('resolveBuiltinACPSetting', () => {
     ).resolves.toBeNull();
   });
 
+  it('launches Devin with the managed runtime and keys capabilities to the actual version', async () => {
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      resolveRuntimeForLaunch: async () => ({
+        runtimeName: 'devin',
+        version: '3000.11.1',
+        targetVersion: '3000.11.3',
+        platformArch: 'darwin-arm64',
+        command: '/managed/devin/bin/devin',
+        updateAvailable: false,
+      }),
+    } as ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>);
+    try {
+      const launch = await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'devin' });
+      expect(launch).toEqual({
+        command: process.execPath,
+        args: [expect.stringMatching(/devin-acp\.js$/u)],
+        env: { DEVIN_PATH: '/managed/devin/bin/devin' },
+        capabilitySourceVersion: `builtin-devin-acp:${managedRuntime.DEVIN_ACP_ADAPTER_VERSION}+official-devin:3000.11.1`,
+      });
+      const overridden = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'devin',
+        runtimeOverrides: { devinPath: '/custom/devin' },
+      });
+      expect(overridden.env).toEqual({ DEVIN_PATH: '/custom/devin' });
+      expect(overridden.capabilitySourceVersion).toContain(
+        '+override:{"devinPath":"/custom/devin"}'
+      );
+      expect(
+        await resolveBuiltinAuthenticationProcessLaunch({
+          cliType: 'builtin',
+          agentType: 'devin',
+          action: 'status',
+        })
+      ).toBeNull();
+      await expect(
+        resolveBuiltinAuthenticationProcessLaunch({
+          cliType: 'builtin',
+          agentType: 'devin',
+          action: 'login',
+        })
+      ).rejects.toThrow('ACP authentication flow');
+    } finally {
+      manager.mockRestore();
+    }
+  });
+
   it('launches Grok ACP and device login through an overridden runtime', async () => {
     await expect(
       resolveACPProcessLaunchAsync({
@@ -681,23 +728,19 @@ describe('resolveBuiltinACPSetting', () => {
     );
   });
 
-  it('keeps Devin on the downloadable registry binary path', () => {
-    const agent = getRegistryAgent('devin');
-
-    expect(agent.distribution.local).toBeUndefined();
-    expect(Object.keys(agent.distribution.binary ?? {})).toEqual(
-      expect.arrayContaining([
-        'darwin-aarch64',
-        'darwin-x86_64',
-        'linux-aarch64',
-        'linux-x86_64',
-        'windows-aarch64',
-        'windows-x86_64',
-      ])
-    );
+  it('keeps removed registry providers launchable without listing duplicates', () => {
+    for (const id of ['devin', 'dimcode', 'kimi', 'kimi-code']) {
+      expect(REGISTRY_ACP_AGENTS.some((agent) => agent.id === id)).toBe(false);
+    }
     expect(() => resolveACPSetting({ cliType: 'registry', agentType: 'devin' })).toThrow(
       /resolveACPProcessLaunchAsync/
     );
+    expect(resolveACPSetting({ cliType: 'registry', agentType: 'dimcode' }).exec.args).toEqual([
+      '--prefer-offline',
+      '-y',
+      'dimcode@0.5.12',
+      'acp',
+    ]);
   });
 
   it('uses the hardcoded Interactive Claude registry provider with exact platform npx packages', () => {

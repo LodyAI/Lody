@@ -1,21 +1,19 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 /**
  * Public pricing page (`/price`, `/zh/price`).
  *
  * Content and structure were ported from the retired VitePress site. Styles
  * live in `app/pricing.css`.
  *
- * Early-bird yearly Plus ($5/seat/mo = $60/yr) is the fixed public presentation
- * with regular $8 (and monthly $10) as strike-through reference only. Do not
- * gate on `Date.now()` or env end dates — that caused an $8→$5 flash on paint.
- * The Sep 30 end date is therefore static copy — one line, in `promoDiscount`:
- * when it passes, edit that copy, do not add a clock.
+ * Public Plus uses standard list pricing: $96 yearly or $10 monthly per seat.
  */
 
 import '@site/app/pricing.css';
 import NumberFlow from '@number-flow/react';
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 
 import { founderCallUrl } from '@site/lib/founder-call';
 
@@ -82,12 +80,6 @@ type PricingCopy = {
     yearly: string;
     monthly: string;
     save: string;
-    earlyBirdSave: string;
-    promoLabel: string;
-    promoDiscount: string;
-    earlyBirdYearlyNote: string;
-    regularYearlyPrice: string;
-    monthlyPrice: string;
     toggleLabel: string;
   };
   plansLabel: string;
@@ -109,10 +101,9 @@ type PricingCopy = {
   }[];
 };
 
-/** Regular Plus list prices — strike-through only when early-bird yearly is shown. */
+/** Standard Plus list prices per seat per month. */
 const REGULAR_PLUS_YEARLY = '8';
 const REGULAR_PLUS_MONTHLY = '10';
-const EARLY_BIRD_PLUS_YEARLY = '5';
 
 const copy = {
   en: {
@@ -126,13 +117,6 @@ const copy = {
       yearly: 'Yearly',
       monthly: 'Monthly',
       save: 'Save 20%',
-      earlyBirdSave: '$60/year',
-      promoLabel: 'Early-bird offer',
-      promoDiscount: '$60/year · ends Sep 30',
-      earlyBirdYearlyNote:
-        'Pay yearly now to lock $60 per seat per year for this workspace forever.',
-      regularYearlyPrice: 'Regular yearly price',
-      monthlyPrice: 'Monthly price',
       toggleLabel: 'Toggle yearly or monthly billing',
     },
     plansLabel: 'Pricing plans',
@@ -328,12 +312,6 @@ const copy = {
       yearly: '年付',
       monthly: '月付',
       save: '省 20%',
-      earlyBirdSave: '$60/年',
-      promoLabel: '早鸟活动',
-      promoDiscount: '$60/年 · 9 月 30 日截止',
-      earlyBirdYearlyNote: '现在选择年付，即可为当前 workspace 永久锁定每席位每年 $60。',
-      regularYearlyPrice: '常规年付价格',
-      monthlyPrice: '月付价格',
       toggleLabel: '切换年付或月付',
     },
     plansLabel: '价格方案',
@@ -504,33 +482,6 @@ export function PricingPage({ locale }: { locale: PricingLocale }) {
   const page = copy[locale];
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('yearly');
   const isYearly = billingCycle === 'yearly';
-  // Permanent early-bird presentation (no client clock / env gate).
-  const earlyBirdYearlyActive = true;
-
-  const standardPlusPlan = useMemo(() => {
-    const plus = page.plans.find((plan) => plan.id === 'plus');
-    if (!plus) return null;
-    return {
-      ...plus,
-      yearly: REGULAR_PLUS_YEARLY,
-      monthly: REGULAR_PLUS_MONTHLY,
-    };
-  }, [page.plans]);
-
-  const plans = useMemo(
-    () =>
-      page.plans.map((plan) =>
-        earlyBirdYearlyActive && plan.id === 'plus'
-          ? {
-              ...plan,
-              yearly: EARLY_BIRD_PLUS_YEARLY,
-              yearlyNote: page.billing.earlyBirdYearlyNote,
-            }
-          : plan
-      ),
-    [earlyBirdYearlyActive, page.billing.earlyBirdYearlyNote, page.plans]
-  );
-
   return (
     <div className="landing-page-root marketing-shell">
       <LandingEffects />
@@ -576,25 +527,17 @@ export function PricingPage({ locale }: { locale: PricingLocale }) {
                 type="button"
               >
                 {page.billing.yearly}
-                <span className="pricing-toolbar-tag">
-                  {earlyBirdYearlyActive ? page.billing.earlyBirdSave : page.billing.save}
-                </span>
+                <span className="pricing-toolbar-tag">{page.billing.save}</span>
               </button>
             </div>
           </div>
 
           <div className="pricing-grid">
-            {plans.map((plan, index) => (
+            {page.plans.map((plan, index) => (
               <PricingCard
-                earlyBirdYearlyActive={earlyBirdYearlyActive}
                 isYearly={isYearly}
                 key={plan.id}
-                monthlyPriceLabel={page.billing.monthlyPrice}
                 plan={plan}
-                promoDiscount={page.billing.promoDiscount}
-                promoLabel={page.billing.promoLabel}
-                regularYearlyPriceLabel={page.billing.regularYearlyPrice}
-                standardPlusPlan={standardPlusPlan}
                 style={{ '--card-index': String(index) } as CSSProperties}
               />
             ))}
@@ -708,24 +651,12 @@ function FeatureSectionBlock({ section }: { section: FeatureSection }) {
 }
 
 function PricingCard({
-  earlyBirdYearlyActive,
   isYearly,
   plan,
-  promoDiscount,
-  promoLabel,
-  regularYearlyPriceLabel,
-  monthlyPriceLabel,
-  standardPlusPlan,
   style,
 }: {
-  earlyBirdYearlyActive: boolean;
   isYearly: boolean;
   plan: PricingPlan;
-  promoDiscount: string;
-  promoLabel: string;
-  regularYearlyPriceLabel: string;
-  monthlyPriceLabel: string;
-  standardPlusPlan: PricingPlan | null;
   style: CSSProperties;
 }) {
   const currentPrice = isYearly ? plan.yearly : plan.monthly;
@@ -733,10 +664,6 @@ function PricingCard({
   const numericPrice =
     isNumeric(plan.yearly) && isNumeric(plan.monthly) ? Number(currentPrice) : null;
   const isMailto = plan.href.startsWith('mailto:');
-  const showPromoBanner = plan.id === 'plus' && earlyBirdYearlyActive && isYearly;
-  const showPromoReference =
-    plan.id === 'plus' && earlyBirdYearlyActive && isYearly && standardPlusPlan !== null;
-
   return (
     <article
       className={[
@@ -762,20 +689,6 @@ function PricingCard({
         <p className="pricing-plan-desc">{plan.description}</p>
       </header>
 
-      {plan.id === 'plus' && earlyBirdYearlyActive ? (
-        <div
-          className={`pricing-promo-slot${showPromoBanner ? ' is-open' : ''}`}
-          aria-hidden={!showPromoBanner}
-        >
-          <div className="pricing-promo-slot-inner">
-            <div className="pricing-promo-banner">
-              <span>{promoLabel}</span>
-              <strong>{promoDiscount}</strong>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       <div className="pricing-price-row">
         {plan.prefix ? <span className="pricing-price-prefix">{plan.prefix}</span> : null}
         {numericPrice !== null ? (
@@ -792,30 +705,6 @@ function PricingCard({
         ) : (
           <span className="pricing-price-custom">{currentPrice}</span>
         )}
-        {plan.id === 'plus' && standardPlusPlan ? (
-          <span
-            className={`pricing-price-reference-slot${showPromoReference ? ' is-open' : ''}`}
-            aria-hidden={!showPromoReference}
-          >
-            <span
-              className="pricing-price-reference"
-              aria-label={
-                showPromoReference
-                  ? `${regularYearlyPriceLabel} ${standardPlusPlan.prefix}${standardPlusPlan.yearly}; ${monthlyPriceLabel} ${standardPlusPlan.prefix}${standardPlusPlan.monthly}`
-                  : undefined
-              }
-            >
-              <s aria-hidden="true">
-                {standardPlusPlan.prefix}
-                {standardPlusPlan.yearly}
-              </s>
-              <s aria-hidden="true">
-                {standardPlusPlan.prefix}
-                {standardPlusPlan.monthly}
-              </s>
-            </span>
-          </span>
-        ) : null}
         {plan.unit ? <span className="pricing-price-unit">{plan.unit}</span> : null}
       </div>
 
@@ -825,7 +714,7 @@ function PricingCard({
         </span>
       </p>
 
-      <a
+      <SiteAnchor
         className={`pricing-card-cta${plan.featured ? ' pricing-card-cta-primary' : ''}`}
         href={plan.href}
         rel={isMailto ? 'noopener' : undefined}
@@ -833,17 +722,17 @@ function PricingCard({
       >
         <span>{plan.cta}</span>
         <ArrowIcon />
-      </a>
+      </SiteAnchor>
 
       {plan.secondaryCta ? (
-        <a
+        <SiteAnchor
           className="pricing-card-secondary-cta"
           href={plan.secondaryCta.href}
           rel="noreferrer"
           target="_blank"
         >
           {plan.secondaryCta.label}
-        </a>
+        </SiteAnchor>
       ) : null}
 
       <ul className="pricing-card-features">
@@ -855,9 +744,9 @@ function PricingCard({
               {typeof feature === 'string' ? (
                 <span>{feature}</span>
               ) : (
-                <a className="pricing-card-feature-link" href={feature.href}>
+                <SiteAnchor className="pricing-card-feature-link" href={feature.href}>
                   {feature.label}
-                </a>
+                </SiteAnchor>
               )}
             </li>
           );

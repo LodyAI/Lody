@@ -75,7 +75,9 @@ export class ProjectLifecyclePage {
     await row.getByRole('button', { name: /^(More actions|更多操作)$/u }).click();
     await this.page.getByRole('menuitem', { name: /^(Remove project|移除项目)$/u }).click();
 
-    const dialog = this.page.getByRole('dialog').filter({ hasText: this.fixture.projectName });
+    const dialog = this.page
+      .locator('[data-lody-dialog-content][role="dialog"]')
+      .filter({ hasText: this.fixture.projectName });
     await expect(dialog).toBeVisible();
     await expect(
       dialog.getByText(

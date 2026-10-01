@@ -74,7 +74,8 @@ strings on i18n rather than the registry's inline English.
   as the workspace Plus badge.
 - Product menu extras live in `menu-styles.ts` (group label, separator, search
   shell); the surface and rows are `@lody/ui`'s popup surface. Rows track
-  `0.9em` of `--ui-font-size`; the edge is a `0.5px` shadow ring, never a 1px
+  `0.9em` of `--ui-font-size` at weight 400, including composer pickers and
+  mention menus; the edge is a `0.5px` shadow ring, never a 1px
   border.
 
 ## Spinner

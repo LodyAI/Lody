@@ -58,7 +58,7 @@ export const supportsBuiltinAuthentication = (input: {
 }): boolean => {
   if (input.cliType !== 'builtin') return false;
   const agentType = input.agentType;
-  if (agentType === 'pi') return false;
+  if (agentType === 'pi' || agentType === 'devin') return false;
   if (!agentType || !isManagedBuiltinAgentType(agentType)) return false;
   if (hasBuiltinEnvAuthentication(agentType, input.env)) return false;
   // A persisted brand marks a preset routed through a third-party provider even
@@ -69,15 +69,20 @@ export const supportsBuiltinAuthentication = (input: {
 };
 
 /**
- * True when the config is a third-party ACP provider, which authenticates
+ * True when the config uses agent-driven authentication (registry, custom, or
+ * builtin Devin), which authenticates
  * through the standard ACP `initialize` → `authenticate` exchange. The methods
  * are advertised by the agent itself, so support cannot be known for certain
  * until it is asked — callers pair this with a live `authRequired` signal rather
  * than offering a sign-in nothing asked for.
  */
 export const usesAcpProtocolAuthentication = (
-  cliType: AgentConfigCliType | null | undefined
-): boolean => cliType === 'registry' || cliType === 'custom';
+  cliType: AgentConfigCliType | null | undefined,
+  agentType?: string | null
+): boolean =>
+  cliType === 'registry' ||
+  cliType === 'custom' ||
+  (cliType === 'builtin' && agentType === 'devin');
 
 /**
  * True when Lody has any sign-in flow to offer for this config after the agent
@@ -87,7 +92,7 @@ export const supportsAuthenticationWhenRequired = (input: {
   cliType: AgentConfigCliType | null | undefined;
   agentType: string | null | undefined;
 }): boolean =>
-  usesAcpProtocolAuthentication(input.cliType) ||
+  usesAcpProtocolAuthentication(input.cliType, input.agentType) ||
   (input.cliType === 'builtin' &&
     !!input.agentType &&
     input.agentType !== 'pi' &&

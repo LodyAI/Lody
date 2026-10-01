@@ -67,3 +67,4 @@ unverified in this checkout.
 
 - [Placement Spec](../../../../specs/composer-mention-menu-placement.md)
 - [Edit-and-resend decision](../feature/2026-09-28-edit-resend-mentions.md)
+- [Main-composer upward placement](2026-09-29-main-composer-mention-above-frame.md)

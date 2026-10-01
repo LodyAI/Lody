@@ -1308,7 +1308,7 @@ describe('SessionManager preparation compatibility', () => {
       config.userName,
       'changed@example.com',
       config.requesterUserId,
-      { preferMachineIdentity: true }
+      { preferMachineIdentity: true, personalIdentityEnabled: false }
     );
   });
 

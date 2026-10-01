@@ -19,7 +19,20 @@ Spec。
 机器侧 Review Automation 在这条 MCP 委派链之外运行。它自己管理轮数、
 Token 和权限预算，并根据外部的 Review 与 CI 状态推进。
 
-## 证据
+## 本地与云端执行
+
+OSS 的 Agent Role mention 必须无需 Lody 账号、无需经过产品云端认证请求即可
+创建工作。Session/catalog MCP 调用进入持有本地 workspace 的 daemon，由正在
+执行的 Turn 提供身份，校验精确的本机与项目，并运行与 Cloud 共用的 Role 解析
+和持久化 Operation 状态机。支持已注册的本地项目和普通聊天；托管仓库上下文
+仍不可用。
+
+恢复使用冻结的 prompt、Role revision 和派发配置。重放缺失的目标输入前，
+Cloud 确认远端文档追平；OSS 确认权威 daemon repo，并在已有创建 claim 下重新
+检查固定 Turn。Cloud workspace 不能把云端断连当成本地权威。完成回传继续
+使用已有的单一所有者 Delivery 协议，不需要持久化 schema 或托管 API 变更。
+
+## 实现证据
 
 实现检查位于 `apps/cli/src/mcp/lody-mcp-server.ts`，共享上限位于
 `packages/shared/src/session-orchestration.ts`，可执行 Operation 模型位于

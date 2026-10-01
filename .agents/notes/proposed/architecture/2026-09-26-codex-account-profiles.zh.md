@@ -18,6 +18,8 @@ Authorization，因此自定义 API 必须经过拒绝重定向的用户侧凭�
 
 [草案 Spec](../../../../specs/codex-account-profiles.zh.md)拥有产品契约。账户位于执行
 机器的 Lody 数据目录，非秘密元数据绑定工作区、机器、提供商、账户、方式及地址。
+下文仅使用密钥库保存 ChatGPT 凭据的选择，已由后续的
+[原生存储兼容决策](../../implemented/bug-fix/2026-09-29-codex-profile-native-auth-storage.zh.md)替代。
 OAuth 刷新仍由 Codex 负责；Lody 用 `@napi-rs/keyring` 2.1.0 暂存 API 密钥代次。
 Linux 明确要求持久化 Secret Service，不回退到临时 keyutils。渲染进程不能读回已有
 密钥；远程输入复用现有与上下文绑定的加密交互，而非另建凭据通道。

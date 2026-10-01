@@ -201,6 +201,9 @@ Grok runs the official `login --device-auth`; Claude Code runs the official
 `login --device-auth`; managed API profiles use the existing secret-input interaction
 and a tools-free Responses probe. [Account profiles](../../../../specs/codex-account-profiles.md)
 owns isolation, generation rotation, concurrency and compatibility guarantees.
+Each new ChatGPT profile lets Codex use its native credential-storage default inside
+the profile's private `CODEX_HOME`; older ready profiles retain their keyring setting.
+The host never moves a global `auth.json` to switch accounts.
 
 Remote Web transport stores only an ephemeral-ECDH/AES-GCM envelope in the 24-hour request
 stream; the target machine keeps the recipient private key in memory and decrypts

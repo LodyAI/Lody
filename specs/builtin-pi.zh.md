@@ -46,8 +46,7 @@ Provider 的 `runtimeOverrides.piExtensions` 是唯一持久选择。显式测�
 
 扫描 RPC 只接受可选的已保存 Pi Provider ID，不接受调用方提供的启动参数或环境变量。
 本地路由失败不得回退到云端。只有校验清单声明 `piExtensionsProtocolVersion: 1` 且主机兼容时，
-daemon 才声明支持。启用扩展的启动必须使用该固定运行时，不回退到旧缓存版本。当前固定产物
-尚不支持此协议；启用界面前，需要发布包含同一源码提交所构建 Windows 模块的新产物。
+daemon 才声明支持。启用扩展的启动必须使用该固定运行时，不回退到旧缓存版本。
 
 ## 导入原生历史会话
 

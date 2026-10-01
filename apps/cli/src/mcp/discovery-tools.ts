@@ -1,10 +1,10 @@
-import type { McpServer } from '@modelcontextprotocol/server';
+import type { createSessionToolRegistrar } from './session-tool-router';
 import { z } from 'zod';
 import { ResourceListSchemas, type DiscoveryQuery } from '@/lib/discovery-query';
 import type { ResourceDiscovery, DiscoveryResource } from '@/lib/resource-discovery';
 
 export function registerDiscoveryTools(
-  server: McpServer,
+  registerTool: ReturnType<typeof createSessionToolRegistrar>,
   withDiscovery: <T>(read: (discovery: ResourceDiscovery) => Promise<T>) => Promise<T>
 ) {
   const descriptions: Record<DiscoveryResource, string> = {
@@ -36,7 +36,7 @@ export function registerDiscoveryTools(
     }
   };
   for (const resource of Object.keys(ResourceListSchemas) as DiscoveryResource[]) {
-    server.registerTool(
+    registerTool(
       `lody_${resource}_list`,
       {
         description: `${descriptions[resource]} Returns a bounded page (default 20, maximum 100); follow nextCursor with the same filters to enumerate all entries.`,
@@ -47,7 +47,7 @@ export function registerDiscoveryTools(
     );
   }
   for (const resource of ['agent_config', 'agent_role'] as const) {
-    server.registerTool(
+    registerTool(
       `lody_${resource}_get`,
       {
         description: `Read one ${resource} by stable id from its list tool.`,

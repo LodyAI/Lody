@@ -47,7 +47,7 @@ export const mentionSurface = stylex.create({
     color: colors.label,
     fontSize: text.subheadlineSize,
     lineHeight: text.subheadlineLeading,
-    fontWeight: 500,
+    fontWeight: 400,
     letterSpacing: text.controlTracking,
     outlineStyle: 'none',
     animationName: rise,

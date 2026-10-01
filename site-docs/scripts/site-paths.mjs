@@ -1,11 +1,13 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-export const SITE_URL = 'https://lody.ai';
+export { SITE_URL, absoluteSiteUrl } from '../lib/site-url.mjs';
 
 const STATIC_PATHS = [
   '/',
   '/home',
+  '/coding-agent-gui',
+  '/coding-agent-remote-control',
   '/zh',
   '/zh/home',
   '/docs',
@@ -119,12 +121,4 @@ export function collectSitePaths(packageRoot) {
   ];
 
   return Array.from(new Set(paths)).sort((a, b) => a.localeCompare(b));
-}
-
-export function absoluteSiteUrl(sitePath) {
-  const url = new URL(sitePath, SITE_URL);
-  if (url.pathname !== '/' && !url.pathname.endsWith('/') && !/\.[^/]+$/u.test(url.pathname)) {
-    url.pathname += '/';
-  }
-  return url.toString();
 }

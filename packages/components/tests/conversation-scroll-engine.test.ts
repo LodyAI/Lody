@@ -359,6 +359,58 @@ describe('reading', () => {
     sim.settle();
     expect(sim.controller.mode).toBe('follow');
   });
+
+  // Rows streamed in while the reader was above were never mounted, so the
+  // bottom a fast fling runs into is estimated and too short. The compositor
+  // stops the fling at that stale bottom while the engine has already grown
+  // the range behind it, so the scroll lands short of the new bottom.
+  const flingIntoStaleBottom = () => {
+    const sim = new ScrollSim(
+      turnRows(40, () => 100),
+      V
+    );
+    sim.render();
+    sim.settle();
+    sim.task(() => sim.controller.release('wheel-up'));
+    sim.nativeScroll(sim.maxTop() - 2000);
+    sim.settle();
+    const streamed = turnRows(
+      6,
+      () => 300,
+      () => 60,
+      'late'
+    ).map((row, i) => ({ ...row, turnIndex: 40 + i }));
+    sim.render([...sim.rows, ...streamed]);
+    sim.settle();
+    const wall = sim.maxTop();
+    // The fling's first steps mount and measure the streamed rows...
+    sim.nativeScroll(wall - 700);
+    sim.settle();
+    expect(sim.maxTop()).toBeGreaterThan(wall + 1000);
+    return { sim, wall };
+  };
+
+  it('follows again when a fast downward fling stops at the bottom it was scrolling toward', () => {
+    const { sim, wall } = flingIntoStaleBottom();
+    // ...and the fling dies against the range the compositor last saw.
+    sim.nativeScroll(wall);
+    sim.settle();
+    sim.task(() => sim.controller.onScrollEnd());
+    sim.settle();
+    expect(sim.controller.mode).toBe('follow');
+    expect(sim.readScrollTop()).toBe(sim.maxTop());
+    expectHealthy(sim);
+  });
+
+  it('keeps reading when a downward scroll comes to rest anywhere else', () => {
+    const { sim, wall } = flingIntoStaleBottom();
+    sim.nativeScroll(wall - 300);
+    sim.settle();
+    sim.task(() => sim.controller.onScrollEnd());
+    sim.settle();
+    expect(sim.controller.mode).toBe('read');
+    expect(sim.readScrollTop()).toBe(wall - 300);
+  });
 });
 
 describe('commands', () => {
@@ -498,6 +550,85 @@ describe('commands', () => {
   });
 });
 
+describe('hidden viewport', () => {
+  // An inactive tab stays mounted under `display: none` and keeps committing
+  // as its conversation streams. Reporting its offset 0 to the view once fed a
+  // synchronous render loop (React #185).
+  function observe(sim: ScrollSim) {
+    const seen = { scrolls: [] as number[], transactions: 0 };
+    sim.controller.setCallbacks({
+      onScroll: (offset) => seen.scrolls.push(offset),
+      onDiagnostic: () => {
+        seen.transactions += 1;
+      },
+    });
+    return seen;
+  }
+
+  it('reports nothing while hidden and shows again at the reading position, whatever changed above it', () => {
+    let rows = turnRows(
+      60,
+      () => 100,
+      () => 100
+    );
+    const sim = new ScrollSim(rows, V);
+    sim.render();
+    sim.settle();
+    sim.task(() => sim.controller.jumpToIndex(30));
+    sim.settle();
+    const seen = observe(sim);
+    const writes = sim.writes.length;
+
+    sim.setHidden(true);
+    rows = expand(rows, 't5', 14, 100);
+    sim.render(rows);
+    sim.settle();
+    rows = [...rows, ...turnRows(3, () => 200, undefined, 'n')];
+    sim.render(rows);
+    sim.settle();
+    expect(seen).toEqual({ scrolls: [], transactions: 0 });
+    expect(sim.writes.length).toBe(writes);
+    expect(sim.controller.mode).toBe('read');
+
+    sim.setHidden(false);
+    sim.settle();
+    expectHealthy(sim);
+    expect(sim.screenTop('t30')).toBe(0);
+    expect(seen.scrolls.at(-1)).toBe(sim.readScrollTop());
+  });
+
+  it('shows a following conversation at the real bottom of what streamed while it was hidden', () => {
+    let rows = turnRows(40, () => 120);
+    const sim = new ScrollSim(rows, V);
+    sim.render();
+    sim.settle();
+    const seen = observe(sim);
+
+    sim.setHidden(true);
+    for (let step = 0; step < 5; step++) {
+      rows = [
+        ...rows.map((row, i) =>
+          i === rows.length - 1 ? { ...row, height: row.height + 300 } : row
+        ),
+        ...turnRows(
+          1,
+          () => 90,
+          () => 60,
+          `n${step}-`
+        ),
+      ];
+      sim.render(rows);
+      sim.settle();
+    }
+    expect(seen.scrolls).toEqual([]);
+
+    sim.setHidden(false);
+    sim.settle();
+    expect(sim.controller.mode).toBe('follow');
+    expectHealthy(sim);
+  });
+});
+
 describe('momentum diagnostics', () => {
   it('counts compensations during a touch fling and which of them ended it', () => {
     let rows = turnRows(
@@ -590,6 +721,9 @@ describe('randomized sequences', () => {
             : undefined;
         const anchorHeight = rows.find((row) => row.key === anchorKey)?.height;
         const anchorBefore = anchorKey ? sim.screenTop(anchorKey) : null;
+        // A clamped reading position has not resolved its anchor yet; it
+        // moves toward it once reachable, so I5 applies only to resolved ones.
+        const resolvedBefore = sim.readScrollTop() > 1 && sim.readScrollTop() < sim.maxTop() - 1;
         let geometryOnly = false;
         switch (action) {
           case 0: // rows above/below grow or shrink
@@ -638,6 +772,11 @@ describe('randomized sequences', () => {
           case 7:
             sim.task(() => sim.controller.scrollToBottom());
             break;
+          case 8: // the reader scrolls down and the sequence comes to rest
+            sim.nativeScroll(sim.readScrollTop() + random() * sim.maxTop());
+            sim.settle();
+            sim.task(() => sim.controller.onScrollEnd());
+            break;
           default:
             break;
         }
@@ -651,6 +790,7 @@ describe('randomized sequences', () => {
           sim.controller.mode === 'read' &&
           anchorKey &&
           anchorBefore !== null &&
+          resolvedBefore &&
           rows.some((row) => row.key === anchorKey)
         ) {
           const after = sim.screenTop(anchorKey);

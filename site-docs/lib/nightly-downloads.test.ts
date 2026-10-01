@@ -4,17 +4,26 @@ import { parseNightlyRelease, resolveNightlyDownloadBase } from './nightly-downl
 
 const base = 'https://downloads.example.test/production/nightly';
 const version = '0.89.4-nightly.42';
-const files = ['arm64.dmg', 'x64.dmg', 'x64-setup.exe', 'x64.AppImage', 'x64.deb', 'x64.snap'].map(
-  (suffix) => `Lody-${version}-${suffix.replace(/\.([^.]+)$/u, '-nightly.$1')}`
-);
-const manifest = {
-  minimumStableVersion: '0.100.1',
-  schema: 1,
-  channel: 'nightly',
-  version,
-  files,
-  downloads: Object.fromEntries(files.map((file) => [file, file])),
-};
+function manifestForVersion(displayVersion: string) {
+  const files = [
+    'arm64.dmg',
+    'x64.dmg',
+    'x64-setup.exe',
+    'x64.AppImage',
+    'x64.deb',
+    'x64.snap',
+  ].map((suffix) => `Lody-${displayVersion}-${suffix.replace(/\.([^.]+)$/u, '-nightly.$1')}`);
+  return {
+    minimumStableVersion: '0.100.1',
+    schema: 1,
+    channel: 'nightly',
+    version: displayVersion,
+    files,
+    downloads: Object.fromEntries(files.map((file) => [file, file])),
+  };
+}
+const manifest = manifestForVersion(version);
+const files = manifest.files;
 
 void test('Nightly download links cover the full published matrix at immutable URLs', () => {
   const release = parseNightlyRelease(manifest, `${base}/`);
@@ -28,6 +37,21 @@ void test('Nightly download links cover the full published matrix at immutable U
     release.downloads.map((item) => item.platform),
     ['mac', 'mac', 'win', 'linux', 'linux', 'linux']
   );
+});
+
+void test('zero-based Nightly cycles produce all installer links without accepting malformed counters', () => {
+  for (const displayVersion of ['0.102.0-nightly.0', '0.102.0-nightly.1', '0.103.0-nightly.0']) {
+    const cycleManifest = manifestForVersion(displayVersion);
+    const release = parseNightlyRelease(cycleManifest, base);
+    assert.equal(release.version, displayVersion);
+    assert.deepEqual(
+      release.downloads.map((item) => item.href),
+      cycleManifest.files.map((file) => `${base}/${file}`)
+    );
+  }
+  for (const suffix of ['00', '01', '-1', '1.0', '100000000']) {
+    assert.throws(() => parseNightlyRelease(manifestForVersion(`0.102.0-nightly.${suffix}`), base));
+  }
 });
 
 void test('Nightly refuses missing, mixed, mutable or external installers', () => {
@@ -51,7 +75,7 @@ void test('Nightly refuses missing, mixed, mutable or external installers', () =
     { schema: 2 },
     { version: '0.89.4' },
     { version: '../../bad' },
-    { version: '0.89.4-nightly.0' },
+    { version: '0.89.4-nightly.00' },
     { minimumStableVersion: undefined },
     { minimumStableVersion: '0.100.1-nightly.1' },
   ]) {

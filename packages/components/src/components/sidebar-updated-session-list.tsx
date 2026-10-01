@@ -955,7 +955,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         />
       ) : null}
 
-      <div className="flex w-full min-w-0 items-start gap-1.5 text-sm">
+      <div
+        className={cn('flex w-full min-w-0 items-start text-sm', isMobile ? 'gap-1.5' : 'gap-2')}
+      >
         <div className="flex h-5 shrink-0 items-center">
           <SessionRowLeadingSlot
             showMenuButton={hasMenuActions}

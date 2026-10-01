@@ -61,9 +61,7 @@ Scan RPC accepts only an optional saved Pi Provider ID, never caller-supplied la
 arguments or environment. Local routes cannot fall back to cloud. The daemon
 advertises support only when the checksummed runtime manifest declares
 `piExtensionsProtocolVersion: 1` and the host can run it. Extension-enabled launches
-require that pinned runtime rather than an older cached fallback. The currently
-pinned artifact predates this protocol; enabling the UI requires publishing the
-new artifact with Windows binaries built from the same source revision.
+require that pinned runtime rather than an older cached fallback.
 
 ## Native history import
 

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,15 +19,8 @@ export type SessionForkEvent = {
   sourceTurnId?: string;
   turnId?: string;
   cwd?: string;
+  purpose?: 'title' | 'turn';
 };
-
-function isSameExistingPath(left: string, right: string): boolean {
-  try {
-    return realpathSync(left) === realpathSync(right);
-  } catch {
-    return false;
-  }
-}
 
 export function isProcessAlive(pid: number): boolean {
   try {
@@ -48,17 +41,23 @@ export class SessionForkFixture {
   readonly eventLogPath: string;
   readonly agentCommandLine: string;
 
-  private constructor(readonly tempRoot: string) {
+  private constructor(
+    readonly tempRoot: string,
+    eventLogPath: string
+  ) {
     this.projectRoot = join(tempRoot, this.projectName);
-    this.eventLogPath = join(tempRoot, 'scripted-acp-events.jsonl');
+    this.eventLogPath = eventLogPath;
     this.agentCommandLine = [process.execPath, ACP_ENTRY, this.eventLogPath]
       .map(quoteCommandArgument)
       .join(' ');
   }
 
-  static async create(): Promise<SessionForkFixture> {
+  static async create(eventLogPath: string): Promise<SessionForkFixture> {
     const tempBase = process.platform === 'win32' ? tmpdir() : '/tmp';
-    const fixture = new SessionForkFixture(mkdtempSync(join(tempBase, 'lody-e2e-work-')));
+    const fixture = new SessionForkFixture(
+      mkdtempSync(join(tempBase, 'lody-e2e-work-')),
+      eventLogPath
+    );
     try {
       mkdirSync(fixture.projectRoot, { recursive: true });
       writeFileSync(
@@ -108,7 +107,6 @@ export class SessionForkFixture {
 
   async waitForSourcePrompt(): Promise<SessionForkEvent> {
     let sourcePrompt: SessionForkEvent | undefined;
-    const projectRoot = realpathSync(this.projectRoot);
     await expect
       .poll(
         () => {
@@ -117,10 +115,7 @@ export class SessionForkFixture {
             events
               .filter(
                 (entry) =>
-                  entry.event === 'session-new' &&
-                  entry.sessionId &&
-                  entry.cwd &&
-                  isSameExistingPath(entry.cwd, projectRoot)
+                  entry.event === 'session-new' && entry.sessionId && entry.purpose === 'turn'
               )
               .map((entry) => entry.sessionId!)
           );

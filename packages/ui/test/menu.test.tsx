@@ -503,24 +503,6 @@ describe('Menu surface', () => {
     // the container rather than landing at the panel's own offset.
     expect((popup().parentElement as HTMLElement).style.position).toBe('absolute');
   });
-
-  test('the menu and the list a Select opens are one surface, sized differently', async () => {
-    mounted = await mount(
-      <Actions>
-        <Menu.Item>Rename</Menu.Item>
-      </Actions>
-    );
-    await click(trigger());
-    const onSurface = classesOf(popup());
-    const asList = classesFor(surface.popup);
-
-    // Everything a list brings — the rung, the shadow, the radius, the inset,
-    // the type — reaches a menu too, and exactly one of a list's declarations
-    // is replaced: the `--anchor-width` it takes from the control it belongs
-    // to, which a menu has no equivalent of.
-    expect(asList.filter((name) => !onSurface.includes(name))).toHaveLength(1);
-    expect(onSurface).toEqual(expect.arrayContaining(classesFor(surface.popupMenu)));
-  });
 });
 
 /** Written out so a test asserts the declaration rather than the primitive's own constant. */

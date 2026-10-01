@@ -1,5 +1,7 @@
 'use client';
 
+import { SiteAnchor } from '@site/components/site-anchor';
+
 import { useNavigate } from '@tanstack/react-router';
 import { useTheme } from 'fumadocs-ui/provider/base';
 import { type MouseEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -8,7 +10,7 @@ type SiteNavLocale = 'en' | 'zh';
 
 type SiteNavProps = {
   locale: SiteNavLocale;
-  languageHref: string;
+  languageHref?: string;
 };
 
 const DISCORD_HREF = 'https://discord.gg/E8mZtMu38s';
@@ -227,7 +229,7 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
     <>
       <header className="site-nav" data-open={open}>
         <div className="site-nav__inner">
-          <a className="site-nav__brand" href={t.homeHref} onClick={routeLink(t.homeHref)}>
+          <SiteAnchor className="site-nav__brand" href={t.homeHref} onClick={routeLink(t.homeHref)}>
             <img
               alt="Lody"
               decoding="async"
@@ -237,31 +239,33 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
               width={24}
             />
             <span>Lody</span>
-          </a>
+          </SiteAnchor>
           <div className="site-nav__right">
             <nav aria-label="Primary" className="site-nav__links">
               {navItems.map((item) => (
-                <a
+                <SiteAnchor
                   className="site-nav__link"
                   href={item.href}
                   key={item.href}
                   onClick={routeLink(item.href)}
                 >
                   {item.label}
-                </a>
+                </SiteAnchor>
               ))}
             </nav>
             <div className="site-nav__actions">
               <ThemeToggle />
-              <a
-                className="site-nav__link site-nav__desktop"
-                href={languageHref}
-                onClick={routeLink(languageHref)}
-              >
-                {t.language}
-              </a>
+              {languageHref && (
+                <SiteAnchor
+                  className="site-nav__link site-nav__desktop"
+                  href={languageHref}
+                  onClick={routeLink(languageHref)}
+                >
+                  {t.language}
+                </SiteAnchor>
+              )}
               <span aria-hidden="true" className="site-nav__divider site-nav__desktop" />
-              <a
+              <SiteAnchor
                 aria-label="Discord"
                 className="site-nav__link site-nav__social site-nav__desktop"
                 href={DISCORD_HREF}
@@ -269,7 +273,7 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
                 target="_blank"
               >
                 <DiscordIcon />
-              </a>
+              </SiteAnchor>
               <details
                 className="site-nav__mobile"
                 ref={menuRef}
@@ -282,25 +286,27 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
                 <div className="site-nav__menu" data-open={open} id={menuId}>
                   <nav aria-label="Primary mobile" className="site-nav__menu-links">
                     {navItems.map((item) => (
-                      <a
+                      <SiteAnchor
                         className="site-nav__menu-link"
                         href={item.href}
                         key={item.href}
                         onClick={routeLink(item.href, () => setOpen(false))}
                       >
                         {item.label}
-                      </a>
+                      </SiteAnchor>
                     ))}
                   </nav>
                   <div className="site-nav__menu-footer">
-                    <a
-                      className="site-nav__menu-secondary"
-                      href={languageHref}
-                      onClick={routeLink(languageHref, () => setOpen(false))}
-                    >
-                      {t.language}
-                    </a>
-                    <a
+                    {languageHref && (
+                      <SiteAnchor
+                        className="site-nav__menu-secondary"
+                        href={languageHref}
+                        onClick={routeLink(languageHref, () => setOpen(false))}
+                      >
+                        {t.language}
+                      </SiteAnchor>
+                    )}
+                    <SiteAnchor
                       aria-label="Discord"
                       className="site-nav__menu-secondary site-nav__menu-social"
                       href={DISCORD_HREF}
@@ -308,7 +314,7 @@ export function SiteNav({ locale, languageHref }: SiteNavProps) {
                       target="_blank"
                     >
                       <DiscordIcon />
-                    </a>
+                    </SiteAnchor>
                   </div>
                 </div>
               </details>

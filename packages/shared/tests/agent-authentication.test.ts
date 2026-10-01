@@ -110,6 +110,8 @@ describe('usesAcpProtocolAuthentication', () => {
     expect(usesAcpProtocolAuthentication('registry')).toBe(true);
     expect(usesAcpProtocolAuthentication('custom')).toBe(true);
     expect(usesAcpProtocolAuthentication('builtin')).toBe(false);
+    expect(usesAcpProtocolAuthentication('builtin', 'devin')).toBe(true);
+    expect(supportsBuiltinAuthentication({ cliType: 'builtin', agentType: 'devin' })).toBe(false);
     expect(usesAcpProtocolAuthentication(undefined)).toBe(false);
   });
 });

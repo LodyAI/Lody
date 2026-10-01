@@ -1,27 +1,28 @@
 ---
 title: 斜杠命令
-description: 在对话输入框中输入 `/`，即可浏览并插入当前 Agent 暴露的斜杠命令。
+description: 在对话输入框中输入 `/`，查找 Agent 命令和可用的 Prompt Shortcuts。
 ---
 
 # 斜杠命令
 
-在输入框开头输入 `/`，会弹出当前 Agent 暴露的命令列表，例如连接的 Agent 支持时可以看到
-`/review`、`/compact`、`/undo` 等。
+在输入框开头输入 `/`，会弹出当前 Agent 暴露的命令和工作区内可用的 Prompt Shortcuts。
+连接的 Agent 支持时，可以看到 `/review`、`/compact`、`/undo` 等 Agent 命令。
 
 <img src="/_docs-assets/slash.png" alt="" />
 
-斜杠命令由 **Agent 提供**，不是 Lody 内置。每个 Agent Config 在能力发现阶段会上报自己的命令列表，
+Agent 命令由 **Agent 提供**，不是 Lody 内置。每个 Agent Config 在能力发现阶段会上报自己的命令列表，
 所以具体可用项取决于 CLI 类型（Claude Code、Codex、Kimi、OpenCode 或任意 ACP Registry runtime）以及
-该机器上安装的版本。
+该机器上安装的版本。Prompt Shortcuts 由工作区定义，受各自的可见性与作用域规则限制。
 
 ## 打开菜单
 
 - 在新一轮对话的第一个字符输入 `/`。
-- 继续输入的文字会对命令列表做模糊匹配。
+- 继续输入后，两个来源的可用候选按相关度排列：先是完全匹配，再是开头匹配、
+  词首匹配、中间包含和更宽松的匹配。每行标明来源。只输入 `/` 时仍按来源分组。
 - 按 `↑` / `↓` 移动高亮项，按 `Home` / `End` 跳到首项或末项。
 - 按 `Enter` 插入当前高亮的命令，按 `Tab` 或 `Escape` 则关闭菜单而不插入。
 
-如果没有命中结果，菜单会自动收起，输入的内容会被当成普通文本保留。
+没有命中结果时，菜单会显示提示；输入内容仍作为普通文本保留。
 
 ## 命令的含义
 

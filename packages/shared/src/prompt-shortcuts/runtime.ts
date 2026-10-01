@@ -3,6 +3,7 @@ import {
   type ShortcutAccessDomain,
   type ShortcutResource,
 } from './access';
+import { InFlightDedupe } from '../in-flight-dedupe';
 import { PromptShortcutCatalog, type PromptShortcutIndexEntry } from './catalog';
 import {
   LocalShortcutStore,
@@ -48,6 +49,9 @@ export class PromptShortcutRuntime {
     { domain: ShortcutAccessDomain; catalog: PromptShortcutCatalog; close(): Promise<void> }
   >();
   private openingIndexes = new Map<string, Promise<void>>();
+  private readonly bodyReads = new InFlightDedupe<string, PromptShortcut>();
+  private readonly warmBodies = new Set<string>();
+  private prefetchTail: Promise<void> = Promise.resolve();
 
   constructor(
     readonly store: LocalShortcutStore,
@@ -123,6 +127,10 @@ export class PromptShortcutRuntime {
       errors: { ...this.errors },
       loading: false,
     };
+    const currentBodies = new Set(this.snapshot.entries.map((entry) => this.bodyKey(entry)));
+    for (const key of this.warmBodies) {
+      if (!currentBodies.has(key)) this.warmBodies.delete(key);
+    }
     for (const listener of this.listeners) listener();
   }
 
@@ -283,64 +291,104 @@ export class PromptShortcutRuntime {
     );
   }
 
+  private bodyKey(entry: PromptShortcutIndexEntry): string {
+    return JSON.stringify(entry);
+  }
+
   read(entry: PromptShortcutIndexEntry): Promise<PromptShortcut> {
     this.assertActive();
-    return this.track(
-      (async () => {
-        if (!this.remote && entry.ownerUserId !== this.userId)
-          throw new PromptShortcutError('forbidden', 'Wrong local identity');
-        const own = this.store.get(entry.id);
-        if (
-          own?.deleted ||
-          (!own?.operation &&
-            this.directory.some((row) => row.shortcutId === entry.id && row.deleted))
-        )
-          throw new PromptShortcutError('not_found', 'Shortcut was deleted');
-        const isWorkingCopy =
-          entry.ownerUserId === this.userId &&
-          own &&
-          !own.deleted &&
-          JSON.stringify(own.entry) === JSON.stringify(entry);
-        if (!isWorkingCopy && this.remote) {
-          if (!this.authorized(entry))
-            throw new PromptShortcutError('forbidden', 'Shortcut is no longer accessible');
-          try {
-            const cached = await this.store.read(entry);
+    const key = this.bodyKey(entry);
+    return this.bodyReads.run(key, () =>
+      this.track(
+        (async () => {
+          if (!this.remote && entry.ownerUserId !== this.userId)
+            throw new PromptShortcutError('forbidden', 'Wrong local identity');
+          const own = this.store.get(entry.id);
+          if (
+            own?.deleted ||
+            (!own?.operation &&
+              this.directory.some((row) => row.shortcutId === entry.id && row.deleted))
+          )
+            throw new PromptShortcutError('not_found', 'Shortcut was deleted');
+          const isWorkingCopy =
+            entry.ownerUserId === this.userId &&
+            own &&
+            !own.deleted &&
+            JSON.stringify(own.entry) === JSON.stringify(entry);
+          if (!isWorkingCopy && this.remote) {
+            if (!this.authorized(entry))
+              throw new PromptShortcutError('forbidden', 'Shortcut is no longer accessible');
+            try {
+              const cached = await this.store.read(entry);
+              this.assertActive();
+              if (!this.authorized(entry))
+                throw new PromptShortcutError('forbidden', 'Shortcut access changed');
+              return cached;
+            } catch (error) {
+              if (
+                !(error instanceof PromptShortcutError) ||
+                !['not_found', 'revision_pending'].includes(error.code)
+              )
+                throw error;
+            }
+            // Only a cache miss needs cloud authorization and transport.
+            const sync = await this.remote.acquire(
+              { kind: 'body', bodyDocId: entry.bodyDocId },
+              false
+            );
+            try {
+              await sync.sync();
+            } finally {
+              await sync.release();
+            }
             this.assertActive();
             if (!this.authorized(entry))
               throw new PromptShortcutError('forbidden', 'Shortcut access changed');
-            return cached;
-          } catch (error) {
-            if (
-              !(error instanceof PromptShortcutError) ||
-              !['not_found', 'revision_pending'].includes(error.code)
-            )
-              throw error;
           }
-          // Only a cache miss needs cloud authorization and transport.
-          const sync = await this.remote.acquire(
-            { kind: 'body', bodyDocId: entry.bodyDocId },
-            false
-          );
-          try {
-            await sync.sync();
-          } finally {
-            await sync.release();
-          }
+          const content = await this.store.read(entry);
           this.assertActive();
-          if (!this.authorized(entry))
+          if (
+            this.store.get(entry.id)?.deleted ||
+            (!isWorkingCopy && this.remote && !this.authorized(entry))
+          )
             throw new PromptShortcutError('forbidden', 'Shortcut access changed');
-        }
-        const content = await this.store.read(entry);
-        this.assertActive();
-        if (
-          this.store.get(entry.id)?.deleted ||
-          (!isWorkingCopy && this.remote && !this.authorized(entry))
-        )
-          throw new PromptShortcutError('forbidden', 'Shortcut access changed');
-        return content;
-      })()
+          return content;
+        })().then((content) => {
+          if (this.snapshot.entries.some((candidate) => this.bodyKey(candidate) === key)) {
+            this.warmBodies.add(key);
+          }
+          return content;
+        })
+      )
     );
+  }
+
+  /** Best-effort, serial warming for current catalog entries. Foreground reads
+   * join the same in-flight body request instead of opening another room. */
+  prefetch(
+    entries: readonly PromptShortcutIndexEntry[],
+    options: { signal?: AbortSignal } = {}
+  ): Promise<void> {
+    this.assertActive();
+    const cancelled = () => this.disposed || (options.signal ? options.signal.aborted : false);
+    const run = this.prefetchTail.then(async () => {
+      for (const requested of entries) {
+        if (cancelled()) return;
+        const key = this.bodyKey(requested);
+        if (this.warmBodies.has(key)) continue;
+        const current = this.snapshot.entries.find((entry) => this.bodyKey(entry) === key);
+        if (!current) continue;
+        try {
+          await this.read(current);
+        } catch {
+          // Warming must not surface background connectivity or authorization
+          // failures. A later catalog publication or online edge schedules retry.
+          if (cancelled()) return;
+        }
+      }
+    });
+    this.prefetchTail = run.catch(() => undefined);
+    return run;
   }
 
   async save(input: {

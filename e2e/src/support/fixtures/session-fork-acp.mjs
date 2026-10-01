@@ -27,7 +27,11 @@ const agent = acp
   .onRequest(acp.methods.agent.session.new, async ({ params }) => {
     const sessionId = `session-fork-${randomUUID()}`;
     sessions.add(sessionId);
-    record('session-new', { sessionId, cwd: params.cwd });
+    record('session-new', {
+      sessionId,
+      cwd: params.cwd,
+      purpose: process.env.LODY_TITLE_AGENT === '1' ? 'title' : 'turn',
+    });
     return { sessionId };
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {

@@ -1,14 +1,19 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import * as acp from '@agentclientprotocol/sdk';
-import { ACP_AUTHORIZATION_URL_MAX_LENGTH } from '@lody/shared';
+import { ACP_AUTHORIZATION_URL_MAX_LENGTH, type AgentConfigMeta } from '@lody/shared';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
+import { CodexProfileStore, getCodexProfileStore } from './codex-profile-store';
 import type { resolveBuiltinAuthenticationProcessLaunch } from './setting';
 
 const createSilentLogger = (): Logger => ({
@@ -50,6 +55,68 @@ describe('AcpAuthenticationManager', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('logs a new managed ChatGPT profile into its isolated home without forcing keyring', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'lody-codex-login-'));
+    try {
+      const profile = await new CodexProfileStore(root).resolve(
+        'workspace-fixture',
+        {
+          id: randomUUID() as AgentConfigMeta['id'],
+          machineId: 'machine-fixture',
+          name: 'ChatGPT',
+          cliType: 'builtin',
+          agentType: 'codex',
+          env: {},
+          codexAuth: { mode: 'chatgpt', profileId: randomUUID() },
+        } as AgentConfigMeta,
+        true
+      );
+      if (!profile) throw new Error('Missing ChatGPT profile');
+      vi.spyOn(getCodexProfileStore(), 'isReady').mockResolvedValue(false);
+      vi.spyOn(getCodexProfileStore(), 'markChatgptReady').mockResolvedValue(undefined);
+      const child = createFakeChild();
+      let observedEnv: NodeJS.ProcessEnv | undefined;
+      const spawnProcess = vi.fn(
+        (_command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
+          observedEnv = options.env;
+          queueMicrotask(() => {
+            child.exitCode = 0;
+            child.emit('exit', 0, null);
+          });
+          return child;
+        }
+      );
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        spawnProcess: spawnProcess as never,
+        resolveLoginShellEnv: async () => ({}),
+        resolveAuthenticationProcessLaunch: (async () => ({
+          command: '/test/codex',
+          args: ['login', '--device-auth'],
+          env: {},
+        })) as never,
+      });
+
+      await expect(
+        manager.authenticate({
+          requestId: 'managed-chatgpt',
+          cliType: 'builtin',
+          agentType: 'codex',
+          codexProfile: profile,
+        })
+      ).resolves.toEqual({ success: true, disposition: 'authenticated' });
+      expect(spawnProcess).toHaveBeenCalledWith(
+        '/test/codex',
+        ['-c', 'forced_login_method="chatgpt"', 'login', '--device-auth'],
+        expect.objectContaining({ env: expect.objectContaining({ CODEX_HOME: profile.home }) })
+      );
+      expect(JSON.parse(observedEnv?.CODEX_CONFIG ?? '{}')).not.toHaveProperty(
+        'cli_auth_credentials_store'
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('reserves the login slot before asynchronous launch preparation', async () => {
@@ -200,7 +267,7 @@ describe('AcpAuthenticationManager', () => {
     expect(receivedInput).toEqual(['browser-code\n']);
   });
 
-  it('explains the ChatGPT device-code setting when Codex login exits unsuccessfully', async () => {
+  it('directs unsuccessful Codex login to its diagnostics without guessing the cause', async () => {
     const failedChild = createFakeChild();
     const manager = new AcpAuthenticationManager(createSilentLogger(), {
       spawnProcess: vi.fn(() => {
@@ -224,7 +291,7 @@ describe('AcpAuthenticationManager', () => {
       success: false,
       disposition: 'error',
       error:
-        'Codex authentication exited with code 1. Make sure device-code login is enabled in your ChatGPT security settings or workspace permissions, then try again.',
+        'Codex authentication exited with code 1. Check the Codex login log on the execution machine for the cause, then try again.',
     });
   });
 
@@ -420,102 +487,106 @@ describe('AcpAuthenticationManager', () => {
     });
   });
 
-  it('bridges request-scoped ACP form elicitation for a custom provider', async () => {
-    const child = createFakeChild();
-    const stdin = new PassThrough();
-    const stdout = new PassThrough();
-    child.stdin = stdin;
-    child.stdout = stdout;
-    child.stderr = new PassThrough();
-    const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
-    const agent = acp
-      .agent({ name: 'test-auth-agent' })
-      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
-        protocolVersion: params.protocolVersion,
-        authMethods: [{ id: 'oauth', name: 'OAuth' }],
-      }))
-      .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
-        const reply = await client.request(acp.methods.client.elicitation.create, {
-          mode: 'form',
-          requestId,
-          message: 'Complete provider sign-in',
-          requestedSchema: {
-            type: 'object',
-            properties: {
-              token: {
-                type: 'string',
-                title: 'Token',
-                default: 'must-not-cross-machine-rpc',
-                _meta: { secret: true },
+  it.each(['custom', 'devin'] as const)(
+    'bridges request-scoped ACP form elicitation for %s',
+    async (provider) => {
+      const child = createFakeChild();
+      const stdin = new PassThrough();
+      const stdout = new PassThrough();
+      child.stdin = stdin;
+      child.stdout = stdout;
+      child.stderr = new PassThrough();
+      const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
+      const agent = acp
+        .agent({ name: 'test-auth-agent' })
+        .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
+          protocolVersion: params.protocolVersion,
+          authMethods: [{ id: 'oauth', name: 'OAuth' }],
+        }))
+        .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
+          const reply = await client.request(acp.methods.client.elicitation.create, {
+            mode: 'form',
+            requestId,
+            message: 'Complete provider sign-in',
+            requestedSchema: {
+              type: 'object',
+              properties: {
+                token: {
+                  type: 'string',
+                  title: 'Token',
+                  default: 'must-not-cross-machine-rpc',
+                  _meta: { secret: true },
+                },
+                account: {
+                  type: 'string',
+                  title: 'Account',
+                  enum: ['work', 'personal'],
+                  default: 'work',
+                },
               },
-              account: {
-                type: 'string',
-                title: 'Account',
-                enum: ['work', 'personal'],
-                default: 'work',
-              },
+              required: ['token', 'account'],
             },
-            required: ['token', 'account'],
-          },
+          });
+          elicitationReply.resolve(reply);
+          return {};
         });
-        elicitationReply.resolve(reply);
-        return {};
+      agent.connect(
+        acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
+      );
+
+      const formReceived = createDeferred<{ interactionId: string }>();
+      const manager = new AcpAuthenticationManager(createSilentLogger(), {
+        spawnProcess: vi.fn(() => child) as never,
+        resolveLoginShellEnv: async () => ({}),
       });
-    agent.connect(
-      acp.ndJsonStream(createStdinWritableStream(stdout), createStdoutReadableStream(stdin))
-    );
+      const authentication = manager.authenticate({
+        requestId: 'auth-custom',
+        cliType: provider === 'devin' ? 'builtin' : 'custom',
+        agentType: provider === 'devin' ? 'devin' : 'custom-test',
+        runtimeOverrides: provider === 'devin' ? { devinPath: '/test/devin' } : undefined,
+        customAcp: { command: '/test/custom-acp', args: [] },
+        onProgress: (event) => {
+          if (event.status === 'input-required') {
+            expect(event.form.fields).toEqual([
+              { id: 'token', type: 'secret', label: 'Token', required: true },
+              {
+                id: 'account',
+                type: 'select',
+                label: 'Account',
+                required: true,
+                options: [
+                  { value: 'work', label: 'work' },
+                  { value: 'personal', label: 'personal' },
+                ],
+                defaultValue: 'work',
+              },
+            ]);
+            formReceived.resolve({ interactionId: event.interactionId });
+          }
+        },
+      });
 
-    const formReceived = createDeferred<{ interactionId: string }>();
-    const manager = new AcpAuthenticationManager(createSilentLogger(), {
-      spawnProcess: vi.fn(() => child) as never,
-      resolveLoginShellEnv: async () => ({}),
-    });
-    const authentication = manager.authenticate({
-      requestId: 'auth-custom',
-      cliType: 'custom',
-      agentType: 'custom-test',
-      customAcp: { command: '/test/custom-acp', args: [] },
-      onProgress: (event) => {
-        if (event.status === 'input-required') {
-          expect(event.form.fields).toEqual([
-            { id: 'token', type: 'secret', label: 'Token', required: true },
-            {
-              id: 'account',
-              type: 'select',
-              label: 'Account',
-              required: true,
-              options: [
-                { value: 'work', label: 'work' },
-                { value: 'personal', label: 'personal' },
-              ],
-              defaultValue: 'work',
-            },
-          ]);
-          formReceived.resolve({ interactionId: event.interactionId });
-        }
-      },
-    });
-
-    const { interactionId } = await formReceived.promise;
-    expect(
-      manager.submitAuthenticationInput(
-        'auth-custom',
-        interactionId,
-        JSON.stringify({
-          action: 'accept',
-          content: { token: 'secret-value', account: 'work' },
-        })
-      )
-    ).toEqual({ success: true, disposition: 'input-accepted' });
-    await expect(elicitationReply.promise).resolves.toEqual({
-      action: 'accept',
-      content: { token: 'secret-value', account: 'work' },
-    });
-    await expect(authentication).resolves.toEqual({
-      success: true,
-      disposition: 'authenticated',
-    });
-  });
+      const { interactionId } = await formReceived.promise;
+      expect(
+        manager.submitAuthenticationInput(
+          'auth-custom',
+          interactionId,
+          JSON.stringify({
+            action: 'accept',
+            content: { token: 'secret-value', account: 'work' },
+          })
+        )
+      ).toEqual({ success: true, disposition: 'input-accepted' });
+      await expect(elicitationReply.promise).resolves.toEqual({
+        action: 'accept',
+        content: { token: 'secret-value', account: 'work' },
+      });
+      await expect(authentication).resolves.toEqual({
+        success: true,
+        disposition: 'authenticated',
+      });
+    }
+  );
 
   it('selects between advertised agent-driven authentication methods', async () => {
     const child = createFakeChild();
@@ -954,19 +1025,22 @@ describe('probeBuiltinAuthentication', () => {
     }
   });
 
-  it('does not spawn a status process for Pi', async () => {
-    const spawnProcess = vi.fn();
-    await expect(
-      probeBuiltinAuthentication({
-        cliType: 'builtin',
-        agentType: 'pi',
-        logger: createSilentLogger(),
-        spawnProcess: spawnProcess as never,
-        resolveLoginShellEnv: async () => ({}),
-      })
-    ).resolves.toEqual({ status: 'unknown' });
-    expect(spawnProcess).not.toHaveBeenCalled();
-  });
+  it.each(['pi', 'devin', 'kimi', 'grok'] as const)(
+    'does not spawn a status process for %s',
+    async (agentType) => {
+      const spawnProcess = vi.fn();
+      await expect(
+        probeBuiltinAuthentication({
+          cliType: 'builtin',
+          agentType,
+          logger: createSilentLogger(),
+          spawnProcess: spawnProcess as never,
+          resolveLoginShellEnv: async () => ({}),
+        })
+      ).resolves.toEqual({ status: 'unknown' });
+      expect(spawnProcess).not.toHaveBeenCalled();
+    }
+  );
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
