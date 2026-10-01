@@ -5,7 +5,7 @@ Translation: current
 
 [中文](2026-10-01-archive-worktree-retention-contract.zh.md)
 
-PR: [#1195](https://github.com/LodyAI/Lody/pull/1195) (draft).
+PR: [#1195](https://github.com/LodyAI/Lody/pull/1195).
 
 ## Abstract
 
@@ -18,8 +18,10 @@ public contract mismatch and does not establish an incident involving real user 
 
 ## Evidence and decision
 
-The final inspected main was `93545f01b69cb0c98ddd3f19d46540decd95a007`; the archive implementation
+The implementation baseline was `93545f01b69cb0c98ddd3f19d46540decd95a007`; the archive implementation
 and conflicting copy were unchanged from the initial `7d502f3d99fdcdbbdd43d032c6d903d4ed497e04`.
+The shorter notice also checked main `c687e45ae6a59e27b5cc7431889c08b3231e9446`,
+which still had the old notice without retention limits.
 Searches of existing PRs
 found the lifecycle implementation in [#620](https://github.com/LodyAI/Lody/pull/620) and
 the Preferences reorganization in [#987](https://github.com/LodyAI/Lody/pull/987), but no effective
@@ -35,6 +37,8 @@ Preferences switches and does not fix retention documentation.
   explicitly requires the same retention disclosure for manual and automatic archive.
 - Desktop and mobile auto-archive settings explain the boundary before users enable a rule.
   The rule is device-local; the archived state can reclaim a worktree on its owning machine.
+  The notice leads with retained chats and branches, possible directory cleanup, and files
+  that may be lost; technical backup details stay in Worktrees rather than crowding the hint.
 - The configured cleanup script runs before `archiveWorktree` stages and commits. Consequently,
   its deleted or modified files are outside the backup guarantee. Backup failure retains the
   directory for retry, whereas script failure does not prevent cleanup.
@@ -54,6 +58,10 @@ tracked modifications and deletions, untracked backup, ignored-file omission, br
 a deleted-owner sweep, restore, backup failure, and a cleanup script that mutates files then fails.
 The [auto-archive suite](../../../../packages/components/tests/auto-archive-pr.test.ts) exercises
 the rendered English and Chinese notice and independent rule toggles alongside PR transitions.
+Playwright also checks the real section against the main baseline in a local, signed-out fixture:
+the same 1280×720 viewport, Chinese locale, and disabled rules, with no external requests.
+It verifies independent toggles and local persistence; inspected before/after screenshots are
+uploaded to the requesting Lody conversation, not treated as evidence of file cleanup.
 
 The final GC suite passed 12 tests; the existing create/remove suites passed 41 tests, and
 auto-archive/settings navigation passed 19 tests. `pnpm format`, site content generation,

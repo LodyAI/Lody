@@ -158,13 +158,24 @@ describe('AutoArchiveSection', () => {
     {
       language: 'en',
       notice: [
-        'local branches are kept',
-        'ignored files',
+        'chats and local branches',
+        'ignored by Git',
         'cleanup scripts',
         'outside the worktree',
+        'only here, for your sessions',
       ],
     },
-    { language: 'zh_CN', notice: ['本地分支会保留', '被 Git 忽略', 'cleanup 脚本', '工作树之外'] },
+    {
+      language: 'zh_CN',
+      notice: [
+        '对话和分支还在',
+        '所属机器',
+        '被 Git 忽略',
+        '清理脚本改动、删除',
+        '工作树之外',
+        '仅在本机',
+      ],
+    },
   ])(
     'shows retention limits in $language while keeping the rules independent',
     async ({ language, notice }) => {
