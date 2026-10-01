@@ -1,3 +1,4 @@
+import { parseIosSimulatorPerformance } from '../src/lib/ios-simulator/ios-simulator-performance';
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -314,5 +315,29 @@ describe('diagnostics', () => {
     expect(text).toContain('device: iPhone 9 Pro');
     expect(text).not.toContain('secret-tunnel');
     expect(text).not.toContain('capability');
+  });
+});
+
+describe('simulator performance report boundary', () => {
+  it('only copies finite numeric fields and booleans, never upstream strings or credentials', () => {
+    expect(
+      parseIosSimulatorPerformance({
+        connected: true,
+        remote: true,
+        receivedMbps: 3.5,
+        url: 'https://private.example',
+        text: 'private input',
+        pixels: [1, 2],
+      })
+    ).toEqual({
+      connected: true,
+      remote: true,
+      receivedMbps: 3.5,
+    });
+    for (const value of [-1, Infinity, NaN, 'secret', {}, 1e13]) {
+      expect(
+        parseIosSimulatorPerformance({ connected: true, remote: true, rttMs: value })
+      ).toBeNull();
+    }
   });
 });

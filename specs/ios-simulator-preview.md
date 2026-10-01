@@ -84,3 +84,13 @@ Remote viewer credentials are encrypted to an ephemeral requester key bound into
 Selecting a device loads its real DeviceKit artwork before starting preview. The separately negotiated, authenticated `exterior {udid}` command reads Baguette chrome layout/composite without booting, reserving the device, streaming or opening a tunnel. One bounded immutable PNG and normalized geometry may cross RPC; live screen pixels and input never do. Resources are not published or persisted in Repo metadata. While artwork is loading or unavailable, show content without an artificial hardware frame.
 
 Remote authorization depends on the connected Cloud backend understanding the exact signed simulator operation. Validate outgoing intents locally; a 400 for a valid simulator request indicates a backend protocol rejection, with a matching-backend update hint and no insecure fallback.
+
+## Remote responsiveness and diagnostics
+
+Size remote video for its visible viewport with bounded pixel density and frame rate.
+Bound unconfirmed video and prefer the latest unsent screen over stale queued frames;
+retain final pointer positions and releases when merging high-frequency moves.
+Same-machine preview preserves native resolution. No new cloud service participates
+in the media path. Connection status exposes numeric performance diagnostics, with
+an explicit copy action and bounded in-memory history; never collect input or pixels
+in these diagnostics. Disconnected samples remain distinguishable from live measurements.

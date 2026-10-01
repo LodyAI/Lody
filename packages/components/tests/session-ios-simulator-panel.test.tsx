@@ -608,6 +608,83 @@ async function connectControlViewer() {
 }
 
 describe('SessionIosSimulatorPanel controls', () => {
+  it('copies only numeric performance from its exact viewer and clears samples after navigation', async () => {
+    const machine = createFakeMachine({
+      devices: [device({ udid: 'phone', state: 'Booted' })],
+      preview: READY,
+    });
+    await renderPanel({ machine, meta: CONTROLS_META });
+    const viewer = await connectControlViewer();
+    const stats = {
+      connected: true,
+      remote: true,
+      paintedFps: 29,
+      receivedMbps: 4,
+      rttMs: 120,
+      elapsedMs: 2000,
+      token: 'private-token',
+      text: 'private input',
+    };
+    const send = async (
+      source: MessageEventSource | null,
+      origin = VIEWER_ORIGIN,
+      operationId = READY.operationId
+    ) => {
+      await act(async () =>
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            source,
+            origin,
+            data: { type: 'lody:ios-simulator:performance', operationId, stats },
+          })
+        )
+      );
+    };
+    await send(window);
+    await send(viewer.frame.contentWindow, 'https://wrong.example');
+    await send(viewer.frame.contentWindow, VIEWER_ORIGIN, 'wrong-operation');
+    await pointerClick(container!.querySelector('[data-testid="ios-simulator-status-trigger"]')!);
+    await pointerClick(
+      await until(
+        () =>
+          Array.from(document.querySelectorAll('button')).find(
+            (candidate) => candidate.textContent?.trim() === 'Copy diagnostics'
+          ) as HTMLButtonElement | undefined,
+        'copy diagnostics'
+      )
+    );
+    expect(vi.mocked(writeTextToClipboard).mock.calls.at(-1)?.[0]).not.toContain(
+      'media-performance'
+    );
+    await send(viewer.frame.contentWindow);
+    await pointerClick(
+      await until(
+        () =>
+          Array.from(document.querySelectorAll('button')).find(
+            (candidate) => candidate.textContent?.trim() === 'Copy diagnostics'
+          ) as HTMLButtonElement | undefined,
+        'copy diagnostics'
+      )
+    );
+    const report = vi.mocked(writeTextToClipboard).mock.calls.at(-1)?.[0] ?? '';
+    expect(report).toContain('"rttMs": 120');
+    expect(report).not.toContain('private-token');
+    expect(report).not.toContain('private input');
+    await act(async () => viewer.frame.dispatchEvent(new Event('load')));
+    await pointerClick(
+      await until(
+        () =>
+          Array.from(document.querySelectorAll('button')).find(
+            (candidate) => candidate.textContent?.trim() === 'Copy diagnostics'
+          ) as HTMLButtonElement | undefined,
+        'copy diagnostics'
+      )
+    );
+    expect(vi.mocked(writeTextToClipboard).mock.calls.at(-1)?.[0]).not.toContain(
+      'media-performance'
+    );
+  });
+
   it('sends native controls through the exact ready operation', async () => {
     const machine = createFakeMachine({
       devices: [

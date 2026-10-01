@@ -1,18 +1,23 @@
+import { simulatorViewerMediaScript } from './viewer-media';
 /** Fixed Lody artifact, never project HTML. One JPEG decode and one pending frame at most. */
-export function simulatorViewerHtml(operationId: string, initialRotation = 0): string {
+export function simulatorViewerHtml(
+  operationId: string,
+  initialRotation = 0,
+  remote = false
+): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body,canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111}body{display:flex;align-items:center;justify-content:center}canvas{max-width:100%;max-height:100%;object-fit:contain;touch-action:none;display:block}</style></head><body><canvas draggable="false"></canvas><script>
 'use strict';
 const operationId=${JSON.stringify(operationId)};
 let rotation=${JSON.stringify(initialRotation)};
+const remote=${JSON.stringify(remote)};
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');
 let parentOrigin,visible=false,ws,pending,decoding=false,generation=0,point,pointer,wheelEnd,heartbeat,firstFrame,lastReport,painted=false,commandAbort,capturing=false;
 function layout(){if(!painted)return;const swap=rotation%180!==0;const scale=Math.min((swap?innerHeight:innerWidth)/canvas.width,(swap?innerWidth:innerHeight)/canvas.height);Object.assign(canvas.style,{width:canvas.width*scale+'px',height:canvas.height*scale+'px',maxWidth:'none',maxHeight:'none',flexShrink:'0',transform:'rotate('+rotation+'deg)'})}
 function report(state){const swap=rotation%180!==0,width=swap?canvas.height:canvas.width,height=swap?canvas.width:canvas.height;const key=state+':'+width+':'+height+':'+rotation;if(parentOrigin&&key!==lastReport){lastReport=key;parent.postMessage({type:'lody:ios-simulator:state',operationId,state,width,height,rotation},parentOrigin)}}
-function send(value){if(ws?.readyState===1)ws.send(JSON.stringify(value))}
-function lift(){clearTimeout(wheelEnd);if(point){send({...point,type:'touch1-up'});point=undefined;pointer=undefined}}
-function close(){lift();generation++;painted=false;commandAbort?.abort();clearInterval(heartbeat);clearTimeout(firstFrame);pending=undefined;if(ws){const old=ws;ws=undefined;old.close()}report('disconnected')}
-async function draw(){if(decoding)return;decoding=true;try{while(pending){const frame=pending;pending=undefined;const g=generation;try{const image=await createImageBitmap(new Blob([frame],{type:'image/jpeg'}));try{if(g!==generation||!visible)continue;canvas.width=image.width;canvas.height=image.height;ctx.drawImage(image,0,0);painted=true;layout();clearTimeout(firstFrame);report('ready')}finally{image.close()}}catch{report('error')}}}finally{decoding=false}}
-function connect(){if(!visible||document.hidden||ws)return;report('connecting');const url=new URL('stream',location.href);url.protocol=location.protocol==='https:'?'wss:':'ws:';const token=new URL(location.href).searchParams.get('__lody_preview_token');if(token)url.searchParams.set('__lody_preview_token',token);const socket=new WebSocket(url);ws=socket;socket.binaryType='arraybuffer';socket.onopen=()=>{send({type:'heartbeat'});heartbeat=setInterval(()=>{if(visible&&!document.hidden)send({type:'heartbeat'})},15000)};firstFrame=setTimeout(()=>{if(ws===socket){close();report('error')}},20000);socket.onmessage=e=>{if(ws!==socket)return;if(e.data instanceof ArrayBuffer){pending=e.data;void draw()}};socket.onclose=()=>{if(ws===socket){close();report('disconnected')}};socket.onerror=()=>{if(ws===socket){close();report('error')}}}
+function send(value){if(ws?.readyState===1){if(ws.bufferedAmount>65536){const old=ws;ws=undefined;old.close();close();report('error');return}ws.send(JSON.stringify(value))}}
+function lift(){clearTimeout(wheelEnd);flushMove();if(point){const up={...point,type:'touch1-up'};point=undefined;pointer=undefined;send(up)}}
+function close(){lift();generation++;painted=false;commandAbort?.abort();clearInterval(heartbeat);clearTimeout(firstFrame);pending=undefined;if(ws){const old=ws;ws=undefined;old.close()}closeMedia();report('disconnected')}
+${simulatorViewerMediaScript}
 let exteriorRequested=false;
 async function sendExterior(){
   if(exteriorRequested||!parentOrigin)return;exteriorRequested=true;
@@ -62,9 +67,9 @@ addEventListener('message',async e=>{
   finally{clearTimeout(timeout);if(commandAbort===abort)commandAbort=undefined}
 });
 addEventListener('visibilitychange',()=>{if(document.hidden)close();else connect()});addEventListener('pagehide',close);addEventListener('blur',lift);
-addEventListener('resize',layout);
+
 function position(e){const r=canvas.getBoundingClientRect(),u=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),v=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));const p=rotation===90?{x:v,y:1-u}:rotation===180?{x:1-u,y:1-v}:rotation===270?{x:1-v,y:u}:{x:u,y:v};return{x:p.x*canvas.width,y:p.y*canvas.height,width:canvas.width,height:canvas.height}}
-canvas.onpointerdown=e=>{if(commandAbort||e.button!==0||pointer!==undefined||!canvas.width||ws?.readyState!==1)return;lift();pointer=e.pointerId;point=position(e);if(point.y>=point.height*.93)point.edge='bottom';canvas.setPointerCapture(pointer);send({...point,type:'touch1-down'});e.preventDefault()};canvas.onpointermove=e=>{if(pointer!==e.pointerId)return;point={...point,...position(e)};send({...point,type:'touch1-move'})};canvas.onpointerup=e=>{if(pointer===e.pointerId){point={...point,...position(e)};lift()}};canvas.onpointercancel=e=>{if(pointer===e.pointerId)lift()};canvas.onlostpointercapture=e=>{if(pointer===e.pointerId)lift()};
+canvas.onpointerdown=e=>{if(commandAbort||e.button!==0||pointer!==undefined||!canvas.width||ws?.readyState!==1)return;lift();pointer=e.pointerId;point=position(e);if(point.y>=point.height*.93)point.edge='bottom';canvas.setPointerCapture(pointer);send({...point,type:'touch1-down'});e.preventDefault()};canvas.onpointermove=e=>{if(pointer!==e.pointerId)return;point={...point,...position(e)};queueMove()};canvas.onpointerup=e=>{if(pointer===e.pointerId){point={...point,...position(e)};lift()}};canvas.onpointercancel=e=>{if(pointer===e.pointerId)lift()};canvas.onlostpointercapture=e=>{if(pointer===e.pointerId)lift()};
 // Wheel deltas describe content scrolling; a finger moves in the opposite direction.
 // Reuse the single-touch protocol, and lift before restarting at a screen boundary.
 canvas.addEventListener('wheel',e=>{
@@ -81,7 +86,7 @@ canvas.addEventListener('wheel',e=>{
   if(point&&(point.x+dx<minX||point.x+dx>maxX||point.y+dy<minY||point.y+dy>maxY))lift();
   if(!point){point=position(e);point.x=Math.max(canvas.width*.3,Math.min(canvas.width*.7,point.x));point.y=Math.max(canvas.height*.3,Math.min(canvas.height*.7,point.y));send({...point,type:'touch1-down'})}
   point={...point,x:Math.max(minX,Math.min(maxX,point.x+dx)),y:Math.max(minY,Math.min(maxY,point.y+dy))};
-  send({...point,type:'touch1-move'});clearTimeout(wheelEnd);wheelEnd=setTimeout(lift,120);
+  queueMove();clearTimeout(wheelEnd);wheelEnd=setTimeout(lift,120);
 },{passive:false});
 </script></body></html>`;
 }

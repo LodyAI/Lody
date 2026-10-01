@@ -23,7 +23,8 @@ const logger = {
 };
 async function setup(
   handler?: http.RequestListener,
-  hostControl: (control: SimulatorHostControl) => Promise<void> = async () => {}
+  hostControl: (control: SimulatorHostControl) => Promise<void> = async () => {},
+  remote = false
 ) {
   const server = http.createServer((req, res) => {
     if (req.url?.endsWith('/orientation?value=portrait')) {
@@ -50,6 +51,7 @@ async function setup(
     active: () => active,
     renew: () => renewals++,
     hostControl,
+    remote,
   });
   cleanups.push(gateway.close);
   const proxy = new LocalPreviewProxyManager({ logger });
@@ -78,6 +80,28 @@ async function setup(
   };
 }
 describe('simulator media boundary', () => {
+  it('derives native scale from the bounded viewport and denies forged receiver credit', async () => {
+    const f = await setup(undefined, undefined, true);
+    const incoming = once(f.upstream, 'connection');
+    const client = new WebSocket(f.stream);
+    cleanups.push(async () => {
+      client.terminate();
+    });
+    await once(client, 'open');
+    const [native] = (await incoming) as [WebSocket];
+    const configured = once(native, 'message');
+    const painted = once(client, 'message');
+    client.send(JSON.stringify({ type: 'stream-config', width: 300, height: 650, dpr: 1 }));
+    native.send(Buffer.from([255, 216, 255, 192, 0, 11, 8, 9, 252, 4, 155, 1, 1, 17, 0]));
+    expect(JSON.parse(String((await configured)[0]))).toEqual({ type: 'set_scale', scale: 4 });
+    const packet = (await painted)[0] as Buffer;
+    expect(packet.readUInt32BE(4)).toBe(1);
+    const closed = once(client, 'close');
+    client.send(JSON.stringify({ type: 'frame-ack', sequence: 2 }));
+    await closed;
+    expect(f.renewals()).toBe(0);
+  });
+
   it('serves only bounded DeviceKit resources behind the existing private preview capability', async () => {
     const requests: string[] = [];
     const png = Buffer.alloc(24);
@@ -236,11 +260,16 @@ describe('simulator media boundary', () => {
       client.terminate();
     });
     await once(client, 'open');
+    client.send(JSON.stringify({ type: 'stream-config', width: 400, height: 800, dpr: 1 }));
     const [native, request] = (await incoming) as [WebSocket, http.IncomingMessage];
     expect(request.url).toContain('/simulators/5519CB11-71C9-46D9-AEFF-73C96F1104E0/stream?');
     const painted = once(client, 'message');
     native.send(Buffer.from([1, 2, 3]));
-    expect((await painted)[0]).toEqual(Buffer.from([1, 2, 3]));
+    const packet = (await painted)[0] as Buffer;
+    expect(packet.readUInt32BE(0)).toBe(0x4c4f4459);
+    expect(packet.readUInt32BE(4)).toBe(1);
+    expect(packet.subarray(8)).toEqual(Buffer.from([1, 2, 3]));
+    client.send(JSON.stringify({ type: 'frame-ack', sequence: 1 }));
     expect(f.renewals()).toBe(0);
     const input = once(native, 'message');
     client.send(JSON.stringify({ type: 'touch1-down', x: 10, y: 20, width: 100, height: 200 }));
@@ -264,6 +293,7 @@ describe('simulator media boundary', () => {
       client.terminate();
     });
     await once(client, 'open');
+    client.send(JSON.stringify({ type: 'stream-config', width: 400, height: 800, dpr: 1 }));
     const [native] = (await incoming) as [WebSocket];
     for (const input of [
       { type: 'touch1-down', x: 50, y: 196, width: 100, height: 200, edge: 'bottom' },
@@ -294,6 +324,7 @@ describe('simulator media boundary', () => {
       client.terminate();
     });
     await once(client, 'open');
+    client.send(JSON.stringify({ type: 'stream-config', width: 400, height: 800, dpr: 1 }));
     const [native] = (await incoming) as [WebSocket];
     if (scenario === 'change-edge') {
       const down = once(native, 'message');
@@ -328,6 +359,7 @@ describe('simulator media boundary', () => {
       client.terminate();
     });
     await once(client, 'open');
+    client.send(JSON.stringify({ type: 'stream-config', width: 400, height: 800, dpr: 1 }));
     const [native] = (await incoming) as [WebSocket];
     const closed = once(client, 'close');
     f.revoke();

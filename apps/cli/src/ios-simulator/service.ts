@@ -296,6 +296,8 @@ export class IosSimulatorService {
         udid: device.udid,
         port: process.port,
         softwareKeyboard: /iphone|ipad/i.test(device.deviceType ?? ''),
+        remote: op.state.transport === 'remote',
+        logger: this.deps.logger,
         signal,
         hostControl: (control) => nativeProcess.control(device.udid, control),
         active,

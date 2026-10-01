@@ -1,3 +1,7 @@
+import {
+  parseIosSimulatorPerformance,
+  type IosSimulatorPerformanceReport,
+} from '@/lib/ios-simulator/ios-simulator-performance';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   IosSimulatorExteriorSchema,
@@ -49,6 +53,7 @@ export type IosSimulatorViewerHandle = {
   capture: () => Promise<IosSimulatorCaptureResult>;
   control: (control: IosSimulatorDeviceControl) => Promise<IosSimulatorControlResult>;
   toggleFullscreen: () => void;
+  performance: () => IosSimulatorPerformanceReport | null;
 };
 
 export type IosSimulatorViewerProps = {
@@ -138,6 +143,10 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
     const effectiveVisible = visible && documentVisible;
     const visibleRef = useRef(effectiveVisible);
     visibleRef.current = effectiveVisible;
+    const performanceRef = useRef<{
+      report: IosSimulatorPerformanceReport;
+      receivedAt: number;
+    } | null>(null);
     const onStateChangeRef = useRef(onStateChange);
     onStateChangeRef.current = onStateChange;
     const onRotationChangeRef = useRef(onRotationChange);
@@ -146,6 +155,7 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
     onFullscreenChangeRef.current = onFullscreenChange;
 
     useEffect(() => {
+      performanceRef.current = null;
       const receive = (event: MessageEvent) => {
         const frameWindow = frameRef.current?.contentWindow;
         if (!frameWindow || event.source !== frameWindow || event.origin !== viewerOrigin) return;
@@ -167,6 +177,27 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
           const imageUrl = URL.createObjectURL(new Blob([png], { type: 'image/png' }));
           exteriorUrl.current = imageUrl;
           setExterior({ geometry: parsed.data, imageUrl });
+          return;
+        }
+        if (
+          event.data?.type === 'lody:ios-simulator:performance' &&
+          event.data.operationId === operationId
+        ) {
+          const stats = parseIosSimulatorPerformance(event.data.stats);
+          if (stats)
+            performanceRef.current = {
+              receivedAt: Date.now(),
+              report: {
+                latest: stats,
+                samples: [
+                  ...(performanceRef.current?.report.samples ?? [])
+                    .filter((sample) => (stats.elapsedMs ?? 0) - (sample.elapsedMs ?? 0) <= 120000)
+                    .slice(-59),
+                  stats,
+                ],
+                ageMs: 0,
+              },
+            };
           return;
         }
         const state = parseIosSimulatorViewerState(event.data, operationId);
@@ -320,6 +351,16 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       () => ({
         capture,
         control,
+        performance: () => {
+          const value = performanceRef.current;
+          if (!value) return null;
+          const ageMs = Math.max(0, Date.now() - value.receivedAt);
+          const samples = value.report.samples.filter(
+            (sample) =>
+              (value.report.latest.elapsedMs ?? 0) + ageMs - (sample.elapsedMs ?? 0) <= 120000
+          );
+          return { ...value.report, samples, ageMs };
+        },
         toggleFullscreen: () => {
           const stage = stageRef.current;
           if (!stage) return;
@@ -331,6 +372,7 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
     );
 
     const handleLoad = () => {
+      performanceRef.current = null;
       for (const cancel of [...pendingReplies.current]) cancel();
       sentVisibleRef.current = visibleRef.current;
       frameRef.current?.contentWindow?.postMessage(

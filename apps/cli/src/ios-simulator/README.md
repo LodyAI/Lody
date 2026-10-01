@@ -100,3 +100,42 @@ Run the simulator tests plus the existing local-proxy and Quick Tunnel regressio
 fixture; lifecycle and gateway tests cover cancellation, cross-workspace exclusion,
 stale stops, idle expiry, denied media access, input filtering and touch release.
 The frontend controller/facade tests cover routing and the exact-origin handshake.
+
+## Media performance diagnostics
+
+Remote streams use viewport/DPR-based integer downsampling (1–4, DPR capped at 2)
+with a 30 FPS sending ceiling; same-machine streams retain native resolution and a
+60 FPS ceiling. The native MJPEG encoder still runs on changed surfaces, so this is
+not an encoder FPS fix. No new runtime artifact or mirror is required.
+
+The gateway sends sequenced JPEG packets through the existing private proxy. A bounded
+receiver-confirmation window (2–8 frames, 512 KiB remotely / 2 MiB locally, allowing one
+oversized frame alone) and a single replaceable pending frame prevent unlimited stale
+video from entering the tunnel. Only a drawn frame acknowledges its sequence and any
+superseded predecessors. A 10-second receiver stall closes the stream for Restore;
+credits and timing probes never count as control activity. Generic proxy behavior is unchanged.
+
+Open the connection-status popover for resolution, painted FPS, Mbps, RTT, ACK delay
+and the in-flight queue. **Copy diagnostics** includes up to two minutes of numeric
+samples. Record 10 seconds idle, 20 seconds of continuous scrolling, then 10 seconds
+idle, and copy the report while the panel remains open. Compare local and remote runs
+of the same screen. Static screens correctly report zero FPS.
+
+- `sourceFps/sourceMbps`: encoded JPEGs reaching the gateway, not capture/encoder timing.
+- `sentFps/sentMbps`: packets the gateway sends; `receivedFps/paintedFps` distinguish
+  receipt from drawing. Rates are per sampling interval, not lifetime averages.
+- `rttMs`: a gateway/browser ping round trip over the media connection (zero before
+  the first reply); includes transport queues, not a separate network-only probe.
+- `ackMs`: gateway send to browser draw and returning confirmation, **not one-way latency**.
+- `oldestFrameMs/inFlightBytes/inFlightFrames`: outstanding receiver work;
+  `droppedFrames/viewerDroppedFrames`: cumulative intentional freshness drops.
+- `decodeMs/decodeP95Ms`: JPEG decode plus canvas draw, excluding RAF wait and network;
+  `gatewaySampleAgeMs` and report `ageMs` identify stale observations.
+- `scale`: requested native integer downsampling; `width/height`: actually decoded pixels.
+  A static screen changes dimensions on its next changed frame.
+
+In browser DevTools, select the simulator iframe and run `lodySimulator.stats()` or
+`lodySimulator.history()`. `lodySimulator.setLogging(true)` opts into console samples;
+`false` disables it. The daemon writes `[iOS Simulator media]` numeric summaries every
+30 seconds. No per-frame logs, automatic upload, URLs, input text or pixels. Existing
+cloudflared connection logs identify QUIC/HTTP2; the viewer does not guess that protocol.

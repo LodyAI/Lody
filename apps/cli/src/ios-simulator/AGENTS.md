@@ -30,6 +30,13 @@
   CLI arguments without boot, lease or server. Its bounded static artwork (256 KiB PNG)
   may cross authenticated RPC; never include screen pixels, paths or capabilities.
   Serialize reads, bound the in-memory cache, and recheck authorization before replying.
+- `frame-flow.ts` owns sequenced JPEGs, cumulative receiver credit and the latest-only
+  pending frame. Keep both frame/byte windows bounded; a local socket's bufferedAmount
+  is not receiver backpressure. ACK/config/probe traffic never renews the lease.
+  `viewer-media.ts` owns RAF decoding, bounded numeric diagnostics and move coalescing;
+  preserve touch-up/final coordinates and cancel scheduled work on disconnect.
+  Remote scale derives only from bounded viewport/DPR and native SOF dimensions;
+  never forward arbitrary Baguette reconfiguration. Native MJPEG FPS remains unfixed.
 - `viewer.ts` is the fixed iframe artifact, without React or annotation injection.
   Parent commands bind source, origin and operation id. Decode at most one JPEG
   with one replaceable pending frame; release touches on blur/cancel/disconnect.

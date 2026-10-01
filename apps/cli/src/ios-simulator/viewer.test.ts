@@ -22,7 +22,13 @@ type Wheel = {
 
 // Execute the exact inline artifact with deterministic browser boundaries. The output
 // is the actual WebSocket protocol, not a second implementation of its input logic.
-function viewer(options: { rotation?: number; fetch?: typeof fetch } = {}) {
+function viewer(
+  options: {
+    rotation?: number;
+    fetch?: typeof fetch;
+    decode?: () => Promise<{ width: number; height: number; close(): void }>;
+  } = {}
+) {
   vi.useFakeTimers();
   const sent: Input[] = [];
   const events = new Map<string, Array<(event: unknown) => unknown>>();
@@ -31,12 +37,19 @@ function viewer(options: { rotation?: number; fetch?: typeof fetch } = {}) {
   const messages: Record<string, unknown>[] = [];
   const captures: Array<{ width: number; height: number }> = [];
   let framePainted: (() => void) | undefined;
+  let sequence = 0;
+  let paints = 0;
   const wheelEvents = new Map<string, (event: Wheel) => void>();
   const canvas = {
     width: 1200,
     height: 2000,
     style: {},
-    getContext: () => ({ drawImage() {} }),
+    getContext: () => ({
+      drawImage() {
+        paints++;
+        framePainted?.();
+      },
+    }),
     getBoundingClientRect: () => ({ left: 100, top: 50, width: 600, height: 1000 }),
     setPointerCapture: (_id: number) => {},
     addEventListener: (name: string, handler: (event: Wheel) => void) =>
@@ -66,14 +79,15 @@ function viewer(options: { rotation?: number; fetch?: typeof fetch } = {}) {
   const parent = {
     postMessage: (message: Record<string, unknown>) => {
       messages.push(message);
-      if (message.state === 'ready') framePainted?.();
     },
   };
   const sockets: Socket[] = [];
   class Socket {
     readyState = 1;
+    bufferedAmount = 0;
+    onopen = () => {};
     onclose = () => {};
-    onmessage = (_event: { data: ArrayBuffer }) => {};
+    onmessage = (_event: { data: ArrayBuffer | string }) => {};
     constructor() {
       sockets.push(this);
     }
@@ -97,6 +111,11 @@ function viewer(options: { rotation?: number; fetch?: typeof fetch } = {}) {
     URL,
     Blob,
     ArrayBuffer,
+    DataView,
+    performance: { now: () => Date.now() },
+    devicePixelRatio: 2,
+    requestAnimationFrame: (callback: () => void) => setTimeout(callback, 16),
+    cancelAnimationFrame: clearTimeout,
     AbortController,
     AbortSignal,
     TextDecoder,
@@ -110,7 +129,7 @@ function viewer(options: { rotation?: number; fetch?: typeof fetch } = {}) {
             options.fetch ??
             (async () => new Response(JSON.stringify({ success: true, rotation: 90 })))
           )(url, init),
-    createImageBitmap: async () => ({ width: 1200, height: 2000, close() {} }),
+    createImageBitmap: options.decode ?? (async () => ({ width: 1200, height: 2000, close() {} })),
     WebSocket: Socket,
     setTimeout,
     clearTimeout,
@@ -127,6 +146,7 @@ function viewer(options: { rotation?: number; fetch?: typeof fetch } = {}) {
     });
   }
   visibility(true, 'lody:ios-simulator:init');
+  sockets.at(-1)?.onopen();
   const pointer = (overrides: Partial<Pointer> = {}): Pointer => ({
     pointerId: 1,
     button: 0,
@@ -136,14 +156,34 @@ function viewer(options: { rotation?: number; fetch?: typeof fetch } = {}) {
     ...overrides,
   });
   return {
-    sent,
+    get sent() {
+      return sent.filter((input) => input.type.startsWith('touch'));
+    },
+    wire: sent,
+    sockets,
+    receiveFrame(id: number) {
+      const data = new ArrayBuffer(9),
+        header = new DataView(data);
+      header.setUint32(0, 0x4c4f4459);
+      header.setUint32(4, id);
+      sockets.at(-1)?.onmessage({ data });
+    },
+    get paints() {
+      return paints;
+    },
     messages,
     captures,
-    paint() {
-      return new Promise<void>((resolve) => {
+    async paint() {
+      const ready = new Promise<void>((resolve) => {
         framePainted = resolve;
-        sockets.at(-1)?.onmessage({ data: new ArrayBuffer(1) });
       });
+      const data = new ArrayBuffer(9),
+        header = new DataView(data);
+      header.setUint32(0, 0x4c4f4459);
+      header.setUint32(4, ++sequence);
+      sockets.at(-1)?.onmessage({ data });
+      await vi.advanceTimersByTimeAsync(16);
+      await ready;
     },
     command(
       data: Record<string, unknown>,
@@ -187,6 +227,115 @@ afterEach(() => {
 });
 
 describe('simulator viewer input', () => {
+  it('keeps one decode and the latest pending frame, and discards an old generation on hide', async () => {
+    const decoders: Array<(image: { width: number; height: number; close(): void }) => void> = [];
+    let released = 0;
+    const v = viewer({ decode: () => new Promise((resolve) => decoders.push(resolve)) });
+    const image = () => ({
+      width: 1200,
+      height: 2000,
+      close: () => {
+        released++;
+      },
+    });
+    v.receiveFrame(1);
+    await vi.advanceTimersByTimeAsync(16);
+    v.receiveFrame(2);
+    v.receiveFrame(3);
+    v.receiveFrame(4);
+    expect(v.paints).toBe(0);
+    decoders.shift()?.(image());
+    await vi.advanceTimersByTimeAsync(16);
+    expect(v.paints).toBe(1);
+    decoders.shift()?.(image());
+    await vi.advanceTimersByTimeAsync(16);
+    expect(v.wire.filter((input) => input.type === 'frame-ack')).toEqual([
+      { type: 'frame-ack', sequence: 1 },
+      { type: 'frame-ack', sequence: 4 },
+    ]);
+    v.receiveFrame(5);
+    await vi.advanceTimersByTimeAsync(16);
+    v.visibility(false);
+    v.visibility(true);
+    decoders.shift()?.(image());
+    await vi.advanceTimersByTimeAsync(16);
+    expect(v.paints).toBe(2);
+    expect(released).toBe(3);
+    expect(v.wire.filter((input) => input.type === 'frame-ack')).toHaveLength(2);
+  });
+
+  it('coalesces pointer moves per animation frame and flushes the final release without replay', () => {
+    const v = viewer();
+    v.canvas.onpointerdown(v.pointer());
+    for (let n = 0; n < 100; n++) v.canvas.onpointermove(v.pointer({ clientY: 600 + n }));
+    expect(v.sent.map((input) => input.type)).toEqual(['touch1-down']);
+    vi.advanceTimersByTime(16);
+    expect(v.sent).toHaveLength(2);
+    expect(v.sent.at(-1)?.y).toBe(1298);
+    v.canvas.onpointermove(v.pointer({ clientY: 720 }));
+    v.canvas.onpointerup(v.pointer({ clientY: 730 }));
+    expect(v.sent.slice(-2)).toMatchObject([
+      { type: 'touch1-move', y: 1340 },
+      { type: 'touch1-up', y: 1360 },
+    ]);
+    const count = v.sent.length;
+    vi.advanceTimersByTime(32);
+    expect(v.sent).toHaveLength(count);
+  });
+
+  it('ACKs drawn sequences, preserves same-sized canvas contents and exports numeric diagnostics', async () => {
+    const v = viewer();
+    let resets = 0,
+      width = v.canvas.width,
+      height = v.canvas.height;
+    Object.defineProperty(v.canvas, 'width', {
+      get: () => width,
+      set: (value) => {
+        width = value;
+        resets++;
+      },
+    });
+    Object.defineProperty(v.canvas, 'height', {
+      get: () => height,
+      set: (value) => {
+        height = value;
+        resets++;
+      },
+    });
+    await v.paint();
+    await v.paint();
+    expect(v.paints).toBe(2);
+    expect(resets).toBe(0);
+    expect(v.wire.filter((input) => input.type === 'frame-ack')).toEqual([
+      { type: 'frame-ack', sequence: 1 },
+      { type: 'frame-ack', sequence: 2 },
+    ]);
+    v.sockets.at(-1)?.onmessage({
+      data: JSON.stringify({
+        type: 'stream-stats',
+        rttMs: 100,
+        sentFps: 30,
+        token: 'secret',
+        ackMs: 'https://secret.example',
+      }),
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    const sample = v.messages.find((m) => m.type === 'lody:ios-simulator:performance');
+    expect(sample?.stats).toMatchObject({
+      rttMs: 100,
+      sentFps: 30,
+      width: 1200,
+      height: 2000,
+      connected: true,
+    });
+    expect(sample?.stats).not.toHaveProperty('token');
+    expect(sample?.stats).not.toHaveProperty('ackMs');
+    v.visibility(false);
+    expect(
+      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
+    ).toMatchObject({ connected: false });
+  });
+
   it('only accepts private controls from the bound parent and remaps touches after rotation', async () => {
     const requests: Array<{ url: string; body: unknown }> = [];
     const v = viewer({
@@ -333,12 +482,15 @@ describe('simulator viewer input', () => {
     v.wheel({ deltaY: Number.NaN });
     expect(v.sent).toEqual([]);
     v.wheel({ deltaMode: 1, deltaY: -2 });
+    vi.advanceTimersByTime(16);
     expect(v.sent.at(-1)?.y).toBe(1064);
     vi.advanceTimersByTime(120);
     v.wheel({ deltaMode: 2, deltaY: 1 });
+    vi.advanceTimersByTime(16);
     expect(v.sent.at(-1)?.y).toBe(500);
     vi.advanceTimersByTime(120);
     v.wheel({ deltaMode: 2, deltaX: 0.1, deltaY: 0 });
+    vi.advanceTimersByTime(16);
     expect(v.sent.at(-1)?.x).toBe(480);
   });
 
@@ -387,6 +539,7 @@ describe('simulator viewer input', () => {
       expect(v.sent).toEqual(before);
       if (reason !== 'disconnect') expect(v.sent.at(-1)?.type).toBe('touch1-up');
       v.wheel();
+      vi.advanceTimersByTime(16);
       expect(v.sent.slice(-2).map(({ type }) => type)).toEqual(['touch1-down', 'touch1-move']);
     }
   );

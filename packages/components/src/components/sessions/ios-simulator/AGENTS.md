@@ -44,3 +44,8 @@ Decision and rationale:
   in More. Unsupported hardware buttons stay disabled.
 - Screenshots are bounded PNG bytes from the viewer; attaching targets the original
   Session composer and never sends a message. No public preview/share action.
+
+- Performance messages use the same frame/origin/operation checks. Keep only a numeric
+  allowlist and booleans, at most 60 samples/two minutes in memory. No URLs, control
+  contents, pixels, Repo state or telemetry. The viewer keeps samples in refs; only an
+  open connection popover polls the snapshot. Copy includes sample age and bounded history.

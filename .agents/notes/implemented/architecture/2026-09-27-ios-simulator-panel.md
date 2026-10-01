@@ -258,3 +258,26 @@ Proposed order: instrument frame sizes/rates, decode/paint time, gateway-to-view
 Next, negotiate Baguette's existing AVCC/H.264 with browser WebCodecs and retain MJPEG fallback. The pinned encoder already uses low-latency settings and a five-second GOP, so arbitrary JPEG-style frame dropping is invalid: retain codec configuration, recover with IDR, and bound decoder queues. No new npm dependency is intrinsically required. WebRTC/direct routing is a later topology change with signaling/STUN/TURN costs, not the first fix. QUIC transport underneath a tunnel does not turn WebSocket video into unreliable datagrams.
 
 Validation scope: source trace against the exact pinned Baguette revision; official Cloudflare and browser API documentation. No measurement of the reported client's RTT, throughput, frame age or loss was performed, and no performance improvement is claimed. Example bandwidth/queue-drain calculations in discussion are illustrative, not observations.
+
+### First four latency optimizations implemented (2026-10-01)
+
+The preceding proposal's first four changes are now implemented. The private gateway/viewer
+pair uses sequenced JPEGs, cumulative drawn-frame ACKs, a bounded 2–8 frame/byte window and
+one replaceable pending frame. It paces sends at 30 FPS remotely (60 locally); it does not
+claim to fix native MJPEG encoding cadence. Remote scale follows bounded viewport/DPR via
+Baguette's existing set_scale; local resolution remains native. Canvas resize/layout only
+runs when needed, RAF schedules decoding, and coalesced pointer/wheel moves retain release
+and final coordinates. No generic proxy, authorization, cloud deployment or runtime pin changes.
+
+Numeric samples cover gateway ingress/send, browser receive/draw, decode time, RTT, draw ACK
+and outstanding work. Only the bound iframe can supply validated numeric diagnostics to the
+panel. At most 60 samples/two minutes are held in memory; the status popover reads them only
+while open, and explicit Copy includes the bounded history and age. DevTools and opt-in console
+logging complement a 30-second daemon summary. Metrics are never automatic cloud telemetry.
+
+Real isolated iPhone 16 validation with the pinned runtime confirmed a 300×650 viewport changed
+JPEGs from 1180×2556 to 294×640 after the next screen update; the browser decoded and acknowledged
+them, and the queue drained. This is local functional validation of the remote profile, not a
+WAN speed claim. Deterministic tests cover stalled/forged ACKs, latest-only replacement, pacing,
+release ordering, numeric-only reports and exact viewer identity. H.264 and native pre-encode
+scheduling remain deferred. See the CLI README for the reproducible field-test procedure.

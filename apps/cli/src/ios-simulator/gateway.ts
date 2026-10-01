@@ -11,6 +11,8 @@ import {
 } from '@lody/shared';
 import { createSimulatorDeviceControls } from './device-controls';
 import type { SimulatorHostControl } from './host-controls';
+import { SimulatorFrameFlow, jpegDimensions, simulatorScale } from './frame-flow';
+import type { Logger } from '@/utils/logger';
 
 const Input = z
   .object({
@@ -24,12 +26,30 @@ const Input = z
   .strict()
   .refine((v) => v.x <= v.width && v.y <= v.height);
 const Heartbeat = z.object({ type: z.literal('heartbeat') }).strict();
+const MediaMessage = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('stream-config'),
+      width: z.number().int().min(1).max(8192),
+      height: z.number().int().min(1).max(8192),
+      dpr: z.number().finite().min(0.5).max(2),
+    })
+    .strict(),
+  z
+    .object({ type: z.literal('frame-ack'), sequence: z.number().int().min(1).max(0xffffffff) })
+    .strict(),
+  z
+    .object({ type: z.literal('pong'), id: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER) })
+    .strict(),
+]);
 /** Only a fixed viewer and one UDID stream. Never exposes the Baguette HTTP API. */
 export async function createSimulatorGateway(options: {
   operationId: string;
   udid: string;
   port: number;
   softwareKeyboard?: boolean;
+  remote?: boolean;
+  logger?: Pick<Logger, 'debug'>;
   signal?: AbortSignal;
   hostControl(control: SimulatorHostControl): Promise<void>;
   active(): boolean;
@@ -184,7 +204,7 @@ export async function createSimulatorGateway(options: {
       'Content-Security-Policy':
         "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src blob:",
     });
-    res.end(simulatorViewerHtml(options.operationId, controls.rotation()));
+    res.end(simulatorViewerHtml(options.operationId, controls.rotation(), options.remote ?? false));
   });
   server.on('connection', (socket) => {
     sockets.add(socket);
@@ -207,8 +227,67 @@ export async function createSimulatorGateway(options: {
       upstreams.add(upstream);
       let touch: z.infer<typeof Input> | undefined;
       let shuttingDown: Promise<void> | undefined;
+      const now = () => performance.now();
+      const flow = new SimulatorFrameFlow(options.remote ?? false, now());
+      let viewport: { width: number; height: number; dpr: number } | undefined;
+      let nativeSize: { width: number; height: number } | undefined;
+      let scale = 1,
+        pingId = 0,
+        samples = 0;
+      let ping: { id: number; at: number } | undefined;
+      let lastScaleAt = -Infinity;
+      const configure = () => {
+        if (
+          !viewport ||
+          !nativeSize ||
+          upstream.readyState !== WebSocket.OPEN ||
+          now() - lastScaleAt < 1000
+        )
+          return;
+        const next = simulatorScale(nativeSize, viewport, options.remote ?? false);
+        if (next !== scale) {
+          scale = next;
+          lastScaleAt = now();
+          upstream.send(JSON.stringify({ type: 'set_scale', scale }));
+        }
+      };
+      const pump = () => {
+        if (shuttingDown) return;
+        if (!options.active()) {
+          close();
+          return;
+        }
+        if (flow.oldestAge(now()) > 10000) {
+          close();
+          return;
+        }
+        configure();
+        if (!viewport || client.readyState !== WebSocket.OPEN || client.bufferedAmount > 256 * 1024)
+          return;
+        const packet = flow.take(now());
+        if (packet) client.send(packet, { binary: true });
+      };
+      // A timer flushes the last pending frame even when the simulator becomes static.
+      const frameTimer = setInterval(pump, Math.ceil(1000 / flow.targetFps));
+      const statsTimer = setInterval(() => {
+        if (shuttingDown || !options.active()) {
+          close();
+          return;
+        }
+        const stats = { ...flow.snapshot(now()), scale, remote: options.remote ?? false };
+        if (++samples % 15 === 0)
+          options.logger?.debug('[iOS Simulator media] ' + JSON.stringify(stats));
+        if (client.readyState !== WebSocket.OPEN || client.bufferedAmount > 64 * 1024) return;
+        client.send(JSON.stringify({ type: 'stream-stats', ...stats }));
+        if (!ping) {
+          ping = { id: ++pingId, at: now() };
+          client.send(JSON.stringify({ type: 'ping', id: ping.id }));
+        }
+      }, 2000);
       const shutdown = (): Promise<void> => {
         if (shuttingDown) return shuttingDown;
+        clearInterval(frameTimer);
+        clearInterval(statsTimer);
         shuttingDown = new Promise<void>((resolve) => {
           const finish = () => {
             clearTimeout(timer);
@@ -258,6 +337,26 @@ export async function createSimulatorGateway(options: {
           options.renew();
           return;
         }
+        const media = MediaMessage.safeParse(raw);
+        if (media.success) {
+          const message = media.data;
+          if (message.type === 'stream-config') {
+            viewport = message;
+            configure();
+            pump();
+          } else if (message.type === 'frame-ack') {
+            if (!flow.acknowledge(message.sequence, now())) {
+              close();
+              return;
+            }
+            pump();
+          } else if (ping?.id === message.id) {
+            flow.recordRtt(now() - ping.at);
+            ping = undefined;
+          }
+          // Configuration, ACKs and probes do not renew the control lease.
+          return;
+        }
         const parsed = Input.safeParse(raw);
         if (!parsed.success || upstream.readyState !== WebSocket.OPEN) {
           close();
@@ -287,13 +386,17 @@ export async function createSimulatorGateway(options: {
           close();
           return;
         }
-        // JPEGs are independent frames; dropping while congested cannot corrupt a GOP.
-        if (
-          binary &&
-          client.readyState === WebSocket.OPEN &&
-          client.bufferedAmount < 2 * 1024 * 1024
-        )
-          client.send(data, { binary: true });
+        if (binary) {
+          const frame = Buffer.isBuffer(data)
+            ? data
+            : data instanceof ArrayBuffer
+              ? Buffer.from(data)
+              : Buffer.concat(data);
+          nativeSize ??= jpegDimensions(frame);
+          configure();
+          flow.offer(frame);
+          pump();
+        }
       });
     });
   });
