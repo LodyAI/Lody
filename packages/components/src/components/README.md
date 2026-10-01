@@ -66,10 +66,11 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
   through `lib/commands/palette-state.ts`; see the [Spec](../../../../specs/sidebar-search.md).
 - Chat landing: `chat/chat-landing.tsx`.
 - Desktop Settings: [`settings/desktop-settings-modal.tsx`](settings/desktop-settings-modal.tsx)
-  switches from sidebar navigation to a single-row, horizontally scrolling tab strip
-  when its panel is at most 720px wide. Arrows expose overflow and the selected tab
-  stays visible. The page and its editors stay mounted through resizing; header actions
-  wrap within the pane. [Decision and verification](../../../../.agents/notes/implemented/bug-fix/2026-10-01-narrow-settings-panel.md).
+  switches from sidebar navigation to a single horizontally scrolling row of
+  categories — text items, the current one underlined — when its panel is at most
+  720px wide. The rail's edges fade where more categories hide and the selected
+  category stays visible. The page and its editors stay mounted through resizing;
+  header actions wrap within the pane. [Decision and verification](../../../../.agents/notes/implemented/bug-fix/2026-10-01-narrow-settings-panel.md).
 - Browser desktop sign-in handoff: `login-page.tsx` under `?client_id=electron`,
   the page the desktop app opens in the system browser. A desktop sign-out leaves
   this browser signed in as the previous account, so the page names that account

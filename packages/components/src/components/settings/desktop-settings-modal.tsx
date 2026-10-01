@@ -1,8 +1,16 @@
-import { useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
-import { Bug, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import {
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
+import { Bug, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { duration, ease, space } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
 import { useTranslation } from 'react-i18next';
@@ -103,15 +111,77 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[1],
     flexShrink: 0,
-    padding: space[3],
+    paddingInline: space[2],
+    paddingBlock: space[1],
   },
-  compactTabViewport: {
+  compactNavViewport: {
     flexGrow: 1,
     minWidth: 0,
     overflowX: 'auto',
     scrollbarWidth: 'none',
   },
-  compactTabStrip: { width: 'max-content', padding: space[1] },
+  /**
+   * One line of categories: the sidebar's sections become groups set apart by
+   * space alone, so the strip keeps its order without gaining labels it has no
+   * room for.
+   */
+  compactNavRow: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'stretch',
+    gap: space[4],
+    width: 'max-content',
+    minWidth: '100%',
+    paddingInline: space[1],
+  },
+  compactNavGroup: { display: 'flex', alignItems: 'stretch' },
+  /**
+   * A category on the strip: a word, not a key in a track. The pointer hints a
+   * line in ink; the current one keeps it in accent. Its bottom edge is the
+   * strip's, so the line lands on the seam between navigation and page.
+   */
+  compactNavItem: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    margin: 0,
+    paddingInline: space[2],
+    paddingBlock: space[2],
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    boxShadow: {
+      default: null,
+      ':hover': `inset 0 -2px 0 color-mix(in oklab, transparent, ${colors.label} 20%)`,
+      ':focus-visible': `inset 0 -2px 0 color-mix(in oklab, transparent, ${colors.label} 20%)`,
+    },
+    outlineStyle: 'none',
+    color: {
+      default: colors.secondaryLabel,
+      ':hover': colors.label,
+      ':focus-visible': colors.label,
+    },
+    fontFamily: 'inherit',
+    fontSize: '1em',
+    fontWeight: 400,
+    lineHeight: type.leading,
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+    transitionProperty: 'color, box-shadow',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  compactNavItemSelected: {
+    color: {
+      default: colors.label,
+      ':hover': colors.label,
+      ':focus-visible': colors.label,
+    },
+    boxShadow: {
+      default: `inset 0 -2px 0 ${colors.accent}`,
+      ':hover': `inset 0 -2px 0 ${colors.accent}`,
+      ':focus-visible': `inset 0 -2px 0 ${colors.accent}`,
+    },
+  },
   navScroll: {
     display: 'flex',
     flexDirection: 'column',
@@ -286,28 +356,80 @@ function SettingsModalBody() {
   useListKeyboardNavigation({
     onItemFocus: handleNavigationItemFocus,
     scopeId: compactNavigationScopeId,
-    itemSelector: '[role="tab"]',
   });
-  const [tabViewport, setTabViewport] = useState<HTMLDivElement | null>(null);
-  const [tabOverflow, setTabOverflow] = useState({ before: false, after: false });
+  /**
+   * Arrow keys never leave a dialog: Base UI's popup stops composite keys at
+   * the portal edge, so the scope-level navigation above only ever sees J/K
+   * here. The strip handles the arrows itself — Left/Right included, which the
+   * global scope switcher cannot see either — as the horizontal row they lay out.
+   */
+  const handleCompactNavKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+      const items = Array.from(
+        event.currentTarget.querySelectorAll<HTMLElement>('[data-scope-item]')
+      );
+      if (items.length === 0) return;
+      const active = document.activeElement;
+      const current =
+        active instanceof HTMLElement ? active.closest<HTMLElement>('[data-scope-item]') : null;
+      const currentIndex = current ? items.indexOf(current) : -1;
+      let nextIndex: number;
+      switch (event.key) {
+        case 'ArrowRight':
+        case 'ArrowDown':
+          nextIndex = currentIndex < 0 ? 0 : currentIndex + 1;
+          break;
+        case 'ArrowLeft':
+        case 'ArrowUp':
+          nextIndex = currentIndex < 0 ? items.length - 1 : currentIndex - 1;
+          break;
+        case 'Home':
+          nextIndex = 0;
+          break;
+        case 'End':
+          nextIndex = items.length - 1;
+          break;
+        default:
+          return;
+      }
+      const next = items[(nextIndex + items.length) % items.length];
+      if (!next) return;
+      event.preventDefault();
+      next.focus({ preventScroll: true });
+      next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      handleNavigationItemFocus(next);
+    },
+    [handleNavigationItemFocus]
+  );
+  const [navViewport, setNavViewport] = useState<HTMLDivElement | null>(null);
+  const [navOverflow, setNavOverflow] = useState({ before: false, after: false });
   useLayoutEffect(() => {
-    if (!tabViewport) return undefined;
+    if (!navViewport) return undefined;
     const updateOverflow = () => {
-      const before = tabViewport.scrollLeft > 1;
-      const after = tabViewport.scrollLeft + tabViewport.clientWidth < tabViewport.scrollWidth - 1;
-      setTabOverflow((previous) =>
+      const before = navViewport.scrollLeft > 1;
+      const after = navViewport.scrollLeft + navViewport.clientWidth < navViewport.scrollWidth - 1;
+      setNavOverflow((previous) =>
         previous.before === before && previous.after === after ? previous : { before, after }
       );
     };
     const revealSelected = () => {
-      const selected = tabViewport.querySelector<HTMLElement>('[aria-selected="true"]');
-      if (selected && tabViewport.clientWidth > 0) {
-        const viewportBox = tabViewport.getBoundingClientRect();
+      const selected = navViewport.querySelector<HTMLElement>('[aria-current="page"]');
+      if (selected && navViewport.clientWidth > 0) {
+        const viewportBox = navViewport.getBoundingClientRect();
         const selectedBox = selected.getBoundingClientRect();
         // Scroll only this rail: scrollIntoView can also move the dialog's page.
-        tabViewport.scrollTo({
+        navViewport.scrollTo({
           left:
-            tabViewport.scrollLeft +
+            navViewport.scrollLeft +
             selectedBox.left -
             viewportBox.left -
             (viewportBox.width - selectedBox.width) / 2,
@@ -316,15 +438,28 @@ function SettingsModalBody() {
       updateOverflow();
     };
     const observer = new ResizeObserver(revealSelected);
-    observer.observe(tabViewport);
-    if (tabViewport.firstElementChild) observer.observe(tabViewport.firstElementChild);
-    tabViewport.addEventListener('scroll', updateOverflow);
+    observer.observe(navViewport);
+    if (navViewport.firstElementChild) observer.observe(navViewport.firstElementChild);
+    navViewport.addEventListener('scroll', updateOverflow);
     revealSelected();
     return () => {
       observer.disconnect();
-      tabViewport.removeEventListener('scroll', updateOverflow);
+      navViewport.removeEventListener('scroll', updateOverflow);
     };
-  }, [tabViewport, resolvedActiveTab, t]);
+  }, [navViewport, resolvedActiveTab, t]);
+  /**
+   * Overflow is said by the rail fading where more categories wait, not by
+   * scroll buttons: the mask only fades an edge while that edge still hides
+   * something.
+   */
+  const navMask = useMemo(() => {
+    if (!navOverflow.before && !navOverflow.after) return undefined;
+    const stops = [navOverflow.before ? 'transparent 0' : 'black 0'];
+    if (navOverflow.before) stops.push('black 32px');
+    if (navOverflow.after) stops.push('black calc(100% - 32px)');
+    stops.push(navOverflow.after ? 'transparent 100%' : 'black 100%');
+    return `linear-gradient(to right, ${stops.join(', ')})`;
+  }, [navOverflow]);
   const groupedSections: Array<{
     id: Exclude<SettingsSectionId, 'account'>;
     label: string;
@@ -333,6 +468,14 @@ function SettingsModalBody() {
     { id: 'workspace', label: t('settings.sections.workspace', 'Workspace') },
     { id: 'other', label: t('settings.sections.misc', 'Other') },
   ];
+  /** The strip keeps the sidebar's order and grouping; the groups just lose their headings. */
+  const compactNavGroups = [
+    { id: 'account' as const, tabs: navigationTabs.filter((tab) => tab.section === 'account') },
+    ...groupedSections.map((section) => ({
+      id: section.id,
+      tabs: navigationTabs.filter((tab) => tab.section === section.id),
+    })),
+  ].filter((group) => group.tabs.length > 0);
   const usesInternalScrolling = resolvedActiveTab === 'projects';
   // Every page's actions and lead are drawn in this one header.
   const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
@@ -360,48 +503,42 @@ function SettingsModalBody() {
             id={compactNavigationScopeId}
             role="navigation"
             aria-label={t('settings.title')}
+            onKeyDown={handleCompactNavKeyDown}
             {...stylex.props(styles.compactNav, surface.nav)}
           >
-            <Button
-              variant="ghost"
-              size="small"
-              icon
-              aria-label={t('settings.navigation.previousCategories')}
-              disabled={!tabOverflow.before}
-              onClick={() => tabViewport?.scrollBy({ left: -tabViewport.clientWidth * 0.7 })}
-            >
-              <ChevronLeft aria-hidden="true" />
-            </Button>
             <div
-              ref={setTabViewport}
-              data-settings-tab-viewport=""
-              {...stylex.props(styles.compactTabViewport)}
+              ref={setNavViewport}
+              data-settings-nav-viewport=""
+              {...stylex.props(styles.compactNavViewport)}
+              style={{ maskImage: navMask, WebkitMaskImage: navMask }}
             >
-              <div {...stylex.props(styles.compactTabStrip)}>
-                <Tabs.List size="medium" activateOnFocus aria-label={t('settings.title')}>
-                  {navigationTabs.map((tab) => (
-                    <Tabs.Tab
-                      key={tab.id}
-                      value={tab.id}
-                      data-id={`settings:${tab.id}`}
-                      data-settings-tab-id={tab.id}
-                    >
-                      {t(tab.labelKey)}
-                    </Tabs.Tab>
-                  ))}
-                </Tabs.List>
+              <div {...stylex.props(styles.compactNavRow)}>
+                {compactNavGroups.map((group) => (
+                  <div key={group.id} {...stylex.props(styles.compactNavGroup)}>
+                    {group.tabs.map((tab) => {
+                      const active = resolvedActiveTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          aria-current={active ? 'page' : undefined}
+                          data-id={`settings:${tab.id}`}
+                          data-scope-item="row"
+                          data-settings-tab-id={tab.id}
+                          {...stylex.props(
+                            styles.compactNavItem,
+                            active && styles.compactNavItemSelected
+                          )}
+                          onClick={() => selectTab(tab.id)}
+                        >
+                          {t(tab.labelKey)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             </div>
-            <Button
-              variant="ghost"
-              size="small"
-              icon
-              aria-label={t('settings.navigation.nextCategories')}
-              disabled={!tabOverflow.after}
-              onClick={() => tabViewport?.scrollBy({ left: tabViewport.clientWidth * 0.7 })}
-            >
-              <ChevronRight aria-hidden="true" />
-            </Button>
             {canReportBug ? (
               <Button
                 variant="ghost"

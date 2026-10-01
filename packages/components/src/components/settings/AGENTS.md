@@ -42,7 +42,7 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Settings rows (`compact-layout.tsx`) give labels remaining width and controls their
   content width. Never size columns from viewport breakpoints: the panel
   clips controls. Desktop Settings nav follows panel width; keep categories/drafts,
-  reveal active tabs and wrap actions.
+  reveal the selection and wrap actions.
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes

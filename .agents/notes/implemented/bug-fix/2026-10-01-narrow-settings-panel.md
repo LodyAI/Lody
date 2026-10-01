@@ -10,11 +10,13 @@ PR: [#1198](https://github.com/LodyAI/Lody/pull/1198)
 
 Desktop Settings kept a fixed 240px navigation column even when its panel was
 only 420px wide, squeezing Role names and clipping the Add role button. The panel
-now uses a single-row, horizontally scrolling tab strip above the page when it is
-at most 720px wide, and its header actions wrap. Both navigation presentations use
-the same filtered tabs and selection handler; resizing preserves the page and open
-editor draft. Browser regression coverage exercises geometry and nested-editor interaction with synthetic
-catalog data; packaged Electron and live cloud workspaces remain outside this check.
+now uses a single horizontally scrolling row of category items above the page
+when it is at most 720px wide — text items grouped like the sidebar, the current
+category underlined — and its header actions wrap. Both navigation presentations
+use the same filtered items and selection handler; resizing preserves the page
+and open editor draft. Browser regression coverage exercises geometry and
+nested-editor interaction with synthetic catalog data; packaged Electron and live
+cloud workspaces remain outside this check.
 
 ## Cause and decision
 
@@ -26,21 +28,26 @@ keep the desktop renderer at narrow widths, per the
 
 [`desktop-settings-modal.tsx`](../../../../packages/components/src/components/settings/desktop-settings-modal.tsx)
 owns the named inline-size container and both navigation presentations. A container
-query selects the layout without remounting the page. The strip uses `@lody/ui` Tabs
-and includes Account and each available category, retaining capability/member/native-shell
-filtering. Previous/next buttons scroll the rail without changing category; selection and rail
-resizing reveal the active tab. Only the rail scrolls, never the page. Tabs keep their
-native keyboard selection and panel association; their focus scope yields handled keys.
-Bug report remains an accessible button when available. Header titles and action
-clusters wrap; narrow headers remove the redundant inner column padding.
+query selects the layout without remounting the page. The strip renders plain
+buttons like the sidebar rows — Account and each available category, retaining
+capability/member/native-shell filtering — grouped as the sidebar groups them and
+underlined at the current category. A fading edge mask marks overflow in place of
+scroll buttons; selection and rail resizing reveal the active item. Only the rail
+scrolls, never the page. Arrow keys cannot leave a Base UI dialog — its popup
+stops composite-key propagation — so the strip moves and selects on arrows and
+Home/End itself, while the shared focus scope still provides J/K. Bug report
+remains an accessible button when available. Header titles and action clusters
+wrap; narrow headers remove the redundant inner column padding.
 
 Shrinking the sidebar alone leaves too little reading width. A full multi-row
-navigation above the page would consume the short window's scrolling area. A dropdown
-was considered but hides adjacent categories behind another click. The tab strip
-costs one row and makes neighboring categories directly selectable; its trade-off is
-that distant categories require horizontal scrolling, made explicit by the arrows.
-Nested editor sizing, focus management and scrolling remain with the existing
-dialog and form, including [pane-centred placement](2026-09-26-settings-editor-dialog-placement.md).
+navigation above the page would consume the short window's scrolling area. A
+dropdown was considered but hides adjacent categories behind another click; a
+segmented tab track with scroll arrows was tried and read as cluttered chrome.
+The underline row costs one line and keeps neighbouring categories directly
+selectable; its trade-off is that distant categories require horizontal
+scrolling, marked by the fading edge. Nested editor sizing, focus management and
+scrolling remain with the existing dialog and form, including
+[pane-centred placement](2026-09-26-settings-editor-dialog-placement.md).
 
 ## Verification
 
@@ -48,9 +55,9 @@ dialog and form, including [pane-centred placement](2026-09-26-settings-editor-d
 add a read-only synthetic Role catalog without transport or real account writes.
 [`desktop-settings-layout.spec.ts`](../../../../packages/components/tests/e2e/desktop-settings-layout.spec.ts)
 checks the actual rendered panel at 400, 500, 707, 900 and 1180px, category parity,
-overflow buttons, keyboard tab selection, selected-tab visibility and one-row navigation,
-draft retention through resize, Chinese/dark actions, focus wrapping, Escape return,
-and scrollable editor content above visible Cancel/Save at 707×394.
+the overflow fade, keyboard selection, selected-item visibility and one-row
+navigation, draft retention through resize, Chinese/dark actions, focus wrapping,
+Escape return, and scrollable editor content above visible Cancel/Save at 707×394.
 
 All ten browser tests pass. Restoring the pre-fix modal makes the 500px geometry
 test fail: Add role ends at 508.125px while the panel ends at 460px. Short-height

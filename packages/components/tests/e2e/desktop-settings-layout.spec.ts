@@ -46,17 +46,20 @@ test('offers every existing navigation entry and keeps the editor draft across r
   await expect(navigation).toBeVisible();
   const labels = await navigation.locator('button[data-settings-tab-id]').allTextContents();
   await page.setViewportSize({ width: 500, height: 800 });
-  const tabs = page.getByRole('tablist', { name: 'Settings' });
-  await expect(tabs.getByRole('tab')).toHaveText([
+  const compactNavigation = page.getByRole('navigation', { name: 'Settings' });
+  await expect(compactNavigation.locator('[data-settings-tab-id]')).toHaveText([
     'Account',
     ...labels.map((label) => label.trim()),
   ]);
-  const viewport = page.locator('[data-settings-tab-viewport]');
-  await expectInside(tabs.getByRole('tab', { name: 'Agent Roles', exact: true }), viewport);
-  await tabs.getByRole('tab', { name: 'About', exact: true }).click();
+  const viewport = page.locator('[data-settings-nav-viewport]');
+  const roles = compactNavigation.locator('[data-settings-tab-id="agent-roles"]');
+  await expectInside(roles, viewport);
+  const about = compactNavigation.locator('[data-settings-tab-id="about"]');
+  await about.click();
   await expect(page.getByRole('dialog', { name: 'About', exact: true })).toBeVisible();
-  await expectInside(tabs.getByRole('tab', { name: 'About', exact: true }), viewport);
-  await tabs.getByRole('tab', { name: 'Agent Roles', exact: true }).click();
+  await expect(about).toHaveAttribute('aria-current', 'page');
+  await expectInside(about, viewport);
+  await roles.click();
   await settings.getByRole('button', { name: 'Edit', exact: true }).click();
   const editor = page.getByRole('dialog', { name: 'Edit Agent Role', exact: true });
   const name = editor.getByRole('textbox', { name: 'Name', exact: true });
@@ -69,64 +72,62 @@ test('offers every existing navigation entry and keeps the editor draft across r
   await page.keyboard.press('Escape');
   await expect(editor).toBeHidden();
   await expect(settings).toBeVisible();
-  await expectInside(tabs.getByRole('tab', { name: 'Agent Roles', exact: true }), viewport);
+  await expectInside(roles, viewport);
 });
 
-test('scrolls overflow categories without changing the page and supports keyboard tab selection', async ({
+test('scrolls overflow categories without changing the page and supports keyboard selection', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 500, height: 800 });
   await page.goto(rolesStory);
-  const tabs = page.getByRole('tablist', { name: 'Settings' });
-  const viewport = page.locator('[data-settings-tab-viewport]');
-  const roles = tabs.getByRole('tab', { name: 'Agent Roles', exact: true });
+  const navigation = page.getByRole('navigation', { name: 'Settings' });
+  const viewport = page.locator('[data-settings-nav-viewport]');
+  const roles = navigation.locator('[data-settings-tab-id="agent-roles"]');
   await expectInside(roles, viewport);
-  const previous = page.getByRole('button', { name: 'Previous settings categories' });
-  const next = page.getByRole('button', { name: 'Next settings categories' });
-  await expect(previous).toBeEnabled();
-  await expect(next).toBeEnabled();
-  const initialScroll = await viewport.evaluate((el) => el.scrollLeft);
-  await previous.click();
-  await expect.poll(() => viewport.evaluate((el) => el.scrollLeft)).toBeLessThan(initialScroll);
-  await expect(roles).toHaveAttribute('aria-selected', 'true');
+  await roles.click();
+  await expect(roles).toHaveAttribute('aria-current', 'page');
+
+  // Scrolling the rail alone changes neither the selection nor the page.
+  await viewport.evaluate((el) => {
+    el.scrollLeft = el.scrollWidth;
+  });
+  await expect(roles).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('dialog', { name: 'Agent Roles', exact: true })).toBeVisible();
-  await next.click();
-  await expect.poll(() => viewport.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
-  await roles.focus();
+  // The edge hiding more categories fades instead of drawing a scroll button.
+  await expect
+    .poll(() => viewport.evaluate((el) => getComputedStyle(el).maskImage))
+    .toContain('rgba(0, 0, 0, 0)');
+
   await page.keyboard.press('ArrowRight');
-  const mcp = tabs.getByRole('tab', { name: 'MCP', exact: true });
+  const mcp = navigation.locator('[data-settings-tab-id="mcp"]');
   await expect(mcp).toBeFocused();
-  await expect(mcp).toHaveAttribute('aria-selected', 'true');
+  await expect(mcp).toHaveAttribute('aria-current', 'page');
   await expectInside(mcp, viewport);
   await page.keyboard.press('ArrowLeft');
   await expect(roles).toBeFocused();
-  await expect(roles).toHaveAttribute('aria-selected', 'true');
+  await expect(roles).toHaveAttribute('aria-current', 'page');
   await page.keyboard.press('End');
-  const about = tabs.getByRole('tab', { name: 'About', exact: true });
+  const about = navigation.locator('[data-settings-tab-id="about"]');
   await expect(about).toBeFocused();
-  await expect(about).toHaveAttribute('aria-selected', 'true');
+  await expect(about).toHaveAttribute('aria-current', 'page');
   await expectInside(about, viewport);
-  await expect(next).toBeDisabled();
-  const panelId = await about.getAttribute('aria-controls');
-  expect(panelId).toBeTruthy();
-  await expect(page.locator(`[id="${panelId}"]`)).toHaveAttribute('role', 'tabpanel');
 });
 
 test('keeps the selected category visible in a single row in a short window', async ({ page }) => {
   await page.setViewportSize({ width: 707, height: 394 });
   await page.goto(rolesStory);
-  const tabs = page.getByRole('tablist', { name: 'Settings' });
-  const viewport = page.locator('[data-settings-tab-viewport]');
+  const navigation = page.getByRole('navigation', { name: 'Settings' });
+  const viewport = page.locator('[data-settings-nav-viewport]');
   const settings = page.getByRole('dialog', { name: 'Agent Roles', exact: true });
-  await expectInside(tabs.getByRole('tab', { name: 'Agent Roles', exact: true }), viewport);
-  const categoryRows = await tabs
-    .getByRole('tab')
+  await expectInside(navigation.locator('[data-settings-tab-id="agent-roles"]'), viewport);
+  const categoryRows = await navigation
+    .locator('[data-settings-tab-id]')
     .evaluateAll((elements) => new Set(elements.map((el) => el.getBoundingClientRect().top)).size);
   expect(categoryRows).toBe(1);
   await expectInside(viewport, settings);
   await expectInside(settings.getByRole('button', { name: 'Add role', exact: true }), settings);
-  await tabs.getByRole('tab', { name: 'About', exact: true }).click();
-  await expectInside(tabs.getByRole('tab', { name: 'About', exact: true }), viewport);
+  await navigation.locator('[data-settings-tab-id="about"]').click();
+  await expectInside(navigation.locator('[data-settings-tab-id="about"]'), viewport);
 });
 
 test('keeps nested Role editor focus contained and short-height scrolling above its footer', async ({

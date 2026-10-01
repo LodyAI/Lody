@@ -35,10 +35,11 @@ window restores them. Mobile devices keep the breakpoint: the mobile layout
 below it, and the desktop layout when the viewport is wide enough.
 
 Desktop Settings adapts to its panel width: a narrow panel puts category navigation
-in one horizontally scrolling tab row above the page; a wide panel retains the
-sidebar. All available categories remain reachable, arrows indicate overflow, and
-selection or resizing reveals the active tab without scrolling the page. Resizing
-keeps the selected category and open editor draft. Nested
+in one horizontally scrolling row above the page — text items underlined at the
+current category, grouped as the sidebar groups them; a wide panel retains the
+sidebar. All available categories remain reachable, the rail's edges fade where
+categories hide, and selection or resizing reveals the active item without
+scrolling the page. Resizing keeps the selected category and open editor draft. Nested
 settings editors retain keyboard focus containment, Escape returning to Settings,
 and a scrolling form with visible footer actions in short windows.
 
