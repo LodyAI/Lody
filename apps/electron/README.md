@@ -2,6 +2,14 @@
 
 Lody desktop application built with Electron, React, and TypeScript.
 
+## Conversation links
+
+All versions generate `lody://session/<id>?workspace=<id>`. In-app links stay in
+the current installation; external links use the OS default selected in Settings →
+About. Startup does not replace an existing default; packaged Windows fills an absent handler after first launch. Version-specific schemes remain for
+explicit handoff and login callbacks. The shared packaging hook advertises both
+resource and callback protocols; see the [deep-link contract](../../specs/deep-links.md).
+
 ## Recommended IDE Setup
 
 - [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Oxc](https://marketplace.visualstudio.com/items?itemName=oxc.oxc-vscode)

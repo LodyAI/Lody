@@ -1,4 +1,5 @@
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { buildSessionLink } from '@lody/shared/session-link';
 import { jsonValueEqual } from '@/lib/json-value-equal';
 import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -1892,25 +1893,13 @@ export function LoroAppSidebar({
 
   const copySessionUrl = useCallback(
     async (sessionId: string, successMessage: string) => {
-      if (!workspaceSlug) return;
+      if (!workspaceId) return;
       if (typeof window === 'undefined') return;
-      const path = `/${workspaceSlug}/sessions/${sessionId}`;
-      // Construct an absolute web URL even on Electron (where window.location.origin
-      // is a `file://` URL). Falling back to the configured site origin keeps the
-      // copied link openable on any device the user pastes it into.
-      const electronOrigin = isElectronRenderer()
-        ? import.meta.env.VITE_SITE_URL?.trim() || ''
-        : '';
-      const origin =
-        electronOrigin ||
-        (window.location.protocol === 'file:'
-          ? import.meta.env.VITE_SITE_URL?.trim() || ''
-          : window.location.origin);
-      const url = origin ? `${origin}${path}` : path;
+      const url = buildSessionLink({ sessionId, workspaceId });
       await navigator.clipboard.writeText(url);
       toast.success(successMessage);
     },
-    [workspaceSlug]
+    [workspaceId]
   );
 
   const [pendingSessionShare, setPendingSessionShare] = useState<PendingSessionShare | null>(null);

@@ -5,6 +5,7 @@ import {
   type MessageTextSpan,
   type MessageTextSpanKind,
 } from '@lody/shared';
+import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
 
 export const USER_TEXT_RENDER_LINE_LIMIT = 10;
 export const USER_TEXT_RENDER_CHAR_LIMIT = 900;
@@ -105,7 +106,7 @@ export const getTextContentFromMessageItems = (items: MessageContent[]): string 
  *
  * The other kinds stay expanded on purpose: a pasted-text span IS the content
  * the user wants when they copy, and a skill or session mention expands to a
- * path or a `session://` link that remains meaningful pasted elsewhere.
+ * path or a `lody://session/` link that remains meaningful pasted elsewhere.
  */
 const COPY_AS_LABEL_SPAN_KINDS: ReadonlySet<MessageTextSpanKind> = new Set(['agent_role']);
 
@@ -139,13 +140,17 @@ export const collapseMentionSpansForCopy = (
  * received — a `@Reviewer` token with no committed mention range would be sent
  * verbatim as a word.
  */
-export const getCopyTextFromMessageItems = (items: MessageContent[]): string =>
+export const getCopyTextFromMessageItems = (
+  items: MessageContent[],
+  workspaceId?: string
+): string =>
   items
     .map((content) =>
       content.type === 'text'
         ? collapseMentionSpansForCopy(content.text, content.spans)
         : getCopyableItemText(content)
     )
+    .map((text) => normalizeSessionLinksForExport(text, workspaceId))
     .filter((text) => text.trim().length > 0)
     .join('\n\n');
 

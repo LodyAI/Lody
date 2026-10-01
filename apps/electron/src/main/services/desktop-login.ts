@@ -160,7 +160,7 @@ export class DesktopLogin {
     try {
       await this.dependencies.openBrowser({
         client_id: 'electron',
-        ...(this.dependencies.channel === 'nightly' ? { desktop_channel: 'nightly' } : {}),
+        desktop_channel: this.dependencies.channel ?? 'stable',
         state: attempt.state,
         code_challenge: createHash('sha256').update(attempt.verifier).digest('base64url'),
         code_challenge_method: 'S256'

@@ -128,6 +128,7 @@ import {
 } from '@/lib/mobile-keyboard-action';
 import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
+import { readPastedSessionLink } from '@/lib/session-deep-link';
 import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
 
@@ -1291,7 +1292,9 @@ export const SessionChatInputArea = memo(
         const text = event.clipboardData.getData('text/plain');
 
         // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
-        const sessionUrl = text ? parseAppSessionUrl(text) : null;
+        const sessionUrl = text
+          ? (readPastedSessionLink(text, workspaceId) ?? parseAppSessionUrl(text))
+          : null;
         if (sessionUrl) {
           if (isPlainLinkPasteShortcut(event)) {
             capturePostHogEvent(postHog, 'mention/session_link_pasted', {
@@ -1360,6 +1363,7 @@ export const SessionChatInputArea = memo(
         insertLargePastedTextAtSelection,
         insertSessionMention,
         isArchived,
+        workspaceId,
         postHog,
         t,
       ]

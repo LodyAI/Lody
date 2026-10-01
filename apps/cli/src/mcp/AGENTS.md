@@ -98,6 +98,6 @@ Parent instructions apply.
   `limit` counts displayable turns, the cursor is the raw position from the previous page, and
   hidden/empty rows never shift it. A page reports `hasMore` from the underlying raw rows, so a
   scan budget never claims the history ended. Session mentions expand to
-  `[@Title](session://<sessionId>)`; resolve them with this tool, accepting a bare id or a
-  `session://` URI.
-  ([note](../../../../.agents/notes/implemented/feature/2026-09-18-session-mention-uri-and-paste.md))
+  `[@Title](lody://session/<id>?workspace=<id>)`; accept bare ids and legacy
+  `session://` URIs too. Explicit workspace must match the tool context.
+  ([contract](../../../../specs/deep-links.md))

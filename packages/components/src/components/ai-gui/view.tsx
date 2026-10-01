@@ -178,6 +178,7 @@ import {
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './subagent-task-panel';
 import { SessionReadonlyContext } from './session-readonly-context';
+import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
 import { UserMessageEditor } from './user-message-editor';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import type { SkillMentionAgent } from '@/components/mentions/mention-skill-source';
@@ -295,6 +296,12 @@ import {
 } from '@/lib/session-chat-search';
 
 const EMPTY_GALLERY_ENTRIES: readonly SessionImageGalleryEntry[] = [];
+
+function useSessionCopyWorkspaceId(): string | undefined {
+  const readonlyPresentation = useContext(SessionReadonlyContext);
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  return readonlyPresentation ? undefined : (workspaceId ?? undefined);
+}
 
 // ── Expand/collapse state cache ──────────────────────────────────────────────
 // Survives virtual-scroll unmount/remount so expand/collapse state is not lost
@@ -3510,6 +3517,7 @@ const UserMessageRowView = ({
 }) => {
   const { t } = useTranslation();
   const { copyContext } = useContext(SessionChatActionContext);
+  const copyWorkspaceId = useSessionCopyWorkspaceId();
   const isMobile = useIsMobile();
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
@@ -3556,13 +3564,13 @@ const UserMessageRowView = ({
     if (!hasTextContent) return;
 
     // The chip form, not the rewritten instruction the agent received.
-    const textContent = getCopyTextFromMessageItems(message.items);
+    const textContent = getCopyTextFromMessageItems(message.items, copyWorkspaceId);
     const ok = await writeTextToClipboard(textContent);
     if (!ok) return;
 
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [hasTextContent, message.items]);
+  }, [hasTextContent, message.items, copyWorkspaceId]);
 
   const handlePin = useCallback(() => {
     if (!pinCtx) return;
@@ -4833,6 +4841,7 @@ export const AssistantTurnFooter = ({
     return getVisibleAssistantTextContent(contentItems, message.finished === true);
   }, [message.finished, message.items]);
   const hasCopyableText = textContent.trim().length > 0;
+  const copyWorkspaceId = useSessionCopyWorkspaceId();
   const fileDiffs = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;
   const durationUnitLabels = getDurationUnitLabels(t);
   const durationMs = resolveSessionHistoryDurationMs(message);
@@ -4868,11 +4877,13 @@ export const AssistantTurnFooter = ({
 
   const handleCopy = useCallback(async () => {
     if (!hasCopyableText) return;
-    const ok = await writeTextToClipboard(textContent);
+    const ok = await writeTextToClipboard(
+      normalizeSessionLinksForExport(textContent, copyWorkspaceId)
+    );
     if (!ok) return;
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [hasCopyableText, textContent]);
+  }, [hasCopyableText, textContent, copyWorkspaceId]);
 
   return (
     <div className="flex flex-col gap-1">
@@ -6769,6 +6780,7 @@ const PlanPanel = ({
   isStreaming?: boolean;
 }) => {
   const plan = { markdown, status: isStreaming ? ('delta' as const) : ('completed' as const) };
+  const copyWorkspaceId = useSessionCopyWorkspaceId();
   const handleAgentFileLinkClick = useCallback(
     (href: string) => {
       onFilePathClick?.(href);
@@ -6777,11 +6789,13 @@ const PlanPanel = ({
   );
   const [didCopy, setDidCopy] = useState(false);
   const handleCopy = useCallback(async () => {
-    const ok = await writeTextToClipboard(plan.markdown);
+    const ok = await writeTextToClipboard(
+      normalizeSessionLinksForExport(plan.markdown, copyWorkspaceId)
+    );
     if (!ok) return;
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [plan.markdown]);
+  }, [plan.markdown, copyWorkspaceId]);
 
   /* A plan is long by nature and it now sits near the TOP of its turn, above the
      work it produced — unclamped it would push everything that happened after it

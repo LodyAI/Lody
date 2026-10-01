@@ -281,13 +281,16 @@ describe('Markdown session links', () => {
     await act(async () => root.unmount());
     container.remove();
   });
-  const text = 'See [@Independent review](session://1ed6ba53-93bc-46d5-91e3-bb693cb0e729).';
+  const legacyText = 'See [@Independent review](session://1ed6ba53-93bc-46d5-91e3-bb693cb0e729).';
 
-  it('renders a session chip that opens the linked Session', async () => {
-    const opened: string[] = [];
+  it.each([
+    legacyText,
+    'See [@Independent review](lody://session/1ed6ba53-93bc-46d5-91e3-bb693cb0e729?workspace=ws_1).',
+  ])('renders a session chip that opens the linked Session: %s', async (text) => {
+    const opened: Array<{ sessionId: string; workspaceId?: string }> = [];
     await act(async () =>
       root.render(
-        <SessionLinkProvider value={(target) => opened.push(target.sessionId)}>
+        <SessionLinkProvider value={(target) => opened.push(target)}>
           <MarkdownRenderer text={text} />
         </SessionLinkProvider>
       )
@@ -296,10 +299,18 @@ describe('Markdown session links', () => {
     expect(chip.textContent).toBe('Independent review');
     expect(container.querySelector('a')).toBeNull();
     await act(async () => chip.click());
-    expect(opened).toEqual(['1ed6ba53-93bc-46d5-91e3-bb693cb0e729']);
+    expect(opened).toEqual([
+      {
+        sessionId: '1ed6ba53-93bc-46d5-91e3-bb693cb0e729',
+        ...(text === legacyText ? {} : { workspaceId: 'ws_1' }),
+      },
+    ]);
   });
 
-  it('stays an inert chip on a read-only share', async () => {
+  it.each([
+    legacyText,
+    'See [@Independent review](lody://session/1ed6ba53-93bc-46d5-91e3-bb693cb0e729?workspace=ws_1).',
+  ])('stays an inert chip on a read-only share: %s', async (text) => {
     await act(async () =>
       root.render(
         <SessionReadonlyContext.Provider

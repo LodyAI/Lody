@@ -37,10 +37,14 @@ the reasoning behind those rules.
   pure zoom/pan geometry, and `mermaid-diagram-viewer.tsx` the full-screen
   surface. Invariants live in
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
-- A `[Title](session://<id>)` link (the form session mentions reach the agent in)
+- A `[Title](lody://session/<id>?workspace=<id>)` link (or legacy `session://<id>`)
   renders as a conversation chip. `session-link-context.tsx` supplies the Session
   navigation from `SessionChatInterface`; without it, or on a read-only share, the
   chip is inert.
+  Message/plan copy and UI/CLI Markdown exports normalize prose references using
+  shared `session-link-export`, preserving code examples and stored history.
+  Only a known source workspace supplies a missing ID; anonymous readers do not
+  borrow the viewer's workspace.
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
 - `markdown-file-image.tsx` binds live file Markdown to its owning provider. Local
   resources load automatically; remote file images show a one-line recessed slot

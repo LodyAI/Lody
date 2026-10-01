@@ -3,6 +3,7 @@ import {
   installEmbeddedNodePtyBinding,
   installEmbeddedSqliteBinding
 } from './cli-native-deps.mjs'
+import { withDesktopResourceProtocols } from './desktop-protocols.mjs'
 
 // electron-builder Arch enum (electron-builder/out/index Arch).
 const ARCH_NAMES = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' }
@@ -14,6 +15,10 @@ const ARCH_NAMES = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal
  * resources/ staging dir.
  */
 export default async function beforePack(context) {
+  // Applied to the resolved configuration, including channel-specific overrides.
+  context.packager.config.protocols = withDesktopResourceProtocols(
+    context.packager.config.protocols
+  )
   const archName = ARCH_NAMES[context.arch]
   const platform = context.electronPlatformName === 'mas' ? 'darwin' : context.electronPlatformName
   if (!archName || archName === 'universal') {
