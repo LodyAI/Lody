@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-01-archive-worktree-retention-contract.zh.md)
 
+PR: [#1195](https://github.com/LodyAI/Lody/pull/1195) (draft).
+
 ## Abstract
 
 The GitHub guide promised to retain worktree directories until permanent Session deletion,

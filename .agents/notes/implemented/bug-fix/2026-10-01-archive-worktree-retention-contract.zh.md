@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-01-archive-worktree-retention-contract.md)
 
+PR：[#1195](https://github.com/LodyAI/Lody/pull/1195)（Draft）。
+
 ## 摘要
 
 GitHub 指南承诺工作树目录保留至永久删除会话，但已有生命周期合同和 daemon 会在归档后回收目录。会话与工作流指南也夸大了备份保护范围及删除能回收的存储。文档与自动归档设置现在区分对话历史、托管目录、本地分支、非 ignored 改动的备份提交及 ignored 文件。本项不改变清理行为，修正的是公开合同冲突，不代表已确认真实用户数据丢失事件。
