@@ -293,7 +293,9 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
             workspaceId={workspaceId}
             showSenderIdentity={showSenderIdentity}
             onNavigateSession={hasNavigateSession ? stableOnNavigateSession : undefined}
-            onEditLastUser={message.id === lastUserMessageId ? handleEditLastUser : undefined}
+            onEditLastUser={
+              message.id === lastUserMessageId && onEditLastUser ? handleEditLastUser : undefined
+            }
             editMentionContext={editMentionContext}
             onResendUndelivered={onResendUndelivered}
             capacityRetry={message.id === capacityRetry?.noticeId ? capacityRetry : undefined}
@@ -308,6 +310,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         hasNavigateSession,
         lastUserMessageId,
         onResendUndelivered,
+        onEditLastUser,
         capacityRetry,
         stableOnNavigateSession,
         showSenderIdentity,
