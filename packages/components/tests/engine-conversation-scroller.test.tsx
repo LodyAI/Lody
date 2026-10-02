@@ -84,6 +84,7 @@ function mount(
     suppress,
     hidden,
     feedback = false,
+    tickOnScroll = false,
   }: {
     strict?: boolean;
     suppress?: { current: boolean };
@@ -91,6 +92,8 @@ function mount(
     hidden?: { current: boolean };
     /** A view whose state flips whenever it is told the offset is 0. */
     feedback?: boolean;
+    /** A view that setStates on every onScroll, like the top-fade flag. */
+    tickOnScroll?: boolean;
   } = {}
 ): Ctx {
   let keys = initialKeys;
@@ -145,6 +148,7 @@ function mount(
     // Stands in for the view's position-derived state (hydration window,
     // outline): at offset 0 it changes the rows, which commits the list again.
     const [flipped, setFlipped] = useState(false);
+    const [, setTick] = useState(0);
     const shown = flipped ? ['flipped', ...listKeys] : listKeys;
     return (
       <EngineConversationScroller
@@ -161,6 +165,7 @@ function mount(
         onScroll={(offset) => {
           scrolls.push(offset);
           if (feedback && offset === 0) setFlipped((value) => !value);
+          if (tickOnScroll) setTick((n) => n + 1);
         }}
         suppressAutoScrollRef={suppress}
         onStateChange={onStateChange}
@@ -358,9 +363,7 @@ it('an upward wheel scrolling a nested code block or terminal keeps following', 
     });
     // A downward wheel and a pinch zoom are not the reader leaving the end either.
     await act(async () => {
-      rowElement(ctx, 'r38').dispatchEvent(
-        new WheelEvent('wheel', { deltaY: 120, bubbles: true })
-      );
+      rowElement(ctx, 'r38').dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true }));
       rowElement(ctx, 'r38').dispatchEvent(
         new WheelEvent('wheel', { deltaY: -120, ctrlKey: true, bubbles: true })
       );
@@ -500,6 +503,18 @@ it('a hidden tab reports no offset, so a view feeding it back cannot loop; shown
     expect(screenTopOf(ctx, 'r20')).toBe(0);
     expect(ctx.state.current?.isSticky).toBe(false);
     expect(ctx.scrolls.at(-1)).toBe(ctx.harness.scrollTop);
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('a view that setStates on every onScroll does not nested-update-loop', async () => {
+  const { ctx } = await openFollowing('engine-scroll-tick', { tickOnScroll: true });
+  try {
+    expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+    expect(ctx.state.current?.revealed).toBe(true);
+    expect(ctx.scrolls.length).toBeGreaterThan(0);
+    expect(ctx.scrolls.length).toBeLessThan(20);
   } finally {
     unmount(ctx);
   }
