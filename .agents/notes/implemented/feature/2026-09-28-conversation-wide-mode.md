@@ -43,6 +43,8 @@ not sync across devices or teammates.
 
 ## Correction: outline clearance (2026-10-02)
 
+PR: [#1205](https://github.com/LodyAI/Lody/pull/1205)
+
 The original 18px desktop gutter let the outline rail overlap wide-mode
 messages: the rail occupies 50px including its magnified active tick.
 `ConversationColumn` now supplies symmetric 64px gutters from the 640px
