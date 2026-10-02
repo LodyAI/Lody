@@ -97,6 +97,12 @@ Selecting a device loads its real DeviceKit artwork before starting preview. The
 
 Remote authorization depends on the connected Cloud backend understanding the exact signed simulator operation. Validate outgoing intents locally; a 400 for a valid simulator request indicates a backend protocol rejection, with a matching-backend update hint and no insecure fallback.
 
+Accepted agent starts expose an iOS Simulator action above the composer. Visible desktop
+conversations automatically reveal the simulator sidebar once per operation per browser
+tab; mobile opens it on explicit action. Manual dismissal is respected. Side Chat
+requests open the originating Session’s preview. The discovery hint is historical,
+not a claim that the preview is still running; opening queries current status.
+
 ## Remote responsiveness
 
 Size remote video for its visible viewport with bounded pixel density and frame rate.

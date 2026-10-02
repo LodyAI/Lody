@@ -1572,14 +1572,26 @@ const SessionDetail = ({
   // Closing the conversation does not close workspace tools. Keep their owner
   // explicit without making the parent an active conversation again.
   const activeBrowserSession = activeDraftTab ? null : (activeTabSession ?? activeSession);
-  // The iOS Simulator tab follows the same Session as Browser, but only when
-  // that Session's TARGET machine is a Mac. Its state is its own.
+  // Simulator follows the selected conversation unless explicitly opened by a
+  // Side Chat. Keep that origin while the side panel switches away from the chat.
+  const [iosSimulatorTarget, setIosSimulatorTarget] = useState<{
+    parentId: SessionId;
+    tabId: SessionId | undefined;
+    sessionId: SessionId;
+  } | null>(null);
+  const simulatorOwnerSession =
+    iosSimulatorTarget?.parentId === sessionId &&
+    iosSimulatorTarget.tabId === activeBrowserSession?.id
+      ? ([activeBrowserSession, ...visibleSideSessions].find(
+          (candidate) => candidate?.id === iosSimulatorTarget.sessionId
+        ) ?? activeBrowserSession)
+      : activeBrowserSession;
   const iosSimulatorMachine = useAtomValue(
-    getMachineMetaByIdAtomFamily(activeBrowserSession?.machineId)
+    getMachineMetaByIdAtomFamily(simulatorOwnerSession?.machineId)
   );
   const activeIosSimulatorSession =
-    activeBrowserSession && getIosSimulatorPanelAvailability(iosSimulatorMachine) !== 'hidden'
-      ? activeBrowserSession
+    simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine) !== 'hidden'
+      ? simulatorOwnerSession
       : null;
   const workspaceOwnerSession =
     activeTabSession?.parentSessionId || isEmptyConversation ? activeSession : activeTabSession;
@@ -3587,6 +3599,18 @@ const SessionDetail = ({
       activateSidebarTab('ios-simulator');
     }
   }, [activateSidebarTab, isMobile, replaceSessionUrlSimulator, revealRightSidebar]);
+
+  const handleOpenIosSimulatorForSession = useCallback(
+    (targetSessionId: SessionId) => {
+      setIosSimulatorTarget({
+        parentId: sessionId,
+        tabId: activeBrowserSession?.id,
+        sessionId: targetSessionId,
+      });
+      handleOpenIosSimulator();
+    },
+    [sessionId, activeBrowserSession?.id, handleOpenIosSimulator]
+  );
 
   const handleCloseIosSimulator = useCallback(() => {
     replaceSessionUrlSimulator(false);
@@ -5790,6 +5814,7 @@ const SessionDetail = ({
                   )}
                   onOpenPrTab={handleOpenPrTab}
                   onOpenAllChanges={handleOpenAllChanges}
+                  onOpenIosSimulator={() => handleOpenIosSimulatorForSession(tabSession.id)}
                   onOpenBrowser={() => handleOpenBrowser(tabSession.id, true)}
                   onOpenExistingBrowser={() => handleOpenBrowser(tabSession.id, false)}
                   changesDiffStat={changesDiffStat}
@@ -6495,6 +6520,7 @@ const SessionDetail = ({
       onFileDiffClick: handleOpenFileDiffForChat,
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
+      onOpenIosSimulator: () => handleOpenIosSimulatorForSession(chatSession.id),
       onOpenBrowser: () => handleOpenBrowser(chatSession.id, true),
       onOpenExistingBrowser: () => handleOpenBrowser(chatSession.id, false),
       onNavigateToComment: handleNavigateToComment,

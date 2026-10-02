@@ -579,3 +579,30 @@ allocations per ordinary decoded frame; native/physical-client/WAN behavior was 
 remeasured. No authorization, protocol wire shape, lease or Device Hub control changes.
 
 Final validation: standalone full check passed (CLI 3,452 plus four skipped; components 4,707), along with CLI build, formatting and docs check. Parallel security/correctness/scope review and fresh adversarial refutation found no blockers. Outer affected checking remains blocked by existing ACP dependency errors.
+
+### Agent preview discovery and composer entry (2026-10-02)
+
+An MCP start previously prepared a device but left no discoverable composer action.
+Accepted agent starts now publish only the 36-byte operation UUID in Session metadata
+as `iosSimulatorPreviewRequestId`. This is a low-frequency historical UI hint, not
+live state, a device record, credentials, or authorization; stop/expiry does not clear
+it. Existing control/status RPCs remain the source of live truth. Reused operations
+retain the same hint and publication failure does not turn a successful start into an
+error. Polling and viewer starts do not publish this hint.
+
+The composer renders an independent Smartphone action beside Browser, including when
+there are no other info-bar items. Visible desktop/Web desktop-layout conversations
+open the simulator sidebar on an unconsumed hint. Mobile keeps explicit opening.
+SessionStorage remembers consumption per session for the current browser tab, with a
+mounted-view fallback when storage is unavailable; switching sessions, remounting or
+manually closing the sidebar must not repeatedly open the same hint. A new operation
+can open it again. A Side Chat binds its exact originating Session, with the override
+fenced to the parent and selected top conversation; it never starts its parent's
+preview. No global polling or parsing agent output is introduced.
+
+Tests cover accepted/reused starts and publication failure, simulator-only and combined
+composer actions, and desktop/mobile consumption across session switches and remounts.
+Static security/correctness/scope review and fresh refutation covered this increment.
+Physical mobile interaction is not part of this validation.
+
+Validation: standalone public full check passed (CLI 3,453 tests plus four skipped; components 4,709 tests), CLI build and formatting passed, docs check passed. Outer affected checking remains blocked by existing ACP adapter type/dependency errors. No native runtime or Cloud deployment change is required; update the frontend and simulator-host CLI.

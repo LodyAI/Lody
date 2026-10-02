@@ -41,6 +41,7 @@ type Dependencies = {
   logger: Logger;
   runtimeBaseUrl: string;
   authorize(request: IosSimulatorRequest): Promise<void>;
+  onAgentPreviewStarted?: (sessionId: string, operationId: string) => Promise<void>;
   leases?: SimulatorControlLeases;
   now?: () => number;
   list?: typeof listSimulatorDevices;
@@ -189,6 +190,7 @@ export class IosSimulatorService {
           existing.state.udid.toUpperCase() === command.udid.toUpperCase()
         ) {
           if (!fromAgent) this.attachViewer(existing, remote, true);
+          else await this.reportAgentPreview(request.sessionId, existing.state.operationId);
           return {
             ...base,
             success: true,
@@ -237,6 +239,7 @@ export class IosSimulatorService {
         if (!fromAgent) this.attachViewer(op, remote);
         this.operations.set(request.sessionId, op);
         op.done = this.run(request.sessionId, op);
+        if (fromAgent) await this.reportAgentPreview(request.sessionId, operationId);
         return {
           ...base,
           success: true,
@@ -251,6 +254,14 @@ export class IosSimulatorService {
         message:
           'Unable to manage iOS Simulator. Check machine access, Xcode and the installed iOS runtime.',
       };
+    }
+  }
+  private async reportAgentPreview(sessionId: string, operationId: string): Promise<void> {
+    try {
+      await this.deps.onAgentPreviewStarted?.(sessionId, operationId);
+    } catch {
+      // Discovery is best effort; it must not turn an accepted start into a failure.
+      this.deps.logger.warn('Failed to publish simulator preview discovery hint.');
     }
   }
   private attachViewer(op: Operation, remote: boolean, retry = false): void {

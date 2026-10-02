@@ -45,3 +45,9 @@ Decision and rationale:
   in More. Unsupported hardware buttons stay disabled.
 - Screenshots are bounded PNG bytes from the viewer; attaching targets the original
   Session composer and never sends a message. No public preview/share action.
+
+- `iosSimulatorPreviewRequestId` is a UUID-only agent-start discovery hint, not live
+  status or authority. It enables the composer action. Visible desktop conversations
+  consume each request once per browser tab in sessionStorage; mobile stays opt-in.
+  Side Chat actions bind the exact originating Session; the panel owner override is
+  fenced to its parent/top-tab selection. Closing the sidebar never starts/stops a device.

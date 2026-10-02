@@ -48,6 +48,7 @@ function fixture(
   boot = async () => {},
   tunnelGate: Promise<void> | (() => Promise<void>) = Promise.resolve()
 ) {
+  const onAgentPreviewStarted = vi.fn(async (_sessionId: string, _operationId: string) => {});
   const remoteReady = deferred<void>();
   const tunnelClosed = deferred<QuickTunnelClosed>();
   let tunnelOutcome: QuickTunnelClosed = {};
@@ -65,6 +66,7 @@ function fixture(
   let captureAbortedBeforeGatewayClose: boolean | undefined;
   const service = new IosSimulatorService({
     workspaceId,
+    onAgentPreviewStarted,
     leases,
     logger,
     runtimeBaseUrl: 'https://example.test',
@@ -146,6 +148,7 @@ function fixture(
     service.control({ sessionId, requestedByUserId: 'u', command }, false);
   return {
     service,
+    onAgentPreviewStarted,
     call,
     agentCall: (command: IosSimulatorRequest['command']) =>
       service.controlFromAgent({ sessionId: 's', requestedByUserId: 'u', command }),
@@ -344,6 +347,24 @@ describe('simulator ownership and lifecycle', () => {
     });
     expect(a.active()).toBe(false);
     expect(a.localClosed()).toBe(1);
+  });
+
+  it('reports only accepted agent starts, with the same discovery id on reuse', async () => {
+    const a = fixture();
+    await a.agentCall({ action: 'list' });
+    await a.agentCall({ action: 'status' });
+    expect(a.onAgentPreviewStarted).not.toHaveBeenCalled();
+    const local = await a.call({ action: 'start', udid });
+    expect(a.onAgentPreviewStarted).not.toHaveBeenCalled();
+    const agent = await a.agentCall({ action: 'start', udid });
+    expect(agent.preview?.operationId).toBe(local.preview?.operationId);
+    expect(a.onAgentPreviewStarted).toHaveBeenCalledWith('s', local.preview!.operationId);
+    await a.agentCall({ action: 'stop', operationId: agent.preview!.operationId });
+    a.onAgentPreviewStarted.mockRejectedValueOnce(new Error('offline'));
+    const replacement = await a.agentCall({ action: 'start', udid });
+    expect(replacement.success).toBe(true);
+    expect(replacement.preview?.operationId).not.toBe(agent.preview?.operationId);
+    expect(a.onAgentPreviewStarted).toHaveBeenLastCalledWith('s', replacement.preview!.operationId);
   });
 
   it('local agent ingress derives the active user and fails closed without that identity', async () => {

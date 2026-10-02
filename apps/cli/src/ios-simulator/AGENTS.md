@@ -6,7 +6,8 @@
   is the machine Worker singleton that excludes other sessions across workspaces.
   Acquire before boot/download, revoke inputs and join cleanup before release. A stale
   operation must never release a replacement lease. Do not persist devices, frames,
-  connection credentials, or heartbeats in Repo metadata.
+  credentials or heartbeats in Repo metadata. Only the UUID `iosSimulatorPreviewRequestId`
+  may publish agent-start discovery, never live state/authority; publication is best-effort.
 - `devices.ts` owns simctl listing/boot; `host-controls.ts` owns fixed device controls.
   Validate foreign JSON and UDIDs; invoke argv directly. Listing never downloads a runtime, starts devices or opens a tunnel.
 - `gateway.ts` exposes only the fixed viewer, bound device stream and typed private
@@ -78,11 +79,11 @@
   reap it and join pending host controls; never terminate the worker as normal cleanup. All build compositions emit
   the same sibling worker entry. No user simulator is shut down during cleanup.
 - Keep Baguette version, artifact digest and executable digest pinned in the manifest;
-  no PATH/Homebrew discovery or upstream fallback. Fetch through the platform runtime
-  artifact channel. License notices accompany the managed installation; see [README](README.md).
+  no PATH/Homebrew/upstream fallback. Use the runtime artifact channel with license
+  notices; see [README](README.md).
 - Patched Baguette builds use a distinct `-lody.N` runtime version/cache/key. Keep
-  the patch and source/toolchain provenance with the archive; never relabel patched
-  bytes as an upstream release. Packaging: `scripts/package-baguette-runtime.mjs`.
+  archive patch/toolchain provenance; never relabel patched bytes as upstream.
+  Packaging: `scripts/package-baguette-runtime.mjs`.
 - Local controls use trusted Machine RPC without Cloud I/O. Remote commands require
   exact signed preview-control proofs, including list/status and the ephemeral response
   key. Never put a viewer URL in workspace-readable Streams. Revocation fences proof
