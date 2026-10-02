@@ -3,6 +3,7 @@
 Status: implemented
 Translation: current
 Issue: [#1216](https://github.com/LodyAI/Lody/issues/1216)
+PR: [#1219](https://github.com/LodyAI/Lody/pull/1219)
 
 [English](2026-10-02-edit-affordance-unsupported-agents.md)
 
