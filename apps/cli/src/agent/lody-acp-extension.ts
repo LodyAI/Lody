@@ -81,6 +81,7 @@ const LodyCapabilitiesSchema = z
     compaction: VersionOneSchema.optional(),
     sessionHistory: VersionOneSchema.optional(),
     worktreeProject: VersionOneSchema.optional(),
+    mcpApps: VersionOneSchema.optional().catch(undefined),
   })
   .partial();
 

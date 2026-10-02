@@ -129,6 +129,10 @@ import {
   SessionSteerResponseSchema,
   SessionGoalResponseSchema,
   SESSION_GOAL_ACTIONS,
+  SessionMcpAppRequestSchema,
+  SessionMcpAppResponseSchema,
+  type SessionMcpAppRequest,
+  type SessionMcpAppResponse,
   SessionPreviewCreateResponseSchema,
   SessionPreviewRevokeResponseSchema,
   SessionPreviewStatusResponseSchema,
@@ -219,6 +223,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'session/live-status',
   'session/steer',
   'session/goal',
+  'session/mcp-app',
   'session/terminate',
   'session/fork',
   'session/edit-and-resend',
@@ -499,6 +504,11 @@ export const LoroSessionGoalRpcRequestSchema = BaseRpcRequestSchema.extend({
     .strict(),
 }).strict();
 
+export const LoroSessionMcpAppRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('session/mcp-app'),
+  params: SessionMcpAppRequestSchema,
+}).strict();
+
 export const LoroSessionSteerRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/steer'),
   params: z
@@ -666,6 +676,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroSessionLiveStatusRpcRequestSchema,
   LoroSessionSteerRpcRequestSchema,
   LoroSessionGoalRpcRequestSchema,
+  LoroSessionMcpAppRpcRequestSchema,
   LoroSessionTerminateRpcRequestSchema,
   LoroSessionForkRpcRequestSchema,
   LoroSessionEditAndResendRpcRequestSchema,
@@ -1516,6 +1527,7 @@ export type LoroMachineRpcResult =
   | LoroSessionLiveStatusRpcResponse
   | SessionSteerResponse
   | SessionGoalResponse
+  | SessionMcpAppResponse
   | SessionTerminateResponse
   | SessionForkResponse
   | SessionEditAndResendResponse
@@ -1553,8 +1565,21 @@ const toLegacyRpcErrorResponse = (
     type?: LocalProjectControlRequest['type'];
   },
   dispatchContext?: { sessionId: string; userTurnId: string },
-  preparationContext?: { preparationId: string; sessionId: string }
+  preparationContext?: { preparationId: string; sessionId: string },
+  mcpAppContext?: { sessionId: string; toolCallId: string }
 ): LoroMachineRpcResult => {
+  if (method === 'session/mcp-app') {
+    // Old daemons reject the unknown method; the renderer shows the app as unavailable.
+    return {
+      type: 'session/mcp-app_response',
+      sessionId: mcpAppContext?.sessionId ?? '',
+      toolCallId: mcpAppContext?.toolCallId ?? '',
+      ok: false,
+      code: 'MCP_APP_UNAVAILABLE',
+      error: `${error.code}: ${error.message}`,
+    };
+  }
+
   if (method === 'machine/preview-control') {
     return {
       type: 'machine/preview-control_response',
@@ -1938,6 +1963,10 @@ const parseRpcSuccessResult = async (
     const parsed = SessionGoalResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionGoalResponse) : null;
   }
+  if (response.method === 'session/mcp-app') {
+    const parsed = SessionMcpAppResponseSchema.safeParse(response.result);
+    return parsed.success ? parsed.data : null;
+  }
   if (response.method === 'session/terminate') {
     const parsed = SessionTerminateResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as SessionTerminateResponse) : null;
@@ -2028,6 +2057,7 @@ export type LoroStreamsRpcPendingRegistration = {
   };
   dispatchContext?: { sessionId: string; userTurnId: string };
   preparationContext?: { preparationId: string; sessionId: string };
+  mcpAppContext?: { sessionId: string; toolCallId: string };
   codeCollabOwnerSessionId?: string;
   onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
   onAcpAuthenticationProgress?: (message: MachineAcpAuthenticationProgressMessage) => void;
@@ -2407,7 +2437,8 @@ export class LoroStreamsRpcResponseDispatcher {
           finalPending.previewContext,
           finalPending.localProjectContext,
           finalPending.dispatchContext,
-          finalPending.preparationContext
+          finalPending.preparationContext,
+          finalPending.mcpAppContext
         )
       );
       return;
@@ -2440,7 +2471,8 @@ export class LoroStreamsRpcResponseDispatcher {
           finalPending.previewContext,
           finalPending.localProjectContext,
           finalPending.dispatchContext,
-          finalPending.preparationContext
+          finalPending.preparationContext,
+          finalPending.mcpAppContext
         )
       );
       return;
@@ -2856,6 +2888,18 @@ export class LoroStreamsMachineRpcClient {
         userId: options.userId,
       },
     })) as SessionGoalResponse | null;
+  }
+
+  /** MCP App traffic is proxied by the target daemon to the session's live agent. */
+  async requestSessionMcpApp(
+    request: SessionMcpAppRequest,
+    options: { timeoutMs?: number } = {}
+  ): Promise<SessionMcpAppResponse | null> {
+    return (await this.sendRequest({
+      method: 'session/mcp-app',
+      timeoutMs: options.timeoutMs ?? 60_000,
+      params: request,
+    })) as SessionMcpAppResponse | null;
   }
 
   async requestSessionTerminate(options: {
@@ -3396,6 +3440,7 @@ export class LoroStreamsMachineRpcClient {
             userId: string;
           };
         }
+      | { method: 'session/mcp-app'; timeoutMs: number; params: SessionMcpAppRequest }
       | {
           method: 'session/terminate';
           timeoutMs: number;
@@ -3632,6 +3677,10 @@ export class LoroStreamsMachineRpcClient {
         args.method === 'session/goal'
           ? { sessionId: args.params.sessionId, action: args.params.action }
           : undefined,
+      mcpAppContext:
+        args.method === 'session/mcp-app'
+          ? { sessionId: args.params.sessionId, toolCallId: args.params.toolCallId }
+          : undefined,
       dispatchContext:
         args.method === 'session/dispatch-turn'
           ? { sessionId: args.params.sessionId, userTurnId: args.params.userTurnId }
@@ -3748,6 +3797,9 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/goal':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'session/mcp-app':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'session/terminate':
@@ -3946,7 +3998,8 @@ export class LoroStreamsMachineRpcClient {
         pending.previewContext,
         pending.localProjectContext,
         pending.dispatchContext,
-        pending.preparationContext
+        pending.preparationContext,
+        pending.mcpAppContext
       );
       pending.resolve(errorResponse);
       return errorResponse;

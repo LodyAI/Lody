@@ -8,6 +8,9 @@ import {
   type ChatFailedReason,
   type SessionGoalAction,
   type SessionGoalResponse,
+  type SessionMcpAppRequest,
+  type SessionMcpAppResponse,
+  sessionMcpAppFailure,
   type IssuePRMention,
   type LocalProjectId,
   type MachineAcpBinaryInstallRequestValidated,
@@ -1265,6 +1268,25 @@ export class SessionExecutionService {
       bySession.set(sessionId, runtime.turnId);
     }
     return Array.from(bySession, ([sessionId, turnId]) => ({ sessionId, turnId }));
+  }
+
+  /**
+   * MCP App views read their state from the agent that ran the tool. Unlike
+   * goal work, viewing history must never boot an agent, so a session without a
+   * live agent reports the app unavailable.
+   */
+  async requestSessionMcpApp(request: SessionMcpAppRequest): Promise<SessionMcpAppResponse> {
+    const agentClient = this.deps.sessionManager.getSession(
+      request.sessionId as SessionId
+    )?.agentClient;
+    if (!agentClient) {
+      return sessionMcpAppFailure(
+        request,
+        'MCP_APP_UNAVAILABLE',
+        'The session agent is not running.'
+      );
+    }
+    return await agentClient.requestMcpApp(request);
   }
 
   /**

@@ -44,6 +44,11 @@ import {
   getDevinSubagentContextId,
   hasOtherDevinSubagentMeta,
   parseDevinSubagentTaskMeta,
+  parseSessionMcpAppAgentResult,
+  sessionMcpAppFailure,
+  SESSION_MCP_APP_MAX_RESPONSE_BYTES,
+  type SessionMcpAppRequest,
+  type SessionMcpAppResponse,
 } from '@lody/shared';
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
@@ -1387,6 +1392,65 @@ export class AgentClient implements acp.Client {
     await connection.request(LODY_EXTENSION_METHODS.subagentsCancel, { sessionId, taskId, reason });
   }
 
+  /**
+   * Proxies an MCP App view's request to the agent, which owns the MCP
+   * connection and scopes every op to the originating tool call. The agent sees
+   * only its own session id, never the Lody requester.
+   */
+  async requestMcpApp(request: SessionMcpAppRequest): Promise<SessionMcpAppResponse> {
+    const sessionId = this.acpSessionId;
+    const connection = this.connection;
+    if (this.lodyExtensionCapabilities.mcpApps?.version !== 1 || !sessionId || !connection) {
+      return sessionMcpAppFailure(
+        request,
+        'MCP_APP_UNAVAILABLE',
+        'The session agent does not serve MCP Apps.'
+      );
+    }
+    const target = { sessionId, toolCallId: request.toolCallId };
+    let raw: unknown;
+    try {
+      if (request.op === 'load') {
+        raw = await connection.request(LODY_EXTENSION_METHODS.mcpAppsLoad, target);
+      } else if (request.op === 'resource_read') {
+        raw = await connection.request(LODY_EXTENSION_METHODS.mcpAppsResourceRead, {
+          ...target,
+          uri: request.uri,
+        });
+      } else {
+        raw = await connection.request(LODY_EXTENSION_METHODS.mcpAppsToolCall, {
+          ...target,
+          name: request.name,
+          ...(request.arguments ? { arguments: request.arguments } : {}),
+        });
+      }
+    } catch (error) {
+      return sessionMcpAppFailure(request, 'MCP_APP_AGENT_ERROR', formatErrorMessage(error));
+    }
+    const result = parseSessionMcpAppAgentResult(request.op, raw);
+    if (!result) {
+      return sessionMcpAppFailure(
+        request,
+        'MCP_APP_AGENT_ERROR',
+        `The agent returned an invalid ${request.op} result.`
+      );
+    }
+    if (Buffer.byteLength(JSON.stringify(result)) > SESSION_MCP_APP_MAX_RESPONSE_BYTES) {
+      return sessionMcpAppFailure(
+        request,
+        'MCP_APP_RESPONSE_TOO_LARGE',
+        `The ${request.op} result exceeds ${SESSION_MCP_APP_MAX_RESPONSE_BYTES} bytes.`
+      );
+    }
+    return {
+      type: 'session/mcp-app_response',
+      sessionId: request.sessionId,
+      toolCallId: request.toolCallId,
+      ok: true,
+      result,
+    };
+  }
+
   getGoalCapability(): LodyGoalCapability | undefined {
     return this.lodyExtensionCapabilities.goal;
   }
@@ -1952,6 +2016,7 @@ export class AgentClient implements acp.Client {
                 lody: {
                   elicitation: { version: 1, answerNotes: true },
                   subagentEvents: { version: 1 },
+                  mcpApps: { version: 1 },
                 } satisfies LodyClientExtensionCapabilities,
               },
             },

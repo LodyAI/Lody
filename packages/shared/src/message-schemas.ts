@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
+import { McpAppToolCallSchema } from './mcp-app';
 import {
   isLodySubagentSnapshot,
   isLodySubagentProgress,
@@ -3283,6 +3284,7 @@ export const ToolCallMessageSchema = z.object({
   // Epoch ms when a scheduling tool call was first persisted (true creation moment;
   // turn-level timestamps are not a safe proxy — see `recordedAtMs` in ai.ts).
   recordedAtMs: z.number().optional(),
+  mcpApp: McpAppToolCallSchema.optional(),
   permissionRequest: PermissionRequestInfoSchema.optional(),
 });
 

@@ -347,6 +347,12 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number }
   ) => Promise<SessionGoalResponse | null>;
+  /** Proxies an MCP App view's request to the session's live agent on `machineId`. */
+  requestSessionMcpApp: (
+    machineId: MachineId,
+    request: import('@lody/shared').SessionMcpAppRequest,
+    options?: { timeoutMs?: number }
+  ) => Promise<import('@lody/shared').SessionMcpAppResponse>;
   requestSessionTerminate: (
     machineId: MachineId,
     sessionId: SessionId,

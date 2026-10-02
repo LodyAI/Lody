@@ -9,6 +9,7 @@ import {
 import type { ToolCallContent as AcpToolCallContent, SessionMode } from '@agentclientprotocol/sdk';
 import type { PermissionOutcome } from './message';
 import type { SessionGoalAction } from './goal';
+import type { McpAppToolCall } from './mcp-app';
 import { createPlanModeConfigOption } from 'acp-extension-core';
 import type { LodySubagentSnapshot, LodySubagentProgress } from 'acp-extension-core';
 import type { AgentConfigId, AgentRoleId, McpServerId, SessionId } from './ids';
@@ -1795,6 +1796,8 @@ export type MessageContent =
        * `collectPendingScheduledTasksFromHistory`.
        */
       recordedAtMs?: number;
+      /** MCP Apps descriptor; the app's content is fetched from the live agent on demand. */
+      mcpApp?: McpAppToolCall;
       permissionRequest?: {
         requestId: string;
         options: PermissionOption[];

@@ -597,6 +597,75 @@ describe('createWorkspaceMachineRpcFacade', () => {
     });
     expect(invoke).not.toHaveBeenCalled();
   });
+
+  it('routes MCP App requests over the local bridge and reports bridge failures as unavailable', async () => {
+    const request = { op: 'load' as const, sessionId, toolCallId: 'call-1', userId: 'owner' };
+    const loaded = {
+      type: 'session/mcp-app_response' as const,
+      sessionId,
+      toolCallId: 'call-1',
+      ok: true as const,
+      result: { toolInput: {}, toolResult: null },
+    };
+    const sent: unknown[] = [];
+    const replies = [
+      { ok: true, result: loaded },
+      { ok: false, error: 'request_timeout' },
+    ];
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async (_channel: string, message: unknown) => {
+          sent.push(message);
+          return replies.shift();
+        },
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected cloud client');
+      },
+    });
+
+    await expect(facade.requestSessionMcpApp(localMachineId, request)).resolves.toEqual(loaded);
+    await expect(facade.requestSessionMcpApp(localMachineId, request)).resolves.toEqual({
+      type: 'session/mcp-app_response',
+      sessionId,
+      toolCallId: 'call-1',
+      ok: false,
+      code: 'MCP_APP_UNAVAILABLE',
+      error: 'request_timeout',
+    });
+    expect(sent[0]).toMatchObject({ method: 'session/mcp-app', params: request });
+  });
+
+  it('reports a remote MCP App request that got no response as unavailable', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () => ({ requestSessionMcpApp: async () => null }) as never,
+    });
+
+    await expect(
+      facade.requestSessionMcpApp(remoteMachineId, {
+        op: 'tool_call',
+        sessionId,
+        toolCallId: 'call-1',
+        userId: 'owner',
+        name: 'expand',
+      })
+    ).resolves.toMatchObject({ ok: false, code: 'MCP_APP_UNAVAILABLE' });
+  });
 });
 
 describe('local MCP discovery routing', () => {

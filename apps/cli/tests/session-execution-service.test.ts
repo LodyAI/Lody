@@ -9652,3 +9652,19 @@ describe('SessionExecutionService initialization deadline', () => {
     }
   });
 });
+
+describe('SessionExecutionService MCP App proxy', () => {
+  it('reports a session without a live agent as unavailable instead of starting one', async () => {
+    const service = new SessionExecutionService(createBaseDeps({}));
+
+    await expect(
+      service.requestSessionMcpApp({
+        op: 'load',
+        sessionId: 'session-idle',
+        toolCallId: 'call-1',
+        userId: 'user-1',
+      })
+    ).resolves.toMatchObject({ ok: false, code: 'MCP_APP_UNAVAILABLE' });
+    expect(service.getExecutionSnapshot('session-idle' as SessionId).hasActiveTurn).toBe(false);
+  });
+});
