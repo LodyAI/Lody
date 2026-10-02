@@ -22,7 +22,11 @@ text writes the simulator clipboard through the IPC worker, then sends Cmd-V.
 `host-controls.ts` owns fixed xcrun commands for pasteboard, appearance, shake and deep links,
 joining their exit on cancellation. Baguette handles HID only; its Foundation subprocess
 paths are not used because killing the server does not reap their separate process groups. The gateway serves the fixed `viewer.ts` artifact. The
-React iframe validates source/origin/operation before accepting viewer state;
+React iframe validates source/origin/operation before accepting viewer state.
+Opaque (`file://`) desktop parents transfer a MessagePort to the exact viewer origin;
+the artifact binds it once after validating the parent and operation, and uses it for
+state, visibility, controls, artwork and screenshots. Navigation disposes the channel.
+There is no wildcard-origin reply. Web parents retain their exact-origin handshake;
 live frames never enter React, RPC, or synchronized documents. An explicitly requested
 screenshot transfers one bounded PNG to the parent for saving or staging as a composer
 attachment; capture never sends a message automatically. Input text and deep links also

@@ -30,6 +30,7 @@ type Wheel = {
 // is the actual WebSocket protocol, not a second implementation of its input logic.
 function viewer(
   options: {
+    origin?: string;
     videoDecoder?: unknown;
     suspendRaf?: boolean;
     rotation?: number;
@@ -158,7 +159,7 @@ function viewer(
   function visibility(visible: boolean, type = 'lody:ios-simulator:visibility') {
     void emit('message', {
       source: parent,
-      origin: 'https://lody.example',
+      origin: options.origin ?? 'https://lody.example',
       data: {
         type,
         operationId: 'test-operation',
@@ -227,6 +228,15 @@ function viewer(
         source,
         origin,
         data: { operationId: 'test-operation', requestId: 'test-request', ...data },
+      });
+    },
+    initPort(port: unknown, overrides: Record<string, unknown> = {}) {
+      return emit('message', {
+        source: parent,
+        origin: 'null',
+        ports: [port],
+        data: { type: 'lody:ios-simulator:init', operationId: 'test-operation', visible: true },
+        ...overrides,
       });
     },
     canvas,
@@ -847,5 +857,74 @@ describe('viewer WebCodecs lifecycle', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(codec.decoders).toHaveLength(0);
     expect(v.paints).toBe(0);
+  });
+});
+
+describe('opaque desktop parent handshake', () => {
+  it('requires a bound port, paints frames and returns controls/captures only through that port', async () => {
+    const v = viewer({ origin: 'null' });
+    expect(v.sockets).toHaveLength(0);
+    const replies: Record<string, unknown>[] = [];
+    const port = {
+      onmessage: (_event: { data: unknown }): unknown => {},
+      postMessage: (data: Record<string, unknown>) => replies.push(data),
+    };
+    await v.initPort(port, { source: {} });
+    await v.initPort(port, {
+      data: { type: 'lody:ios-simulator:init', operationId: 'other', visible: true },
+    });
+    await v.initPort(port, {
+      data: { type: 'lody:ios-simulator:init', operationId: 'test-operation', visible: 'yes' },
+    });
+    await v.initPort(port, { ports: [] });
+    expect(v.sockets).toHaveLength(0);
+    await v.initPort(port);
+    expect(v.sockets).toHaveLength(1);
+    v.sockets[0]?.onopen();
+    await v.paint();
+    expect(replies).toContainEqual(
+      expect.objectContaining({ type: 'lody:ios-simulator:state', state: 'ready' })
+    );
+    const command = {
+      type: 'lody:ios-simulator:control',
+      operationId: 'test-operation',
+      requestId: 'control',
+      control: { kind: 'rotate', direction: 'left' },
+    };
+    await v.command(command, 'null');
+    expect(replies.some((m) => m.requestId === 'control')).toBe(false);
+    await port.onmessage({ data: command });
+    expect(replies).toContainEqual(
+      expect.objectContaining({ requestId: 'control', success: true })
+    );
+    await port.onmessage({
+      data: { ...command, type: 'lody:ios-simulator:capture', requestId: 'capture' },
+    });
+    expect(replies).toContainEqual(
+      expect.objectContaining({
+        requestId: 'capture',
+        mimeType: 'image/png',
+        data: expect.any(ArrayBuffer),
+      })
+    );
+    await v.initPort({
+      ...port,
+      postMessage: () => {
+        throw new Error('rebound');
+      },
+    });
+    await port.onmessage({
+      data: { type: 'lody:ios-simulator:visibility', operationId: 'other', visible: false },
+    });
+    expect(v.sockets[0]?.readyState).toBe(1);
+    await port.onmessage({
+      data: {
+        type: 'lody:ios-simulator:visibility',
+        operationId: 'test-operation',
+        visible: false,
+      },
+    });
+    expect(v.sockets[0]?.readyState).toBe(3);
+    expect(v.messages).toEqual([]);
   });
 });

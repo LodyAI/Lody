@@ -118,6 +118,8 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
   ) {
     const stageRef = useRef<HTMLDivElement>(null);
     const frameRef = useRef<HTMLIFrameElement>(null);
+    const parentPort = useRef<MessagePort | null>(null);
+    const receivePort = useRef<(event: MessageEvent) => void>(() => {});
     const [loaded, setLoaded] = useState(false);
     const loadedRef = useRef(false);
     loadedRef.current = loaded;
@@ -150,8 +152,6 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
 
     useEffect(() => {
       const receive = (event: MessageEvent) => {
-        const frameWindow = frameRef.current?.contentWindow;
-        if (!frameWindow || event.source !== frameWindow || event.origin !== viewerOrigin) return;
         if (
           event.data?.type === 'lody:ios-simulator:exterior' &&
           event.data.operationId === operationId
@@ -195,8 +195,21 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
         }
         onStateChangeRef.current(state);
       };
-      window.addEventListener('message', receive);
-      return () => window.removeEventListener('message', receive);
+      receivePort.current = receive;
+      const receiveWindow = (event: MessageEvent) => {
+        if (
+          parentPort.current ||
+          event.source !== frameRef.current?.contentWindow ||
+          event.origin !== viewerOrigin
+        )
+          return;
+        receive(event);
+      };
+      window.addEventListener('message', receiveWindow);
+      return () => {
+        receivePort.current = () => {};
+        window.removeEventListener('message', receiveWindow);
+      };
     }, [operationId, viewerOrigin]);
 
     // A failed iframe navigation may never send a state. Offer Restore instead of
@@ -217,10 +230,13 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
     useEffect(() => {
       if (!loaded || sentVisibleRef.current === effectiveVisible) return;
       sentVisibleRef.current = effectiveVisible;
-      frameRef.current?.contentWindow?.postMessage(
-        { type: IOS_SIMULATOR_VIEWER_VISIBILITY, operationId, visible: effectiveVisible },
-        viewerOrigin
-      );
+      const message = {
+        type: IOS_SIMULATOR_VIEWER_VISIBILITY,
+        operationId,
+        visible: effectiveVisible,
+      };
+      if (parentPort.current) parentPort.current.postMessage(message);
+      else frameRef.current?.contentWindow?.postMessage(message, viewerOrigin);
     }, [effectiveVisible, loaded, operationId, viewerOrigin]);
 
     useEffect(() => {
@@ -238,6 +254,9 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
     useEffect(
       () => () => {
         for (const cancel of [...pendingReplies.current]) cancel();
+        parentPort.current?.close();
+        parentPort.current = null;
+        loadedRef.current = false;
       },
       [operationId, viewerOrigin, viewerUrl]
     );
@@ -257,11 +276,17 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
             resolve(unavailable);
             return;
           }
+          const port = parentPort.current;
           const requestId = crypto.randomUUID();
           let timer: ReturnType<typeof setTimeout> | undefined;
           let settled = false;
           const receive = (event: MessageEvent) => {
-            if (event.source !== frameWindow || event.origin !== viewerOrigin) return;
+            if (
+              port
+                ? parentPort.current !== port
+                : event.source !== frameWindow || event.origin !== viewerOrigin
+            )
+              return;
             const result = parse(event.data, operationId, requestId);
             if (result !== null) finish(result);
           };
@@ -269,16 +294,20 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
             if (settled) return;
             settled = true;
             clearTimeout(timer);
-            window.removeEventListener('message', receive);
+            if (port) port.removeEventListener('message', receive);
+            else window.removeEventListener('message', receive);
             pendingReplies.current.delete(cancel);
             resolve(result);
           };
           const cancel = () => finish(unavailable);
           pendingReplies.current.add(cancel);
           timer = setTimeout(() => finish(timeoutResult), timeoutMs);
-          window.addEventListener('message', receive);
+          if (port) port.addEventListener('message', receive);
+          else window.addEventListener('message', receive);
           try {
-            frameWindow.postMessage({ type, operationId, requestId, ...payload }, viewerOrigin);
+            const message = { type, operationId, requestId, ...payload };
+            if (port) port.postMessage(message);
+            else frameWindow.postMessage(message, viewerOrigin);
           } catch {
             finish(unavailable);
           }
@@ -336,15 +365,27 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
     const handleLoad = () => {
       for (const cancel of [...pendingReplies.current]) cancel();
       sentVisibleRef.current = visibleRef.current;
-      frameRef.current?.contentWindow?.postMessage(
-        {
-          type: IOS_SIMULATOR_VIEWER_INIT,
-          operationId,
-          visible: visibleRef.current,
-          rotateWithDevice,
-        },
-        viewerOrigin
-      );
+      parentPort.current?.close();
+      parentPort.current = null;
+      const frameWindow = frameRef.current?.contentWindow;
+      if (!frameWindow) return;
+      const init = {
+        type: IOS_SIMULATOR_VIEWER_INIT,
+        operationId,
+        visible: visibleRef.current,
+        rotateWithDevice,
+      };
+      // file:// has no addressable origin. The port is delivered only to this
+      // viewer's exact origin and dies with this document's navigation/unmount.
+      if (window.origin === 'null') {
+        const channel = new MessageChannel();
+        parentPort.current = channel.port1;
+        channel.port1.onmessage = (event) => {
+          if (parentPort.current === channel.port1) receivePort.current(event);
+        };
+        frameWindow.postMessage(init, viewerOrigin, [channel.port2]);
+      } else frameWindow.postMessage(init, viewerOrigin);
+      loadedRef.current = true;
       setLoaded(true);
     };
 

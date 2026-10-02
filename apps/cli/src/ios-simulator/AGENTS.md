@@ -63,18 +63,16 @@
   Native MJPEG FPS remains unfixed. `idle-refresh.ts` owns one bounded sharp JPEG
   after a drained quiet period; input/source changes revoke pending stills, and
   disconnect joins cancelled capture. Fixed loopback capture never renews a lease.
-- `viewer.ts` is the fixed iframe artifact, without React or annotation injection.
-  Parent commands bind source, origin and operation id. Decode at most one JPEG
-  with one replaceable pending frame; release touches on blur/cancel/disconnect.
-  Wheel/trackpad scrolling synthesizes the same single-touch protocol; it must
-  release on idle and before pointer takeover, without widening the gateway allowlist.
-  Pointer gestures starting in the bottom 7% retain `edge: bottom` until release.
-  The gateway accepts only that edge, validates its start band and rejects changes
-  mid-gesture; disconnect cleanup preserves the edge on the final touch-up.
-  Capture transfers bounded PNG bytes only to the exact parent that requested it;
-  never send pixels through state messages. The authenticated init selects mobile
-  upright display or desktop device-following rotation. Display angle consistently
-  controls layout, pointer mapping and capture; native device rotation stays independent.
+- `viewer.ts` is fixed iframe HTML, without React/annotation injection. Parent commands
+  bind source, origin and operation. Opaque init requires the exact parent, operation,
+  boolean visibility and one port; bind once, reject later window commands, and reply
+  only through that port, never `*`. Capture PNGs are bounded and request-bound.
+  JPEG keeps one active and one replaceable pending frame. Release touches
+  on blur/cancel/disconnect. Wheel input uses the same touch protocol, releasing on
+  idle and before pointer takeover. Bottom-7% gestures retain `edge: bottom` through
+  release; the gateway validates start band and rejects mid-gesture edge changes.
+  Authenticated init chooses mobile upright or desktop-following display rotation;
+  layout/input/capture share that angle, independent of native rotation.
 - `baguette-worker.ts` owns the native process through an IPC lease. Owner loss must
   reap it and join pending host controls; never terminate the worker as normal cleanup. All build compositions emit
   the same sibling worker entry. No user simulator is shut down during cleanup.
