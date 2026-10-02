@@ -8,11 +8,10 @@ let videoProgressTimer,videoHealthyAt=0,videoHealthyFrames=0,videoHealthyLast=0;
 function disposeVideo(){
   clearTimeout(videoProgressTimer);videoProgressTimer=undefined;videoHealthyAt=videoHealthyFrames=videoHealthyLast=0;
   videoEpoch++;videoQueue=[];videoBytes=0;videoReading=false;videoWaiting=true;videoOutputs.clear();
-  cancelAnimationFrame(videoDraw);clearTimeout(videoPaintTimer);videoDraw=undefined;videoPaintTimer=undefined;videoPending?.frame.close();videoPending=undefined;
+  cancelAnimationFrame(videoDraw);clearTimeout(videoPaintTimer);videoDraw=undefined;videoPaintTimer=undefined;videoPending?.close();videoPending=undefined;
   if(videoDecoder){try{videoDecoder.close()}catch{}videoDecoder=undefined}
 }
 function ackVideo(sequence){
-  if(ws?.readyState!==1)return;
   send({type:'frame-ack',sequence});
 }
 function fallbackVideo(){
@@ -46,8 +45,7 @@ function decodedVideoProgress(){
   watchVideoProgress(true);
 }
 function paintVideo(){
-  cancelAnimationFrame(videoDraw);clearTimeout(videoPaintTimer);videoDraw=undefined;videoPaintTimer=undefined;const entry=videoPending;videoPending=undefined;if(!entry)return;
-  const image=entry.frame;
+  cancelAnimationFrame(videoDraw);clearTimeout(videoPaintTimer);videoDraw=undefined;videoPaintTimer=undefined;const image=videoPending;videoPending=undefined;if(!image)return;
   try{
     if(!visible||document.hidden||!usingH264)return;
     const width=image.displayWidth,height=image.displayHeight;
@@ -81,13 +79,13 @@ async function readVideo(){
         const decoder=new VideoDecoder({
           output:frame=>{
             if(epoch!==videoEpoch||g!==generation||videoDecoder!==decoder){frame.close();return}
-            const entry=videoOutputs.get(frame.timestamp);videoOutputs.delete(frame.timestamp);
-            if(!entry){frame.close();recoverVideo();return}
-            if(videoPending){videoPending.frame.close()}
-            videoPending={frame,sequence:entry.sequence};
+            const sequence=videoOutputs.get(frame.timestamp);videoOutputs.delete(frame.timestamp);
+            if(sequence===undefined){frame.close();recoverVideo();return}
+            if(videoPending){videoPending.close()}
+            videoPending=frame;
             // Only one decoded picture is retained. RAF may pause on mobile while
             // decoder output continues: receiver credit must not wait for painting.
-            ackVideo(entry.sequence);decodedVideoProgress();
+            ackVideo(sequence);decodedVideoProgress();
             if(videoDraw===undefined){
               videoDraw=requestAnimationFrame(()=>paintVideo());
               videoPaintTimer=setTimeout(()=>paintVideo(),100);
@@ -103,7 +101,7 @@ async function readVideo(){
       }
       if(videoWaiting||!videoDecoder){ackVideo(packet.sequence);continue}
       const timestamp=packet.sequence*16667;
-      videoOutputs.set(timestamp,{sequence:packet.sequence});
+      videoOutputs.set(timestamp,packet.sequence);
       watchVideoProgress();
       videoDecoder.decode(new EncodedVideoChunk({type:packet.key?'key':'delta',timestamp,data:new Uint8Array(packet.data,11+packet.descriptionLength)}));
     }

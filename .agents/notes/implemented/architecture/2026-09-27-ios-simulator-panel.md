@@ -553,3 +553,29 @@ input prioritization and Device Hub-compatible controls are operational behavior
 remain intact. Cleanup does not claim a new network latency improvement.
 
 Validation: standalone public full check passed (CLI 3,377 tests plus four skipped; components 4,638). Final CLI typecheck/build, quick checks and formatter passed; 41 viewer/gateway tests passed after the final unused-argument removal. Parallel security/correctness/scope reviews and a fresh adversarial review found no blockers. Outer affected check retains existing ACP errors; docs retains only the existing oversized MCP AGENTS error. No new physical-device/WAN run was required or claimed for this removal.
+
+### Controlled redundancy ablation (2026-10-02)
+
+Starting at `54670425`, run the unchanged 110-test simulator suite against baseline,
+each isolated candidate, a negative control, and the combined retained candidates.
+Run `pnpm --dir apps/cli exec vitest run src/ios-simulator` for each variant.
+All experiments run in a separate validation checkout; no live simulator is touched.
+
+| Variant | Intervention | Result |
+| --- | --- | --- |
+| Baseline | Original implementation | 110 passed |
+| A | Store the pending VideoFrame directly; map decoder timestamps to sequence numbers instead of one-field objects | 110 passed |
+| B | Remove ACK helper's duplicate socket-open guard; shared send retains open/buffer checks | 110 passed |
+| C | Remove unconsumed H264 snapshot fields and make ACK duration a per-call local | 110 passed |
+| Negative control | Remove the 100 ms paint fallback | 109 passed, 1 failed: RAF suspension paints zero frames |
+| A+B+C | Combine retained candidates | 110 passed |
+
+Keep A/B/C; restore the paint fallback. Source-use inspection confirms removed fields
+have no production or test consumers. Tests remain unchanged and cover decoded credit,
+frame disposal, stale callbacks, fallback, recovery, pacing and bounded queues. This
+is behavioral regression evidence plus dependency analysis, not proof for every browser
+or a measured performance gain. Removing frame wrappers avoids two bookkeeping object
+allocations per ordinary decoded frame; native/physical-client/WAN behavior was not
+remeasured. No authorization, protocol wire shape, lease or Device Hub control changes.
+
+Final validation: standalone full check passed (CLI 3,452 plus four skipped; components 4,707), along with CLI build, formatting and docs check. Parallel security/correctness/scope review and fresh adversarial refutation found no blockers. Outer affected checking remains blocked by existing ACP dependency errors.

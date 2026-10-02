@@ -18,7 +18,6 @@ export class SimulatorH264Flow {
   private acknowledged = 0;
   private baseRtt = 400;
   private rtt = 0;
-  private ackMs = 0;
   private lastAck = 0;
   private nextSend = 0;
   private lastTune = 0;
@@ -157,7 +156,7 @@ export class SimulatorH264Flow {
     if (sequence <= this.acknowledged) return true;
     const frame = this.inFlight.get(sequence);
     if (!frame) return false;
-    this.ackMs = Math.max(0, now - frame.at);
+    const ackMs = Math.max(0, now - frame.at);
     if (!this.feedbackCount || now - this.lastAck >= 2000) {
       this.feedbackAt = now;
       this.feedbackCount = this.slowFeedback = this.feedbackBytes = 0;
@@ -165,8 +164,8 @@ export class SimulatorH264Flow {
     }
     this.lastAck = now;
     this.feedbackCount++;
-    if (this.ackMs > this.baseRtt + 350) this.slowFeedback++;
-    this.minFeedback = Math.min(this.minFeedback, this.ackMs);
+    if (ackMs > this.baseRtt + 350) this.slowFeedback++;
+    this.minFeedback = Math.min(this.minFeedback, ackMs);
     this.acknowledged = sequence;
     for (const [id, entry] of this.inFlight)
       if (id <= sequence) {
@@ -231,17 +230,8 @@ export class SimulatorH264Flow {
       inFlightFrames: this.inFlight.size,
       inFlightBytes: this.inFlightBytes(),
       oldestFrameMs: this.oldestAge(now),
-      ackMs: this.ackMs,
-      ackIdleMs: this.lastAck ? now - this.lastAck : 0,
-      rttMs: this.rtt,
-      baseRttMs: this.rtt ? this.baseRtt : 0,
-      targetFps: this.targetFps,
       windowBytes: this.budget(),
-      pacingMbps: (this.bitrate * 1.3) / 1e6,
-      encoderBitrate: this.bitrate,
-      queuedAgeMs: this.queue[0] ? Math.max(0, now - this.queue[0].at) : 0,
       queuedFrames: this.queue.length,
-      queuedBytes: this.queuedBytes,
     };
     return result;
   }
