@@ -505,3 +505,35 @@ Baguette artifact delivered H.264 on both gateway paths simultaneously (172 loca
 checks native multi-view capture, not a physical phone or a real Internet tunnel.
 
 Validation: the standalone public full check passed before the final cleanup-outcome refinement (CLI 3,366 tests plus four skipped; components 4,640). The final refinement passed all 208 simulator/preview tests, CLI typecheck/build and quick checks; formatting passed. Outer affected checking remains blocked by existing ACP type/dependency errors, and docs checking retains the existing oversized MCP AGENTS file. This increment was self-reviewed without subagents.
+
+### Device Hub coexistence for navigation buttons (2026-10-02)
+
+Xcode 27 Device Hub suppresses legacy MainScreenButtonsService; Home, double-Home
+App Switcher and Lock can report successful dispatch without changing the screen.
+A guest HIDVirtualEventService with the CoreDevice button-service properties and
+consumer Menu/Power events coexists with Device Hub. The worker now owns a fixed
+bundled helper compiled by the host Xcode simulator SDK, one persistent service per
+preview/device, with bounded ready/command replies, no uncertain-command replay,
+and joined EOF/termination cleanup. Preparation warms the helper before viewing;
+failure does not prevent video/touch use. Only the three navigation buttons change.
+
+Runtime compilation avoids a new Baguette artifact and matches the installed SDK,
+but adds cold preparation cost and requires a complete Xcode toolchain. The helper
+uses private guest HID interfaces and targets Apple Silicon/iOS 17+; older runtimes
+can continue previewing but navigation controls can report unavailable. A binary
+helper bundled in a future pinned artifact could remove compilation cost. Per-press
+process spawning was rejected because it increases interaction latency; restarting
+SpringBoard was rejected because it terminates the user's apps. The earlier generic
+HingeControl proof is not shipped: this helper registers only a button service and
+has explicit replies. No shell/caller source, arbitrary HID codes or device switching
+is exposed. A successful native reply confirms event submission, not UI completion.
+
+An isolated Xcode 27/iPhone 17 Pro/iOS 26.2 run verified actual Home, App Switcher
+and Lock screens with Device Hub active and unchanged SpringBoard/backboardd PIDs.
+Warm App Switcher took about 376 ms and Lock 105 ms; cold compilation/registration
+was about 5.5 s before moving it to preparation. These are local measurements,
+not remote end-to-end latency. Physical mobile UI and older Xcode remain unverified.
+
+Fault-injection review found and fixed a parent-first process-group leak and a cleanup-error path that could skip native teardown. The final reviewer reran the descendant probe and observed no surviving process. Native cancellation during App Switcher also removed both host simctl and guest helper before device shutdown, with Device Hub active and unchanged system UI PIDs.
+
+Validation: standalone public full check passed (CLI 3,379 passed/four skipped; components 4,640 passed), final CLI build/typecheck and formatting passed. Adversarial security/correctness/scope review and fresh refutation completed; no remaining P0/P1 findings. Outer affected checking retains existing ACP dependency/type failures; docs retains only the existing oversized MCP AGENTS file.

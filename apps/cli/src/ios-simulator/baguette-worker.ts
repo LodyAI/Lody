@@ -3,11 +3,13 @@ import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { IosSimulatorDeviceControlSchema } from '@lody/shared';
+import { createGuestButtons } from './guest-buttons';
 import { runSimulatorHostControl } from './host-controls';
 
 // IPC is ownership: losing the daemon always reaps the native server.
 const abort = new AbortController();
 const stop = () => abort.abort();
+const buttons = createGuestButtons(abort.signal);
 process.on('disconnect', stop);
 let pendingHostControl: Promise<void> | undefined;
 const onMessage = (raw: unknown) => {
@@ -18,7 +20,7 @@ const onMessage = (raw: unknown) => {
       udid: z.string().uuid(),
       control: z.union([
         IosSimulatorDeviceControlSchema,
-        z.object({ kind: z.literal('prepare-keyboard') }).strict(),
+        z.object({ kind: z.enum(['prepare-keyboard', 'prepare-buttons']) }).strict(),
       ]),
     })
     .strict()
@@ -29,19 +31,27 @@ const onMessage = (raw: unknown) => {
   }
   const { id, udid, control } = request.data;
   if (
+    !(control.kind === 'button' && ['home', 'app-switcher', 'lock'].includes(control.button)) &&
     control.kind !== 'text' &&
     control.kind !== 'appearance' &&
     control.kind !== 'open-url' &&
     control.kind !== 'shake' &&
+    control.kind !== 'prepare-buttons' &&
     control.kind !== 'prepare-keyboard'
   ) {
     stop();
     return;
   }
-  pendingHostControl = runSimulatorHostControl(
-    udid,
-    control,
-    AbortSignal.any([abort.signal, AbortSignal.timeout(10000)])
+  pendingHostControl = (
+    control.kind === 'prepare-buttons'
+      ? buttons.prepare(udid)
+      : control.kind === 'button'
+        ? buttons.press(udid, z.enum(['home', 'app-switcher', 'lock']).parse(control.button))
+        : runSimulatorHostControl(
+            udid,
+            control,
+            AbortSignal.any([abort.signal, AbortSignal.timeout(10000)])
+          )
   )
     .then(
       () => {
@@ -115,6 +125,9 @@ try {
 } finally {
   stop();
   await pendingHostControl;
+  await buttons.close().catch(() => {
+    process.exitCode = 1;
+  });
   if (child?.pid !== undefined) {
     const group = -child.pid;
     const signalGroup = (signal: NodeJS.Signals | 0): boolean => {

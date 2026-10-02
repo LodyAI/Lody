@@ -240,15 +240,9 @@ describe('simulator media boundary', () => {
   });
 
   it('authenticates private controls, binds the device and deduplicates completed request IDs', async () => {
-    const received: Array<{ path?: string; body: unknown }> = [];
-    const f = await setup((req, res) => {
-      void (async () => {
-        const chunks: Buffer[] = [];
-        for await (const chunk of req) chunks.push(chunk);
-        received.push({ path: req.url, body: JSON.parse(Buffer.concat(chunks).toString()) });
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end('{"ok":true}');
-      })();
+    const received: SimulatorHostControl[] = [];
+    const f = await setup(undefined, async (control) => {
+      received.push(control);
     });
     const request = {
       operationId: 'operation',
@@ -272,12 +266,7 @@ describe('simulator media boundary', () => {
     expect(received).toEqual([]);
     expect(await (await send(request)).json()).toEqual({ success: true, rotation: 0 });
     expect(await (await send(request)).json()).toEqual({ success: true, rotation: 0 });
-    expect(received).toEqual([
-      {
-        path: '/simulators/5519CB11-71C9-46D9-AEFF-73C96F1104E0/input',
-        body: { type: 'button', button: 'home', duration: 0 },
-      },
-    ]);
+    expect(received).toEqual([{ kind: 'button', button: 'home' }]);
     expect(
       await (await send({ ...request, control: { kind: 'button', button: 'lock' } })).json()
     ).toEqual({ success: false, error: 'failed' });

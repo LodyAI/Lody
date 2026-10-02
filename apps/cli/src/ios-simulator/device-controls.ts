@@ -52,6 +52,16 @@ export function createSimulatorDeviceControls(options: {
   const execute = async (control: IosSimulatorDeviceControl): Promise<void> => {
     switch (control.kind) {
       case 'button':
+        if (
+          control.button === 'home' ||
+          control.button === 'app-switcher' ||
+          control.button === 'lock'
+        ) {
+          if (!options.active()) throw new Error('Simulator unavailable.');
+          await options.hostControl({ kind: 'button', button: control.button });
+          if (!options.active()) throw new Error('Simulator unavailable.');
+          return;
+        }
         Ack.parse(
           await post('input', {
             type: 'button',
@@ -86,7 +96,11 @@ export function createSimulatorDeviceControls(options: {
   };
   return {
     initialize: async () => {
-      if (options.softwareKeyboard) await options.hostControl({ kind: 'prepare-keyboard' });
+      if (options.softwareKeyboard) {
+        await options.hostControl({ kind: 'prepare-keyboard' });
+        // Unsupported guest HID must not prevent video/touch viewing; button requests still fail explicitly.
+        await options.hostControl({ kind: 'prepare-buttons' }).catch(() => {});
+      }
       Ack.parse(await post('orientation?value=portrait'));
       orientation = 0;
     },

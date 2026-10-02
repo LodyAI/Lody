@@ -258,3 +258,17 @@ backpressure. These timings need no clock synchronization. High input RTT with l
 queue wait points toward transport/scheduling; low input RTT does not establish that
 the guest rendered promptly. Network propagation and already-sent bytes cannot be
 removed by dropping an unsent queue.
+
+
+Home, App Switcher and Lock use a preview-owned guest virtual button service. Xcode
+27 Device Hub can suppress Baguette's legacy hardware-button service while its
+requests still acknowledge success. The new service coexists with Device Hub and
+never resets its notify state or restarts SpringBoard. Fixed bundled Objective-C
+source is compiled with the installed simulator SDK into a private temporary
+directory (Apple Silicon, iOS 17+ target); no downloaded compiler or PATH helper is
+used. iPhone/iPad preview preparation warms it; preparation failure leaves video
+available and subsequent button requests report failure. The first compile is paid
+at preparation; warm commands reuse the process. Acknowledgements mean both HID
+edges were accepted, not that the guest app completed an animation. EOF releases
+an in-progress key, closes the service, and cleanup joins the child before deleting
+the temporary directory. Unknown replies/timeouts fail without replaying a press.

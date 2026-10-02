@@ -3,7 +3,8 @@ import type { IosSimulatorDeviceControl } from '@lody/shared';
 
 export type SimulatorHostControl =
   | Extract<IosSimulatorDeviceControl, { kind: 'text' | 'appearance' | 'open-url' | 'shake' }>
-  | { kind: 'prepare-keyboard' };
+  | { kind: 'prepare-keyboard' | 'prepare-buttons' }
+  | { kind: 'button'; button: 'home' | 'app-switcher' | 'lock' };
 
 /** Run only fixed simctl/devicectl commands, inside the IPC lifecycle worker.
  * Unlike Foundation.Process children, these direct children can be cancelled and joined. */
@@ -46,6 +47,9 @@ export async function runSimulatorHostControl(
   }
   let code: number | null;
   switch (control.kind) {
+    case 'prepare-buttons':
+    case 'button':
+      throw new Error('Simulator buttons require the owned guest service.');
     case 'prepare-keyboard':
       code = await run([
         'simctl',

@@ -32,7 +32,7 @@ describe('simulator device controls', () => {
         );
       },
     });
-    await controller.execute({ kind: 'button', button: 'home' });
+    await controller.execute({ kind: 'button', button: 'volume-up' });
     await controller.execute({ kind: 'rotate', direction: 'left' });
     expect(controller.rotation()).toBe(270);
     fail = true;
@@ -49,7 +49,7 @@ describe('simulator device controls', () => {
     expect(calls).toEqual([
       {
         url: 'http://127.0.0.1:1234/simulators/test-device/input',
-        body: { type: 'button', button: 'home', duration: 0 },
+        body: { type: 'button', button: 'volume-up', duration: 0 },
       },
       {
         url: 'http://127.0.0.1:1234/simulators/test-device/orientation?value=landscape-right',
@@ -139,10 +139,10 @@ describe('simulator device controls', () => {
         return new Response('x'.repeat(65537));
       },
     });
-    await expect(controller.execute({ kind: 'button', button: 'home' })).rejects.toThrow();
+    await expect(controller.execute({ kind: 'button', button: 'volume-up' })).rejects.toThrow();
     expect(calls).toEqual([]);
     active = true;
-    await expect(controller.execute({ kind: 'button', button: 'home' })).rejects.toThrow(
+    await expect(controller.execute({ kind: 'button', button: 'volume-up' })).rejects.toThrow(
       'too large'
     );
   });
@@ -173,7 +173,7 @@ describe('simulator device controls', () => {
 
   it('rejects arbitrary routes, unsupported actions and non-navigation URLs at the boundary', () => {
     for (const input of [
-      { kind: 'button', button: 'home', udid: 'other' },
+      { kind: 'button', button: 'volume-up', udid: 'other' },
       { kind: 'install', path: '/tmp/test.app' },
       { kind: 'text', text: 'x'.repeat(16001) },
       ...[
@@ -189,4 +189,31 @@ describe('simulator device controls', () => {
       IosSimulatorDeviceControlSchema.parse({ kind: 'open-url', url: 'myapp://settings' })
     ).toEqual({ kind: 'open-url', url: 'myapp://settings' });
   });
+});
+
+it('routes navigation buttons through owned guest control and fences revoked replies', async () => {
+  const applied: string[] = [];
+  let active = true;
+  let revoke = false;
+  const controller = createSimulatorDeviceControls({
+    udid: 'device',
+    port: 1234,
+    signal: new AbortController().signal,
+    active: () => active,
+    fetch: async () => {
+      throw new Error('Legacy button path must not be used');
+    },
+    hostControl: async (control) => {
+      if (control.kind !== 'button') throw new Error('Unexpected control');
+      applied.push(control.button);
+      if (revoke) active = false;
+    },
+  });
+  for (const button of ['home', 'app-switcher', 'lock'] as const)
+    await controller.execute({ kind: 'button', button });
+  expect(applied).toEqual(['home', 'app-switcher', 'lock']);
+  revoke = true;
+  await expect(controller.execute({ kind: 'button', button: 'home' })).rejects.toThrow();
+  await expect(controller.execute({ kind: 'button', button: 'lock' })).rejects.toThrow();
+  expect(applied).toEqual(['home', 'app-switcher', 'lock', 'home']);
 });
