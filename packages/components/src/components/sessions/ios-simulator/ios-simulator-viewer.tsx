@@ -377,7 +377,8 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
       };
       // file:// has no addressable origin. The port is delivered only to this
       // viewer's exact origin and dies with this document's navigation/unmount.
-      if (window.origin === 'null') {
+      // Electron reports file:// here but serializes message origins as null.
+      if (window.location.protocol === 'file:' || window.origin === 'null') {
         const channel = new MessageChannel();
         parentPort.current = channel.port1;
         channel.port1.onmessage = (event) => {

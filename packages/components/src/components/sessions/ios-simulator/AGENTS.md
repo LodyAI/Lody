@@ -16,7 +16,8 @@ Decision and rationale:
 - The viewer keeps its own origin for the exact-origin handshake, so a `viewerUrl` that
   is not http(s) or shares the app's origin is rejected, never rendered. Accept viewer
   `state` only from that frame's window, origin and operation. For an opaque desktop
-  origin, transfer a fresh MessagePort to the exact viewer origin on load; route all
+  origin, detect `file:` via location.protocol (Electron self-origin can be `file://`
+  while outgoing message origin is `null`), and transfer a fresh MessagePort to the exact viewer origin on load; route all
   later traffic through it. Close/fence ports and cancel replies on reload/unmount.
 - One Session controls a device: never offer a takeover of an occupied device. Stop and
   Cancel are `stop{operationId}`; they end the preview only, never shut the device down.

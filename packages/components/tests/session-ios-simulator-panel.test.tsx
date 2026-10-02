@@ -140,6 +140,12 @@ function createFakeMachine(initial: {
   };
 }
 
+const testDom = (
+  globalThis as unknown as {
+    jsdom: { reconfigure(options: { url: string }): void };
+  }
+).jsdom;
+const initialTestUrl = window.location.href;
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
@@ -148,6 +154,7 @@ afterEach(() => {
   root = undefined;
   container?.remove();
   container = undefined;
+  testDom.reconfigure({ url: initialTestUrl });
   window.localStorage.clear();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -1017,107 +1024,115 @@ it('loads real Kit artwork before preview without a start and releases it on unm
   }
 });
 
-it('binds opaque desktop controls and state to a fresh port on every iframe load', async () => {
-  vi.stubGlobal('origin', 'null');
-  class Port extends EventTarget {
-    onmessage: ((event: MessageEvent) => void) | null = null;
-    peer?: Port;
-    closed = false;
-    postMessage(data: unknown) {
-      if (this.closed || this.peer?.closed) return;
-      const event = new MessageEvent('message', { data });
-      this.peer?.onmessage?.(event);
-      this.peer?.dispatchEvent(event);
-    }
-    close() {
-      this.closed = true;
-    }
-  }
-  vi.stubGlobal(
-    'MessageChannel',
-    class {
-      port1 = new Port();
-      port2 = new Port();
-      constructor() {
-        this.port1.peer = this.port2;
-        this.port2.peer = this.port1;
+it.each(['null', 'file://'])(
+  'binds desktop origin %s to a fresh port on every iframe load',
+  async (origin) => {
+    if (origin === 'file://')
+      testDom.reconfigure({ url: 'file:///Applications/Lody.app/index.html' });
+    vi.stubGlobal('origin', origin);
+    class Port extends EventTarget {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      peer?: Port;
+      closed = false;
+      postMessage(data: unknown) {
+        if (this.closed || this.peer?.closed) return;
+        const event = new MessageEvent('message', { data });
+        this.peer?.onmessage?.(event);
+        this.peer?.dispatchEvent(event);
+      }
+      close() {
+        this.closed = true;
       }
     }
-  );
-  const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
-  const panel = await renderPanel({ machine, meta: CONTROLS_META });
-  const frame = container!.querySelector('iframe')!;
-  const ports: Port[] = [];
-  vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((
-    message: unknown,
-    target: string,
-    transfer: Port[]
-  ) => {
-    expect(target).toBe(VIEWER_ORIGIN);
-    expect(message).toMatchObject({ type: 'lody:ios-simulator:init', operationId: 'op-1' });
-    ports.push(transfer[0]!);
-  }) as never);
-  await act(async () => frame.dispatchEvent(new Event('load')));
-  const port = ports[0]!;
-  const ready = {
-    type: 'lody:ios-simulator:state',
-    operationId: 'op-1',
-    state: 'ready',
-    width: 2000,
-    height: 1200,
-    rotation: 90,
-  };
-  const turns = () =>
-    container?.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns');
-  await act(async () =>
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        source: frame.contentWindow,
-        origin: VIEWER_ORIGIN,
-        data: ready,
-      })
-    )
-  );
-  expect(turns()).toBe('0');
-  await act(async () => port.postMessage({ ...ready, operationId: 'wrong' }));
-  expect(turns()).toBe('0');
-  await act(async () => port.postMessage(ready));
-  expect(turns()).toBe('1');
-  const requests: Record<string, unknown>[] = [];
-  port.onmessage = (event) => requests.push(event.data);
-  await act(async () => labelled('Home')?.click());
-  expect(requests.at(-1)).toMatchObject({
-    type: 'lody:ios-simulator:control',
-    operationId: 'op-1',
-    control: { kind: 'button', button: 'home' },
-  });
-  const reply = { ...requests.at(-1), type: 'lody:ios-simulator:control-result', success: true };
-  await act(async () =>
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        source: frame.contentWindow,
-        origin: VIEWER_ORIGIN,
-        data: reply,
-      })
-    )
-  );
-  expect(labelled('Home')?.disabled).toBe(true);
-  await act(async () => port.postMessage(reply));
-  expect(labelled('Home')?.disabled).toBe(false);
-  await act(async () => labelled('Home')?.click());
-  await act(async () => frame.dispatchEvent(new Event('load')));
-  expect(port.peer?.closed).toBe(true);
-  expect(labelled('Home')?.disabled).toBe(false);
-  // Even an already-queued event on the old port cannot change the new viewer.
-  await act(async () =>
-    port.peer?.onmessage?.(new MessageEvent('message', { data: { ...ready, rotation: 270 } }))
-  );
-  expect(turns()).toBe('1');
-  const fresh = ports[1]!;
-  fresh.onmessage = (event) => requests.push(event.data);
-  await panel.render(false);
-  expect(requests.at(-1)).toMatchObject({ type: 'lody:ios-simulator:visibility', visible: false });
-  act(() => root?.unmount());
-  root = undefined;
-  expect(fresh.peer?.closed).toBe(true);
-});
+    vi.stubGlobal(
+      'MessageChannel',
+      class {
+        port1 = new Port();
+        port2 = new Port();
+        constructor() {
+          this.port1.peer = this.port2;
+          this.port2.peer = this.port1;
+        }
+      }
+    );
+    const machine = createFakeMachine({ devices: [device({ udid: 'phone' })], preview: READY });
+    const panel = await renderPanel({ machine, meta: CONTROLS_META });
+    const frame = container!.querySelector('iframe')!;
+    const ports: Port[] = [];
+    vi.spyOn(frame.contentWindow!, 'postMessage').mockImplementation(((
+      message: unknown,
+      target: string,
+      transfer: Port[]
+    ) => {
+      expect(target).toBe(VIEWER_ORIGIN);
+      expect(message).toMatchObject({ type: 'lody:ios-simulator:init', operationId: 'op-1' });
+      ports.push(transfer[0]!);
+    }) as never);
+    await act(async () => frame.dispatchEvent(new Event('load')));
+    const port = ports[0]!;
+    const ready = {
+      type: 'lody:ios-simulator:state',
+      operationId: 'op-1',
+      state: 'ready',
+      width: 2000,
+      height: 1200,
+      rotation: 90,
+    };
+    const turns = () =>
+      container?.querySelector('[data-testid="ios-simulator-device"]')?.getAttribute('data-turns');
+    await act(async () =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: frame.contentWindow,
+          origin: VIEWER_ORIGIN,
+          data: ready,
+        })
+      )
+    );
+    expect(turns()).toBe('0');
+    await act(async () => port.postMessage({ ...ready, operationId: 'wrong' }));
+    expect(turns()).toBe('0');
+    await act(async () => port.postMessage(ready));
+    expect(turns()).toBe('1');
+    const requests: Record<string, unknown>[] = [];
+    port.onmessage = (event) => requests.push(event.data);
+    await act(async () => labelled('Home')?.click());
+    expect(requests.at(-1)).toMatchObject({
+      type: 'lody:ios-simulator:control',
+      operationId: 'op-1',
+      control: { kind: 'button', button: 'home' },
+    });
+    const reply = { ...requests.at(-1), type: 'lody:ios-simulator:control-result', success: true };
+    await act(async () =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: frame.contentWindow,
+          origin: VIEWER_ORIGIN,
+          data: reply,
+        })
+      )
+    );
+    expect(labelled('Home')?.disabled).toBe(true);
+    await act(async () => port.postMessage(reply));
+    expect(labelled('Home')?.disabled).toBe(false);
+    await act(async () => labelled('Home')?.click());
+    await act(async () => frame.dispatchEvent(new Event('load')));
+    expect(port.peer?.closed).toBe(true);
+    expect(labelled('Home')?.disabled).toBe(false);
+    // Even an already-queued event on the old port cannot change the new viewer.
+    await act(async () =>
+      port.peer?.onmessage?.(new MessageEvent('message', { data: { ...ready, rotation: 270 } }))
+    );
+    expect(turns()).toBe('1');
+    const fresh = ports[1]!;
+    fresh.onmessage = (event) => requests.push(event.data);
+    await panel.render(false);
+    expect(requests.at(-1)).toMatchObject({
+      type: 'lody:ios-simulator:visibility',
+      visible: false,
+    });
+    act(() => root?.unmount());
+    root = undefined;
+    expect(fresh.peer?.closed).toBe(true);
+  }
+);

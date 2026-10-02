@@ -7,8 +7,8 @@ Translation: current
 
 ## Abstract
 
-Packaged Electron loads its renderer from `file://`, whose opaque origin cannot be
-used as a reply destination. The simulator artifact rejected that parent's init,
+Packaged Electron loads its renderer from `file://`. It reports `window.origin` as
+`file://`, but the receiving iframe sees the message origin as `null`. The simulator artifact rejected that parent's init,
 so a ready local operation could show a black screen and eventually `viewer=error`
 while web/mobile viewers worked. Desktop parents now transfer a dedicated MessagePort
 to the exact viewer origin; the artifact binds it to the parent and operation.
@@ -56,3 +56,18 @@ with the required 2 GiB heap; Electron renderer built with its normal configured
 Security, correctness, scope/simplification and fresh adversarial reviews found no
 P0/P1. Outer affected checking stops on the intentionally different OSS pin in this
 public-only checkout; no private gitlink or revision manifest is changed.
+
+## Correction: Electron self-origin differs from message origin
+
+The first patch selected a port only when `window.origin === 'null'`. That passed
+Chrome file-page validation but still failed in packaged Electron: Electron 43.7.6
+reports its own origin as `file://` while serializing the outgoing message as `null`.
+The renderer now also selects the port when `location.protocol === 'file:'`.
+The receiver's admission rules and all non-file web behavior are unchanged.
+
+The owning React regression now uses an actual file URL and Electron's self-origin;
+restoring the old condition makes it fail. An isolated Electron window with the same
+sandbox/context-isolation settings connected to the live native preview, reached
+ready and returned a PNG through the bound port. The installed product still needs
+its renderer rebuilt/restarted; a CLI already containing the first patch needs no
+further update. Chrome alone cannot validate Electron's file-origin semantics.

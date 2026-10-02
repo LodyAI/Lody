@@ -7,7 +7,8 @@ Translation: current
 
 ## 摘要
 
-打包后的 Electron 从 `file://` 加载界面，其不透明来源不能作为消息回复目标。
+打包后的 Electron 从 `file://` 加载界面。它报告的 `window.origin` 为 `file://`，
+但接收 iframe 看到的消息来源为 `null`。
 模拟器查看器拒绝了这类父页面的初始化消息，因此本地操作已就绪时仍可能黑屏，
 最终显示 `viewer=error`，而网页和移动端正常。桌面父页面现在向查看器的精确来源
 转交专用 MessagePort，查看器将其绑定到父窗口和操作。网页保留已有的精确来源
@@ -48,3 +49,16 @@ React 面板测试覆盖绑定状态／控制回复、刷新取消、旧消息�
 界面使用其正常配置的堆大小完成构建。安全、正确性、范围／简化及独立反证复审均
 未发现 P0/P1。外层 affected 检查停在公共代码与私有固定版本不一致的校验；本次
 仅修改公共仓库，不提交私有 gitlink 或版本清单。
+
+## 更正：Electron 自身来源与消息来源不同
+
+首次补丁仅在 `window.origin === 'null'` 时创建端口。这通过了 Chrome 文件页面验证，
+但打包 Electron 仍失败：Electron 43.7.6 报告自身来源为 `file://`，发出的消息来源却
+序列化为 `null`。现在界面在 `location.protocol === 'file:'` 时也选择端口。接收端
+准入校验和非 file 网页行为均不变。
+
+原有 React 回归测试现在使用真实文件 URL 和 Electron 的自身来源；恢复旧条件就会
+失败。使用相同 sandbox/context-isolation 配置的独立 Electron 窗口已连接实际原生
+预览，进入 ready 并通过绑定端口返回 PNG。已安装产品仍需重新构建／重启界面；
+已包含首次补丁的 CLI 无需进一步更新。仅验证 Chrome 不能证明 Electron 文件来源
+语义正确。
