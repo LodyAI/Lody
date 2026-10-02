@@ -49,7 +49,12 @@ disables it; and Select's built-in typeahead alone is undiscoverable.
 ## Verification and limits
 
 `tsgo --noEmit`, `oxlint`, `oxfmt --check`, `check-i18n`, and the 44 tests in
-`tests/agent-config-dialog.test.tsx` pass. Not verified: packaged-app visuals.
+`tests/agent-config-dialog.test.tsx` pass. The
+[before](2026-10-02-agent-config-selector-popup-pin.before.png) and
+[after](2026-10-02-agent-config-selector-popup-pin.after.png) captures come
+from the `EditLongOptionLists` story driven by Playwright — before is the same
+fixture with the component change stashed, so only the control differs. Not
+verified: packaged-app visuals.
 `agent-role-form.tsx`'s `ValueSelect` renders the same catalogs through a bare
 `Select` and has the same unfixed behaviour; it is the same fix if it regresses
 visibly. `@lody/ui`'s `Select` still animates its hidden state as if the popup

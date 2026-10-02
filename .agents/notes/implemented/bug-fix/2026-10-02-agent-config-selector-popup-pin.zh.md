@@ -42,8 +42,12 @@ settings 各页面已在用的字段形态可搜索控件，会 portal 进最近
 ## 验证与限制
 
 `tsgo --noEmit`、`oxlint`、`oxfmt --check`、`check-i18n` 及
-`tests/agent-config-dialog.test.tsx` 的 44 个测试全部通过。未验证：打包
-应用的实机观感。`agent-role-form.tsx` 的 `ValueSelect` 用裸 `Select`
+`tests/agent-config-dialog.test.tsx` 的 44 个测试全部通过。
+[before](2026-10-02-agent-config-selector-popup-pin.before.png) 与
+[after](2026-10-02-agent-config-selector-popup-pin.after.png) 截图由
+Playwright 驱动 `EditLongOptionLists` story 产出——before 是把组件改动
+stash 后对同一 fixture 拍摄的，因此只有控件不同。未验证：打包应用的实机
+观感。`agent-role-form.tsx` 的 `ValueSelect` 用裸 `Select`
 渲染同样的 catalog，存在相同的未修复行为——若其观感同样变差，套用同一
 修法即可。`@lody/ui` 的 `Select` 仍假设弹层永远从下方升起
 （未使用 `hiddenSurfaceForSide`），所以其它被翻转的 `Select` 入场动画方
