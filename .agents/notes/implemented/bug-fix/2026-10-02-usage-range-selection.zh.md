@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1210](https://github.com/LodyAI/Lody/pull/1210)
 
 [English](2026-10-02-usage-range-selection.md)
 
