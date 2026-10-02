@@ -1,0 +1,97 @@
+---
+title: Share Link vs Live Handoff
+description: A screenshot, transcript, share link, or archive is a record. A live handoff invites a teammate into the same coding-agent session — conversation, diffs, and worktree.
+---
+
+# Share link vs live handoff
+
+A **share link** publishes a record of a coding-agent session. A **live handoff** invites a teammate into the **same** session so they can keep chatting, reviewing diffs, and working in the same worktree.
+
+Those jobs get collapsed into “share my session.” They are not the same. A screenshot, a Markdown export, a ChatGPT-style snapshot, or an archive viewer lets someone *read* (or sometimes fork into a *new* run). None of those invite them into the live conversation, the live diffs, or the original working directory.
+
+The how-to lives in [Share a Coding Agent Session](/docs/session-handoff). The team-workspace story is in [Team Features](/docs/team).
+
+<Callout title="Definition">
+A screenshot, transcript, share link, or session archive is not a live handoff. Viewers do not join your running session, and they do not inherit the original worktree. Handoff requires workspace membership and the machine / project sharing rules on the session-handoff page — it is not a public URL anyone can open.
+</Callout>
+
+## Two different jobs
+
+People already share agent work in several ways. Most of them stop at “look at this.”
+
+| Job | What the recipient can do | Same live session? |
+| --- | --- | --- |
+| Screenshot | See a picture of the chat | No |
+| Markdown / transcript export | Paste static text into a new chat | No — they start over |
+| ChatGPT-style share link | Read a snapshot of the conversation | No |
+| Share-link / archive tools (for example [Lore](https://lore.link/share) or [SpecStory](https://docs.specstory.com/cloud/session-sharing)) | View a rendered thread or saved history, or fork that context into a **new** agent run | No — viewers do not join the running session or the original worktree |
+| **Live handoff** | Open the existing [session](/docs/session), keep chatting, review live [diffs](/docs/diff-viewer), and keep working in the same [worktree](/docs/worktrees) | **Yes** |
+
+Lody can still [copy a conversation as Markdown](/docs/copy-md) when you only need a record. Copying a session URL without sharing the session also does not grant team access — the link still works for the owner.
+
+This page does not review any share-link product. Lore and SpecStory appear only as examples of the record / archive category already named on the handoff page.
+
+## What a live handoff actually is
+
+In Lody, a teammate who can open the session continues it from the same context:
+
+- the live conversation the agent already has
+- the file diffs the agent produced
+- the session worktree and branch
+- the same [agent config](/docs/agents), so they can send the next prompt
+
+They open **that** session — not a fork, and not a new composer thread. Forking copies history into a **new** session; use it when you want a private branch of the conversation. See [Fork a Session](/docs/session#fork-a-session).
+
+Handoff is a team-workspace action. The other person must already be a member, and the session is team-visible only when the machine (and local project, if any) is shared. Steps and edge cases: [Share a Coding Agent Session](/docs/session-handoff).
+
+## When to use which
+
+Use a **screenshot, transcript, share link, or archive** when:
+
+- you only need someone to *read* what happened
+- you want a record outside the workspace
+- you are seeding a *new* agent run from exported context
+
+Use a **live handoff** when:
+
+- a teammate should continue the same coding-agent session
+- they need the current diffs and the same worktree, not a reconstructed prompt
+- they are already (or can be) a member of the [workspace](/docs/team)
+
+To run several isolated sessions as a team — mixed models, separate worktrees — see [Parallel Coding Agents](/docs/parallel-agents). That is starting more work, not handing off one session.
+
+## Permissions (do not invent extra access)
+
+Handoff follows the same rules as the product guide. This page does not add a public share-link ACL.
+
+| Control | Effect |
+| --- | --- |
+| Workspace membership | Required before anyone can open team sessions |
+| Member role | Owners and admins manage who can invite, edit, or remove people — see [Change Member Permissions](/docs/team#change-member-permissions) |
+| Machine sharing | Sessions on an unshared machine do not appear in other members’ sidebars. Only the device owner can share. |
+| Local project sharing | For a local project, teammates need the project grant as well as the machine grant |
+| Session URL | Owner always; teammates only after the session is team-visible. Copying the URL is not the same as **Share with team…** |
+
+Joining a workspace does **not** expose your laptop. Machines stay private until you share them. Sharing a session may share its machine and/or local project with everyone in the workspace; other conversations on that device can become visible too. See [Team Machine Visibility](/docs/team#team-machine-visibility).
+
+## FAQ
+
+### Is a share link the same as handing off a coding agent session?
+
+No. A share link, screenshot, transcript, or archive is a **viewable record**. Someone can read it, and some flows can start a *new* agent run from that context. They do not join the original live session, and they do not get the original worktree. A live handoff opens the existing workspace session so a teammate continues it.
+
+### Can a teammate continue my Claude Code session from a share link?
+
+Not from a transcript, ChatGPT-style snapshot, or archive viewer. If the session runs in a Lody workspace, invite them, share the session (and the machine or local project it needs), then have them open **that** session. Details: [Share a Coding Agent Session](/docs/session-handoff).
+
+### What is the difference between sharing a transcript and collaborating live?
+
+Sharing a transcript is sending a record. Collaborating live means a teammate is in the same session: same chat, same diffs, same worktree. Exporting Markdown or copying a URL does not grant that access.
+
+### What if I only want to send a transcript?
+
+Copy a message or **Copy as Markdown** from the session menu. That does not grant live access. See [Copy Conversations](/docs/copy-md).
+
+### Why can’t my teammate open the session URL I sent?
+
+Copying a session URL does not share the session. They must be a workspace member, the machine (and local project, if any) must be shared, and they should look at **All Tasks** rather than **My Tasks**. Unshared machines never sync those conversations into other members’ sidebars.

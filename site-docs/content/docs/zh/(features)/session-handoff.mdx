@@ -9,7 +9,7 @@ Lody 里的 **编程 Agent 会话交接**，指的是同事打开你已经在跑
 
 这和常见的「分享 Claude Code session」做法不同：那些多半是在发布一份对话记录。Lody 是把人请进现有会话，让对方继续聊、继续 steer Agent。
 
-另见 [会话](/zh/docs/session)、[团队功能](/zh/docs/team) 和 [Agent Config](/zh/docs/agents)。
+另见 [会话](/zh/docs/session)、[团队功能](/zh/docs/team)、[Agent Config](/zh/docs/agents)，以及定义对比页 [分享链接 vs 现场交接](/zh/docs/compare/share-link-vs-live-handoff)。
 
 <Callout title="这里的「接着做」指什么">
 能打开该会话的工作空间成员，可以在同一段上下文里继续对话。Lody 不会把交接变成只读回放。共享范围仍受机器和项目可见性约束，见下方的[权限](#权限)。
@@ -28,7 +28,7 @@ Lody 里的 **编程 Agent 会话交接**，指的是同事打开你已经在跑
 | [SpecStory](https://docs.specstory.com/cloud/session-sharing) | 保存下来的历史，或公开的查看链接 | 否——查看者不会加入你正在跑的会话 | 历史 / 导出，不是会话 Worktree |
 | **Lody** | 工作空间里已有的[会话](/zh/docs/session) | **是**——打开后接着聊 | **是**——实时 [Diff](/zh/docs/diff-viewer) 和会话 Worktree |
 
-如果只需要留档，Lody 也可以把对话复制成 Markdown。那是另一件事，见[复制对话](/zh/docs/copy-md)。只复制会话 URL、却没有把会话共享给团队，也不会授予访问权限——这条链接对所有者仍然有效。
+分享链接和现场交接的定义见 [分享链接 vs 现场交接](/zh/docs/compare/share-link-vs-live-handoff)。如果只需要留档，Lody 也可以把对话复制成 Markdown。那是另一件事，见[复制对话](/zh/docs/copy-md)。只复制会话 URL、却没有把会话共享给团队，也不会授予访问权限——这条链接对所有者仍然有效。
 
 ## 如何交接一个会话
 
@@ -102,7 +102,7 @@ Fork 会话是另一件事：它会把历史复制到**新的**会话里。**当
 
 ### 这和 ChatGPT 分享链接、Lore、SpecStory 一样吗？
 
-不一样。那些产品围绕的是**可查看的记录**——快照、渲染后的 thread，或导出的历史。其中有些可以把内容灌进一次*新的* Agent 运行。Lody 交接的是团队工作空间里**已经存在的编程 Agent 会话**：同一段对话、差异和工作树。
+不一样。那些产品围绕的是**可查看的记录**——快照、渲染后的 thread，或导出的历史。其中有些可以把内容灌进一次*新的* Agent 运行。Lody 交接的是团队工作空间里**已经存在的编程 Agent 会话**：同一段对话、差异和工作树。见 [分享链接 vs 现场交接](/zh/docs/compare/share-link-vs-live-handoff)。
 
 ### 同事为什么看不到这个会话？
 
