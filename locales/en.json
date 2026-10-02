@@ -251,7 +251,7 @@
   "billing.perkUnlimitedSessions": "Unlimited sessions",
   "billing.redeemApply": "Apply",
   "billing.redeemCheckoutInProgress": "This workspace has a checkout in progress. Complete it or wait for it to expire first.",
-  "billing.redeemFounderSuccess": "Founder pricing applied. Complete the subscription in Stripe.",
+  "billing.redeemFounderSuccess": "Discount applied. Complete the subscription in Stripe.",
   "billing.redeemInProgress": "Another gift redemption is being processed for this workspace. Try again shortly.",
   "billing.redeemInvalid": "That code isn't valid.",
   "billing.redeemLabel": "Have a redemption code?",

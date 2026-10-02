@@ -251,7 +251,7 @@
   "billing.perkUnlimitedSessions": "Session 数量不限",
   "billing.redeemApply": "应用",
   "billing.redeemCheckoutInProgress": "当前 workspace 有正在进行的结账，请先完成或等待其失效。",
-  "billing.redeemFounderSuccess": "Founder 价已应用，请在 Stripe 完成订阅。",
+  "billing.redeemFounderSuccess": "优惠已应用，请在 Stripe 完成订阅。",
   "billing.redeemInProgress": "当前 workspace 正在处理另一笔赠送兑换，请稍后再试。",
   "billing.redeemInvalid": "兑换码无效。",
   "billing.redeemLabel": "有兑换码？",
