@@ -1,10 +1,11 @@
 import { useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
-import { Bug, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Bug, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
+import { Tooltip } from '@lody/ui/tooltip';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useSetAtom } from 'jotai';
 import {
@@ -66,7 +67,7 @@ const PANEL_STYLE: CSSProperties = {
   containerName: 'desktop-settings',
 };
 
-// The 240px nav needs a readable page beside it; the panel is narrower than the window.
+// Below this the nav column answers as its icon rail; the panel is narrower than the window.
 const NARROW = '@container desktop-settings (max-width: 720px)';
 
 /** The close button's inset, equal from the top and the end of the right pane. */
@@ -86,43 +87,23 @@ const styles = stylex.create({
   },
   body: {
     display: 'flex',
-    flexDirection: { default: 'row', [NARROW]: 'column' },
+    flexDirection: 'row',
     flexGrow: 1,
     minHeight: 0,
     overflow: 'hidden',
   },
-  /** The nav: its fill (`surface.nav`) is what splits it from the page. */
+  /**
+   * The nav stays the nav at every width — the rail keeps its fill
+   * (`surface.nav`), its grouping and its selection. What collapses is its
+   * width: below the panel's narrow breakpoint it is the rows' icon column
+   * only, the same sidebar answering with less room.
+   */
   nav: {
-    display: { default: 'flex', [NARROW]: 'none' },
+    display: 'flex',
     flexDirection: 'column',
     flexShrink: 0,
-    width: '240px',
+    width: { default: '240px', [NARROW]: '48px' },
   },
-  /**
-   * The compact nav is one edge-to-edge tray: the band itself is the tab
-   * strip's track, with no inset of its own, so the strip reads as the panel's
-   * own header band rather than a control floating in one.
-   */
-  compactNav: {
-    display: { default: 'none', [NARROW]: 'flex' },
-    alignItems: 'stretch',
-    flexShrink: 0,
-    backgroundColor: colors.trayBackground,
-  },
-  compactNavViewport: {
-    flexGrow: 1,
-    minWidth: 0,
-    overflowX: 'auto',
-    scrollbarWidth: 'none',
-  },
-  compactNavStrip: {
-    display: 'flex',
-    alignItems: 'stretch',
-    width: 'max-content',
-    minWidth: '100%',
-  },
-  /** The scroll arrows and the bug entry keep their own height on the band. */
-  compactNavEdge: { flexShrink: 0, alignSelf: 'center' },
   navScroll: {
     display: 'flex',
     flexDirection: 'column',
@@ -131,8 +112,10 @@ const styles = stylex.create({
     minHeight: 0,
     overflowY: 'auto',
     padding: space[3],
+    paddingInline: { default: space[3], [NARROW]: space[1.5] },
   },
   navGroupHeading: {
+    display: { default: 'block', [NARROW]: 'none' },
     margin: 0,
     paddingInline: space[2],
     paddingBottom: space[1],
@@ -142,7 +125,15 @@ const styles = stylex.create({
     color: colors.tertiaryLabel,
   },
   navGroupRows: { display: 'flex', flexDirection: 'column', gap: '2px' },
-  navFooter: { marginTop: 'auto', padding: space[3] },
+  /** On the rail a row is its icon, centred in the icon column. */
+  navRowRail: { justifyContent: { default: null, [NARROW]: 'center' } },
+  /** A rail row's words leave the rail; its name still reaches the a11y tree. */
+  navRowLabelRail: { display: { default: null, [NARROW]: 'none' } },
+  navFooter: {
+    marginTop: 'auto',
+    padding: space[3],
+    paddingInline: { default: space[3], [NARROW]: space[1.5] },
+  },
   content: {
     position: 'relative',
     display: 'flex',
@@ -212,7 +203,7 @@ const styles = stylex.create({
    * stays flush with the pane edge.
    */
   paneInset: {
-    paddingInlineStart: space[6],
+    paddingInlineStart: { default: space[6], [NARROW]: space[4] },
     paddingInlineEnd: '40px',
     paddingBottom: space[6],
   },
@@ -250,7 +241,6 @@ export function DesktopSettingsModal() {
 function SettingsModalBody() {
   const { t } = useTranslation();
   const navigationScopeId = useId();
-  const compactNavigationScopeId = useId();
   const contentScopeId = useId();
   const [activeTab, setActiveTab] = useAtom(settingsActiveTabAtom);
   const setSelectedMachineId = useSetAtom(settingsSelectedMachineIdAtom);
@@ -294,61 +284,41 @@ function SettingsModalBody() {
     onItemFocus: handleNavigationItemFocus,
     scopeId: navigationScopeId,
   });
-  useListKeyboardNavigation({
-    onItemFocus: handleNavigationItemFocus,
-    scopeId: compactNavigationScopeId,
-    itemSelector: '[role="tab"]',
-  });
-  const [navViewport, setNavViewport] = useState<HTMLDivElement | null>(null);
-  const [navOverflow, setNavOverflow] = useState({ before: false, after: false });
+  const [navScroller, setNavScroller] = useState<HTMLElement | null>(null);
+  /** Below the rail threshold the nav answers with icons; labels hide in CSS. */
+  const [navIsRail, setNavIsRail] = useState(false);
   useLayoutEffect(() => {
-    if (!navViewport) return undefined;
-    const updateOverflow = () => {
-      const before = navViewport.scrollLeft > 1;
-      const after = navViewport.scrollLeft + navViewport.clientWidth < navViewport.scrollWidth - 1;
-      setNavOverflow((previous) =>
-        previous.before === before && previous.after === after ? previous : { before, after }
-      );
+    if (!navScroller) return undefined;
+    const updateRail = () => {
+      const rail = navScroller.parentElement;
+      const next = rail ? rail.getBoundingClientRect().width <= 56 : false;
+      setNavIsRail((previous) => (previous === next ? previous : next));
     };
     const revealSelected = () => {
-      const selected = navViewport.querySelector<HTMLElement>('[aria-selected="true"]');
-      if (selected && navViewport.clientWidth > 0) {
-        const viewportBox = navViewport.getBoundingClientRect();
-        const selectedBox = selected.getBoundingClientRect();
-        // Scroll only this rail: scrollIntoView can also move the dialog's page.
-        navViewport.scrollTo({
-          left:
-            navViewport.scrollLeft +
-            selectedBox.left -
-            viewportBox.left -
-            (viewportBox.width - selectedBox.width) / 2,
-        });
-      }
-      updateOverflow();
+      const selected = navScroller.querySelector<HTMLElement>('[aria-current="page"]');
+      if (!selected || navScroller.clientHeight === 0) return;
+      const railBox = navScroller.getBoundingClientRect();
+      const selectedBox = selected.getBoundingClientRect();
+      if (selectedBox.top >= railBox.top && selectedBox.bottom <= railBox.bottom) return;
+      // Scroll only this column: scrollIntoView can also move the dialog's page.
+      navScroller.scrollTo({
+        top:
+          navScroller.scrollTop +
+          selectedBox.top -
+          railBox.top -
+          (railBox.height - selectedBox.height) / 2,
+      });
     };
-    const observer = new ResizeObserver(revealSelected);
-    observer.observe(navViewport);
-    if (navViewport.firstElementChild) observer.observe(navViewport.firstElementChild);
-    navViewport.addEventListener('scroll', updateOverflow);
-    revealSelected();
-    return () => {
-      observer.disconnect();
-      navViewport.removeEventListener('scroll', updateOverflow);
+    const observe = () => {
+      updateRail();
+      revealSelected();
     };
-  }, [navViewport, resolvedActiveTab, t]);
-  /**
-   * Overflow is said by the rail fading where more categories wait, not by
-   * scroll buttons: the mask only fades an edge while that edge still hides
-   * something.
-   */
-  const navMask = useMemo(() => {
-    if (!navOverflow.before && !navOverflow.after) return undefined;
-    const stops = [navOverflow.before ? 'transparent 0' : 'black 0'];
-    if (navOverflow.before) stops.push('black 32px');
-    if (navOverflow.after) stops.push('black calc(100% - 32px)');
-    stops.push(navOverflow.after ? 'transparent 100%' : 'black 100%');
-    return `linear-gradient(to right, ${stops.join(', ')})`;
-  }, [navOverflow]);
+    const observer = new ResizeObserver(observe);
+    observer.observe(navScroller);
+    if (navScroller.parentElement) observer.observe(navScroller.parentElement);
+    observe();
+    return () => observer.disconnect();
+  }, [navScroller, resolvedActiveTab]);
   const groupedSections: Array<{
     id: Exclude<SettingsSectionId, 'account'>;
     label: string;
@@ -381,139 +351,119 @@ function SettingsModalBody() {
       >
         <div {...stylex.props(styles.body)}>
           <FocusScope
-            id={compactNavigationScopeId}
-            role="navigation"
-            aria-label={t('settings.title')}
-            {...stylex.props(styles.compactNav)}
-          >
-            <Button
-              variant="ghost"
-              size="small"
-              icon
-              aria-label={t('settings.navigation.previousCategories')}
-              disabled={!navOverflow.before}
-              onClick={() => navViewport?.scrollBy({ left: -navViewport.clientWidth * 0.7 })}
-            >
-              <ChevronLeft aria-hidden="true" />
-            </Button>
-            <div
-              ref={setNavViewport}
-              data-settings-nav-viewport=""
-              {...stylex.props(styles.compactNavViewport)}
-              style={{ maskImage: navMask, WebkitMaskImage: navMask }}
-            >
-              <div {...stylex.props(styles.compactNavStrip)}>
-                <Tabs.List size="medium" activateOnFocus aria-label={t('settings.title')}>
-                  {navigationTabs.map((tab) => (
-                    <Tabs.Tab
-                      key={tab.id}
-                      value={tab.id}
-                      data-id={`settings:${tab.id}`}
-                      data-settings-tab-id={tab.id}
-                    >
-                      {t(tab.labelKey)}
-                    </Tabs.Tab>
-                  ))}
-                </Tabs.List>
-              </div>
-            </div>
-            <Button
-              variant="ghost"
-              size="small"
-              icon
-              aria-label={t('settings.navigation.nextCategories')}
-              disabled={!navOverflow.after}
-              onClick={() => navViewport?.scrollBy({ left: navViewport.clientWidth * 0.7 })}
-            >
-              <ChevronRight aria-hidden="true" />
-            </Button>
-            {canReportBug ? (
-              <Button
-                variant="ghost"
-                size="small"
-                icon
-                aria-label={t('bugReport.title', 'Report a bug')}
-                onClick={handleReportBug}
-              >
-                <Bug aria-hidden="true" />
-              </Button>
-            ) : null}
-          </FocusScope>
-          <FocusScope
             id={navigationScopeId}
             role="navigation"
             aria-label={t('settings.title')}
             {...stylex.props(styles.nav, surface.nav)}
           >
-            <nav {...stylex.props(styles.navScroll)}>
-              {groupedSections.map((section) => {
-                const tabs = navigationTabs.filter((tab) => tab.section === section.id);
-                const showsAccountEntry = section.id === 'personal' && accountTab;
-                if (tabs.length === 0 && !showsAccountEntry) return null;
-                return (
-                  <section key={section.id} aria-label={section.label}>
-                    <h2 {...stylex.props(styles.navGroupHeading)}>{section.label}</h2>
-                    <div {...stylex.props(styles.navGroupRows)}>
-                      {showsAccountEntry ? (
-                        <div
-                          data-id="settings:account"
-                          data-scope-item="row"
-                          data-settings-tab-id="account"
-                        >
-                          <SettingsAccountEntry
-                            user={session?.user}
-                            active={resolvedActiveTab === 'account'}
-                            onSelect={() => selectTab('account')}
-                          />
-                        </div>
-                      ) : null}
-                      {tabs.map((tab) => {
-                        const Icon = tab.icon;
-                        const active = resolvedActiveTab === tab.id;
-                        return (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            aria-current={active ? 'page' : undefined}
-                            data-id={`settings:${tab.id}`}
+            <Tooltip.Provider delay={250}>
+              <nav
+                ref={setNavScroller}
+                data-settings-nav-viewport=""
+                {...stylex.props(styles.navScroll)}
+              >
+                {groupedSections.map((section) => {
+                  const tabs = navigationTabs.filter((tab) => tab.section === section.id);
+                  const showsAccountEntry = section.id === 'personal' && accountTab;
+                  if (tabs.length === 0 && !showsAccountEntry) return null;
+                  return (
+                    <section key={section.id} aria-label={section.label}>
+                      <h2 {...stylex.props(styles.navGroupHeading)}>{section.label}</h2>
+                      <div {...stylex.props(styles.navGroupRows)}>
+                        {showsAccountEntry ? (
+                          <div
+                            data-id="settings:account"
                             data-scope-item="row"
-                            data-settings-tab-id={tab.id}
-                            {...stylex.props(surface.listRow, active && surface.listRowSelected)}
-                            onClick={() => selectTab(tab.id)}
+                            data-settings-tab-id="account"
                           >
-                            <Icon
-                              {...stylex.props(
-                                surface.listRowIcon,
-                                active && surface.listRowIconSelected
-                              )}
-                              strokeWidth={1.75}
-                              aria-hidden="true"
+                            <SettingsAccountEntry
+                              user={session?.user}
+                              active={resolvedActiveTab === 'account'}
+                              onSelect={() => selectTab('account')}
                             />
-                            <span {...stylex.props(surface.listRowLabel)}>{t(tab.labelKey)}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </section>
-                );
-              })}
-            </nav>
-            {canReportBug && (
-              <div {...stylex.props(styles.navFooter)}>
-                <button
-                  type="button"
-                  data-id="settings:report-bug"
-                  data-scope-item="row"
-                  {...stylex.props(surface.listRow)}
-                  onClick={handleReportBug}
-                >
-                  <Bug {...stylex.props(surface.listRowIcon)} strokeWidth={1.75} />
-                  <span {...stylex.props(surface.listRowLabel)}>
-                    {t('bugReport.title', 'Report a bug')}
-                  </span>
-                </button>
-              </div>
-            )}
+                          </div>
+                        ) : null}
+                        {tabs.map((tab) => {
+                          const Icon = tab.icon;
+                          const active = resolvedActiveTab === tab.id;
+                          const label = t(tab.labelKey);
+                          return (
+                            <Tooltip.Root key={tab.id}>
+                              <Tooltip.Trigger
+                                render={
+                                  <button
+                                    type="button"
+                                    aria-label={label}
+                                    aria-current={active ? 'page' : undefined}
+                                    data-id={`settings:${tab.id}`}
+                                    data-scope-item="row"
+                                    data-settings-tab-id={tab.id}
+                                    {...stylex.props(
+                                      surface.listRow,
+                                      styles.navRowRail,
+                                      active && surface.listRowSelected
+                                    )}
+                                    onClick={() => selectTab(tab.id)}
+                                  >
+                                    <Icon
+                                      {...stylex.props(
+                                        surface.listRowIcon,
+                                        active && surface.listRowIconSelected
+                                      )}
+                                      strokeWidth={1.75}
+                                      aria-hidden="true"
+                                    />
+                                    <span
+                                      {...stylex.props(
+                                        surface.listRowLabel,
+                                        styles.navRowLabelRail
+                                      )}
+                                    >
+                                      {label}
+                                    </span>
+                                  </button>
+                                }
+                              />
+                              {navIsRail ? (
+                                <Tooltip.Content side="right">{label}</Tooltip.Content>
+                              ) : null}
+                            </Tooltip.Root>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  );
+                })}
+              </nav>
+              {canReportBug && (
+                <div {...stylex.props(styles.navFooter)}>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label={t('bugReport.title', 'Report a bug')}
+                          data-id="settings:report-bug"
+                          data-scope-item="row"
+                          {...stylex.props(surface.listRow, styles.navRowRail)}
+                          onClick={handleReportBug}
+                        >
+                          <Bug {...stylex.props(surface.listRowIcon)} strokeWidth={1.75} />
+                          <span {...stylex.props(surface.listRowLabel, styles.navRowLabelRail)}>
+                            {t('bugReport.title', 'Report a bug')}
+                          </span>
+                        </button>
+                      }
+                    />
+                    {navIsRail ? (
+                      <Tooltip.Content side="right">
+                        {t('bugReport.title', 'Report a bug')}
+                      </Tooltip.Content>
+                    ) : null}
+                  </Tooltip.Root>
+                </div>
+              )}
+            </Tooltip.Provider>
           </FocusScope>
 
           {/* Tabs.Panel owns its DOM id; FocusScope consumes id as a keyboard-scope key. */}
