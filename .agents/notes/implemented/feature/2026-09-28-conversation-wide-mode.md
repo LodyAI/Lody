@@ -40,3 +40,19 @@ not sync across devices or teammates.
 - Verified: `pnpm typecheck` on `@lody/components`, vitest for
   conversation-wide-mode + appearance-settings (12/12), and Playwright
   screenshots of the capped vs wide column plus the menu Switch.
+
+## Correction: outline clearance (2026-10-02)
+
+The original 18px desktop gutter let the outline rail overlap wide-mode
+messages: the rail occupies 50px including its magnified active tick.
+`ConversationColumn` now supplies symmetric 64px gutters from the 640px
+breakpoint, keeping messages, composer and other shared column surfaces aligned.
+Below that breakpoint the 14px gutter remains; capped mode is unchanged.
+This restores usable side clearance without reinstating the content-width cap.
+
+Verification: all 4,641 component tests passed. Playwright measured 64px side
+padding at a 1440px viewport, clear of the 50px rail even on hover, and 14px
+at 430px. Typechecking, lint, formatting, docs and boundary checks passed.
+The root `pnpm check` stopped on the unrelated CLI
+`workspace-git-service.test.ts` GitHub-remote backfill assertion, which also
+failed when rerun alone.
