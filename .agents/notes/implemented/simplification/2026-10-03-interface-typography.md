@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1221](https://github.com/LodyAI/Lody/pull/1221)
+
 [中文](2026-10-03-interface-typography.zh.md)
 
 ## Abstract
@@ -50,7 +52,8 @@ base preference. The native settings preview uses the same calculation.
 ## Retained exceptions
 
 Font families, brand/landing headlines, icons, spacing and control geometry are not
-redesigned. xterm keeps its 1.2 line-height ratio; one-line button labels retain their
+redesigned. Settings paragraphs retain their proportional leading. xterm keeps its
+1.2 line-height ratio; one-line button labels retain their
 centered button metric. Reference chips remain relative to their surrounding prose;
 they do not nest compact containers. Third-party diagrams, document viewers, editor
 zoom and the separate task-body editor are outside this ordinary-text migration.
@@ -81,9 +84,9 @@ No provider execution or private conversation was captured.
 | Command | Observed result |
 | --- | --- |
 | `pnpm build` | OSS CLI + desktop production build passed; existing bundle/import warnings |
-| `pnpm check` (Node 26.10.0) | Type checks/lint passed; UI 298 tests passed; components 4726 passed, one boot-shell failure also reproduced with production changes reverted |
-| `pnpm check` (isolated Node 22.14.0) | Type checks/lint passed; shared stopped at a WASM loader error, also reproduced with production changes reverted |
-| `NODE_ENV=test pnpm --filter @lody/components test --maxWorkers=2` (Node 22.14.0) | All 4727 tests passed on the final implementation |
+| `pnpm check` (Node 26.10.0) | Type checks/lint passed; UI 298 tests passed; components 4741 passed, one boot-shell failure also reproduced with production changes reverted |
+| `pnpm check` (isolated Node 22.14.0, before main integration) | Type checks/lint passed; shared stopped at a WASM loader error, also reproduced with production changes reverted |
+| `NODE_ENV=test pnpm --filter @lody/components test --maxWorkers=2` (Node 22.14.0) | All 4742 tests passed after integrating main `d3e249d2f` |
 | `pnpm --filter @lody/ui test` / `pnpm --filter @lody/electron test` | 298 / 199 tests passed |
 | `pnpm check:quick` | Lint, i18n, import and platform/public boundaries passed |
 | `NODE_ENV=test pnpm --filter @lody/components test tests/appearance-settings.test.tsx tests/interface-font-controller.test.tsx tests/terminal-settings.test.ts tests/local-terminal-panel.test.tsx` | 33 tests passed |
@@ -92,6 +95,10 @@ No provider execution or private conversation was captured.
 | `pnpm run docs check` | Passed; pre-existing translation/size warnings, no SHA-protected topics |
 
 Both full-check failures were reproduced against main production source, not waived.
+The first integrated browser run overlapped a build-triggered preview reload and
+lost focus during navigation; rerunning after the build passed all four cases
+without changing assertions. Production build, Node 26 full check, Node 22 component
+suite and browser verification were rerun after the conflict-free main integration.
 Node 22 passes boot-shell; Node 26 passes shared's WASM suite. The broken Homebrew
 Node 22 installation was left untouched; a pnpm-cached isolated Node 22 supplied
 the second runtime. No checks were disabled. Windows/Linux native UI, signed packaging,

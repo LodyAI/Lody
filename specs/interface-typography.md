@@ -60,6 +60,8 @@ This does not resize brand artwork, icon geometry or third-party document/canvas
 contents. Intentional landing typography, diagrams, file viewers and editor
 zoom remain outside this ordinary-text migration. No new font family or global
 spacing scale is introduced.
+Settings paragraphs may retain their existing proportional leading; they still
+derive their size and line height from the same baseline.
 
 ## Evidence
 

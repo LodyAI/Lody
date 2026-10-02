@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1221](https://github.com/LodyAI/Lody/pull/1221)
+
 [English](2026-10-03-interface-typography.md)
 
 ## 摘要
@@ -40,7 +42,8 @@ xterm 实际字号为 `终端保存字号 × 全局基准 / 14`。沿用原地�
 
 ## 保留的例外
 
-不重做字体家族、品牌/landing 标题、图标、间距或控件几何。xterm 保留 1.2 倍行高，
+不重做字体家族、品牌/landing 标题、图标、间距或控件几何。设置段落保留比例行高，
+xterm 保留 1.2 倍行高，
 单行按钮保留居中指标。引用 chip 仍相对正文，但不嵌套紧凑容器。第三方图表、文档
 查看器、编辑器 zoom 和独立任务正文编辑器不在普通文字迁移范围。显式预览适配器
 使用 CSS 类型除法，固定 Electron 43 与已测 Chromium 支持；旧 Safari/shared 页面
@@ -66,9 +69,9 @@ portal），搜索选项，检查键盘焦点/关闭、刷新及旧偏好。矩�
 | 命令 | 实际结果 |
 | --- | --- |
 | `pnpm build` | OSS CLI + 桌面生产构建通过；保留既有 bundle/import 警告 |
-| `pnpm check`（Node 26.10.0） | 类型和 lint 通过；UI 298 测试通过；components 4726 通过、一个 boot-shell 失败，撤回生产修改后同样复现 |
-| `pnpm check`（隔离 Node 22.14.0） | 类型和 lint 通过；shared 因 WASM 加载错误中断，撤回生产修改后同样复现 |
-| `NODE_ENV=test pnpm --filter @lody/components test --maxWorkers=2`（Node 22.14.0） | 最终实现的 4727 测试全部通过 |
+| `pnpm check`（Node 26.10.0） | 类型和 lint 通过；UI 298 测试通过；components 4741 通过、一个 boot-shell 失败，撤回生产修改后同样复现 |
+| `pnpm check`（隔离 Node 22.14.0，整合 main 前） | 类型和 lint 通过；shared 因 WASM 加载错误中断，撤回生产修改后同样复现 |
+| `NODE_ENV=test pnpm --filter @lody/components test --maxWorkers=2`（Node 22.14.0） | 整合 main `d3e249d2f` 后，4742 测试全部通过 |
 | `pnpm --filter @lody/ui test` / `pnpm --filter @lody/electron test` | 298 / 199 测试通过 |
 | `pnpm check:quick` | lint、i18n、导入及 platform/public 边界通过 |
 | `NODE_ENV=test pnpm --filter @lody/components test tests/appearance-settings.test.tsx tests/interface-font-controller.test.tsx tests/terminal-settings.test.ts tests/local-terminal-panel.test.tsx` | 33 测试通过 |
@@ -76,7 +79,10 @@ portal），搜索选项，检查键盘焦点/关闭、刷新及旧偏好。矩�
 | `pnpm format` | 通过 |
 | `pnpm run docs check` | 通过；保留既有翻译/大小警告，没有 SHA 保护主题 |
 
-两种运行时的完整检查失败都在 main 生产源码上复现，没有豁免。Node 22 的 boot-shell
+两种运行时的完整检查失败都在 main 生产源码上复现，没有豁免。整合后的首次浏览器
+运行与构建触发的预览重载重叠，导航使焦点断言失败；构建完成后不修改断言重跑，
+四个用例全部通过。无冲突整合 main 后重跑了生产构建、Node 26 完整检查、Node 22
+组件套件及浏览器验证。Node 22 的 boot-shell
 通过，Node 26 的 shared WASM 套件通过。未修复损坏的 Homebrew Node 22，改用 pnpm
 缓存中的隔离 Node 22 进行第二轮验证，没有关闭任何检查。Windows/Linux
 原生 UI、签名打包、真实 provider 流、其他系统字体及旧 Safari 未验收。
