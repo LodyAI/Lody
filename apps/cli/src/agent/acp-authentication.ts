@@ -107,6 +107,7 @@ const DEFAULT_STATUS_PROBE_TIMEOUT_MS = 15_000;
 const BUILTIN_AUTH_METHODS = {
   // Pi credentials are configured through the official Pi CLI on the host.
   pi: [],
+  devin: [],
   kimi: [
     {
       id: 'login',
@@ -408,15 +409,7 @@ export async function probeBuiltinAuthentication(
   options: ProbeBuiltinAuthenticationOptions
 ): Promise<BuiltinAuthenticationProbeResult> {
   options.signal?.throwIfAborted();
-  if (options.cliType !== 'builtin' || !isManagedBuiltinAgentType(options.agentType)) {
-    return { status: 'unknown' };
-  }
-  if (
-    options.agentType === 'kimi' ||
-    options.agentType === 'grok' ||
-    options.agentType === 'pi' ||
-    options.agentType === 'codex'
-  ) {
+  if (options.cliType !== 'builtin' || options.agentType !== 'claude') {
     return { status: 'unknown' };
   }
   const launch = await resolveBuiltinAuthenticationProcessLaunch({
@@ -558,8 +551,11 @@ export class AcpAuthenticationManager {
       ) => Promise<Record<string, unknown>>;
     }) => Promise<void>;
   }): Promise<AcpAuthenticationResult> {
+    // Devin advertises its own browser method over ACP, not a native login command.
     const isBuiltinAuthentication =
-      options.cliType === 'builtin' && isManagedBuiltinAgentType(options.agentType);
+      options.cliType === 'builtin' &&
+      isManagedBuiltinAgentType(options.agentType) &&
+      options.agentType !== 'devin';
     const displayName = isBuiltinAuthentication
       ? getBuiltinDisplayName(options.agentType)
       : options.agentType;

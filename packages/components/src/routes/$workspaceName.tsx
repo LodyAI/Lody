@@ -1,4 +1,6 @@
-import { createFileRoute, Navigate, notFound, Outlet, redirect } from '@tanstack/react-router';
+import { createFileRoute, notFound, Outlet, redirect } from '@tanstack/react-router';
+import { BootNavigate } from '@/components/boot-navigate';
+import { BootShell } from '@/components/boot-shell';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -139,7 +141,9 @@ function LocalWorkspaceGuardRoute() {
   // its canonical slug instead of rendering under a mismatched URL.
   const canonicalSlug = getLocalWorkspaceSlug(workspace);
   if (workspaceName !== canonicalSlug) {
-    return <Navigate to="/$workspaceName/chat" params={{ workspaceName: canonicalSlug }} replace />;
+    return (
+      <BootNavigate to="/$workspaceName/chat" params={{ workspaceName: canonicalSlug }} replace />
+    );
   }
 
   return <Outlet />;
@@ -199,12 +203,12 @@ function CloudWorkspaceGuardRoute() {
 
     if (fallback.kind === 'workspace') {
       return (
-        <Navigate to="/$workspaceName/chat" params={{ workspaceName: fallback.slug }} replace />
+        <BootNavigate to="/$workspaceName/chat" params={{ workspaceName: fallback.slug }} replace />
       );
     }
 
     if (fallback.kind === 'create-workspace') {
-      return <Navigate to="/workspace/create" replace />;
+      return <BootNavigate to="/workspace/create" replace />;
     }
 
     return (
@@ -243,7 +247,7 @@ function CloudWorkspaceGuardRoute() {
   // unauthorized access to workspace UI.
   // ==========================================================================
   if (confirmedUnauthenticated) {
-    return null;
+    return <BootShell />;
   }
 
   if (hasLocalToken) {
@@ -252,7 +256,7 @@ function CloudWorkspaceGuardRoute() {
     // and the sidebar will show offline status.
     if (sessionSettled && !isPending && !isRetrying && !sessionError && !session?.user) {
       const currentPath = getAppCurrentPathWithSearch();
-      return <Navigate to="/login" search={{ redirect: currentPath }} replace />;
+      return <BootNavigate to="/login" search={{ redirect: currentPath }} replace />;
     }
 
     // Check access denial only when we have confirmed access response
@@ -293,7 +297,7 @@ function CloudWorkspaceGuardRoute() {
 
   if (!session?.user || sessionError) {
     const currentPath = getAppCurrentPathWithSearch();
-    return <Navigate to="/login" search={{ redirect: currentPath }} replace />;
+    return <BootNavigate to="/login" search={{ redirect: currentPath }} replace />;
   }
 
   if (isPending || isRetrying || access === undefined) {
@@ -384,10 +388,14 @@ function WorkspaceAuthedRoute({
 
       if (fallbackSlug) {
         return (
-          <Navigate to="/$workspaceName/chat" params={{ workspaceName: fallbackSlug }} replace />
+          <BootNavigate
+            to="/$workspaceName/chat"
+            params={{ workspaceName: fallbackSlug }}
+            replace
+          />
         );
       }
-      return <Navigate to="/workspace/create" replace />;
+      return <BootNavigate to="/workspace/create" replace />;
     }
 
     if (optimisticGuard === 'switch-error') {
@@ -456,10 +464,10 @@ function WorkspaceAuthedRoute({
 
     if (fallbackSlug) {
       return (
-        <Navigate to="/$workspaceName/chat" params={{ workspaceName: fallbackSlug }} replace />
+        <BootNavigate to="/$workspaceName/chat" params={{ workspaceName: fallbackSlug }} replace />
       );
     }
-    return <Navigate to="/workspace/create" replace />;
+    return <BootNavigate to="/workspace/create" replace />;
   }
 
   if (workspaceGuard === 'switch-error') {

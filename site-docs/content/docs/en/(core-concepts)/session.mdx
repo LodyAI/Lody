@@ -105,13 +105,13 @@ a new one (for example, in Zed).
 Hover a session in the list (or tap it on mobile) to reveal the archive button at the bottom-right.
 Click it to archive the session.
 
-Archived sessions are moved into the archive list but are not truly deleted — your conversation
-content and the session's Git branch are preserved, so you can restore one and pick up where you
-left off at any time. For sessions backed by a worktree, archiving already frees disk space on the
-CLI machine by removing the worktree's working directory; any uncommitted changes are committed to
-the branch first, so nothing is lost, and the worktree is recreated automatically when you restore
-and continue. To also remove the conversation history and reclaim the rest of its disk space, use
-**Delete Session**.
+Archived sessions move into the archive list and retain their conversation history. The owning
+machine can reclaim a Lody-managed worktree directory before permanent deletion, keeping the local
+branch and committing pending non-ignored changes first. Ignored files can be discarded, and a
+cleanup script can change files before the backup. Save needed files outside the worktree before
+archiving. See [Worktree retention and recovery](/docs/worktrees#automatic-cleanup) for timing,
+recovery requirements, and protection boundaries. Sessions running directly in a local project
+directory do not have that directory removed by managed-worktree cleanup.
 
 ## Unarchive Sessions
 
@@ -124,8 +124,9 @@ list and continue chatting at any time.
 ## Delete Sessions
 
 At the bottom-right of the left sidebar, click the archive-list button to open archived sessions.
-Click the delete button next to a session to permanently remove it. This deletes the conversation
-history and reclaims the remaining disk space on the CLI machine, and it cannot be undone.
+Click the delete button next to a session to permanently remove it and its conversation history.
+This cannot be undone. Any remaining managed worktree stays eligible for cleanup under the
+[same backup rule](/docs/worktrees#automatic-cleanup); the local Git branch and commits are kept.
 
 <img src="/_docs-assets/delete-archive.png" alt="" />
 

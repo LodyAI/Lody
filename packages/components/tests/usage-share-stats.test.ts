@@ -14,6 +14,13 @@ import type {
   SettingsUsageTimelineBucket,
   SettingsUsageTimelineData,
 } from '../src/components/settings/settings-data-cache';
+import {
+  createUsageTimelineFormatter,
+  formatUsageTimelineBucketInterval,
+  formatUsageTimelineBucketLabel,
+  formatUsageTimelineWindow,
+  usageTimelineHourLabels,
+} from '../src/components/settings/usage-timeline-bucket-label';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -68,6 +75,103 @@ function bucket(
 }
 
 describe('usage share stats', () => {
+  it('labels hourly buckets at their UTC start, including a partial final bucket', () => {
+    const timeline = createTimeline({
+      range: 'day',
+      bucketSizeMs: HOUR_MS,
+      endMs: Date.UTC(2026, 9, 1, 0, 17),
+    });
+    const formatter = createUsageTimelineFormatter('en-US');
+    expect(
+      formatUsageTimelineBucketLabel(timeline, bucket(Date.UTC(2026, 8, 30, 23), 80), formatter)
+    ).toBe('Sep 30, 23:00 UTC');
+    expect(
+      formatUsageTimelineBucketLabel(timeline, bucket(Date.UTC(2026, 9, 1), 20), formatter)
+    ).toBe('Oct 1, 00:00 UTC');
+  });
+
+  it('keeps skyline hours and split labels on the same chronological buckets across midnight', () => {
+    const startMs = Date.UTC(2026, 8, 30, 16);
+    const timeline = createTimeline({
+      range: 'day',
+      startMs,
+      endMs: startMs + DAY_MS,
+      bucketSizeMs: HOUR_MS,
+      buckets: Array.from({ length: 24 }, (_, index) =>
+        bucket(startMs + index * HOUR_MS, index === 7 ? 500 : 0)
+      ),
+    });
+    const formatter = createUsageTimelineFormatter('en-US');
+    const hours = usageTimelineHourLabels(timeline.buckets);
+    expect(hours).toEqual([
+      '16',
+      '17',
+      '18',
+      '19',
+      '20',
+      '21',
+      '22',
+      '23',
+      '00',
+      '01',
+      '02',
+      '03',
+      '04',
+      '05',
+      '06',
+      '07',
+      '08',
+      '09',
+      '10',
+      '11',
+      '12',
+      '13',
+      '14',
+      '15',
+    ]);
+    const labels = timeline.buckets.map((item) =>
+      formatUsageTimelineBucketLabel(timeline, item, formatter)
+    );
+    expect(labels[7]).toBe('Sep 30, 23:00 UTC');
+    expect(labels[8]).toBe('Oct 1, 00:00 UTC');
+    expect(formatUsageTimelineWindow(timeline, formatter)).toBe('Sep 30, 16:00 – Oct 1, 16:00 UTC');
+  });
+
+  it('shows actual partial-bucket extents without shifting the plotted start', () => {
+    const startMs = Date.UTC(2026, 8, 30, 23);
+    const timeline = createTimeline({
+      range: 'day',
+      startMs: startMs + 12 * 60_000,
+      endMs: startMs + HOUR_MS + 17 * 60_000,
+      bucketSizeMs: HOUR_MS,
+    });
+    const formatter = createUsageTimelineFormatter('en-US');
+    expect(formatUsageTimelineBucketInterval(timeline, bucket(startMs, 80), formatter)).toBe(
+      'Sep 30, 23:12 – Oct 1, 00:00 UTC'
+    );
+    expect(
+      formatUsageTimelineBucketInterval(timeline, bucket(startMs + HOUR_MS, 20), formatter)
+    ).toBe('Oct 1, 00:00 – Oct 1, 00:17 UTC');
+    expect(formatUsageTimelineBucketLabel(timeline, bucket(startMs + HOUR_MS, 20), formatter)).toBe(
+      'Oct 1, 00:00 UTC'
+    );
+  });
+
+  it('uses UTC starts for week hours and preserves server labels for daily buckets', () => {
+    const item = { ...bucket(Date.UTC(2026, 8, 30, 23), 100), bucketLabel: '2026-09-30' };
+    const formatter = createUsageTimelineFormatter('en-US');
+    expect(
+      formatUsageTimelineBucketLabel(
+        createTimeline({ range: 'week', bucketSizeMs: HOUR_MS }),
+        item,
+        formatter
+      )
+    ).toBe('Sep 30, 23:00 UTC');
+    expect(
+      formatUsageTimelineBucketLabel(createTimeline({ range: 'month' }), item, formatter)
+    ).toBe('2026-09-30');
+  });
+
   it('counts active days and the longest streak inside the shared window only', () => {
     // Days 0-2 active, day 3 quiet, days 4-5 active — all inside the window.
     // Days 40-46 are a longer run that sits outside it and must not be counted.
@@ -263,12 +367,18 @@ describe('usage share stats', () => {
       // The helper derives a bucket's cost from its tokens, so these are the
       // token counts that make the costs come out at 6 and 3.
       buckets: [
-        bucket(START_MS, 6000, [{ modelId: 'a', tokens: 6000, costUSD: 6 }], [
-          { userId: 'u1', tokens: 6000, costUSD: 6 },
-        ]),
-        bucket(START_MS + HOUR_MS, 3000, [{ modelId: 'b', tokens: 3000, costUSD: 3 }], [
-          { userId: 'u2', tokens: 3000, costUSD: 3 },
-        ]),
+        bucket(
+          START_MS,
+          6000,
+          [{ modelId: 'a', tokens: 6000, costUSD: 6 }],
+          [{ userId: 'u1', tokens: 6000, costUSD: 6 }]
+        ),
+        bucket(
+          START_MS + HOUR_MS,
+          3000,
+          [{ modelId: 'b', tokens: 3000, costUSD: 3 }],
+          [{ userId: 'u2', tokens: 3000, costUSD: 3 }]
+        ),
       ],
     });
 

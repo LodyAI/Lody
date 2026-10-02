@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import {
   type ComponentPropsWithoutRef,
@@ -217,6 +217,7 @@ import {
   resolveSessionHistoryDurationMs,
 } from '@/lib/session-history-duration';
 import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import type { TurnIndexRow } from '@/lib/conversation-view';
 import { TurnPlaceholderRow, estimatePlaceholderHeight } from './turn-placeholder-row';
@@ -234,7 +235,11 @@ import { Button } from '@lody/ui/button';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { Skeleton } from '@lody/ui/skeleton';
-import { getSessionImageBlobUrl, getSessionImageDataUrl } from '@/lib/session-image-cache';
+import {
+  getSessionImageBlobUrl,
+  getSessionImageDataUrl,
+  peekSessionImageUrl,
+} from '@/lib/session-image-cache';
 import { SessionFileCard, SessionFileCardList } from './session-file-card';
 import {
   SessionFilePreviewDialog,
@@ -2807,7 +2812,65 @@ const DashedNoticeRule = () => (
 );
 
 const noticeStyles = stylex.create({
-  footer: { paddingInline: space[2], paddingBottom: space[2] },
+  /**
+   * One wrapping row for the whole banner. Above the mobile breakpoint the
+   * detail and footer keep their own rows; at phone widths the copy-only case
+   * swaps those two orders so the footer rides the header's trailing edge
+   * instead of spending a row. When a capacity retry action is present the
+   * header is already occupied, so the footer keeps its row to avoid squeezing
+   * the title between two controls.
+   */
+  row: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[2],
+    rowGap: space[1.5],
+    paddingInline: space[2],
+    paddingTop: space[1.5],
+    paddingBottom: space[1.5],
+  },
+  /** A footer button's own bottom padding replaces the plain band's. */
+  rowWithFooter: {
+    paddingBottom: space[2],
+  },
+  label: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    fontSize: textScale.footnoteSize,
+    lineHeight: textScale.footnoteLeading,
+    fontWeight: 500,
+  },
+  action: { flexShrink: 0 },
+  detail: {
+    order: 4,
+    width: '100%',
+    minWidth: 0,
+  },
+  /** Applied only when copy is the sole trailing control. */
+  detailAfterFooter: {
+    '@media (max-width: 767px)': { order: 5 },
+  },
+  detailText: {
+    display: 'block',
+    minWidth: 0,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+    fontSize: textScale.footnoteSize,
+    lineHeight: textScale.bodyLeading,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  footer: {
+    order: 5,
+    width: '100%',
+    flexShrink: 0,
+  },
+  /** Applied only when copy is the sole trailing control. */
+  footerInHeader: {
+    '@media (max-width: 767px)': { order: 4, width: 'auto' },
+  },
 });
 
 /**
@@ -2870,30 +2933,42 @@ const AgentNoticeBanner = ({
   // this same shadow ring for menus.
   const ringColor = `color-mix(in srgb, ${toneColor} 14%, hsl(var(--border)))`;
   const fillColor = `color-mix(in srgb, ${toneColor} 3.5%, transparent)`;
+  // Only lift copy into the header when it would be the sole trailing control.
+  // A capacity retry action already owns that edge, and moving copy beside it
+  // wraps a short title into a tall column on phones.
+  const copyRidesHeader = !action;
 
   return (
     <div
       style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
       className="w-full overflow-hidden rounded-lg"
     >
-      {/* Header and body read as one continuous band. The detail is a sibling
-          of the header rather than a child of the column beside the glyph:
-          hanging it off the label indented every line past the icon, which cost
-          width the card does not have. An action rides the header's trailing
-          edge so a retry stays on the same line as the message it answers. */}
-      <div className="flex items-center gap-2 px-2 py-1.5">
+      {/* Header, detail, and footer share one wrapping row. On phones without a
+          retry action the footer keeps the header's trailing edge and the detail
+          drops to its own full-width line, so copy no longer spends a separate
+          row; wider viewports keep detail and footer on their own rows below. */}
+      <div {...stylex.props(noticeStyles.row, footer ? noticeStyles.rowWithFooter : undefined)}>
         <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
-        <span className={cn('min-w-0 text-xs font-medium leading-4', accentClass)}>{label}</span>
-        {action ? <div className="ml-auto shrink-0">{action}</div> : null}
+        <span {...withClassName(stylex.props(noticeStyles.label), accentClass)}>{label}</span>
+        {action ? <div {...stylex.props(noticeStyles.action)}>{action}</div> : null}
+        {detail ? (
+          <div
+            {...stylex.props(
+              noticeStyles.detail,
+              copyRidesHeader && noticeStyles.detailAfterFooter
+            )}
+          >
+            <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
+          </div>
+        ) : null}
+        {footer ? (
+          <div
+            {...stylex.props(noticeStyles.footer, copyRidesHeader && noticeStyles.footerInHeader)}
+          >
+            {footer}
+          </div>
+        ) : null}
       </div>
-      {detail ? (
-        <div className="px-2 pb-1.5">
-          <span className="block min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
-            {detail}
-          </span>
-        </div>
-      ) : null}
-      {footer ? <div {...stylex.props(noticeStyles.footer)}>{footer}</div> : null}
     </div>
   );
 };
@@ -3066,7 +3141,7 @@ const ChatFailedNoticeView = ({
       cliType: sessionMeta.cliType,
       agentType: sessionMeta.agentType,
     }) &&
-    (!usesAcpProtocolAuthentication(sessionMeta.cliType) ||
+    (!usesAcpProtocolAuthentication(sessionMeta.cliType, sessionMeta.agentType) ||
       machineSupportsAcpProtocolAuthentication(sessionMachineMeta));
 
   const meta = notice.meta as
@@ -5839,7 +5914,7 @@ const UserImageBlock = (props: Parameters<typeof WorkspaceUserImageBlock>[0]) =>
   );
 };
 
-const WorkspaceUserImageBlock = ({
+export const WorkspaceUserImageBlock = ({
   entry,
   onPreviewRequest,
   variant = 'full',
@@ -5872,6 +5947,14 @@ const WorkspaceUserImageBlock = ({
     entry.fileName || entry.alt || t('sessions.uploadedImage', 'Uploaded image');
   const imageLoadUnavailableLabel = t('sessions.imageLoadUnavailable', 'Unable to load image');
   const imageLoadFailedLabel = t('sessions.imageLoadFailed', 'Failed to load image');
+  const cachedThumbnailUrl =
+    workspaceId && authToken
+      ? peekSessionImageUrl(
+          { workspaceId, sessionId: entry.sessionId, imageId: entry.imageId },
+          useNativeIOSShareSafeImageUrl
+        )
+      : null;
+  const displayedThumbnailUrl = cachedThumbnailUrl ?? thumbnailBlobUrl;
 
   useEffect(() => {
     let active = true;
@@ -5882,6 +5965,19 @@ const WorkspaceUserImageBlock = ({
       setThumbnailBlobUrl(null);
       setIsThumbnailLoading(false);
       setThumbnailLoadingError(imageLoadUnavailableLabel);
+      return () => {
+        active = false;
+      };
+    }
+
+    const cachedUrl = peekSessionImageUrl(
+      { workspaceId, sessionId: entry.sessionId, imageId: entry.imageId },
+      useNativeIOSShareSafeImageUrl
+    );
+    if (cachedUrl) {
+      setThumbnailBlobUrl(cachedUrl);
+      setThumbnailLoadingError(null);
+      setIsThumbnailLoading(false);
       return () => {
         active = false;
       };
@@ -5949,13 +6045,13 @@ const WorkspaceUserImageBlock = ({
         isThumbnail ? `${thumbnailFrameClass} shrink-0` : 'inline-flex max-w-full flex-col'
       )}
     >
-      {isThumbnailLoading && (
+      {!cachedThumbnailUrl && isThumbnailLoading && (
         <Skeleton
           shape="block"
           className={cn(isThumbnail ? thumbnailFrameClass : `h-36 ${fullFrameWidthClass}`)}
         />
       )}
-      {!isThumbnailLoading && thumbnailLoadingError && (
+      {!cachedThumbnailUrl && !isThumbnailLoading && thumbnailLoadingError && (
         <div
           className={cn(
             'flex items-center justify-center px-3 py-4 text-xs text-muted-foreground',
@@ -5965,35 +6061,38 @@ const WorkspaceUserImageBlock = ({
           {thumbnailLoadingError}
         </div>
       )}
-      {!isThumbnailLoading && !thumbnailLoadingError && thumbnailBlobUrl && (
-        <>
-          <button
-            type="button"
-            className={cn(isThumbnail ? `block ${thumbnailFrameClass}` : 'inline-flex max-w-full')}
-            onClick={() => {
-              if (onPreviewRequest) {
-                onPreviewRequest(entry.key);
-                return;
-              }
-              if (sessionImagePreview) {
-                sessionImagePreview.openImagePreview(entry.key);
-                return;
-              }
-              setLocalActiveImageKey(entry.key);
-            }}
-          >
-            <img
-              src={thumbnailBlobUrl}
-              alt={previewImageAlt}
+      {(cachedThumbnailUrl || (!isThumbnailLoading && !thumbnailLoadingError)) &&
+        displayedThumbnailUrl && (
+          <>
+            <button
+              type="button"
               className={cn(
-                isThumbnail
-                  ? `${thumbnailFrameClass} object-cover`
-                  : 'block max-h-[10.5rem] max-w-full object-contain'
+                isThumbnail ? `block ${thumbnailFrameClass}` : 'inline-flex max-w-full'
               )}
-            />
-          </button>
-        </>
-      )}
+              onClick={() => {
+                if (onPreviewRequest) {
+                  onPreviewRequest(entry.key);
+                  return;
+                }
+                if (sessionImagePreview) {
+                  sessionImagePreview.openImagePreview(entry.key);
+                  return;
+                }
+                setLocalActiveImageKey(entry.key);
+              }}
+            >
+              <img
+                src={displayedThumbnailUrl}
+                alt={previewImageAlt}
+                className={cn(
+                  isThumbnail
+                    ? `${thumbnailFrameClass} object-cover`
+                    : 'block max-h-[10.5rem] max-w-full object-contain'
+                )}
+              />
+            </button>
+          </>
+        )}
       {!sessionImagePreview && !onPreviewRequest ? (
         <ImagePreviewDialog
           open={localActiveImageKey !== null}

@@ -1,14 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { useState } from 'react';
 import type {
   GitHubCheckRun,
   GitHubIssueComment,
   GitHubPullRequestDetails,
+  GitHubPullRequestCommit,
+  GitHubPullRequestFile,
   GitHubReview,
   GitHubReviewComment,
   GitHubReviewThread,
   GitHubUser,
 } from '@lody/shared';
 import { PrTabView, type PrTabViewData } from '@/components/sessions/pr-tab-view';
+import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
+import type { PrCommitSelection } from '@/lib/github-pr-diff';
 
 const alice: GitHubUser = {
   login: 'alice',
@@ -39,6 +44,7 @@ const basePr: GitHubPullRequestDetails = {
   draft: false,
   htmlUrl: 'https://github.com/loro-dev/lody/pull/42',
   baseRef: 'main',
+  baseSha: 'base0000000000',
   headRef: 'feat/pr-tab-for-github-worktree',
   headSha: 'deadbeefcafef00d',
   user: alice,
@@ -262,6 +268,91 @@ const baseData: PrTabViewData = {
   checkRuns: passingChecks,
 };
 
+const storyCommits: GitHubPullRequestCommit[] = [
+  {
+    sha: 'commit1111111111',
+    message: 'Add the PR changes surface',
+    authorLogin: 'alice',
+    authoredAt: '2026-09-29T22:30:00.000Z',
+    htmlUrl: 'https://github.com/loro-dev/lody/commit/commit1111111111',
+    parentSha: 'base0000000000',
+  },
+  {
+    sha: 'deadbeefcafef00d',
+    message: 'Polish the diff controls',
+    authorLogin: 'alice',
+    authoredAt: '2026-09-30T00:15:00.000Z',
+    htmlUrl: 'https://github.com/loro-dev/lody/commit/deadbeefcafef00d',
+    parentSha: 'commit1111111111',
+  },
+];
+
+const storyFiles: GitHubPullRequestFile[] = [
+  {
+    path: 'README.md',
+    previousPath: null,
+    status: 'modified',
+    additions: 4,
+    deletions: 1,
+    changes: 5,
+    sha: 'readme000000000',
+    blobUrl: 'https://github.com/loro-dev/lody/blob/deadbeefcafef00d/README.md',
+    rawUrl: null,
+    patch: null,
+  },
+  {
+    path: 'packages/components/src/components/sessions/pr-tab-view.tsx',
+    previousPath: null,
+    status: 'modified',
+    additions: 15,
+    deletions: 3,
+    changes: 18,
+    sha: 'view00000000000',
+    blobUrl:
+      'https://github.com/loro-dev/lody/blob/deadbeefcafef00d/packages/components/src/components/sessions/pr-tab-view.tsx',
+    rawUrl: null,
+    patch: null,
+  },
+];
+
+const storyFileContent = new Map([
+  [
+    'README.md',
+    {
+      status: 'ready' as const,
+      oldText: '# Lody\n\nReview code.',
+      newText: '# Lody\n\nReview code in the session PR tab.\n',
+    },
+  ],
+  [
+    'packages/components/src/components/sessions/pr-tab-view.tsx',
+    {
+      status: 'ready' as const,
+      oldText: 'const tab = "Summary";\n',
+      newText: 'const tab = "Summary";\nconst changes = "Changes";\n',
+    },
+  ],
+]);
+
+const storyChanges: UseGitHubPrDiffResult & {
+  selection: PrCommitSelection;
+  onSelectionChange: (selection: PrCommitSelection) => void;
+} = {
+  state: 'ready',
+  commits: storyCommits,
+  files: storyFiles,
+  range: { from: 'base0000000000', to: 'deadbeefcafef00d', historical: false },
+  mergeBaseSha: 'base0000000000',
+  error: null,
+  contentByPath: storyFileContent,
+  refresh: async () => {},
+  loadFile: async () => {},
+  selection: { type: 'all' },
+  onSelectionChange: () => {},
+};
+
+const changesData: PrTabViewData = { ...baseData, changes: storyChanges };
+
 const storyCallbacks = {
   onRefresh: () => {
     /* no-op in stories */
@@ -322,6 +413,29 @@ export const OpenCiPassed: Story = {
     state: 'ready',
     data: baseData,
     ...storyCallbacks,
+  },
+};
+
+export const Changes: Story = {
+  args: {
+    repoFullName: 'loro-dev/lody',
+    prNumber: 42,
+    state: 'ready',
+    data: changesData,
+    initialTab: 'changes',
+    ...storyCallbacks,
+  },
+  render: function ChangesStory(args) {
+    const [selection, setSelection] = useState<PrCommitSelection>({ type: 'all' });
+    return (
+      <PrTabView
+        {...args}
+        data={{
+          ...args.data!,
+          changes: { ...storyChanges, selection, onSelectionChange: setSelection },
+        }}
+      />
+    );
   },
 };
 

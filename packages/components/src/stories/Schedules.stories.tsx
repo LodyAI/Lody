@@ -352,6 +352,20 @@ const editor = (
 });
 
 export const Editor: Story = editor();
+export const EditorOnceMachineClock: Story = editor({
+  now: Date.parse('2026-10-01T00:00:00Z'),
+  timeZone: 'America/Los_Angeles',
+  clockName: 'Fixture machine',
+  contextBar: undefined,
+  agentBar: undefined,
+  initial: {
+    title: 'One-off review',
+    prompt: 'Review the fixture changes.',
+    trigger: { kind: 'once', at: '2026-10-01T09:21:00.000Z' },
+    misfire: 'run_once',
+    overlap: 'queue_one',
+  },
+});
 /**
  * A DESKTOP viewport with a narrow panel — the case a `sm:` breakpoint cannot
  * see. Every row must keep its control inside the panel rather than clipping it.

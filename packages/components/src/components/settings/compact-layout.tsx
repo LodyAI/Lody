@@ -37,6 +37,9 @@ interface CompactSectionProps {
 
 interface CompactRowProps {
   label: string;
+  /** Controls associate these IDs through aria-labelledby / aria-describedby. */
+  labelId?: string;
+  helperId?: string;
   helper?: ReactNode;
   children?: ReactNode;
   className?: string;
@@ -132,6 +135,8 @@ export function CompactSection({
 
 export function CompactRow({
   label,
+  labelId,
+  helperId,
   helper,
   children,
   className,
@@ -145,8 +150,14 @@ export function CompactRow({
     >
       {/* A bare label may use the whole column: long command names should not wrap early. */}
       <div {...stylex.props(surface.rowText, helper != null && surface.rowTextCapped)}>
-        <p {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>{label}</p>
-        {helper ? <p {...stylex.props(surface.rowHelper)}>{helper}</p> : null}
+        <p id={labelId} {...stylex.props(surface.rowLabel, disabled && surface.rowLabelDisabled)}>
+          {label}
+        </p>
+        {helper ? (
+          <p id={helperId} {...stylex.props(surface.rowHelper)}>
+            {helper}
+          </p>
+        ) : null}
       </div>
       {children ? (
         <div {...stylex.props(surface.rowControl, alignTop && surface.rowControlTop)}>

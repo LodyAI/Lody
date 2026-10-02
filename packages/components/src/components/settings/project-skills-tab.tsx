@@ -166,8 +166,7 @@ import { settingsSurface as surface } from './surface';
  * Storybook stories driving every visual state without standing up the
  * IndexedDB cache / RPC / GitHub token machinery the hook needs.
  *
- * Read-only by decision I in `docs/project-skills.md` — there's no skill
- * detail surface; each row only renders name / description / version / author.
+ * Rows open read-only Markdown details; closing them preserves the list's query.
  */
 export function ProjectSkillsTab({ source }: { source: ProjectSkillsSource | null }) {
   const { status, groups, error, stale, fetchedAt, refresh } = useProjectSkills(source);

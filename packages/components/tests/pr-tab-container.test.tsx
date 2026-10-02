@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
     refresh: vi.fn(),
     toastError: vi.fn(),
     useGitHubPrDetails: vi.fn(),
+    useGitHubPrDiff: vi.fn(),
     ReadyForReviewStillDraftError,
   };
 });
@@ -72,6 +73,10 @@ vi.mock('@/hooks/use-github-pr-details', () => ({
 vi.mock('../src/hooks/use-github-pr-details', () => ({
   ReadyForReviewStillDraftError: mocks.ReadyForReviewStillDraftError,
   useGitHubPrDetails: mocks.useGitHubPrDetails,
+}));
+
+vi.mock('@/hooks/use-github-pr-diff', () => ({
+  useGitHubPrDiff: mocks.useGitHubPrDiff,
 }));
 
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
@@ -171,11 +176,23 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     mocks.refresh.mockReset();
     mocks.toastError.mockReset();
     mocks.useGitHubPrDetails.mockReset();
+    mocks.useGitHubPrDiff.mockReset();
 
     store = createStore();
     store.set(currentWorkspaceIdAtom, 'workspace-1' as WorkspaceId);
     mocks.refresh.mockResolvedValue(null);
     mocks.useGitHubPrDetails.mockReturnValue(createPrDetailsResult());
+    mocks.useGitHubPrDiff.mockReturnValue({
+      state: 'idle',
+      commits: [],
+      files: [],
+      range: null,
+      mergeBaseSha: null,
+      error: null,
+      contentByPath: new Map(),
+      refresh: vi.fn().mockResolvedValue(undefined),
+      loadFile: vi.fn().mockResolvedValue(undefined),
+    });
 
     container = document.createElement('div');
     document.body.appendChild(container);

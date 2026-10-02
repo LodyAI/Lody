@@ -33,9 +33,8 @@ export const CONVERSATION_CONTENT_WIDTH_CLASS = `mx-auto w-full max-w-[calc(48re
 
 /**
  * Full-width variant (`conversationWideModeAtom`): the cap on the CONTENT box
- * drops and the column spans the pane, keeping only the shared gutter — the
- * same left/right padding the capped column already leaves at the edges of a
- * narrow window. `mx-auto` stays so a re-capped nested column (none today)
- * would still centre.
+ * drops and the column spans the pane. `ConversationColumn` owns its responsive
+ * side padding, reserving room for the outline rail on desktop. `mx-auto`
+ * stays so a re-capped nested column (none today) would still centre.
  */
-export const CONVERSATION_CONTENT_WIDTH_WIDE_CLASS = `mx-auto w-full ${CONVERSATION_GUTTER_X_CLASS}`;
+export const CONVERSATION_CONTENT_WIDTH_WIDE_CLASS = 'mx-auto w-full';

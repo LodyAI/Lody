@@ -35,9 +35,11 @@ function harness(
     remote?: string;
     status?: number;
     permissions?: { push?: boolean; admin?: boolean };
+    policyFailures?: number;
   } = {}
 ) {
   const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  let policyFailures = options.policyFailures ?? 0;
   const actual: Array<string[]> = [];
   const spawn = vi.fn((_command: string, args: string[]) => {
     const child = Object.assign(new EventEmitter(), {
@@ -67,6 +69,8 @@ function harness(
     const endpoint = new URL(url).pathname;
     const body = JSON.parse(init.body ?? '{}');
     calls.push({ path: endpoint, body });
+    if (endpoint === '/github-auth-context' && policyFailures-- > 0)
+      return { ok: false, status: 503, json: async () => ({ error: 'policy_unavailable' }) };
     if (endpoint === '/github-auth-context')
       return {
         ok: true,
@@ -138,6 +142,26 @@ function harness(
 }
 
 describe('generated gh command boundary', () => {
+  it('keeps personal identity after transient policy failure without executing the write', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness({
+        personal: true,
+        localToken: 'owner-token',
+        policyFailures: 1,
+        permissions: { push: true },
+      });
+      const pending = h.build(['pr', 'merge', '1', '-R', 'other/repo']);
+      await vi.advanceTimersByTimeAsync(250);
+      expect((await pending).env.GH_TOKEN).toBe('personal:other/repo');
+      expect(h.actual).toEqual([]);
+      expect(
+        h.calls.filter((call) => call.path === '/github-token').map((call) => call.body.source)
+      ).toEqual(['personal']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('generates syntactically valid standalone gh and Git transports', () => {
     for (const command of ['gh', 'git', 'git-remote-lody-github'])
       expect(

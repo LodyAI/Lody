@@ -85,6 +85,9 @@ Performance comparisons must use the current full-Mirror baseline.
 
 - Default app entry opens the workspace chat landing; never persist or restore the
   last visited route. Explicit deep links and requested window targets retain their destination.
+  Entry/workspace gate redirects use `BootNavigate`; `PreloadedMainLayout` owns its
+  boot-shell Suspense fallback. Keep a visible shell until the destination commits;
+  the hidden warm window's `/` remains neutral.
 
 - Dock counts derive from complete active metadata and the sidebar's child activity
   summary. Publish absolute snapshots, including zero, on change and every 30 seconds;

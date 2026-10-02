@@ -7,6 +7,8 @@ import type { LoroDoc } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
 import type { ConversationView } from '@/lib/conversation-view';
 import type {
+  McpToolListResult,
+  WorkspaceMcpServerMeta,
   InferInputType,
   InferType,
   ClientToServer,
@@ -27,6 +29,7 @@ import type {
   SessionTurnInputConfig,
   SessionId,
   SessionMeta,
+  SessionHistoryBackendKind,
   SessionOperation,
   MachineId,
   AgentConfigId,
@@ -103,6 +106,8 @@ export type SessionDocUpdater =
 export type SessionDocStore = {
   readonly sessionId: SessionId;
   readonly roomId: string;
+  /** Immutable history ownership selected from the session catalog. */
+  readonly historyBackend: SessionHistoryBackendKind;
   readonly doc: LoroDoc;
   readonly firstSynced: Promise<void>;
   acquireSync: () => () => void;
@@ -498,6 +503,10 @@ export type WorkspaceRuntime = {
     request: LocalProjectControlRequest,
     options?: { timeoutMs?: number }
   ) => Promise<LocalProjectControlResponse | null>;
+  requestLocalMcpTools: (
+    machineId: MachineId,
+    server: WorkspaceMcpServerMeta
+  ) => Promise<McpToolListResult>;
   requestMachineBugReport: (
     machineId: MachineId,
     args: { description: string; reporterUserId: string; requestToken: string },

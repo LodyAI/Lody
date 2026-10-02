@@ -1,4 +1,11 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { FloatingFocusManager, useFloating } from '@floating-ui/react';
+import * as stylex from '@stylexjs/stylex';
+import { Button } from '@lody/ui/button';
+import { forcedThemeClassNames } from '@lody/ui/theme';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { PhotoSlider } from 'react-photo-view';
 import { toast } from '@/lib/toast';
@@ -19,8 +26,8 @@ import './zoomable-image-viewer.css';
 
 /**
  * The single full-screen image viewer for the whole app: pinch-to-zoom,
- * double-tap zoom, wheel zoom, drag-to-pan, and the top-right close button all
- * come from `react-photo-view`'s `PhotoSlider`. Chat image blocks and the Code
+ * double-tap zoom, wheel zoom and drag-to-pan come from `react-photo-view`'s
+ * `PhotoSlider`; Lody owns the modal focus boundary and named buttons. Chat image blocks and the Code
  * Collab file preview both mount THIS component, so the gestures stay identical
  * between them — do not hand-roll a second zoom surface for a new caller.
  *
@@ -38,6 +45,34 @@ import './zoomable-image-viewer.css';
 
 /** Mask alpha on desktop; mobile keeps the library's opaque black. */
 const DESKTOP_MASK_OPACITY = 0.86;
+
+const styles = stylex.create({
+  modal: { position: 'fixed', inset: 0, zIndex: 'var(--z-image-viewer, 95)' },
+  controls: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 'calc(var(--z-image-viewer, 95) + 1)',
+    pointerEvents: 'none',
+  },
+  toolbar: { pointerEvents: 'auto' },
+  close: { marginInlineStart: 'auto', paddingInline: space[2] },
+  previous: {
+    position: 'absolute',
+    top: '50%',
+    left: 'var(--safe-area-left, env(safe-area-inset-left, 0px))',
+    padding: space[2],
+    pointerEvents: 'auto',
+    transform: 'translateY(-50%)',
+  },
+  next: {
+    position: 'absolute',
+    top: '50%',
+    right: 'var(--safe-area-right, env(safe-area-inset-right, 0px))',
+    padding: space[2],
+    pointerEvents: 'auto',
+    transform: 'translateY(-50%)',
+  },
+});
 
 export type ZoomableImageViewerItem = {
   readonly key: string;
@@ -71,33 +106,6 @@ export const resolveImagePreviewPortalContainer = (
   );
 };
 
-/**
- * Mark the mounted portal root `data-vaul-no-drag` so Vaul does not take over
- * the viewer's pan/pinch gestures and drag the drawer toward dismissal.
- */
-export function useImagePreviewPortalNoDrag(
-  active: boolean,
-  portalContainer: HTMLElement | undefined
-) {
-  useLayoutEffect(() => {
-    if (!active || !portalContainer) {
-      return undefined;
-    }
-
-    const portal = portalContainer.querySelector<HTMLElement>(
-      ':scope > .lody-photo-slider.PhotoView-Portal'
-    );
-    if (!portal) {
-      return undefined;
-    }
-
-    portal.setAttribute('data-vaul-no-drag', '');
-    return () => {
-      portal.removeAttribute('data-vaul-no-drag');
-    };
-  }, [active, portalContainer]);
-}
-
 export type ZoomableImageViewerProps = {
   readonly open: boolean;
   readonly onClose: () => void;
@@ -122,7 +130,6 @@ export function ZoomableImageViewer({
   portalAnchorRef,
 }: ZoomableImageViewerProps) {
   const portalContainer = resolveImagePreviewPortalContainer(portalAnchorRef?.current);
-  useImagePreviewPortalNoDrag(open, portalContainer);
 
   if (!open || index < 0 || index >= images.length) {
     return null;
@@ -237,6 +244,19 @@ function OpenZoomableImageViewer({
   readonly onIndexChange?: (index: number) => void;
   readonly portalContainer?: HTMLElement;
 }) {
+  const { t } = useTranslation();
+  const closeRef = useRef<HTMLElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(
+    document.activeElement instanceof HTMLElement ? document.activeElement : null
+  );
+  const { context, refs, elements } = useFloating({ open: true });
+  const loops = images.length > 3;
+  const move = (offset: number) =>
+    onIndexChange?.(
+      loops
+        ? (index + offset + images.length) % images.length
+        : Math.max(0, Math.min(images.length - 1, index + offset))
+    );
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
   useImagePreviewContextMenu(images);
@@ -256,27 +276,121 @@ function OpenZoomableImageViewer({
     reservesWindowControls && isWindowsElectronRenderer() && 'lody-photo-slider--win-controls'
   );
 
-  return (
-    <PhotoSlider
-      className={sliderClassName}
-      images={images}
-      visible
-      onClose={onClose}
-      index={index}
-      {...(onIndexChange ? { onIndexChange } : {})}
-      maskClosable
-      // The photo itself is the pan/zoom surface. Letting a tap close it makes
-      // a second click after opening race with the source thumbnail and can
-      // reopen the viewer; the toolbar and backdrop remain explicit exits.
-      photoClosable={false}
-      // A vertical drag should pan the image, not turn into PhotoView's
-      // pull-to-dismiss animation. That animation is what makes a zoomed
-      // desktop image appear to float away from the pointer.
-      pullClosable={false}
-      {...(isMobile ? {} : { maskOpacity: DESKTOP_MASK_OPACITY })}
-      photoClassName="lody-photo-slider-image"
-      photoWrapClassName="lody-photo-slider-photo-wrap"
-      {...(portalContainer ? { portalContainer } : {})}
-    />
+  // Keep PhotoSlider's portal inside the focus boundary, including while loading.
+  useLayoutEffect(() => {
+    const photoPortal = elements.floating?.querySelector('.PhotoView-Portal');
+    photoPortal?.removeAttribute('role');
+    photoPortal?.setAttribute('data-vaul-no-drag', '');
+  }, [elements.floating]);
+
+  return createPortal(
+    <FloatingFocusManager
+      context={context}
+      initialFocus={closeRef}
+      returnFocus={openerRef}
+      restoreFocus
+      outsideElementsInert
+    >
+      <div
+        ref={refs.setFloating}
+        {...stylex.props(styles.modal)}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('sessions.imagePreview')}
+        data-state="open"
+        data-vaul-no-drag=""
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          // Do not also run PhotoSlider's window listener or background shortcuts.
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            onClose();
+          } else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+            event.preventDefault();
+            event.stopPropagation();
+            move(event.key === 'ArrowRight' ? 1 : -1);
+          }
+        }}
+      >
+        {elements.floating && (
+          <PhotoSlider
+            className={sliderClassName}
+            images={images}
+            visible
+            onClose={onClose}
+            index={index}
+            bannerVisible={false}
+            {...(onIndexChange ? { onIndexChange } : {})}
+            maskClosable
+            // The photo itself is the pan/zoom surface. Letting a tap close it makes
+            // a second click after opening race with the source thumbnail and can
+            // reopen the viewer; the toolbar and backdrop remain explicit exits.
+            photoClosable={false}
+            // A vertical drag should pan the image, not turn into PhotoView's
+            // pull-to-dismiss animation. That animation is what makes a zoomed
+            // desktop image appear to float away from the pointer.
+            pullClosable={false}
+            {...(isMobile ? {} : { maskOpacity: DESKTOP_MASK_OPACITY })}
+            photoClassName="lody-photo-slider-image"
+            photoWrapClassName="lody-photo-slider-photo-wrap"
+            portalContainer={elements.floating}
+          />
+        )}
+        <div
+          className={cn(
+            sliderClassName,
+            stylex.props(styles.controls).className,
+            ...forcedThemeClassNames('dark')
+          )}
+        >
+          <div
+            className={cn('PhotoView-Slider__BannerWrap', stylex.props(styles.toolbar).className)}
+          >
+            <span className="PhotoView-Slider__Counter" aria-live="polite">
+              {index + 1} / {images.length}
+            </span>
+            <div {...stylex.props(styles.close)}>
+              <Button
+                ref={closeRef}
+                icon
+                variant="ghost"
+                aria-label={t('sessions.imagePreview.close', 'Close image preview')}
+                onClick={onClose}
+              >
+                <X aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
+          {images.length > 1 && (
+            <>
+              <div {...stylex.props(styles.previous)}>
+                <Button
+                  icon
+                  variant="ghost"
+                  aria-label={t('sessions.previousImage')}
+                  disabled={(!loops && index === 0) || !onIndexChange}
+                  onClick={() => move(-1)}
+                >
+                  <ChevronLeft aria-hidden="true" />
+                </Button>
+              </div>
+              <div {...stylex.props(styles.next)}>
+                <Button
+                  icon
+                  variant="ghost"
+                  aria-label={t('sessions.nextImage')}
+                  disabled={(!loops && index === images.length - 1) || !onIndexChange}
+                  onClick={() => move(1)}
+                >
+                  <ChevronRight aria-hidden="true" />
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </FloatingFocusManager>,
+    portalContainer ?? document.body
   );
 }

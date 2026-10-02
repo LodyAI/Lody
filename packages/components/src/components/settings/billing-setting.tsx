@@ -580,19 +580,14 @@ function CloudBillingSettings() {
                   {formatUsd(intervalPreview.subtotalAmount)}
                 </span>
               </div>
-              {/* Permanent yearly early-bird discount */}
+              {/* Existing subscription discount */}
               {intervalPreview.promoDiscountAmount !== 0 ? (
                 <div className="mt-1.5 flex items-baseline justify-between gap-4">
-                  <span className="text-primary">{t('billing.switchLinePromoDiscount')}</span>
+                  <span className="text-primary">{t('billing.upcomingDiscount')}</span>
                   <span className="tabular-nums text-primary">
                     {formatUsd(intervalPreview.promoDiscountAmount)}
                   </span>
                 </div>
-              ) : null}
-              {intervalPreview.promoApplied ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t('billing.yearlyEarlyBirdLocked')}
-                </p>
               ) : null}
               {/* Credit for the unused portion of the current period */}
               {intervalPreview.creditAmount !== 0 ? (

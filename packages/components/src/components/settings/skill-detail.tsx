@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import type { MouseEvent } from 'react';
 import { User } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import type { ProjectSkill, ProjectSkillScope } from '@lody/shared';
@@ -55,6 +56,26 @@ const styles = stylex.create({
 /** The panel reads a SKILL.md, so it keeps a reading width rather than a form's. */
 const SKILL_DIALOG_WIDTH = '768px';
 
+function navigateSkillFragment(event: MouseEvent<HTMLDivElement>) {
+  if (!(event.target instanceof Element)) return;
+  const link = event.target.closest('a[href^="#"]');
+  if (!link || !event.currentTarget.contains(link)) return;
+  // Fragments belong to this detail, never the router or another mounted document.
+  event.preventDefault();
+  let id: string;
+  try {
+    id = decodeURIComponent(link.getAttribute('href')!.slice(1));
+  } catch {
+    return;
+  }
+  const heading = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>('h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]')
+  ).find((element) => element.id === id);
+  if (!heading) return;
+  heading.scrollIntoView({ block: 'start' });
+  heading.focus({ preventScroll: true });
+}
+
 /**
  * Shared skill detail body: badges + metadata + the rendered SKILL.md markdown
  * (`skill.content`, frontmatter already stripped by the scanner). The skill
@@ -93,12 +114,15 @@ export function SkillDetailContent({
         </div>
       </div>
 
-      <div {...withClassName(stylex.props(styles.body), 'scrollbar-pro')}>
+      <div
+        onClickCapture={navigateSkillFragment}
+        {...withClassName(stylex.props(styles.body), 'scrollbar-pro')}
+      >
         {skill.content ? (
           /* Primary: the app's full Markdown renderer (Streamdown). It lazy-
              loads a Shiki code highlighter; if that dynamic import fails (e.g. a
              stale Vite dev optimize-deps chunk) the boundary falls back to a
-             dependency-free Markdown renderer so the content still renders as
+             small Markdown renderer so the content still renders as
              Markdown — never raw text. */
           <ErrorBoundary
             name="SkillMarkdown"
@@ -106,7 +130,7 @@ export function SkillDetailContent({
             resetKeys={[skill.relativePath]}
             fallback={<SkillMarkdownFallback content={skill.content} />}
           >
-            <MarkdownRenderer text={skill.content} size="sm" />
+            <MarkdownRenderer text={skill.content} size="sm" headingAnchors />
           </ErrorBoundary>
         ) : (
           <p {...stylex.props(styles.empty)}>

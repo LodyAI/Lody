@@ -1,6 +1,6 @@
-import { memo, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { useReducedMotion } from 'framer-motion';
 import { useLocation } from '@tanstack/react-router';
 import { LoroAppSidebar } from './loro-app-sidebar';
 import {
@@ -21,10 +21,7 @@ import { getWebWorkspaceLayoutRootClassName, isSettingsRoute } from './workspace
 import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 import { cn } from '@/lib/utils';
-
-// Compact overlay width: the standard 18rem drawer, capped so it never
-// covers the whole window on the narrowest desktops.
-const COMPACT_SIDEBAR_OVERLAY_WIDTH = 'min(18rem,85vw)';
+import { CompactNavigationDialog } from './compact-navigation-dialog';
 
 const DesktopSidebarContent = memo(function DesktopSidebarContent({
   pathname,
@@ -55,6 +52,8 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   const shouldReduceMotion = useReducedMotion();
   const sidebarRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const [layoutRoot, setLayoutRoot] = useState<HTMLDivElement | null>(null);
   const wasSidebarVisibleRef = useRef(sidebarVisible);
 
   useLayoutEffect(() => {
@@ -101,52 +100,19 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
     ),
     MAX_DESKTOP_SIDEBAR_WIDTH
   );
-  const slideTransition = {
-    duration: shouldReduceMotion ? 0 : 0.22,
-    ease: [0.32, 0.72, 0, 1] as const,
-  };
-
   return (
-    <div className={cn(getWebWorkspaceLayoutRootClassName(), 'relative')}>
-      {/* presenceAffectsLayout gives the presence context a new value on every
-          render, which re-propagated it through the whole sidebar (~29k fibers)
-          on each session switch. Neither branch animates `layout`. */}
+    <div ref={setLayoutRoot} className={cn(getWebWorkspaceLayoutRootClassName(), 'relative')}>
       {compact ? (
-        // Compact desktop: the navigation sidebar floats over the content as
-        // a dismissible sheet instead of taking a column it can no longer
-        // afford. Scrim click records a real collapse (persisted), matching
-        // every other close path; compact auto-hide uses the separate
-        // suppressed flag so widening restores the sidebar instead.
-        <AnimatePresence initial={false} presenceAffectsLayout={false}>
-          {sidebarVisible && [
-            <motion.div
-              key="app-sidebar-scrim"
-              aria-hidden="true"
-              className="absolute inset-0 z-30 bg-black/40"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: shouldReduceMotion ? 0 : 0.15 }}
-              onClick={() => setSidebarCollapsed(true)}
-            />,
-            <motion.div
-              key="app-sidebar-overlay"
-              className="absolute inset-y-0 left-0 z-40"
-              style={{ width: COMPACT_SIDEBAR_OVERLAY_WIDTH }}
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={slideTransition}
-            >
-              <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
-                <LoroAppSidebar
-                  overlay
-                  className="h-full border-r border-sidebar-border shadow-xl"
-                />
-              </ErrorBoundary>
-            </motion.div>,
-          ]}
-        </AnimatePresence>
+        <CompactNavigationDialog
+          open={sidebarVisible}
+          onOpenChange={(open) => setSidebarCollapsed(!open)}
+          container={layoutRoot}
+          returnFocus={returnFocusRef}
+        >
+          <ErrorBoundary name="AppSidebar" variant="section" resetKeys={[pathname]}>
+            <LoroAppSidebar overlay className="h-full border-r border-sidebar-border shadow-xl" />
+          </ErrorBoundary>
+        </CompactNavigationDialog>
       ) : (
         <div
           ref={sidebarRef}
@@ -167,6 +133,11 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
       <FocusScope
         ref={contentRef}
         id={WORKSPACE_FOCUS_SCOPES.content}
+        inert={compact && sidebarVisible}
+        onFocusCapture={(event) => {
+          // Capture before inert can blur the opener during the open commit.
+          returnFocusRef.current = event.target;
+        }}
         className="relative flex min-w-0 flex-1 overflow-hidden"
       >
         <WindowDragStrip />

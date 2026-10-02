@@ -1,4 +1,3 @@
-import { readSessionHistory } from '@lody/shared/session-data';
 import {
   getServerNow,
   getSessionRoomId,
@@ -13,6 +12,7 @@ import {
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
 import type { Logger } from '@/utils/logger';
+import { createSessionBackend } from '@/session/session-backend';
 import { ReviewAutomationEngine, type ReviewSessionFacts } from './review-automation-engine';
 import { createGhRunner, createReviewGitHubClient } from './review-automation-github';
 import {
@@ -122,7 +122,8 @@ export const createReviewAutomation = (
     readIntent: async (sessionId) => {
       try {
         const doc = await documentManager.getOrCreateSessionDoc(sessionId);
-        const history = readSessionHistory(doc.sessionData.history);
+        const backend = await createSessionBackend(doc);
+        const history = await backend.readHistory();
         const firstUserEntry = history.find((entry) => entry.role === 'user');
         return entryText(firstUserEntry) || undefined;
       } catch {
@@ -132,7 +133,8 @@ export const createReviewAutomation = (
     readLastAssistantText: async (sessionId) => {
       try {
         const doc = await documentManager.getOrCreateSessionDoc(sessionId);
-        const history = readSessionHistory(doc.sessionData.history);
+        const backend = await createSessionBackend(doc);
+        const history = await backend.readHistory();
         for (let index = history.length - 1; index >= 0; index -= 1) {
           const entry = history[index];
           if (entry?.role !== 'assistant') {

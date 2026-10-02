@@ -17,6 +17,8 @@ import {
 import { throwIfSendAborted, type SessionSendResources } from './session-send-resources';
 import { preparedDraftInput } from './session-attachment-draft';
 import type { PendingSessionSend } from './session-pending-sends';
+import { seedSessionImageCache } from './session-image-cache';
+import { isNativeIOSAppShell } from './native-platform';
 
 type DraftAttachmentSend = Pick<
   PendingSessionSend,
@@ -143,6 +145,24 @@ export async function prepareDraftAttachments(args: {
         ready = fileResult;
       }
       throwIfSendAborted(args.signal);
+      if (ready.type === 'image') {
+        try {
+          await seedSessionImageCache(
+            {
+              workspaceId: args.record.workspaceId as WorkspaceId,
+              sessionId: args.record.sessionId,
+              imageId: ready.imageId,
+            },
+            attachment.source,
+            isNativeIOSAppShell(),
+            args.signal
+          );
+        } catch (error) {
+          // A preview cache failure cannot turn an accepted upload into a retry.
+          console.warn('Uploaded image preview cache unavailable', error);
+        }
+        throwIfSendAborted(args.signal);
+      }
       attachments = attachments.map((item) =>
         item.id === attachment.id ? { ...item, ready, error: undefined, progress: 100 } : item
       );

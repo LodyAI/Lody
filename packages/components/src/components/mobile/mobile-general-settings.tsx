@@ -662,7 +662,10 @@ export function MobileGeneralSettings() {
       </MobileInlinePickerCoordinator>
 
       {githubIntegrationAvailable ? (
-        <MobileSettingsSection title={t('settings.autoArchive.title', 'Auto-archive sessions')}>
+        <MobileSettingsSection
+          title={t('settings.autoArchive.title', 'Auto-archive sessions')}
+          description={t('settings.autoArchive.description')}
+        >
           <MobileSettingsRowGroup>
             <MobileSettingsRow
               label={t('settings.autoArchive.onPrMerged', 'When the PR is merged')}

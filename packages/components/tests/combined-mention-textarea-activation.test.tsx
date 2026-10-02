@@ -404,7 +404,90 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     expect(document.body.textContent).toContain('Current project');
   });
 
-  it('offers all projects from an empty current-project result and scopes the command', async () => {
+  it.each([
+    { name: 'No project', projectKey: 'chat' as const, mentionSource: undefined },
+    {
+      name: 'GitHub project',
+      projectKey: 'github:lodyai/lody' as const,
+      mentionSource: { kind: 'github', repoFullName: 'lodyai/lody' },
+    },
+    {
+      name: 'local project',
+      projectKey: 'local:machine-1:project-1' as const,
+      mentionSource: { kind: 'local', machineId: 'machine-1', localProjectId: 'project-1' },
+    },
+  ])(
+    'distinguishes unmatched searches from an empty $name scope',
+    async ({ projectKey, mentionSource }) => {
+      for (let index = 0; index < 14; index++) {
+        sessionItems.push({
+          sessionId: `scoped-${index}`,
+          title: `Scoped conversation ${index}`,
+          slug: `scoped-conversation-${index}`,
+          activityAt: 14 - index,
+          projectKey,
+        });
+      }
+      sessionItems.push({
+        sessionId: 'other',
+        title: 'Elsewhere parser work',
+        slug: 'elsewhere-parser-work',
+        activityAt: 1,
+        projectKey: 'github:lodyai/other',
+      });
+      await render({ value: '', mentionSource });
+      await typeInto('@');
+      const category = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-slot="mention-item"]')
+      ).find((row) => row.textContent === 'Sessions');
+      if (!category) throw new Error('Sessions category missing');
+      await act(async () => category.click());
+
+      const rows = () =>
+        Array.from(document.querySelectorAll<HTMLElement>('[data-slot="mention-item"]')).map(
+          (row) => row.textContent
+        );
+      const initialRows = rows();
+      expect(initialRows).toHaveLength(14);
+      expect(textarea()!.value).toBe('@session:');
+
+      for (const query of ['zzzzunmatched', 'elsewhere']) {
+        await typeInto(`@session:${query}`);
+        expect(rows()).toEqual([]);
+        expect(document.body.textContent).toContain(`Nothing matches “${query}”`);
+        expect(document.body.textContent).not.toContain('There are no other sessions');
+        expect(textarea()!.value).toBe(`@session:${query}`);
+        expect(document.activeElement).toBe(textarea());
+        await typeInto('@session:');
+        expect(rows()).toEqual(initialRows);
+      }
+
+      await typeInto('@session:elsewhere');
+      await act(async () => {
+        commands.execute('mention.toggleSessionProjectScope');
+      });
+      expect(textarea()!.value).toBe('@session:elsewhere');
+      expect(document.activeElement).toBe(textarea());
+      expect(rows()).toHaveLength(1);
+      expect(rows()[0]).toContain('Elsewhere parser work');
+      await typeInto('@session:zzzzunmatched');
+      expect(document.body.textContent).toContain('Nothing matches “zzzzunmatched”');
+      await typeInto('@session:');
+      expect(rows()).toHaveLength(15);
+      await act(async () => {
+        commands.execute('mention.toggleSessionProjectScope');
+      });
+      expect(rows()).toEqual(initialRows);
+    }
+  );
+
+  it.each([
+    { mentionSource: undefined, message: 'There are no other sessions without a project.' },
+    {
+      mentionSource: { kind: 'github', repoFullName: 'lodyai/lody' },
+      message: 'There are no other sessions in the current project.',
+    },
+  ])('offers all projects from an empty scope: $message', async ({ mentionSource, message }) => {
     sessionItems.push({
       sessionId: 'other',
       title: 'Cross project session',
@@ -414,14 +497,15 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     });
     await render({
       value: '',
-      mentionSource: { kind: 'github', repoFullName: 'lodyai/lody' },
+      mentionSource,
     });
 
     expect(commands.execute('mention.toggleSessionProjectScope')).toBe(false);
+    await typeInto('@session:');
+    expect(document.body.textContent).toContain(message);
+    expect(document.body.textContent).toContain('View all projects');
     await typeInto('@session:cross');
-    expect(document.body.textContent).toContain(
-      'There are no other sessions in the current project.'
-    );
+    expect(document.body.textContent).toContain(message);
     expect(document.body.textContent).not.toContain('Cross project session');
 
     expect(commands.execute('mention.toggleSessionProjectScope')).toBe(true);

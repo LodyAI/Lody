@@ -3,14 +3,15 @@
 Binding rules live in [AGENTS.md](AGENTS.md); this index explains ownership.
 Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own their scoped rules.
 
-| Area                | Entry points                                                                                                     | Responsibility                                            |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| Sidebar             | [`loro-sidebar.tsx`](loro-sidebar.tsx), [`session-list.tsx`](session-list.tsx)                                   | Organizes workspace and session navigation.               |
-| Desktop layout      | [`web-workspace-layout.tsx`](web-workspace-layout.tsx), [`sidebar-update-banner.tsx`](sidebar-update-banner.tsx) | Owns the shell's safe areas and update notice.            |
-| Provider readiness  | [`shared/agent-readiness-mark.tsx`](shared/agent-readiness-mark.tsx)                                             | Draws setup state across settings and onboarding.         |
-| Shared cues         | [`shared/`](shared/)                                                                                             | Draws cross-surface drop, run-config, and transport cues. |
-| Session controls    | [`shared/workdir-mode-selector.tsx`](shared/workdir-mode-selector.tsx), [`shared/session-relation-card.tsx`](shared/session-relation-card.tsx) | Selects workdir mode and navigates session provenance. |
-| Conversation access | [`session-sharing.tsx`](session-sharing.tsx), [`sharing/`](sharing/)                                             | Presents team visibility and static sharing controls.     |
+| Area                | Entry points                                                                                                                                   | Responsibility                                                   |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Sidebar             | [`loro-sidebar.tsx`](loro-sidebar.tsx), [`session-list.tsx`](session-list.tsx)                                                                 | Organizes workspace and session navigation.                      |
+| Desktop layout      | [`web-workspace-layout.tsx`](web-workspace-layout.tsx), [`sidebar-update-banner.tsx`](sidebar-update-banner.tsx)                               | Owns the shell's safe areas and update notice.                   |
+| Startup             | [`boot-navigate.tsx`](boot-navigate.tsx), [`preloaded-main-layout.tsx`](preloaded-main-layout.tsx)                                             | Retains the boot shell during redirects and layout code loading. |
+| Provider readiness  | [`shared/agent-readiness-mark.tsx`](shared/agent-readiness-mark.tsx)                                                                           | Draws setup state across settings and onboarding.                |
+| Shared cues         | [`shared/`](shared/)                                                                                                                           | Draws cross-surface drop, run-config, and transport cues.        |
+| Session controls    | [`shared/workdir-mode-selector.tsx`](shared/workdir-mode-selector.tsx), [`shared/session-relation-card.tsx`](shared/session-relation-card.tsx) | Selects workdir mode and navigates session provenance.           |
+| Conversation access | [`session-sharing.tsx`](session-sharing.tsx), [`sharing/`](sharing/)                                                                           | Presents team visibility and static sharing controls.            |
 
 ## Sidebar and session rows
 
@@ -47,6 +48,12 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
 
 ## Entry points and layout
 
+- Entry and workspace-gate redirects use `BootNavigate`; `PreloadedMainLayout`
+  owns its boot-shell Suspense fallback for local and cloud paths. The ready layout
+  keeps the existing content gate while workspace data resolves. See
+  [startup intent](../../../../specs/app-startup-landing.md) and the
+  [first-paint decision](../../../../.agents/notes/implemented/feature/2026-09-26-boot-shell-first-paint.md).
+
 - Sidebar footer: Help (`?`), Archive, Settings, in that order. Help retains the
   documentation, GitHub repository, community, GitHub Issues feedback, and bug-report menu; Archive is a direct
   button and becomes the return action while open. See the
@@ -78,6 +85,10 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
 - Sidebar toggle: `WebWorkspaceLayout` retains the full-width sidebar, animates
   its transform and the adjacent content width together, and honors reduced motion.
   `SidebarVisibilityGate` pauses sidebar-only sources while hidden. Compact
+  navigation uses [`CompactNavigationDialog`](compact-navigation-dialog.tsx) for
+  focus containment, nested dismissal and return focus; its content scope is inert
+  while open. See [desktop layout intent](../../../../specs/desktop-windows.md).
+  Compact
   presentation and settings navigation can still remount it: `LoroSidebar` saves
   its viewport offset by workspace in `atoms/sidebar-state.ts` and restores it
   before paint. [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-26-sidebar-content-width-animation.md).

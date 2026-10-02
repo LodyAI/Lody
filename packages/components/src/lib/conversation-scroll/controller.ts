@@ -32,6 +32,8 @@ export const ENGINE_MIN_ROW_PX = 20;
 const MAX_SUPPLEMENTARY_COMMITS = 2;
 /** A downward scroll that ends this close to the real bottom re-arms follow. */
 const REARM_DISTANCE_PX = 4;
+/** Scroll ranges remembered per scroll sequence (see {@link ScrollGesture}). */
+const MAX_GESTURE_BOTTOMS = 32;
 /** How long a send (or a smooth jump) takes to glide to its target. */
 const GLIDE_MS = 360;
 /** Differences below this are sub-pixel rounding, not movement. */
@@ -119,6 +121,19 @@ interface Glide {
   settle: Intent;
 }
 
+/**
+ * One scroll sequence, from its first scroll event to `scrollend`. The
+ * compositor clamps a fling against the scroll range of the last frame it
+ * received; rows measured during the fling can grow the range after that, so
+ * the fling stops at a bottom that was real while it ran. `bottoms` holds
+ * every maximum offset the range had during the sequence.
+ */
+interface ScrollGesture {
+  bottoms: number[];
+  /** The last movement in the sequence was downward. */
+  down: boolean;
+}
+
 interface Transaction {
   reason: string;
   pass: 1 | 2;
@@ -180,6 +195,7 @@ export class ScrollController {
   private touchActive = false;
   /** Touch ended and no `scrollend` yet: any scrolling now is momentum. */
   private momentum = false;
+  private gesture: ScrollGesture | null = null;
   private momentumStats: MomentumStats = { compensations: 0, interruptions: 0 };
   private compensationPendingCheck = false;
   private scrolledSinceCompensation = false;
@@ -252,6 +268,7 @@ export class ScrollController {
     this.hidden = hidden;
     if (hidden) {
       this.tx = null;
+      this.gesture = null;
       this.cancelGlide();
     } else {
       this.reshown = true;
@@ -352,6 +369,9 @@ export class ScrollController {
     this.applyMovement(movement, scrollTop, this.committedPlan);
     // Re-arm follow: a downward scroll reaching the real bottom.
     const maxNow = Math.max(0, this.host.readScrollHeight() - this.viewportHeight);
+    this.gesture ??= { bottoms: last ? [last.maxScrollTop] : [], down: false };
+    this.gesture.down = scrollTop > previous;
+    this.recordBottom(maxNow);
     if (
       this.intent.kind === 'read' &&
       !this.glide &&
@@ -418,6 +438,7 @@ export class ScrollController {
 
   /** The native `scrollend` event. */
   onScrollEnd(): void {
+    this.rearmAtGestureBottom();
     if (this.compensationPendingCheck && !this.scrolledSinceCompensation) {
       this.momentumStats.interruptions += 1;
     }
@@ -660,6 +681,7 @@ export class ScrollController {
     }
 
     // 1. grow, 2. write, 3. shrink, 4. read back (extent ownership).
+    this.recordBottom(Math.max(0, this.host.readScrollHeight() - this.viewportHeight));
     this.host.setExtent(Math.max(extentBefore, total));
     this.host.setReplyRoom(Math.max(roomBefore, room));
     let expected: number;
@@ -683,6 +705,7 @@ export class ScrollController {
     this.extent = total;
     const actual = this.host.readScrollTop();
     const maxNow = Math.max(0, this.host.readScrollHeight() - this.viewportHeight);
+    this.recordBottom(maxNow);
     const clampedExpected = Math.min(Math.max(0, expected), maxNow);
 
     if (Math.abs(actual - clampedExpected) > EPSILON_PX) {
@@ -979,6 +1002,43 @@ export class ScrollController {
       anchorKey: anchor.kind === 'turn' ? anchor.rowKey : anchor.fixed,
       resolvedKey: resolved ? (this.rows[resolved.index]?.key ?? null) : null,
     };
+  }
+
+  private recordBottom(maxScrollTop: number): void {
+    const bottoms = this.gesture?.bottoms;
+    if (!bottoms || bottoms[bottoms.length - 1] === maxScrollTop) return;
+    bottoms.push(maxScrollTop);
+    if (bottoms.length > MAX_GESTURE_BOTTOMS) bottoms.shift();
+  }
+
+  /**
+   * A downward scroll sequence that came to rest at a bottom the range had
+   * while it ran reached the end the reader was scrolling to: follow again,
+   * even though the rows measured on the way have moved the end further.
+   */
+  private rearmAtGestureBottom(): void {
+    const gesture = this.gesture;
+    this.gesture = null;
+    if (
+      !gesture?.down ||
+      this.disposed ||
+      this.hidden ||
+      this.rows.length === 0 ||
+      this.tx ||
+      this.intent.kind !== 'read' ||
+      this.glide ||
+      this.pointerHeld ||
+      this.host.isSuppressed() ||
+      this.replyRoom !== 0
+    ) {
+      return;
+    }
+    const scrollTop = this.host.readScrollTop();
+    if (!gesture.bottoms.some((bottom) => Math.abs(bottom - scrollTop) <= REARM_DISTANCE_PX)) {
+      return;
+    }
+    this.setIntent({ kind: 'follow' });
+    this.run('rearm', true);
   }
 
   private shrinkReplyRoom(scrollTop: number): void {

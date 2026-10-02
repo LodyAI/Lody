@@ -1,4 +1,3 @@
-import { readSessionHistory } from '@lody/shared/session-data';
 import { randomUUID } from 'node:crypto';
 import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
@@ -36,6 +35,7 @@ import type { Logger } from '@/utils/logger';
 import type { SessionDispatchWatcher } from '@/session/session-dispatch-watcher';
 import type { SessionExecutionService } from '@/session/session-execution-service';
 import type { SessionUserResolver } from '@/session/session-user-resolver';
+import { createSessionBackend, type SessionBackend } from '@/session/session-backend';
 
 import {
   DELIVERY_MAX_ATTEMPTS,
@@ -160,12 +160,6 @@ export type LodyOperationCoordinatorOptions = {
 
 const isTerminalAssistantEntry = (entry: SessionHistoryInput): boolean =>
   entry.role === 'assistant' && (entry.finished === true || typeof entry.endedAt === 'number');
-
-const terminalAssistantFor = (
-  history: SessionHistoryInput[],
-  userTurnId: string
-): SessionHistoryInput | undefined =>
-  history.find((entry) => entry.userTurnId === userTurnId && isTerminalAssistantEntry(entry));
 
 const completionText = (operation: StoredLodyOperation): string =>
   [
@@ -459,20 +453,25 @@ export class LodyOperationCoordinator {
       const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(
         operation.requesterSessionId
       );
+      const backend = await createSessionBackend(sessionDoc, metaRecord.meta as SessionMeta);
       const statusByTarget = await this.collectOperationProgressTargetStatuses(operation);
       // A previous lease must not resume writing after stop/restart.
       if (!this.started || this.store !== ownerStore) return;
-      await upsertOperationProgressHistory(sessionDoc, operation, this.now, statusByTarget);
+      await upsertOperationProgressHistory(backend, operation, this.now, statusByTarget);
+      const progressTurn = await backend.readTurn(
+        getOperationProgressTurnId(operation.requesterSessionId, operation.operationId)
+      );
       if (
         operation.state === 'finished' &&
         this.progressIsSettled(
           operation,
-          readSessionHistory(sessionDoc.sessionData.history),
+          progressTurn.state === 'ready'
+            ? (progressTurn.turn as unknown as SessionHistoryInput)
+            : undefined,
           statusByTarget
         )
       ) {
-        // The SQLite acknowledgement must never outrun local Loro durability.
-        await this.options.workspaceDocument.repo.flush();
+        await backend.flushLocalWrites();
         if (!this.started || this.store !== ownerStore) return;
         this.withStore((store) =>
           store.settleProgress(operation.requesterSessionId, operation.operationId)
@@ -489,13 +488,9 @@ export class LodyOperationCoordinator {
 
   private progressIsSettled(
     operation: StoredLodyOperation,
-    history: SessionHistoryInput[],
+    row: SessionHistoryInput | undefined,
     observed: OperationProgressStatusByTarget
   ): boolean {
-    const row = history.find(
-      (entry) =>
-        entry.id === getOperationProgressTurnId(operation.requesterSessionId, operation.operationId)
-    );
     const content = row?.items?.find((item) => item.type === 'operation_progress');
     const published = new Map(
       (content?.items ?? []).map((item) => [
@@ -540,12 +535,16 @@ export class LodyOperationCoordinator {
       const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(
         target.sessionId
       );
-      this.subscribeTarget(target.sessionId, sessionDoc);
-      const history = readSessionHistory(sessionDoc.sessionData.history);
-      const userTurn = history.find(
+      const backend = await createSessionBackend(sessionDoc, meta);
+      this.subscribeTarget(target.sessionId, sessionDoc, backend);
+      const output = await backend.readTurnOutput(target.userTurnId);
+      const userTurn = output.find(
         (entry) => entry.id === target.userTurnId && entry.role === 'user'
       );
       if (!userTurn) return;
+      const assistantRead = output.find(
+        (entry) => entry.role === 'assistant' && entry.userTurnId === target.userTurnId
+      );
       const key = getOperationProgressTargetKey(target);
       if (userTurn.status === 'failed') {
         statuses.set(key, 'failed');
@@ -555,7 +554,7 @@ export class LodyOperationCoordinator {
         statuses.set(key, 'cancelled');
         return;
       }
-      if (terminalAssistantFor(history, target.userTurnId)) {
+      if (assistantRead !== undefined && isTerminalAssistantEntry(assistantRead)) {
         statuses.set(key, 'succeeded');
         return;
       }
@@ -702,12 +701,18 @@ export class LodyOperationCoordinator {
     const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(
       item.target.sessionId
     );
-    this.subscribeTarget(item.target.sessionId, sessionDoc);
-    const history = readSessionHistory(sessionDoc.sessionData.history);
-    const userTurn = history.find(
+    const backend = await createSessionBackend(sessionDoc, metaRecord.meta as SessionMeta);
+    this.subscribeTarget(item.target.sessionId, sessionDoc, backend);
+    const targetOutput = await backend.readTurnOutput(item.target.userTurnId);
+    const userTurn = targetOutput.find(
       (entry) => entry.id === item.target.userTurnId && entry.role === 'user'
     );
-    const assistant = terminalAssistantFor(history, item.target.userTurnId);
+    const assistant = targetOutput.find(
+      (entry) =>
+        entry.role === 'assistant' &&
+        entry.userTurnId === item.target.userTurnId &&
+        isTerminalAssistantEntry(entry)
+    );
     if (userTurn?.status === 'failed') {
       return {
         status: 'failed',
@@ -756,10 +761,17 @@ export class LodyOperationCoordinator {
       return false;
     }
     const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(sessionId);
-    const history = readSessionHistory(sessionDoc.sessionData.history);
-    const userTurn = history.find((entry) => entry.id === userTurnId && entry.role === 'user');
+    const backend = await createSessionBackend(sessionDoc, metaRecord.meta as SessionMeta);
+    const output = await backend.readTurnOutput(userTurnId);
+    const userTurn = output.find((entry) => entry.id === userTurnId && entry.role === 'user');
     if (!userTurn) return false;
     const meta = metaRecord.meta as SessionMeta;
+    const assistantIsTerminal = output.some(
+      (entry) =>
+        entry.role === 'assistant' &&
+        entry.userTurnId === userTurnId &&
+        isTerminalAssistantEntry(entry)
+    );
     return (
       meta.latestUserMsgId === userTurnId ||
       meta.processingUserMsgId === userTurnId ||
@@ -767,15 +779,23 @@ export class LodyOperationCoordinator {
       userTurn.status === 'handled' ||
       userTurn.status === 'failed' ||
       userTurn.status === 'canceled' ||
-      terminalAssistantFor(history, userTurnId) !== undefined
+      assistantIsTerminal
     );
   }
 
-  private subscribeTarget(sessionId: SessionId, sessionDoc: SessionDocument): void {
+  private subscribeTarget(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    backend: Pick<SessionBackend, 'subscribeHistory'>
+  ): void {
     if (!this.started || this.targetSubscriptions.has(sessionId)) return;
-    const unsubscribe = subscribeSessionChanges(sessionDoc, () => {
-      void this.wake('target-history');
-    });
+    const unsubscribe = subscribeSessionChanges(
+      sessionDoc,
+      () => {
+        void this.wake('target-history');
+      },
+      backend
+    );
     this.targetSubscriptions.set(sessionId, { unsubscribe });
   }
 
@@ -1106,7 +1126,8 @@ export class LodyOperationCoordinator {
     const sessionDoc = await this.options.workspaceDocument.getOrCreateSessionDoc(
       delivery.requesterSessionId
     );
-    this.subscribeTarget(delivery.requesterSessionId, sessionDoc);
+    const backend = await createSessionBackend(sessionDoc, meta);
+    this.subscribeTarget(delivery.requesterSessionId, sessionDoc, backend);
 
     const execution = this.options.executionService.getExecutionSnapshot(
       delivery.requesterSessionId
@@ -1554,7 +1575,8 @@ export class LodyOperationCoordinator {
         },
       };
     };
-    await sessionDoc.sessionData.commands.applyHistoryAction({
+    const backend = await createSessionBackend(sessionDoc);
+    await backend.applyHistoryAction({
       kind: 'operation-completion',
       operation,
       turn: buildTurn(undefined),

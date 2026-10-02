@@ -48,13 +48,18 @@ When a PR is merged, that session has completed its job. Unless a related bug ap
 recommend continuing unrelated work in the same session. Use the [archive action](/docs/session#archive-sessions)
 in the sidebar to remove completed sessions from your active list.
 
-You can also enable auto-archive in **Settings** -> **General** so PR-linked sessions are archived
+You can also enable auto-archive in **Settings** -> **Preferences** -> **Auto-archive sessions** so PR-linked sessions are archived
 automatically when the PR is merged or closed.
+
+Both archive paths can reclaim the managed worktree directory while keeping the conversation and
+local branch. Save needed ignored files outside the worktree first; see
+[Worktree retention and recovery](/docs/worktrees#automatic-cleanup).
 
 ## Periodically Delete Archived Sessions
 
-Archiving removes a session's worktree directory, but its conversation history and Git branch are
-kept on the CLI machine. To reclaim that space too, periodically [delete archived sessions](/docs/session#delete-sessions).
+When you no longer need a conversation, [delete the archived session](/docs/session#delete-sessions)
+to permanently remove its history. This does not delete the preserved local Git branch or its
+backup commits; it is not a way to reclaim all repository storage.
 
 ## Non-GitHub Projects
 

@@ -1,5 +1,65 @@
 import { expect, test } from '@playwright/test';
 
+test('No project session searches preserve candidates and report query misses', async ({
+  page,
+}) => {
+  const phase = process.env.MENTION_SCREENSHOT_PHASE ?? 'after';
+  const screenshotDir = process.env.MENTION_SCREENSHOT_DIR;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route('**/*', (route) => {
+    const url = new URL(route.request().url());
+    return url.hostname === '127.0.0.1' || url.hostname === 'localhost'
+      ? route.continue()
+      : route.abort();
+  });
+  await page.goto('/iframe.html?id=mentions-sessionmentionsearch--no-project&viewMode=story');
+  const input = page.getByRole('combobox', { name: 'Message' });
+  await input.fill('@');
+  await page.getByRole('option', { name: 'Sessions', exact: true }).click();
+  await expect(input).toHaveValue('@session:');
+  await expect(page.getByRole('option')).toHaveCount(14);
+  await expect(page.getByRole('button', { name: 'No project', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+
+  for (const query of ['zzzzunmatched', 'elsewhere']) {
+    await input.fill(`@session:${query}`);
+    await expect(page.getByRole('option')).toHaveCount(0);
+    if (phase === 'before') {
+      await expect(
+        page.getByText('There are no other sessions without a project.', { exact: true })
+      ).toBeVisible();
+    } else {
+      await expect(page.getByText(`Nothing matches “${query}”`, { exact: true })).toBeVisible();
+      await expect(
+        page.getByText('There are no other sessions without a project.', { exact: true })
+      ).toHaveCount(0);
+    }
+    await expect(input).toBeFocused();
+    if (screenshotDir) {
+      await page.screenshot({
+        path: `${screenshotDir}/${phase}-${query}.png`,
+        animations: 'disabled',
+        caret: 'hide',
+      });
+    }
+    await input.fill('@session:');
+    await expect(page.getByRole('option')).toHaveCount(14);
+  }
+
+  await input.fill('@session:elsewhere');
+  await page.getByRole('button', { name: 'All projects', exact: true }).click();
+  await expect(input).toHaveValue('@session:elsewhere');
+  await expect(input).toBeFocused();
+  await expect(page.getByRole('option', { name: /Elsewhere parser work/ })).toHaveCount(1);
+  await input.fill('@session:');
+  await expect(page.getByRole('option')).toHaveCount(15);
+  await page.getByRole('button', { name: 'No project', exact: true }).click();
+  await expect(page.getByRole('option')).toHaveCount(14);
+  await expect(input).toBeFocused();
+});
+
 test('session command menu follows the caret while opening above it', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/iframe.html?id=chat-chatcomposer--session-mention-stress&viewMode=story');

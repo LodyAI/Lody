@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+Follow-up PR: [#1166](https://github.com/LodyAI/Lody/pull/1166)
+
 [中文](2026-09-26-boot-shell-first-paint.zh.md)
 
 ## Abstract
@@ -13,7 +15,8 @@ that was several seconds of nothing, followed by a differently shaped placeholde
 followed by the real layout. The window's first frame is now a static boot shell
 inlined into `index.html`: the sidebar column at the user's stored width and theme,
 and the Lody mark centred in the content area. React's boot and auth gates render
-the same markup, so the only visible change is the real layout arriving. The cost is
+the same markup; redirects retain it and the lazy layout owns its fallback, so
+these transitions do not clear the canvas. The cost is
 a small inline script that needs a CSP hash, and colours copied out of the bundled
 themes, which a test pins.
 
@@ -30,6 +33,12 @@ then `CriticalWorkspaceShell` (a 220 px sidebar with text rows, where the real o
 The entry stylesheet makes this worse on the web: Vite links it in `<head>`, where it
 blocks the first paint until the whole product stylesheet has downloaded, so even
 markup in `index.html` would not show before it.
+
+Correction from the 2026-09-30 inspection: matching React and static markup alone
+did not cover a commit containing only `Navigate`, or the cloud layout's empty
+Suspense fallback. The original fallback covered only the local layout. Confirmed
+sign-out also returned `null` while the root's redirect effect ran. These gaps
+removed the static shell before a destination existed.
 
 ## Decision
 
@@ -49,7 +58,9 @@ markup in `index.html` would not show before it.
   preference) and sets `dark` or `light` on `<html>`. It decides whether the
   workspace sidebar will show: not on non-workspace routes, on settings, or when the
   sidebar is collapsed; session windows default to collapsed and auxiliary windows
-  read their own storage. It records that on `<html>` as `data-lody-boot-sidebar`,
+  read their own storage. Default `/` entry shows only the mark, as specified by
+  [startup chat landing](../simplification/2026-09-29-startup-chat-landing.md).
+  It records that on `<html>` as `data-lody-boot-sidebar`,
   with the width in a CSS variable. React's copies read the same attributes, so the
   decision is made once. The script only reads storage. On any failure it falls
   back to the light canvas with the mark alone.
@@ -66,8 +77,15 @@ markup in `index.html` would not show before it.
 - **Boot gates use the shell.** `LoadingPlaceholder` gains `variant="boot"`. The route
   gates in `routes/index.tsx`, `routes/$workspaceName.tsx` and `_auth.tsx`
   (starting the local workspace, signing in, loading workspaces) use it.
-  `viewport` stays for callers inside panes (session detail, login). The local
-  layout's `RouteSuspense` fallback is now the shell on every route.
+  `viewport` stays for callers inside panes (session detail, login).
+  `BootNavigate` draws the shell alongside the router's redirect until the
+  destination commits, including login, canonical-slug and workspace-creation
+  redirects. Confirmed sign-out draws the shell while the root owns invalidation
+  and navigation; the hidden warm window still renders nothing at `/`.
+  `PreloadedMainLayout` owns a shell Suspense fallback for every local and cloud
+  path, including `workspaceReady={false}`, so callers cannot omit it. Once its chunk arrives, the existing
+  content-pane placeholder remains until route, runtime and doc-meta ownership
+  agree. No readiness, access or organization-switch gate is bypassed.
   `CriticalWorkspaceShell` is removed. It used to fall back to `null` off the chat
   route, which blanked the window again.
 - **Stylesheets after the shell.** In builds the plugin moves `<head>` stylesheet
@@ -107,8 +125,8 @@ markup in `index.html` would not show before it.
 - `tests/boot-shell.test.tsx` covers:
   - the script's theme resolution;
   - the sidebar decision (workspace, hash history, stored and clamped widths,
-    collapsed, settings, login, onboarding, the root with and without a last
-    route, session and auxiliary windows) and the storage-failure fallback;
+    collapsed, settings, login, onboarding, root entry ignoring legacy last-route
+    storage, session and auxiliary windows) and the storage-failure fallback;
   - that the injected script matches the CSP hash;
   - marker handling and the stylesheet move;
   - that React and static markup match;
@@ -123,6 +141,22 @@ markup in `index.html` would not show before it.
 - A desktop reload was recorded under Xvfb with every script, stylesheet and wasm
   request delayed by 1.5 s through a main-process `file:` handler, before and after.
 
+The 2026-09-30 regression coverage in `home-route.test.tsx` holds destination
+loading with an explicit promise and checks the React shell after it replaces
+static markup, then checks chat/login/workspace creation after release. It covers
+cached and resolved authentication, local entry and the neutral warm window.
+`preloaded-main-layout.test.tsx` delays the layout import and checks shell removal,
+retained layout state and immediate rendering after preload.
+
+These suites plus `boot-failure.test.ts` pass 67 tests using the existing checkout's dependency
+links (`NODE_ENV=test`, with Node 26's experimental Web Storage disabled so jsdom
+owns storage). The renderer CSP suite passes all five tests. Route generation,
+changed-file Oxfmt and Oxlint checks pass. Full `pnpm check` stops on missing package
+dependencies; the component typecheck also reports stale shared/provider APIs and
+missing preview dependencies, with no error in the changed source files. Document
+checking reports 62 links into absent ACP submodules and none in the changed docs.
+No new packaged-window recording or startup latency measurement is claimed.
+
 ## Limits
 
 - The web host lives outside this repository. It needs to add the plugin, the markers
@@ -130,6 +164,6 @@ markup in `index.html` would not show before it.
   measured here.
 - The inlined mark adds about 8KB of base64 to each entry HTML, and a web host's
   CSP must allow `data:` images, as the desktop renderer's already does.
-- The Electron `BrowserWindow` background still follows the OS theme, so a user whose
-  stored theme differs from the OS can see one native frame in the wrong colour before
-  the document paints.
+- Native window theme persistence is now owned by the
+  [committed startup theme decision](2026-09-29-committed-startup-theme.md).
+  Native background colours can still differ from the shell's bundled theme colours.

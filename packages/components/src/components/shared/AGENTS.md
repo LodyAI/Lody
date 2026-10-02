@@ -3,6 +3,11 @@
 Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
 `AGENTS.md` only.
 
+- `MenuOptionSearchList` places search above the results; only options scroll.
+  It stays content-sized within the host's cap. Never reserve
+  unfiltered dimensions or keep an old popup origin to prevent query-driven layout
+  changes; the desktop host must preserve its normal trigger-row anchor. Intent:
+  [composer submenu placement](../../../../../specs/composer-run-config-submenu-placement.md).
 - The live agent status (`AgentActivityRow` in `ai-gui/view.tsx`, and the collapsed
   group label it hands the status to) shimmers via `.agent-shimmer`, which animates only
   `transform`. Never switch it to a `background-position`/text-clip shimmer, canvas
@@ -17,6 +22,9 @@ Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
   `width`/`height` decenters it and padding erases a small image. Its portal sits at
   `--z-image-viewer`, deliberately UNDER `--z-toast`, because the viewer's own copy/save
   confirmations are toasts.
+- The shared image viewer is modal: trap focus, isolate the background, use named
+  native buttons, and restore the opener without replacing the image gesture engine.
+  [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-09-30-image-viewer-modal-focus.md).
 - Image preview copy/save (`lib/image-preview-export.ts`) is Electron-only and splits by
   what each process can reach: main owns the native menu, clipboard, and save dialog;
   the renderer owns the `blob:` bytes and sends them only after the user picks an

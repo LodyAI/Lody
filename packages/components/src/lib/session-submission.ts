@@ -13,6 +13,7 @@ import type {
 import {
   getSessionRoomId,
   getServerNow,
+  NEW_SESSION_HISTORY_BACKEND,
   normalizeSessionTurnInputConfig,
   SessionStatusFactory,
 } from '@lody/shared';
@@ -50,6 +51,10 @@ function buildSessionCreateResult(payload: SessionToCreate): CreateSessionResult
     createdAt: new Date().toISOString(),
     cliType: payload.cliType,
     agentType: payload.agentType,
+    // Backend selection is a creation policy, not caller-provided turn data.
+    // Flip NEW_SESSION_HISTORY_BACKEND only when the corresponding adapter is
+    // registered on every client that can open the session.
+    historyBackend: NEW_SESSION_HISTORY_BACKEND,
     agentConfigId: payload.agentConfigId,
     acpSessionId: undefined,
     diffStats: undefined,

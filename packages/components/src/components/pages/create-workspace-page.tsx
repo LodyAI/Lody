@@ -57,8 +57,6 @@ export function CreateWorkspacePage({
   onSubmit,
 }: CreateWorkspacePageProps) {
   const { t } = useTranslation();
-  const yearlyEarlyBirdSelected =
-    billingInterval === 'year' && pricing?.yearlyOfferKey === 'early_bird_yearly_6000_forever';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -220,11 +218,6 @@ export function CreateWorkspacePage({
                       'Plus is billed per accepted workspace member. Stripe shows the final total before payment.'
                     )}
                   </p>
-                  {yearlyEarlyBirdSelected ? (
-                    <p className="text-xs font-medium text-foreground">
-                      {t('billing.yearlyEarlyBirdCheckoutPromise')}
-                    </p>
-                  ) : null}
                   <PricingPageLink />
                 </div>
               ) : null}
@@ -251,9 +244,7 @@ export function CreateWorkspacePage({
                 ) : (
                   <span className="flex items-center">
                     {paidRequired
-                      ? yearlyEarlyBirdSelected
-                        ? t('billing.upgradeEarlyBird')
-                        : t('organization.continueToCheckout', 'Continue to checkout')
+                      ? t('organization.continueToCheckout', 'Continue to checkout')
                       : t('organization.createWorkspace', 'Create Workspace')}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </span>

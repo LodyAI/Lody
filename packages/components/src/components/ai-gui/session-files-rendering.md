@@ -3,9 +3,10 @@
 File attachments use `file` blocks; the product contract is in
 `specs/session-files.md`.
 
-- `session-file-card.tsx` — pure card (icon by extension, name, size; pending/expired/
-  previewable/downloadable derived from transport + `getServerNow()` expiry) and
-  `SessionFileCardList` (adjacent-block aggregation). Story: `SessionFileCard.stories.tsx`,
+- `session-file-card.tsx` — `SessionFileCardLayout` is shared by pending and delivered
+  cards. The delivered card shows the extension-derived icon, name, and size;
+  transport and `getServerNow()` expiry determine pending/expired/previewable/
+  downloadable state. `SessionFileCardList` aggregates adjacent blocks. Story: `SessionFileCard.stories.tsx`,
   test: `tests/session-file-card.test.tsx`.
 - Static shares pass `retention='publication'`: the copied object has no dependency
   on the source upload's expiry. Its manifest-gated reader decides availability.
@@ -41,6 +42,32 @@ File attachments use `file` blocks; the product contract is in
   speaker's side. Decision:
   [image attachment row](../../../../../.agents/notes/implemented/bug-fix/2026-09-15-image-attachment-row-wraps.md).
 
+## Upload-to-history continuity
+
+Pending file attachments reuse `SessionFileCardLayout` and `SessionFileCardList`,
+including the delivered row's insets. Progress overlays the bottom edge; it adds
+no height. Ready files show their size in the same subtitle slot. Failure reasons
+still belong to their affected card.
+
+`session-attachment-preparation.ts` seeds `session-image-cache.ts` with each
+successful image upload before releasing its source. The pending image and
+`view.tsx`'s delivered image read that workspace/session/image-scoped cache
+synchronously, so history publication needs no fresh thumbnail request or
+loading frame. Native iOS seeds a data URL before readiness to preserve its
+long-press sharing behavior. Browsers supporting `decode()` warm that URL before
+it becomes ready, avoiding a local decode flash. The existing 200 MiB memory bound and object URL
+cleanup remain; eviction/restart uses normal loading. Cancelled or cache-cleared
+native conversions cannot publish late previews. Preview caching failures do
+not fail an otherwise successful upload.
+
+Behavioral coverage: `tests/session-image-cache.test.ts`,
+`tests/session-attachment-preparation.test.ts`, and
+`tests/session-pending-message-row.test.tsx`. `SessionPendingMessages.UploadToHistory`
+and its narrow counterpart exercise the real pending and delivered rows with
+synthetic bytes. This replaces the earlier reserved file-progress row and closes
+the extra thumbnail-load gap documented in the
+[deferred-attachment note](../../../../../.agents/notes/implemented/architecture/2026-09-14-deferred-attachment-send.md#sending-in-place-2026-09-29).
+
 ## Image-preview overlay (zoom / pan)
 
 - **There is exactly ONE zoomable image surface in the app:**
@@ -62,8 +89,12 @@ File attachments use `file` blocks; the product contract is in
   blocked or fall through. Pass an in-drawer element as `portalAnchorRef`;
   `resolveImagePreviewPortalContainer` walks up to the real `[data-vaul-drawer]`
   (not the `data-vaul-no-drag` body wrapper, which is `display: contents`) and
-  `useImagePreviewPortalNoDrag` marks the mounted portal root `data-vaul-no-drag`
+  the shared viewer marks its modal and photo portal roots `data-vaul-no-drag`
   so Vaul does not take over pan/pinch gestures.
+- The shared viewer owns modal focus isolation and named UI buttons: initial
+  focus is Close, Tab stays inside, background content is inert, and closing
+  returns focus to the connected opener. The photo portal lives inside this
+  boundary, including while its source is loading.
 - `react-photo-view@1.2.7` is patched in root `patches/` to hard-clamp the MINIMUM
   pinch scale at `1` (no shrink-below-fit rubber band; max stays 6×). Do not replace
   this with an outer `overlayRender`/React state clamp; that fights PhotoView's touch

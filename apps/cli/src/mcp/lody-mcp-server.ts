@@ -123,6 +123,7 @@ import {
 import { registerScheduleTools } from './schedule-tools';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
 import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
+import { createSessionBackend } from '@/session/session-backend';
 import { version as cliVersion } from '@/pkg';
 import {
   configureWorkspaceMcpServer,
@@ -1546,9 +1547,10 @@ const readSessionExecutionSnapshot = async (
   live: SessionLiveWorking
 ): Promise<SessionExecutionSnapshot> => {
   const sessionDoc = await manager.getOrCreateSessionDoc(session.id);
+  const backend = await createSessionBackend(sessionDoc, session);
   const [directory, queue] = await Promise.all([
-    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
-    sessionDoc.getMessageQueue(),
+    backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
+    backend.getMessageQueue(),
   ]);
   const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
   const queuedTurnCount =
@@ -1944,11 +1946,12 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
       );
     }
     const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(sessionDoc, session);
     // Bounded business paging: `limit` counts displayable turns, the cursor is a
     // raw position, and entries removed by the 128 KiB byte cap stay reachable.
     return await buildSessionHistoryForReader({
       sessionId,
-      history: sessionDoc.sessionData.history,
+      history: backend.history,
       limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
       ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
       maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSessionSearchResults,
   buildSessionSearchTextParts,
+  extractSearchBlocksForMessage,
   extractSessionSearchBlocks,
   getProposedPlanSearchBlockId,
   getTextSearchBlockId,
@@ -97,6 +98,7 @@ describe('extractSessionSearchBlocks', () => {
             kind: 'execute',
             title: 'Run rg config',
             locations: [{ path: `${worktreeRoot}/packages/components/src/index.ts` }],
+            rawInput: { command: 'rg config' },
             rawOutput: { summary: 'rg found 2 matches' },
             content: [
               {
@@ -172,6 +174,66 @@ describe('extractSessionSearchBlocks', () => {
     ];
 
     expect(extractSessionSearchBlocks(history)).toEqual([]);
+  });
+
+  it('finds paths and code in prose without also matching the same tool payload', () => {
+    const path = 'src/search.ts';
+    const code = 'const needle = 1;';
+    const history = [
+      buildMessage({
+        id: 'user-prose',
+        role: 'user',
+        items: [{ type: 'text', text: `Inspect ${path}: ${code}` }],
+      }),
+      buildMessage({
+        id: 'assistant-mixed',
+        items: [
+          { type: 'text', text: `Found \`${path}\`: \`${code}\`` },
+          { type: 'thought', text: `Consider \`${path}\` and \`${code}\`` },
+          {
+            type: 'proposed_plan',
+            status: 'completed',
+            markdown: `- Update \`${path}\` with \`${code}\``,
+          },
+          {
+            type: 'tool_call',
+            toolCallId: 'tool-mixed',
+            status: 'completed',
+            kind: 'edit',
+            title: `Edit ${path}: ${code}`,
+            locations: [{ path }],
+            rawInput: { path, text: code },
+            rawOutput: { text: `${path}: ${code} tool-only-marker` },
+            content: [
+              { type: 'content', content: { type: 'text', text: `${path}: ${code}` } },
+              { type: 'terminal_command', command: 'echo', args: [path, code] },
+              { type: 'terminal_output', output: `${path}: ${code}` },
+              { type: 'diff', path, oldText: code, newText: `${code}\n${code}` },
+            ],
+          },
+        ],
+      }),
+    ];
+    const blocks = extractSessionSearchBlocks(history);
+    expect(history.flatMap(extractSearchBlocksForMessage)).toEqual(blocks);
+
+    for (const query of [path, code]) {
+      const results = buildSessionSearchResults(blocks, query);
+      expect(results.map((result) => result.blockId)).toEqual([
+        getTextSearchBlockId('user-prose', 0),
+        getTextSearchBlockId('assistant-mixed', 0),
+        getThoughtSearchBlockId('assistant-mixed', 1),
+        getProposedPlanSearchBlockId('assistant-mixed', 2),
+      ]);
+      expect(
+        results.map((result) =>
+          blocks
+            .find((block) => block.blockId === result.blockId)!
+            .text.slice(result.start, result.end)
+        )
+      ).toEqual([query, query, query, query]);
+    }
+    expect(buildSessionSearchResults(blocks, 'tool-only-marker')).toEqual([]);
   });
 });
 

@@ -380,7 +380,7 @@ export function ScheduleProposalNotice({
           [
             t('schedules.trigger.label', 'Trigger'),
             recurrence
-              ? describeRecurrence(recurrence, t, i18n.language)
+              ? describeRecurrence(recurrence, t, i18n.language, machineTimeZone)
               : t('schedules.trigger.manual', 'Manual'),
           ] as [string, string],
         ]),

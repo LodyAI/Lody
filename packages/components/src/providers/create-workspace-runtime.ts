@@ -48,6 +48,7 @@ import {
   getSessionRoomId,
   getMachineFlockAgentConfigs,
   getMachineFlockDocId,
+  resolveSessionHistoryBackendKind,
   isSessionDocRoomId,
   isLoroRepoDocDeleted,
   readSessionOperationTargets,
@@ -63,6 +64,7 @@ import {
   type SessionCancelResponse,
   type SessionChatResponse,
   type SessionId,
+  type SessionHistoryBackendKind,
   type MachineId,
   type MachineStatusResponse,
   type MachinePingResponse,
@@ -89,7 +91,10 @@ import {
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
 import type { WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
-import { createConversationSession } from '@/lib/conversation-view';
+import {
+  createConversationSession,
+  type ConversationSessionDataFactory,
+} from '@/lib/conversation-view';
 import {
   WorkspaceTargetRouter,
   type WorkspaceTransportRoom,
@@ -230,6 +235,8 @@ type RuntimeDeps = {
    * scan.
    */
   readDocMetaCache?: ReadDocMetaCache;
+  /** Optional backend-owned SessionData composition; defaults to Loro. */
+  createSessionData?: ConversationSessionDataFactory;
 };
 
 type LoroStreamsTokenProvider = ReturnType<typeof createLoroStreamsTokenProvider>;
@@ -1821,6 +1828,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestLocalMcpTools,
     requestMachinePiExtensions,
   } = createWorkspaceMachineRpcFacade({
     getSessionToken: () => authToken,
@@ -4046,7 +4054,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   const createSessionStore = async (sessionId: SessionId): Promise<SessionDocStore> => {
     const roomId = getSessionRoomId(sessionId);
-
+    // Backend selection is part of the persisted session identity, so resolve it
+    // before composing the reader even when this runtime has no injected factory.
+    // That lets createConversationSession fail closed for a Roost session instead
+    // of silently constructing a Loro history reader.
     // Merge bootstrap state before Repo adopts a cold document and before its
     // history reader subscribes. Existing live documents retain their identity.
     const persistedDoc = await openSessionWithSnapshot(repo, roomId, () =>
@@ -4063,15 +4074,27 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       )
     );
     const sessionDoc = persistedDoc.doc as LoroDoc;
+    // Read metadata after the bootstrap merge. Otherwise a cold remote Roost
+    // session can be composed with the legacy Loro reader before its catalog
+    // row becomes visible in this Repo instance.
+    const sessionMeta = (await repo.getDocMeta(roomId))?.meta as
+      | { historyBackend?: SessionHistoryBackendKind }
+      | undefined;
 
-    const {
-      mirror,
-      history,
-      sessionData,
-      dispose: disposeConversation,
-    } = createConversationSession(sessionDoc, {
-      sessionId,
-    });
+    let conversation: ReturnType<typeof createConversationSession>;
+    try {
+      conversation = createConversationSession(sessionDoc, {
+        sessionId,
+        backendKind: resolveSessionHistoryBackendKind(sessionMeta),
+        ...(deps.createSessionData ? { createSessionData: deps.createSessionData } : {}),
+      });
+    } catch (error) {
+      // A Roost session without its renderer adapter fails closed. Release the
+      // cold repo handle before the cache gets a chance to retry the open.
+      await repo.unloadDoc(roomId).catch(() => {});
+      throw error;
+    }
+    const { mirror, history, sessionData, dispose: disposeConversation } = conversation;
 
     const syncTracker = createTrackedRoomSyncTracker(roomId);
     // Track subscription for cleanup
@@ -4193,6 +4216,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     return {
       sessionId,
       roomId,
+      historyBackend: resolveSessionHistoryBackendKind(sessionMeta),
       doc: persistedDoc.doc as LoroDoc,
       firstSynced,
       acquireSync,
@@ -5048,6 +5072,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestLocalMcpTools,
     requestMachinePiExtensions,
     dispose,
   };
