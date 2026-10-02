@@ -42,7 +42,7 @@ builds to `site-docs/out/client`. Binding rules live in
   shared integration cards, and native FAQs. `app/coding-agent.css` owns their layout.
   The pages reuse real public product screenshots and the marketing shell; they do
   not imply feature parity or certification across runtimes. Agent setup remains in
-  `content/docs/{en,zh}/(core-concepts)/agents.mdx`.
+  `content/docs/{en,zh}/(reference)/(agents-and-runtimes)/agents.mdx`.
 
 Demo sequencing and screenshot notes live in
 [context/landing-demos.md](context/landing-demos.md). Measurements, history, and

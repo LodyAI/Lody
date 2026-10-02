@@ -1,0 +1,205 @@
+---
+title: Your First Session
+description: Run one small Lody session end to end — start it, steer the agent, review the diff, and decide what to do with the result.
+---
+
+# Your First Session
+
+[Quick Start](/docs/quickstart) gets Lody installed and connected. This page covers the part it does
+not: one complete session, from an empty composer to a result you have reviewed. Everything here
+works on a local project, without GitHub and without running several agents at once.
+
+<Callout type="info" title="Before you start">
+- Lody is installed and you are signed in. If not, do [Quick Start](/docs/quickstart) first.
+- You added one project — a plain local directory is fine. See [Local Projects](/docs/local-project).
+- You have one Agent Config whose **Test** passed on that machine. See [Agent Config](/docs/agents).
+</Callout>
+
+## Pick a task small enough for one session
+
+A session is one conversation with one agent about one task. When the task is small, you can review
+the result quickly and the agent has enough context to finish it. Good first tasks look like:
+
+- "Add a `/health` endpoint that returns the app version."
+- "Fix the failing test in `src/parser.test.ts` and explain the cause."
+- "Rename `fetchUser` to `getUser` across the package and update callers."
+
+Avoid asking for a whole feature area in the first session. When you outgrow one session, the
+[Recommended Workflow](/docs/workflow) shows how to split the work.
+
+<Callout title="One session, one task" type="idea">
+The rest of these docs build on this habit. If a session starts doing two unrelated things, stop it
+and start a second session instead of making the first one longer.
+</Callout>
+
+## Walk through one session
+
+<Steps>
+<Step>
+
+### 1. Start from the home-page composer
+
+Open Lody and use the composer on the home page. Before you send, choose:
+
+- the **project** (and branch, for a Git project);
+- the **Agent Config** and **model**;
+- the **permission scope** you are comfortable with.
+
+Then write the task, including the file or behavior you care about and how you will judge success.
+
+```text
+Add a /health endpoint that returns { "status": "ok", "version": <package version> }.
+Add one test that asserts the status and version fields. Do not change other routes.
+```
+
+</Step>
+<Step>
+
+### 2. Watch the round
+
+Lody creates the session and streams the agent's work. A **round** is one agent turn plus the file
+changes it produced. While a round is running you can:
+
+- send a follow-up to **steer** the active task instead of waiting for it to finish;
+- ask a question in a **Side Chat** without interrupting the main task, when the agent supports
+  native forking;
+- stop the turn if the agent is heading in the wrong direction.
+
+</Step>
+<Step>
+
+### 3. Review the diff
+
+When the round ends, the reply shows the changed files and their added and removed line counts.
+Click any file to open it in a [diff tab](/docs/diff-viewer), or use the **Files** and **Changes**
+sidebar to browse the whole conversation.
+
+Read the diff before asking for more. This is where you catch a wrong assumption while it is still
+cheap to fix — much cheaper than after a pull request.
+
+</Step>
+<Step>
+
+### 4. Ask for the next round
+
+Continue in the same session. Keep each follow-up scoped to one thing:
+
+```text
+The test passes, but the version is read from package.json at request time.
+Read it once in a module constant instead, and keep the response shape the same.
+```
+
+You can repeat "watch, review, follow up" as many times as the task needs. If the conversation grows
+long or the agent loses the thread, start a fresh session with a short summary instead.
+
+</Step>
+<Step>
+
+### 5. Decide what to do with the result
+
+When the change looks right, you have a few options:
+
+- **Keep the branch.** Copy the current branch name from the session and test or push it from your
+  own editor.
+- **Open it locally.** On desktop, use **Open in** to launch the worktree in your editor.
+- **Create a pull request.** For a GitHub session, use **Create PR** above the conversation. Lody
+  links the PR back to the session and syncs CI status. This is the start of the
+  [recommended workflow](/docs/workflow).
+- **Archive the session.** Once the work is done, archive it from the sidebar. Archiving reclaims
+  the worktree but keeps the branch and conversation, so you can restore it later. See
+  [Archive Sessions](/docs/session#archive-sessions).
+
+</Step>
+</Steps>
+
+## Two example first sessions
+
+<Tabs items={['Small feature', 'Bug fix']}>
+<Tab value="Small feature">
+
+```text
+Add a --json flag to the status command. When set, print the same fields as the
+human-readable output, as JSON on one line, and add a test for the flag.
+```
+
+Why it works: one behavior, a clear success check, and the agent can run the test itself.
+
+</Tab>
+<Tab value="Bug fix">
+
+```text
+The parser throws on an empty file. Reproduce it in a test first, then fix the
+parser so an empty file returns an empty list. Keep the existing error for
+malformed input.
+```
+
+Why it works: the failure is concrete, and the test pins down what "fixed" means.
+
+</Tab>
+</Tabs>
+
+## Common first-session mistakes
+
+<Accordions>
+<Accordion title="Asking for too much at once">
+Long, multi-part prompts make both the agent and the review harder. Split the work into sessions
+that each produce one reviewable change. See [Parallel Coding Agents](/docs/parallel-agents).
+</Accordion>
+<Accordion title="Not choosing the project or agent config">
+An empty or wrong project means the agent works in the wrong directory. Check the project, branch,
+Agent Config, and model in the composer before sending.
+</Accordion>
+<Accordion title="Reviewing only at the end">
+Round-level diffs are cheap to read and easy to comment on. Reviewing each round keeps a wrong
+direction from spreading through the whole change.
+</Accordion>
+<Accordion title="Never archiving">
+Finished sessions keep their worktree around. Archive them when the work is merged or abandoned so
+the machine reclaims the space.
+</Accordion>
+</Accordions>
+
+## FAQ
+
+### Do I need GitHub for a first session?
+
+No. GitHub adds pull requests, CI status, and review-comment sync, but a local project session can
+chat, edit files, show diffs, and be reviewed entirely on its own. See
+[Local Projects](/docs/local-project).
+
+### What is a "round"?
+
+A round is one agent turn plus the file changes produced during it. Lody summarizes each round with
+a diff so you can review continuously instead of reading one large final diff. See
+[Diff Viewer](/docs/diff-viewer).
+
+### What should I do if the agent changes something I did not ask for?
+
+Open the file's diff, leave a comment or send a follow-up in the same session, and let the agent
+correct it. If the change is unrelated to the task, ask the agent to revert it and keep the session
+focused.
+
+### Can I stop a running session?
+
+Yes. Use the stop control in the composer to cancel the active turn. A stopped session stays in the
+list and you can continue it with a new message.
+
+### Where does an archived session go?
+
+It moves to the archive list at the bottom-right of the sidebar. The conversation and branch are
+kept, and the worktree is recreated when you restore the session. See
+[Archive Sessions](/docs/session#archive-sessions).
+
+## Next
+
+<Cards>
+  <Card href="/docs/concepts" title="Concepts & Glossary">
+    Learn the objects behind sessions, agent configs, roles, runtimes, and worktrees.
+  </Card>
+  <Card href="/docs/workflow" title="Recommended Workflow">
+    Turn one session into a repeatable from-idea-to-PR workflow.
+  </Card>
+  <Card href="/docs/diff-viewer" title="Diff Viewer">
+    Review round-level and whole-conversation changes in detail.
+  </Card>
+</Cards>

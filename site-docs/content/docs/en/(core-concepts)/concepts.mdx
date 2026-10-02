@@ -1,0 +1,130 @@
+---
+title: Concepts & Glossary
+description: The mental model behind Lody — sessions, rounds, agent configs, roles, runtimes, worktrees, and pull requests — plus a glossary of the terms used across these docs.
+---
+
+# Concepts & Glossary
+
+Most of Lody is a small set of objects arranged the same way on every screen. Read this page once
+and the guides become easier to place. If you remember only two rules, remember these:
+
+<Callout title="The two rules that prevent most confusion" type="idea">
+1. **One session = one task.** A session is the unit of work, history, and review.
+2. **An Agent Config is what can run; an Agent Role is a saved choice of how to run it.**
+</Callout>
+
+## The mental model
+
+```text
+workspace
+├── projects / repositories
+│   └── session            one task, one conversation, one branch/worktree
+│       ├── round          one agent turn + the changes it made
+│       ├── side chat      a forked question that does not interrupt the main task
+│       └── pull request   optional GitHub hand-off after review
+├── agent configs          runtime + authentication + machine
+│   └── agent roles        saved machine + config + model + permissions
+└── teammates              see shared sessions, not private machines
+```
+
+A session is the object you spend most of your time in. Everything else either feeds it (project,
+repository, agent config, role) or comes out of it (diff, pull request, handoff).
+
+## The path of a task
+
+1. **Add a project or repository.** A [Local Project](/docs/local-project) is a directory; a
+   [GitHub repository](/docs/github) adds pull requests, CI, and review sync.
+2. **Choose what runs.** An [Agent Config](/docs/agents) binds a runtime to a machine and its
+   credentials. An [Agent Role](/docs/agent-roles) saves a repeated combination.
+3. **Open a session.** From the home-page composer, pick the project, branch, config, model, and
+   permission scope. See [Sessions](/docs/session).
+4. **Work in rounds.** Each round is an agent turn plus a diff. Review it with the
+   [Diff Viewer](/docs/diff-viewer) and comment with [Diff Comments](/docs/diff-comments).
+5. **Finish the task.** Create a pull request, keep the branch, or archive the session. See
+   [Recommended Workflow](/docs/workflow).
+
+## Core objects
+
+| Term | What it is | Read more |
+| --- | --- | --- |
+| **Workspace** | The team-level container: members, shared machines, sessions, and settings. | [Team Features](/docs/team) |
+| **Project / repository** | The code a session works on — a local directory or a GitHub repository. | [Local Projects](/docs/local-project) · [GitHub Integration](/docs/github) |
+| **Session** | One task with one conversation, one branch, and usually one worktree. | [Sessions](/docs/session) |
+| **Round** | One agent turn plus the file changes it produced. | [Diff Viewer](/docs/diff-viewer) |
+| **Worktree** | An isolated checkout so two sessions can edit the same repository without colliding. | [Worktrees](/docs/worktrees) |
+| **Agent Config** | A runtime (Claude Code, Codex, Kimi, ACP, and others) plus its auth and execution machine. | [Agent Config](/docs/agents) · [CLI Runtime Types](/docs/cli-runtimes) |
+| **Agent Role** | A saved preset that combines a machine, Agent Config, model, reasoning, permission, and an optional instruction. | [Agent Roles](/docs/agent-roles) |
+| **Pull request (PR)** | The GitHub review and merge surface a session can create and sync with. | [GitHub Integration](/docs/github) |
+
+## How the pieces relate
+
+<Accordions>
+<Accordion title="Session vs. round vs. turn">
+A **session** is the whole task and its history. A **round** is one agent turn plus its diff. When
+these docs say "review the round," they mean read the diff produced by that turn before continuing.
+</Accordion>
+<Accordion title="Agent Config vs. Agent Role">
+An **Agent Config** answers "what can run on this machine, and how does it authenticate?" An
+**Agent Role** answers "when I start this kind of task, which machine, config, model, and
+permissions should be selected?" Roles reference configs; configs do not reference roles.
+</Accordion>
+<Accordion title="Fork vs. Side Chat vs. handoff">
+- **Fork** copies the conversation into a new session so you can try a different direction.
+- **Side Chat** is a fork pinned beside the main chat for a quick question.
+- **Handoff** invites a teammate into the same session; it does not create a copy. See
+  [Share a Coding Agent Session](/docs/session-handoff).
+</Accordion>
+<Accordion title="Parallel sessions vs. Agent Session Control">
+- **Parallel sessions** are started by you, each with its own task and worktree. See
+  [Parallel Coding Agents](/docs/parallel-agents).
+- **Agent Session Control** is an agent creating, steering, and collecting other sessions through
+  Lody's MCP tools. See [Agent Session Control](/docs/session-orchestration).
+</Accordion>
+</Accordions>
+
+## Glossary of terms you will meet
+
+| Term | Meaning |
+| --- | --- |
+| **ACP** | Agent Client Protocol, the interface Lody uses to launch and talk to many coding-agent CLIs. See [CLI Runtime Types](/docs/cli-runtimes). |
+| **MCP** | Model Context Protocol. Lody exposes built-in MCP tools so an agent can act on Lody conversations and other resources. |
+| **Daemon** | The background Lody CLI process that actually runs agents on a machine. See [CLI Commands](/docs/cli). |
+| **Permission scope** | How much the agent may do without asking, such as editing files or running shell commands. Set it per session in the composer. |
+| **Context window** | How much conversation the model can hold at once. Lody shows the remaining capacity in chat. See [Context, Token & Quota](/docs/usage-and-quota). |
+| **Handoff** | Inviting a teammate into a live session so they continue the same conversation, diffs, and worktree. |
+| **Orchestration** | Having one agent create, message, and collect results from other sessions. |
+
+## FAQ
+
+### What is the difference between an Agent Config and an Agent Role?
+
+An Agent Config is a runtime plus its authentication and execution machine. An Agent Role is a
+saved preset that selects a machine, an Agent Config, a model, reasoning, and permission, plus an
+optional instruction, so you can reuse the same setup when a session starts. See [Agent Config](/docs/agents) and
+[Agent Roles](/docs/agent-roles).
+
+### What is the difference between forking a session and handing it off?
+
+Forking copies the conversation into a new session that you own. Handing off invites another person
+into the existing session so you both see the same live chat, diffs, and worktree. Forking does not
+add anyone to the original session. See [Sessions](/docs/session) and
+[Share a Coding Agent Session](/docs/session-handoff).
+
+### Do I need to understand worktrees to use Lody?
+
+You can use Lody without ever opening the worktree directory. It matters when you run several
+sessions at once: each worktree is what keeps their edits apart. See [Worktrees](/docs/worktrees).
+
+### Is a "task" the same as a session?
+
+In these docs, yes — one task is normally one session, one branch, and one pull request. The
+[Recommended Workflow](/docs/workflow) explains why small tasks work better.
+
+## Next
+
+<Cards>
+  <Card href="/docs/session" title="Sessions" />
+  <Card href="/docs/agents" title="Agent Config" />
+  <Card href="/docs/worktrees" title="Worktrees" />
+  <Card href="/docs/first-session" title="Your First Session" />
+</Cards>

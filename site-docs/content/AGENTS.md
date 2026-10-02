@@ -12,6 +12,10 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
 - Reference public document images as URLs, `<img src="/_docs-assets/name.png" />`.
   Do not use Markdown image syntax here; Vite will treat it as a JS import from
   `public/`.
+- Prefer the registered rich MDX components over long unbroken prose: `Callout`
+  (`info`/`warn`/`error`/`success`/`idea`), `Cards`/`Card`, `Accordions`/`Accordion`,
+  `Steps`/`Step`, `Files`/`Folder`/`File`, `Tabs`/`Tab`, and `InlineToc`. They are
+  wired in `components/mdx.tsx`; content needs no import for them.
 - MDX links are resolved by the site's client router, so a link to a path this
   site does not own renders the 404 page. Web-app paths such as `/login` work only
   because `components/site-root-provider.tsx` lists them in `APP_OWNED_PATHS`; add

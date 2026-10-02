@@ -1,0 +1,10 @@
+{
+  "title": "Agents & runtimes",
+  "pages": [
+    "agents",
+    "cli-runtimes",
+    "claude-codex-capabilities",
+    "skills",
+    "device-resource-monitoring"
+  ]
+}

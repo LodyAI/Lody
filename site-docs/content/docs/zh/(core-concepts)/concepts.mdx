@@ -1,0 +1,122 @@
+---
+title: 概念与术语表
+description: Lody 背后的心智模型——会话、轮次、Agent Config、角色、运行时、工作树和 Pull Request，以及文档中常见术语的解释。
+---
+
+# 概念与术语表
+
+Lody 的大部分界面背后，都是同一小组对象在重复出现。花几分钟读一遍这页，后面的指南会更容易对号入座。
+如果只记两条，请记住：
+
+<Callout title="能避免大多数困惑的两条规则" type="idea">
+1. **一个会话 = 一个任务。** 会话是工作、历史和审阅的基本单位。
+2. **Agent Config 是“能跑什么”；Agent Role 是“用什么方式跑”的保存项。**
+</Callout>
+
+## 心智模型
+
+```text
+工作区（workspace）
+├── 项目 / 仓库
+│   └── 会话（session）        一个任务、一段对话、一个分支 / 工作树
+│       ├── 轮次（round）      一次 Agent 回复 + 它产生的改动
+│       ├── 侧边对话            不会打断主任务的 Fork 追问
+│       └── Pull Request       审阅之后可选的 GitHub 交接
+├── Agent Configs              运行时 + 认证 + 执行机器
+│   └── Agent Roles            保存好的机器 + 配置 + 模型 + 权限
+└── 团队成员                    能看到共享会话，而不是别人的私有机器
+```
+
+会话是你待得最久的对象。其它东西要么是它的输入（项目、仓库、Agent Config、角色），要么是它的输出
+（diff、Pull Request、交接）。
+
+## 一个任务会经过什么
+
+1. **添加项目或仓库。** [本地项目](/zh/docs/local-project)就是一个目录；[GitHub 仓库](/zh/docs/github)
+   会额外带来 Pull Request、CI 和 review 同步。
+2. **决定用什么跑。** [Agent Config](/zh/docs/agents)把运行时绑定到一台机器和它的凭据；
+   [Agent Role](/zh/docs/agent-roles)把常用的组合保存下来。
+3. **打开会话。** 在主页输入框选择项目、分支、配置、模型和权限范围。见[会话](/zh/docs/session)。
+4. **按轮次推进。** 每一轮都有一次 Agent 回复和一份 diff。用[差异查看](/zh/docs/diff-viewer)审阅，
+   用 [Diff 行评论](/zh/docs/diff-comments)评论。
+5. **结束任务。** 创建 Pull Request、保留分支，或者归档会话。见[推荐工作流](/zh/docs/workflow)。
+
+## 核心对象
+
+| 术语 | 是什么 | 深入了解 |
+| --- | --- | --- |
+| **工作区（Workspace）** | 团队级容器：成员、共享机器、会话和设置。 | [团队功能](/zh/docs/team) |
+| **项目 / 仓库** | 会话所操作的代码——一个本地目录或 GitHub 仓库。 | [本地项目](/zh/docs/local-project) · [GitHub 集成](/zh/docs/github) |
+| **会话（Session）** | 一个任务，一段对话，一个分支，通常还有一个工作树。 | [会话](/zh/docs/session) |
+| **轮次（Round）** | 一次 Agent 回复加上它产生的文件改动。 | [差异查看](/zh/docs/diff-viewer) |
+| **工作树（Worktree）** | 隔离的检出，让两个会话可以编辑同一个仓库而不互相覆盖。 | [工作树](/zh/docs/worktrees) |
+| **Agent Config** | 一个运行时（Claude Code、Codex、Kimi、ACP 等）加上它的认证和执行机器。 | [Agent Config](/zh/docs/agents) · [CLI 运行时类型](/zh/docs/cli-runtimes) |
+| **Agent Role** | 保存好的预设：组合机器、Agent Config、模型、推理、权限和可选指令。 | [Agent 角色](/zh/docs/agent-roles) |
+| **Pull Request（PR）** | 会话可以创建并同步的 GitHub 审阅与合并界面。 | [GitHub 集成](/zh/docs/github) |
+
+## 它们之间的关系
+
+<Accordions>
+<Accordion title="会话、轮次和一次回复有什么区别？">
+**会话**是整个任务及其历史；**轮次**是一次 Agent 回复加上它的 diff。文档里说“审阅这一轮”，意思就
+是在继续之前先读完这次回复产生的 diff。
+</Accordion>
+<Accordion title="Agent Config 和 Agent Role 有什么区别？">
+**Agent Config** 回答“这台机器上能跑什么，它怎么认证？”；**Agent Role** 回答“开始这类任务时，应该
+选中哪台机器、哪个配置、哪个模型和什么权限？”。角色引用配置，配置不引用角色。
+</Accordion>
+<Accordion title="Fork、侧边对话和交接有什么区别？">
+- **Fork** 复制对话到一个新会话，方便你换一个方向继续；
+- **侧边对话（Side Chat）** 是挂在主对话旁边的 Fork，用来快速追问；
+- **交接（Handoff）** 是把同事请进同一个会话，不产生副本。见[共享并交接 Agent 会话](/zh/docs/session-handoff)。
+</Accordion>
+<Accordion title="并行会话和 Agent 对话控制有什么区别？">
+- **并行会话**由你自己启动，每个任务有自己的工作树。见[并行 Coding Agents](/zh/docs/parallel-agents)；
+- **Agent 对话控制**是 Agent 通过 Lody 的 MCP 工具创建、指挥和收集其他会话。见 [Agent 对话控制](/zh/docs/session-orchestration)。
+</Accordion>
+</Accordions>
+
+## 常见术语
+
+| 术语 | 含义 |
+| --- | --- |
+| **ACP** | Agent Client Protocol，Lody 用来启动并连接各种 coding agent CLI 的接口。见 [CLI 运行时类型](/zh/docs/cli-runtimes)。 |
+| **MCP** | Model Context Protocol。Lody 提供内置 MCP 工具，让 Agent 能操作 Lody 会话和其他资源。 |
+| **Daemon** | 后台的 Lody CLI 进程，真正在机器上运行 Agent。见 [CLI 命令](/zh/docs/cli)。 |
+| **权限范围** | Agent 在不需要询问的情况下能做多少事（例如改文件、执行命令）。在输入框里按会话设置。 |
+| **上下文窗口** | 模型一次能容纳多少对话。Lody 会在聊天里显示剩余容量。见[上下文、Token 与配额](/zh/docs/usage-and-quota)。 |
+| **交接（Handoff）** | 把同事请进正在进行的会话，让 TA 接着同一段对话、diff 和工作树继续。 |
+| **编排（Orchestration）** | 让一个 Agent 创建、给其他会话发消息并收集结果。 |
+
+## 常见问题
+
+### Agent Config 和 Agent Role 的区别是什么？
+
+Agent Config 是一个运行时加上它的认证和执行机器；Agent Role 是一个保存好的预设，用来在开始会话时
+选择机器、Agent Config、模型、推理和权限，以及可选指令，方便复用同一套设置。见 [Agent Config](/zh/docs/agents) 和
+[Agent 角色](/zh/docs/agent-roles)。
+
+### Fork 会话和把会话交接出去有什么区别？
+
+Fork 会把对话复制成一个属于你自己的新会话；交接是把另一个人请进原来的会话，让你们看到同一份实时
+对话、diff 和工作树。Fork 不会把任何人加进原会话。见[会话](/zh/docs/session)和
+[共享并交接 Agent 会话](/zh/docs/session-handoff)。
+
+### 用 Lody 需要理解工作树吗？
+
+你可以完全不打开工作树目录就正常使用 Lody。只有同时跑多个会话时它才重要：每个工作树就是让它们的改动
+互不干扰的东西。见[工作树](/zh/docs/worktrees)。
+
+### “任务”和“会话”是一回事吗？
+
+在这套文档里，通常是的——一个任务一般就是一个会话、一个分支和一个 Pull Request。[推荐工作流](/zh/docs/workflow)
+解释了为什么小任务效果更好。
+
+## 下一步
+
+<Cards>
+  <Card href="/zh/docs/session" title="会话" />
+  <Card href="/zh/docs/agents" title="Agent Config" />
+  <Card href="/zh/docs/worktrees" title="工作树" />
+  <Card href="/zh/docs/first-session" title="第一次会话" />
+</Cards>

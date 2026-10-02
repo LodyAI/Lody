@@ -9,6 +9,11 @@ description: 在 Lody 中让 Claude Code 协调 Codex、Kimi 和 Grok：分派 P
 
 这篇文章介绍如何让 **Claude Code 担任 orchestrator，统筹其他 Agent**。下面的提示词是可按自己仓库调整的示例，不是性能测试结果，也不是某次生产任务的实录。
 
+<Callout title="我该看哪一页？">
+本页是一条“由一个 Agent 统筹”的完整示例。底层工具见 [Agent 对话控制](/zh/docs/session-orchestration)；
+如果你想自己同时开多个任务，见[并行 Coding Agents](/zh/docs/parallel-agents)。
+</Callout>
+
 ## 负责统筹的 Agent 做什么
 
 它跟进整体任务：哪些工作需要处理、改动之间有哪些依赖、每一部分由谁负责，以及还有什么需要验证。其他 Agent 则在各自的对话中完成具体分工。

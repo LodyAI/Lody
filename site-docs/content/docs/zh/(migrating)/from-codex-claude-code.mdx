@@ -1,0 +1,153 @@
+---
+title: 从 Codex 或 Claude Code 过来
+description: Lody 与 Codex / Claude Code CLI 的关系——哪些习惯可以保留、Lody 多了什么、概念对照，以及迁移清单。
+---
+
+# 从 Codex 或 Claude Code 过来
+
+你不需要放弃 `codex` 或 `claude` CLI。Lody 通过 [Agent Config](/zh/docs/agents) 运行同样的运行时，
+在它们外面加了一层工作区：隔离工作树、同时跑多个会话、实时 diff 审阅、团队交接和移动端访问。
+
+<Callout title="太长不看">
+- 你的订阅、API Key 和机器上的登录都留在原来的地方。
+- 会话相当于 CLI 里的一次对话；Agent Config 是它背后的运行时。
+- Lody 增加的是工作区层：并行工作树、审阅、共享和编排。
+</Callout>
+
+## 哪些可以保留
+
+- **运行时。** Lody 启动的是同一个 agent 进程，不会替换模型，也不会改变 CLI 自身的行为。
+- **你的认证。** Lody 使用机器上已有的订阅登录或环境配置。见 [Agent Config](/zh/docs/agents)。
+- **仓库约定。** `AGENTS.md`、`CLAUDE.md` 以及其它项目指令继续生效，因为 Agent 仍然在项目里运行。
+- **你的终端。** 临时改一小块代码时，直接跑 CLI 仍然是不错的选择。
+
+## 概念对照
+
+| 你习惯的 | 在 Lody 里 | 说明 |
+| --- | --- | --- |
+| 终端里的 `claude` / `codex` | 带 [Agent Config](/zh/docs/agents) 的[会话](/zh/docs/session) | 同一个运行时，多了 GUI、移动端和团队层 |
+| 一份仓库检出 | 每个会话一个[工作树](/zh/docs/worktrees) | 会话之间不再抢同一份文件 |
+| 一次提问和它的改动 | 一个[轮次](/zh/docs/diff-viewer) | Lody 在每轮结束后展示 diff |
+| `--resume` / `resume` | 从侧边栏重新打开会话 | 对话、分支和工作树保持在一起 |
+| 手动 `git diff` 审阅 | [差异查看](/zh/docs/diff-viewer)和 [Diff 行评论](/zh/docs/diff-comments) | 直接在行上评论，并同步到 GitHub PR |
+| 一次开一个终端 | 多个[并行会话](/zh/docs/parallel-agents) | 每个任务有自己的分支和工作树 |
+| 斜杠命令和各种模式 | 运行时暴露的[斜杠命令](/zh/docs/slash-commands) | Lody 会发现运行时支持哪些能力 |
+| 团队里发截图或聊天记录 | [会话交接](/zh/docs/session-handoff) | 把同事请进实时会话 |
+
+## Lody 额外提供了什么
+
+<Cards>
+  <Card href="/zh/docs/parallel-agents" title="并行工作">
+    同时跑多个独立任务的会话，文件不会互相覆盖。
+  </Card>
+  <Card href="/zh/docs/agent-collaboration" title="多 Agent 协作">
+    让 Claude Code、Codex、Kimi、Grok 互相委派和审阅。
+  </Card>
+  <Card href="/zh/docs/diff-comments" title="审阅闭环">
+    在改动行上评论，并把评论线程发回给 Agent。
+  </Card>
+  <Card href="/zh/docs/session-handoff" title="团队交接">
+    让同事进入同一个实时会话，而不是收到聊天记录。
+  </Card>
+  <Card href="/zh/docs/mobile" title="移动端与远程">
+    在手机上查看和指挥跑在共享机器上的会话。
+  </Card>
+  <Card href="/zh/docs/scheduled-tasks" title="定时任务">
+    在保持在线的机器上运行周期性的 Agent 工作。
+  </Card>
+</Cards>
+
+## 迁移清单
+
+<Steps>
+<Step>
+
+### 1. 安装 Lody 并登录
+
+按[快速开始](/zh/docs/quickstart)操作。你可以从桌面端、移动端，或者远程机器上的 CLI 开始。
+
+</Step>
+<Step>
+
+### 2. 保留现有登录
+
+打开 **Settings** -> **Agent Config**，为你用到的每个运行时添加一个配置。大多数情况下不需要新的
+凭据：Lody 会使用机器上已经存在的订阅登录或环境配置。
+
+</Step>
+<Step>
+
+### 3. 添加项目
+
+为你已经在用的目录添加一个[本地项目](/zh/docs/local-project)，或者连接
+[GitHub 仓库](/zh/docs/github)以获得 Pull Request 和 CI。如果你一直在这个本地项目上用 Codex 或
+Claude Code，Lody 可以导入并继续已有历史。见[同步 Code Agent 历史](/zh/docs/local-project)。
+
+</Step>
+<Step>
+
+### 4. 跑一次小会话
+
+按[第一次会话](/zh/docs/first-session)选一个在 CLI 里一次就能做完的任务，确认项目、Agent Config
+和模型都符合预期。
+
+</Step>
+<Step>
+
+### 5. 把重复的设置存下来
+
+如果你总是用同一台机器、同一个配置、同一个模型和同一套指令开始某类任务，就把它保存成
+[Agent 角色](/zh/docs/agent-roles)，不用每次重新选。
+
+</Step>
+<Step>
+
+### 6. 需要时再叠加工作区能力
+
+连接 GitHub 以获得 PR 和 CI；找两个小任务试试[并行会话](/zh/docs/parallel-agents)；或者用
+[会话交接](/zh/docs/session-handoff)邀请同事。可以一步一步来。
+
+</Step>
+</Steps>
+
+## 什么时候 CLI 仍然更合适
+
+<Callout type="info" title="把终端留给合适的任务">
+如果你只是想快速改一处、不需要留审阅记录，或者正在调试 agent 本身，又或者那台机器上不想跑 Lody
+daemon，直接用 CLI 就好。当一个任务能从工作树、可审阅的 diff、同事协作或第二台设备中获益时，Lody
+才更有价值。
+</Callout>
+
+## 常见问题
+
+### Lody 会取代 Codex 或 Claude Code CLI 吗？
+
+不会。Lody 启动这些运行时（以及其它运行时），并在外面加一层工作区。CLI 仍然是受支持的工作方式，
+同一台机器上两者可以并用。
+
+### 我需要迁移 API Key 或订阅吗？
+
+不需要。常见情况下，Lody 使用机器上已有的订阅登录或环境配置。你添加 [Agent Config](/zh/docs/agents)
+是为了告诉 Lody 启动哪个运行时，而不是把凭据搬进 Lody。
+
+### 还能继续使用仓库里的 AGENTS.md 或 CLAUDE.md 吗？
+
+可以。Agent 仍然在你的仓库里运行，它原本就会读取的指令文件继续生效。
+
+### 怎样像 `codex resume` 或 `claude --resume` 那样继续一段对话？
+
+从侧边栏打开对应会话即可。Lody 会把对话、分支和工作树保持在一起。当运行时支持原生 Fork 时，你还能
+[Fork 会话](/zh/docs/session#fork-a-session)，在不影响原会话的前提下换一个方向继续。见[会话](/zh/docs/session)。
+
+### 能在手机上继续同一个会话吗？
+
+可以。执行机器需要保持在线，并登录同一个 Lody 工作区。见[移动端](/zh/docs/mobile)。
+
+## 下一步
+
+<Cards>
+  <Card href="/zh/docs/first-session" title="第一次会话" />
+  <Card href="/zh/docs/concepts" title="概念与术语表" />
+  <Card href="/zh/docs/workflow" title="推荐工作流" />
+  <Card href="/zh/docs/parallel-agents" title="并行 Coding Agents" />
+</Cards>
