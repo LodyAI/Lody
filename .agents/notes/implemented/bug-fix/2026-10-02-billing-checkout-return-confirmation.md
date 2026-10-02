@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: not created
+PR: [#1218](https://github.com/LodyAI/Lody/pull/1218)
 
 [中文](2026-10-02-billing-checkout-return-confirmation.zh.md)
 
