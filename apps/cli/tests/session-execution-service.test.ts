@@ -1261,6 +1261,126 @@ describe('SessionExecutionService', () => {
     }
   );
 
+  it('does not submit a steer when Stop wins during the submitted marker write', async () => {
+    let history: SessionHistoryInput[] = [
+      { id: 'user-1', role: 'user', status: 'handled', read: true } as SessionHistoryInput,
+      {
+        id: 'user-2',
+        role: 'user',
+        status: 'pending_apply',
+        read: false,
+        inputConfig: { prompt: 'do it differently' },
+      } as SessionHistoryInput,
+    ];
+    const submittedWriteStarted = createDeferred<void>();
+    const releaseSubmittedWrite = createDeferred<void>();
+    let lastOperation: unknown;
+    const setSteerOperationRecord = vi.fn(async (_operationId: string, record: unknown) => {
+      if (
+        record &&
+        typeof record === 'object' &&
+        'phase' in record &&
+        record.phase === 'submitted'
+      ) {
+        submittedWriteStarted.resolve();
+        await releaseSubmittedWrite.promise;
+      }
+      lastOperation = record;
+    });
+    const sessionDoc = withHistoryPort({
+      setSteerOperationRecord,
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+    });
+    const upsertDocMeta = vi.fn(async () => {});
+    const steerPrompt = vi.fn(() => ({
+      completion: new Promise(() => {}),
+      outcome: Promise.resolve({
+        outcome: 'applied' as const,
+        application: { steerId: 'steer-after-stop', release: vi.fn() },
+      }),
+    }));
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      cancel: vi.fn(async () => {}),
+      pendingPromptCompletion: null,
+      getAcknowledgedSteerCapability: vi.fn(() => ({
+        provider: 'codex',
+        appliedNotificationMethod: 'codex/steerApplied',
+        upstreamTurn: 'same',
+        configPolicy: 'active',
+      })),
+      findSteerConfigMismatch: vi.fn(() => null),
+      steerPrompt,
+    };
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const sessionId = 'session-steer-stop-during-marker' as SessionId;
+    const runtime = {
+      sessionId,
+      turnId: 'assistant:user-1',
+      userTurnId: 'user-1',
+      session: { agentClient, acpSessionId: 'acp-steer-stop' as ACPSessionId },
+      promptInFlight: true,
+      activePromptRun: { turnId: 'assistant:user-1' },
+      cancelRequested: false,
+      pendingInputOnCancel: 'preserve' as const,
+    };
+    (
+      service as unknown as {
+        turnRuntimeBySession: Map<SessionId, typeof runtime>;
+      }
+    ).turnRuntimeBySession.set(sessionId, runtime);
+
+    const steering = service.steerSession({
+      sessionId,
+      expectedTurnId: 'assistant:user-1',
+      userTurnId: 'user-2',
+      userId: 'user-1',
+      timestamp: '2026-09-14T00:00:00.000Z',
+      inputConfig: { prompt: 'do it differently' },
+    });
+    await submittedWriteStarted.promise;
+
+    await expect(
+      service.cancelSession(
+        {
+          type: 'session/cancel',
+          sessionId,
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+          turnId: 'assistant:user-1',
+        },
+        { pendingInput: 'preserve' }
+      )
+    ).resolves.toEqual({ success: true });
+    releaseSubmittedWrite.resolve();
+
+    await expect(steering).resolves.toMatchObject({
+      applied: false,
+      disposition: 'stale-turn',
+    });
+    expect(steerPrompt).not.toHaveBeenCalled();
+    expect(history.find((entry) => entry.id === 'user-2')).toMatchObject({
+      status: 'pending_apply',
+      read: false,
+    });
+    expect(lastOperation).toMatchObject({
+      phase: 'settled',
+      delivery: 'not_applied',
+      status: 'pending',
+      cancellationPolicy: 'preserve',
+    });
+  });
+
   it.each([false, true])(
     'recovers a not-applied steer after ESC (meta write failure: %s)',
     async (failMetaWrite) => {

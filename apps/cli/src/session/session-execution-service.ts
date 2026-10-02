@@ -1587,24 +1587,56 @@ export class SessionExecutionService {
     }
     const waitController = (runtime.steerWaitController ??= new AbortController());
     const wait = <T>(work: Promise<T>) => waitForSteer(work, waitController.signal);
-    const rejectBeforeProviderSubmission = async (): Promise<SessionSteerResponse | null> => {
+    type ProviderSubmissionRejection =
+      | 'stale-turn'
+      | 'no-active-turn'
+      | 'preserve'
+      | 'owner-transition';
+    const getProviderSubmissionRejection = (
+      expectedPromptRun?: PromptHandoffRun
+    ): ProviderSubmissionRejection | null => {
       if (
         this.turnRuntimeBySession.get(options.sessionId) !== runtime ||
         runtime.turnId !== options.expectedTurnId
       ) {
-        return await rejectAndPromote('stale-turn');
+        return 'stale-turn';
       }
       if (runtime.cancelRequested) {
-        return runtime.pendingInputOnCancel === 'promote'
-          ? await rejectAndPromote('no-active-turn')
-          : await preserveAndReject();
+        return runtime.pendingInputOnCancel === 'promote' ? 'no-active-turn' : 'preserve';
       }
       // No provider request has been submitted yet, so this guide is still
       // ours to run as an ordinary follow-up turn.
       if (!runtime.promptInFlight) {
-        return await rejectAndPromote('no-active-turn');
+        return 'no-active-turn';
+      }
+      if (expectedPromptRun !== undefined && runtime.activePromptRun !== expectedPromptRun) {
+        return 'owner-transition';
       }
       return null;
+    };
+    const resolveProviderSubmissionRejection = async (
+      rejection: ProviderSubmissionRejection
+    ): Promise<SessionSteerResponse> => {
+      if (rejection === 'stale-turn') {
+        return await rejectAndPromote('stale-turn');
+      }
+      if (rejection === 'preserve') {
+        return await preserveAndReject();
+      }
+      if (rejection === 'owner-transition') {
+        return await rejectAndPromote(
+          'busy',
+          'Prompt owner is transitioning between logical turns'
+        );
+      }
+      return await rejectAndPromote('no-active-turn');
+    };
+    const rejectBeforeProviderSubmission = async (
+      expectedPromptRun?: PromptHandoffRun
+    ): Promise<SessionSteerResponse | null> => {
+      const rejection = getProviderSubmissionRejection(expectedPromptRun);
+      if (rejection === null) return null;
+      return await resolveProviderSubmissionRejection(rejection);
     };
     try {
       preparedDoc = await wait(
@@ -1781,6 +1813,17 @@ export class SessionExecutionService {
         phase: 'submitted',
         delivery: 'unknown',
       });
+      // The durable submission marker is asynchronous. Stop can win while that
+      // write is in flight, and the wait wrapper cannot abort this particular
+      // operation. Re-check ownership immediately before handing the steer to
+      // the provider so a canceled input is never submitted after the marker.
+      // Keep this final read synchronous: once it passes there must be no
+      // suspension point before `steerPrompt`, or Stop could win in between
+      // the fence and the provider call.
+      const postStatusRejection = getProviderSubmissionRejection(ownedPromptRun);
+      if (postStatusRejection !== null) {
+        return await resolveProviderSubmissionRejection(postStatusRejection);
+      }
       providerSubmissionStarted = true;
       const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
       if (steerCapability.upstreamTurn === 'handoff') {
