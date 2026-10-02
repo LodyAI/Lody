@@ -294,11 +294,25 @@ const SessionWorkContextInputSchema = z.discriminatedUnion('kind', [
 ]);
 
 /**
- * Semantic run-config fields shared by single and batch create. The concrete ACP
- * config option ids differ per agent, so callers pick the values reported by
- * `lody_session_create_options` and the CLI maps them at dispatch time.
+ * Single and batch creates share semantic controls and explicit ACP selectors.
+ * Discovery reports the target's advertised ids and values; the shared CLI create
+ * path resolves semantic controls and validates the resulting configuration.
  */
 const SessionRunConfigInputShape = {
+  modeId: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      'ACP mode id from runConfig.modes. May grant broader permissions than the parent; choose only within the user authorization granted to the caller.'
+    ),
+  configOptionValues: z
+    .record(z.string().min(1), z.union([z.string(), z.boolean()]))
+    .optional()
+    .describe(
+      'Explicit ACP option values using ids and choices from runConfig.configOptions. Includes permission options even without a category. Semantic model/reasoning/Fast/Plan fields retain their existing precedence. Permissions may be broader than the parent; choose only within the user authorization granted to the caller.'
+    ),
   modelId: z
     .string()
     .trim()
@@ -1197,11 +1211,12 @@ const buildStructuredOutputOptions = (
 };
 
 /**
- * MCP callers select run config semantically (model / reasoning effort / fast /
- * plan). The concrete ACP ids are resolved against the target agent's
- * capabilities inside the shared create path, not here.
+ * Semantic controls resolve against target capabilities in the shared create
+ * path. Explicit ACP selectors use the same validation as CLI --mode/--config-option.
  */
 const buildMcpTurnDispatchConfig = (input: {
+  modeId?: string;
+  configOptionValues?: Record<string, string | boolean>;
   modelId?: string;
   reasoningEffort?: string;
   fastMode?: boolean;
@@ -1215,17 +1230,27 @@ const buildMcpTurnDispatchConfig = (input: {
   };
   return {
     ...resolveTurnDispatchConfig({}),
+    ...(input.modeId !== undefined ? { modeId: input.modeId } : {}),
+    ...(input.configOptionValues !== undefined
+      ? { configOptionValues: input.configOptionValues }
+      : {}),
     ...(hasAgentRunConfigSelection(runConfig) ? { runConfig } : {}),
   };
 };
 
 /** Run config is part of the Command's identity, so it is fingerprinted too. */
 const buildMcpRunConfigCanonicalCommand = (input: {
+  modeId?: string;
+  configOptionValues?: Record<string, string | boolean>;
   modelId?: string;
   reasoningEffort?: string;
   fastMode?: boolean;
   planMode?: boolean;
-}): Record<string, string | boolean> => ({
+}): Record<string, string | boolean | Record<string, string | boolean>> => ({
+  ...(input.modeId !== undefined ? { modeId: input.modeId } : {}),
+  ...(input.configOptionValues !== undefined
+    ? { configOptionValues: input.configOptionValues }
+    : {}),
   ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
   ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
   ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}),
@@ -4059,7 +4084,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Create multiple Lody sessions',
       description:
-        'Start one durable batch Operation for 1-20 Session creates. defaults and items shallow-merge; nested objects replace wholesale. Each item may use an agentRoleId from the workspace catalog. When a Role item also includes manual machine, agent config, or run-config fields, the Role takes precedence and those fields are ignored. Non-Role items accept modelId, reasoningEffort, fastMode, and planMode. Ordered item failures are isolated. Completion arrives automatically as one continuation, so do not poll operation_get in a loop.',
+        'Start one durable batch Operation for 1-20 Session creates. defaults and items shallow-merge; nested objects replace wholesale. Each item may use an agentRoleId from the workspace catalog. When a Role item also includes manual machine, agent config, or run-config fields, the Role takes precedence and those fields are ignored. Non-Role items accept modeId, configOptionValues, modelId, reasoningEffort, fastMode, and planMode using target advertised capabilities from lody_session_create_options. Explicit permissions may be broader than the parent; choose only within the user authorization granted to the caller. Ordered item failures are isolated. Completion arrives automatically as one continuation, so do not poll operation_get in a loop.',
       inputSchema: SessionCreateManyToolInputSchema,
     },
     async (input) => {

@@ -1406,7 +1406,25 @@ export function applyAgentRunConfigSelection(
   if (!hasAgentRunConfigSelection(runConfig)) {
     return { config: rest, validatedConfigIds: new Set(), unverifiedSelections: [] };
   }
-  const resolved = resolveAgentRunConfigSelection(runConfig, capability);
+  const resolved = resolveAgentRunConfigSelection(
+    {
+      ...runConfig,
+      modelId:
+        runConfig?.modelId ??
+        rest.modelId ??
+        getTurnSelectorConfigOptionValue(rest.configOptionValues, capability, 'model'),
+    },
+    capability
+  );
+  const explicitModeId =
+    rest.modeId ?? getTurnSelectorConfigOptionValue(rest.configOptionValues, capability, 'mode');
+  // A legacy Plan control occupies the same ACP mode selector as permission.
+  // Independent plan_mode options do not produce resolved.modeId.
+  if (resolved.modeId && explicitModeId && resolved.modeId !== explicitModeId) {
+    throw new Error(
+      `Plan mode requires ACP mode ${resolved.modeId}, which conflicts with explicit mode ${explicitModeId}.`
+    );
+  }
   const configOptionValues = {
     ...(rest.configOptionValues ?? {}),
     ...(resolved.configOptionValues ?? {}),
@@ -3033,7 +3051,7 @@ export async function validateSessionCreateOptions(args: {
   });
 }
 
-async function resolveEffectiveSessionCreateDispatchConfig(args: {
+export async function resolveEffectiveSessionCreateDispatchConfig(args: {
   manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   agentConfig: AgentConfigMeta;
@@ -3085,12 +3103,22 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
     capability,
     requested.validatedConfigIds
   );
+  const inherited = filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability);
+  if (inherited) {
+    // Raw selectors must override inherited scalar selectors, which the runtime
+    // otherwise applies first and uses to skip the corresponding option.
+    if (getTurnSelectorConfigOptionValue(requested.config.configOptionValues, capability, 'mode')) {
+      delete inherited.modeId;
+    }
+    if (
+      getTurnSelectorConfigOptionValue(requested.config.configOptionValues, capability, 'model')
+    ) {
+      delete inherited.modelId;
+    }
+  }
   return {
     ...withBuiltinDefaultTurnMode(
-      mergeTurnDispatchConfig(
-        requested.config,
-        filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability)
-      ),
+      mergeTurnDispatchConfig(requested.config, inherited),
       args.agentConfig,
       capability
     ),

@@ -1,4 +1,4 @@
-# Session orchestration chain depth
+# Session orchestration
 
 Status: draft
 Translation: current
@@ -21,6 +21,41 @@ executable model, and this Spec.
 Machine-side review automation runs outside this MCP delegation chain. It keeps
 its own round, token, and authority budgets while reacting to external review and
 CI state.
+
+## Session creation configuration
+
+An orchestrator can select the target Agent's advertised configuration on
+`lody_session_create` and `lody_session_create_many` without creating an Agent Role.
+Optional `modeId` uses ACP mode ids; `configOptionValues` uses actual option ids
+with string or boolean values. All advertised options are eligible, including
+permission options without a category. Discovery reports modes and option
+ids, types and choices; it omits current values and launch configuration.
+
+Creation uses the CLI's target-capability validation. Unsupported modes, unknown
+option ids and invalid values fail before a single Operation is accepted. Batch
+item failures remain isolated. Batch defaults and items shallow-merge: an item's
+map replaces the defaults map. Raw options retain the existing CLI inheritance
+contract: a supplied map replaces the inherited map. Explicit raw mode/model
+selectors override inherited scalar selectors. Omitting both new fields preserves
+the existing inheritance and supported builtin defaults.
+
+Explicit semantic model, reasoning, Fast and Plan controls retain their existing
+precedence; resolving them must preserve unrelated raw options. Independent Plan
+options coexist with permissions. If legacy Plan selects ACP mode `plan`, reject
+a different explicit mode rather than silently overwriting it. An explicit Role
+remains authoritative: manual target and configuration fields are ignored before
+capability validation, command identity and dispatch.
+
+An explicit permission selection may be broader than the parent's. The caller
+must act within its user authorization. This interface introduces no permission
+ranking, escalation approval rule or safety boundary relative to CLI creation.
+Changing existing sessions through `lody_session_chat` is outside this change.
+
+Explicit selectors participate in the canonical command fingerprint. Reordering
+map keys is the same request; changing selections under an accepted Operation id
+is `OPERATION_ID_REUSED`. Acceptance freezes each effective target dispatch config.
+Retry and recovery use that config rather than recomputing requester defaults or
+Role configuration. No Operation storage migration is required.
 
 ## Local and cloud execution
 

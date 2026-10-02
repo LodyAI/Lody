@@ -81,9 +81,9 @@ Parent instructions apply.
   probe mismatch cannot reject them, and missing per-model data defers to runtime. Drop
   incompatible inherited selectors; fill builtin mode only when still empty.
   ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-17-chat-follow-up-inherits-target-run-config.md))
-- `lody_session_create_options` publishes valid run-config values per agent config and stays
-  sparse by default (online Machines, one agent config, the current local project, no GitHub
-  fetch), expanding only through explicit query inputs.
+- Create discovery reports modes and option ids/types/choices, never current values.
+  Stay sparse: online Machines, one config, current project, no GitHub fetch without a query.
+  Explicit permissions may exceed the parent; follow the caller's user authorization.
 - Machine liveness is THREE-state. `getOnlineMachineIds()` returning null means the presence room
   could not be joined — status UNKNOWN, never offline. Block a dispatch or report `MACHINE_OFFLINE`
   only for a definite `offline`; an unknown Machine proceeds and fails against its own deadline,

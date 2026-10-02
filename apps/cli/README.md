@@ -39,6 +39,15 @@ Matching MCP tools are `lody_machine_list`, `lody_project_list`,
 `lody_operation_list`. Session list adds `query`, `machineId`, `agentConfigId`,
 and `agentRoleId`. Creation provenance is what the Role filter matches.
 
+`lody_session_create_options` and Agent config discovery expose `runConfig.modes`
+and `runConfig.configOptions` (ids, types and choices, without current values).
+Single and batch MCP creates accept `modeId` and `configOptionValues`, matching
+CLI `--mode` and `--config-option` validation against target capabilities.
+For example, a Grok target may use `configOptionValues: { permission_mode: "ask" }`;
+its ACP mode `default` is not a permission policy. Explicit permissions may exceed
+the parent; callers must follow their user authorization. Roles still override
+manual configuration. Merge, Plan and retry behavior: [creation contract](../../specs/session-orchestration.md#session-creation-configuration).
+
 `project list` without catalog options retains the local daemon project listing.
 Workspace project listing now spans authorized machines and enabled GitHub repositories;
 `--machine` restricts it to local projects on that machine. Directory lists are
