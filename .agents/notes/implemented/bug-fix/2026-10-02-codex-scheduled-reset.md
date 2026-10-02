@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1209
 
 [中文](2026-10-02-codex-scheduled-reset.zh.md)
 
