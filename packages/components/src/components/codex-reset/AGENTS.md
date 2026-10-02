@@ -24,7 +24,7 @@ popover.
 - Gate every entry point on `canShowCodexResetForecast` (built-in Codex with no custom
   key/brand, matching `canShowSubscriptionRateLimits`); a disabled entry makes no
   request at all. The provider row always shows the entry; the usage-popover row appears
-  only while a watch is live. There is deliberately NO always-visible composer band: it
+  while a watch is live or a scheduled reset awaits execution. There is deliberately NO always-visible composer band: it
   would have to load in the background to know whether to render.
 - The usage-popover row must NOT own the dialog. Opening a Radix Dialog from inside a
   Popover dismisses the popover and unmounts a dialog rendered in its content, so
@@ -39,3 +39,7 @@ popover.
   `expires_at` instant semantically ("Today 2:00 PM", "明天 14:00") in the user's
   browser/OS time zone, and describe it as the time through which the forecast is valid
   rather than promising a reset.
+
+- `scheduled_reset` is an announcement, separate from the probabilistic watch. Show it
+  ahead of a watch without a probability; a null time means unspecified, and passing
+  `scheduled_for` means awaiting execution confirmation, never completed or expired.

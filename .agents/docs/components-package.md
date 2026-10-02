@@ -97,3 +97,8 @@ onto one in-flight request, and clamping the served `Cache-Control: max-age` to 
 (the endpoint's CDN-shaped 4h is wrong for someone who just opened the panel) keep it to
 roughly one 304 per interaction. An always-visible composer band was rejected because it
 would have to load in the background to know whether to render at all.
+
+The parser also normalizes `scheduled_reset` independently of `active_watch`. Both entry
+points and the dialog prioritize an announced schedule over the forecast probability.
+The local scheduled time is optional; crossing it shows pending execution confirmation.
+See the [API compatibility decision](../notes/implemented/bug-fix/2026-10-02-codex-scheduled-reset.md).
