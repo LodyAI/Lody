@@ -170,3 +170,59 @@ test('legacy preferences retain their nearest tier across real settings and rend
     await page.getByRole('button', { name: 'Close', exact: true }).click();
   }
 });
+
+test('sidebar navigation follows the same five settings tiers as session titles', async ({
+  page,
+}) => {
+  await page.goto(story.replace('--unified', '--navigation'));
+  for (const [index, tier] of tiers.entries()) {
+    const size = index + 12;
+    await chooseSize(page, tier);
+    for (const name of ['New chat 新会话', 'Schedules 计划']) {
+      const button = page.getByRole('button', { name, exact: true });
+      await metrics(button, size, (20 * size) / 14);
+      expect(await button.evaluate((node) => node.clientHeight)).toBeGreaterThanOrEqual(
+        (20 * size) / 14
+      );
+      await button.focus();
+      await expect(button).toBeFocused();
+    }
+    await surfaces(page, size);
+  }
+});
+
+test('explicit message preview size is independent of the modern host scale', async ({ page }) => {
+  await page.goto(story.replace('--unified', '--explicit-preview'));
+  expect(
+    await page.evaluate(() => CSS.supports('font-size', 'calc(14px * (12px / 14px))')),
+    'The supported modern host must implement CSS typed division.'
+  ).toBe(true);
+  for (const [tier, hostSize] of [
+    ['Larger', 16],
+    ['Small', 13],
+  ] as const) {
+    await chooseSize(page, tier);
+    const message = page.getByTestId('typography-message');
+    await metrics(message.locator('p').first(), 12, (20 * 12) / 14);
+    await metrics(message.locator('h1'), (18 * 12) / 14, (24 * 12) / 14);
+    for (const node of [message.locator('pre code'), message.locator('td').first()])
+      await metrics(node, (13 * 12) / 14, (18 * 12) / 14);
+    await metrics(
+      page.getByTestId('typography-composer').locator('textarea'),
+      hostSize,
+      (20 * hostSize) / 14
+    );
+    await metrics(
+      page.getByTestId('typography-terminal').locator('pre').first(),
+      (13 * hostSize) / 14,
+      (18 * hostSize) / 14
+    );
+    await page.getByRole('button', { name: 'Menu 菜单' }).click();
+    await metrics(
+      page.getByRole('menuitem', { name: 'Copy 复制 gypq' }),
+      (13 * hostSize) / 14,
+      (18 * hostSize) / 14
+    );
+    await page.keyboard.press('Escape');
+  }
+});

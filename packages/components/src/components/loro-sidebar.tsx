@@ -73,6 +73,12 @@ import { WorkspaceAvatar } from './workspace-avatar';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
+import {
+  SIDEBAR_ROW_TEXT_CLASS,
+  SIDEBAR_CAPTION_TEXT_CLASS,
+  SIDEBAR_HELPER_TEXT_CLASS,
+  SIDEBAR_CONTROL_TEXT_CLASS,
+} from './sidebar-row-shared';
 
 export type LoroSidebarNavKey = 'home' | 'archive' | 'schedules';
 
@@ -654,7 +660,8 @@ function NavButton({
         className={cn(
           // Same size as the session titles below: a smaller label reads as
           // undersized next to its 16px icon.
-          'group flex w-full select-none items-center rounded-lg py-1.5 text-left text-sm outline-hidden transition',
+          SIDEBAR_ROW_TEXT_CLASS,
+          'group flex w-full select-none items-center rounded-lg py-1.5 text-left outline-hidden transition',
           // Desktop rows share a +15px icon and +37px text column with the
           // project, repository, and session rows below them.
           isMobile ? 'gap-2 px-2' : 'gap-1.5 px-[9px]',
@@ -676,7 +683,12 @@ function NavButton({
         </span>
         <span className="truncate">{label}</span>
         {badge !== undefined && badge > 0 ? (
-          <span className="ml-auto shrink-0 text-[0.8em] tabular-nums text-muted-foreground">
+          <span
+            className={cn(
+              SIDEBAR_CAPTION_TEXT_CLASS,
+              'ml-auto shrink-0 tabular-nums text-muted-foreground'
+            )}
+          >
             {badge > 99 ? '99+' : badge}
           </span>
         ) : null}
@@ -945,10 +957,20 @@ export const LoroSidebar = memo(function LoroSidebar({
           <ClipboardList className="size-4" strokeWidth={1.8} aria-hidden="true" />
         )}
       </div>
-      <p className="mt-3 max-w-[220px] text-[13px] font-medium leading-5 text-sidebar-foreground">
+      <p
+        className={cn(
+          SIDEBAR_CONTROL_TEXT_CLASS,
+          'mt-3 max-w-[220px] font-medium text-sidebar-foreground'
+        )}
+      >
         {chatScope === 'my' ? mergedLabels.filter.emptyMyTasks : mergedLabels.filter.emptyAllTasks}
       </p>
-      <p className="mt-0.5 max-w-[220px] text-xs leading-[18px] text-sidebar-foreground-muted">
+      <p
+        className={cn(
+          SIDEBAR_HELPER_TEXT_CLASS,
+          'mt-0.5 max-w-[220px] text-sidebar-foreground-muted'
+        )}
+      >
         {chatScope === 'my'
           ? mergedLabels.filter.emptyMyTasksHint
           : mergedLabels.filter.emptyAllTasksHint}
@@ -958,7 +980,10 @@ export const LoroSidebar = memo(function LoroSidebar({
           type="button"
           variant="secondary"
           size="small"
-          className="mt-3 h-7 rounded-full border-sidebar-border bg-sidebar px-3 text-xs font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground"
+          className={cn(
+            SIDEBAR_HELPER_TEXT_CLASS,
+            'mt-3 h-7 rounded-full border-sidebar-border bg-sidebar px-3 font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
+          )}
           onClick={() => onChatScopeChange('team')}
         >
           <Users className="mr-1.5 size-3.5" strokeWidth={1.8} aria-hidden="true" />
@@ -992,7 +1017,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   );
   const windowDrag = isElectron && !isElectronFullscreen;
   const workspaceIdentityClassName = cn(
-    'flex w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.9em]',
+    SIDEBAR_CONTROL_TEXT_CLASS,
+    'flex w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left',
     isMobile ? 'h-9' : 'h-8',
     'text-sidebar-foreground dark:text-sidebar-foreground/75',
     workspaceSwitcherEnabled &&
@@ -1026,14 +1052,16 @@ export const LoroSidebar = memo(function LoroSidebar({
           />
         </div>
         <Menu.Content align="start" side={menuSide} className="w-64">
-          <Menu.GroupLabel className="normal-case text-xs font-normal tracking-normal">
+          <Menu.GroupLabel
+            className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'normal-case font-normal tracking-normal')}
+          >
             {userEmail}
           </Menu.GroupLabel>
           <Menu.Separator />
 
           {workspaces.length > 0 ? (
             <>
-              <Menu.GroupLabel className="text-xs font-medium">
+              <Menu.GroupLabel className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'font-medium')}>
                 {mergedLabels.switchWorkspace}
               </Menu.GroupLabel>
               <Menu.RadioGroup
@@ -1096,7 +1124,12 @@ export const LoroSidebar = memo(function LoroSidebar({
                             // The checked row is the current workspace — it
                             // carries the richer plan/members line that used to
                             // need a separate header card.
-                            <span className="truncate text-[0.75em] text-muted-foreground">
+                            <span
+                              className={cn(
+                                SIDEBAR_CAPTION_TEXT_CLASS,
+                                'truncate text-muted-foreground'
+                              )}
+                            >
                               {typeof ws.memberCount === 'number'
                                 ? t('workspace.switcher.planAndMembers', {
                                     plan: getPlanLabel(ws.planTier),
@@ -1439,7 +1472,12 @@ export const LoroSidebar = memo(function LoroSidebar({
               <div className="space-y-3 pt-1">
                 {repoSections.map((section, sectionIndex) => (
                   <div key={section.id} className="space-y-2">
-                    <div className="flex items-center gap-2 px-1 text-[0.9em] font-medium text-sidebar-foreground-muted">
+                    <div
+                      className={cn(
+                        SIDEBAR_CONTROL_TEXT_CLASS,
+                        'flex items-center gap-2 px-1 font-medium text-sidebar-foreground-muted'
+                      )}
+                    >
                       <Github className="h-3.5 w-3.5" />
                       <span className="truncate">{section.repoFullName}</span>
                       {sectionIndex === 0 && sectionHeaderFilterAction ? (
@@ -1455,7 +1493,8 @@ export const LoroSidebar = memo(function LoroSidebar({
                             <li key={item.id}>
                               <div
                                 className={cn(
-                                  'flex items-center gap-2 rounded-lg px-2 py-2 text-[1em]',
+                                  SIDEBAR_ROW_TEXT_CLASS,
+                                  'flex items-center gap-2 rounded-lg px-2 py-2',
                                   item.isSelected
                                     ? 'bg-sidebar-selection text-sidebar-selection-foreground'
                                     : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
@@ -1464,7 +1503,12 @@ export const LoroSidebar = memo(function LoroSidebar({
                                 <span className="h-2 w-2 rounded-full bg-sidebar-border" />
                                 <span className="min-w-0 flex-1 truncate">{item.title}</span>
                                 {item.ageLabel ? (
-                                  <span className="shrink-0 text-[0.75em] text-sidebar-foreground-muted">
+                                  <span
+                                    className={cn(
+                                      SIDEBAR_CAPTION_TEXT_CLASS,
+                                      'shrink-0 text-sidebar-foreground-muted'
+                                    )}
+                                  >
                                     {item.ageLabel}
                                   </span>
                                 ) : null}

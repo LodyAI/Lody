@@ -27,9 +27,10 @@ token 表达 `Default 指标 × 基准 / 14`，保留默认名义值。portal �
 未采用后代 `em` 缩放，因为紧凑工具正文、表格和嵌套代码会重复乘比例，portal 也会
 脱离父级比例。
 
-侧栏标题和输入框选 body；分组和说明选 footnote；Composer 控件、紧凑工具正文、
+侧栏导航、项目/会话标题和输入框选 body；分组和说明选 footnote；Composer 控件、紧凑工具正文、
 代码和工具输出选 subheadline；Markdown 标题使用现有标题角色及配套行高。
-独立 Markdown 预览的小适配器先消去文档比例再应用显式字号，不拥有第二套角色映射。
+消息角色适配器先消去文档比例再应用请求的字号，也保留独立 Markdown 预览的显式
+字号语义，不拥有第二套角色映射。
 
 删除 settings 的 caption/title 字号别名，调用点机械改为共享 token；Chat/工具的
 元信息与状态标签也选择相同角色，不再用固定 px 或 Tailwind 字号覆盖。删除未使用的
@@ -42,28 +43,40 @@ xterm 实际字号为 `终端保存字号 × 全局基准 / 14`。沿用原地�
 
 ## 保留的例外
 
-不重做字体家族、品牌/landing 标题、图标、间距或控件几何。设置段落保留比例行高，
+不重做字体家族、品牌/landing 标题、头像字母、图标、间距或控件几何。设置段落保留比例行高，
 xterm 保留 1.2 倍行高，
 单行按钮保留居中指标。引用 chip 仍相对正文，但不嵌套紧凑容器。第三方图表、文档
-查看器、编辑器 zoom 和独立任务正文编辑器不在普通文字迁移范围。显式预览适配器
-使用 CSS 类型除法，固定 Electron 43 与已测 Chromium 支持；旧 Safari/shared 页面
-宿主未验证。
+查看器、编辑器 zoom 和独立任务正文编辑器不在普通文字迁移范围。
+
+消息角色适配器对普通消息正文、代码、标题和终端输出使用 CSS length/length 类型
+除法，并非仅独立预览。目标宿主必须实现这一现代 CSS 能力，固定 Electron 43 与
+已测 Chromium 145 支持。[MDN 兼容性数据](https://github.com/mdn/browser-compat-data/blob/main/css/types/calc.json)
+声明 Chrome 140+、Safari 26+，Firefox 当前不支持。按已确认的现代内核目标，不提供
+旧内核回退、polyfill 或平行数值尺度。不支持此能力的内核不在目标内，而非未验收的
+受支持配置。
 
 ## 验证与删除对照
 
-合成 `InterfaceTypography` story 使用真实 SessionList、Appearance、Composer/
+合成 `InterfaceTypography` stories 使用真实 SessionList/LoroSidebar、Appearance、Composer/
 OptionSelector、Markdown、工具 sheet、终端输出、xterm、Menu/Popover/Tooltip
 及 Field。浏览器回归通过设置 UI 选择五档，断言实际字号与行高（含嵌套代码和
 portal），搜索选项，检查键盘焦点/关闭、刷新及旧偏好。矩阵为 1280px 亮暗主题和
-720px 亮色窄桌面，使用中英混排、长标题、正文及输出。恢复实现后四个用例通过。
+720px 亮色窄桌面，使用中英混排、长标题、正文及输出。另有两个用例验证导航五档，
+以及 16px/13px 宿主下固定 12px 的消息预览，包含代码/标题、宿主 Composer、portal
+和终端输出。
 
 临时反向应用生产补丁回到 main `9ea2768` 后，回归失败。最大档的消息/输入/菜单/
 代码在 main 为 16/14/13/14.4px，恢复后为 16/16/14.857/14.857px。
 仅检查文档 CSS 变量无法证明这些边界生效。
+单独恢复导航的固定 `text-sm` 也使新导航用例失败：最小档期望 12px，实际为 14px。
+随后恢复共享角色实现。
 
 通过既有 E2E harness 启动构建的隔离 OSS Electron，使用临时数据目录、独立 profile
 和随机自有 CLI 端点，未操作用户现有应用。从 Settings → Appearance 逐档选择，
-真实输入框为 12/13/14/15/16px，终端预览按默认 13px 偏好乘比例，刷新保留最大档。
+真实输入框及 New chat/Schedules 导航均为 12/13/14/15/16px，配套行高且高度足够。
+终端预览按未改写的默认 13px 偏好乘比例，键盘焦点可用，刷新保留最大档。最终构建的
+Electron 43.7.6 / Chromium 150 确认支持类型除法；浏览器自动化连接阻塞后，改用
+既有 harness 重跑了完整原生流程。
 未执行 provider，也未捕获私有对话。
 
 | 命令 | 实际结果 |
@@ -75,7 +88,7 @@ portal），搜索选项，检查键盘焦点/关闭、刷新及旧偏好。矩�
 | `pnpm --filter @lody/ui test` / `pnpm --filter @lody/electron test` | 298 / 199 测试通过 |
 | `pnpm check:quick` | lint、i18n、导入及 platform/public 边界通过 |
 | `NODE_ENV=test pnpm --filter @lody/components test tests/appearance-settings.test.tsx tests/interface-font-controller.test.tsx tests/terminal-settings.test.ts tests/local-terminal-panel.test.tsx` | 33 测试通过 |
-| `LODY_STORYBOOK_URL=http://127.0.0.1:6016 pnpm --filter @lody/components test:e2e interface-typography.spec.ts --workers=1` | 四个浏览器用例通过；反向对照按预期失败 |
+| `LODY_STORYBOOK_URL=http://127.0.0.1:6016 pnpm --filter @lody/components test:e2e interface-typography.spec.ts --workers=1` | 六个浏览器用例通过；生产补丁和导航反向对照按预期失败 |
 | `pnpm format` | 通过 |
 | `pnpm run docs check` | 通过；保留既有翻译/大小警告，没有 SHA 保护主题 |
 
@@ -85,7 +98,7 @@ portal），搜索选项，检查键盘焦点/关闭、刷新及旧偏好。矩�
 组件套件及浏览器验证。Node 22 的 boot-shell
 通过，Node 26 的 shared WASM 套件通过。未修复损坏的 Homebrew Node 22，改用 pnpm
 缓存中的隔离 Node 22 进行第二轮验证，没有关闭任何检查。Windows/Linux
-原生 UI、签名打包、真实 provider 流、其他系统字体及旧 Safari 未验收。
+原生 UI、签名打包、真实 provider 流及其他系统字体未验收。
 
 ## 截图
 

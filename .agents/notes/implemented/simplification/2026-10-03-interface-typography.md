@@ -31,11 +31,12 @@ their nominal values. Portals read the same document scale. The rejected alterna
 was resizing descendants with `em`: compact prose, table cells and nested code would
 compound, and portals would lose the parent's ratio.
 
-Sidebar titles and prompts take body; groups and descriptions take footnote;
+Sidebar navigation, project/session titles and prompts take body; groups and descriptions take footnote;
 Composer controls, compact tool prose, code and tool output take subheadline.
 Markdown headings use the existing heading roles and paired leading. A small adapter
-preserves explicitly sized standalone Markdown previews by cancelling the document
-baseline before applying the requested size; it does not own a second role map.
+applies message roles by cancelling the document baseline before applying the
+requested size; this also preserves explicitly sized standalone Markdown previews.
+It does not own a second role map.
 
 Settings' parallel caption/title aliases are deleted, with their callers mechanically
 moved to the shared tokens. Chat/tool metadata and status labels also select these
@@ -51,34 +52,48 @@ base preference. The native settings preview uses the same calculation.
 
 ## Retained exceptions
 
-Font families, brand/landing headlines, icons, spacing and control geometry are not
+Font families, brand/landing headlines, avatar initials, icons, spacing and control geometry are not
 redesigned. Settings paragraphs retain their proportional leading. xterm keeps its
 1.2 line-height ratio; one-line button labels retain their
 centered button metric. Reference chips remain relative to their surrounding prose;
 they do not nest compact containers. Third-party diagrams, document viewers, editor
 zoom and the separate task-body editor are outside this ordinary-text migration.
-Browser CSS typed division is used only by the explicit-size preview adapter; pinned
-Electron 43 and tested Chromium support it. Older Safari/shared-page hosts were not
-verified.
+
+The message-role adapter uses CSS length/length typed division for ordinary message
+prose, code, headings and terminal output, not only standalone previews. Supported
+hosts must implement this modern CSS capability; pinned Electron 43 and tested
+Chromium 145 do. [MDN's compatibility dataset](https://github.com/mdn/browser-compat-data/blob/main/css/types/calc.json)
+records Chrome 140+ and Safari 26+, with Firefox currently unsupported. Per the
+confirmed modern-engine target, there is no older-engine fallback, polyfill or
+parallel numeric role scale. Unsupported engines are outside the target, not an
+unverified supported configuration.
 
 ## Verification and deletion comparison
 
-The synthetic `InterfaceTypography` story renders real SessionList, Appearance
+The synthetic `InterfaceTypography` stories render real SessionList/LoroSidebar, Appearance
 settings, Composer/OptionSelector, Markdown, tool sheets, terminal output, xterm,
 Menu/Popover/Tooltip and Field. The browser regression selects all five values through
 the settings UI, checks actual font sizes and leading (including nested code and
 portal content), searches options, checks keyboard focus/dismissal, reloads, and reads
 legacy preferences. Matrix: light/dark at 1280px and light at 720px, mixed Chinese and
-English, long titles/prose/output. All four cases passed after restoration.
+English, long titles/prose/output. Additional cases check navigation at all five
+tiers and an explicit 12px message preview under both 16px and 13px host baselines,
+including code/headings, host Composer, portal and terminal output.
 
 Temporarily reversing the production patch to main `9ea2768` made that regression
 fail. At Larger, main rendered message/prompt/menu/code at 16/14/13/14.4px; restored
 code renders 16/16/14.857/14.857px. The document variable alone would not prove this.
+Reintroducing navigation's fixed `text-sm` separately failed the new navigation case:
+Smaller expected 12px but rendered 14px. The shared-role implementation was restored.
 
 An isolated built OSS Electron was launched with the existing E2E harness: temporary
 data/profile and a random owned CLI endpoint, no user's running app. Settings →
-Appearance selected all five tiers; the real prompt rendered 12/13/14/15/16px, the
-terminal preview multiplied its base 13px preference, and reload retained Larger.
+Appearance selected all five tiers; the real prompt and New chat/Schedules navigation
+rendered 12/13/14/15/16px with paired leading and sufficient height. The terminal
+preview multiplied its unchanged base 13px preference, keyboard focus worked, and
+reload retained Larger. The final built Electron 43.7.6 / Chromium 150 reports
+typed division supported; the full native flow was rerun with the existing harness
+after a browser-automation connection stalled.
 No provider execution or private conversation was captured.
 
 | Command | Observed result |
@@ -90,7 +105,7 @@ No provider execution or private conversation was captured.
 | `pnpm --filter @lody/ui test` / `pnpm --filter @lody/electron test` | 298 / 199 tests passed |
 | `pnpm check:quick` | Lint, i18n, import and platform/public boundaries passed |
 | `NODE_ENV=test pnpm --filter @lody/components test tests/appearance-settings.test.tsx tests/interface-font-controller.test.tsx tests/terminal-settings.test.ts tests/local-terminal-panel.test.tsx` | 33 tests passed |
-| `LODY_STORYBOOK_URL=http://127.0.0.1:6016 pnpm --filter @lody/components test:e2e interface-typography.spec.ts --workers=1` | Four browser cases passed; reversal comparison failed as expected |
+| `LODY_STORYBOOK_URL=http://127.0.0.1:6016 pnpm --filter @lody/components test:e2e interface-typography.spec.ts --workers=1` | Six browser cases passed; production and navigation reversal comparisons failed as expected |
 | `pnpm format` | Passed |
 | `pnpm run docs check` | Passed; pre-existing translation/size warnings, no SHA-protected topics |
 
@@ -102,7 +117,7 @@ suite and browser verification were rerun after the conflict-free main integrati
 Node 22 passes boot-shell; Node 26 passes shared's WASM suite. The broken Homebrew
 Node 22 installation was left untouched; a pnpm-cached isolated Node 22 supplied
 the second runtime. No checks were disabled. Windows/Linux native UI, signed packaging,
-live provider streams, other system font families and older Safari are not accepted
+live provider streams and other system font families are not accepted
 by this run.
 
 ## Screenshots

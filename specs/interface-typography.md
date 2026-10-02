@@ -40,6 +40,10 @@ Each size and leading is its Default value multiplied by the selected baseline
 divided by 14. A standalone message preview with an explicit size retains that
 size independently of the host document's baseline.
 
+The target is modern engines with CSS length/length typed division. Message prose,
+code, headings and terminal output use this capability, including explicit previews.
+Do not add older-engine fallbacks, polyfills or a parallel numeric role scale.
+
 ## Durability and boundaries
 
 Keep `lody-conversation-font-size` and its existing normalization: legacy

@@ -35,6 +35,9 @@ Appearance 中的字号选择应同步缩放普通界面文字，而不抹平层
 字号和行高均为 Default 值乘所选基准再除以 14。独立消息预览显式传入的字号
 不受宿主文档基准影响。
 
+目标为支持 CSS length/length 类型除法的现代内核。消息正文、代码、标题和终端输出
+均使用此能力，包含显式预览。不新增旧内核回退、polyfill 或平行数值角色尺度。
+
 ## 持久化与边界
 
 保留 `lody-conversation-font-size` 及现有归一化：旧 `small/default/large`

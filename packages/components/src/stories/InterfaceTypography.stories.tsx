@@ -13,6 +13,7 @@ import { conversationFontSizeAtom } from '@/atoms/settings';
 import { InterfaceFontController } from '@/components/interface-font-controller';
 import { AppearanceSettingsComponent } from '@/components/settings/appearance-setting';
 import { SessionList, type SessionListRow } from '@/components/session-list';
+import { LoroSidebar } from '@/components/loro-sidebar';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { OptionSelector } from '@/components/shared/option-selector';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
@@ -57,6 +58,7 @@ const channel: TerminalChannel = {
 const styles = stylex.create({
   frame: { display: 'flex', minHeight: '100vh' },
   sidebar: { width: '230px', flexShrink: 0, padding: '12px' },
+  navigationSidebar: { height: '100vh' },
   main: {
     flex: 1,
     minWidth: 0,
@@ -91,7 +93,9 @@ const markdown =
   '\n\n| Role 角色 | Value 值 |\n| --- | --- |\n| Body 正文 | 文字保持层级 |\n\n' +
   '```typescript\nconst label = "中文 English gypq";\nconsole.log(label);\n```';
 
-function Surfaces() {
+type SurfaceOptions = { navigation?: boolean; previewSize?: number };
+
+function Surfaces({ navigation = false, previewSize }: SurfaceOptions) {
   const size = useAtomValue(conversationFontSizeAtom);
   const [prompt, setPrompt] = useState(
     '输入 Mixed English 中文，gypq\nLong text 自动换行 '.repeat(3)
@@ -101,8 +105,28 @@ function Surfaces() {
     <>
       <InterfaceFontController enabled={false} />
       <div {...stylex.props(styles.frame)}>
-        <aside data-testid="typography-sidebar" {...stylex.props(styles.sidebar)}>
-          <SessionList sessions={rows} repos={[]} />
+        <aside
+          data-testid="typography-sidebar"
+          {...stylex.props(styles.sidebar, navigation && styles.navigationSidebar)}
+        >
+          {navigation ? (
+            <LoroSidebar
+              workspaceName="Local 本地"
+              userEmail=""
+              workspaces={[]}
+              currentWorkspaceId="typography"
+              workspaceSwitcherEnabled={false}
+              defaultWidth={206}
+              minWidth={206}
+              maxWidth={206}
+              sessionListProps={{ sessions: rows, repos: [] }}
+              labels={{ home: 'New chat 新会话', schedules: 'Schedules 计划' }}
+              onHomeClicked={() => {}}
+              onSchedulesClicked={() => {}}
+            />
+          ) : (
+            <SessionList sessions={rows} repos={[]} />
+          )}
         </aside>
         <main {...stylex.props(styles.main)}>
           <div {...stylex.props(styles.actions)}>
@@ -140,7 +164,7 @@ function Surfaces() {
             </Tooltip.Root>
           </div>
           <div data-testid="typography-message">
-            <MarkdownRenderer text={markdown} size={size} />
+            <MarkdownRenderer text={markdown} size={previewSize ?? size} />
           </div>
           <div data-testid="typography-compact">
             <MarkdownRenderer
@@ -208,12 +232,12 @@ function Surfaces() {
   );
 }
 
-function StoryShell() {
+function StoryShell(options: SurfaceOptions) {
   const store = useMemo(() => createStore(), []);
   return (
     <PlatformContext.Provider value={platform}>
       <Provider store={store}>
-        <Surfaces />
+        <Surfaces {...options} />
       </Provider>
     </PlatformContext.Provider>
   );
@@ -227,3 +251,5 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Unified: Story = {};
+export const Navigation: Story = { args: { navigation: true } };
+export const ExplicitPreview: Story = { args: { previewSize: 12 } };

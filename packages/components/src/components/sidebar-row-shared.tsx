@@ -938,9 +938,12 @@ const sidebarTypography = stylex.create({
   group: { fontSize: text.footnoteSize, lineHeight: text.footnoteLeading },
   row: { fontSize: text.bodySize, lineHeight: text.bodyLeading },
   caption: { fontSize: text.captionSize, lineHeight: text.captionLeading },
+  control: { fontSize: text.subheadlineSize, lineHeight: text.subheadlineLeading },
 });
 export const SIDEBAR_ROW_TEXT_CLASS = stylex.props(sidebarTypography.row).className;
 export const SIDEBAR_CAPTION_TEXT_CLASS = stylex.props(sidebarTypography.caption).className;
+export const SIDEBAR_HELPER_TEXT_CLASS = stylex.props(sidebarTypography.group).className;
+export const SIDEBAR_CONTROL_TEXT_CLASS = stylex.props(sidebarTypography.control).className;
 export const SIDEBAR_GROUP_LABEL_CLASS = cn(
   stylex.props(sidebarTypography.group).className,
   'font-bold tracking-[0.01em]',

@@ -88,7 +88,7 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   their ONE dialog: [README.md](README.md#subagent-tasks).
 
 - Text roles use `@lody/ui` tokens; compact prose/code use subheadline, never nested `em`.
-  Explicit preview sizes use `conversation-font-size-classes.ts`. Only streaming turns load the stream
+  Message sizes use `conversation-font-size-classes.ts`; hosts require CSS typed division. Only streaming turns load the stream
   engine; else static. A remounted streaming row shows its existing text
   immediately; only later additions animate.
 - A Mermaid diagram in a message is a still preview until a pointer click
