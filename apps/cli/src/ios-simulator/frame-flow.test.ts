@@ -3,14 +3,14 @@ import { SimulatorFrameFlow, jpegDimensions, simulatorScale } from './frame-flow
 
 describe('simulator receiver credit and freshness', () => {
   it('bounds unacknowledged bytes and replaces pending JPEGs while a receiver stalls', () => {
-    const flow = new SimulatorFrameFlow(true, 0);
+    const flow = new SimulatorFrameFlow(true);
     flow.offer(Buffer.alloc(300 * 1024, 1));
     expect(flow.take(0)?.readUInt32BE(4)).toBe(1);
     for (let n = 2; n <= 20; n++) {
       flow.offer(Buffer.alloc(300 * 1024, n));
       expect(flow.take(n * 40)).toBeUndefined();
     }
-    expect(flow.snapshot(800)).toMatchObject({ inFlightFrames: 1, droppedFrames: 18 });
+    expect(flow.snapshot(800)).toMatchObject({ inFlightFrames: 1 });
     expect(flow.acknowledge(1000, 900)).toBe(false);
     expect(flow.take(900)).toBeUndefined();
     expect(flow.acknowledge(1, 900)).toBe(true);
@@ -18,7 +18,7 @@ describe('simulator receiver credit and freshness', () => {
   });
 
   it('paces to 30 FPS and flushes the final pending frame without another source event', () => {
-    const flow = new SimulatorFrameFlow(true, 0);
+    const flow = new SimulatorFrameFlow(true);
     flow.offer(Buffer.from([1]));
     expect(flow.take(0)?.subarray(8)).toEqual(Buffer.from([1]));
     flow.offer(Buffer.from([2]));
@@ -28,12 +28,11 @@ describe('simulator receiver credit and freshness', () => {
     expect(flow.take(34)?.subarray(8)).toEqual(Buffer.from([3]));
     expect(flow.acknowledge(2, 100)).toBe(true);
     expect(flow.acknowledge(1, 101)).toBe(true);
-    expect(flow.snapshot(200)).toMatchObject({ inFlightFrames: 0, inFlightBytes: 0, ackMs: 66 });
-    expect(flow.snapshot(2200)).toMatchObject({ sourceFps: 0, sentFps: 0, sentMbps: 0 });
+    expect(flow.snapshot(200)).toMatchObject({ inFlightFrames: 0, inFlightBytes: 0 });
   });
 
   it('pipelines across RTT instead of stop-and-wait, with a hard frame cap and age budget', () => {
-    const flow = new SimulatorFrameFlow(true, 0);
+    const flow = new SimulatorFrameFlow(true);
     flow.recordRtt(200);
     for (let i = 0; i < 8; i++) {
       flow.offer(Buffer.from([i]));
@@ -48,7 +47,7 @@ describe('simulator receiver credit and freshness', () => {
   });
 
   it('uses fast first-frame feedback without retaining the conservative startup wait', () => {
-    const flow = new SimulatorFrameFlow(true, 0);
+    const flow = new SimulatorFrameFlow(true);
     flow.recordRtt(30);
     flow.offer(Buffer.alloc(200000));
     flow.take(0);
@@ -58,7 +57,7 @@ describe('simulator receiver credit and freshness', () => {
   });
 
   it('does not enlarge the queue when congested probes inflate RTT', () => {
-    const flow = new SimulatorFrameFlow(true, 0);
+    const flow = new SimulatorFrameFlow(true);
     flow.recordRtt(400);
     const initial = flow.snapshot(0).windowBytes;
     flow.recordRtt(4500);
@@ -66,7 +65,7 @@ describe('simulator receiver credit and freshness', () => {
   });
 
   it('paces a synthetic 1 Mbps path, lowers resolution and drains the final frame', () => {
-    const flow = new SimulatorFrameFlow(true, 0);
+    const flow = new SimulatorFrameFlow(true);
     flow.recordRtt(400);
     let scale = 2,
       wireFreeAt = 0,
@@ -106,7 +105,7 @@ describe('simulator receiver credit and freshness', () => {
   });
 
   it('excludes idle time from delivery estimates and preserves local full resolution', () => {
-    const flow = new SimulatorFrameFlow(true, 0);
+    const flow = new SimulatorFrameFlow(true);
     flow.recordRtt(100);
     flow.offer(Buffer.alloc(50000));
     flow.take(0);
@@ -117,7 +116,7 @@ describe('simulator receiver credit and freshness', () => {
     flow.acknowledge(2, 60200);
     expect(flow.snapshot(60200).deliveryMbps).toBe(before);
     expect(flow.recommendedScale(2, 2)).toBe(2);
-    const local = new SimulatorFrameFlow(false, 0);
+    const local = new SimulatorFrameFlow(false);
     local.offer(Buffer.alloc(50000));
     local.take(0);
     local.acknowledge(1, 5000);
@@ -125,7 +124,7 @@ describe('simulator receiver credit and freshness', () => {
   });
 
   it('recovers viewport quality after payload completion gets faster', () => {
-    const flow = new SimulatorFrameFlow(true, 0);
+    const flow = new SimulatorFrameFlow(true);
     flow.recordRtt(400);
     flow.offer(Buffer.alloc(75000));
     flow.take(0);
@@ -141,7 +140,7 @@ describe('simulator receiver credit and freshness', () => {
   });
 
   it('allows one oversized JPEG but cannot accumulate another', () => {
-    const flow = new SimulatorFrameFlow(true, 0);
+    const flow = new SimulatorFrameFlow(true);
     flow.offer(Buffer.alloc(1024 * 1024));
     expect(flow.take(0)).toBeDefined();
     flow.offer(Buffer.alloc(1024 * 1024));

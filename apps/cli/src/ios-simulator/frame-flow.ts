@@ -7,7 +7,6 @@ export const SIMULATOR_FRAME_MAGIC = 0x4c4f4459;
 export class SimulatorFrameFlow {
   private pending?: Buffer;
   private pendingStill = false;
-  private idleRefreshFrames = 0;
   private sequence = 0;
   private acknowledged = 0;
   private lastSent = -Infinity;
@@ -18,29 +17,14 @@ export class SimulatorFrameFlow {
   private deliveryBytesPerSecond = 0;
   private lastSentBytes = 0;
   private latestFrameBytes = 0;
-  private ackMs = 0;
-  private lastAck = 0;
-  private received = 0;
-  private receivedBytes = 0;
-  private sent = 0;
-  private sentBytes = 0;
-  private dropped = 0;
-  private sample = { at: 0, received: 0, receivedBytes: 0, sent: 0, sentBytes: 0 };
   readonly targetFps: number;
 
-  constructor(
-    private readonly remote: boolean,
-    now: number
-  ) {
-    this.sample.at = now;
+  constructor(private readonly remote: boolean) {
     this.targetFps = remote ? 30 : 60;
   }
 
   offer(frame: Buffer, still = false) {
     this.latestFrameBytes = frame.length;
-    this.received++;
-    this.receivedBytes += frame.length;
-    if (this.pending) this.dropped++;
     this.pending = frame;
     this.pendingStill = still;
   }
@@ -53,7 +37,6 @@ export class SimulatorFrameFlow {
     if (!this.pendingStill || !this.pending) return;
     this.pending = undefined;
     this.pendingStill = false;
-    this.dropped++;
   }
 
   /** One frame may exceed the byte budget, but never alongside another frame. */
@@ -80,14 +63,11 @@ export class SimulatorFrameFlow {
     packet.writeUInt32BE(sequence, 4);
     frame.copy(packet, 8);
     this.pending = undefined;
-    if (this.pendingStill) this.idleRefreshFrames++;
     this.pendingStill = false;
     this.inFlight.set(sequence, { bytes: frame.length, at: now });
     this.lastSent = now;
     // No saved-up tokens: idle time must not buy a burst of stale frames.
     this.lastSentBytes = packet.length;
-    this.sent++;
-    this.sentBytes += packet.length;
     return packet;
   }
 
@@ -111,8 +91,6 @@ export class SimulatorFrameFlow {
             this.deliveryBytesPerSecond * 1.2,
             this.deliveryBytesPerSecond * 0.5 + rate * 0.5
           );
-    this.ackMs = Math.max(0, now - frame.at);
-    this.lastAck = now;
     this.acknowledged = sequence;
     for (const id of this.inFlight.keys()) if (id <= sequence) this.inFlight.delete(id);
     return true;
@@ -165,33 +143,16 @@ export class SimulatorFrameFlow {
   }
 
   snapshot(now: number) {
-    const seconds = Math.max(0.001, (now - this.sample.at) / 1000);
     const result = {
-      sourceFps: (this.received - this.sample.received) / seconds,
-      sentFps: (this.sent - this.sample.sent) / seconds,
-      sourceMbps: ((this.receivedBytes - this.sample.receivedBytes) * 8) / seconds / 1e6,
-      sentMbps: ((this.sentBytes - this.sample.sentBytes) * 8) / seconds / 1e6,
-      sentFrames: this.sent,
-      idleRefreshFrames: this.idleRefreshFrames,
-      droppedFrames: this.dropped,
       inFlightFrames: this.inFlight.size,
       inFlightBytes: this.inFlightBytes(),
       oldestFrameMs: this.oldestAge(now),
-      ackMs: this.ackMs,
-      ackIdleMs: this.lastAck ? now - this.lastAck : 0,
       rttMs: this.measuredRtt ? this.rttMs : 0,
       targetFps: this.targetFps,
       baseRttMs: this.measuredRtt ? this.baseRttMs : 0,
       deliveryMbps: (this.deliveryBytesPerSecond * 8) / 1e6,
       pacingMbps: this.remote ? (this.sendRate() * 8) / 1e6 : 0,
       windowBytes: this.byteBudget(),
-    };
-    this.sample = {
-      at: now,
-      received: this.received,
-      receivedBytes: this.receivedBytes,
-      sent: this.sent,
-      sentBytes: this.sentBytes,
     };
     return result;
   }

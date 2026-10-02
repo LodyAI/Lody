@@ -1,21 +1,16 @@
 import { simulatorViewerMediaScript } from './viewer-media';
 /** Fixed Lody artifact, never project HTML. Media decoders own bounded queues and disposal. */
-export function simulatorViewerHtml(
-  operationId: string,
-  initialRotation = 0,
-  remote = false
-): string {
+export function simulatorViewerHtml(operationId: string, initialRotation = 0): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body,canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111}body{display:flex;align-items:center;justify-content:center}canvas{max-width:100%;max-height:100%;object-fit:contain;touch-action:none;display:block}</style></head><body><canvas draggable="false"></canvas><script>
 'use strict';
 const operationId=${JSON.stringify(operationId)};
 let rotation=${JSON.stringify(initialRotation)},rotateWithDevice=true;
 function displayRotation(){return rotateWithDevice?rotation:0}
-const remote=${JSON.stringify(remote)};
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');
 let parentOrigin,visible=false,ws,pending,decoding=false,generation=0,point,pointer,wheelEnd,heartbeat,firstFrame,lastReport,painted=false,commandAbort,capturing=false;
 function layout(){if(!painted)return;const angle=displayRotation(),swap=angle%180!==0;const scale=Math.min((swap?innerHeight:innerWidth)/canvas.width,(swap?innerWidth:innerHeight)/canvas.height);Object.assign(canvas.style,{width:canvas.width*scale+'px',height:canvas.height*scale+'px',maxWidth:'none',maxHeight:'none',flexShrink:'0',transform:'rotate('+angle+'deg)'})}
 function report(state){const rotation=displayRotation(),swap=rotation%180!==0,width=swap?canvas.height:canvas.width,height=swap?canvas.width:canvas.height;const key=state+':'+width+':'+height+':'+rotation;if(parentOrigin&&key!==lastReport){lastReport=key;parent.postMessage({type:'lody:ios-simulator:state',operationId,state,width,height,rotation},parentOrigin)}}
-function send(value){if(ws?.readyState===1){if(ws.bufferedAmount>65536){const old=ws;ws=undefined;old.close();close();report('error');return}if(value.type==='touch1-down'||value.type==='touch1-up'){const inputId=++inputSequence;inputPending.set(inputId,performance.now());if(inputPending.size>32)inputPending.delete(inputPending.keys().next().value);value={...value,inputId}}ws.send(JSON.stringify(value))}}
+function send(value){if(ws?.readyState===1){if(ws.bufferedAmount>65536){const old=ws;ws=undefined;old.close();close();report('error');return}ws.send(JSON.stringify(value))}}
 function lift(){clearTimeout(wheelEnd);flushMove();if(point){const up={...point,type:'touch1-up'};point=undefined;pointer=undefined;send(up)}}
 function close(){lift();generation++;painted=false;commandAbort?.abort();clearInterval(heartbeat);clearTimeout(firstFrame);pending=undefined;if(ws){const old=ws;ws=undefined;old.close()}closeMedia();report('disconnected')}
 ${simulatorViewerMediaScript}

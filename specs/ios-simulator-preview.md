@@ -97,7 +97,7 @@ Selecting a device loads its real DeviceKit artwork before starting preview. The
 
 Remote authorization depends on the connected Cloud backend understanding the exact signed simulator operation. Validate outgoing intents locally; a 400 for a valid simulator request indicates a backend protocol rejection, with a matching-backend update hint and no insecure fallback.
 
-## Remote responsiveness and diagnostics
+## Remote responsiveness
 
 Size remote video for its visible viewport with bounded pixel density and frame rate.
 On slow links, reduce sharpness and pace bytes using receiver feedback; recover quality
@@ -111,12 +111,8 @@ loss. Only decoded video pictures may be coalesced; decoding confirmation releas
 credit independently of the browser paint cadence, with at most one unpainted picture;
 retain final pointer positions and releases when merging high-frequency moves.
 Same-machine preview preserves native resolution. No new cloud service participates
-in the media path. Connection status exposes numeric performance diagnostics, with
-an explicit copy action and bounded in-memory history; never collect input or pixels
-in these diagnostics. Disconnected samples remain distinguishable from live measurements.
+in the media path. Connection status retains basic connection diagnostics and an explicit copy action.
 
 Interaction feedback takes priority over replaying stale queued animation. Preserve
 H.264 dependency safety and receiver credit when replacing a stale unsent chain;
 never discard a valid chain unless a replacement can be requested immediately.
-Optional numeric input receipt diagnostics measure gateway-forwarding round trips,
-not simulator execution or click-to-visible-response latency.

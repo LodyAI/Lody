@@ -110,7 +110,7 @@ fixture; lifecycle and gateway tests cover cancellation, cross-workspace exclusi
 stale stops, idle expiry, denied media access, input filtering and touch release.
 The frontend controller/facade tests cover routing and the exact-origin handshake.
 
-## Media performance diagnostics
+## Media delivery and recovery
 
 The fixed viewer prefers Baguette AVCC/H.264 when WebCodecs is available. It probes
 support for the actual avcC configuration; unsupported configurations and decode/protocol failures
@@ -164,73 +164,17 @@ A failed read keeps the last live image and waits for new activity before retryi
 Mobile init keeps the canvas and exterior upright; guest orientation still changes.
 Input coordinates and captured pixels follow the chosen display angle consistently.
 
-Open the connection-status popover for resolution, painted FPS, Mbps, RTT, ACK delay
-and the in-flight queue. **Copy diagnostics** includes up to two minutes of numeric
-samples. Record 10 seconds idle, 20 seconds of continuous scrolling, then 10 seconds
-idle, and copy the report while the panel remains open. Compare local and remote runs
-of the same screen. Static MJPEG screens correctly report zero FPS; H.264 emits small repeated deltas to keep the decoder progressing.
-
-- `codecH264`: 1 for H.264, 0 for MJPEG. `codecFallback`: 0 none/API absent, 1 unsupported configuration, 2 explicit native codec rejection, 3 decode/protocol failure. Transport errors never permanently downgrade the codec.
-- `codecFailure`: detail for fallback 3: 1 invalid packet, 2 invalid dimensions, 3 configuration/decode exception, 4 exhausted recovery budget.
-- `videoRecoveries` is total recovery attempts; `videoRecoveryStreak` is the current failure budget. `videoRecoveryReason`: 1 encoded queue overflow, 2 no decoded progress, 3 unmatched decoder output, 4 decoder error.
-- `videoBackpressure` counts submission pauses; `encodedQueue/encodedQueueBytes` expose bounded browser buffering. These are numeric diagnostics, never input contents or exception text.
-- `encoderBitrate`, `keyframeRequests`, `upstreamGaps`, `queuedFrames/queuedBytes` describe H.264 encoder control and pending reference chains. `decoderQueue` counts submitted pictures awaiting output.
-- `sourceFps/sourceMbps`: encoded pictures offered to the gateway, including idle stills, not
-  capture/encoder timing. `idleRefreshFrames` counts sharp stills actually sent.
-- `sentFps/sentMbps`: packets the gateway sends; `receivedFps/paintedFps` distinguish
-  receipt from drawing. Browser rates use an independent two-second clock, so
-  burst-delivered gateway reports cannot create artificial FPS spikes. The server
-  and browser intervals are not synchronized; rates are not lifetime averages.
-- `rttMs`: a gateway/browser ping round trip over the media connection (zero before
-  the first reply); includes transport queues, not a separate network-only probe.
-- `baseRttMs`: minimum observed probe RTT for this connection; still an estimate,
-  not a guaranteed queue-free network measurement.
-- `deliveryMbps`: effective payload-rate estimate from frame completion minus base
-  RTT; includes queue/decode/return-path effects, not measured link capacity.
-  `pacingMbps` reserves 15% headroom, `windowBytes` is the current credit budget.
-- `ackMs`: gateway send to browser H.264 decode / JPEG draw and returning confirmation, **not one-way latency**.
-  `ackIdleMs` is time since that ACK; an idle screen retains the last ACK value.
-- `oldestFrameMs/inFlightBytes/inFlightFrames`: outstanding receiver work;
-  `droppedFrames/viewerDroppedFrames`: cumulative intentional freshness drops.
-- `decodeMs/decodeP95Ms`: JPEG decode plus canvas draw, or H.264 submission to decoder output, excluding RAF wait and network;
-  `gatewaySampleAgeMs` and report `ageMs` identify stale observations.
-- `scale`: requested native integer downsampling; `width/height`: actually decoded pixels.
-  A static screen changes dimensions on its next changed frame.
-
-In browser DevTools, select the simulator iframe and run `lodySimulator.stats()` or
-`lodySimulator.history()`. `lodySimulator.setLogging(true)` opts into console samples;
-`false` disables it. The daemon writes `[iOS Simulator media]` numeric summaries every
-30 seconds. No per-frame logs, automatic upload, URLs, input text or pixels. Existing
-cloudflared connection logs identify QUIC/HTTP2; the viewer does not guess that protocol.
-
 H.264 transport recovery retries twice per iframe (500/1500 ms), then leaves Restore
 visible. An eight-second absence of all socket messages also triggers recovery;
-receiving gateway statistics alone does not prove that video is progressing. Hide
+receiving a timing probe alone does not prove that video is progressing. Hide
 cancels pending retries. Every new socket revalidates the existing private capability.
-
-Additional numeric diagnostics: `transportRetries`; `transportFailure` (1 close,
-2 socket error, 3 no messages for eight seconds, 4 first-frame timeout);
-`transportCloseCode` (0 if unavailable); `messageIdleMs`, `frameIdleMs`,
-`decodeIdleMs`, `paintIdleMs` (0 before the first corresponding event);
-`lastReceivedSequence`, `lastAckSequence` (H.264, reset per connection),
-and `paintPending` (0/1). These distinguish network silence from decode/paint
-starvation. H.264 ACK delay now excludes RAF waiting, while JPEG still includes draw.
 
 H.264 bitrate decisions use complete two-second feedback windows with at least
 eight ACKs. At least 75% must exceed minimum RTT + 350 ms before reducing the
 bitrate; a slow outlier is insufficient. Recovery requires at most 10% slow ACKs,
 a near-baseline minimum, actual payload demand, and five seconds since the last
 change. A two-second ACK gap resets the observation. The independent frame/byte/age
-limits still apply during sparse feedback or a stall. `feedbackSamples`,
-`slowAckPercent` and `feedbackMinAckMs` describe the last completed window.
-
-`rafPaints` and `timerPaints` are cumulative H.264 draw counts, `paintScheduleMs`
-is average scheduling-to-draw delay per browser sample, and `receiveGapMaxMs` is
-the largest inter-frame arrival gap in that sample. Coalesced decoded pictures
-are intentional freshness drops; a low draw rate alone does not establish slow
-decoding or RAF suspension. Gateway and browser counters use different sample
-times; consult `gatewaySampleAgeMs` before comparing sequences or FPS.
-
+limits still apply during sparse feedback or a stall.
 
 ### Input feedback latency
 
@@ -242,23 +186,6 @@ in-flight age all remain enforced. A quick release during cooldown preserves the
 replacement chain. Corrupted chains still reset unconditionally. Recovery can
 pipeline an IDR behind acknowledged-or-in-flight pictures instead of waiting for
 all ACKs to drain; ordered delivery and cumulative credit remain unchanged.
-
-- `inputAckMs`: last touch edge sent → gateway validates and forwards it to native
-  → receipt reaches this viewer. Includes both network directions and socket
-  buffering; **does not measure guest execution or visible feedback**.
-- `inputAckSamples` / `inputAckP95Ms`: receipt count and P95 in the current 2-second
-  sample (zero samples means no measurement). Move events do not request receipts.
-- `queueWaitMs`: most recently sent H.264 frame's time in the gateway's unsent queue.
-- `queuedAgeMs`: current oldest unsent H.264 frame age; zero when empty.
-- `interactionResets`: cumulative elective pre-input queue resets for this stream.
-
-Input receipt IDs and timestamps remain private, numeric and bounded (32 pending
-receipts, 120 samples); disconnect clears them. An echo can be skipped under socket
-backpressure. These timings need no clock synchronization. High input RTT with low
-queue wait points toward transport/scheduling; low input RTT does not establish that
-the guest rendered promptly. Network propagation and already-sent bytes cannot be
-removed by dropping an unsent queue.
-
 
 Home, App Switcher and Lock use a preview-owned guest virtual button service. Xcode
 27 Device Hub can suppress Baguette's legacy hardware-button service while its

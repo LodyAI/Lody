@@ -6,7 +6,7 @@ const jpeg = Buffer.from([255, 216, 255, 192, 0, 11, 8, 9, 252, 4, 155, 1, 1, 17
 function harness() {
   const captures: Array<{ scale: number; signal: AbortSignal; resolve: (frame: Buffer) => void }> =
     [];
-  const flow = new SimulatorFrameFlow(true, 0);
+  const flow = new SimulatorFrameFlow(true);
   const idle = new SimulatorIdleRefresh(
     (scale, signal) => new Promise((resolve) => captures.push({ scale, signal, resolve })),
     (frame) => flow.offer(frame, true),
@@ -37,7 +37,6 @@ describe('quiet simulator quality refresh', () => {
     flow.acknowledge(1, 3500);
     idle.tick(60000, 2, true);
     expect(captures).toHaveLength(1);
-    expect(flow.snapshot(60000).idleRefreshFrames).toBe(1);
     await idle.close();
   });
 

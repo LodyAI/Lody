@@ -14,7 +14,6 @@ import {
 import { createSimulatorDeviceControls } from './device-controls';
 import type { SimulatorHostControl } from './host-controls';
 import { SimulatorFrameFlow, jpegDimensions, simulatorScale } from './frame-flow';
-import type { Logger } from '@/utils/logger';
 
 const Input = z
   .object({
@@ -24,7 +23,6 @@ const Input = z
     width: z.number().int().min(1).max(16384),
     height: z.number().int().min(1).max(16384),
     edge: z.literal('bottom').optional(),
-    inputId: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
   })
   .strict()
   .refine((v) => v.x <= v.width && v.y <= v.height);
@@ -53,7 +51,6 @@ export async function createSimulatorGateway(options: {
   port: number;
   softwareKeyboard?: boolean;
   remote?: boolean;
-  logger?: Pick<Logger, 'debug'>;
   signal?: AbortSignal;
   hostControl(control: SimulatorHostControl): Promise<void>;
   active(): boolean;
@@ -96,7 +93,6 @@ export async function createSimulatorGateway(options: {
       return;
     }
     const requestPath = new URL(req.url ?? '/', 'http://localhost').pathname;
-    const remote = requestPath.startsWith(remotePath) || (options.remote ?? false);
     const requestedPath = requestPath.startsWith(remotePath)
       ? path + requestPath.slice(remotePath.length)
       : requestPath;
@@ -215,7 +211,7 @@ export async function createSimulatorGateway(options: {
       'Content-Security-Policy':
         "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src blob:",
     });
-    res.end(simulatorViewerHtml(options.operationId, controls.rotation(), remote));
+    res.end(simulatorViewerHtml(options.operationId, controls.rotation()));
   });
   server.on('connection', (socket) => {
     sockets.add(socket);
@@ -242,7 +238,7 @@ export async function createSimulatorGateway(options: {
       let touch: z.infer<typeof Input> | undefined;
       let shuttingDown: Promise<void> | undefined;
       const now = () => performance.now();
-      const jpegFlow = new SimulatorFrameFlow(remote, now());
+      const jpegFlow = new SimulatorFrameFlow(remote);
       const videoFlow = h264
         ? new SimulatorH264Flow(remote, now(), () => {
             if (upstream.readyState === WebSocket.OPEN && upstream.bufferedAmount < 65536)
@@ -262,8 +258,7 @@ export async function createSimulatorGateway(options: {
       let nativeSize: { width: number; height: number } | undefined;
       let observedScale = 1;
       let scale = 1,
-        pingId = 0,
-        samples = 0;
+        pingId = 0;
       let ping: { id: number; at: number } | undefined;
       const idle = new SimulatorIdleRefresh(
         (stillScale, signal) =>
@@ -341,27 +336,17 @@ export async function createSimulatorGateway(options: {
       };
       // Establish a propagation baseline ahead of the first (native-sized) JPEG.
       probe();
-      const statsTimer = setInterval(() => {
+      const probeTimer = setInterval(() => {
         if (shuttingDown || !options.active()) {
           close();
           return;
         }
-        const stats = {
-          codecH264: h264 ? 1 : 0,
-          ...flow.snapshot(now()),
-          scale,
-          remote,
-        };
-        if (++samples % 15 === 0)
-          options.logger?.debug('[iOS Simulator media] ' + JSON.stringify(stats));
-        if (client.readyState !== WebSocket.OPEN || client.bufferedAmount > 64 * 1024) return;
-        client.send(JSON.stringify({ type: 'stream-stats', ...stats }));
         probe();
       }, 2000);
       const shutdown = (): Promise<void> => {
         if (shuttingDown) return shuttingDown;
         clearInterval(frameTimer);
-        clearInterval(statsTimer);
+        clearInterval(probeTimer);
         invalidateStills.delete(invalidateStill);
         const idleClosed = idle.close();
         shuttingDown = new Promise<void>((resolve) => {
@@ -443,7 +428,7 @@ export async function createSimulatorGateway(options: {
           close();
           return;
         }
-        const { inputId, ...input } = parsed.data;
+        const input = parsed.data;
         if ((input.type === 'touch1-down' && touch) || (input.type !== 'touch1-down' && !touch))
           return;
         // An edge belongs to the gesture's starting point, never a mid-drag switch.
@@ -463,11 +448,6 @@ export async function createSimulatorGateway(options: {
         }
         upstream.send(JSON.stringify(input));
         if (input.type !== 'touch1-move') videoFlow?.prioritizeInteraction(now());
-        // Receipt means forwarded to native, not that the guest rendered a response.
-        // Keep diagnostics off the native input protocol and never queue an echo
-        // behind an already full client socket.
-        if (inputId !== undefined && client.bufferedAmount <= 64 * 1024)
-          client.send(JSON.stringify({ type: 'input-ack', inputId }));
       });
       upstream.on('message', (data, binary) => {
         if (shuttingDown || !options.active()) {

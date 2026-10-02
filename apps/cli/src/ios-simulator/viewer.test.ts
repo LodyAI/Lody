@@ -4,7 +4,6 @@ import { simulatorViewerHtml } from './viewer';
 
 type Input = {
   type: string;
-  inputId?: number;
   x?: number;
   y?: number;
   width?: number;
@@ -180,10 +179,7 @@ function viewer(
   });
   return {
     get sent() {
-      // Gesture assertions ignore the receipt id; wire assertions below cover it.
-      return sent
-        .filter((input) => input.type.startsWith('touch'))
-        .map(({ inputId: _id, ...input }) => input);
+      return sent.filter((input) => input.type.startsWith('touch'));
     },
     wire: sent,
     sockets,
@@ -264,40 +260,6 @@ afterEach(() => {
 });
 
 describe('simulator viewer input', () => {
-  it('measures correlated input receipts without delaying input or accepting stale receipts', async () => {
-    const v = viewer();
-    const receipt = (inputId: number | undefined) =>
-      v.sockets.at(-1)?.onmessage({
-        data: JSON.stringify({ type: 'input-ack', inputId }),
-      });
-    v.canvas.onpointerdown(v.pointer());
-    const down = v.wire.at(-1);
-    expect(down).toMatchObject({ type: 'touch1-down', inputId: 1 });
-    await vi.advanceTimersByTimeAsync(120);
-    v.canvas.onpointerup(v.pointer());
-    const up = v.wire.at(-1);
-    expect(up).toMatchObject({ type: 'touch1-up', inputId: 2 });
-    await vi.advanceTimersByTimeAsync(180);
-    receipt(down?.inputId);
-    receipt(down?.inputId); // Duplicate and unknown ids cannot skew samples.
-    receipt(999);
-    await vi.advanceTimersByTimeAsync(20);
-    receipt(up?.inputId);
-    await vi.advanceTimersByTimeAsync(1680);
-    expect(
-      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
-    ).toMatchObject({ inputAckMs: 200, inputAckSamples: 2, inputAckP95Ms: 300 });
-    v.canvas.onpointerdown(v.pointer());
-    const stale = v.wire.at(-1)?.inputId;
-    v.visibility(false);
-    v.visibility(true);
-    v.sockets.at(-1)?.onopen();
-    receipt(stale);
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(
-      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
-    ).toMatchObject({ inputAckMs: 0, inputAckSamples: 0 });
-  });
   it('keeps one decode and the latest pending frame, and discards an old generation on hide', async () => {
     const decoders: Array<(image: { width: number; height: number; close(): void }) => void> = [];
     let released = 0;
@@ -354,7 +316,7 @@ describe('simulator viewer input', () => {
     expect(v.sent).toHaveLength(count);
   });
 
-  it('ACKs drawn sequences, preserves same-sized canvas contents and exports numeric diagnostics', async () => {
+  it('ACKs drawn sequences, preserves same-sized canvas contents without resetting pixels', async () => {
     const v = viewer();
     let resets = 0,
       width = v.canvas.width,
@@ -381,54 +343,6 @@ describe('simulator viewer input', () => {
       { type: 'frame-ack', sequence: 1 },
       { type: 'frame-ack', sequence: 2 },
     ]);
-    v.sockets.at(-1)?.onmessage({
-      data: JSON.stringify({
-        type: 'stream-stats',
-        rttMs: 100,
-        sentFps: 30,
-        token: 'secret',
-        ackMs: 'https://secret.example',
-      }),
-    });
-    await vi.advanceTimersByTimeAsync(2000);
-    const sample = v.messages.find((m) => m.type === 'lody:ios-simulator:performance');
-    expect(sample?.stats).toMatchObject({
-      rttMs: 100,
-      sentFps: 30,
-      width: 1200,
-      height: 2000,
-      connected: true,
-    });
-    expect(sample?.stats).not.toHaveProperty('token');
-    expect(sample?.stats).not.toHaveProperty('ackMs');
-    v.visibility(false);
-    expect(
-      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
-    ).toMatchObject({ connected: false });
-  });
-
-  it('samples on the viewer clock even when gateway reports arrive in a burst', async () => {
-    const v = viewer();
-    await v.paint();
-    for (let i = 0; i < 4; i++)
-      v.sockets.at(-1)?.onmessage({
-        data: JSON.stringify({
-          type: 'stream-stats',
-          sentFps: i,
-          baseRttMs: 400,
-          windowBytes: 50000,
-        }),
-      });
-    expect(v.messages.filter((m) => m.type === 'lody:ios-simulator:performance')).toHaveLength(0);
-    await vi.advanceTimersByTimeAsync(2000);
-    const reports = v.messages.filter((m) => m.type === 'lody:ios-simulator:performance');
-    expect(reports).toHaveLength(1);
-    expect(reports[0]?.stats).toMatchObject({
-      paintedFps: 0.5,
-      sentFps: 3,
-      baseRttMs: 400,
-      windowBytes: 50000,
-    });
   });
 
   it('only accepts private controls from the bound parent and remaps touches after rotation', async () => {
@@ -737,10 +651,6 @@ describe('viewer WebCodecs lifecycle', () => {
     expect(codec.frames.every((f) => f.closed)).toBe(true);
     v.visibility(false);
     expect(d?.closed).toBe(true);
-    const stats = v.messages
-      .filter((m) => m.type === 'lody:ios-simulator:performance')
-      .at(-1)?.stats;
-    expect(stats).toMatchObject({ rafPaints: 1, timerPaints: 0, paintScheduleMs: 16 });
   });
   it('falls back once when actual AVC configuration is unsupported and retains JPEG preview', async () => {
     const codec = fakeVideoCodec(false),
@@ -775,10 +685,6 @@ describe('viewer WebCodecs lifecycle', () => {
     expect(codec.frames.filter((f) => !f.closed).length).toBeLessThanOrEqual(1);
     expect(v.paints).toBeGreaterThan(10);
     v.visibility(false);
-    const stats = v.messages
-      .filter((m) => m.type === 'lody:ios-simulator:performance')
-      .at(-1)?.stats;
-    expect(stats).toMatchObject({ rafPaints: 0, timerPaints: v.paints, paintScheduleMs: 100 });
     const paints = v.paints;
     await vi.advanceTimersByTimeAsync(1000);
     expect(v.paints).toBe(paints);
@@ -890,14 +796,6 @@ describe('viewer WebCodecs lifecycle', () => {
       expect(v.sockets).toHaveLength(1);
     }
     v.visibility(false);
-    expect(
-      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
-    ).toMatchObject({
-      codecFallback: 0,
-      videoRecoveries: 5,
-      videoRecoveryStreak: 1,
-      videoRecoveryReason: 4,
-    });
   });
   it('bounds repeated failures even if each decoder outputs one picture', async () => {
     const codec = fakeVideoCodec(),
@@ -911,14 +809,6 @@ describe('viewer WebCodecs lifecycle', () => {
     }
     expect(v.sockets).toHaveLength(2);
     expect(v.sockets[1]?.url.searchParams.has('codec')).toBe(false);
-    expect(
-      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
-    ).toMatchObject({
-      codecFallback: 3,
-      codecFailure: 4,
-      videoRecoveryStreak: 4,
-      videoRecoveryReason: 4,
-    });
   });
   it('bounds encoded buffering and requires a new reference chain after overflow', async () => {
     const codec = fakeVideoCodec(),
@@ -942,9 +832,6 @@ describe('viewer WebCodecs lifecycle', () => {
     v.visibility(false);
     await vi.advanceTimersByTimeAsync(12000);
     expect(v.sockets).toHaveLength(1);
-    expect(
-      v.messages.filter((m) => m.type === 'lody:ios-simulator:performance').at(-1)?.stats
-    ).toMatchObject({ videoRecoveryReason: 1, encodedQueue: 0, encodedQueueBytes: 0 });
   });
   it('does not resurrect a decoder after an asynchronous configuration probe resolves on a hidden viewer', async () => {
     const codec = fakeVideoCodec();

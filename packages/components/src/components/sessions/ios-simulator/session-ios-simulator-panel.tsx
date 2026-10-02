@@ -424,7 +424,6 @@ function SessionIosSimulatorPanelController({
   // ready preview, through its exact operation.
 
   const viewerRef = useRef<IosSimulatorViewerHandle>(null);
-  const readPerformance = useCallback(() => viewerRef.current?.performance?.() ?? null, []);
   const [turns, setTurns] = useState<IosSimulatorQuarterTurns>(0);
   const [viewMode, setViewMode] = useState<IosSimulatorViewMode>('device');
   const [fullscreen, setFullscreen] = useState(false);
@@ -622,19 +621,12 @@ function SessionIosSimulatorPanelController({
               }
             : { phase: blocker ?? 'loading' },
     });
-    const performance = readPerformance();
-    const report = performance
-      ? text +
-        '\nmedia-performance (2s samples; ACK includes return path + H264 decode / JPEG draw):\n' +
-        JSON.stringify(performance, null, 2)
-      : text;
-    if (await writeTextToClipboard(report)) {
+    if (await writeTextToClipboard(text)) {
       toast.success(t('sessions.iosSimulator.diagnosticsCopied', 'Diagnostics copied'));
     } else {
       toast.error(t('sessions.iosSimulator.diagnosticsCopyFailed', 'Couldn’t copy diagnostics'));
     }
   }, [
-    readPerformance,
     availability,
     blocker,
     catalog,
@@ -683,7 +675,6 @@ function SessionIosSimulatorPanelController({
         controlsLayout={controlsLayout}
         turns={turns}
         viewerRef={viewerRef}
-        readPerformance={readPerformance}
         onRotationChange={setTurns}
         onFullscreenChange={setFullscreen}
       />

@@ -283,26 +283,3 @@ export const Narrow: Story = {
   ],
   args: { status: ready('local'), viewerState: 'ready', controls },
 };
-
-export const PerformanceDiagnostics: Story = {
-  args: {
-    status: ready('remote'),
-    viewerState: 'ready',
-    controls,
-    readPerformance: () => ({
-      ageMs: 50,
-      samples: [],
-      latest: {
-        connected: true,
-        remote: true,
-        width: 589,
-        height: 1278,
-        paintedFps: 29.4,
-        receivedMbps: 4.2,
-        rttMs: 120,
-        ackMs: 145,
-        inFlightFrames: 4,
-      },
-    }),
-  },
-};

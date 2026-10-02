@@ -52,12 +52,13 @@
 - `frame-flow.ts` owns sequenced JPEGs, cumulative receiver credit and the latest-only
   pending frame. Keep both frame/byte windows bounded; a local socket's bufferedAmount
   is not receiver backpressure. ACK/config/probe traffic never renews the lease.
-  `viewer-media.ts` owns RAF decoding, bounded numeric diagnostics and move coalescing;
+  `viewer-media.ts` owns RAF decoding, recovery watchdogs and move coalescing;
   preserve touch-up/final coordinates and cancel scheduled work on disconnect.
   Remote pacing/byte credit use conservative payload completion and minimum RTT;
   congested RTT must not expand credit. Scale combines viewport/SOF with network
   feedback, capped at 4; never forward arbitrary native reconfiguration. Recover
-  quality slowly and keep browser sampling independent of queued gateway reports.
+  quality slowly. Keep ACK/RTT feedback for flow control; do not restore performance
+  sampling, histories or periodic media logs.
   Native MJPEG FPS remains unfixed. `idle-refresh.ts` owns one bounded sharp JPEG
   after a drained quiet period; input/source changes revoke pending stills, and
   disconnect joins cancelled capture. Fixed loopback capture never renews a lease.

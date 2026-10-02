@@ -64,7 +64,6 @@ describe('AVC private stream', () => {
     f.offer(frame(1), 160);
     expect(f.take(170)?.[8]).toBe(2);
     expect(f.take(180)?.[8]).toBe(3);
-    expect(f.snapshot(200).upstreamGaps).toBe(1);
   });
   it('allows reference number wrap and rejects mislabeled IDRs', () => {
     const { f } = flow(false);
@@ -72,7 +71,6 @@ describe('AVC private stream', () => {
       f.offer(frame(i % 16, i === 0), i);
       expect(f.take(i)).toBeDefined();
     }
-    expect(f.snapshot(20).upstreamGaps).toBe(0);
     const wrong = frame(1);
     wrong[0] = 2;
     expect(() => f.offer(wrong, 21)).toThrow();
@@ -148,10 +146,7 @@ describe('AVC private stream', () => {
     f.offer(frame(0), 220);
     expect(f.take(220)?.[8]).toBe(2);
     expect(f.snapshot(220)).toMatchObject({
-      interactionResets: 1,
-      droppedFrames: 3,
       queuedFrames: 0,
-      queueWaitMs: 0,
     });
     // The new IDR still consumes ordinary receiver credit.
     expect(f.snapshot(220).inFlightFrames).toBe(2);
@@ -163,7 +158,6 @@ describe('AVC private stream', () => {
       f.prioritizeInteraction(remote ? 100 : 500);
       expect(requests).toHaveLength(0);
       expect(f.take(500)?.[8]).toBe(2);
-      expect(f.snapshot(500)).toMatchObject({ interactionResets: 0, queueWaitMs: 500 });
     }
   });
   it('preserves a replacement chain when a quick release falls inside the IDR cooldown', () => {
@@ -179,7 +173,6 @@ describe('AVC private stream', () => {
     f.prioritizeInteraction(350);
     expect(f.take(350)?.[8]).toBe(3);
     expect(requests).toHaveLength(1);
-    expect(f.snapshot(350).interactionResets).toBe(1);
   });
   it('preserves pre-input frames while pacing or receiver credit prevents replacement', () => {
     const { f, requests } = flow();
@@ -188,11 +181,11 @@ describe('AVC private stream', () => {
     f.offer(frame(1), 10);
     f.prioritizeInteraction(200);
     expect(requests).toHaveLength(0);
-    expect(f.snapshot(200)).toMatchObject({ interactionResets: 0, queuedFrames: 1 });
+    expect(f.snapshot(200)).toMatchObject({ queuedFrames: 1 });
     f.acknowledge(1, 250);
     // Pacing debt still blocks optional replacement even after receiver credit arrives.
     f.prioritizeInteraction(300);
-    expect(f.snapshot(300)).toMatchObject({ interactionResets: 0, queuedFrames: 1 });
+    expect(f.snapshot(300)).toMatchObject({ queuedFrames: 1 });
   });
   it('does not mistake tiny idle deltas for spare link capacity', () => {
     const { f } = flow();

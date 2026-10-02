@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import type { IosSimulatorPerformanceReport } from '@/lib/ios-simulator/ios-simulator-performance';
+import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { CircleDashed, Copy, Link2Off, Monitor, RadioTower, TriangleAlert } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -29,7 +28,6 @@ export type IosSimulatorConnectionStatusProps = {
   onCancel?: () => void;
   onStop?: () => void;
   onCopyDiagnostics: () => void;
-  readPerformance?: () => IosSimulatorPerformanceReport | null;
 };
 
 type StatusKind = 'idle' | 'preparing' | 'direct' | 'remote' | 'interrupted' | 'failed';
@@ -108,22 +106,10 @@ export function IosSimulatorConnectionStatus({
   onCancel,
   onStop,
   onCopyDiagnostics,
-  readPerformance,
 }: IosSimulatorConnectionStatusProps) {
   const { t } = useTranslation();
   const stageLabel = useIosSimulatorStageLabel();
   const [open, setOpen] = useState(false);
-  const [performance, setPerformance] = useState<IosSimulatorPerformanceReport | null>(null);
-  useEffect(() => {
-    if (!open || !readPerformance) return undefined;
-    const update = () => setPerformance(readPerformance());
-    update();
-    const timer = setInterval(update, 2000);
-    return () => clearInterval(timer);
-  }, [open, readPerformance]);
-  const stats = performance?.latest;
-  const metric = (value: number | undefined, digits = 0) =>
-    value === undefined ? '—' : value.toFixed(digits);
   const kind = statusKind(status, viewerState);
   const canCancel = status.phase === 'preparing' && Boolean(status.operationId);
   const busy = pendingAction !== null;
@@ -231,31 +217,6 @@ export function IosSimulatorConnectionStatus({
                 )}
               </li>
             </ul>
-          ) : null}
-          {stats ? (
-            <div data-testid="ios-simulator-performance" {...stylex.props(styles.detail)}>
-              <p {...stylex.props(styles.title)}>
-                {t('sessions.iosSimulator.performance.title', 'Performance')}
-              </p>
-              <div>
-                {metric(stats.width)} × {metric(stats.height)} · {metric(stats.paintedFps, 1)} FPS
-              </div>
-              <div>
-                {metric(stats.receivedMbps, 2)} Mbps · RTT {metric(stats.rttMs || undefined)} ms
-              </div>
-              <div>
-                ACK {metric(stats.ackMs)} ms · Q {metric(stats.inFlightFrames)}
-              </div>
-              <div>
-                {t(
-                  'sessions.iosSimulator.performance.detail',
-                  'ACK includes decoding (H.264) or drawing (JPEG) and the return trip. Copy diagnostics for the last two minutes.'
-                )}
-              </div>
-              {!stats.connected || (performance?.ageMs ?? 0) > 6000 ? (
-                <div>{t('sessions.iosSimulator.performance.paused', 'No fresh sample')}</div>
-              ) : null}
-            </div>
           ) : null}
           <Separator />
           <div {...stylex.props(styles.actions)}>

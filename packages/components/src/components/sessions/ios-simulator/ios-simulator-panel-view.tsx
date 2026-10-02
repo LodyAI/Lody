@@ -1,4 +1,3 @@
-import type { IosSimulatorPerformanceReport } from '@/lib/ios-simulator/ios-simulator-performance';
 import type { IosSimulatorExterior } from '@lody/shared';
 import type { ReactNode, Ref } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -93,7 +92,6 @@ export type IosSimulatorPanelViewProps = {
   /** Quarter turns of the exterior; the streamed screen is never rotated. */
   turns?: IosSimulatorQuarterTurns;
   viewerRef?: Ref<IosSimulatorViewerHandle>;
-  readPerformance?: () => IosSimulatorPerformanceReport | null;
   onRotationChange?: (turns: IosSimulatorQuarterTurns) => void;
   onFullscreenChange?: (fullscreen: boolean) => void;
 };
@@ -396,7 +394,6 @@ export function IosSimulatorPanelView({
   controlsLayout = 'toolbar',
   turns = 0,
   viewerRef,
-  readPerformance,
   onRotationChange,
   onFullscreenChange,
 }: IosSimulatorPanelViewProps) {
@@ -720,7 +717,6 @@ export function IosSimulatorPanelView({
               onCancel={onCancel}
               onStop={onStop}
               onCopyDiagnostics={onCopyDiagnostics}
-              readPerformance={active ? readPerformance : undefined}
             />
           </div>
         ) : null}

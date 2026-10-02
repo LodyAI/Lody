@@ -27,38 +27,17 @@ export class SimulatorH264Flow {
   private slowFeedback = 0;
   private feedbackBytes = 0;
   private minFeedback = Infinity;
-  private feedbackSamples = 0;
-  private slowAckPercent = 0;
-  private feedbackMinAckMs = 0;
   private lastRecovery = -Infinity;
-  private recoveries = 0;
-  private upstreamGaps = 0;
-  private interactionResets = 0;
-  private queueWaitMs = 0;
   private bitrate: number;
-  private received = 0;
-  private receivedBytes = 0;
-  private sent = 0;
-  private sentBytes = 0;
-  private dropped = 0;
-  private sample: {
-    at: number;
-    received: number;
-    receivedBytes: number;
-    sent: number;
-    sentBytes: number;
-  };
   constructor(
     private readonly remote: boolean,
     now: number,
     private readonly requestKeyframe: () => void
   ) {
     this.bitrate = remote ? 600_000 : 4_000_000;
-    this.sample = { at: now, received: 0, receivedBytes: 0, sent: 0, sentBytes: 0 };
     this.lastTune = now;
   }
   private reset() {
-    this.dropped += this.queue.length;
     this.queue = [];
     this.queuedBytes = 0;
     this.waiting = true;
@@ -70,7 +49,6 @@ export class SimulatorH264Flow {
     // for every ACK adds a whole return trip even when there is usable credit.
     if (this.canRequestKeyframe(now)) {
       this.lastRecovery = now;
-      this.recoveries++;
       this.requestKeyframe();
     }
   }
@@ -92,7 +70,6 @@ export class SimulatorH264Flow {
       now - this.queue[0].at > 100 &&
       this.canRequestKeyframe(now)
     ) {
-      this.interactionResets++;
       this.recover(now);
     }
   }
@@ -108,8 +85,6 @@ export class SimulatorH264Flow {
     }
     if ((tag !== 2 && tag !== 3) || !this.description || payload.length > 2 * 1024 * 1024)
       throw Error('AVC packet');
-    this.received++;
-    this.receivedBytes += payload.length;
     const info = avcFrameInfo(payload, this.description);
     if (info.key !== (tag === 2)) throw Error('AVC key tag');
     if (
@@ -117,18 +92,15 @@ export class SimulatorH264Flow {
       (this.reference === undefined ||
         info.frameNum !== (this.reference + 1) % 2 ** this.description.frameBits)
     ) {
-      this.upstreamGaps++;
       this.recover(now);
     }
     if (info.reference) this.reference = info.frameNum;
     if (info.key) {
-      this.dropped += this.queue.length;
       this.queue = [];
       this.queuedBytes = 0;
       this.waiting = false;
     }
     if (this.waiting) {
-      this.dropped++;
       this.recover(now);
       return;
     }
@@ -137,7 +109,6 @@ export class SimulatorH264Flow {
       this.queuedBytes + payload.length > 2 * 1024 * 1024 ||
       (this.queue[0] && now - this.queue[0].at > 1000)
     ) {
-      this.dropped++;
       this.recover(now);
       return;
     }
@@ -176,13 +147,10 @@ export class SimulatorH264Flow {
     description?.copy(packet, 11);
     next.payload.copy(packet, 11 + (description?.length ?? 0));
     this.queue.shift();
-    this.queueWaitMs = Math.max(0, now - next.at);
     this.queuedBytes -= next.payload.length;
     this.inFlight.set(sequence, { bytes: size, at: now });
     // Native bitrate is a long-term target, not a hard per-frame size limit.
     this.nextSend = now + (this.remote ? (size * 8 * 1000) / (this.bitrate * 1.3) : 0);
-    this.sent++;
-    this.sentBytes += size;
     return packet;
   }
   acknowledge(sequence: number, now: number) {
@@ -210,9 +178,6 @@ export class SimulatorH264Flow {
     // of turning one large keyframe into evidence about the whole link.
     const elapsed = now - (this.feedbackAt ?? now);
     if (elapsed >= 2000) {
-      this.feedbackSamples = this.feedbackCount;
-      this.slowAckPercent = (this.slowFeedback * 100) / this.feedbackCount;
-      this.feedbackMinAckMs = this.minFeedback;
       const enough = this.feedbackCount >= 8;
       const slowFraction = this.slowFeedback / this.feedbackCount;
       if (this.remote && enough && slowFraction >= 0.75) {
@@ -262,14 +227,7 @@ export class SimulatorH264Flow {
     return first ? Math.max(0, now - first.at) : 0;
   }
   snapshot(now: number) {
-    const seconds = Math.max(0.001, (now - this.sample.at) / 1000);
     const result = {
-      sourceFps: (this.received - this.sample.received) / seconds,
-      sourceMbps: ((this.receivedBytes - this.sample.receivedBytes) * 8) / seconds / 1e6,
-      sentFps: (this.sent - this.sample.sent) / seconds,
-      sentMbps: ((this.sentBytes - this.sample.sentBytes) * 8) / seconds / 1e6,
-      sentFrames: this.sent,
-      droppedFrames: this.dropped,
       inFlightFrames: this.inFlight.size,
       inFlightBytes: this.inFlightBytes(),
       oldestFrameMs: this.oldestAge(now),
@@ -281,24 +239,9 @@ export class SimulatorH264Flow {
       windowBytes: this.budget(),
       pacingMbps: (this.bitrate * 1.3) / 1e6,
       encoderBitrate: this.bitrate,
-      feedbackSamples: this.feedbackSamples,
-      slowAckPercent: this.slowAckPercent,
-      feedbackMinAckMs: this.feedbackMinAckMs,
-      keyframeRequests: this.recoveries,
-      upstreamGaps: this.upstreamGaps,
-      interactionResets: this.interactionResets,
-      queueWaitMs: this.queueWaitMs,
       queuedAgeMs: this.queue[0] ? Math.max(0, now - this.queue[0].at) : 0,
       queuedFrames: this.queue.length,
       queuedBytes: this.queuedBytes,
-      codecH264: 1,
-    };
-    this.sample = {
-      at: now,
-      received: this.received,
-      receivedBytes: this.receivedBytes,
-      sent: this.sent,
-      sentBytes: this.sentBytes,
     };
     return result;
   }

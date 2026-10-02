@@ -537,3 +537,19 @@ not remote end-to-end latency. Physical mobile UI and older Xcode remain unverif
 Fault-injection review found and fixed a parent-first process-group leak and a cleanup-error path that could skip native teardown. The final reviewer reran the descendant probe and observed no surviving process. Native cancellation during App Switcher also removed both host simctl and guest helper before device shutdown, with Device Hub active and unchanged system UI PIDs.
 
 Validation: standalone public full check passed (CLI 3,379 passed/four skipped; components 4,640 passed), final CLI build/typecheck and formatting passed. Adversarial security/correctness/scope review and fresh refutation completed; no remaining P0/P1 findings. Outer affected checking retains existing ACP dependency/type failures; docs retains only the existing oversized MCP AGENTS file.
+
+### Retire investigation instrumentation (2026-10-02)
+
+At the user's request, remove the temporary performance panel, two-second samples,
+two-minute history, DevTools stats/logging API, periodic gateway media logs and numeric
+input-receipt echo. Remove their parser, story, translations and instrumentation-only
+tests. Earlier performance sections in this note describe historical investigation;
+they no longer describe shipped diagnostic UI. Keep basic connection diagnostics.
+
+Remove sampling-only counters from the flow controllers. Their read-only snapshots
+remain available to regression tests and allocate nothing during normal streaming.
+Frame ACKs, RTT probes, bitrate feedback windows, watchdogs, bounded decoder queues,
+input prioritization and Device Hub-compatible controls are operational behavior and
+remain intact. Cleanup does not claim a new network latency improvement.
+
+Validation: standalone public full check passed (CLI 3,377 tests plus four skipped; components 4,638). Final CLI typecheck/build, quick checks and formatter passed; 41 viewer/gateway tests passed after the final unused-argument removal. Parallel security/correctness/scope reviews and a fresh adversarial review found no blockers. Outer affected check retains existing ACP errors; docs retains only the existing oversized MCP AGENTS error. No new physical-device/WAN run was required or claimed for this removal.
