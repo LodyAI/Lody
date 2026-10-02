@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
@@ -25,7 +26,6 @@ import { labelForAgent } from './provider-row';
 import { ProviderProgressButton } from './provider-progress-button';
 import { BUB_ACP_INSTALL_DOCS_URL, BubInstallGuide } from './bub-install-guide';
 import { settingsCatalog as catalog } from './surface';
-import { settingsType as type } from './type.stylex';
 
 /** Where the agent's text column starts: the mark, its gap, and the row's inset. */
 const TEXT_INSET = '52px';
@@ -45,14 +45,14 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.label,
   },
   agent: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   /** The provider row's status column, reserved so the actions line up with it. */
@@ -83,7 +83,7 @@ const styles = stylex.create({
     paddingInlineEnd: space[3],
     paddingBottom: space[3],
   },
-  status: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  status: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   /** A failure says so in its sentence; the row takes no border for it. */
   statusFailed: { color: colors.destructive },
 });

@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -120,7 +121,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   bannerSlot: { paddingInline: space[3], paddingTop: space[3] },
@@ -132,7 +133,7 @@ const styles = stylex.create({
     gap: space[2],
     height: '100%',
     padding: space[4],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   column: { display: 'flex', flexDirection: 'column', width: '100%', minWidth: 0 },
@@ -215,7 +216,7 @@ const styles = stylex.create({
     ...TRUNCATE,
     display: 'block',
     marginTop: '2px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   pickerCheck: {
@@ -242,7 +243,7 @@ const styles = stylex.create({
   headingSubtitle: {
     margin: 0,
     marginTop: '2px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
@@ -254,29 +255,29 @@ const styles = stylex.create({
     paddingInline: space[4],
     paddingBlock: space[8],
     textAlign: 'center',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   privateSection: { display: 'flex', flexDirection: 'column', gap: space[3], paddingTop: space[3] },
   privateHeading: { paddingInline: space[1] },
   privateTitleLine: { display: 'flex', alignItems: 'center', gap: space[2] },
-  privateTitle: { margin: 0, fontSize: type.caption, fontWeight: 400, color: colors.label },
+  privateTitle: { margin: 0, fontSize: uiText.footnoteSize, fontWeight: 400, color: colors.label },
   count: {
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontVariantNumeric: 'tabular-nums',
     color: colors.secondaryLabel,
   },
   privateHint: {
     margin: 0,
     marginTop: '2px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   selectPrompt: {
     paddingInline: space[1],
     paddingBlock: space[8],
     textAlign: 'center',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   /** The disclosure is the card's first line; the pointer fills the whole of it. */
@@ -293,7 +294,7 @@ const styles = stylex.create({
     borderWidth: 0,
     color: colors.label,
     fontFamily: 'inherit',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontWeight: 400,
     textAlign: 'start',
     cursor: 'pointer',
@@ -303,7 +304,7 @@ const styles = stylex.create({
     margin: 0,
     paddingInline: space[4],
     paddingBottom: '10px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -321,11 +322,11 @@ const styles = stylex.create({
     borderWidth: 0,
     color: colors.label,
     fontFamily: 'inherit',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     textAlign: 'start',
     cursor: 'pointer',
   },
-  manage: { flexShrink: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  manage: { flexShrink: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
 });
 
 export type MachineAgentSettingsProps = {

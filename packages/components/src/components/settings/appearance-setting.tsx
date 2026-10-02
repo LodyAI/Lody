@@ -5,10 +5,11 @@ import { usePostHog } from '@posthog/react';
 import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 
 import {
   conversationFontSizeAtom,
+  DEFAULT_CONVERSATION_FONT_SIZE,
   conversationWideModeAtom,
   extendedCodeLanguagesEnabledAtom,
   fontLigaturesEnabledAtom,
@@ -124,7 +125,8 @@ const styles = stylex.create({
     height: '24px',
     paddingInline: space[3],
     backgroundColor: 'color-mix(in oklab, var(--terminal-background), black 10%)',
-    fontSize: '10px',
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
     color: 'color-mix(in oklab, var(--terminal-foreground) 60%, transparent)',
   },
   terminalBarIcon: { width: '12px', height: '12px', flexShrink: 0 },
@@ -480,7 +482,7 @@ export function AppearanceSettingsView({
                 styles.terminalLine,
                 styles.terminalFace(
                   buildTerminalFontPreviewFamily(terminalFontFamily),
-                  `${terminalFontSize}px`
+                  `${(terminalFontSize * conversationFontSize) / DEFAULT_CONVERSATION_FONT_SIZE}px`
                 )
               )}
             >

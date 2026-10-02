@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useEffect, useRef, useState } from 'react';
@@ -38,7 +39,6 @@ import {
   settingsCatalog as catalog,
   settingsSurface as surface,
 } from './surface';
-import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
   actions: { gap: space[2] },
@@ -48,7 +48,7 @@ const styles = stylex.create({
     borderTopColor: colors.separator,
     paddingInline: space[3],
     paddingBlock: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   toolList: { display: 'flex', minWidth: 0, flexWrap: 'wrap', gap: space[1.5] },
@@ -58,7 +58,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[1.5],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
     cursor: 'pointer',
   },

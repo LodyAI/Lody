@@ -2,8 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Base UI + StyleX primitives. Consumers compile through `@stylexjs/unplugin`
-with this package's `stylex-options.ts`.
+Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-options.ts`.
 
 - Package styles use StyleX: no Tailwind, `cn`, `cva`, `tailwind-merge` or
   `@source` scanning here. Component props own visual variants, sizes, tones and
@@ -11,8 +10,8 @@ with this package's `stylex-options.ts`.
   never the deleted component's visual design.
 - Depends on React, `@base-ui/react` and `@stylexjs/stylex` only; never on
   `@lody/components`, `@lody/platform` or a cloud package.
-- No border token exists. Edges are wells, raised shadows, elevation shadows
-  and the focus ring. Read `src/tokens/RULES.md` before adding a token or style.
+- No border token: use wells, shadows and focus rings; read `src/tokens/RULES.md`.
+- Text sizes/leading derive from document `--ui-font-size` (14px fallback), not nested `em`.
 - A focus or invalid ring is a `box-shadow` composed with the control's own
   shadow, never an `outline` (the shell resets outlines with `!important`); a
   control whose edge changes with state restates it. Focus rings read
@@ -51,8 +50,8 @@ with this package's `stylex-options.ts`.
 - Triggers use Base UI `render` for an existing element. Only default context-menu
   wrappers use `display: contents`; rendered triggers keep their box. A nested
   menu root goes inside the outer item's `render`. Product owns `finalFocus`.
-- `Popover` reads `popup` and replaces five of a list's declarations
-  (`test/popover.test.tsx` pins them); `PreviewCard` is it hovered open, with
+- `Popover` shares `popup` material but uses prose layout and text roles;
+  `PreviewCard` is it hovered open, with
   no focus and no dialog role.
 - Dialog, AlertDialog and Drawer are one family on the modal rung sharing
   `dialog/surface.ts`; only their way in and dismissal differ. An outside press

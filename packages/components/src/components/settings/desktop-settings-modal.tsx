@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useId, useMemo, useState, type CSSProperties } from 'react';
 import { Bug, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
@@ -104,7 +105,7 @@ const styles = stylex.create({
     margin: 0,
     paddingInline: space[2],
     paddingBottom: space[1],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontWeight: 400,
     lineHeight: type.leading,
     color: colors.tertiaryLabel,
@@ -147,7 +148,7 @@ const styles = stylex.create({
   /** The page's lead, under its name; empty on a page without one. */
   headerLead: {
     margin: 0,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: type.leading,
     color: colors.secondaryLabel,
     ':empty': { display: 'none' },

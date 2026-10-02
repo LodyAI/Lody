@@ -8,6 +8,7 @@ import {
   focus,
   radius,
   space,
+  text,
 } from '@lody/ui/tokens/scales.stylex';
 import { settingsMaterial as material } from './material.stylex';
 import { settingsType as type } from './type.stylex';
@@ -19,9 +20,7 @@ import { settingsType as type } from './type.stylex';
  * family's shared look in its `surface.ts`, so the section, the catalog lists,
  * the editors and their dialogs cannot each grow their own card.
  *
- * Settings copy is sized in `em`, not in the package's px steps: the settings
- * chrome is `1em` of `--ui-font-size`, the person's font-size tier, and a
- * fixed step here would ignore it.
+ * Text roles use the shared document scale, never a parent-relative size.
  */
 
 /** Wider than this, a row lays its label and control side by side. */
@@ -42,7 +41,7 @@ export const settingsSurface = stylex.create({
     // halfway between the last row above and the first line below.
     paddingTop: { default: material.sectionRuleGap, ':first-child': 0 },
     boxShadow: { default: material.sectionRule, ':first-child': 'none' },
-    fontSize: '1em',
+    fontSize: text.bodySize,
   },
   /** A section led by its heading: the heading has no padding of its own to lend. */
   sectionTitled: { paddingTop: { default: material.sectionTitledGap, ':first-child': 0 } },
@@ -65,7 +64,7 @@ export const settingsSurface = stylex.create({
   sectionHeading: { flexGrow: 1, minWidth: 0, lineHeight: type.leading },
   sectionTitle: {
     margin: 0,
-    fontSize: '1em',
+    fontSize: text.bodySize,
     fontWeight: type.headingWeight,
     lineHeight: type.leading,
     color: colors.label,
@@ -74,7 +73,7 @@ export const settingsSurface = stylex.create({
   sectionTitleDanger: { color: colors.destructive },
   sectionDescription: {
     margin: 0,
-    fontSize: type.caption,
+    fontSize: text.footnoteSize,
     lineHeight: type.leading,
     color: colors.secondaryLabel,
   },
@@ -85,7 +84,7 @@ export const settingsSurface = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     textAlign: 'end',
-    fontSize: type.caption,
+    fontSize: text.footnoteSize,
     color: colors.secondaryLabel,
   },
   sectionActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1.5] },
@@ -144,7 +143,7 @@ export const settingsSurface = stylex.create({
   rowLabel: { margin: 0, lineHeight: type.leading, color: colors.label },
   rowHelper: {
     margin: 0,
-    fontSize: type.caption,
+    fontSize: text.footnoteSize,
     lineHeight: type.leading,
     color: colors.secondaryLabel,
   },
@@ -156,7 +155,7 @@ export const settingsSurface = stylex.create({
     gap: space[2],
     minWidth: 0,
     paddingInlineStart: { default: 0, [WIDE]: space[4] },
-    fontSize: '1em',
+    fontSize: text.bodySize,
   },
   rowControlTop: { alignSelf: { default: 'auto', [WIDE]: 'start' } },
 
@@ -178,12 +177,18 @@ export const settingsSurface = stylex.create({
    * space above it and its heading, never by a bordered box inside the box.
    */
   formGroup: { display: 'flex', flexDirection: 'column', gap: space[3], paddingTop: space[2] },
-  formGroupTitle: { margin: 0, fontSize: '12px', fontWeight: 400, color: colors.secondaryLabel },
+  formGroupTitle: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    fontWeight: 400,
+    color: colors.secondaryLabel,
+  },
   formGroupHint: {
     margin: 0,
     marginTop: '2px',
-    fontSize: '11px',
-    lineHeight: 1.375,
+    fontSize: text.captionSize,
+    lineHeight: text.captionLeading,
     color: colors.secondaryLabel,
   },
   /** A note or a switch inside a form: the region rung, a fill with no edge. */
@@ -231,7 +236,7 @@ export const settingsSurface = stylex.create({
     outline: { default: null, ':focus-visible': 'none' },
     color: colors.label,
     fontFamily: 'inherit',
-    fontSize: '1em',
+    fontSize: text.bodySize,
     fontWeight: 400,
     lineHeight: type.leading,
     textAlign: 'start',
@@ -278,7 +283,7 @@ export const settingsSurface = stylex.create({
   },
   listRowMeta: {
     flexShrink: 0,
-    fontSize: type.caption,
+    fontSize: text.footnoteSize,
     color: colors.tertiaryLabel,
     fontVariantNumeric: 'tabular-nums',
   },
@@ -316,7 +321,7 @@ export const settingsSurface = stylex.create({
     margin: 0,
     paddingInline: space[4],
     paddingBlock: '10px',
-    fontSize: type.caption,
+    fontSize: text.footnoteSize,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -354,7 +359,7 @@ export const settingsSurface = stylex.create({
    */
   pageTitle: {
     margin: 0,
-    fontSize: type.title,
+    fontSize: text.titleSize,
     fontWeight: type.titleWeight,
     lineHeight: 1.3,
     letterSpacing: '-0.01em',
@@ -380,11 +385,16 @@ const RING = `inset 0 0 0 ${focus.ringWidth} ${colors.accent}`;
  */
 export const settingsCatalog = stylex.create({
   /** A catalog page's lead sentence, above its sections. */
-  intro: { margin: 0, fontSize: type.caption, lineHeight: 1.375, color: colors.secondaryLabel },
+  intro: {
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
   /** The heading's name, its count and what is still syncing, on one line. */
   heading: { display: 'flex', flexGrow: 1, alignItems: 'center', gap: space[2], minWidth: 0 },
   count: {
-    fontSize: type.caption,
+    fontSize: text.footnoteSize,
     color: colors.tertiaryLabel,
     fontVariantNumeric: 'tabular-nums',
   },
@@ -392,7 +402,7 @@ export const settingsCatalog = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[1],
-    fontSize: type.caption,
+    fontSize: text.footnoteSize,
     color: colors.tertiaryLabel,
   },
   /** Groups of one catalog, stacked and set apart by space. */
@@ -406,7 +416,7 @@ export const settingsCatalog = stylex.create({
     minWidth: 0,
     margin: 0,
     paddingInline: material.headingInset,
-    fontSize: '1em',
+    fontSize: text.bodySize,
     fontWeight: type.headingWeight,
     lineHeight: type.leading,
     color: colors.label,
@@ -492,7 +502,7 @@ export const settingsCatalog = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: type.caption,
+    fontSize: text.footnoteSize,
     lineHeight: type.leading,
     color: colors.label,
   },
@@ -501,7 +511,7 @@ export const settingsCatalog = stylex.create({
     alignItems: 'center',
     gap: space[1.5],
     minWidth: 0,
-    fontSize: type.caption,
+    fontSize: text.footnoteSize,
     lineHeight: type.leading,
     color: colors.secondaryLabel,
   },

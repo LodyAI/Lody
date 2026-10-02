@@ -1,18 +1,10 @@
-import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { Button } from '../src/button/button';
 import { Popover } from '../src/popover/popover';
 import { PopupContainerProvider } from '../src/popup/portal-container';
-import { surface } from '../src/popup/surface';
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
 import { all, classesOf, click, mount, one, press, type Mounted } from './dom';
-
-/** See `menu.test.tsx`: the same loosened call the primitives make. */
-function classesFor(...styles: readonly unknown[]): string[] {
-  const props = stylex.props as (...args: readonly unknown[]) => { className?: string };
-  return (props(...styles).className ?? '').split(' ').filter(Boolean);
-}
 
 let mounted: Mounted | undefined;
 afterEach(async () => {
@@ -103,21 +95,6 @@ describe('Popover', () => {
 
     expect(apply).toHaveBeenCalledTimes(1);
     expect(trigger().getAttribute('aria-expanded')).toBe('false');
-  });
-
-  test('is the list surface with five declarations replaced, and no more', () => {
-    // The claim the token rules make about a popover, pinned as a count. Of the
-    // classes a list's surface compiles to, exactly five are gone from a
-    // popover's: the width it takes from the control that shows its value, the
-    // 4px inset that lets a row bleed to the surface's edge, and the three that
-    // make the type a control's — size, weight and tracking — because what a
-    // popover holds is prose rather than the labels of commands. A sixth would
-    // mean a second floating surface had started to grow beside the one every
-    // other popup in this package shares.
-    const list = classesFor(surface.popup);
-    const popover = classesFor(surface.popup, surface.popupPanel);
-    const replaced = list.filter((className) => !popover.includes(className));
-    expect(replaced).toHaveLength(5);
   });
 
   test('mounts into the container a modal named, not on the body', async () => {

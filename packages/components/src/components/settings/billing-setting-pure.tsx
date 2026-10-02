@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -50,7 +51,7 @@ const styles = stylex.create({
     columnGap: space[2],
     rowGap: '2px',
     marginTop: space[1],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -85,13 +86,13 @@ const styles = stylex.create({
   helper: {
     margin: 0,
     marginTop: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
   helperFlush: {
     margin: 0,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -110,7 +111,7 @@ const styles = stylex.create({
     color: colors.label,
     fontVariantNumeric: 'tabular-nums',
   },
-  priceUnit: { fontSize: type.caption, color: colors.secondaryLabel },
+  priceUnit: { fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   action: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[2] },
   perks: {
     display: 'grid',
@@ -120,7 +121,7 @@ const styles = stylex.create({
     margin: 0,
     padding: 0,
     listStyleType: 'none',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   perk: { display: 'flex', alignItems: 'center', gap: space[1.5], minWidth: 0 },
@@ -159,7 +160,7 @@ const styles = stylex.create({
     alignItems: 'baseline',
     justifyContent: 'space-between',
     gap: space[4],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   truncate: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -177,7 +178,7 @@ const styles = stylex.create({
   },
   invoiceText: { minWidth: 0 },
   link: {
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.accent,
     textDecoration: { default: 'none', ':hover': 'underline' },
   },
@@ -193,7 +194,7 @@ const styles = stylex.create({
     backgroundColor: 'transparent',
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     fontFamily: 'inherit',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     cursor: { default: 'pointer', ':disabled': 'default' },
     opacity: { default: 1, ':disabled': 0.6 },
   },

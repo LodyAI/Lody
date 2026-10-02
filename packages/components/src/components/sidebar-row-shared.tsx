@@ -36,6 +36,7 @@ import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Tooltip } from '@lody/ui/tooltip';
 import * as stylex from '@stylexjs/stylex';
+import { text } from '@lody/ui/tokens/scales.stylex';
 import { Badge } from '@lody/ui/badge';
 import { mergeableBadgeTheme } from './sidebar-mergeable-badge.stylex';
 import { ContextMenu } from '@lody/ui/context-menu';
@@ -921,20 +922,28 @@ export function GitHubOwnerIcon({
 
 // Shared section-header metrics. Every sidebar organize mode (Workspace local
 // project / GitHub Worktrees sections and the flat Updated list) uses these so
-// section labels read identically (0.9em medium, in the sidebar row color — not
+// section labels read identically (the footnote role, in the sidebar row color — not
 // brighter than the session titles under them, and not a further /55 fade: that
 // made "Pinned"/"Chats" and the filter icon nearly illegible on light sidebars).
 /**
  * Top-level group label (a machine, GitHub Worktrees, Chats). Projects and
  * repos sit flush below it, so the header is told apart by type alone: about
- * 11.5px bold, faint, a 26px row with no hover fill, above 14px regular rows
+ * 12px bold at the default tier, faint, a 26px row with no hover fill, above 14px regular rows
  * with a hover fill. Every group label uses exactly this class — one size
  * (from the interface font size, not the parent's `em`), one color — so the
  * groups read as one consistent layer.
  */
 export const SIDEBAR_GROUP_LABEL_COLOR_CLASS = 'text-sidebar-foreground-muted/70';
+const sidebarTypography = stylex.create({
+  group: { fontSize: text.footnoteSize, lineHeight: text.footnoteLeading },
+  row: { fontSize: text.bodySize, lineHeight: text.bodyLeading },
+  caption: { fontSize: text.captionSize, lineHeight: text.captionLeading },
+});
+export const SIDEBAR_ROW_TEXT_CLASS = stylex.props(sidebarTypography.row).className;
+export const SIDEBAR_CAPTION_TEXT_CLASS = stylex.props(sidebarTypography.caption).className;
 export const SIDEBAR_GROUP_LABEL_CLASS = cn(
-  'text-[length:calc(var(--ui-font-size,14px)*0.82)] font-bold tracking-[0.01em]',
+  stylex.props(sidebarTypography.group).className,
+  'font-bold tracking-[0.01em]',
   SIDEBAR_GROUP_LABEL_COLOR_CLASS
 );
 
