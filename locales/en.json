@@ -2857,6 +2857,8 @@
   "settings.agent.dialog.section.envAdditional": "Additional environment variables",
   "settings.agent.dialog.section.prompt": "Custom prompt",
   "settings.agent.dialog.section.titleGen": "Title generation",
+  "settings.agent.dialog.optionSearchPlaceholder": "Search options",
+  "settings.agent.dialog.optionSearchEmpty": "No options match",
   "settings.agent.dialog.testCapabilities": "Test agent capabilities",
   "settings.agent.dialog.testCapabilitiesShort": "Test",
   "settings.agent.dialog.title.create": "New provider",
