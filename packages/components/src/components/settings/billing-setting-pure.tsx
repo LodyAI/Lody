@@ -385,8 +385,13 @@ export function BillingSettingsView({
     overview.effectivePlanTier === 'plus' || overview.effectivePlanTier === 'enterprise';
   const checkoutInProgress = overview.checkoutPending || overview.subscriptionSetupPending;
   const paidCheckoutPending = overview.checkoutPending && !overview.subscriptionSetupPending;
+  // A successful web checkout keeps the page on the pre-payment free overview
+  // until the webhook/reconcile lands. Treat that window as the Plus plan being
+  // activated instead of rendering "Free" over the payment-received banner.
+  const activationPending = paymentProcessing && !isPaid;
+  const entitled = isPaid || activationPending;
   const planName =
-    paidCheckoutPending || overview.effectivePlanTier === 'plus'
+    paidCheckoutPending || overview.effectivePlanTier === 'plus' || activationPending
       ? t('billing.plan.plus')
       : overview.effectivePlanTier === 'enterprise'
         ? t('billing.plan.enterprise')
@@ -407,11 +412,10 @@ export function BillingSettingsView({
     !overview.autoRenewAfterGift &&
     !overview.canResumeAfterGift &&
     overview.effectivePlanTier === 'plus';
-  const showSubscriptionOffer = !isPaid || canScheduleAfterGift;
+  const showSubscriptionOffer = !entitled || canScheduleAfterGift;
 
   // `null` = unlimited.
-  const sessionLimit =
-    overview.effectivePlanTier === 'free' ? FREE_SESSION_LIMIT_PER_WORKSPACE : null;
+  const sessionLimit = entitled ? null : FREE_SESSION_LIMIT_PER_WORKSPACE;
   const nearLimit =
     sessionCount !== null &&
     sessionLimit !== null &&
@@ -461,13 +465,15 @@ export function BillingSettingsView({
             ? t('billing.promotionalEndsOn', {
                 date: formatDate(giftEnd),
               })
-            : isPaid && overview.currentPeriodEnd
-              ? overview.cancelAtPeriodEnd
-                ? t('billing.cancelsOn', { date: formatDate(overview.currentPeriodEnd) })
-                : t('billing.renewsOn', { date: formatDate(overview.currentPeriodEnd) })
-              : !isPaid
-                ? t('billing.freeTagline')
-                : null;
+            : activationPending
+              ? t('billing.paymentProcessingTitle')
+              : isPaid && overview.currentPeriodEnd
+                ? overview.cancelAtPeriodEnd
+                  ? t('billing.cancelsOn', { date: formatDate(overview.currentPeriodEnd) })
+                  : t('billing.renewsOn', { date: formatDate(overview.currentPeriodEnd) })
+                : !isPaid
+                  ? t('billing.freeTagline')
+                  : null;
 
   const offerTitle = checkoutInProgress
     ? overview.subscriptionSetupPending
@@ -664,7 +670,7 @@ export function BillingSettingsView({
               <p {...stylex.props(surface.rowLabel)}>{t('billing.members')}</p>
               <span {...stylex.props(styles.metricValue)}>
                 <span {...stylex.props(styles.metricStrong)}>{overview.seatCount}</span>
-                {!isPaid ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
+                {!entitled ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
               </span>
             </div>
           </div>
