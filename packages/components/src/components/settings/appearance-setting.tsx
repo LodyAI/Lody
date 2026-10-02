@@ -10,6 +10,7 @@ import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import {
   conversationFontSizeAtom,
   conversationWideModeAtom,
+  extendedCodeLanguagesEnabledAtom,
   fontLigaturesEnabledAtom,
   inlineMathEnabledAtom,
   interfaceFontFamilyAtom,
@@ -50,6 +51,8 @@ export interface AppearanceSettingsViewProps {
   onConversationWideModeChange: (value: boolean) => void;
   inlineMathEnabled: boolean;
   onInlineMathEnabledChange: (value: boolean) => void;
+  extendedCodeLanguagesEnabled: boolean;
+  onExtendedCodeLanguagesEnabledChange: (value: boolean) => void;
   isElectron: boolean;
   interfaceFontFamily: string;
   onInterfaceFontFamilyChange: (value: string) => void;
@@ -226,6 +229,8 @@ export function AppearanceSettingsView({
   onConversationWideModeChange,
   inlineMathEnabled,
   onInlineMathEnabledChange,
+  extendedCodeLanguagesEnabled,
+  onExtendedCodeLanguagesEnabledChange,
   isElectron,
   interfaceFontFamily,
   onInterfaceFontFamilyChange,
@@ -390,6 +395,19 @@ export function AppearanceSettingsView({
           />
         </CompactRow>
         <CompactRow
+          label={t('settings.extendedCodeLanguages.label', 'Extended code languages')}
+          helper={t(
+            'settings.extendedCodeLanguages.helper',
+            'Adds more syntax grammars, including Lean and Rocq. Each grammar loads when first used and can slow that render.'
+          )}
+        >
+          <Switch
+            checked={extendedCodeLanguagesEnabled}
+            onCheckedChange={onExtendedCodeLanguagesEnabledChange}
+            aria-label={t('settings.extendedCodeLanguages.label', 'Extended code languages')}
+          />
+        </CompactRow>
+        <CompactRow
           label={t('settings.fontLigatures.label', 'Font ligatures')}
           helper={t(
             'settings.fontLigatures.helper',
@@ -485,6 +503,9 @@ function DesktopAppearanceSettings() {
   const [conversationFontSize, setConversationFontSize] = useAtom(conversationFontSizeAtom);
   const [conversationWideMode, setConversationWideMode] = useAtom(conversationWideModeAtom);
   const [inlineMathEnabled, setInlineMathEnabled] = useAtom(inlineMathEnabledAtom);
+  const [extendedCodeLanguagesEnabled, setExtendedCodeLanguagesEnabled] = useAtom(
+    extendedCodeLanguagesEnabledAtom
+  );
   const [interfaceFontFamily, setInterfaceFontFamily] = useAtom(interfaceFontFamilyAtom);
   const [terminalFontFamily, setTerminalFontFamily] = useAtom(terminalFontFamilyAtom);
   const [terminalFontSize, setTerminalFontSize] = useAtom(terminalFontSizeAtom);
@@ -553,6 +574,8 @@ function DesktopAppearanceSettings() {
       onConversationWideModeChange={setConversationWideMode}
       inlineMathEnabled={inlineMathEnabled}
       onInlineMathEnabledChange={setInlineMathEnabled}
+      extendedCodeLanguagesEnabled={extendedCodeLanguagesEnabled}
+      onExtendedCodeLanguagesEnabledChange={setExtendedCodeLanguagesEnabled}
       isElectron={isElectron}
       interfaceFontFamily={interfaceFontFamily}
       onInterfaceFontFamilyChange={setInterfaceFontFamily}

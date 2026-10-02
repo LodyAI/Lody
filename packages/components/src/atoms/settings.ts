@@ -153,6 +153,28 @@ export const inlineMathEnabledAtom = atom(
   }
 );
 
+/**
+ * Optional syntax grammars stay out of the default rendering path. The
+ * preference is local because it changes only the languages this client loads.
+ */
+export const DEFAULT_EXTENDED_CODE_LANGUAGES_ENABLED = false;
+
+export function normalizeExtendedCodeLanguagesEnabled(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : DEFAULT_EXTENDED_CODE_LANGUAGES_ENABLED;
+}
+
+const extendedCodeLanguagesEnabledStorageAtom = atomWithStorage<unknown>(
+  'lody-extended-code-languages-enabled',
+  DEFAULT_EXTENDED_CODE_LANGUAGES_ENABLED
+);
+
+export const extendedCodeLanguagesEnabledAtom = atom(
+  (get) => normalizeExtendedCodeLanguagesEnabled(get(extendedCodeLanguagesEnabledStorageAtom)),
+  (_get, set, nextValue: boolean) => {
+    set(extendedCodeLanguagesEnabledStorageAtom, nextValue);
+  }
+);
+
 // Desktop settings modal open state. On desktop (non-mobile) the settings UI is a
 // modal overlay driven by this atom instead of a full-page route. Mobile keeps the
 // route-based settings page and ignores this atom.

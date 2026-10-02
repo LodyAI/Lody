@@ -2922,6 +2922,8 @@
   "settings.fontLigatures.label": "字体连字",
   "settings.inlineMath.helper": "在 Markdown 中排版 $...$ 和 \\(...\\) 行内公式。",
   "settings.inlineMath.label": "渲染行内公式",
+  "settings.extendedCodeLanguages.helper": "增加包括 Lean 和 Rocq 在内的更多语法。每种语法会在首次使用时加载，该次渲染可能会变慢。",
+  "settings.extendedCodeLanguages.label": "扩展代码语言",
   "settings.autoArchive.description": "归档后，对话和分支还在，但所属机器可能清理工作树。被 Git 忽略或被清理脚本改动、删除的内容不保证找回。重要文件请先另存到工作树之外。规则仅在本机启用，只归档你的会话。",
   "settings.autoArchive.onPrClosed": "PR 被关闭时",
   "settings.autoArchive.onPrMerged": "PR 被合并时",

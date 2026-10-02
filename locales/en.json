@@ -2922,6 +2922,8 @@
   "settings.fontLigatures.label": "Font ligatures",
   "settings.inlineMath.helper": "Typeset $...$ and \\(...\\) in Markdown.",
   "settings.inlineMath.label": "Render inline math",
+  "settings.extendedCodeLanguages.helper": "Adds more syntax grammars, including Lean and Rocq. Each grammar loads when first used and can slow that render.",
+  "settings.extendedCodeLanguages.label": "Extended code languages",
   "settings.autoArchive.description": "Archive keeps chats and local branches, but the owning machine may remove the worktree. Files ignored by Git or changed/deleted by cleanup scripts may be lost. Save important files outside the worktree first. These rules run only here, for your sessions.",
   "settings.autoArchive.onPrClosed": "When the PR is closed",
   "settings.autoArchive.onPrMerged": "When the PR is merged",
