@@ -53,7 +53,7 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   verification.
 - Keep three.js/R3F behind the lazy usage-calendar module so lightweight and SSR
   consumers never evaluate its renderer graph.
-- Charts use [UTC](../../../../../specs/usage-timeline.md).
+- Charts follow [timeline rules](../../../../../specs/usage-timeline.md).
   Cache bounded day snapshots per auth session/workspace/date for one hour;
   refresh expiry without blanking data. Keep auth/capability gates
   ([cache](../../../../../specs/usage-detail-cache.md)).

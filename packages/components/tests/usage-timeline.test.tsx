@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { act, useState } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UsageCalendarVisualization } from '../src/components/settings/usage-calendar-visualization';
 import type { SettingsUsageTimelineData } from '../src/components/settings/settings-data-cache';
 import {
@@ -16,19 +18,21 @@ vi.mock('react-i18next', () => ({
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
-function timeline(range: 'day' | 'week'): SettingsUsageTimelineData {
-  const startMs = Date.UTC(2026, 8, 30, 16);
-  const count = range === 'day' ? 24 : 168;
+function timeline(range: SettingsUsageTimelineData['range']): SettingsUsageTimelineData {
+  const hourly = range === 'day' || range === 'week';
+  const startMs = Date.UTC(2026, 8, 30, hourly ? 16 : 0);
+  const count = range === 'day' ? 24 : range === 'week' ? 168 : 8;
+  const bucketSizeMs = hourly ? HOUR_MS : DAY_MS;
   return {
     workspaceId: 'synthetic-workspace',
     range,
     startMs,
-    endMs: startMs + count * HOUR_MS,
-    bucketSizeMs: HOUR_MS,
+    endMs: startMs + count * bucketSizeMs,
+    bucketSizeMs,
     totals: { tokens: 500, costUSD: 0 },
     users: {},
     buckets: Array.from({ length: count }, (_, index) => ({
-      bucketStartMs: startMs + index * HOUR_MS,
+      bucketStartMs: startMs + index * bucketSizeMs,
       bucketLabel: 'untrusted display label',
       tokens: index === count - 1 ? 500 : 0,
       costUSD: 0,
@@ -99,5 +103,211 @@ describe('usage timeline presentation', () => {
     expect(peak).not.toBeNull();
     expect(container.querySelectorAll('[role="row"]')).toHaveLength(8);
     expect(container.textContent).toContain('Sep 30, 16:00 – Oct 7, 16:00 UTC');
+  });
+});
+
+class ControlledResizeObserver {
+  static instances: ControlledResizeObserver[] = [];
+  target: Element | null = null;
+  connected = false;
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    ControlledResizeObserver.instances.push(this);
+  }
+
+  observe(target: Element) {
+    this.target = target;
+    this.connected = true;
+  }
+
+  unobserve() {}
+  disconnect() {
+    this.connected = false;
+  }
+
+  deliver() {
+    this.callback([], this as unknown as ResizeObserver);
+  }
+}
+
+function SelectionHarness({ data }: { data: SettingsUsageTimelineData }) {
+  const [selected, setSelected] = useState<number | null>(null);
+  return (
+    <>
+      <output>{selected === null ? 'closed' : selected}</output>
+      <UsageCalendarVisualization
+        calendar={{
+          workspaceId: data.workspaceId,
+          timezone: 'UTC',
+          startMs: Date.UTC(2026, 8, 30),
+          endMs: Date.UTC(2026, 9, 8),
+          days: Array.from({ length: 8 }, (_, index) => ({
+            dayStartMs: Date.UTC(2026, 8, 30) + index * DAY_MS,
+            date: new Date(Date.UTC(2026, 8, 30) + index * DAY_MS).toISOString().slice(0, 10),
+            tokens: 500,
+            costUSD: 1,
+            isFuture: false,
+          })),
+        }}
+        timeline={data}
+        dayDetail={
+          selected === null
+            ? undefined
+            : {
+                workspaceId: data.workspaceId,
+                dayStartMs: selected,
+                date: new Date(selected).toISOString().slice(0, 10),
+                totals: {
+                  tokens: 500,
+                  costUSD: 1,
+                  inputTokens: 500,
+                  outputTokens: 0,
+                  cacheReadInputTokens: 0,
+                  cacheCreationInputTokens: 0,
+                  reasoningOutputTokens: 0,
+                  webSearchRequests: 0,
+                },
+                byModel: [],
+                byUser: [],
+                users: {},
+              }
+        }
+        onSelectedDayChange={setSelected}
+      />
+    </>
+  );
+}
+
+describe('usage day selection across ranges', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    vi.stubGlobal('ResizeObserver', ControlledResizeObserver);
+    ControlledResizeObserver.instances = [];
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function show(data: SettingsUsageTimelineData) {
+    await act(async () => root.render(<SelectionHarness data={data} />));
+  }
+
+  async function selectCell(index: number, range?: 'day' | 'week') {
+    const cells = [...container.querySelectorAll<HTMLButtonElement>('[role="gridcell"]')];
+    const cell = cells.filter(
+      (item) =>
+        !range || (item.title.includes('UTC') && item.title.includes(' – ') === (range === 'day'))
+    )[index]!;
+    await act(async () => cell.click());
+    return cell;
+  }
+
+  async function selectRangeCell(range: SettingsUsageTimelineData['range']) {
+    if (range === 'day' || range === 'week') return selectCell(0, range);
+    const cell = container.querySelector<HTMLButtonElement>(
+      '[role="gridcell"][aria-label*="Sep 30, 2026"]'
+    )!;
+    expect(cell).not.toBeNull();
+    await act(async () => cell.click());
+    return cell;
+  }
+
+  function selectedObserver(cell: Element) {
+    const observer = ControlledResizeObserver.instances.findLast((item) =>
+      item.target?.contains(cell)
+    );
+    expect(observer).toBeDefined();
+    return observer!;
+  }
+
+  function expectClosed() {
+    expect(container.querySelector('output')!.textContent).toBe('closed');
+    const detail = container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"]');
+    if (detail) expect(detail.closest('.grid-rows-\\[0fr\\]')).not.toBeNull();
+  }
+
+  it.each([
+    ['week', 'day'],
+    ['day', 'week'],
+    ['week', 'month'],
+    ['day', 'total'],
+    ['month', 'day'],
+    ['total', 'week'],
+  ] as const)('keeps detail closed after %s → %s and an old resize callback', async (from, to) => {
+    await show(timeline(from));
+    const oldCell = await selectRangeCell(from);
+    const observer = selectedObserver(oldCell);
+    expect(container.querySelector('output')!.textContent).toBe(String(Date.UTC(2026, 8, 30)));
+    await show(timeline(to));
+    expectClosed();
+    // Real AnimatePresence retains the old cell until its exit completes.
+    expect(observer.target!.contains(oldCell)).toBe(true);
+    if (from === 'month' || from === 'total') expect(observer.connected).toBe(true);
+    if (from === 'month' || from === 'total') {
+      await act(async () => oldCell.closest('[dir="rtl"]')!.dispatchEvent(new Event('scroll')));
+      expectClosed();
+    }
+    await act(async () => observer.deliver());
+    expectClosed();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expectClosed();
+    const collapse = container.querySelector('.grid-rows-\\[0fr\\]')!;
+    await act(async () => collapse.dispatchEvent(new Event('transitionend', { bubbles: true })));
+    expect(container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"]')).toBeNull();
+    await selectRangeCell(to);
+    expect(container.querySelector('output')!.textContent).toBe(String(Date.UTC(2026, 8, 30)));
+    expect(container.querySelector('.grid-rows-\\[1fr\\]')).not.toBeNull();
+  });
+
+  it.each(['day', 'month'] as const)(
+    'moves the %s caret without changing the selected date',
+    async (range) => {
+      await show(timeline(range));
+      const cell = await selectRangeCell(range);
+      const observer = selectedObserver(cell);
+      vi.spyOn(cell, 'getBoundingClientRect').mockReturnValue(new DOMRect(30, 0, 20, 8));
+      await act(async () => observer.deliver());
+      expect(container.querySelector('output')!.textContent).toBe(String(Date.UTC(2026, 8, 30)));
+      const detail = container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"]')!;
+      expect((detail.previousElementSibling as HTMLElement).style.left).toBe('40px');
+    }
+  );
+
+  it('retains a selected day across 30d ↔ All and rejects a callback for another day', async () => {
+    await show(timeline('month'));
+    const cell = await selectRangeCell('month');
+    const observer = selectedObserver(cell);
+    await show(timeline('total'));
+    expect(container.querySelector('output')!.textContent).toBe(String(Date.UTC(2026, 8, 30)));
+    await show(timeline('month'));
+    expect(container.querySelector('output')!.textContent).toBe(String(Date.UTC(2026, 8, 30)));
+    const other = container.querySelector<HTMLButtonElement>(
+      '[role="gridcell"][aria-label*="Oct 1, 2026"]'
+    )!;
+    await act(async () => other.click());
+    await act(async () => observer.deliver());
+    expect(container.querySelector('output')!.textContent).toBe(String(Date.UTC(2026, 9, 1)));
+    expect(
+      container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"] p')!.textContent
+    ).toBe('Thu, Oct 1, 2026');
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label="common.close"]')!.click()
+    );
+    await act(async () => selectedObserver(other).deliver());
+    expectClosed();
   });
 });

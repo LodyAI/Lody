@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { userEvent, within } from 'storybook/test';
 import { UsageCalendarVisualization } from '@/components/settings/usage-calendar-visualization';
 import { useState } from 'react';
+import { Button } from '@lody/ui/button';
 import type {
   SettingsUsageCalendarData,
   SettingsUsageDayData,
@@ -280,6 +281,23 @@ export const LargeTotal: Story = { args: { shape: 'largeTotal' } };
 export const Last24Hours: Story = { args: { range: 'day' } };
 export const Last7Days: Story = { args: { range: 'week' } };
 export const Last30Days: Story = { args: { range: 'month' } };
+export const RangeSwitching: Story = {
+  render: function RangeSwitchingStory() {
+    const [range, setRange] = useState<SettingsUsageRange>('week');
+    return (
+      <>
+        <div className="flex gap-2 p-6">
+          {(['day', 'week', 'month', 'total'] as const).map((value, index) => (
+            <Button key={value} onClick={() => setRange(value)} aria-pressed={range === value}>
+              {['24h', '7d', '30d', 'All'][index]}
+            </Button>
+          ))}
+        </div>
+        <Harness range={range} />
+      </>
+    );
+  },
+};
 /** Clicking an hour bar opens the breakdown of the day it belongs to. */
 export const Last24HoursDaySelected: Story = {
   args: { range: 'day' },
