@@ -22,6 +22,7 @@ import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
 import { openExternalUrl } from '@/lib/native-browser';
 import {
+  type CodexScheduledReset,
   type CodexResetSource,
   type CodexResetStatus,
   type CodexResetWatch,
@@ -286,6 +287,8 @@ export function CodexResetForecastDialog({
               <Spinner size="small" aria-hidden="true" />
               {t('codexReset.loading', 'Loading the latest forecast…')}
             </p>
+          ) : state.data?.scheduledReset ? (
+            <ScheduledReset reset={state.data.scheduledReset} relative={relative} nowMs={nowMs} />
           ) : watch ? (
             <ActiveForecast watch={watch} relative={relative} nowMs={nowMs} />
           ) : hasNothingToShow ? (
@@ -333,6 +336,44 @@ function RetryButton({ onRetry }: { onRetry: () => void }) {
     <Button variant="secondary" size="small" onClick={onRetry}>
       {t('codexReset.retry', 'Try again')}
     </Button>
+  );
+}
+
+function ScheduledReset({
+  reset,
+  relative,
+  nowMs,
+}: {
+  reset: CodexScheduledReset;
+  relative: (epochMs: number) => string;
+  nowMs: number;
+}) {
+  const { t, i18n } = useTranslation();
+  const scheduledForMs = reset.scheduledForMs;
+  return (
+    <div {...stylex.props(styles.stack)}>
+      <p {...stylex.props(styles.statement)}>{t('codexReset.scheduled', 'Reset scheduled')}</p>
+      {scheduledForMs !== null && reset.scheduledForIso ? (
+        <div {...stylex.props(styles.region, styles.expiry)}>
+          <span {...stylex.props(styles.expiryLabel)}>
+            {t('codexReset.scheduledFor', 'Scheduled for')}
+          </span>
+          <time {...stylex.props(styles.expiryValue)} dateTime={reset.scheduledForIso}>
+            {formatCodexResetExpiry(scheduledForMs, nowMs, i18n.resolvedLanguage ?? i18n.language)}
+          </time>
+          <span {...stylex.props(styles.hint)}>
+            {scheduledForMs > nowMs
+              ? relative(scheduledForMs)
+              : t('codexReset.awaitingExecution', 'Awaiting confirmation of execution')}
+          </span>
+        </div>
+      ) : (
+        <p {...stylex.props(styles.hint)}>
+          {t('codexReset.scheduleUnknown', 'Time not yet specified')}
+        </p>
+      )}
+      <SourceBlock text={reset.text} source={reset.source} />
+    </div>
   );
 }
 

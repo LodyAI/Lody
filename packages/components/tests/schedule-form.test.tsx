@@ -6,6 +6,7 @@ import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import en from '../../../locales/en.json';
 import { ScheduleForm } from '../src/components/schedules/schedule-view';
+import { evaluateSchedule, ScheduleDefinitionSchema } from '@lody/shared';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -105,6 +106,137 @@ describe('Schedule editor', () => {
       kind: 'cron',
       expression: '0 9 * * *',
       timeZone: 'America/New_York',
+    });
+  });
+
+  it.each([
+    ['America/Los_Angeles', '2026-10-01T02:21', '2026-10-01T09:21:00.000Z', '2:21 AM'],
+    ['Asia/Singapore', '2026-10-01T02:21', '2026-09-30T18:21:00.000Z', '2:21 AM'],
+    ['America/Los_Angeles', '2026-10-01T23:21', '2026-10-02T06:21:00.000Z', '11:21 PM'],
+    ['America/Los_Angeles', '2026-03-08T02:30', '2026-03-08T10:30:00.000Z', '3:30 AM'],
+    ['America/Los_Angeles', '2026-11-01T01:30', '2026-11-01T08:30:00.000Z', '1:30 AM'],
+  ])('keeps Once input, preview, save and due slot on %s (%s)', (zone, input, at, time) => {
+    props.timeZone = zone;
+    props.clockName = 'Fixture machine';
+    props.now = Date.parse(at) - 86_400_000;
+    props.initial = {
+      ...props.initial,
+      trigger: { kind: 'once', at: new Date(Date.parse(at) - 60_000).toISOString() },
+    };
+    render();
+    type(en['schedules.repeat.runAt'], input);
+    const normalizedInput = input === '2026-03-08T02:30' ? '2026-03-08T03:30' : input;
+    expect(field(en['schedules.repeat.runAt']).value).toBe(normalizedInput);
+    const preview = container.querySelector('[aria-atomic="true"]')!;
+    expect(preview.textContent).toContain(time);
+    expect(preview.querySelector('[title]')?.getAttribute('title')).toBe(zone);
+    submit();
+    const trigger = vi.mocked(props.onSave).mock.calls[0]![0].trigger;
+    expect(trigger).toEqual({ kind: 'once', at });
+    const definition = ScheduleDefinitionSchema.parse({
+      scheduleId: 'fixture',
+      title: 'Fixture',
+      ownerId: 'owner',
+      machineId: 'machine',
+      enabled: true,
+      activationId: 'activation',
+      activeFrom: props.now,
+      trigger,
+      misfirePolicy: { kind: 'run_once' },
+      overlapPolicy: 'queue_one',
+      agent: { agentConfigId: 'agent' },
+      retryPolicy: { dispatchMaxAttempts: 5, dispatchMaxAgeMs: 86_400_000 },
+      createdAt: props.now,
+      updatedAt: props.now,
+      createdBy: 'owner',
+    });
+    expect(evaluateSchedule(definition, undefined, Date.parse(at) - 1).due).toBeUndefined();
+    expect(evaluateSchedule(definition, undefined, Date.parse(at)).due).toEqual({
+      scheduledFor: Date.parse(at),
+      disposition: 'run',
+    });
+  });
+
+  it('keeps a Once instant when switching machines and reopening the saved form', () => {
+    const at = '2026-10-01T09:21:00.000Z';
+    props.initial = { ...props.initial, trigger: { kind: 'once', at } };
+    props.now = Date.parse('2026-09-30T00:00:00Z');
+    props.timeZone = 'America/Los_Angeles';
+    render();
+    expect(field(en['schedules.repeat.runAt']).value).toBe('2026-10-01T02:21');
+    props.timeZone = 'Asia/Singapore';
+    render();
+    expect(field(en['schedules.repeat.runAt']).value).toBe('2026-10-01T17:21');
+    expect(container.querySelector('[aria-atomic="true"]')!.textContent).toContain('5:21 PM');
+    submit();
+    const saved = vi.mocked(props.onSave).mock.calls[0]![0];
+    expect(saved.trigger).toBe(props.initial.trigger);
+    act(() => root.unmount());
+    root = createRoot(container);
+    props.initial = saved;
+    render();
+    expect(field(en['schedules.repeat.runAt']).value).toBe('2026-10-01T17:21');
+  });
+
+  it('keeps a stored second DST-fold instant when saving an untouched Once field', () => {
+    const trigger = { kind: 'once', at: '2026-11-01T09:30:00.000Z' } as const;
+    props.initial = { ...props.initial, trigger };
+    props.timeZone = 'America/Los_Angeles';
+    props.now = Date.parse('2026-10-31T00:00:00Z');
+    render();
+    expect(field(en['schedules.repeat.runAt']).value).toBe('2026-11-01T01:30');
+    submit();
+    expect(vi.mocked(props.onSave).mock.calls[0]![0].trigger).toBe(trigger);
+  });
+
+  it('switches Once to a periodic rule using the machine hour and keeps it through Manual', async () => {
+    props.initial = { ...props.initial, trigger: { kind: 'once', at: '2026-10-01T09:21:00.000Z' } };
+    props.timeZone = 'America/Los_Angeles';
+    props.now = Date.parse('2026-10-01T00:30:00Z');
+    render();
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(`[aria-label="${en['schedules.repeat.label']}"]`)!
+        .click();
+    });
+    await act(async () => {
+      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (item) => item.textContent === en['schedules.repeat.daily']
+      )!;
+      option.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      option.click();
+    });
+    expect(field(en['schedules.repeat.at']).value).toBe('02:21');
+    const tab = (name: string) =>
+      [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+        (entry) => entry.textContent === name
+      )!;
+    act(() => tab(en['schedules.trigger.manual']).click());
+    act(() => tab(en['schedules.trigger.timed']).click());
+    submit();
+    expect(vi.mocked(props.onSave).mock.calls[0]![0].trigger).toEqual({
+      kind: 'cron',
+      expression: '21 2 * * *',
+      timeZone: 'America/Los_Angeles',
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(`[aria-label="${en['schedules.repeat.label']}"]`)!
+        .click();
+    });
+    await act(async () => {
+      const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+        (item) => item.textContent === en['schedules.repeat.once']
+      )!;
+      option.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+      option.click();
+    });
+    expect(field(en['schedules.repeat.runAt']).value).toBe('2026-09-30T18:30');
+    expect(container.querySelector('[aria-atomic="true"]')!.textContent).toContain('6:30 PM');
+    submit();
+    expect(vi.mocked(props.onSave).mock.calls[1]![0].trigger).toEqual({
+      kind: 'once',
+      at: '2026-10-01T01:30:00.000Z',
     });
   });
 

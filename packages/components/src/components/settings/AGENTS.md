@@ -17,8 +17,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   `settings-page-header.tsx`, never its own title. Groups are flat in `settingsFlat`
   (pane, project window), else cards. Group by meaning, no one-row groups; a helper
   says what the label cannot. Split master/detail by fill; type: `type.stylex.ts`.
-- Model pages on Preferences: each line a `CompactRow`, one answer (value, Switch,
-  Select/menu, button); records too (name, state line; more in its menu/detail).
+- Preferences grammar: `CompactRow`, one answer; records: name, state, menu/detail.
+  Its four switches bind translated labels and rendered helpers.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
@@ -53,12 +53,13 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   verification.
 - Keep three.js/R3F behind the lazy usage-calendar module so lightweight and SSR
   consumers never evaluate its renderer graph.
-- Usage day details persist bounded snapshots per auth session, workspace, and
-  date. Reuse for one hour; refresh expired selections without blanking cached
-  data. Preserve auth/capability gates; see [contract](../../../../../specs/usage-detail-cache.md).
+- Charts follow [timeline rules](../../../../../specs/usage-timeline.md).
+  Cache bounded day snapshots per auth session/workspace/date for one hour;
+  refresh expiry without blanking data. Keep auth/capability gates
+  ([cache](../../../../../specs/usage-detail-cache.md)).
 - Interface/terminal fonts exclude symbol families in `lib/local-fonts.ts`; option
-  names stay on the default interface font. Font size is five named tiers writing
-  `--ui-font-size`. Font ligatures is a boolean in the Text group, writing
+  names stay on the default interface font. Five tiers write `--ui-font-size`;
+  sizes use `@lody/ui` text tokens. Font ligatures in the Text group writes
   `--lody-font-ligatures` for conversation, code, and tool output.
 - The Codex reset forecast chip in the provider row must not fetch on mount:
   [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).

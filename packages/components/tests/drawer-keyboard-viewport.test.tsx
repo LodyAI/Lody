@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, useState } from 'react';
+import { Menu } from '@lody/ui/menu';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Drawer, DrawerContent, DrawerTitle } from '../src/ui/drawer';
@@ -149,4 +150,60 @@ describe('native side-drawer keyboard layout', () => {
     const drawer = renderDrawer(mode !== 'disabled');
     expect(drawer.style.bottom).toBe('');
   });
+});
+
+function DrawerMenu({ initiallyOpen }: { initiallyOpen: boolean }) {
+  const [selection, setSelection] = useState('Unchanged');
+  return (
+    <Drawer direction="right" open repositionInputs={false}>
+      <DrawerContent aria-describedby={undefined}>
+        <DrawerTitle>Simulator</DrawerTitle>
+        <output>{selection}</output>
+        <Menu.Root defaultOpen={initiallyOpen}>
+          <Menu.Trigger>More controls</Menu.Trigger>
+          <Menu.Content>
+            <Menu.Item onClick={() => setSelection('Rotated')}>Rotate left</Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+describe('drawer floating controls', () => {
+  it.each([false, true])(
+    'keeps a menu interactive in the modal scope (initially open: %s)',
+    async (initiallyOpen) => {
+      await act(async () => {
+        root.render(<DrawerMenu initiallyOpen={initiallyOpen} />);
+      });
+      if (!initiallyOpen) {
+        await act(async () => {
+          document
+            .querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!
+            .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+          await vi.advanceTimersByTimeAsync(32);
+        });
+      }
+      const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+      const item = document.querySelector<HTMLElement>('[role="menuitem"]')!;
+      expect(drawer.contains(item)).toBe(true);
+      expect(item.closest('[data-vaul-no-drag]')).not.toBeNull();
+      // A body portal inherits the modal pointer lock, so its clicks hit the iframe below.
+      expect(getComputedStyle(document.body).pointerEvents).toBe('none');
+      expect(getComputedStyle(item).pointerEvents).not.toBe('none');
+      await act(async () => {
+        item.focus();
+        await vi.advanceTimersByTimeAsync(32);
+      });
+      expect(document.activeElement).toBe(item);
+      await act(async () => {
+        item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(32);
+      });
+      expect(drawer.querySelector('output')?.textContent).toBe('Rotated');
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      expect(drawer.getAttribute('data-state')).toBe('open');
+    }
+  );
 });

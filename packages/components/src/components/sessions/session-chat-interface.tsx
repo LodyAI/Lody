@@ -1,3 +1,4 @@
+import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
 import { SessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
@@ -1843,6 +1844,7 @@ interface SessionChatInterfaceProps {
   browserActionSession?: SessionMeta | null;
   /** Called when the user wants to open the Browser panel. */
   onOpenBrowser?: () => void;
+  onOpenIosSimulator?: () => void;
   /** Opens Browser without forcing a newly reported candidate navigation. */
   onOpenExistingBrowser?: () => void;
   /**
@@ -1887,6 +1889,11 @@ export type SessionChatInterfaceHandle = {
   toggleCommentReference: (reference: CommentReferencePayload) => boolean;
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   toggleVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
+  /**
+   * Adds files to the composer as attachments, the way a drop does. It never
+   * sends; false when the composer is not mounted to take them.
+   */
+  addAttachmentFiles: (files: File[]) => boolean;
   copyConversationHistory: () => Promise<void>;
   /** Plain-text conversation snapshot for the share-as-image card; null while
    * durable history has not loaded. */
@@ -2003,6 +2010,7 @@ export const SessionChatInterface = memo(
       onOpenPrTab,
       browserActionSession,
       onOpenBrowser,
+      onOpenIosSimulator,
       onOpenExistingBrowser,
       headerVariant = 'page',
       paintSessionMentionOverlay = true,
@@ -5056,6 +5064,13 @@ export const SessionChatInterface = memo(
       sessionDocReady,
     ]);
 
+    useIosSimulatorPreviewRequest(
+      session.id,
+      session.iosSimulatorPreviewRequestId,
+      isVisible && !hideMessageArea && !isMobile && Boolean(onOpenIosSimulator),
+      onOpenIosSimulator
+    );
+
     const headerBrowserSession =
       browserActionSession === undefined ? session : browserActionSession;
     // Agent-driven action: it appears only once the session actually has a
@@ -5141,6 +5156,12 @@ export const SessionChatInterface = memo(
         },
         toggleVisualAnnotationReference: (reference) => {
           return inputAreaRef.current?.toggleVisualAnnotationReference(reference) ?? false;
+        },
+        addAttachmentFiles: (files) => {
+          const inputArea = inputAreaRef.current;
+          if (!inputArea) return false;
+          inputArea.handleImageDrop(files);
+          return true;
         },
         copyConversationHistory: handleCopyConversationHistory,
         getShareImageData: async () => {
@@ -6418,6 +6439,9 @@ export const SessionChatInterface = memo(
                         ) : undefined
                       }
                       onOpenBrowser={browserActionAvailable ? handleOpenBrowser : undefined}
+                      onOpenIosSimulator={
+                        session.iosSimulatorPreviewRequestId ? onOpenIosSimulator : undefined
+                      }
                       privateAccessStatus={
                         isMobile && sharing?.visibility === 'private'
                           ? {

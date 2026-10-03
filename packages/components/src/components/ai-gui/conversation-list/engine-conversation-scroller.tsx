@@ -137,6 +137,7 @@ export function EngineConversationScroller({
     () => getSavedScrollState(sessionId)?.intent.kind !== 'read'
   );
   const [revealed, setRevealed] = useState(false);
+  const lastReportedScroll = useRef<number | null>(null);
 
   const latest = useRef({ onAtBottomChange, onScroll, suppressAutoScrollRef, layoutKey });
   latest.current = { onAtBottomChange, onScroll, suppressAutoScrollRef, layoutKey };
@@ -216,7 +217,15 @@ export function EngineConversationScroller({
       latest.current.onAtBottomChange?.(sticky);
     },
     onFirstCycle: () => setRevealed(true),
-    onScroll: (offset) => latest.current.onScroll?.(offset),
+    onScroll: (offset) => {
+      // Same offset from a later commit must not setState: the view's
+      // `onScroll` lives in a layout effect (afterCommit) and a repeating
+      // update is React #185.
+      const previous = lastReportedScroll.current;
+      if (previous !== null && Math.abs(previous - offset) < 0.5) return;
+      lastReportedScroll.current = offset;
+      latest.current.onScroll?.(offset);
+    },
     onDiagnostic: (diagnostic) => {
       recordScrollEngineDiagnostic(sessionId, diagnostic);
       scrollDebug('engine-cycle', { ...diagnostic });

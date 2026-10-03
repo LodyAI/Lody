@@ -173,6 +173,9 @@ import { SessionFileContentView, type SessionFileSaveViewState } from './session
 import { SessionFileQuickOpen } from './session-file-quick-open';
 import { PrTabContainer } from './pr-tab-container';
 import { SessionBrowserPanel } from './session-browser-panel';
+import { SessionIosSimulatorPanel } from './ios-simulator/session-ios-simulator-panel';
+import { getIosSimulatorPanelAvailability } from '@/lib/ios-simulator/ios-simulator-model';
+import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { deletePrCacheEntriesForSession } from '@/lib/github-pr-cache';
 import { FileTreeView } from './components/file-tree-view';
 import { useSessionFileActions } from '@/hooks/use-session-file-actions';
@@ -478,6 +481,7 @@ const MOBILE_DRAWER_HEADER_INSET = 'calc(3.5rem + var(--safe-area-top))';
 const EMPTY_LOCAL_PROJECTS: Record<LocalProjectId, LocalProjectMeta> = {};
 const MOBILE_PR_VIEWER_ID = 'mobile-viewer:pr';
 const MOBILE_BROWSER_VIEWER_ID = 'mobile-viewer:browser';
+const MOBILE_IOS_SIMULATOR_VIEWER_ID = 'mobile-viewer:ios-simulator';
 const MOBILE_FILES_VIEWER_ID = 'mobile-viewer:files';
 
 /* Minimum width the desktop right sidebar gets when the PR tab opens into a
@@ -738,12 +742,14 @@ const SessionDetail = ({
   urlTab,
   urlPrNumber,
   urlBrowser,
+  urlSimulator,
   onMobileBack,
 }: {
   sessionId: SessionId;
   urlTab?: string;
   urlPrNumber?: number;
   urlBrowser?: boolean;
+  urlSimulator?: boolean;
   onMobileBack?: () => void;
 }) => {
   const { t } = useTranslation();
@@ -1566,6 +1572,27 @@ const SessionDetail = ({
   // Closing the conversation does not close workspace tools. Keep their owner
   // explicit without making the parent an active conversation again.
   const activeBrowserSession = activeDraftTab ? null : (activeTabSession ?? activeSession);
+  // Simulator follows the selected conversation unless explicitly opened by a
+  // Side Chat. Keep that origin while the side panel switches away from the chat.
+  const [iosSimulatorTarget, setIosSimulatorTarget] = useState<{
+    parentId: SessionId;
+    tabId: SessionId | undefined;
+    sessionId: SessionId;
+  } | null>(null);
+  const simulatorOwnerSession =
+    iosSimulatorTarget?.parentId === sessionId &&
+    iosSimulatorTarget.tabId === activeBrowserSession?.id
+      ? ([activeBrowserSession, ...visibleSideSessions].find(
+          (candidate) => candidate?.id === iosSimulatorTarget.sessionId
+        ) ?? activeBrowserSession)
+      : activeBrowserSession;
+  const iosSimulatorMachine = useAtomValue(
+    getMachineMetaByIdAtomFamily(simulatorOwnerSession?.machineId)
+  );
+  const activeIosSimulatorSession =
+    simulatorOwnerSession && getIosSimulatorPanelAvailability(iosSimulatorMachine) !== 'hidden'
+      ? simulatorOwnerSession
+      : null;
   const workspaceOwnerSession =
     activeTabSession?.parentSessionId || isEmptyConversation ? activeSession : activeTabSession;
   const activeSessionProject = activeSession?.project;
@@ -1881,6 +1908,32 @@ const SessionDetail = ({
     },
     [router, sessionId, workspaceSlug]
   );
+
+  const replaceSessionUrlSimulator = useCallback(
+    (nextSimulator: boolean, { push = false }: { push?: boolean } = {}) => {
+      if (!workspaceSlug) {
+        return;
+      }
+
+      void router.navigate({
+        to: '/$workspaceName/sessions/$sessionId',
+        params: { workspaceName: workspaceSlug, sessionId },
+        search: (prev) => {
+          if ((prev.simulator === true) === nextSimulator) {
+            return prev;
+          }
+          if (!nextSimulator) {
+            const next = { ...prev };
+            delete next.simulator;
+            return next;
+          }
+          return { ...prev, simulator: true };
+        },
+        replace: !push,
+      });
+    },
+    [router, sessionId, workspaceSlug]
+  );
   // Multi-tab: create a new child session
   const {
     startSession,
@@ -2052,6 +2105,23 @@ const SessionDetail = ({
       return false;
     },
     [closedConversationIds, t]
+  );
+
+  // A simulator screenshot joins the composer as an ordinary attachment; the
+  // person decides when, and whether, it is sent.
+  const handleAttachSimulatorScreenshot = useCallback(
+    (targetSessionId: SessionId, file: File) => {
+      const chatRef = chatRefsMap.current.get(targetSessionId);
+      if (
+        closedConversationIds.has(targetSessionId) ||
+        !chatRef ||
+        !('addAttachmentFiles' in chatRef)
+      ) {
+        return false;
+      }
+      return chatRef.addAttachmentFiles([file]);
+    },
+    [closedConversationIds]
   );
 
   const handleAddPreviewAnnotationToChat = useCallback(
@@ -2946,6 +3016,17 @@ const SessionDetail = ({
     }
   }, [activeBrowserSession, activeSidebarTab]);
 
+  // Wait for the machine's metadata before deciding it is not a Mac, so a
+  // restored iOS Simulator selection survives the first render.
+  useEffect(() => {
+    if (
+      activeSidebarTab === 'ios-simulator' &&
+      (!activeBrowserSession || (iosSimulatorMachine && !activeIosSimulatorSession))
+    ) {
+      setActiveSidebarTab(null);
+    }
+  }, [activeBrowserSession, activeIosSimulatorSession, activeSidebarTab, iosSimulatorMachine]);
+
   // The ?browser=1 URL param is only meaningful for the mobile full-screen
   // drawer. On desktop the browser lives in the resizable sidebar (no URL
   // state), so strip the flag to keep the URL consistent and avoid a stale
@@ -2956,6 +3037,13 @@ const SessionDetail = ({
       replaceSessionUrlBrowser(false);
     }
   }, [isMobile, replaceSessionUrlBrowser, urlBrowser]);
+
+  // Same rule for the iOS Simulator drill's `?simulator=1`.
+  useEffect(() => {
+    if (!isMobile && urlSimulator) {
+      replaceSessionUrlSimulator(false);
+    }
+  }, [isMobile, replaceSessionUrlSimulator, urlSimulator]);
 
   /* Sync ?pr=<number> into the desktop sidebar. The mobile path reads
      `urlPrNumber` directly for its full-screen drawer.
@@ -3503,6 +3591,31 @@ const SessionDetail = ({
     replaceSessionUrlBrowser(false);
   }, [replaceSessionUrlBrowser]);
 
+  const handleOpenIosSimulator = useCallback(() => {
+    if (isMobile) {
+      replaceSessionUrlSimulator(true, { push: true });
+    } else {
+      revealRightSidebar();
+      activateSidebarTab('ios-simulator');
+    }
+  }, [activateSidebarTab, isMobile, replaceSessionUrlSimulator, revealRightSidebar]);
+
+  const handleOpenIosSimulatorForSession = useCallback(
+    (targetSessionId: SessionId) => {
+      setIosSimulatorTarget({
+        parentId: sessionId,
+        tabId: activeBrowserSession?.id,
+        sessionId: targetSessionId,
+      });
+      handleOpenIosSimulator();
+    },
+    [sessionId, activeBrowserSession?.id, handleOpenIosSimulator]
+  );
+
+  const handleCloseIosSimulator = useCallback(() => {
+    replaceSessionUrlSimulator(false);
+  }, [replaceSessionUrlSimulator]);
+
   const handleOpenFile = useStableCallback(
     (filePath: string, options: SessionDetailOpenFileOptions = {}) => {
       setFileProviderRequestedByInteraction(true);
@@ -3851,6 +3964,13 @@ const SessionDetail = ({
         kind: 'browser',
       });
     }
+    if (activeIosSimulatorSession) {
+      options.push({
+        id: 'ios-simulator',
+        label: t('sessions.detailTabs.iosSimulator', 'iOS Simulator'),
+        kind: 'ios-simulator',
+      });
+    }
     if (latestPr && repoFullName && latestPrNumber != null) {
       options.push({
         id: 'pr',
@@ -3859,7 +3979,7 @@ const SessionDetail = ({
       });
     }
     return options;
-  }, [activeBrowserSession, latestPr, latestPrNumber, repoFullName, t]);
+  }, [activeBrowserSession, activeIosSimulatorSession, latestPr, latestPrNumber, repoFullName, t]);
   const sideChatOption = useMemo<SessionSidePanelOption | null>(() => {
     const launcherState = getSideChatLauncherState({
       providerSupportsFork: Boolean(
@@ -4822,6 +4942,14 @@ const SessionDetail = ({
         active: false,
       });
     }
+    if (activeIosSimulatorSession) {
+      list.push({
+        id: MOBILE_IOS_SIMULATOR_VIEWER_ID,
+        label: t('sessions.detailTabs.iosSimulator', 'iOS Simulator'),
+        kind: 'ios-simulator',
+        active: false,
+      });
+    }
     if (canShowGitHubActions && latestPr && latestPrNumber != null && latestPrRepoFullName) {
       list.push({
         id: MOBILE_PR_VIEWER_ID,
@@ -4848,6 +4976,7 @@ const SessionDetail = ({
     latestPrNumber,
     latestPrRepoFullName,
     activeBrowserSession,
+    activeIosSimulatorSession,
     viewerTabItems,
     effectiveActiveViewerTabId,
     mobileFileViewerOpen,
@@ -4905,6 +5034,10 @@ const SessionDetail = ({
         if (activeBrowserSession) handleOpenBrowser(activeBrowserSession.id);
         return;
       }
+      if (id === MOBILE_IOS_SIMULATOR_VIEWER_ID) {
+        if (activeIosSimulatorSession) handleOpenIosSimulator();
+        return;
+      }
       if (id === MOBILE_FILES_VIEWER_ID) {
         setMobileFilesBrowserOpen(true);
         return;
@@ -4923,8 +5056,10 @@ const SessionDetail = ({
       latestPrNumber,
       latestPrRepoFullName,
       activeBrowserSession,
+      activeIosSimulatorSession,
       handleOpenPrTab,
       handleOpenBrowser,
+      handleOpenIosSimulator,
       handleViewerTabSelect,
       viewerTabs,
     ]
@@ -5679,6 +5814,7 @@ const SessionDetail = ({
                   )}
                   onOpenPrTab={handleOpenPrTab}
                   onOpenAllChanges={handleOpenAllChanges}
+                  onOpenIosSimulator={() => handleOpenIosSimulatorForSession(tabSession.id)}
                   onOpenBrowser={() => handleOpenBrowser(tabSession.id, true)}
                   onOpenExistingBrowser={() => handleOpenBrowser(tabSession.id, false)}
                   changesDiffStat={changesDiffStat}
@@ -6030,6 +6166,49 @@ const SessionDetail = ({
             </VaulDrawerBody>
           </DrawerContent>
         </Drawer>
+        {/* Mobile iOS Simulator drill: the same right-sliding layer as Browser,
+           with its own `?simulator=1` state. */}
+        <Drawer
+          direction="right"
+          repositionInputs={isNativeAppShell()}
+          open={Boolean(urlSimulator && activeIosSimulatorSession)}
+          onOpenChange={(open) => {
+            if (!open) handleCloseIosSimulator();
+          }}
+        >
+          <DrawerContent
+            className="w-full! max-w-none! inset-0 border-0 border-l-0! rounded-none"
+            data-sidebar-swipe-open-disabled
+          >
+            <DrawerTitle className="sr-only">
+              {t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
+            </DrawerTitle>
+            <VaulDrawerBody topInset={MOBILE_DRAWER_HEADER_INSET}>
+              {activeIosSimulatorSession && (
+                <SessionIosSimulatorPanel
+                  session={activeIosSimulatorSession}
+                  active={Boolean(urlSimulator)}
+                  controlsLayout="menu"
+                  onAttachScreenshot={(file) =>
+                    handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
+                  }
+                  leadingSlot={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      icon
+                      className={getSessionDetailTouchIconButtonClassName('-ml-1')}
+                      onClick={handleCloseIosSimulator}
+                      aria-label={t('common.back', 'Back')}
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                  }
+                />
+              )}
+            </VaulDrawerBody>
+          </DrawerContent>
+        </Drawer>
         {fileQuickOpenDialog}
         {deleteConfirmDialog}
         {archiveConfirmDialog}
@@ -6144,7 +6323,24 @@ const SessionDetail = ({
           />
         </div>
       ) : null}
-      {activeSidebarTab !== 'browser' ? (
+      {activeIosSimulatorSession && openedSidebarTabs.includes('ios-simulator') ? (
+        <div
+          className={cn(
+            'absolute inset-0',
+            activeSidebarTab !== 'ios-simulator' && 'invisible pointer-events-none'
+          )}
+          aria-hidden={activeSidebarTab !== 'ios-simulator'}
+        >
+          <SessionIosSimulatorPanel
+            session={activeIosSimulatorSession}
+            active={activeSidebarTab === 'ios-simulator' && isSidebarVisible}
+            onAttachScreenshot={(file) =>
+              handleAttachSimulatorScreenshot(activeIosSimulatorSession.id, file)
+            }
+          />
+        </div>
+      ) : null}
+      {activeSidebarTab !== 'browser' && activeSidebarTab !== 'ios-simulator' ? (
         <div className="absolute inset-0">{nonBrowserSidebarContent}</div>
       ) : null}
     </div>
@@ -6324,6 +6520,7 @@ const SessionDetail = ({
       onFileDiffClick: handleOpenFileDiffForChat,
       onFilePathClick: handleOpenFile,
       onOpenHtmlFile: handleOpenHtmlFile,
+      onOpenIosSimulator: () => handleOpenIosSimulatorForSession(chatSession.id),
       onOpenBrowser: () => handleOpenBrowser(chatSession.id, true),
       onOpenExistingBrowser: () => handleOpenBrowser(chatSession.id, false),
       onNavigateToComment: handleNavigateToComment,

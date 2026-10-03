@@ -152,6 +152,117 @@ function EditWrapper({ config = existingConfig }: { config?: AgentConfigMeta }) 
   );
 }
 
+const kimiConfigId = 'cfg-kimi' as AgentConfigId;
+
+/**
+ * A builtin Kimi config on a machine whose runtime-probed capabilities publish
+ * a catalog the size of a real provider's — over a hundred models — so the
+ * title-generation selectors show their searchable, scrollable form.
+ */
+const makeMachineWithKimiCaps = (): MachineViewMeta => ({
+  id: machineId,
+  name: 'Workstation',
+  cliVersion: '0.44.0',
+  os: 'macOS',
+  sessions: [],
+  raceLimits: {},
+  acpCapabilities: {
+    [getAcpCapabilityCacheKey(kimiConfigId)]: {
+      cliType: 'builtin',
+      agentType: 'kimi',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      sourceVersion: 'kimi-code@1.0.0',
+      provenance: 'runtime',
+      modes: [],
+      models: [],
+      configOptions: [
+        {
+          id: 'session_mode',
+          name: 'Session Mode',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'code',
+          options: [
+            { value: 'code', name: 'Code' },
+            { value: 'plan', name: 'Plan' },
+          ],
+        },
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'swe-2',
+          options: [
+            { value: 'adaptive', name: 'Adaptive' },
+            { value: 'swe-2', name: 'SWE-2' },
+            { value: 'swe-1.7-lightning', name: 'SWE-1.7 Lightning' },
+            { value: 'claude-fable-5.1', name: 'Claude Fable 5.1' },
+            { value: 'claude-opus-5.5', name: 'Claude Opus 5.5' },
+            { value: 'gpt-6-astra', name: 'GPT-6 Astra' },
+            { value: 'gpt-6-sol', name: 'GPT-6 Sol' },
+            { value: 'gpt-6-luna', name: 'GPT-6 Luna' },
+            { value: 'kimi-k3', name: 'Kimi K3' },
+            { value: 'glm-5.2-high', name: 'GLM-5.2 High' },
+            { value: 'glm-5.2-high-1m', name: 'GLM-5.2 High 1M' },
+            ...Array.from({ length: 96 }, (_, i) => ({
+              value: `catalog-model-${i + 1}`,
+              name: `Catalog Model ${i + 1}`,
+            })),
+          ],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'max',
+          options: [
+            { value: 'low', name: 'low' },
+            { value: 'medium', name: 'medium' },
+            { value: 'high', name: 'high' },
+            { value: 'max', name: 'max' },
+          ],
+        },
+      ],
+      availableCommands: [],
+      fetchedAt: Date.now(),
+    },
+  },
+});
+
+function EditLongOptionListsWrapper() {
+  const [open, setOpen] = useState(true);
+  return (
+    <AgentConfigDialog
+      open={open}
+      onOpenChange={setOpen}
+      mode={{
+        kind: 'edit',
+        config: {
+          id: kimiConfigId,
+          machineId,
+          name: 'Kimi',
+          description: undefined,
+          cliType: 'builtin',
+          agentType: 'kimi',
+          env: {},
+        },
+      }}
+      machine={makeMachineWithKimiCaps()}
+      onSubmit={async () => {}}
+      onRefreshCapabilities={async (args) => ({
+        type: 'machine/acp-capabilities-refresh_response',
+        machineId: args.machineId,
+        configId: args.configId,
+        cliType: 'builtin',
+        agentType: 'kimi',
+        success: true,
+      })}
+    />
+  );
+}
+
 function DeepSeekPresetWrapper() {
   const [open, setOpen] = useState(true);
   return (
@@ -410,6 +521,15 @@ export const NestedInSettings: Story = {
 
 export const Edit: Story = {
   render: () => <EditWrapper />,
+};
+
+/**
+ * Title-generation selectors against a provider-scale catalog (~108 models):
+ * the option list is taller than the dialog, so the popup must stay anchored
+ * below its trigger and offer search rather than flipping up over the form.
+ */
+export const EditLongOptionLists: Story = {
+  render: () => <EditLongOptionListsWrapper />,
 };
 
 /** Signing in again lives here, not on the provider list row. */

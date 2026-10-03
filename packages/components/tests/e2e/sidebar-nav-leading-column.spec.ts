@@ -1,5 +1,99 @@
 import { expect, test } from '@playwright/test';
 
+test.describe('compact navigation modal', () => {
+  test.use({ viewport: { width: 500, height: 745 } });
+
+  test.beforeEach(async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/iframe.html?id=layout-compactnavigationdialog--default&viewMode=story');
+  });
+
+  test('keeps Tab, Shift+Tab, programmatic focus and pointer presses off the background', async ({
+    page,
+  }) => {
+    const opener = page.getByRole('button', { name: 'Show navigation sidebar' });
+    const navigation = page.getByRole('dialog', { name: 'Navigation Menu', exact: true });
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      await opener.click();
+      await expect(navigation).toBeVisible();
+      const first = navigation.getByRole('button', { name: 'New Chat' });
+      const last = navigation.getByRole('button', { name: 'Settings', exact: true });
+      await expect(first).toBeFocused();
+      await page.keyboard.press('Shift+Tab');
+      await expect(last).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(first).toBeFocused();
+      const background = page.locator('[data-focus-scope="workspace-content"]');
+      await expect(background).toHaveAttribute('inert', '');
+      await background
+        .getByRole('button', { name: 'Machine', includeHidden: true, exact: true })
+        .evaluate((button) => button.focus());
+      await expect(first).toBeFocused();
+      await expect(page.getByRole('dialog', { name: 'Background machine picker' })).toHaveCount(0);
+      await page.keyboard.press('Enter');
+      await expect(navigation).toBeHidden();
+      await expect(page.getByRole('dialog', { name: 'Background machine picker' })).toHaveCount(0);
+      await expect(opener).toBeFocused();
+      await expect(background).not.toHaveAttribute('inert');
+    }
+    await opener.click();
+    // The uncovered right-hand part of the backdrop dismisses navigation.
+    await page.mouse.click(450, 300);
+    await expect(navigation).toBeHidden();
+    await expect(page.getByRole('dialog', { name: 'Background machine picker' })).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await page.getByRole('button', { name: 'Machine', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Background machine picker' })).toBeVisible();
+  });
+
+  test('dismisses a nested popup or dialog before navigation and keeps focus in navigation', async ({
+    page,
+  }) => {
+    await page.getByRole('button', { name: 'Show navigation sidebar' }).click();
+    const navigation = page.getByRole('dialog', { name: 'Navigation Menu', exact: true });
+    const machine = navigation.getByRole('button', { name: 'Navigation machine' });
+    await machine.click();
+    await expect(page.getByRole('button', { name: 'Demo machine' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Demo machine' })).toBeHidden();
+    await expect(navigation).toBeVisible();
+    await expect
+      .poll(() => navigation.evaluate((dialog) => dialog.contains(document.activeElement)))
+      .toBe(true);
+    const settings = navigation.getByRole('button', { name: 'Settings', exact: true });
+    await settings.click();
+    await expect(page.getByRole('dialog', { name: 'Nested settings' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Nested settings' })).toBeHidden();
+    await expect(navigation).toBeVisible();
+    await expect(settings).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(navigation).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Show navigation sidebar' })).toBeFocused();
+  });
+
+  test('falls back to the content scope when the opener disappears', async ({ page }) => {
+    await page.getByRole('button', { name: 'Show navigation sidebar' }).click();
+    await page.getByRole('button', { name: 'Remove opener and close' }).click();
+    await expect(page.getByRole('dialog', { name: 'Navigation Menu', exact: true })).toBeHidden();
+    await expect(page.locator('[data-focus-scope="workspace-content"]')).toBeFocused();
+  });
+
+  test('restores focus and releases the modal after an animated close', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const opener = page.getByRole('button', { name: 'Show navigation sidebar' });
+    await opener.click();
+    const navigation = page.getByRole('dialog', { name: 'Navigation Menu', exact: true });
+    await expect(navigation.getByRole('button', { name: 'New Chat' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(navigation).toBeHidden();
+    await expect(opener).toBeFocused();
+    await expect(page.locator('[data-focus-scope="workspace-content"]')).not.toHaveAttribute(
+      'inert'
+    );
+  });
+});
+
 /* The sidebar's leading elements share one column: every nav row's icon box
    starts on the same X as the header wordmark's text, and the row labels sit
    one icon-width-plus-gap past it. The oversized w-5 icon slot previously

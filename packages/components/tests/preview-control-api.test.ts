@@ -54,3 +54,35 @@ describe('preview control proof minting', () => {
     );
   });
 });
+
+it('validates simulator intents locally and diagnoses an older authorization service without retrying', async () => {
+  uninstall = installCloudHttpPort({ authBaseUrl: 'https://auth.test', serverBaseUrl: null });
+  const { PreviewControlIntentSchema } = await import('@lody/shared');
+  const { createRpcSecretRecipient } = await import('@lody/loro-streams-rpc');
+  const recipient = await createRpcSecretRecipient();
+  const simulator = {
+    ...intent,
+    operation: {
+      action: 'ios-simulator' as const,
+      command: { action: 'list' as const },
+      responseKey: recipient.publicKey,
+    },
+  };
+  const calls: unknown[] = [];
+  vi.stubGlobal('fetch', async (_url: URL, init: RequestInit) => {
+    const request = JSON.parse(String(init.body));
+    expect(PreviewControlIntentSchema.parse({ ...request, requesterUserId: 'owner' })).toEqual(
+      simulator
+    );
+    calls.push(request);
+    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
+  });
+  await expect(mintPreviewControlProof(simulator, 'session')).rejects.toThrow(
+    'Update the connected Cloud backend'
+  );
+  expect(calls).toHaveLength(1);
+  await expect(
+    mintPreviewControlProof({ ...simulator, runtimeNonce: 'invalid' }, 'session')
+  ).rejects.toThrow();
+  expect(calls).toHaveLength(1);
+});

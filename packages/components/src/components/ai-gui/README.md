@@ -12,13 +12,14 @@ the reasoning behind those rules.
 
 ## Ownership
 
-| Area                    | Owner                                            | Contract                                                                          |
-| ----------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------- |
-| Stream                  | `view.tsx`, `build-chat-stream-items.ts`         | Stable Virtua rows and scroll.                                                    |
-| User rows               | `view.tsx`                                       | Multi-member sender metadata and desktop profile.                                 |
-| Turns                   | `assistant-turn-render-blocks.ts`                | Activity groups and foldable segments.                                            |
-| Outline                 | `conversation-outline-*`                         | Round ticks and navigation.                                                       |
-| Image sharing selection | [`message-selection.tsx`](message-selection.tsx) | Temporary message selection, drag rectangle, range modifiers, and edge scrolling. |
+| Area                    | Owner                                                                                             | Contract                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Stream                  | `view.tsx`, `build-chat-stream-items.ts`                                                          | Stable Virtua rows and scroll.                                                          |
+| User rows               | `view.tsx`                                                                                        | Multi-member sender metadata and desktop profile.                                       |
+| Turns                   | `assistant-turn-render-blocks.ts`                                                                 | Activity groups and foldable segments.                                                  |
+| Outline                 | `conversation-outline-*`                                                                          | Round ticks and navigation.                                                             |
+| Image sharing selection | [`message-selection.tsx`](message-selection.tsx)                                                  | Temporary message selection, drag rectangle, range modifiers, and edge scrolling.       |
+| Typography              | [`conversation-font-size-classes.ts`](conversation-font-size-classes.ts), `markdown-renderer.tsx` | Shared text roles; explicit preview size and compact tool prose without nested scaling. |
 
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
@@ -66,6 +67,12 @@ the reasoning behind those rules.
   image-preview rendering.
 
 ## Coverage
+
+`InterfaceTypography.stories.tsx` composes real settings and surfaces;
+`tests/e2e/interface-typography.spec.ts` checks computed type metrics, portals,
+five-tier persistence, legacy preferences, themes and narrow desktop layout.
+See the [global scale decision](../../../../../.agents/notes/implemented/simplification/2026-10-03-interface-typography.md)
+for scope and retained exceptions.
 
 `tests/build-chat-stream-items.test.ts`, `tests/conversation-outline*.test.ts`,
 `tests/user-message-sender-identity.test.tsx`, the `ExtremeConversation` story,

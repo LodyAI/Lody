@@ -348,6 +348,148 @@ describe('PrTabView document', () => {
   });
 });
 
+describe('PrTabView load failure', () => {
+  let root: Root | undefined;
+  let container: HTMLDivElement | undefined;
+
+  afterEach(() => {
+    if (root) flushSync(() => root?.unmount());
+    root = undefined;
+    container?.remove();
+    container = undefined;
+  });
+
+  const render = (props: {
+    state: PrTabViewState;
+    data?: PrTabViewData | null;
+    error?: string;
+
+    isRefreshing?: boolean;
+    onRefresh?: () => void | Promise<unknown>;
+    onPostComment?: (body: string) => Promise<void> | void;
+  }) => {
+    if (!container) {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+    }
+    flushSync(() => {
+      root?.render(
+        createElement(PrTabView, {
+          repoFullName: 'loro-dev/lody',
+          prNumber: 42,
+          ...props,
+        })
+      );
+    });
+    return container;
+  };
+
+  const panel = () => container?.querySelector<HTMLElement>('[data-pr-unavailable]');
+  const retryButton = () =>
+    [...(panel()?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Retry'
+    );
+
+  it('keeps the PR context and offers GitHub + retry instead of a bare failure', () => {
+    const onRefresh = vi.fn();
+    const onGrantChecksPermission = vi.fn();
+    render({
+      state: 'error',
+      data: null,
+      error: 'GitHub request failed: 404 Not Found',
+      onRefresh,
+      onPostComment: vi.fn(),
+      onGrantChecksPermission,
+    });
+
+    expect(panel()?.getAttribute('role')).toBe('status');
+    expect(panel()?.textContent).toContain('Failed to load pull request');
+    expect(panel()?.textContent).toContain('A pull request was found for this branch');
+    expect(panel()?.textContent).toContain('You can still view it on GitHub');
+
+    const link = panel()?.querySelector<HTMLAnchorElement>('a[href]');
+    expect(link?.href).toBe('https://github.com/loro-dev/lody/pull/42');
+    expect(link?.textContent).toContain('Open on GitHub');
+
+    // The verbatim error stays visible as a quiet detail line — not the
+    // headline, not a fold.
+    expect(panel()?.textContent).toContain('404 Not Found');
+
+    // A 404 hedges toward the one cause the user can repair: app access.
+    expect(panel()?.textContent).toContain('can also mean the Lody GitHub App');
+    const reviewLink = [...(panel()?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Review app access'
+    );
+    flushSync(() => reviewLink?.click());
+    expect(onGrantChecksPermission).toHaveBeenCalledTimes(1);
+
+    // No affordance that cannot work: no comment composer under a failed load.
+    expect(container?.querySelector('[data-pr-comment-composer]')).toBeNull();
+    expect(container?.querySelector('textarea')).toBeNull();
+
+    flushSync(() => retryButton()?.click());
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the verified identity cause inline', () => {
+    const identityMessage =
+      'Cannot verify this session’s repository identity. GitHub operations are paused.';
+    render({
+      state: 'error',
+      data: null,
+      error: identityMessage,
+      onRefresh: vi.fn(),
+    });
+
+    expect(panel()?.textContent).toContain('Failed to load pull request');
+    expect(panel()?.textContent).toContain(identityMessage);
+    // Not a 404: no app-access hint.
+    expect(panel()?.textContent).not.toContain('GitHub App can’t access');
+  });
+
+  it('holds the retry button pending until the reload settles', async () => {
+    let settle: (() => void) | undefined;
+    const onRefresh = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        })
+    );
+    render({ state: 'error', data: null, error: 'offline', onRefresh });
+
+    flushSync(() => retryButton()?.click());
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(retryButton()?.disabled).toBe(true);
+
+    settle?.();
+    await vi.waitFor(() => expect(retryButton()?.disabled).toBe(false));
+  });
+
+  it('keeps a typed comment draft across a failed reload', () => {
+    const onPostComment = vi.fn();
+    render({ state: 'ready', data, onPostComment });
+    const textarea = container?.querySelector('textarea');
+    expect(textarea).not.toBeNull();
+
+    flushSync(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+        textarea,
+        'still reviewing this'
+      );
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(textarea?.value).toBe('still reviewing this');
+
+    // The reload fails: the composer leaves, the draft does not.
+    render({ state: 'error', data: null, error: 'offline', onPostComment });
+    expect(container?.querySelector('textarea')).toBeNull();
+
+    render({ state: 'ready', data, onPostComment });
+    expect(container?.querySelector('textarea')?.value).toBe('still reviewing this');
+  });
+});
+
 describe('PrTabView merge card', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;

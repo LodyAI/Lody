@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from '@tanstack/react-router';
@@ -34,10 +35,9 @@ import {
 import { WorkspaceJoinRequestsSettings } from './workspace-join-requests-settings';
 import { WorkspaceOwnershipTransfer } from './workspace-ownership-transfer';
 import { AccountMachinesOverview } from './account-machines-overview';
-import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
-  empty: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  empty: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
 });
 
 const getInviteLink = (invitation: Invitation) => getAppShareUrl(`/invite/${invitation.id}`);

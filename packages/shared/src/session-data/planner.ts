@@ -103,6 +103,9 @@ export function applyRespondPermission(
     if (record?.type !== 'tool_call') continue;
     const request = asRecord(record.permissionRequest);
     if (request?.requestId !== requestId) continue;
+    // A permission request is single-assignment. A later automatic outcome
+    // must never overwrite a decision that another client already persisted.
+    if (request.outcome !== undefined) return false;
     record.permissionRequest = { ...request, outcome };
     return true;
   }

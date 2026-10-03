@@ -91,6 +91,7 @@ import type {
 import { readLocalProjectWorktreeSetup } from './worktree/worktree-setup-config-store';
 import { resolveTerminalWorkdirFromMetadata } from '@/lib/terminal-workdir-resolver';
 import { createWorktreeScriptHistoryRecorder } from './worktree/worktree-script-history';
+import { createSessionBackend } from './session-backend';
 import { runWorktreeSetup } from './worktree/worktree-setup-runner';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import {
@@ -2167,6 +2168,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             sessionId: config.sessionId!,
             phase: 'setup',
             logger: this.logger,
+            backend: await createSessionBackend(sessionDoc, await sessionDoc.getMetaState()),
             insertBeforeEntryId: config.worktreeScriptHistoryInsertBeforeEntryId,
           }),
         });

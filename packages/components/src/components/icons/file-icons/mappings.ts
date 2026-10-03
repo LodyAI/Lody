@@ -373,7 +373,9 @@ export const extensionMap: Record<string, string> = {
   pnm: 'image',
   svgx: 'image',
   toml: 'gear',
-  v: 'v',
+  // `.v` is assigned to Coq by the optional code-language pack; keep its
+  // icon language-neutral instead of presenting it as Vlang.
+  v: 'code-purple',
   nix: 'nix',
   fc: 'func',
   mongodb: 'mongo',
@@ -762,7 +764,7 @@ export const fileNameMap: Record<string, string> = {
   '.nxignore': 'nx',
   'nx.json': 'nx',
   'components.json': 'shadcn',
-  'Makefile': 'gear',
+  Makefile: 'gear',
   makefile: 'gear',
   'CMakeLists.txt': 'cmake',
   Dockerfile: 'docker',

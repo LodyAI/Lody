@@ -49,6 +49,11 @@ terminal. Never silently bypass the personal preference.
 Unavailable policy is different from expired context. Report connection/access
 recovery for policy failures, not an unconditional session restart. Do not use a
 cached preference to bypass a newly selected personal identity during an outage.
+Transient policy connection failures and server errors get one bounded retry before
+credential selection. Reread the same workspace's broker state while retaining the
+helper's captured requester context. Authentication rejection, invalid context and
+invalid policy data do not retry or fall back to another identity. Persistent
+failures report a safe error category/status, never raw response or token material.
 
 Helpers must not save managed tokens into local credential stores. Recovery stays
 within the workspace broker. Broker context is bound to the active requester;

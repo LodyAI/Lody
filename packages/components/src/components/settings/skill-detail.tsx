@@ -1,4 +1,6 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
+import type { MouseEvent } from 'react';
 import { User } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import type { ProjectSkill, ProjectSkillScope } from '@lody/shared';
@@ -14,7 +16,6 @@ import {
 import { withClassName } from '@/lib/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
-import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
   root: { display: 'flex', flexDirection: 'column', minHeight: 0 },
@@ -23,7 +24,7 @@ const styles = stylex.create({
   description: {
     margin: 0,
     marginTop: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   meta: {
@@ -33,7 +34,7 @@ const styles = stylex.create({
     columnGap: space[3],
     rowGap: space[1],
     marginTop: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   author: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
@@ -47,13 +48,33 @@ const styles = stylex.create({
   },
   /** The body is set apart from the head by space, not a rule under it. */
   body: { flexGrow: 1, minHeight: 0, overflowY: 'auto', marginTop: space[4] },
-  empty: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  empty: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   title: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   fill: { flexGrow: 1, minHeight: 0 },
 });
 
 /** The panel reads a SKILL.md, so it keeps a reading width rather than a form's. */
 const SKILL_DIALOG_WIDTH = '768px';
+
+function navigateSkillFragment(event: MouseEvent<HTMLDivElement>) {
+  if (!(event.target instanceof Element)) return;
+  const link = event.target.closest('a[href^="#"]');
+  if (!link || !event.currentTarget.contains(link)) return;
+  // Fragments belong to this detail, never the router or another mounted document.
+  event.preventDefault();
+  let id: string;
+  try {
+    id = decodeURIComponent(link.getAttribute('href')!.slice(1));
+  } catch {
+    return;
+  }
+  const heading = Array.from(
+    event.currentTarget.querySelectorAll<HTMLElement>('h1[id],h2[id],h3[id],h4[id],h5[id],h6[id]')
+  ).find((element) => element.id === id);
+  if (!heading) return;
+  heading.scrollIntoView({ block: 'start' });
+  heading.focus({ preventScroll: true });
+}
 
 /**
  * Shared skill detail body: badges + metadata + the rendered SKILL.md markdown
@@ -93,12 +114,15 @@ export function SkillDetailContent({
         </div>
       </div>
 
-      <div {...withClassName(stylex.props(styles.body), 'scrollbar-pro')}>
+      <div
+        onClickCapture={navigateSkillFragment}
+        {...withClassName(stylex.props(styles.body), 'scrollbar-pro')}
+      >
         {skill.content ? (
           /* Primary: the app's full Markdown renderer (Streamdown). It lazy-
              loads a Shiki code highlighter; if that dynamic import fails (e.g. a
              stale Vite dev optimize-deps chunk) the boundary falls back to a
-             dependency-free Markdown renderer so the content still renders as
+             small Markdown renderer so the content still renders as
              Markdown — never raw text. */
           <ErrorBoundary
             name="SkillMarkdown"
@@ -106,7 +130,7 @@ export function SkillDetailContent({
             resetKeys={[skill.relativePath]}
             fallback={<SkillMarkdownFallback content={skill.content} />}
           >
-            <MarkdownRenderer text={skill.content} size="sm" />
+            <MarkdownRenderer text={skill.content} size="sm" headingAnchors />
           </ErrorBoundary>
         ) : (
           <p {...stylex.props(styles.empty)}>

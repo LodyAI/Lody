@@ -11,13 +11,13 @@ import fileIndexScanWorker from './file-index-scan-worker';
 const execFileAsync = promisify(execFile);
 
 async function git(cwd: string, args: readonly string[]): Promise<void> {
-  await execFileAsync('git', args, { cwd });
+  await execFileAsync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd });
 }
 
 async function withGitWorkspace<T>(fn: (workspaceRoot: string) => Promise<T>): Promise<T> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'lody-file-index-worker-'));
   try {
-    await git(workspaceRoot, ['init']);
+    await git(workspaceRoot, ['init', '-b', 'main']);
     await git(workspaceRoot, ['config', 'user.email', 'test@example.com']);
     await git(workspaceRoot, ['config', 'user.name', 'Test User']);
     await mkdir(path.join(workspaceRoot, 'src'), { recursive: true });
@@ -47,6 +47,35 @@ async function withPlainWorkspace<T>(fn: (workspaceRoot: string) => Promise<T>):
 }
 
 describe('fileIndexScanWorker', () => {
+  it('rebuilds against the tracking base for a qualified local owner ref', async () => {
+    await withGitWorkspace(async (workspaceRoot) => {
+      await git(workspaceRoot, ['checkout', '-b', 'feature']);
+      await git(workspaceRoot, ['add', '.']);
+      await git(workspaceRoot, ['commit', '-m', 'upstream changes']);
+      await git(workspaceRoot, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+      await writeFile(path.join(workspaceRoot, 'avatar.txt'), 'avatar fix\n');
+      await git(workspaceRoot, ['add', '.']);
+      await git(workspaceRoot, ['commit', '-m', 'avatar fix']);
+      const scan = () =>
+        fileIndexScanWorker({
+          kind: 'full-state',
+          workspaceRoot,
+          preferredBaseBranch: 'refs/heads/main',
+          maxRawTextBytes: 1024 * 1024,
+          entryBudget: 1000,
+        });
+      const before = await scan();
+      expect(before.status).toBe('ok');
+      if (before.status !== 'ok') throw new Error('Expected Git scan');
+      expect(before.allChanges).toEqual({ 'avatar.txt': { diff: [1, 0] } });
+      await git(workspaceRoot, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+      const merged = await scan();
+      expect(merged.status).toBe('ok');
+      if (merged.status !== 'ok') throw new Error('Expected merged scan');
+      expect(merged.allChanges).toEqual({});
+      expect(merged.fileIndex['avatar.txt']).toBe(true);
+    });
+  });
   it('builds Git-backed full file-index state off the main service path', async () => {
     await withGitWorkspace(async (workspaceRoot) => {
       const result = await fileIndexScanWorker({

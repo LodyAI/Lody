@@ -143,7 +143,7 @@ export function ScheduleForm({
   const promptMissing = !value.prompt.trim();
   const formIssues = issues.filter((issue) => issue.field === 'form');
   const blocked = titleMissing || promptMissing || !!resolved.error || issues.length > 0;
-  const zone = triggerTimeZone(resolved.trigger ?? initial.trigger);
+  const zone = triggerTimeZone(resolved.trigger ?? initial.trigger, timeZone);
   const noteId = useId();
 
   return (

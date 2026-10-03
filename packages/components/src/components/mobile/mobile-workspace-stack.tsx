@@ -102,6 +102,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
     tab?: string;
     pr?: number;
     browser?: boolean;
+    simulator?: boolean;
   } | null>(null);
   if (sessionId) {
     lastSessionRef.current = {
@@ -109,6 +110,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
       tab: sessionSearch?.tab,
       pr: sessionSearch?.pr,
       browser: sessionSearch?.browser,
+      simulator: sessionSearch?.simulator,
     };
   }
   const rendered = lastSessionRef.current;
@@ -180,6 +182,7 @@ export function MobileWorkspaceStack({ workspaceName }: { workspaceName: string 
                      exit animation and flashes a few frames. */
                   urlPrNumber={open ? rendered.pr : undefined}
                   urlBrowser={open ? rendered.browser : false}
+                  urlSimulator={open ? rendered.simulator : false}
                   onMobileBack={handleClose}
                 />
               </AppThemeShell>

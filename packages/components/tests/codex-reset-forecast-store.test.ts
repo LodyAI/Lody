@@ -18,6 +18,7 @@ const status = (windowText: string): CodexResetStatus => ({
     text: 'text',
     source: null,
   },
+  scheduledReset: null,
   latestReset: null,
 });
 

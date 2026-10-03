@@ -1,4 +1,3 @@
-import { readSessionHistory } from '@lody/shared/session-data';
 import {
   buildPendingUserHistoryEntry,
   getServerNow,
@@ -26,6 +25,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { SessionExecutionService } from './session-execution-service';
 import type { ISession, SessionManager } from './session-manager';
 import type { SessionUserResolver } from './session-user-resolver';
+import { createSessionBackend } from './session-backend';
 
 export type SessionEditAndResendInput = Omit<SessionEditAndResendSpec, 'inputConfig'> & {
   inputConfig: SessionTurnInputConfig;
@@ -105,7 +105,8 @@ export class SessionEditAndResendService {
       );
     }
 
-    const history = readSessionHistory(sessionDoc.sessionData.history);
+    const backend = await createSessionBackend(sessionDoc, meta);
+    const history = await backend.readHistory();
     const lastUser = lastUserIndex(history);
     if (history[lastUser]?.id === spec.replacementUserTurnId) {
       return this.success(spec);
@@ -182,7 +183,7 @@ export class SessionEditAndResendService {
 
         const [freshMeta, freshHistory] = await Promise.all([
           sessionDoc.getMetaState(),
-          readSessionHistory(sessionDoc.sessionData.history),
+          backend.readHistory(),
         ]);
         const freshEditable = resolveEditableTail(freshHistory, spec.expectedUserTurnId);
         if (!freshMeta || !freshEditable || freshEditable.forkTurnId !== editable.forkTurnId) {
@@ -330,7 +331,7 @@ export class SessionEditAndResendService {
         // One domain command re-runs the eligibility and active-goal rules against
         // the history read inside the store's commit; the caller cannot supply a
         // history array or a raw writer callback.
-        const rollbackResult = await sessionDoc.sessionData.commands.replaceEditableTail({
+        const rollbackResult = await backend.replaceEditableTail({
           expectedUserTurnId: spec.expectedUserTurnId,
           expectedForkTurnId: commitEditable.forkTurnId,
           replacement,

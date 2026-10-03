@@ -34,6 +34,13 @@ taking columns and float over the content until dismissed, and widening the
 window restores them. Mobile devices keep the breakpoint: the mobile layout
 below it, and the desktop layout when the viewport is wide enough.
 
+The compact navigation sidebar is modal. Opening it moves focus into navigation;
+Tab and Shift+Tab stay within it and background controls cannot receive focus or
+pointer interaction. Escape dismisses the innermost popup or dialog first, then
+navigation. Clicking the navigation backdrop or explicitly closing navigation
+persists the collapse and restores focus to the opening control, or to the content
+scope if that control is no longer usable. Widening releases the modal boundary.
+
 Desktop Settings adapts to its panel width: a narrow panel collapses category
 navigation to its icon rail — the same sidebar column, its labels and group
 headings folded away, rows named for assistive technology and on hover; a wide

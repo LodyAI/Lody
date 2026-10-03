@@ -87,13 +87,12 @@ Command entrypoints, the daemon runner, and session dispatch from the CLI/MCP bo
   when the pointer was NOT yet written (`if (!dispatched)`); rolling back after dispatch deletes an
   already-running session out from under the daemon. Do not reintroduce a hard-fail Streams ack on
   the dispatch write.
-- MCP create takes run config semantically (`modelId`/`reasoningEffort`/`fastMode`/`planMode`),
-  never raw ACP option ids. `@lody/shared` `acp-run-config.ts` owns the mapping onto each agent's
-  advertised option ids, `applyAgentRunConfigSelection` applies it once the target agent's cached
-  capabilities are read, and `validateSessionCreateOptions({ dispatchConfig })` rejects
-  unsupported selections before the Operation is accepted. Durable create acceptance stores each
-  target's resolved effective dispatch config; recovery must use it instead of inheriting again
-  from mutable requester history.
+- MCP create combines semantic controls with explicit `modeId`/`configOptionValues`.
+  Shared `acp-run-config.ts` maps semantic controls; CLI validators check advertised
+  ids, types and values without requiring permission categories. Explicit raw selectors
+  override inherited scalar selectors. Reject conflicting legacy Plan/mode selections.
+  `validateSessionCreateOptions({ dispatchConfig })` validates before acceptance;
+  freeze each effective target config and use it for recovery, never mutable history.
 - Local daemon IPC sends the real control request once; do not restore a health preflight. Native
   `LocalDaemonAvailabilityError` must be thrown outside the Effect runtime boundary so MCP can
   preserve `DAEMON_NOT_RUNNING` versus retryable `DAEMON_BUSY`: a connection refusal means not

@@ -25,6 +25,7 @@ const PERSISTENT_CACHE_NAME = 'lody-session-image-v1';
 const SESSION_IMAGE_FETCH_ACCEPT = 'image/avif,image/webp,image/*,*/*';
 
 let totalCachedBytes = 0;
+let cacheGeneration = 0;
 
 export type SessionImageLoadVariant = 'original' | 'thumbnail';
 
@@ -100,7 +101,7 @@ const writeBlobToPersistentCache = async (downloadUrl: string, blob: Blob): Prom
   }
 };
 
-const writeBlobToMemoryCache = (key: string, blob: Blob): CacheEntry => {
+const writeBlobToMemoryCache = (key: string, blob: Blob, preparedUrl?: string): CacheEntry => {
   const existingEntry = imageCache.get(key);
   if (existingEntry) {
     URL.revokeObjectURL(existingEntry.blobUrl);
@@ -108,7 +109,7 @@ const writeBlobToMemoryCache = (key: string, blob: Blob): CacheEntry => {
     imageCache.delete(key);
   }
 
-  const blobUrl = URL.createObjectURL(blob);
+  const blobUrl = preparedUrl ?? URL.createObjectURL(blob);
   const entry: CacheEntry = {
     key,
     blob,
@@ -149,6 +150,62 @@ type GetSessionImageCacheEntryArgs = {
   thumbnailQuality?: number;
 };
 
+type SessionImageIdentity = Pick<
+  GetSessionImageCacheEntryArgs,
+  'workspaceId' | 'sessionId' | 'imageId'
+>;
+
+const originalCacheKey = ({ workspaceId, sessionId, imageId }: SessionImageIdentity) =>
+  getCacheKey(
+    workspaceId,
+    sessionId,
+    imageId,
+    'original',
+    buildSessionImageDownloadUrl(workspaceId, sessionId, imageId)
+  );
+
+/** Keep uploaded bytes available before the pending preview releases its source. */
+export async function seedSessionImageCache(
+  identity: SessionImageIdentity,
+  blob: Blob,
+  shareSafe = false,
+  signal?: AbortSignal
+): Promise<void> {
+  const generation = cacheGeneration;
+  const dataUrl = shareSafe ? await blobToDataUrl(blob) : undefined;
+  if (generation !== cacheGeneration || signal?.aborted) return;
+  const blobUrl = URL.createObjectURL(blob);
+  try {
+    if (typeof Image !== 'undefined' && typeof Image.prototype.decode === 'function') {
+      const image = new Image();
+      image.src = dataUrl ?? blobUrl;
+      // A new blob URL still needs decoding. Publish it only once the next
+      // image element can paint without a second blank frame.
+      await image.decode();
+    }
+    if (generation !== cacheGeneration || signal?.aborted) {
+      URL.revokeObjectURL(blobUrl);
+      return;
+    }
+    const entry = writeBlobToMemoryCache(originalCacheKey(identity), blob, blobUrl);
+    entry.dataUrl = dataUrl;
+  } catch (error) {
+    URL.revokeObjectURL(blobUrl);
+    throw error;
+  }
+}
+
+/** Synchronous first paint for locally uploaded images; misses retain normal loading. */
+export function peekSessionImageUrl(
+  identity: SessionImageIdentity,
+  shareSafe = false
+): string | null {
+  const entry = imageCache.get(originalCacheKey(identity));
+  if (!entry) return null;
+  touchCacheEntry(entry);
+  return (shareSafe ? entry.dataUrl : entry.blobUrl) ?? null;
+}
+
 const getSessionImageCacheEntry = async (
   args: GetSessionImageCacheEntryArgs
 ): Promise<CacheEntry> => {
@@ -179,6 +236,14 @@ const getSessionImageCacheEntry = async (
   if (cached) {
     touchCacheEntry(cached);
     return cached;
+  }
+
+  // A just-uploaded original already has the exact bytes the thumbnail depicts.
+  // CSS owns the frame's fit; no second request is needed at the send handoff.
+  const original = imageCache.get(originalCacheKey(args));
+  if (original) {
+    touchCacheEntry(original);
+    return original;
   }
 
   const pending = inFlightCache.get(key);
@@ -274,6 +339,7 @@ export const getSessionImageDataUrl = async (
 };
 
 export const clearSessionImageCache = (): void => {
+  cacheGeneration += 1;
   for (const entry of imageCache.values()) {
     URL.revokeObjectURL(entry.blobUrl);
   }

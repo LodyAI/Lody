@@ -15,8 +15,10 @@ Design, invariants I1–I8 and the coverage lemma:
   frames interpolate `screenY`). Layout compensation in `read` is relative
   (`scrollBy`), navigation absolute. No deferred compensation, no origin shift.
 - A transaction ends within two passes of at most two supplementary commits;
-  `lastObserved` records only covered positions. Never add timers, frame retries or a
-  hidden/reveal gate; the viewport is never hidden.
+  `lastObserved` records only covered positions, and `onScroll` fires only for those.
+  A React re-render that did not change the list must not start a new cycle (that
+  layout-effect `onScroll` → setState loop is React #185). Never add timers, frame
+  retries or a hidden/reveal gate; the viewport is never hidden.
 - Keep the layout contract: viewport `overflow-anchor: none` and
   `scrollbar-gutter: stable`; rows container `overflow-y: clip`; no row may use
   `content-visibility: auto` or size itself from the container or its position. Rows

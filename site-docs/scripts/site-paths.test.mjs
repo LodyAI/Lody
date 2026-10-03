@@ -31,6 +31,8 @@ await test('site links preserve query, fragment, files and off-site/app destinat
   const { siteHref, absoluteSiteUrl, absolutePageUrl } = await import('../lib/site-url.mjs');
   for (const [input, expected] of [
     ['/docs', '/docs/'],
+    ['/docs/cli#daemon-mode', '/docs/cli/#daemon-mode'],
+    ['/zh/docs/cli?from=docs#daemon-模式', '/zh/docs/cli/?from=docs#daemon-模式'],
     ['/coding-agent-gui', '/coding-agent-gui/'],
     ['/coding-agent-remote-control#codex-remote', '/coding-agent-remote-control/#codex-remote'],
     ['/zh', '/zh/'],

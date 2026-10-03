@@ -105,10 +105,6 @@ const styles = stylex.create({
     paddingInline: 0,
     justifyContent: 'center',
   },
-  /* The icon-only trigger's glyph leads the shared column instead of sitting
-     centred: one start step lands its box at the trigger edge + one item pad,
-     the same 16px box a labeled trigger's leading glyph holds. */
-  iconOnlyGlyphLead: { marginInlineStart: space[1] },
   /** The model keeps its tail when it truncates: `provider/model` loses the prefix. */
   modelName: { maxWidth: '10rem', direction: 'rtl' },
   /** The "create a Role" mark at the end of the empty Role row. */
@@ -1155,12 +1151,7 @@ export function DesktopPermissionModeButton({
         className={iconOnlyTriggerClassName}
         render={<button type="button" />}
       >
-        {/* The icon-only square still leads the shared column: the start
-            margin puts its 16px glyph box where a labeled trigger's leading
-            glyph sits — the same box the rows' icons land on below. */}
-        <span {...stylex.props(surface.glyph, styles.iconOnlyGlyphLead)}>
-          {permissionModeIcon(value ?? null)}
-        </span>
+        <span {...stylex.props(surface.glyph)}>{permissionModeIcon(value ?? null)}</span>
       </Menu.Trigger>
       <Menu.Content align="start" className="w-max min-w-44 max-w-64">
         <div {...stylex.props(surface.menuList)}>

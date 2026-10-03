@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 
@@ -15,11 +15,25 @@ const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
 const IMAGE_SRC = 'blob:lody/preview-image';
 
 function createBridge(action: 'copy' | 'save' | null) {
+  let finish!: () => void;
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
   return {
-    showMenu: vi.fn(async () => ({ action })),
-    copyToClipboard: vi.fn(async () => ({ copied: true })),
-    saveAs: vi.fn(async () => ({ saved: true as const, path: '/tmp/shot.png' })),
-  } satisfies ImagePreviewExportBridge;
+    finished,
+    showMenu: vi.fn(async () => {
+      if (!action) finish();
+      return { action };
+    }),
+    copyToClipboard: vi.fn(async () => {
+      finish();
+      return { copied: true };
+    }),
+    saveAs: vi.fn(async () => {
+      finish();
+      return { saved: true as const, path: '/tmp/shot.png' };
+    }),
+  } satisfies ImagePreviewExportBridge & { finished: Promise<void> };
 }
 
 function installImageIpc(bridge: ImagePreviewExportBridge) {
@@ -97,44 +111,110 @@ describe('image preview context menu', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    delete (HTMLElement.prototype as Partial<HTMLElement>).inert;
   });
 
   const renderViewer = (onClose: () => void = () => {}) => {
-    root = createRoot(container!);
-    act(() => {
-      root!.render(
+    function Preview() {
+      const [open, setOpen] = useState(true);
+      return (
         <ZoomableImageViewer
-          open
-          onClose={onClose}
+          open={open}
+          onClose={() => {
+            setOpen(false);
+            onClose();
+          }}
           images={[{ key: 'shot', src: IMAGE_SRC, fileName: 'diagram.png' }]}
           index={0}
         />
       );
+    }
+    root = createRoot(container!);
+    act(() => {
+      root!.render(<Preview />);
     });
     const photo = document.querySelector<HTMLImageElement>('img.lody-photo-slider-image');
     expect(photo).not.toBeNull();
     return photo!;
   };
 
-  /**
-   * Drains the menu → fetch → blob → bridge chain. Every step of it settles on
-   * the microtask/task queue (no timers), so draining the task queue a fixed
-   * number of times is deterministic rather than a timed wait.
-   */
-  const flushAsync = async () => {
-    for (let tick = 0; tick < 5; tick += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-  };
-
-  const rightClick = async (photo: HTMLImageElement) => {
+  const rightClick = async (photo: HTMLImageElement, finished = Promise.resolve()) => {
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
     await act(async () => {
       photo.dispatchEvent(event);
-      await flushAsync();
+      await finished;
     });
     return event;
   };
+
+  it.each([IMAGE_SRC, undefined])(
+    'isolates the gallery and restores its opener with source %s',
+    async (src) => {
+      vi.useFakeTimers();
+      // jsdom lacks the browser's inert property and native layout/focus traversal.
+      Object.defineProperty(HTMLElement.prototype, 'inert', {
+        configurable: true,
+        get() {
+          return this.hasAttribute('inert');
+        },
+        set(value: boolean) {
+          this.toggleAttribute('inert', value);
+        },
+      });
+      const images = [
+        { key: 'one', src },
+        { key: 'two', src },
+        { key: 'three', src },
+      ];
+      function Gallery() {
+        const [open, setOpen] = useState(false);
+        const [index, setIndex] = useState(0);
+        return (
+          <>
+            <button onClick={() => setOpen(true)}>before-vs-after.png</button>
+            <button>before.png</button>
+            <ZoomableImageViewer
+              open={open}
+              onClose={() => setOpen(false)}
+              images={images}
+              index={index}
+              onIndexChange={setIndex}
+            />
+          </>
+        );
+      }
+      root = createRoot(container!);
+      act(() => root!.render(<Gallery />));
+      const [opener, background] = container!.querySelectorAll('button');
+      opener!.focus();
+      await act(async () => opener!.click());
+      await act(async () => vi.advanceTimersByTimeAsync(20));
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]');
+      expect(dialog).not.toBeNull();
+      const close = dialog!.querySelector<HTMLButtonElement>(
+        'button[aria-label="Close image preview"]'
+      )!;
+      const next = dialog!.querySelector<HTMLButtonElement>('button[aria-label="Next image"]')!;
+      expect(close.tagName).toBe('BUTTON');
+      expect(next.tagName).toBe('BUTTON');
+      expect(document.activeElement).toBe(close);
+      expect(background!.closest('[inert]')).not.toBeNull();
+      await act(async () => {
+        close.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
+        );
+      });
+      expect(dialog!.textContent).toContain('2 / 3');
+      await act(async () => {
+        close.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+        );
+      });
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(background!.closest('[inert]')).toBeNull();
+      expect(document.activeElement).toBe(opener);
+    }
+  );
 
   it('copies the previewed image when the menu returns copy', async () => {
     const bridge = createBridge('copy');
@@ -142,7 +222,7 @@ describe('image preview context menu', () => {
     stubImageFetch('image/png');
 
     const photo = renderViewer();
-    const event = await rightClick(photo);
+    const event = await rightClick(photo, bridge.finished);
 
     expect(event.defaultPrevented).toBe(true);
     expect(bridge.showMenu).toHaveBeenCalledTimes(1);
@@ -162,7 +242,7 @@ describe('image preview context menu', () => {
     stubImageFetch('image/png');
 
     const photo = renderViewer();
-    await rightClick(photo);
+    await rightClick(photo, bridge.finished);
 
     expect(bridge.saveAs).toHaveBeenCalledTimes(1);
     expect(bridge.saveAs.mock.calls[0]![0]!.fileName).toBe('diagram.png');
@@ -175,7 +255,8 @@ describe('image preview context menu', () => {
     stubImageFetch('image/png');
 
     const photo = renderViewer();
-    await rightClick(photo);
+    const event = await rightClick(photo, bridge.finished);
+    expect(event.defaultPrevented).toBe(true);
 
     expect(bridge.showMenu).toHaveBeenCalledTimes(1);
     expect(bridge.copyToClipboard).not.toHaveBeenCalled();
@@ -205,7 +286,7 @@ describe('image preview context menu', () => {
       await vi.advanceTimersByTimeAsync(350);
     });
 
-    expect(onClose).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull();
   });
 });
 

@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import * as stylex from '@stylexjs/stylex';
@@ -63,7 +64,7 @@ const MONO = 'var(--font-mono, ui-monospace, monospace)';
 const styles = stylex.create({
   quietLine: {
     margin: 0,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: type.leading,
     color: colors.secondaryLabel,
     textAlign: 'center',
@@ -114,7 +115,7 @@ const styles = stylex.create({
     textAlign: 'center',
   },
   emptyIcon: { width: '24px', height: '24px', color: colors.tertiaryLabel },
-  emptyCopy: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  emptyCopy: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   pane: {
     display: 'flex',
     flexDirection: 'column',
@@ -175,7 +176,7 @@ const styles = stylex.create({
   titleMobile: { fontSize: '1.125em', textAlign: 'center' },
   ping: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1.5] },
   pushEnd: { marginInlineStart: 'auto' },
-  latency: { fontFamily: MONO, fontSize: type.caption, color: colors.secondaryLabel },
+  latency: { fontFamily: MONO, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   share: {
     display: 'flex',
     flexShrink: 0,
@@ -184,7 +185,7 @@ const styles = stylex.create({
     marginInlineStart: 'auto',
     paddingInlineStart: space[2],
   },
-  shareLabel: { whiteSpace: 'nowrap', fontSize: type.caption, color: colors.secondaryLabel },
+  shareLabel: { whiteSpace: 'nowrap', fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   /** Between the management actions and the destructive ones: one structural line. */
   groupRule: {
     flexShrink: 0,
@@ -218,8 +219,8 @@ const styles = stylex.create({
     marginTop: space[3],
   },
   updateText: { minWidth: 0 },
-  updateTitle: { fontSize: type.caption, color: colors.label },
-  updateVersion: { fontFamily: MONO, fontSize: type.caption, color: colors.secondaryLabel },
+  updateTitle: { fontSize: uiText.footnoteSize, color: colors.label },
+  updateVersion: { fontFamily: MONO, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   body: { flexGrow: 1, minHeight: 0, overflowY: 'auto' },
   bodyInAccordion: { overflowY: 'visible' },
 });

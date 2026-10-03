@@ -11,6 +11,12 @@ import {
 import { createConversationSession } from '../src/lib/conversation-view';
 import { createSessionSendResources } from '../src/lib/session-send-resources';
 import { finalizePreparedSend } from '../src/lib/session-attachment-preparation';
+import {
+  clearSessionImageCache,
+  peekSessionImageUrl,
+  getSessionImageBlobUrl,
+} from '../src/lib/session-image-cache';
+import type { WorkspaceId } from '@lody/shared';
 import { createWorkspacePendingSends } from '../src/providers/workspace-pending-sends';
 import type { PendingSessionSend, PendingSessionSends } from '../src/lib/session-pending-sends';
 import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
@@ -18,7 +24,8 @@ import type { SessionSendRuntime } from '../src/lib/session-send-delivery';
 const upload = vi.hoisted(() => ({
   run: undefined as undefined | ((file: File, signal: AbortSignal) => Promise<unknown>),
 }));
-vi.mock('../src/lib/session-image-upload', () => ({
+vi.mock('../src/lib/session-image-upload', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/session-image-upload')>()),
   uploadSessionImage: (args: { file: File; signal: AbortSignal }) =>
     upload.run!(args.file, args.signal),
 }));
@@ -58,6 +65,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
   Object.assign(local, { enabled: false, machineId: null, files: [], fail: false });
   upload.run = undefined;
+  clearSessionImageCache();
 });
 
 const SESSION = 'session' as SessionId;
@@ -223,6 +231,22 @@ it('holds an attachment send out of the document until it is ready, then writes 
   finish.resolve();
   await f.delivered('message');
   expect(f.pending.getSnapshot()).toEqual([]);
+  const cachedUrl = peekSessionImageUrl({
+    workspaceId: 'workspace' as WorkspaceId,
+    sessionId: SESSION,
+    imageId: 'image',
+  });
+  expect(cachedUrl).toMatch(/^blob:/);
+  expect(
+    await getSessionImageBlobUrl({
+      workspaceId: 'workspace' as WorkspaceId,
+      sessionId: SESSION,
+      imageId: 'image',
+      token: 'token',
+      variant: 'thumbnail',
+      thumbnailWidth: 160,
+    })
+  ).toBe(cachedUrl);
   const [turn] = f.turns();
   expect(turn?.id).toBe('message');
   expect(turn?.items).toEqual(
@@ -232,6 +256,27 @@ it('holds an attachment send out of the document until it is ready, then writes 
     ])
   );
   expect(f.metas.get(getSessionRoomId(SESSION))?.latestUserMsgId).toBe('message');
+});
+
+it('preserves successful upload and publication when preview caching fails', async () => {
+  const f = fixture();
+  upload.run = async (file) => ready(file);
+  const objectUrl = vi.spyOn(URL, 'createObjectURL').mockImplementationOnce(() => {
+    throw new Error('Preview cache unavailable');
+  });
+  try {
+    f.pending.enqueue(send('cached-failure', ['image']));
+    await f.delivered('cached-failure');
+    expect(f.pending.getSnapshot()).toEqual([]);
+    expect(f.turns()[0]?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'image', imageId: 'image' }),
+        expect.objectContaining({ type: 'text', text: 'keep cached-failure' }),
+      ])
+    );
+  } finally {
+    objectUrl.mockRestore();
+  }
 });
 
 it('keeps successful attachment receipts, blocks later sends, and retries only the failure', async () => {

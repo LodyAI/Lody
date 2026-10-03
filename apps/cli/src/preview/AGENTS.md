@@ -44,7 +44,7 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   and clean up this endpoint, never a replacement created while the probe awaited.
 - `PreviewService` now creates only `QuickTunnelSession` remote owners. The owner
   releases its proxy and child on cancellation, failed readiness, idle expiry or
-  process exit. Its `closed` result is a cleanup barrier, not just a signal sent.
+  process exit. Its `closed` result joins cleanup; `cleanupFailed` distinguishes resource failure from a network error.
   Lifecycle writes are serialized per Session; revoke cancels acquisition before
   joining that queue. One-hour activity deadlines stay in memory. Machine slots
   span workspaces in the singleton Worker, never a PID registry on disk.

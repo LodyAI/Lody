@@ -90,13 +90,20 @@ you can also merge it from Lody and delete the branch after merge when GitHub st
 
 ## Auto-Archive Finished PR Sessions
 
-In **Settings** -> **General**, enable auto-archive rules for PR-linked sessions:
+In **Settings** -> **Preferences** -> **Auto-archive sessions**, enable rules for PR-linked sessions:
 
 - archive when the PR is merged
 - archive when the PR is closed
 
-Auto-archive keeps completed PR work out of the active sidebar while preserving the conversation
-and worktree until you permanently delete the archived session.
+These rules apply to sessions you own when this device observes a PR status transition; opening
+Lody with an already merged or closed PR does not retroactively archive its session.
+
+Auto-archive uses the same lifecycle as manual archive: the conversation remains in the archive
+list, while the owning machine can reclaim the Lody-managed worktree directory before permanent
+deletion. The local branch is kept, and pending non-ignored changes are backed up in a commit
+before removal. Ignored files, such as `.env` and build output, can be discarded. Save files you
+need outside the worktree before enabling these rules. See
+[Worktree retention and recovery](/docs/worktrees#automatic-cleanup) for the protection boundary.
 
 ## Commit and Push for PR Sessions
 

@@ -4,6 +4,7 @@ import { createHistoryWriter, parseSessionNotification, type SessionId } from '@
 import { SessionDocument } from '../src/lib/loro/doc';
 import { composeTestSessionDoc } from './session-doc-fixture';
 import { appendACPNotificationsToAssistantEntry } from '../src/lib/acp/history';
+import { createSessionBackend } from '../src/session/session-backend';
 
 describe('targeted history writes', () => {
   it('limits targeted callbacks, preserves old tool ownership, and creates missing targets', async () => {
@@ -17,6 +18,7 @@ describe('targeted history writes', () => {
     } as never);
     // The production storage entry (control-plane Mirror + one shared writer).
     composeTestSessionDoc(doc, { doc: loro });
+    const backend = await createSessionBackend(doc, { historyBackend: 'loro' });
     const writer = createHistoryWriter(loro);
     try {
       writer.append({
@@ -42,13 +44,15 @@ describe('targeted history writes', () => {
       await appendACPNotificationsToAssistantEntry(
         doc,
         notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: ' next' } }),
-        'target'
+        'target',
+        { backend }
       );
       expect(writer.read('target')?.items).toEqual([{ type: 'text', text: 'start next' }]);
       await appendACPNotificationsToAssistantEntry(
         doc,
         notify({ sessionUpdate: 'tool_call_update', toolCallId: 'old-tool', status: 'completed' }),
-        'target'
+        'target',
+        { backend }
       );
       expect(writer.read('older')?.items?.[0]).toMatchObject({
         toolCallId: 'old-tool',
@@ -61,7 +65,8 @@ describe('targeted history writes', () => {
           sessionUpdate: 'agent_message_chunk',
           content: { type: 'text', text: 'created' },
         }),
-        'new-target'
+        'new-target',
+        { backend }
       );
       expect(writer.read('new-target')?.items).toEqual([{ type: 'text', text: 'created' }]);
       const version = loro.version().toJSON();

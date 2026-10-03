@@ -316,6 +316,7 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
       onOpenSession={openSession}
       contextForRow={(item) => ({
         machine: machines.get(item.machineId as never)?.name ?? item.machineId,
+        timeZone: machines.get(item.machineId as never)?.timeZone,
         agent: agents.find((a) => a.id === item.agentConfigId)?.name ?? item.agentConfigId,
         project: !item.projectKey
           ? null

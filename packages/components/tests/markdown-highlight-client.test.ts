@@ -48,6 +48,20 @@ describe('markdown highlight client', () => {
     expect(fake.received).toHaveLength(3);
   });
 
+  it('keeps core and extended language requests separate', async () => {
+    const fake = createFakeWorker();
+    const client = createMarkdownHighlightClient(() => fake.worker);
+
+    const core = client.highlight('x', 'coq', false);
+    const extended = client.highlight('x', 'coq', true);
+    expect(fake.received.map((request) => request.extendedLanguagesEnabled)).toEqual([false, true]);
+
+    fake.reply({ id: fake.received[0]!.id, tokens: tokensFor('core') });
+    fake.reply({ id: fake.received[1]!.id, tokens: tokensFor('extended') });
+    await expect(core).resolves.toEqual(tokensFor('core'));
+    await expect(extended).resolves.toEqual(tokensFor('extended'));
+  });
+
   it('rejects a failed tokenization without disabling the worker', async () => {
     const fake = createFakeWorker();
     const client = createMarkdownHighlightClient(() => fake.worker);

@@ -76,6 +76,7 @@ export default defineConfig({
       input: {
         index: path.resolve(__dirname, 'src/index.ts'),
         'cloudflared-worker': path.resolve(__dirname, 'src/preview/cloudflared-worker.ts'),
+        'baguette-worker': path.resolve(__dirname, 'src/ios-simulator/baguette-worker.ts'),
         'codex-acp': path.resolve(__dirname, 'src/codex-acp-entry.ts'),
         'claude-acp': path.resolve(__dirname, 'src/claude-acp-entry.ts'),
         'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),
