@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-04-sidebar-footer-density.zh.md)
 
+PR: [#1239](https://github.com/LodyAI/Lody/pull/1239)
+
 ## Abstract
 
 The desktop workspace trigger was 32px high beside 24px action buttons, making

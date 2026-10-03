@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-04-sidebar-footer-density.md)
 
+PR: [#1239](https://github.com/LodyAI/Lody/pull/1239)
+
 ## 摘要
 
 桌面 workspace 入口原来高 32px，旁边的操作按钮只有 24px，导致悬停区域显得过厚。
