@@ -12,7 +12,7 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { OPEN_SOURCE_ATTRIBUTION_BUNDLE } from '@/lib/open-source-attributions.generated';
-import { interfaceFontNotices } from '@/tailwind/interface-fonts/notices';
+import { interfaceFontNotices } from '../../tailwind/interface-fonts/notices';
 import type { OpenSourceAttributionEntry } from '@/lib/open-source-attributions';
 import { Badge, Button, ScrollArea, Dialog } from '@/ui';
 import { Accordion } from '@lody/ui/accordion';

@@ -47,6 +47,20 @@ occur at build time only, hashes fail closed, existing generated assets are reus
 only after recipe/content/file verification, and the shared CI setup supplies uv.
 No hosted product capabilities or telemetry are enabled.
 
+Build integration also needs the pinned adapter manifests and root lockfile to
+agree. Baseline `e5b7bde30` changed Codex/Core gitlinks without synchronizing the
+Codex importer; main `9bdac2851` still had that mismatch. Synchronize only that
+importer and its required peer snapshots, retaining unrelated resolutions.
+pnpm 10.20 takes the first matching release-age name rule, so the already-selected
+Codex versions and platform aliases share one exact-version union, not a wildcard.
+No ACP source or submodule pin changes belong to this repair.
+
+Built Storybook exposed two existing barrel cycles: chat selectors → shared
+selectors → chat selectors, and Appearance → settings barrel → Appearance.
+Use the same selector leaves and existing `settingsSurface.container` directly;
+there is no new compatibility rewrite, configuration behavior or visual token.
+The font notice import is relative so Electron's narrower type paths resolve it.
+
 ## Evidence and limits
 
 [Browser regression](../../../../packages/components/tests/e2e/interface-typography.spec.ts)
@@ -63,15 +77,24 @@ code and is excluded from the change. The implementation budget is 3 MiB and at
 most three first-screen Geist/vivo requests; cached bodies are reused and initial
 CLS is below 0.05. Vite dev uses `no-store`, so built assets own the cache test.
 macOS Chromium results do not prove rendering on every OS or desktop packaging.
-Executed checks: nine live Chromium regressions and twenty related component
-tests passed; deterministic font checks passed. Built font transport in a frozen
-DOM/CSS copy of the actual expanded components measured 2,654,308 first-screen
-Geist/vivo bytes, zero warm transferred bytes and one 318,716-byte rare-text request.
+Nine Chromium regressions pass against the complete built Storybook runtime,
+including five tiers and portals; deterministic font checks pass. The complete
+dense React scene measures 2,654,308 first-screen Geist/vivo bytes, zero warm
+transferred bytes and one 318,716-byte rare-text request.
 The same scene used 44,430,472 bytes for original TTF, 23,079,052 for one WOFF2,
-and 20,493,224 across nine mechanical partitions. Initial CLS was 0.04857 versus
-0.04846 before. These are loopback HTTP measurements, not remote-network or
-packaged-desktop results. Static Storybook builds succeeded but their runtime
-stalled in story preparation; live interactions were tested on the dev preview.
-Full repository checks/build were blocked by missing dependencies in this nested
-worktree; existing ACP links also fail docs/boundary checks. They are not passes.
+and 20,493,224 across nine mechanical partitions. Initial CLS is 0.02886 versus
+0.02861 before. The earlier frozen DOM result was transport-only and is superseded
+for runtime acceptance. These are loopback HTTP measurements, not remote-network
+or packaged-installer results. Full OSS desktop and Storybook builds, frozen
+installation and public/platform boundary checks pass. The isolated real Electron
+Appearance scenario passes, and its unit suite passes 199 tests.
+
+The full repository check passes with `NODE_ENV=test` and
+`NODE_OPTIONS=--no-experimental-webstorage` on Node 26.10.0. Plain Node 26 reproduces
+the unchanged boot-shell storage-spy failure (one of 4,759 component tests);
+disabling Node's experimental storage restores the browser/jsdom boundary without
+changing product or test code. The installed Node 22 binary cannot start because
+its Homebrew simdutf library is missing, so local Node 22 execution is unverified.
+Docs check still reports six pre-existing links into uninitialized, root-excluded
+Kimi/Pi checkouts; do not report that check as passed.
 Related sizing decision: [interface typography](../../implemented/simplification/2026-10-03-interface-typography.md).

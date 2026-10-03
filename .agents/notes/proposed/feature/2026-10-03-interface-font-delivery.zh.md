@@ -36,6 +36,17 @@ vivo 协议未明确授权格式转换或子集化；仅作传输优化的解释
 不匹配则失败；复用资产前核对配方、内容及文件 hash，共享 CI 工具链安装 uv。
 不启用产品云能力或遥测。
 
+构建还要求固定的 adapter manifest 与根锁文件一致。基线 `e5b7bde30` 更新
+Codex/Core gitlink，却未同步 Codex importer；main `9bdac2851` 仍有此缺口。
+只同步该 importer 及必要 peer snapshot，保留无关依赖解析。pnpm 10.20 对发布时间
+例外只取第一条同包规则，因此把已选 Codex 版本和平台 alias 合成一个确切版本
+并集，不开放通配例外，不改 ACP 源码或子模块 pin。
+
+完整 Storybook 暴露两个既有汇总入口循环：chat selectors → shared selectors →
+chat selectors，以及 Appearance → settings barrel → Appearance。直接引用同一
+selector 与既有 `settingsSurface.container`，不加兼容重写，不改配置行为或样式
+token。字体署名模块改用相对导入，使 Electron 较窄的类型路径也能解析。
+
 ## 证据与边界
 
 [浏览器回归](../../../../packages/components/tests/e2e/interface-typography.spec.ts)
@@ -48,12 +59,19 @@ vivo 协议未明确授权格式转换或子集化；仅作传输优化的解释
 不是生产代码，也不进入该改动。实现预算为首屏 3 MiB、最多三个 Geist/vivo 请求，
 暖缓存复用正文，初始 CLS 低于 0.05。Vite 开发服务使用 `no-store`，缓存验收以构建
 资产为准。macOS Chromium 结果不能证明全部平台或桌面打包结果。
-已执行：九项真实 Chromium 回归、二十项组件相关测试及确定性字体检查通过。
-构建字体通过真实展开组件的冻结 DOM/CSS 测得首屏 Geist/vivo 2,654,308 字节，
+九项 Chromium 回归已在完整构建的 Storybook 运行时通过，覆盖五档字号与 portal；
+确定性字体检查通过。完整复杂 React 页面测得首屏 Geist/vivo 2,654,308 字节，
 暖缓存零传输，生僻字单独新增 318,716 字节。相同场景的原 TTF 为 44,430,472 字节，
 单个 WOFF2 为 23,079,052 字节，机械分包请求九包共 20,493,224 字节。
-初始 CLS 为 0.04857，before 为 0.04846。结果来自 loopback HTTP，不代表远程网络
-或桌面安装包。静态 Storybook 构建成功，但运行时停在 preparing；交互使用开发
-预览验收。嵌套 worktree 缺依赖，完整仓库检查/构建未通过；现有 ACP 链接还会使
-docs/边界检查失败，不得把这些项算作通过。
+初始 CLS 为 0.02886，before 为 0.02861。此前冻结 DOM 结果仅属传输验证，本轮
+运行时证据替代其验收边界。结果来自 loopback HTTP，不代表远程网络或打包后的
+安装程序。完整 OSS 桌面与 Storybook 构建、冻结安装、公开/平台边界检查通过；
+隔离的真实 Electron Appearance 场景通过，Electron 单元测试 199 项通过。
+
+Node 26.10.0 下，完整仓库检查在 `NODE_ENV=test`、
+`NODE_OPTIONS=--no-experimental-webstorage` 时通过。普通 Node 26 会复现未改动的
+boot-shell storage spy 用例失败（4,759 个组件测试中的一个）；关闭 Node 实验性
+storage 后恢复浏览器/jsdom 边界，没有修改产品或测试源码。已装 Node 22 因缺
+Homebrew simdutf 动态库无法启动，本机 Node 22 未验。docs check 仍有六项既有
+链接指向未初始化、根工作区排除的 Kimi/Pi checkout，不将该检查算作通过。
 相关字号决策：[界面文字层级](../../implemented/simplification/2026-10-03-interface-typography.zh.md)。
