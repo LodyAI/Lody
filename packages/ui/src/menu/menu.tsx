@@ -153,7 +153,7 @@ function Row({
 }
 
 /** The caller's glyph, in the box the rules give it. */
-function ItemIcon({ icon, tone }: { icon: ReactNode; tone?: MenuItemTone }) {
+function ItemIcon({ icon, tone }: { icon: MenuRowProps['icon']; tone?: MenuItemTone }) {
   return (
     <span
       {...stylex.props(
@@ -192,7 +192,7 @@ function ItemSpacer() {
   return <span aria-hidden="true" {...stylex.props(surface.itemIcon)} />;
 }
 
-function leadingFor(icon: ReactNode, inset: boolean | undefined, tone?: MenuItemTone) {
+function leadingFor(icon: MenuRowProps['icon'], inset: boolean | undefined, tone?: MenuItemTone) {
   if (icon != null) return <ItemIcon icon={icon} tone={tone} />;
   return inset ? <ItemSpacer /> : null;
 }

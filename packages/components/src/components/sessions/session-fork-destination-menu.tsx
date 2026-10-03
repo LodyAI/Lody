@@ -1,4 +1,4 @@
-import { type ComponentProps, type ReactElement, type ReactNode, useState } from 'react';
+import { type ComponentProps, type ReactElement, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, Folder } from 'lucide-react';
 
