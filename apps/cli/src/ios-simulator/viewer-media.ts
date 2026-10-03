@@ -76,10 +76,10 @@ function connect(){
 }
 function flushMove(){
   cancelAnimationFrame(moveRequest);moveRequest=undefined;
-  if(queuedMove){send({...queuedMove,type:'touch1-move'});queuedMove=undefined}
+  if(queuedMove){send(queuedMove);queuedMove=undefined}
 }
 function queueMove(){
-  queuedMove={...point};if(moveRequest===undefined)moveRequest=requestAnimationFrame(flushMove);
+  queuedMove=touchMessage('move');if(moveRequest===undefined)moveRequest=requestAnimationFrame(flushMove);
 }
 function closeMedia(){
   clearTimeout(retryTimer);retryTimer=undefined;disposeVideo();

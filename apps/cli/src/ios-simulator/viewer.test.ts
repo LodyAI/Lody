@@ -561,6 +561,51 @@ describe('simulator viewer input', () => {
     expect(v.sent.at(-1)).toEqual({ type: 'touch1-up', x: 600, y: 800, width: 1200, height: 2000 });
   });
 
+  it('switches to paired coordinates, coalesces moves and waits for both fingers to lift', () => {
+    const v = viewer();
+    v.canvas.onpointerdown(v.pointer({ clientX: 200, clientY: 400 }));
+    v.canvas.onpointerdown(v.pointer({ pointerId: 2, clientX: 300, clientY: 600 }));
+    expect(v.sent.map((x) => x.type)).toEqual(['touch1-down', 'touch1-up', 'touch2-down']);
+    expect(v.sent.at(-1)).toMatchObject({
+      x1: 200,
+      y1: 700,
+      x2: 400,
+      y2: 1100,
+      width: 1200,
+      height: 2000,
+    });
+    v.canvas.onpointermove(v.pointer({ clientX: 150, clientY: 350 }));
+    v.canvas.onpointermove(v.pointer({ pointerId: 2, clientX: 350, clientY: 650 }));
+    v.canvas.onpointerdown(v.pointer({ pointerId: 3 }));
+    v.canvas.onpointerup(v.pointer({ pointerId: 2, clientX: 350, clientY: 650 }));
+    expect(v.sent.slice(-2)).toEqual([
+      { type: 'touch2-move', x1: 100, y1: 600, x2: 500, y2: 1200, width: 1200, height: 2000 },
+      { type: 'touch2-up', x1: 100, y1: 600, x2: 500, y2: 1200, width: 1200, height: 2000 },
+    ]);
+    const count = v.sent.length;
+    v.canvas.onpointermove(v.pointer());
+    v.canvas.onpointerdown(v.pointer({ pointerId: 2 }));
+    v.canvas.onpointerup(v.pointer());
+    expect(v.sent).toHaveLength(count);
+    v.canvas.onpointerdown(v.pointer());
+    expect(v.sent.at(-1)?.type).toBe('touch1-down');
+  });
+
+  it.each(['cancel', 'blur', 'hidden', 'disconnect'])('ends a paired gesture on %s', (reason) => {
+    const v = viewer();
+    v.canvas.onpointerdown(v.pointer());
+    v.canvas.onpointerdown(v.pointer({ pointerId: 2 }));
+    if (reason === 'cancel') v.canvas.onpointercancel(v.pointer({ pointerId: 2 }));
+    else if (reason === 'hidden') v.visibility(false);
+    else if (reason === 'disconnect') v.disconnect();
+    else v.event(reason);
+    if (reason !== 'disconnect') expect(v.sent.at(-1)?.type).toBe('touch2-up');
+    const count = v.sent.length;
+    v.canvas.onpointermove(v.pointer());
+    vi.advanceTimersByTime(16);
+    expect(v.sent).toHaveLength(count);
+  });
+
   it('ignores secondary buttons and cancellation from an unrelated pointer', () => {
     const v = viewer();
     v.canvas.onpointerdown(v.pointer({ button: 2 }));

@@ -15,7 +15,7 @@ Stop ends both endpoints. Remote revocation conservatively ends any operation wi
 a remote attachment, including its local endpoint. Device shutdown is never implied.
 
 The pinned Baguette executable runs in an IPC-owned worker. The native HTTP API
-stays on loopback; only the bound device's MJPEG stream and validated single-pointer
+stays on loopback; only the bound device's MJPEG stream and validated one/two-finger
 input cross `gateway.ts`, along with typed device controls on the private preview
 connection. `device-controls.ts` maps these controls to fixed native endpoints;
 text writes the simulator clipboard through the IPC worker, then sends Cmd-V.
@@ -32,6 +32,15 @@ screenshot transfers one bounded PNG to the parent for saving or staging as a co
 attachment; capture never sends a message automatically. Input text and deep links also
 stay out of workspace RPC. Device controls advertise `iosSimulatorControls: 1` independently
 of lifecycle protocol compatibility.
+
+## Two-finger input
+
+Touchscreens send paired coordinates for pinch, rotation and pan. The second
+finger ends the single-touch gesture before starting a native touch2 gesture.
+Either finger lifting ends the pair; the remaining finger must lift before a new
+gesture starts. Extra pointers are ignored. Moves coalesce per animation frame;
+down/up remain immediate. Cancellation and gateway shutdown release the pair.
+Mouse/wheel input remains single-touch; desktop modifier gestures are not added.
 
 ## Remote WebRTC transport
 
@@ -74,7 +83,7 @@ Supported native artifact: Apple Silicon, macOS 15+, Xcode and an installed iOS
 runtime. Intel has no pinned artifact. Local smoke evidence used Xcode 26.6 / iOS
 26.5 and verified device enumeration, managed installation, real JPEG delivery and
 preview cleanup. Full Electron sidebar, remote Quick Tunnel and mobile E2E remain
-unverified. Multitouch, physical-key forwarding and advanced device configuration are later work.
+unverified. Three-or-more-finger input, physical-key forwarding and advanced device configuration are later work.
 
 ## Maintaining the patched build
 

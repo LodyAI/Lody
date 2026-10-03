@@ -70,12 +70,12 @@ The viewer prefers H.264 with WebCodecs, probes the actual decoder configuration
 and falls back to MJPEG on codec incompatibility or decode failure. Transient transport
 failures get bounded H.264 reconnection before requiring Restore, without permanent
 codec downgrade. Hiding cancels recovery; controls are never replayed. Both use bounded queues
-and receiver feedback, with single-pointer input, including mouse drag and wheel/trackpad scrolling translated into a finger drag.
+and receiver feedback, with one- and two-finger input. Touchscreens support paired pinch, rotation and pan; mouse drag and wheel/trackpad scrolling remain single-finger. A second finger ends the single gesture before starting the pair. Either finger lifting ends the pair, and the remaining finger must lift before a new gesture. Additional fingers are ignored.
 Scroll input and pointer drag never hold separate simultaneous touches; hiding,
 disconnecting or losing focus releases the active gesture.
 Dragging upward from the bottom edge carries a system-edge gesture for Home;
 ordinary wheel scrolling remains an in-app gesture.
-Multi-touch, physical-key forwarding and advanced device configuration remain later work.
+Three-or-more-finger input, physical-key forwarding and advanced device configuration remain later work.
 Each new operation acknowledges a portrait baseline; reconnecting the same operation preserves rotation.
 Readiness separates preparation/transport from the first decoded frame.
 

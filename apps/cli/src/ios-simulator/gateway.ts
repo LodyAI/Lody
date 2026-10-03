@@ -21,7 +21,7 @@ import { createSimulatorDeviceControls } from './device-controls';
 import type { SimulatorHostControl } from './host-controls';
 import { SimulatorFrameFlow, jpegDimensions, simulatorScale } from './frame-flow';
 
-const Input = z
+const SingleInput = z
   .object({
     type: z.enum(['touch1-down', 'touch1-move', 'touch1-up']),
     x: z.number().finite().min(0).max(16384),
@@ -32,6 +32,19 @@ const Input = z
   })
   .strict()
   .refine((v) => v.x <= v.width && v.y <= v.height);
+const DualInput = z
+  .object({
+    type: z.enum(['touch2-down', 'touch2-move', 'touch2-up']),
+    x1: z.number().finite().min(0).max(16384),
+    y1: z.number().finite().min(0).max(16384),
+    x2: z.number().finite().min(0).max(16384),
+    y2: z.number().finite().min(0).max(16384),
+    width: z.number().int().min(1).max(16384),
+    height: z.number().int().min(1).max(16384),
+  })
+  .strict()
+  .refine((v) => v.x1 <= v.width && v.x2 <= v.width && v.y1 <= v.height && v.y2 <= v.height);
+const Input = z.union([SingleInput, DualInput]);
 const Heartbeat = z.object({ type: z.literal('heartbeat') }).strict();
 const MediaMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('keyframe-request') }).strict(),
@@ -483,7 +496,13 @@ export async function createSimulatorGateway(options: {
           upstream.once('close', finish);
           client.terminate();
           if (upstream.readyState === WebSocket.OPEN) {
-            if (touch) upstream.send(JSON.stringify({ ...touch, type: 'touch1-up' }));
+            if (touch)
+              upstream.send(
+                JSON.stringify({
+                  ...touch,
+                  type: touch.type.startsWith('touch2-') ? 'touch2-up' : 'touch1-up',
+                })
+              );
             touch = undefined;
             // close() drains the touch-up before its Close frame; terminate() would discard it.
             upstream.close();
@@ -551,25 +570,30 @@ export async function createSimulatorGateway(options: {
           return;
         }
         const input = parsed.data;
-        if ((input.type === 'touch1-down' && touch) || (input.type !== 'touch1-down' && !touch))
+        const down = input.type.endsWith('-down');
+        if ((down && touch) || (!down && !touch)) return;
+        if (touch && input.type.slice(0, 6) !== touch.type.slice(0, 6)) {
+          close();
           return;
-        // An edge belongs to the gesture's starting point, never a mid-drag switch.
+        }
+        // An edge belongs to a single-finger gesture's starting point.
         if (
-          (input.type === 'touch1-down' && input.edge && input.y < input.height * 0.93) ||
-          (touch && input.edge !== touch.edge)
+          'x' in input &&
+          ((down && input.edge && input.y < input.height * 0.93) ||
+            (touch && 'x' in touch && input.edge !== touch.edge))
         ) {
           close();
           return;
         }
         invalidateStill();
-        touch = input.type === 'touch1-up' ? undefined : input;
+        touch = input.type.endsWith('-up') ? undefined : input;
         options.renew();
         if (upstream.bufferedAmount > 64 * 1024) {
           close();
           return;
         }
         upstream.send(JSON.stringify(input));
-        if (input.type !== 'touch1-move') videoFlow?.prioritizeInteraction(now());
+        if (!input.type.endsWith('-move')) videoFlow?.prioritizeInteraction(now());
       });
       upstream.on('message', (data, binary) => {
         if (shuttingDown || !options.active()) {
