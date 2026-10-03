@@ -34,3 +34,5 @@ Translation: current
 ## 独立 CI 集成
 
 CI 检查与 main 的合并结果，其中 Codex ACP 子模块需要 SDK ~1.5.0、ajv 和 Vitest 5。必须在独立克隆中根据这些固定清单刷新公共锁文件；嵌入私有工作区的安装使用另一份锁文件，不能验证此边界。保留七天依赖等待规则，仅为已选用的 werift ASN.1/mediabunny 和 main 的 Codex 版本添加精确例外。pnpm 10.20 只使用同包第一条匹配规则，因此 Codex 的多个精确版本与平台变体须合并为一个版本联合列表。确认锁文件保留各平台可选包，并验证独立 frozen 安装。
+
+CLI 打包容量：WebRTC 使单体入口的 sourcemap 超出 2 GiB 构建预算；临时消融 RTC 后构建恢复。按 npm 包分出 vendor chunk，并单独放置 CommonJS 辅助代码，保留 Rollup 传递依赖归属以避免辅助代码经入口形成循环。保留 sourcemap 和平铺 worker 文件名。按需加载 RTC、排除源码内容及单个依赖分包均未解决超限；单一全依赖 chunk 会耦合 worker 加载，未采用。验证实际产物，不仅验证编译。
