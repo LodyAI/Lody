@@ -28,6 +28,9 @@ import {
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { control, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Kbd } from '@lody/ui/kbd';
 import { Tooltip } from '@lody/ui/tooltip';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
@@ -299,6 +302,40 @@ export interface LoroSidebarProps {
  */
 const COLLAPSE_DRAG_THRESHOLD = 160;
 
+const footerStyles = stylex.create({
+  desktop: { columnGap: space[1] },
+  workspaceControl: {
+    width: '100%',
+    minWidth: 0,
+    justifyContent: 'flex-start',
+    gap: space[2],
+    textAlign: 'start',
+  },
+  workspaceNameplate: {
+    display: 'flex',
+    alignItems: 'center',
+    height: control.small,
+    paddingInline: space[2],
+    boxSizing: 'border-box',
+    fontSize: text.subheadlineSize,
+    lineHeight: 1,
+    color: colors.secondaryLabel,
+    userSelect: 'none',
+  },
+  actions: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: space[1],
+  },
+  selectedAction: {
+    display: 'inline-flex',
+    backgroundColor: colors.selectedFill,
+    borderRadius: radius.small,
+  },
+  selectedMobileAction: { borderRadius: radius.large },
+});
+
 const defaultLabels: LoroSidebarLabels = {
   home: 'Home',
   schedules: 'Schedules',
@@ -493,18 +530,34 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
   ref
 ) {
   const isMobile = useIsMobile();
-  return (
+  const button = (
     <Button
       ref={ref}
       type="button"
       variant="ghost"
-      icon
-      className={cn(getLoroSidebarFooterIconButtonClassName(isMobile, active), className)}
+      size="small"
+      icon={!isMobile}
+      aria-label={label}
+      aria-current={active ? 'page' : undefined}
+      className={cn(isMobile && 'h-12 w-12', className)}
       {...buttonProps}
     >
-      {children}
+      {isMobile ? (
+        <span className="flex size-5 items-center justify-center">{children}</span>
+      ) : (
+        children
+      )}
       <span className="sr-only">{label}</span>
     </Button>
+  );
+  return active ? (
+    <span
+      {...stylex.props(footerStyles.selectedAction, isMobile && footerStyles.selectedMobileAction)}
+    >
+      {button}
+    </span>
+  ) : (
+    button
   );
 });
 
@@ -705,20 +758,6 @@ export function getLoroSidebarFooterClassName(isMobile: boolean): string {
       ? 'pl-[calc(6px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-1 pb-2'
       : 'px-1.5 py-1',
     'border-sidebar-border'
-  );
-}
-
-export function getLoroSidebarFooterIconButtonClassName(isMobile: boolean, active = false): string {
-  return cn(
-    isMobile
-      ? 'h-12 w-12 rounded-xl [&_svg]:h-5 [&_svg]:w-5'
-      : 'h-6 w-6 rounded-md [&_svg]:h-3.5 [&_svg]:w-3.5',
-    'transition-colors focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
-    // A 12% foreground fill: the row selection token is tuned for full-width
-    // rows and nearly vanishes behind a 24px icon.
-    active
-      ? 'bg-foreground/[0.12] text-sidebar-selection-foreground hover:bg-foreground/[0.16]'
-      : 'text-sidebar-foreground dark:text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
   );
 }
 
@@ -1016,10 +1055,10 @@ export const LoroSidebar = memo(function LoroSidebar({
     </>
   );
   const windowDrag = isElectron && !isElectronFullscreen;
-  const workspaceIdentityClassName = cn(
+  const mobileWorkspaceIdentityClassName = cn(
     SIDEBAR_CONTROL_TEXT_CLASS,
     'flex w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left',
-    isMobile ? 'h-9' : 'h-8',
+    'h-9',
     'text-sidebar-foreground dark:text-sidebar-foreground/75',
     workspaceSwitcherEnabled &&
       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:bg-sidebar-hover'
@@ -1036,18 +1075,38 @@ export const LoroSidebar = memo(function LoroSidebar({
   const renderWorkspaceControl = (menuSide: 'top' | 'bottom') =>
     workspaceSwitcherEnabled ? (
       <Menu.Root modal={!isMobile}>
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1">
           <Menu.Trigger
             render={
-              <button
-                type="button"
-                className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
-                data-workspace-switcher-trigger
-                data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
-                aria-busy={workspaceSyncing || undefined}
-              >
-                {workspaceIdentity}
-              </button>
+              isMobile ? (
+                <button
+                  type="button"
+                  className={cn(
+                    mobileWorkspaceIdentityClassName,
+                    windowDrag && WINDOW_DRAG_EXEMPT_CLASS
+                  )}
+                  data-workspace-switcher-trigger
+                  data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
+                  aria-busy={workspaceSyncing || undefined}
+                >
+                  {workspaceIdentity}
+                </button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="small"
+                  className={cn(
+                    stylex.props(footerStyles.workspaceControl).className,
+                    windowDrag && WINDOW_DRAG_EXEMPT_CLASS
+                  )}
+                  data-workspace-switcher-trigger
+                  data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
+                  aria-busy={workspaceSyncing || undefined}
+                >
+                  {workspaceIdentity}
+                </Button>
+              )
             }
           />
         </div>
@@ -1196,7 +1255,15 @@ export const LoroSidebar = memo(function LoroSidebar({
       </Menu.Root>
     ) : (
       <div className="min-w-0 flex-1">
-        <div className={workspaceIdentityClassName} data-workspace-identity>
+        <div
+          className={
+            isMobile
+              ? mobileWorkspaceIdentityClassName
+              : stylex.props(footerStyles.workspaceControl, footerStyles.workspaceNameplate)
+                  .className
+          }
+          data-workspace-identity
+        >
           {workspaceIdentity}
         </div>
       </div>
@@ -1547,14 +1614,20 @@ export const LoroSidebar = memo(function LoroSidebar({
           </div>
         ) : null}
 
-        <div className={getLoroSidebarFooterClassName(isMobile)}>
+        <div
+          className={cn(
+            getLoroSidebarFooterClassName(isMobile),
+            !isMobile && stylex.props(footerStyles.desktop).className
+          )}
+          data-sidebar-footer
+        >
           {!isMobile ? renderWorkspaceControl('top') : null}
-          <div className={cn('flex items-center gap-1', !isMobile && 'ml-auto shrink-0 gap-2')}>
+          <div {...stylex.props(footerStyles.actions)}>
             <Menu.Root>
               <Menu.Trigger
                 render={
                   <IconButton label={t('menu.help', 'Help')}>
-                    <CircleHelp strokeWidth={1.5} />
+                    <CircleHelp className="size-full" strokeWidth={1.5} />
                   </IconButton>
                 }
               />
@@ -1601,21 +1674,21 @@ export const LoroSidebar = memo(function LoroSidebar({
               >
                 <Archive
                   strokeWidth={1.5}
-                  className="group-hover:hidden group-focus-visible:hidden"
+                  className="size-full group-hover:hidden group-focus-visible:hidden"
                 />
                 <ArrowLeft
                   strokeWidth={1.5}
-                  className="hidden group-hover:block group-focus-visible:block"
+                  className="hidden size-full group-hover:block group-focus-visible:block"
                 />
               </IconButton>
             ) : (
               <IconButton label={t('archive.title', 'Archive')} onClick={onArchiveClicked}>
-                <Archive strokeWidth={1.5} />
+                <Archive className="size-full" strokeWidth={1.5} />
               </IconButton>
             )}
 
             <IconButton label={t('settings.title', 'Settings')} onClick={onSettingsClicked}>
-              <Settings strokeWidth={1.5} />
+              <Settings className="size-full" strokeWidth={1.5} />
             </IconButton>
           </div>
 
