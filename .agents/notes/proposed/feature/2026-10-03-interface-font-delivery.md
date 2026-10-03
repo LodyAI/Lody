@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-03-interface-font-delivery.zh.md)
 
+[Draft review](https://github.com/LodyAI/Lody/pull/1235)
+
 ## Abstract
 
 The default interface needs coordinated Latin and Chinese type without a 44 MB

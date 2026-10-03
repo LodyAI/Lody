@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-03-interface-font-delivery.md)
 
+[Draft 审查](https://github.com/LodyAI/Lody/pull/1235)
+
 ## 摘要
 
 默认界面需要协调中西文，但首屏不能下载 44 MB 中文字体。审查实现使用官方
