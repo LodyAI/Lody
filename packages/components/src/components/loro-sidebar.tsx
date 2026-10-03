@@ -1093,7 +1093,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                                   <ContextMenu.Trigger render={<div {...props} />} />
                                   <ContextMenu.Content>
                                     <ContextMenu.Item
-                                      icon={<AppWindow />}
+                                      icon={AppWindow}
                                       onClick={() => {
                                         openDesktopWindow(undefined, workspaceSlug, 'context_menu');
                                       }}
@@ -1171,25 +1171,13 @@ export const LoroSidebar = memo(function LoroSidebar({
 
           {/* Icon boxes match the radio rows' avatars, so both row kinds
               share one leading column and one text column. */}
-          <Menu.Item
-            className="gap-1.5"
-            icon={<Plus className="h-4 w-4" />}
-            onClick={() => onCreateWorkspaceClicked?.()}
-          >
+          <Menu.Item className="gap-1.5" icon={Plus} onClick={() => onCreateWorkspaceClicked?.()}>
             {mergedLabels.createWorkspace}
           </Menu.Item>
-          <Menu.Item
-            className="gap-1.5"
-            icon={<Users className="h-4 w-4" />}
-            onClick={() => onInviteClicked?.()}
-          >
+          <Menu.Item className="gap-1.5" icon={Users} onClick={() => onInviteClicked?.()}>
             {mergedLabels.inviteMembers}
           </Menu.Item>
-          <Menu.Item
-            className="gap-1.5"
-            icon={<Link2 className="h-4 w-4" />}
-            onClick={() => onLinkRepoClicked?.()}
-          >
+          <Menu.Item className="gap-1.5" icon={Link2} onClick={() => onLinkRepoClicked?.()}>
             {mergedLabels.connectGithubRepo}
           </Menu.Item>
         </Menu.Content>
@@ -1559,24 +1547,19 @@ export const LoroSidebar = memo(function LoroSidebar({
                 }
               />
               <Menu.Content side="top" align="end" className="min-w-[160px]">
-                <Menu.Item onClick={() => onDocsClicked?.()}>
-                  <BookOpen className="h-4 w-4" />
+                <Menu.Item icon={BookOpen} onClick={() => onDocsClicked?.()}>
                   {mergedLabels.docs}
                 </Menu.Item>
-                <Menu.Item onClick={() => onGithubClicked?.()}>
-                  <Github className="h-4 w-4" />
+                <Menu.Item icon={Github} onClick={() => onGithubClicked?.()}>
                   {t('sidebar.github', 'GitHub')}
                 </Menu.Item>
-                <Menu.Item onClick={() => onJoinCommunityClicked?.()}>
-                  <Users className="h-4 w-4" />
+                <Menu.Item icon={Users} onClick={() => onJoinCommunityClicked?.()}>
                   {mergedLabels.joinCommunity}
                 </Menu.Item>
-                <Menu.Item onClick={() => onFeedbackClicked?.()}>
-                  <MessageSquareMore className="h-4 w-4" />
+                <Menu.Item icon={MessageSquareMore} onClick={() => onFeedbackClicked?.()}>
                   {mergedLabels.feedback}
                 </Menu.Item>
-                <Menu.Item onClick={() => onBugReportClicked?.()}>
-                  <Bug className="h-4 w-4" />
+                <Menu.Item icon={Bug} onClick={() => onBugReportClicked?.()}>
                   {mergedLabels.bugReport}
                 </Menu.Item>
               </Menu.Content>

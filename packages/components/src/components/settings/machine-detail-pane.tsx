@@ -787,7 +787,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   >
                     {isMobile && manageableOwnMachine && (
                       <Menu.Item
-                        icon={<Pencil {...stylex.props(styles.iconFill)} />}
+                        icon={Pencil}
                         onClick={() => {
                           pendingRenameRef.current = true;
                           setRenaming(true);
@@ -804,7 +804,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                           void handleSharedToggle(!effectiveShared);
                         }}
                         disabled={sharing}
-                        icon={<Users {...stylex.props(styles.iconFill)} />}
+                        icon={Users}
                         endContent={
                           <Switch
                             checked={effectiveShared}
@@ -830,13 +830,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                           void handlePing();
                         }}
                         disabled={pinging}
-                        icon={
-                          pinging ? (
-                            <Spinner size="small" />
-                          ) : (
-                            <Activity {...stylex.props(styles.iconFill)} />
-                          )
-                        }
+                        icon={pinging ? <Spinner size="small" /> : Activity}
                         shortcut={
                           pingLatencyMs !== null ? (
                             <span {...stylex.props(styles.mono)}>
@@ -854,13 +848,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       <Menu.Item
                         onClick={() => void handleUpgradeDaemon()}
                         disabled={restartingDaemon || upgradingDaemon}
-                        icon={
-                          upgradingDaemon ? (
-                            <Spinner size="small" />
-                          ) : (
-                            <Download {...stylex.props(styles.iconFill)} />
-                          )
-                        }
+                        icon={upgradingDaemon ? <Spinner size="small" /> : Download}
                       >
                         {t(
                           'settings.agent.machineLifecycle.upgradeAndRestartButton',
@@ -872,13 +860,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       <Menu.Item
                         onClick={() => void handleRestartDaemon()}
                         disabled={restartingDaemon || upgradingDaemon}
-                        icon={
-                          restartingDaemon ? (
-                            <Spinner size="small" />
-                          ) : (
-                            <RotateCcw {...stylex.props(styles.iconFill)} />
-                          )
-                        }
+                        icon={restartingDaemon ? <Spinner size="small" /> : RotateCcw}
                       >
                         {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
                       </Menu.Item>
@@ -893,7 +875,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                           }}
                           disabled={!canDelete}
                           tone="destructive"
-                          icon={<LogOut {...stylex.props(styles.iconFill)} />}
+                          icon={LogOut}
                         >
                           {canDelete
                             ? t('workspace.machines.removeFromWorkspace', 'Remove from workspace')

@@ -1208,7 +1208,7 @@ function PrPrimaryAction({
   const closeItem = canClose ? (
     <Menu.Item
       tone="destructive"
-      icon={<GitPullRequestClosed />}
+      icon={GitPullRequestClosed}
       onClick={() => void onSetState?.('closed')}
     >
       {t('sessions.prTab.closeAction', 'Close pull request')}

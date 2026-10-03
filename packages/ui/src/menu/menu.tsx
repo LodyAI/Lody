@@ -1,6 +1,13 @@
 import { Menu as BaseMenu } from '@base-ui/react/menu';
 import * as stylex from '@stylexjs/stylex';
-import { forwardRef, type ComponentProps, type ReactNode } from 'react';
+import {
+  createElement,
+  forwardRef,
+  isValidElement,
+  type ComponentProps,
+  type ElementType,
+  type ReactNode,
+} from 'react';
 import { appendClassName } from '../internal/class-name';
 import { ChevronRightGlyph, DotGlyph, TickGlyph } from '../internal/glyphs';
 import { portalClassName, usePopupContainer, type PopupContainer } from '../popup/portal-container';
@@ -34,11 +41,12 @@ type SeparatorBaseProps = ComponentProps<typeof BaseMenu.Separator>;
 interface MenuRowProps {
   children?: ReactNode;
   /**
-   * A glyph in the fixed box at the start of the row. The box owns its size and
-   * its colour; a glyph placed in it fills it, so an icon that carries its own
-   * dimensions states them as 100% rather than arriving at its library default.
+   * A glyph in the fixed box at the start of the row, stated as the component
+   * (`icon={Check}`) so the box mounts it at its own size — the preferred form.
+   * The element form (`icon={<Check size="100%" />}`) is for a glyph that
+   * carries props, and keeps whatever size it declares.
    */
-  icon?: ReactNode;
+  icon?: ReactNode | ElementType<{ className?: string }>;
   /** Trailing metadata: a keyboard shortcut, a count, a hint. */
   shortcut?: ReactNode;
   /** Anything else at the end of the row, after the shortcut. */
@@ -155,9 +163,28 @@ function ItemIcon({ icon, tone }: { icon: ReactNode; tone?: MenuItemTone }) {
         tone === 'destructive' && surface.itemIconInherit
       )}
     >
-      {icon}
+      {rowGlyph(icon)}
     </span>
   );
+}
+
+/**
+ * `icon` takes a component (`icon={Check}`), and the box mounts it with a class
+ * that fills the box — the box cannot size a child it only hosts, but it owns
+ * the size of the glyph it instantiates. An element form (`icon={<Check />}`)
+ * is for a glyph that carries props; it keeps whatever size it declares.
+ */
+function rowGlyph(icon: MenuRowProps['icon']): ReactNode {
+  if (isValidElement(icon)) return icon;
+  if (
+    typeof icon === 'function' ||
+    (typeof icon === 'object' && icon !== null && '$$typeof' in icon)
+  ) {
+    return createElement(icon as ElementType, {
+      className: stylex.props(surface.itemIconGlyph).className,
+    });
+  }
+  return icon;
 }
 
 /** The reserved but empty leading box that lines an `inset` row up. */
@@ -208,7 +235,15 @@ function rowClassName(
  * context menu is anchored to the pointer rather than to a control.
  */
 export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function MenuContent(
-  { className, children, container, finalFocus, width = 'regular', sideOffset = POPUP_GAP, ...rest },
+  {
+    className,
+    children,
+    container,
+    finalFocus,
+    width = 'regular',
+    sideOffset = POPUP_GAP,
+    ...rest
+  },
   ref
 ) {
   const inheritedContainer = usePopupContainer();
@@ -340,7 +375,16 @@ export const MenuCheckboxItem = forwardRef<HTMLDivElement, MenuCheckboxItemProps
 
 /** A row that picks one of a `Menu.RadioGroup`'s values; the same box, a dot. */
 export const MenuRadioItem = forwardRef<HTMLDivElement, MenuRadioItemProps>(function MenuRadioItem(
-  { className, children, icon, shortcut, endContent, indicator = 'dot', indicatorSide = 'start', ...rest },
+  {
+    className,
+    children,
+    icon,
+    shortcut,
+    endContent,
+    indicator = 'dot',
+    indicatorSide = 'start',
+    ...rest
+  },
   ref
 ) {
   const mark = (
@@ -362,7 +406,16 @@ export const MenuRadioItem = forwardRef<HTMLDivElement, MenuRadioItemProps>(func
       <Row
         leading={indicatorSide === 'end' ? leadingFor(icon, undefined, 'neutral') : mark}
         shortcut={shortcut}
-        endContent={indicatorSide === 'end' ? <>{endContent}{mark}</> : endContent}
+        endContent={
+          indicatorSide === 'end' ? (
+            <>
+              {endContent}
+              {mark}
+            </>
+          ) : (
+            endContent
+          )
+        }
       >
         {children}
       </Row>
