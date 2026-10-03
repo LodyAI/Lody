@@ -3,6 +3,7 @@ import { AlertDialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtom, useAtomValue } from 'jotai';
 import { toast } from '@/lib/toast';
 import { useNavigate } from '@tanstack/react-router';
@@ -66,6 +67,18 @@ import { ScheduleAgentControls } from './schedule-agent-controls';
 import { FieldIssueMark } from './schedule-field-issue-mark';
 import { pickScheduleAgent, seedScheduleAgentRunRef } from './schedule-agent-defaults';
 import { readChatLandingDefaults } from '@/lib/chat-landing-defaults';
+
+const styles = stylex.create({
+  mobileDetail: {
+    display: 'flex',
+    flexDirection: 'column',
+    boxSizing: 'border-box',
+    height: '100%',
+    minHeight: 0,
+    // Mobile detail owns its top edge; desktop insets belong to the workspace shell.
+    paddingTop: 'var(--safe-area-top, 0px)',
+  },
+});
 
 export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
   const { t } = useTranslation();
@@ -375,7 +388,7 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
       ) : null}
       <div className="min-h-0 flex-1">
         {mobile && scheduleId ? (
-          <div className="flex h-full min-h-0 flex-col">{detailPane}</div>
+          <div {...stylex.props(styles.mobileDetail)}>{detailPane}</div>
         ) : (
           list
         )}

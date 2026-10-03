@@ -79,6 +79,20 @@ minimumReleaseAge: 10080
 
 # Grandfather versions already locked on main; later releases remain quarantined.
 minimumReleaseAgeExclude:
+  # pnpm 10.20 uses the first rule per package; keep exact Codex versions together.
+  - '@openai/codex@0.154.0 || 0.156.0 || 0.156.0-darwin-arm64 || 0.156.0-darwin-x64 || 0.156.0-linux-arm64 || 0.156.0-linux-x64 || 0.156.0-win32-arm64 || 0.156.0-win32-x64 || 0.159.2 || 0.159.2-darwin-arm64 || 0.159.2-darwin-x64 || 0.159.2-linux-arm64 || 0.159.2-linux-x64 || 0.159.2-win32-arm64 || 0.159.2-win32-x64'
+  # Exact transitive dependencies already selected for werift.
+  - '@peculiar/asn1-x509@2.10.0'
+  - '@peculiar/asn1-x509-attr@2.10.0'
+  - '@peculiar/asn1-rsa@2.10.0'
+  - '@peculiar/asn1-pkcs9@2.10.0'
+  - '@peculiar/asn1-pkcs8@2.10.0'
+  - '@peculiar/asn1-pfx@2.10.0'
+  - '@peculiar/asn1-ecc@2.10.0'
+  - '@peculiar/asn1-csr@2.10.0'
+  - '@peculiar/asn1-cms@2.10.0'
+  - mediabunny@1.61.0
+  - '@peculiar/asn1-schema@2.10.0'
   # Electron 43 desktop runtime. 43.7.6 carries the WASM code-cache fix
   # (electron/electron#54234); electron-vite 6.0.0-beta.2+ is the first release
   # with Electron 42-44 build targets. rolldown and magic-string come with it.
@@ -143,13 +157,6 @@ minimumReleaseAgeExclude:
   - '@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.280'
   - '@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.280'
   - '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.280'
-  - '@openai/codex@0.156.0'
-  - '@openai/codex@0.156.0-darwin-arm64'
-  - '@openai/codex@0.156.0-darwin-x64'
-  - '@openai/codex@0.156.0-linux-arm64'
-  - '@openai/codex@0.156.0-linux-x64'
-  - '@openai/codex@0.156.0-win32-arm64'
-  - '@openai/codex@0.156.0-win32-x64'
   # Exact dependency pins from the ACP adapters already selected on main.
   - '@anthropic-ai/sdk@0.126.0'
   - prettier@3.9.7
@@ -177,7 +184,6 @@ minimumReleaseAgeExclude:
   - '@devframes/plugin-terminals--assets@1.0.0'
   - '@devframes/plugin-terminals@1.0.0'
   - '@devframes/vite@1.0.0'
-  - '@openai/codex@0.154.0'
   - '@anthropic-ai/sdk@0.126.0'
   - prettier@3.9.7
   - vitest@5.0.1
@@ -212,7 +218,7 @@ onlyBuiltDependencies:
 
 overrides:
   # ASN.1 decorators and consumers must share one schema registry for WebRTC DTLS certificates.
-  "@peculiar/x509>@peculiar/asn1-schema": 2.10.0
+  '@peculiar/x509>@peculiar/asn1-schema': 2.10.0
   acp-extension-core: workspace:*
   electron-builder-squirrel-windows: ^26.15.3
   '@loro-dev/loro-cli>loro-crdt': 1.16.3

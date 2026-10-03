@@ -74,6 +74,47 @@ describe('daemon PID ownership', () => {
 });
 
 describe('daemon runner launch cleanup', () => {
+  it.each(['1.2.2', undefined])(
+    'rejects and drains a replacement reporting version %s',
+    (cliVersion) => {
+      expect(
+        interpretDaemonRunnerLaunchOutcome(
+          {
+            status: 'ready',
+            pid: 999_000,
+            instanceId: 'replacement',
+            cliVersion,
+          },
+          999_000,
+          '1.2.3'
+        )
+      ).toEqual({
+        outcome: {
+          status: 'error',
+          runnerPid: 999_000,
+          message: `Daemon reported version ${cliVersion ?? 'unknown'}; expected 1.2.3`,
+        },
+        cancelRunner: true,
+      });
+    }
+  );
+
+  it('accepts legacy readiness for ordinary launches without an expected upgrade version', () => {
+    expect(
+      interpretDaemonRunnerLaunchOutcome(
+        {
+          status: 'ready',
+          pid: 999_000,
+          instanceId: 'legacy',
+        },
+        999_000
+      )
+    ).toEqual({
+      outcome: { status: 'ready', pid: 999_000, instanceId: 'legacy' },
+      cancelRunner: false,
+    });
+  });
+
   it('awaits a runner that reported startup failure before returning the error', () => {
     expect(
       interpretDaemonRunnerLaunchOutcome(
