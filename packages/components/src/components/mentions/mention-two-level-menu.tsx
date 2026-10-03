@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  File,
   GitPullRequest,
   MessageSquare,
   Terminal,
@@ -537,7 +538,11 @@ function CategoryRow({
       onMentionNavigate={onNavigate ? () => onNavigate(category) : undefined}
     >
       <RowGlyph value={value}>
-        <CandidateIcon icon={category.icon} />
+        {category.icon === 'file' ? (
+          <File {...stylex.props(styles.glyphSvg)} strokeWidth={1.75} />
+        ) : (
+          <CandidateIcon icon={category.icon} />
+        )}
       </RowGlyph>
       <span {...stylex.props(styles.text, reason != null && styles.textStacked)}>
         <span {...stylex.props(styles.title, disabled && styles.titleMuted)}>{category.label}</span>
