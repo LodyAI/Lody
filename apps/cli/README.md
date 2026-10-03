@@ -14,6 +14,38 @@ Install the CLI package:
 npm install -g lody@next
 ```
 
+## Daemon upgrades and autostart
+
+Remote upgrades install globally using the daemon's npm environment, resolve the
+installed package's declared CLI entry via `npm root -g`, and verify its version.
+The watchdog launches that entry explicitly and only reports upgrade success after
+the replacement reaches ready with the same version. A successful npm install alone
+does not prove that the running daemon upgraded. Verification or handoff failure is
+logged as failure; the existing restart recovery remains available.
+
+Autostart scripts, scheduled tasks, and service definitions must invoke the stable
+global installation, not an absolute `_npx` cache entry or a version-specific store
+path. This repository does not generate or rewrite user-owned autostart scripts.
+If an existing daemon was launched from such a pinned path:
+
+1. In the same OS environment and user account as the daemon, install the desired
+   version globally. Windows and WSL have separate installations.
+2. Find the global prefix with `npm prefix -g`. On Windows the stable launcher is
+   `<prefix>\lody.cmd`; on Linux/WSL/macOS it is `<prefix>/bin/lody`.
+   Check that launcher's `--version` before using it. Use the same Node/npm
+   installation and preserve the script's environment and daemon arguments.
+3. Replace the old cache path in the autostart command with that absolute launcher.
+   In PowerShell invoke a quoted launcher with `&`. Ensure the task's PATH includes
+   the intended Node runtime; WSL tasks must use the launcher inside that distro.
+4. Use the verified launcher to run `daemon stop`, then `daemon start` with the
+   original options, and check `daemon status` and the startup log's CLI version.
+   Restart the watchdog too: restarting only its Worker leaves old upgrade code alive.
+
+An already-running old watchdog cannot acquire this fix merely by downloading it;
+the one-time launcher correction and restart are needed for that deployment.
+Older releases without versioned readiness cannot be verified by the new remote
+handoff and must be started explicitly if a rollback is required.
+
 ## Workspace discovery
 
 The cloud workspace CLI and Lody MCP share resource queries. Lists return 20 entries
