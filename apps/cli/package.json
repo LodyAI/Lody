@@ -1,6 +1,6 @@
 {
   "name": "lody",
-  "version": "0.100.0",
+  "version": "0.102.0",
   "description": "Lody Agent CLI tool for managing remote command execution",
   "type": "module",
   "main": "dist/index.js",
