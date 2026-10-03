@@ -14,6 +14,8 @@
   control endpoint. It is behind the authenticated preview proxy; never forward arbitrary Baguette routes or
   messages. Validate every input and active lease. Frames/status probes do not renew
   idle expiry; only explicit viewer heartbeat or valid input does.
+- WebRTC reuses stream validation; bound queues and join teardown. Never replay input.
+  Local viewers stay offline; ICE credentials stay ephemeral.
 - `guest-buttons.ts` owns the preview-local Home/App Switcher/Lock helper. Compile only
   bundled source with the installed simulator SDK into a private temporary directory;
   bind one guest service to the device; acknowledge releases, never replay uncertain

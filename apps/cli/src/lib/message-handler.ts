@@ -3190,6 +3190,33 @@ export class MessageHandler {
       remotePreview: this.cloudPort.remotePreview,
     });
     this.iosSimulatorService = new IosSimulatorService({
+      iceServers: this.cloudPort.remotePreview?.simulatorIceServers
+        ? async (sessionId) => {
+            const record = await this.workspaceDocument.repo.getDocMeta(
+              getSessionRoomId(sessionId as SessionId)
+            );
+            if (
+              !record?.meta ||
+              isLoroRepoDocDeleted(record) ||
+              record.meta.isArchived ||
+              record.meta.machineId !== this.machineId ||
+              typeof record.meta.userId !== 'string' ||
+              !record.meta.userId
+            )
+              throw new Error('Simulator session access denied.');
+            const provider = this.cloudPort.remotePreview?.simulatorIceServers;
+            if (!provider) throw new Error('Simulator relay is unavailable.');
+            return provider({
+              workspaceId: this.workspaceId,
+              machineId: this.machineId,
+              requesterUserId: record.meta.userId,
+              localProjectId:
+                typeof record.meta.localProjectId === 'string'
+                  ? record.meta.localProjectId
+                  : undefined,
+            });
+          }
+        : undefined,
       onAgentPreviewStarted: async (sessionId, operationId) => {
         await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
           iosSimulatorPreviewRequestId: operationId,

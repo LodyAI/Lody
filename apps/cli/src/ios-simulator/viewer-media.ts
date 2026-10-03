@@ -43,7 +43,7 @@ function connect(){
   usingH264=!h264Disabled&&typeof VideoDecoder!=='undefined'&&typeof EncodedVideoChunk!=='undefined';
   if(usingH264)url.searchParams.set('codec','h264');
   videoLastSequence=0;videoRecovery=0;
-  const socket=new WebSocket(url);ws=socket;socket.binaryType='arraybuffer';
+  const socket=createSimulatorSocket(url);ws=socket;socket.binaryType='arraybuffer';
   socket.onopen=()=>{
     if(ws!==socket)return;
     streamConfig();send({type:'heartbeat'});

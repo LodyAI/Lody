@@ -33,7 +33,13 @@ keyboard preference; do not reboot it or change host-global Simulator settings. 
 sends the native device-orientation event; apps may restrict their supported orientations.
 
 Same-machine Electron uses direct local transport, including offline operation. Remote
-viewing by the authorized session uses Quick Tunnel internally. Both routes authorize
+viewing by the authorized session uses Quick Tunnel for the private viewer and signaling.
+Remote media and input prefer ordered WebRTC DataChannels, preserving the existing
+H.264/MJPEG decoder and control protocol. Use short-lived relay credentials from an
+optional authenticated cloud capability; secrets never enter the public client.
+Without relay configuration, attempt direct connectivity. Fall back to WebSocket
+when WebRTC setup fails; never replay uncertain input during transport changes.
+Quick Tunnel remains required for bootstrap. Both routes authorize
 access; remote control binds a short-lived proof to the exact session, device/operation,
 action and daemon instance. OS controls discoverability; a versioned machine capability
 controls compatibility. Public local-only builds make no authenticated cloud calls.
@@ -116,8 +122,7 @@ references or discard the affected chain and resume on a keyframe, including ups
 loss. Only decoded video pictures may be coalesced; decoding confirmation releases video
 credit independently of the browser paint cadence, with at most one unpainted picture;
 retain final pointer positions and releases when merging high-frequency moves.
-Same-machine preview preserves native resolution. No new cloud service participates
-in the media path. Connection status retains basic connection diagnostics and an explicit copy action.
+Same-machine preview preserves native resolution. An optional TURN service relays remote media when direct connectivity fails. Connection status retains basic connection diagnostics and an explicit copy action.
 
 Interaction feedback takes priority over replaying stale queued animation. Preserve
 H.264 dependency safety and receiver credit when replacing a stale unsent chain;

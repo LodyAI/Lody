@@ -1,9 +1,16 @@
+import { simulatorViewerWebRtcScript } from './viewer-webrtc';
 import { simulatorViewerMediaScript } from './viewer-media';
 /** Fixed Lody artifact, never project HTML. Media decoders own bounded queues and disposal. */
-export function simulatorViewerHtml(operationId: string, initialRotation = 0): string {
+export function simulatorViewerHtml(
+  operationId: string,
+  initialRotation = 0,
+  preferWebRtc = false
+): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body,canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111}body{display:flex;align-items:center;justify-content:center}canvas{max-width:100%;max-height:100%;object-fit:contain;touch-action:none;display:block}</style></head><body><canvas draggable="false"></canvas><script>
 'use strict';
 const operationId=${JSON.stringify(operationId)};
+const preferWebRtc=${JSON.stringify(preferWebRtc)};
+${simulatorViewerWebRtcScript}
 let rotation=${JSON.stringify(initialRotation)},rotateWithDevice=true;
 function displayRotation(){return rotateWithDevice?rotation:0}
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');
@@ -75,7 +82,8 @@ async function receiveParent(d){
   const timeout=setTimeout(()=>abort.abort(),12000);
   try{
     const url=new URL('control',location.href);url.search=new URL(location.href).search;
-    const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operationId,requestId:d.requestId,control:d.control}),signal:abort.signal,redirect:'error'});
+    const body={operationId,requestId:d.requestId,control:d.control};
+    const response=ws?.rtc?{ok:true,json:()=>ws.requestControl(body,abort.signal)}:await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:abort.signal,redirect:'error'});
     const result=await response.json();
     if(response.ok&&result.success===true&&[0,90,180,270].includes(result.rotation)){rotation=result.rotation;layout();report('ready')}
     const error=['unavailable','unsupported','failed','busy'].includes(result.error)?result.error:'failed';

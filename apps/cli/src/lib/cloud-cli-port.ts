@@ -1,3 +1,4 @@
+import { SimulatorIceServersSchema } from '@/ios-simulator/webrtc-protocol';
 import { ConvexClient, ConvexHttpClient } from 'convex/browser';
 import { z } from 'zod';
 import { api } from '@lody/cloud-api';
@@ -267,6 +268,25 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     },
     attachmentUpload: { serverBaseUrl },
     remotePreview: {
+      simulatorIceServers: async (input) => {
+        const response = await getCliHttpFetch({ logger: options.logger })(
+          new URL('/api/ios-simulator/ice-servers', authSiteUrl),
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${options.token}`,
+            },
+            body: JSON.stringify(input),
+            signal: AbortSignal.timeout(10_000),
+            redirect: 'error',
+          }
+        );
+        if (!response.ok) throw new Error('Simulator relay configuration is unavailable.');
+        return z
+          .object({ iceServers: SimulatorIceServersSchema, expiresAt: z.number().finite() })
+          .parse(await response.json());
+      },
       verifyControl: async (input) => {
         const response = await getCliHttpFetch({ logger: options.logger })(
           new URL('/api/session-preview/verify', authSiteUrl),

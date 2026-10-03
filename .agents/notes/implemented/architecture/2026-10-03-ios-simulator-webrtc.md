@@ -1,0 +1,22 @@
+# WebRTC transport for simulator previews
+
+Status: implemented
+Translation: current
+
+[中文](2026-10-03-ios-simulator-webrtc.zh.md)
+
+## Abstract
+
+Remote simulator frames previously shared the Quick Tunnel WebSocket path with page loading. The viewer now prefers WebRTC DataChannels for media and input, retaining the existing codecs and lease checks. An optional cloud capability supplies short-lived TURN credentials; local viewers remain offline. Quick Tunnel is still needed to load the viewer and exchange signaling, so this does not recover a failed initial tunnel. Real provider relay and constrained-network acceptance remain unverified.
+
+## Decision and trade-offs
+
+Keep the fixed viewer and H.264/MJPEG flow-control protocol instead of introducing a native RTP encoder. Two ordered reliable channels preserve encoded reference chains and isolate control messages from media chunking. The CLI bridges the same bound-device stream boundary, avoiding a second authority/input implementation. Reliable delivery can still stall under packet loss; decoded ACK credit and bounded queues remain necessary.
+
+Use werift rather than a native WebRTC addon so CLI packaging stays JavaScript-based. Its DTLS certificate dependencies require a shared ASN.1 schema registry; the workspace pins the registry consumed by x509 accordingly. The pinned werift patch cancels pending TURN handshakes/allocations, joins ICE gathering and stops allocation-refresh timers before closing. The CLI selects the provider's TLS/443 relay first because this werift version uses only one TURN URL. A binary-data dependency patch makes its internal imports relative so the bundled CLI resolves them without node_modules. The viewer signals once a relay candidate exists rather than waiting for unrelated UDP gathering. Short-lived ICE credentials enter through the optional platform cloud port. They stay operation-local and never enter synchronized documents. Local-only composition has no authenticated cloud provider.
+
+The [original panel decision](2026-09-27-ios-simulator-panel.md) remains the source for device ownership and private preview boundaries. This change replaces only its remote transport choice. The [preview Spec](../../../../specs/ios-simulator-preview.md) remains draft.
+
+## Evidence and limits
+
+Cancellation regressions stop real stalled TLS handshakes and TCP TURN allocations after explicit socket events. A real local werift pair exchanges chunked frames and input over DTLS/SCTP and closes on abort. Viewer behavior tests exercise reassembly, startup fallback and uncertain-control rejection. Gateway regression covers teardown with an incomplete signaling body. Existing simulator tests and CLI typecheck pass. Provider authorization and response tests use synthetic credentials; no paid TURN service was configured or deployed, and no remote latency improvement is claimed. An established relay may fail when credentials expire; the viewer then uses its WebSocket recovery path instead of refreshing that peer in place.

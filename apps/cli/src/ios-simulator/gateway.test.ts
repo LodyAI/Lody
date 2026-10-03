@@ -85,6 +85,32 @@ async function setup(
   };
 }
 describe('simulator media boundary', () => {
+  it('joins an unfinished signaling request when stopping the gateway', async () => {
+    const f = await setup();
+    const origin = `http://127.0.0.1:${f.gateway.port}`;
+    const request = http.request(new URL(`${f.gateway.remotePath}rtc`, origin), {
+      method: 'POST',
+      headers: {
+        origin,
+        'content-type': 'application/json',
+        expect: '100-continue',
+        'content-length': '100',
+      },
+    });
+    const closed = new Promise<void>((resolve) => {
+      request.on('error', () => {});
+      request.once('close', resolve);
+    });
+    const continued = once(request, 'continue');
+    request.flushHeaders();
+    await continued;
+    // The server accepted the headers, but this client never completes its body.
+    cleanups.splice(cleanups.indexOf(f.gateway.close), 1);
+    await f.gateway.close();
+    await closed;
+    expect(request.destroyed).toBe(true);
+  });
+
   it('serves local and remote routes with independent media budgets and one control baseline', async () => {
     const f = await setup();
     const remoteEndpoint = await f.proxy.acquire({
