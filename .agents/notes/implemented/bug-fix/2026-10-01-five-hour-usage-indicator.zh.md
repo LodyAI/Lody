@@ -29,8 +29,9 @@ Translation: current
 新增的两个用例在修复前均失败。
 
 已初始化子模块的独立克隆通过了仓库类型检查、lint、格式化、文档检查和边界检查，
-Electron 的 199 项测试也全部通过。`pnpm check` 停在既有的 boot-shell 存储不可用测试
-（组件测试 1 项失败、4592 项通过）；在 Node 26.10.0 下恢复原始组件代码后仍复现。
+Electron 的 199 项测试也全部通过。`pnpm check` 仍在 `boot-shell.test.tsx` 的存储不可用用例失败
+（组件测试 1 项失败、4,592 项通过）；恢复原始用量组件后，在 Node 26.10.0 下仍可复现，
+表明此失败与本次修复无关。
 未进行应用界面手动验证。
 
-PR：[ #1201](https://github.com/LodyAI/Lody/pull/1201)。
+PR：[#1201](https://github.com/LodyAI/Lody/pull/1201)。

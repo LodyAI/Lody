@@ -34,8 +34,9 @@ fallback, and context priority after rerender. Both new cases failed before the 
 
 An independent clone with initialized submodules passes repository typechecks,
 lint, formatting, documentation checks, and boundary guards; Electron's 199 tests
-also pass. `pnpm check` stops at the existing boot-shell storage-unavailable test
-(1 failure, 4592 passing component tests), reproduced with the original component
-code on Node 26.10.0. No manual application UI verification was performed.
+also pass. `pnpm check` still fails at `boot-shell.test.tsx`'s storage-unavailable
+case (1 failure, 4,592 component tests passing); restoring the original usage
+component reproduces it on Node 26.10.0, indicating it is unrelated to this fix.
+No manual application UI verification was performed.
 
 PR: [#1201](https://github.com/LodyAI/Lody/pull/1201).
