@@ -23,7 +23,7 @@ Cancellation regressions stop real stalled TLS handshakes and TCP TURN allocatio
 
 ## Preview connection details
 
-The popover uses Realtime mode / Compatibility mode instead of protocol names, and simple preview wording instead of tunnel/privacy jargon. “Direct” was rejected as a remote transport label because WebRTC can use TURN. Only active errors expose diagnostics copying; successful fallback is a normal compatibility state. The authenticated viewer state carries optional allowlisted transport, codec and fallback stage, accepted through the existing source/origin/operation boundary. Older viewers report unknown transport instead of guessing. Reports also include client network, visibility and browser capabilities; no SDP, candidate addresses or credentials are copied. Component and CLI typechecks cover integration; tests and live cross-device acceptance were not run for this UI follow-up.
+The popover uses simple preview wording and omits the transport-mode icon and explanation row. Transport details remain available in error diagnostics. “Direct” was rejected as a remote transport label because WebRTC can use TURN. Only active errors expose diagnostics copying; successful fallback is a normal compatibility state. The authenticated viewer state carries optional allowlisted transport, codec and fallback stage, accepted through the existing source/origin/operation boundary. Older viewers report unknown transport instead of guessing. Reports also include client network, visibility and browser capabilities; no SDP, candidate addresses or credentials are copied. Component and CLI typechecks cover integration; tests and live cross-device acceptance were not run for this UI follow-up.
 
 ## Ablation-guided simplification
 

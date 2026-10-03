@@ -65,7 +65,6 @@ export type IosSimulatorPanelViewProps = {
   status: IosSimulatorPanelStatus;
   /** What the viewer page last reported for the ready preview. */
   viewerState?: IosSimulatorViewerState | null;
-  viewerDiagnostics?: IosSimulatorViewerDiagnostics | null;
   /** Bumped to reload the viewer page after its stream dropped. */
   viewerReloadKey?: number;
   pendingAction?: IosSimulatorPendingAction;
@@ -380,7 +379,6 @@ export function IosSimulatorPanelView({
   selectedUdid,
   status,
   viewerState = null,
-  viewerDiagnostics = null,
   viewerReloadKey = 0,
   pendingAction = null,
   bootExpected = false,
@@ -716,7 +714,6 @@ export function IosSimulatorPanelView({
             <IosSimulatorConnectionStatus
               status={status}
               viewerState={viewerState}
-              viewerDiagnostics={viewerDiagnostics}
               deviceName={statusDevice?.name}
               pendingAction={pendingAction}
               onRetry={onRetry}

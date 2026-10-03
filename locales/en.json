@@ -1,8 +1,4 @@
 {
-  "sessions.iosSimulator.connection.compatibleHint": "Keeps the preview available when realtime mode cannot connect.",
-  "sessions.iosSimulator.connection.realtimeHint": "For responsive viewing and controls.",
-  "sessions.iosSimulator.connection.compatibleMode": "Compatibility mode",
-  "sessions.iosSimulator.connection.realtimeMode": "Realtime mode",
   "settings.agent.codex.authentication": "Authentication",
   "settings.agent.codex.storage": "Credentials stay on the selected machine. Each provider has its own account.",
   "settings.agent.codex.customApi": "Custom API",

@@ -1,8 +1,4 @@
 {
-  "sessions.iosSimulator.connection.compatibleHint": "实时模式无法连接时，仍可继续预览和操作。",
-  "sessions.iosSimulator.connection.realtimeHint": "及时查看画面并操作模拟器。",
-  "sessions.iosSimulator.connection.compatibleMode": "兼容模式",
-  "sessions.iosSimulator.connection.realtimeMode": "实时模式",
   "settings.agent.codex.authentication": "认证方式",
   "settings.agent.codex.storage": "凭据仅保存在所选机器上。每个提供商配置使用独立账户。",
   "settings.agent.codex.customApi": "自定义 API",

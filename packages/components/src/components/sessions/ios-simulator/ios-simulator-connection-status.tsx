@@ -1,14 +1,6 @@
 import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import {
-  CircleDashed,
-  Copy,
-  Info,
-  Link2Off,
-  Monitor,
-  RadioTower,
-  TriangleAlert,
-} from 'lucide-react';
+import { CircleDashed, Copy, Link2Off, Monitor, RadioTower, TriangleAlert } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
@@ -19,7 +11,6 @@ import { space, text } from '@lody/ui/tokens/scales.stylex';
 import type {
   IosSimulatorPanelStatus,
   IosSimulatorViewerState,
-  IosSimulatorViewerDiagnostics,
 } from '@/lib/ios-simulator/ios-simulator-types';
 import { useIosSimulatorStageLabel } from './ios-simulator-copy';
 
@@ -29,7 +20,6 @@ export type IosSimulatorConnectionStatusProps = {
   status: IosSimulatorPanelStatus;
   /** What the viewer page last reported for a ready preview. */
   viewerState?: IosSimulatorViewerState | null;
-  viewerDiagnostics?: IosSimulatorViewerDiagnostics | null;
   /** Name of the device `status` is about. */
   deviceName?: string;
   pendingAction?: IosSimulatorPendingAction;
@@ -91,7 +81,6 @@ const styles = stylex.create({
   },
   actions: { display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: space[1.5] },
   copy: { marginInlineEnd: 'auto' },
-  info: { display: 'inline-block', verticalAlign: 'text-bottom' },
 });
 
 function StatusGlyph({ kind }: { kind: StatusKind }) {
@@ -111,7 +100,6 @@ function StatusGlyph({ kind }: { kind: StatusKind }) {
 export function IosSimulatorConnectionStatus({
   status,
   viewerState = null,
-  viewerDiagnostics = null,
   deviceName,
   pendingAction = null,
   onRetry,
@@ -188,7 +176,6 @@ export function IosSimulatorConnectionStatus({
     hasError ||
     kind === 'failed' ||
     (status.phase === 'ready' && (viewerState === 'error' || viewerState === 'disconnected'));
-  const mode = kind === 'remote' && viewerState === 'ready' ? viewerDiagnostics?.transport : null;
   const hasActions =
     showDiagnostics ||
     (kind === 'preparing' && Boolean(onCancel)) ||
@@ -226,24 +213,6 @@ export function IosSimulatorConnectionStatus({
         <div {...stylex.props(styles.panel)}>
           <Popover.Title {...stylex.props(styles.title)}>{title}</Popover.Title>
           <Popover.Description {...stylex.props(styles.detail)}>{detail}</Popover.Description>
-          {mode === 'webrtc' || mode === 'websocket' ? (
-            <p {...stylex.props(styles.detail)}>
-              <Info {...stylex.props(styles.info)} size={12} aria-hidden />{' '}
-              {mode === 'webrtc'
-                ? t('sessions.iosSimulator.connection.realtimeMode', 'Realtime mode')
-                : t('sessions.iosSimulator.connection.compatibleMode', 'Compatibility mode')}
-              {' — '}
-              {mode === 'webrtc'
-                ? t(
-                    'sessions.iosSimulator.connection.realtimeHint',
-                    'For responsive viewing and controls.'
-                  )
-                : t(
-                    'sessions.iosSimulator.connection.compatibleHint',
-                    'Keeps the preview available when realtime mode cannot connect.'
-                  )}
-            </p>
-          ) : null}
           {showFacts ? (
             <ul {...stylex.props(styles.facts)}>
               <li>

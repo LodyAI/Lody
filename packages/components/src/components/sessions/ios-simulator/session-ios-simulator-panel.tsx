@@ -670,7 +670,6 @@ function SessionIosSimulatorPanelController({
         selectedUdid={selectedUdid}
         status={status}
         viewerState={viewerState}
-        viewerDiagnostics={viewerDiagnostics}
         viewerReloadKey={viewerReloadKey}
         pendingAction={pendingAction}
         bootExpected={bootExpected}

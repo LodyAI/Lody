@@ -155,16 +155,6 @@ export const PreviewingRemote: Story = {
   args: {
     status: ready('remote'),
     viewerState: 'ready',
-    viewerDiagnostics: { transport: 'webrtc', codec: 'h264' },
-    controls,
-  },
-};
-
-export const CompatibilityMode: Story = {
-  args: {
-    status: ready('remote'),
-    viewerState: 'ready',
-    viewerDiagnostics: { transport: 'websocket', codec: 'h264', fallbackReason: 'timeout' },
     controls,
   },
 };
