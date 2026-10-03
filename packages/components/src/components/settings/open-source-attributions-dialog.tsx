@@ -12,12 +12,13 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { OPEN_SOURCE_ATTRIBUTION_BUNDLE } from '@/lib/open-source-attributions.generated';
+import { interfaceFontNotices } from '@/tailwind/interface-fonts/notices';
 import type { OpenSourceAttributionEntry } from '@/lib/open-source-attributions';
 import { Badge, Button, ScrollArea, Dialog } from '@/ui';
 import { Accordion } from '@lody/ui/accordion';
 import { Select } from '@lody/ui/select';
 
-const allEntries = OPEN_SOURCE_ATTRIBUTION_BUNDLE.entries;
+const allEntries = [...interfaceFontNotices, ...OPEN_SOURCE_ATTRIBUTION_BUNDLE.entries];
 const bundledEntries = allEntries.filter((entry) => entry.kind === 'vendored');
 const dependencyEntries = allEntries.filter((entry) => entry.kind === 'package');
 const uniqueLicenses = new Set(allEntries.map((entry) => entry.license)).size;
@@ -112,6 +113,7 @@ const styles = stylex.create({
   licenseGroupTitle: { margin: 0, fontSize: text.bodySize, fontWeight: 400, color: colors.label },
   licenseGroupHint: { margin: 0, fontSize: text.footnoteSize, color: colors.secondaryLabel },
   licenseSelect: { flexShrink: 0, width: { default: '100%', [WIDE]: '320px' } },
+  licenseText: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontFamily: 'inherit' },
 });
 
 function formatGeneratedAt(value: string): string {
@@ -162,6 +164,12 @@ function AttributionItem({ entry, ruled }: { entry: OpenSourceAttributionEntry; 
         {entry.description ? <p {...stylex.props(styles.itemMeta)}>{entry.description}</p> : null}
         {entry.noticePath ? (
           <p {...stylex.props(styles.itemMeta)}>Notice file: {entry.noticePath}</p>
+        ) : null}
+        {entry.licenseText != null && entry.licenseText.length > 0 ? (
+          <details>
+            <summary {...stylex.props(styles.itemMeta)}>{entry.license}</summary>
+            <pre {...stylex.props(styles.itemMeta, styles.licenseText)}>{entry.licenseText}</pre>
+          </details>
         ) : null}
       </div>
       {entry.homepage ? (
