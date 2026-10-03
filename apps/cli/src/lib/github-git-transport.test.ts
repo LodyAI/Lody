@@ -8,223 +8,190 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ensureGitHubGitTransport } from './github-git-transport';
-
 let directory: string;
 beforeEach(() => {
-  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-git-transport-'));
+  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-native-git-'));
 });
 afterEach(() => {
   fs.rmSync(directory, { recursive: true, force: true });
 });
-
 function harness(
   options: {
     owner?: boolean;
     personal?: boolean;
-    target?: string;
-    header?: string;
-    sshCommand?: string;
-    unavailable?: boolean;
-    env?: Record<string, string>;
+    offline?: boolean;
+    operation?: string;
+    denyPersonal?: boolean;
   } = {}
 ) {
-  ensureGitHubGitTransport(directory, '/workspace/broker.json', 'git');
+  ensureGitHubGitTransport(directory, '/workspace/broker', 'git');
   const source = fs
-    .readFileSync(path.join(directory, 'git-remote-lody-github'), 'utf8')
-    .replace(/main\(\)\.catch\([\s\S]*$/, 'globalThis.run = main;');
-  let contextToken = 'original';
-  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
-  const sync = vi.fn((_git: string, args: string[]) => {
-    if (args.includes('core.sshCommand')) return { status: 0, stdout: options.sshCommand ?? '' };
-    if (args.includes('http.extraHeader')) return { status: 0, stdout: options.header ?? '' };
-    if (args[0] === 'credential')
-      return { status: 0, stdout: 'username=local\npassword=local-token\n' };
-    return { status: 0, stdout: '', stderr: '' };
-  });
-  const spawn = vi.fn(() => new EventEmitter());
+    .readFileSync(path.join(directory, 'git-remote-https'), 'utf8')
+    .replace(/main\(\)\.catch[\s\S]*$/, 'globalThis.run = main;');
+  const delegates: Array<{ args: string[]; env: Record<string, string> }> = [];
+  const attempts: string[] = [];
+  const sync = vi.fn(
+    (_git: string, args: string[], init: { env: Record<string, string>; input?: string }) => {
+      if (args[0] === 'credential')
+        return { status: 0, stdout: 'username=owner\npassword=local-token\n' };
+      if (args[0] === 'remote-https') {
+        const headers = init.env.GIT_CONFIG_PARAMETERS || '';
+        attempts.push(headers);
+        if (
+          options.denyPersonal &&
+          headers.includes(Buffer.from('x-access-token:personal-token').toString('base64'))
+        )
+          return { status: 128, stderr: 'HTTP 403' };
+      }
+      return { status: 0, stdout: '' };
+    }
+  );
   const context = vm.createContext({
     require: (name: string) =>
-      name === 'child_process'
-        ? { spawn, spawnSync: sync }
-        : {
-            readFileSync: (file: string) =>
-              JSON.stringify(
-                file.endsWith('context.json')
-                  ? { contextToken }
-                  : { url: 'http://broker', token: 'bearer' }
-              ),
-          },
+      name === 'path'
+        ? path
+        : name === 'child_process'
+          ? {
+              spawnSync: sync,
+              spawn: (
+                _git: string,
+                args: string[],
+                init: { env: Record<string, string>; input?: string }
+              ) => {
+                delegates.push({ args, env: init.env });
+                return new EventEmitter();
+              },
+            }
+          : {
+              readFileSync: (file: string) =>
+                JSON.stringify(
+                  file.includes('.contexts/')
+                    ? { version: 1, contextToken: 'frozen', allowLocalAuth: options.owner ?? true }
+                    : { url: 'http://broker', token: 'fixture' }
+                ),
+            },
     process: {
-      argv: ['node', 'helper', 'origin', options.target ?? 'org/repo'],
+      argv: ['node', 'adapter', 'origin', 'https://github.com/org/repo.git'],
       env: {
-        LODY_GIT_CRED_CONTEXT_FILE: '/session/context.json',
-        LODY_GIT_OPERATION: 'write',
-        ...options.env,
+        LODY_GIT_CRED_CONTEXT_TOKEN: 'frozen',
+        LODY_GIT_OPERATION: options.operation ?? 'read',
       },
-      exit: vi.fn(),
     },
-    fetch: vi.fn(
-      async (url: string, init: { body?: string; headers?: { Authorization: string } }) => {
-        const body = JSON.parse(init.body ?? '{}');
-        requests.push({ url, body });
-        if (url.startsWith('https://api.github.com'))
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ private: false, permissions: { push: true } }),
-          };
-        if (url.endsWith('/github-auth-context'))
-          return {
-            ok: true,
-            json: async () => ({
-              allowLocalAuth: options.owner ?? true,
-              personalEnabled: options.personal ?? false,
-            }),
-          };
-        return {
-          ok: true,
-          json: async () =>
-            options.unavailable
-              ? { available: false }
-              : { tokenSource: body.source, token: body.source + '-token' },
-        };
-      }
-    ),
-    console: { error: vi.fn() },
+    fetch: async (_url: string, init: { body: string }) => {
+      if (options.offline) throw Object.assign(new Error('SECRET'), { code: 'ECONNREFUSED' });
+      const { source: identity } = JSON.parse(init.body);
+      return Response.json(
+        identity === 'personal' && !options.personal
+          ? { available: false }
+          : { token: identity + '-token', tokenSource: identity }
+      );
+    },
+    console: { error: () => {} },
     URL,
     AbortSignal,
     Buffer,
   });
   vm.runInContext(source, context);
-  return {
-    sync,
-    spawn,
-    requests,
-    rotate: () => {
-      contextToken = 'rotated';
-    },
-    run: () => (context.run as () => Promise<void>)(),
-  };
+  return { run: () => (context.run as () => Promise<void>)(), delegates, attempts, sync };
 }
-
-describe('GitHub per-remote transport', () => {
-  it('preserves credential reads but forces a nested push to use write authorization', () => {
-    const execPath = execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim();
-    const coreGit = path.join(execPath, process.platform === 'win32' ? 'git.exe' : 'git');
-    const realGit = fs.existsSync(coreGit) ? coreGit : 'git';
-    const env = Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([key]) => !/^(GIT_CONFIG_|LODY_GIT_|GIT_DIR$|GIT_WORK_TREE$)/.test(key)
-      )
+describe('native Git credential adapter', () => {
+  it('delegates once using personal credentials and keeps standard remote URLs', async () => {
+    const h = harness({ personal: true });
+    await h.run();
+    expect(h.delegates).toHaveLength(1);
+    expect(h.delegates[0].args).toEqual([
+      'remote-https',
+      'origin',
+      'https://github.com/org/repo.git',
+    ]);
+    expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain(
+      Buffer.from('x-access-token:personal-token').toString('base64')
     );
-    Object.assign(env, {
+    expect(h.sync.mock.calls.some(([, args]) => args[0] === 'credential')).toBe(false);
+  });
+  it('falls through a denied native advertisement to machine identity before executing a write', async () => {
+    const h = harness({ personal: true, denyPersonal: true, operation: 'write' });
+    await h.run();
+    expect(h.attempts).toHaveLength(2);
+    expect(h.delegates).toHaveLength(1);
+    expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain(
+      Buffer.from('x-access-token:local-token').toString('base64')
+    );
+    expect(
+      h.sync.mock.calls
+        .filter(([, args]) => args[0] === 'remote-https')
+        .every(([, , init]) => init.input === 'list for-push\n\n')
+    ).toBe(true);
+  });
+  it('uses isolated anonymous reads after a cloud outage without borrowing nonowner credentials', async () => {
+    const h = harness({ owner: false, offline: true });
+    await h.run();
+    expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain('.extraHeader=Authorization:');
+    expect(h.delegates[0].env.GIT_CONFIG_PARAMETERS).toContain('http.cookieFile=');
+    expect(h.sync.mock.calls.some(([, args]) => args[0] === 'credential')).toBe(false);
+  });
+  it('does not execute an anonymous write when providers fail', async () => {
+    const h = harness({ owner: false, offline: true, operation: 'write' });
+    await expect(h.run()).rejects.toMatchObject({ code: 'credentials_exhausted' });
+    expect(h.delegates).toEqual([]);
+  });
+  it('native receive-pack advertisement leaves refs unchanged', () => {
+    const bare = path.join(directory, 'remote.git');
+    execFileSync('git', ['init', '--bare', bare], { stdio: 'ignore' });
+    expect(spawnSync('git', ['ls-remote', '--upload-pack=git-receive-pack', bare]).status).toBe(0);
+    expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref'], { encoding: 'utf8' })).toBe('');
+  });
+  it('clones recursive native SSH submodules while cloud credentials fail', async () => {
+    const realGit = path.join(
+      execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(),
+      'git'
+    );
+    const fixtureEnv = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([key]) => !/^(GIT_CONFIG_|GIT_EXEC_PATH|LODY_GIT_)/.test(key)
+        )
+      ),
       GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_GLOBAL: path.join(directory, 'empty-config'),
-    });
-    ensureGitHubGitTransport(directory, '/unused', realGit);
-    const wrapper = path.join(directory, 'git');
-    for (const inherited of ['read', 'write', 'invalid', undefined]) {
-      const result = spawnSync(
-        process.execPath,
-        [
-          wrapper,
-          '-c',
-          'credential.helper=',
-          '-c',
-          'credential.helper=!f() { printf "username=fixture\\npassword=%s\\n" "$LODY_GIT_OPERATION"; }; f',
-          'credential',
-          'fill',
-        ],
-        {
-          cwd: directory,
-          env: { ...env, LODY_GIT_OPERATION: inherited },
-          input: 'protocol=https\nhost=fixture.test\n\n',
-          encoding: 'utf8',
-        }
-      );
-      expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toContain(`password=${inherited === 'read' ? 'read' : 'write'}`);
-    }
-    const repo = path.join(directory, 'project');
-    const remote = path.join(directory, 'remote.git');
-    const git = (args: string[]) => execFileSync(realGit, args, { env, stdio: 'ignore' });
-    git(['init', '-b', 'fixture-base', repo]);
-    git(['init', '--bare', remote]);
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_AUTHOR_NAME: 'Fixture',
+      GIT_AUTHOR_EMAIL: 'fixture@example.test',
+      GIT_COMMITTER_NAME: 'Fixture',
+      GIT_COMMITTER_EMAIL: 'fixture@example.test',
+    };
+    const git = (args: string[]) =>
+      execFileSync(realGit, args, { env: fixtureEnv, stdio: 'ignore' });
+    const dependency = path.join(directory, 'dependency');
+    const project = path.join(directory, 'project');
+    git(['init', dependency]);
+    git(['-C', dependency, 'commit', '--allow-empty', '-m', 'dependency']);
+    git(['init', project]);
     git([
       '-C',
-      repo,
+      project,
       '-c',
-      'user.name=Fixture',
-      '-c',
-      'user.email=fixture@example.test',
-      '-c',
-      'commit.gpgsign=false',
-      'commit',
-      '--allow-empty',
-      '-m',
-      'fixture',
+      'protocol.file.allow=always',
+      'submodule',
+      'add',
+      dependency,
+      'dependency',
     ]);
+    git([
+      '-C',
+      project,
+      'config',
+      '-f',
+      '.gitmodules',
+      'submodule.dependency.url',
+      'git@github.com:org/dependency.git',
+    ]);
+    git(['-C', project, 'add', '.gitmodules']);
+    git(['-C', project, 'commit', '-m', 'project']);
+    const ssh = path.join(directory, 'ssh.cjs');
+    const log = path.join(directory, 'ssh.log');
     fs.writeFileSync(
-      path.join(repo, '.git', 'hooks', 'pre-push'),
-      '#!/bin/sh\nprintf "operation=%s\\n" "$LODY_GIT_OPERATION" >&2\nexit 1\n',
-      { mode: 0o755 }
-    );
-    const push = spawnSync(process.execPath, [wrapper, '-C', repo, 'push', remote, 'HEAD'], {
-      env: { ...env, LODY_GIT_OPERATION: 'read' },
-      encoding: 'utf8',
-    });
-    expect(push.status).toBe(1);
-    expect(push.stderr).toContain('operation=write');
-    expect(
-      execFileSync(realGit, ['--git-dir', remote, 'for-each-ref'], { env, encoding: 'utf8' })
-    ).toBe('');
-  });
-  it.skipIf(process.platform === 'win32').each([false, true])(
-    'routes a native recursive submodule clone through the same transport (policy retry: %s)',
-    async (retryPolicy) => {
-      const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
-      const fixtureEnv = {
-        ...process.env,
-        GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: '/dev/null',
-        GIT_AUTHOR_NAME: 'Fixture',
-        GIT_AUTHOR_EMAIL: 'fixture@example.test',
-        GIT_COMMITTER_NAME: 'Fixture',
-        GIT_COMMITTER_EMAIL: 'fixture@example.test',
-      };
-      const git = (args: string[]) =>
-        execFileSync(realGit, args, { env: fixtureEnv, stdio: 'ignore' });
-      const dependency = path.join(directory, 'dependency');
-      const project = path.join(directory, 'project');
-      git(['init', dependency]);
-      git(['-C', dependency, 'commit', '--allow-empty', '-m', 'dependency']);
-      git(['init', project]);
-      git([
-        '-C',
-        project,
-        '-c',
-        'protocol.file.allow=always',
-        'submodule',
-        'add',
-        dependency,
-        'dependency',
-      ]);
-      git([
-        '-C',
-        project,
-        'config',
-        '-f',
-        '.gitmodules',
-        'submodule.dependency.url',
-        'git@github.com:org/dependency.git',
-      ]);
-      git(['-C', project, 'add', '.gitmodules']);
-      git(['-C', project, 'commit', '-m', 'project']);
-      const ssh = path.join(directory, 'ssh.cjs');
-      const log = path.join(directory, 'ssh.log');
-      fs.writeFileSync(
-        ssh,
-        `const fs = require('node:fs');
+      ssh,
+      `const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2).join(' ');
 if (process.argv.includes('-G')) process.exit(0);
@@ -235,228 +202,64 @@ const roots = ${JSON.stringify({ project, dependency })};
 const child = spawnSync(${JSON.stringify(realGit)}, [match[1].replace('git-', ''), roots[match[2]]], { stdio: 'inherit' });
 process.exit(child.status ?? 1);
 `
-      );
-      let firstPolicy = true;
-      let brokerToken = 'fixture';
-      const state = path.join(directory, 'broker.json');
-      const server = createServer((req, res) => {
-        res.setHeader('Content-Type', 'application/json');
-        if (req.headers.authorization !== 'Bearer ' + brokerToken) {
-          res.writeHead(401);
-          res.end(JSON.stringify({ error: 'unauthorized' }));
-          return;
-        }
-        if (retryPolicy && firstPolicy) {
-          firstPolicy = false;
-          // Simulate broker recovery between attempts. Reusing the original
-          // state/token instead of rereading this workspace's file must fail.
-          brokerToken = 'recovered';
-          const previous = JSON.parse(fs.readFileSync(state, 'utf8'));
-          fs.writeFileSync(state, JSON.stringify({ ...previous, token: brokerToken }));
-          res.writeHead(503);
-          res.end(JSON.stringify({ error: 'policy_unavailable' }));
-          return;
-        }
-        res.end(JSON.stringify({ allowLocalAuth: true, personalEnabled: false }));
-      });
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      try {
-        const address = server.address();
-        if (!address || typeof address === 'string') throw new Error('Missing broker port');
-        fs.writeFileSync(
-          state,
-          JSON.stringify({ url: `http://127.0.0.1:${address.port}`, token: 'fixture' })
-        );
-        const bin = path.join(directory, 'bin');
-        fs.mkdirSync(bin);
-        ensureGitHubGitTransport(bin, state, realGit);
-        const checkout = path.join(directory, 'checkout');
-        await promisify(execFile)(
-          path.join(bin, 'git'),
-          ['clone', '--recurse-submodules', 'git@github.com:org/project.git', checkout],
-          {
-            env: {
-              ...fixtureEnv,
-              PATH: `${bin}:${process.env.PATH}`,
-              GIT_SSH_COMMAND: `${JSON.stringify(process.execPath)} ${JSON.stringify(ssh)}`,
-              LODY_GIT_CRED_CONTEXT_TOKEN: 'requester',
-              LODY_GIT_LOCAL_CONFIG: '{}',
-              GIT_CONFIG_COUNT: '2',
-              GIT_CONFIG_KEY_0: 'url.lody-github::.insteadOf',
-              GIT_CONFIG_VALUE_0: 'git@github.com:',
-              GIT_CONFIG_KEY_1: 'protocol.lody-github.allow',
-              GIT_CONFIG_VALUE_1: 'always',
-            },
-            timeout: 20_000,
-          }
-        );
-        expect(fs.readFileSync(log, 'utf8').split('\n')).toEqual(
-          expect.arrayContaining(['project', 'dependency'])
-        );
-        expect(
-          execFileSync(realGit, ['-C', path.join(checkout, 'dependency'), 'rev-parse', 'HEAD'], {
-            encoding: 'utf8',
-          }).trim()
-        ).toBe(
-          execFileSync(realGit, ['-C', dependency, 'rev-parse', 'HEAD'], {
-            encoding: 'utf8',
-          }).trim()
-        );
-      } finally {
-        await new Promise<void>((resolve, reject) =>
-          server.close((error) => (error ? reject(error) : resolve()))
-        );
-      }
-    }
-  );
-  it('allows verified public anonymous reads but never anonymous writes', async () => {
-    const h = harness({
-      owner: false,
-      target: 'https/public/dependency',
-      unavailable: true,
-      env: { LODY_GIT_OPERATION: 'read' },
-    });
-    await h.run();
-    expect(h.spawn.mock.calls[0]).toEqual([
-      'git',
-      ['remote-https', 'origin', 'https://github.com/public/dependency.git'],
-      expect.objectContaining({
-        env: expect.objectContaining({
-          GIT_CONFIG_PARAMETERS: expect.stringContaining('.extraHeader=Authorization:'),
-        }),
-      }),
-    ]);
-    const write = harness({ owner: false, unavailable: true });
-    await expect(write.run()).rejects.toThrow('No GitHub credential');
-    expect(write.spawn).not.toHaveBeenCalled();
-  });
-  it('blocks native Git rewrite precedence from bypassing credential selection', () => {
-    ensureGitHubGitTransport(directory, '/unused', 'git');
-    const result = spawnSync(
-      process.execPath,
-      [
-        path.join(directory, 'git'),
-        '-c',
-        'url.git@github.com:.insteadOf=https://github.com/',
-        'ls-remote',
-        '--get-url',
-        'https://github.com/org/repo.git',
-      ],
-      { cwd: directory, encoding: 'utf8' }
     );
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('custom GitHub URL rewrite');
-    expect(result.stdout).toBe('');
-  });
-  it('preserves SSH command and port 443, preflighting receive-pack without replaying a write', async () => {
-    const h = harness({
-      target: 'ssh443/org/submodule.git',
-      sshCommand: 'ssh -i "key with spaces"',
+    const state = path.join(directory, 'broker.json');
+    const server = createServer((_req, res) => {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'upstream_unavailable' }));
     });
-    await h.run();
-    expect(h.sync).toHaveBeenCalledWith(
-      'git',
-      [
-        'ls-remote',
-        '--upload-pack=git-receive-pack',
-        'ssh://git@ssh.github.com:443/org/submodule.git',
-      ],
-      expect.objectContaining({
-        env: expect.objectContaining({
-          GIT_SSH_COMMAND: 'ssh -i "key with spaces" -oBatchMode=yes -oConnectTimeout=5',
-        }),
-      })
-    );
-    expect(h.spawn).toHaveBeenCalledOnce();
-    expect(h.spawn.mock.calls[0]).toEqual([
-      'git',
-      ['remote-ext', 'origin', expect.stringContaining('-p% 443% git@ssh.github.com')],
-      expect.anything(),
-    ]);
-    expect(h.requests.some((request) => request.url.endsWith('/github-token'))).toBe(false);
-  });
-  it('uses owner-local HTTPS authorization headers only after personal selection', async () => {
-    const h = harness({
-      target: 'https/org/repo',
-      header: 'Authorization: Basic ' + Buffer.from('user:header-token').toString('base64'),
-    });
-    await h.run();
-    expect(h.requests.some((request) => request.url.endsWith('/github-token'))).toBe(false);
-    expect(h.spawn.mock.calls[0]).toEqual([
-      'git',
-      ['remote-https', 'origin', 'https://github.com/org/repo.git'],
-      expect.objectContaining({
-        env: expect.objectContaining({
-          GIT_CONFIG_PARAMETERS: expect.stringContaining(
-            Buffer.from('x-access-token:header-token').toString('base64')
-          ),
-        }),
-      }),
-    ]);
-  });
-  it.each([
-    { owner: false, personal: false, source: 'app', inherited: undefined },
-    { owner: true, personal: true, source: 'personal', inherited: undefined },
-    { owner: false, personal: false, source: 'app', inherited: '' },
-    { owner: true, personal: true, source: 'personal', inherited: '' },
-    {
-      owner: false,
-      personal: false,
-      source: 'app',
-      inherited: "'http.https://github.com/.extraHeader=Authorization: Bearer owner-secret'",
-    },
-    {
-      owner: true,
-      personal: true,
-      source: 'personal',
-      inherited: "'http.https://github.com/.extraHeader=Authorization: Bearer owner-secret'",
-    },
-  ])(
-    'does not borrow local headers for $source (inherited: $inherited)',
-    async ({ owner, personal, source, inherited }) => {
-      const h = harness({
-        owner,
-        personal,
-        target: 'https/org/repo',
-        header: 'Authorization: Bearer owner-secret',
-        env: inherited === undefined ? {} : { GIT_CONFIG_PARAMETERS: inherited },
-      });
-      h.rotate();
-      await h.run();
-      expect(
-        h.sync.mock.calls.some(
-          ([, args]) =>
-            args.includes('http.extraHeader') || args[0] === 'credential' || args[0] === 'ls-remote'
-        )
-      ).toBe(false);
-      expect(
-        h.requests
-          .filter((request) => request.url.startsWith('http://broker'))
-          .every((request) => request.body.contextToken === 'original')
-      ).toBe(true);
-      const invocation = h.spawn.mock.calls[0] as unknown as [
-        string,
-        string[],
-        { env: Record<string, string> },
-      ];
-      const headers = execFileSync(
-        'git',
-        ['config', '--get-urlmatch', 'http.extraHeader', 'https://github.com/org/repo.git'],
-        { cwd: directory, env: { ...process.env, ...invocation[2].env }, encoding: 'utf8' }
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Missing broker port');
+      fs.writeFileSync(
+        state,
+        JSON.stringify({ url: `http://127.0.0.1:${address.port}`, token: 'fixture' })
       );
-      expect(headers.trim()).toBe(
-        'Authorization: Basic ' +
-          Buffer.from('x-access-token:' + source + '-token').toString('base64')
+      fs.mkdirSync(state + '.contexts');
+      fs.writeFileSync(
+        state + '.contexts/requester.json',
+        JSON.stringify({ version: 1, contextToken: 'requester', allowLocalAuth: true })
+      );
+      const bin = path.join(directory, 'bin');
+      fs.mkdirSync(bin);
+      ensureGitHubGitTransport(bin, state, realGit);
+      const checkout = path.join(directory, 'checkout');
+      await promisify(execFile)(
+        path.join(bin, 'git'),
+        ['clone', '--recurse-submodules', 'git@github.com:org/project.git', checkout],
+        {
+          env: {
+            ...fixtureEnv,
+            PATH: `${bin}:${process.env.PATH}`,
+            GIT_SSH_COMMAND: `${JSON.stringify(process.execPath)} ${JSON.stringify(ssh)}`,
+            LODY_GIT_CRED_CONTEXT_TOKEN: 'requester',
+            LODY_GIT_LOCAL_CONFIG: '{}',
+            GIT_CONFIG_COUNT: '2',
+            GIT_CONFIG_KEY_0: 'url.https://github.com/.insteadOf',
+            GIT_CONFIG_VALUE_0: 'git@github.com:',
+            GIT_CONFIG_KEY_1: 'protocol.ext.allow',
+            GIT_CONFIG_VALUE_1: 'always',
+          },
+          timeout: 20_000,
+        }
+      );
+      expect(fs.readFileSync(log, 'utf8').split('\n')).toEqual(
+        expect.arrayContaining(['project', 'dependency'])
+      );
+      expect(
+        execFileSync(realGit, ['-C', path.join(checkout, 'dependency'), 'rev-parse', 'HEAD'], {
+          encoding: 'utf8',
+        }).trim()
+      ).toBe(
+        execFileSync(realGit, ['-C', dependency, 'rev-parse', 'HEAD'], {
+          encoding: 'utf8',
+        }).trim()
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
       );
     }
-  );
-  it('native receive-pack advertisement does not change repository refs', () => {
-    const bare = path.join(directory, 'remote.git');
-    execFileSync('git', ['init', '--bare', bare], { stdio: 'ignore' });
-    const probe = spawnSync('git', ['ls-remote', '--upload-pack=git-receive-pack', bare], {
-      encoding: 'utf8',
-    });
-    expect(probe.status).toBe(0);
-    expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref'], { encoding: 'utf8' })).toBe('');
   });
 });

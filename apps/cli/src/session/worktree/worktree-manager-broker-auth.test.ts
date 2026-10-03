@@ -241,29 +241,42 @@ process.exit(result.status ?? 1);
       }
     );
     ensureCredentialHelperScript(REPO_ID);
-    const auth = (context: string): GitCredentialBrokerAuth => ({
-      workspaceId: context,
-      url: `http://${context}.test`,
-      token: context,
-      contextToken: context,
-      transportEnv: {
-        GIT_CONFIG_COUNT: checkoutCredentials ? '5' : '3',
-        GIT_CONFIG_KEY_0: 'credential.https://github.com.helper',
-        GIT_CONFIG_VALUE_0: '',
-        GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
-        GIT_CONFIG_VALUE_1: buildCredentialHelperValueForHost(REPO_ID),
-        GIT_CONFIG_KEY_2: 'credential.https://github.com.useHttpPath',
-        GIT_CONFIG_VALUE_2: 'true',
-        ...(checkoutCredentials
-          ? {
-              GIT_CONFIG_KEY_3: 'filter.credential-fixture.smudge',
-              GIT_CONFIG_VALUE_3: `${JSON.stringify(process.execPath)} ${JSON.stringify(smudge)}`,
-              GIT_CONFIG_KEY_4: 'filter.credential-fixture.required',
-              GIT_CONFIG_VALUE_4: 'true',
-            }
-          : {}),
-      },
-    });
+    const auth = (context: string): GitCredentialBrokerAuth => {
+      const stateFilePath = path.join(dataDir, context + '-broker.json');
+      mkdirSync(stateFilePath + '.contexts', { recursive: true });
+      writeFileSync(
+        stateFilePath,
+        JSON.stringify({ url: `http://${context}.test`, token: context })
+      );
+      writeFileSync(
+        stateFilePath + '.contexts/' + context + '.json',
+        JSON.stringify({ version: 1, contextToken: context, allowLocalAuth: false })
+      );
+      return {
+        stateFilePath,
+        workspaceId: context,
+        url: `http://${context}.test`,
+        token: context,
+        contextToken: context,
+        transportEnv: {
+          GIT_CONFIG_COUNT: checkoutCredentials ? '5' : '3',
+          GIT_CONFIG_KEY_0: 'credential.https://github.com.helper',
+          GIT_CONFIG_VALUE_0: '',
+          GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
+          GIT_CONFIG_VALUE_1: buildCredentialHelperValueForHost(REPO_ID),
+          GIT_CONFIG_KEY_2: 'credential.https://github.com.useHttpPath',
+          GIT_CONFIG_VALUE_2: 'true',
+          ...(checkoutCredentials
+            ? {
+                GIT_CONFIG_KEY_3: 'filter.credential-fixture.smudge',
+                GIT_CONFIG_VALUE_3: `${JSON.stringify(process.execPath)} ${JSON.stringify(smudge)}`,
+                GIT_CONFIG_KEY_4: 'filter.credential-fixture.required',
+                GIT_CONFIG_VALUE_4: 'true',
+              }
+            : {}),
+        },
+      };
+    };
     return {
       head,
       auth,
@@ -314,7 +327,7 @@ process.exit(result.status ?? 1);
       expect(info.headSha).toBe(fixture.head);
       expect(fixture.calls()).toBe(needsClone ? 2 : 1);
       expect(fixture.contexts()).toEqual(
-        Array.from({ length: needsClone ? 4 : 2 }, () => 'requester-a')
+        Array.from({ length: needsClone ? 2 : 1 }, () => 'requester-a')
       );
       if (mode === 'restore-cache') expect(info.branch).toBe('fixture-base');
       // Existing checkout restores offline, without authenticating or fetching.
@@ -337,12 +350,7 @@ process.exit(result.status ?? 1);
         fixture.auth('requester-a')
       );
       expect(readFileSync(path.join(info.hostPath, 'README.md'), 'utf8')).toBe('fixture content');
-      expect(fixture.contexts()).toEqual([
-        'requester-a',
-        'requester-a',
-        'requester-a',
-        'requester-a',
-      ]);
+      expect(fixture.contexts()).toEqual(['requester-a', 'requester-a']);
     }
   );
 
@@ -381,12 +389,7 @@ process.exit(result.status ?? 1);
       );
       expect(info.headSha).toBe(fixture.head);
     }
-    expect(fixture.contexts()).toEqual([
-      'requester-a',
-      'requester-a',
-      'requester-b',
-      'requester-b',
-    ]);
+    expect(fixture.contexts()).toEqual(['requester-a', 'requester-b']);
   });
 
   it('fails a fresh worktree before materialization when the requester context is invalid', async () => {
@@ -396,7 +399,7 @@ process.exit(result.status ?? 1);
     const sessionId = 'denied-startup' as SessionId;
     await expect(
       manager.createWorktree(sessionId, undefined, undefined, undefined, fixture.auth('revoked'))
-    ).rejects.toThrow('credential context expired');
+    ).rejects.toThrow('invalid_context');
     expect(manager.hasWorktree(sessionId)).toBe(false);
     expect(fixture.contexts()).toEqual([]);
   });

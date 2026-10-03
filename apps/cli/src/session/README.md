@@ -9,10 +9,10 @@ Dispatch architecture: context/message-flow.md — user turns arrive by being wr
 session doc (meta pointers), not via a message bus. The WS/DO path is DEPRECATED. The
 CLI/MCP orchestration contract is specs/session-orchestration.md.
 
-| Boundary         | Owner                                             | Responsibility                                                       |
-| ---------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
-| Admission        | [Dispatch watcher](session-dispatch-watcher.ts)   | Resolves metadata activation against history, queue, and RPC offers. |
-| Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.      |
+| Boundary         | Owner                                             | Responsibility                                                                       |
+| ---------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Admission        | [Dispatch watcher](session-dispatch-watcher.ts)   | Resolves metadata activation against history, queue, and RPC offers.                 |
+| Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
 ## Files
@@ -236,14 +236,14 @@ subscriptions at every daemon start (see [../lib/loro/AGENTS.md](../lib/loro/AGE
 
 ### GitHub credential broker
 
-Agent `gh` auth for GitHub repo sessions is set up in `session-manager.ts`: it creates the git
-credential broker, prepends the `~/.lody/bin/gh` shim, and injects/refreshes a managed
-`GH_TOKEN` when no user token is present. The shim lives in `../lib/gh-shim-script.ts`; token
-fetching/caching is in `../lib/github-token-manager.ts`; git HTTPS auth uses
-`../lib/git-credential-helper-script.ts`. A native `gh` earlier in PATH bypasses the shim, so the
-PATH merges keep the shim dir first (see [../lib/AGENTS.md](../lib/AGENTS.md)). Session process trees are already correct —
-`prepareGitHubRepoSessionConfig` injects the env explicitly. The host-side rule is in
-[worktree/AGENTS.md](worktree/AGENTS.md).
+Managed GitHub sessions receive a trusted conversation-owner snapshot and workspace
+Git/gh adapters from `session-manager.ts`. The shared credential iterator tries
+personal, eligible machine and repository App sources once, without a cloud policy
+lookup. The broker supplies optional managed tokens; owner-local credentials remain
+available during token-service failure. Native Git helpers use `GIT_EXEC_PATH`;
+standard URLs remain standard. Host operations pin the same owner snapshot through
+checkout. See [the contract](../../../../specs/github-identity-fallback.md) and
+[worktree rules](worktree/AGENTS.md) for ownership, write non-replay and isolation.
 
 ### Commit identity
 
@@ -256,7 +256,7 @@ Lody/GitHub identity and can never inherit the machine owner's Git config; if no
 identity exists, the neutral LodyAI identity is used. The cloud composition root owns hosted
 user resolution because the daemon does not own an end-user browser session; the local access
 port resolves only its synthetic owner and never performs network I/O. PR and push identity
-itself comes from the requester-bound GitHub token, not from git config. Identity changes update the host Session environment without restarting ACP or its sandbox,
+itself comes from the conversation-owner GitHub credential, not from git config. Identity changes update the host Session environment without restarting ACP or its sandbox,
 including adopted preparations. Existing ACP children retain their launch environment; live
 identity propagation into adapter-owned Git commands remains unresolved.
 

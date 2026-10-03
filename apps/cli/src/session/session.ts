@@ -387,7 +387,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   ): void {
     const configEnv = this.config.env ?? {};
     if (this.config.githubCredentialPolicy) {
-      this.config.githubCredentialPolicy.allowLocalAuth = options.preferMachineIdentity;
+      // Commit attribution follows the turn; network credentials belong to the session owner.
       if (options.personalIdentityEnabled !== undefined) {
         this.config.githubCredentialPolicy.personalEnabled = options.personalIdentityEnabled;
       }
@@ -517,6 +517,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         if (
           key.startsWith('LODY_GIT_CRED_') ||
           key.startsWith('GIT_CONFIG_') ||
+          key === 'GIT_EXEC_PATH' ||
           key === 'LODY_GIT_LOCAL_CONFIG'
         )
           finalEnv[key] = configEnv[key];
