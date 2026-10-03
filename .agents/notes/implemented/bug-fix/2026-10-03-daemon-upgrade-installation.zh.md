@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1228
 
 [English](2026-10-03-daemon-upgrade-installation.md)
 
