@@ -24,3 +24,9 @@ Cancellation regressions stop real stalled TLS handshakes and TCP TURN allocatio
 ## Preview connection details
 
 The popover uses Realtime mode / Compatibility mode instead of protocol names, and simple preview wording instead of tunnel/privacy jargon. “Direct” was rejected as a remote transport label because WebRTC can use TURN. Only active errors expose diagnostics copying; successful fallback is a normal compatibility state. The authenticated viewer state carries optional allowlisted transport, codec and fallback stage, accepted through the existing source/origin/operation boundary. Older viewers report unknown transport instead of guessing. Reports also include client network, visibility and browser capabilities; no SDP, candidate addresses or credentials are copied. Component and CLI typechecks cover integration; tests and live cross-device acceptance were not run for this UI follow-up.
+
+## Ablation-guided simplification
+
+Removed the unused peer UUID, repeated cancellation checks already enforced by the common failure handler or the synchronous send loop. Overlapping device controls now close the peer instead of maintaining a special busy-response branch; the viewer normally permits only one pending control. No command is replayed.
+
+Baseline: 10 RTC tests passed. Server and viewer deletions passed independently. Removing the opened flag passed tests but review found it lost the last transport in failure diagnostics; that deletion was reverted. Removing frame-offset validation as a negative control made the discontinuous-frame regression fail, so that guard remains. The final 11 tests include real DTLS/SCTP delivery, abort, overlapping-control closure and pending TCP/TLS TURN cleanup. Keep normal network fallback, authorization, bounded buffers and teardown: these protect exercised behavior. These local experiments do not establish live TURN or cross-network reliability.

@@ -41,13 +41,12 @@ function createSimulatorSocket(url){
   async function read(response){if(!response.ok)throw Error('RTC signaling');const text=await response.text();if(text.length>70000)throw Error('RTC response');return JSON.parse(text)}
   void (async()=>{
     const config=await read(await fetch(endpoint('rtc-config'),{signal:abort.signal,redirect:'error'}));
-    if(stopped||abort.signal.aborted)return;
+    if(abort.signal.aborted)return;
     rtcStage='negotiation';
     pc=new RTCPeerConnection({iceServers:config.iceServers,iceTransportPolicy:'all'});
     media=pc.createDataChannel('media',{ordered:true});control=pc.createDataChannel('control',{ordered:true});media.binaryType='arraybuffer';
     pc.onconnectionstatechange=()=>{if(['failed','disconnected'].includes(pc.connectionState))failed()};
-    media.onclose=control.onclose=()=>{if(!abort.signal.aborted)failed()};
-    media.onerror=control.onerror=()=>{if(!abort.signal.aborted)failed()};
+    media.onclose=control.onclose=media.onerror=control.onerror=()=>failed();
     media.onmessage=e=>{
       if(stopped||state!==1)return;
       const bytes=e.data;
@@ -78,11 +77,11 @@ function createSimulatorSocket(url){
       pc.addEventListener('icegatheringstatechange',changed);pc.addEventListener('icecandidate',changed);abort.signal.addEventListener('abort',cancel,{once:true});
       if(abort.signal.aborted)cancel();else changed();
     });
-    if(stopped||abort.signal.aborted)return;
+    if(abort.signal.aborted)return;
     const answer=await read(await fetch(endpoint('rtc'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sdp:pc.localDescription.sdp,codec:url.searchParams.get('codec')==='h264'?'h264':'mjpeg'}),signal:abort.signal,redirect:'error'}));
-    if(stopped||abort.signal.aborted)return;
+    if(abort.signal.aborted)return;
     await pc.setRemoteDescription({type:'answer',sdp:answer.sdp});
-  })().catch(()=>{if(!abort.signal.aborted)failed(1000,rtcStage)});
+  })().catch(()=>failed(1000,rtcStage));
   return socket;
 }
 `;

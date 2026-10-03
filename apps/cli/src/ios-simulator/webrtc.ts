@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { RTCPeerConnection, type RTCDataChannel } from 'werift';
 import { WebSocket } from 'ws';
 import {
@@ -21,7 +20,6 @@ export async function createSimulatorRtcPeer(options: {
   control(request: unknown): Promise<IosSimulatorDeviceControlResult>;
   onClose(): void;
 }) {
-  const id = randomUUID();
   // Werift selects only the first TURN URL, unlike browsers. Prefer TLS/443 so
   // hosts behind UDP-blocking networks actually use the advertised relay fallback.
   const iceServers = options.iceServers
@@ -121,7 +119,6 @@ export async function createSimulatorRtcPeer(options: {
               if (media.bufferedAmount <= 256 * 1024) break;
               await media.bufferedAmountLow.asPromise(5000);
             }
-            if (closing || !options.active() || media?.readyState !== 'open') return;
             media.send(chunk);
           }
           queuedBytes -= next.length;
@@ -168,15 +165,7 @@ export async function createSimulatorRtcPeer(options: {
             }
             const parsed = IosSimulatorDeviceControlRequestSchema.safeParse(raw);
             if (parsed.success) {
-              if (pendingControl)
-                return sendControl(
-                  JSON.stringify({
-                    type: 'rtc-control-result',
-                    requestId: parsed.data.requestId,
-                    success: false,
-                    error: 'busy',
-                  })
-                );
+              if (pendingControl) return cancel();
               pendingControl = true;
               void options
                 .control(parsed.data)
@@ -227,7 +216,7 @@ export async function createSimulatorRtcPeer(options: {
     await pc.setLocalDescription(await pc.createAnswer());
     if (closing || !options.active() || options.signal.aborted || !pc.localDescription)
       throw Error('RTC cancelled');
-    return { id, sdp: pc.localDescription.sdp, close };
+    return { sdp: pc.localDescription.sdp, close };
   } catch (error) {
     await close();
     throw error;

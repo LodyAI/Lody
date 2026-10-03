@@ -12,72 +12,98 @@ afterEach(async () => {
   cleanup.length = 0;
 });
 
-it('carries fragmented frames and input over real DTLS/SCTP, then revokes the connection', async () => {
-  const server = createServer();
-  const wss = new WebSocketServer({ server });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  if (!address || typeof address === 'string') throw Error('bind');
-  cleanup.push(async () => {
-    for (const socket of wss.clients) socket.terminate();
-    wss.close();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  });
-  const client = new RTCPeerConnection({
-    iceServers: [],
-    iceAdditionalHostAddresses: ['127.0.0.1'],
-  });
-  cleanup.push(() => client.close());
-  const media = client.createDataChannel('media', { ordered: true });
-  const control = client.createDataChannel('control', { ordered: true });
-  const ready = Promise.withResolvers<void>();
-  const complete = Promise.withResolvers<Buffer>();
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  media.onMessage.subscribe((message) => {
-    if (!Buffer.isBuffer(message)) throw Error('binary expected');
-    expect(message.length).toBeLessThanOrEqual(16384);
-    expect(message.readUInt32BE(4)).toBe(bytes);
-    const part = message.subarray(8);
-    bytes += part.length;
-    chunks.push(part);
-    if (bytes === message.readUInt32BE(0)) complete.resolve(Buffer.concat(chunks));
-  });
-  control.onMessage.subscribe((message) => {
-    if (typeof message === 'string' && JSON.parse(message).type === 'rtc-ready') ready.resolve();
-  });
-  await client.setLocalDescription(await client.createOffer());
-  const abort = new AbortController();
-  const closed = Promise.withResolvers<void>();
-  const connected = once(wss, 'connection');
-  const peer = await createSimulatorRtcPeer({
-    sdp: client.localDescription?.sdp ?? '',
-    iceServers: [],
-    streamUrl: `ws://127.0.0.1:${address.port}/stream`,
-    origin: `http://127.0.0.1:${address.port}`,
-    signal: abort.signal,
-    active: () => !abort.signal.aborted,
-    control: async () => ({ success: false, error: 'unavailable' }),
-    onClose: () => closed.resolve(),
-  });
-  cleanup.push(peer.close);
-  await client.setRemoteDescription({ type: 'answer', sdp: peer.sdp });
-  await ready.promise;
-  const [upstream] = await connected;
-  const input = once(upstream, 'message');
-  control.send(JSON.stringify({ type: 'heartbeat' }));
-  const [received] = await input;
-  expect(received.toString()).toBe('{"type":"heartbeat"}');
-  const frame = Buffer.alloc(200_000, 0x42);
-  upstream.send(frame);
-  expect(await complete.promise).toEqual(frame);
-  const upstreamClosed = once(upstream, 'close');
-  abort.abort();
-  await closed.promise;
-  await upstreamClosed;
-  expect(wss.clients.size).toBe(0);
-});
+it.each(['abort', 'overlapping control'] as const)(
+  'carries frames and input over real DTLS/SCTP, then closes on %s',
+  async (failure) => {
+    const server = createServer();
+    const wss = new WebSocketServer({ server });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw Error('bind');
+    cleanup.push(async () => {
+      for (const socket of wss.clients) socket.terminate();
+      wss.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    });
+    const client = new RTCPeerConnection({
+      iceServers: [],
+      iceAdditionalHostAddresses: ['127.0.0.1'],
+    });
+    cleanup.push(() => client.close());
+    const media = client.createDataChannel('media', { ordered: true });
+    const control = client.createDataChannel('control', { ordered: true });
+    const ready = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<Buffer>();
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    media.onMessage.subscribe((message) => {
+      if (!Buffer.isBuffer(message)) throw Error('binary expected');
+      expect(message.length).toBeLessThanOrEqual(16384);
+      expect(message.readUInt32BE(4)).toBe(bytes);
+      const part = message.subarray(8);
+      bytes += part.length;
+      chunks.push(part);
+      if (bytes === message.readUInt32BE(0)) complete.resolve(Buffer.concat(chunks));
+    });
+    control.onMessage.subscribe((message) => {
+      if (typeof message === 'string' && JSON.parse(message).type === 'rtc-ready') ready.resolve();
+    });
+    await client.setLocalDescription(await client.createOffer());
+    const abort = new AbortController();
+    const closed = Promise.withResolvers<void>();
+    const connected = once(wss, 'connection');
+    const controlStarted = Promise.withResolvers<void>();
+    const controlResult = Promise.withResolvers<{ success: false; error: 'unavailable' }>();
+    const peer = await createSimulatorRtcPeer({
+      sdp: client.localDescription?.sdp ?? '',
+      iceServers: [],
+      streamUrl: `ws://127.0.0.1:${address.port}/stream`,
+      origin: `http://127.0.0.1:${address.port}`,
+      signal: abort.signal,
+      active: () => !abort.signal.aborted,
+      control: () => {
+        controlStarted.resolve();
+        return controlResult.promise;
+      },
+      onClose: () => closed.resolve(),
+    });
+    cleanup.push(peer.close);
+    await client.setRemoteDescription({ type: 'answer', sdp: peer.sdp });
+    await ready.promise;
+    const [upstream] = await connected;
+    const input = once(upstream, 'message');
+    control.send(JSON.stringify({ type: 'heartbeat' }));
+    const [received] = await input;
+    expect(received.toString()).toBe('{"type":"heartbeat"}');
+    const frame = Buffer.alloc(200_000, 0x42);
+    upstream.send(frame);
+    expect(await complete.promise).toEqual(frame);
+    const upstreamClosed = once(upstream, 'close');
+    if (failure === 'abort') abort.abort();
+    else {
+      control.send(
+        JSON.stringify({
+          operationId: 'operation',
+          requestId: 'first',
+          control: { kind: 'button', button: 'home' },
+        })
+      );
+      await controlStarted.promise;
+      control.send(
+        JSON.stringify({
+          operationId: 'operation',
+          requestId: 'second',
+          control: { kind: 'button', button: 'home' },
+        })
+      );
+    }
+    await closed.promise;
+    controlResult.resolve({ success: false, error: 'unavailable' });
+    await upstreamClosed;
+    expect(wss.clients.size).toBe(0);
+  }
+);
 
 it.each(['tcp', 'tls'] as const)(
   'joins a cancelled pending TURN %s connection without leaking its socket',
