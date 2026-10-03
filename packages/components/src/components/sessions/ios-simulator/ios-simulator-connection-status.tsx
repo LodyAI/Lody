@@ -193,8 +193,7 @@ export function IosSimulatorConnectionStatus({
     showDiagnostics ||
     (kind === 'preparing' && Boolean(onCancel)) ||
     (status.phase === 'ready' && Boolean(onStop)) ||
-    (kind === 'interrupted' && Boolean(onRestore)) ||
-    (kind === 'failed' && Boolean(onRetry));
+    (kind === 'interrupted' && Boolean(onRestore));
   const showFacts = kind === 'direct' || kind === 'remote' || kind === 'interrupted';
   const accessibleName = t(
     'sessions.iosSimulator.connection.statusLabel',
