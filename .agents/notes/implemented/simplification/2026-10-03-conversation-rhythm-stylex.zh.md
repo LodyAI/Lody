@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1238](https://github.com/LodyAI/Lody/pull/1238)
 
 [English](2026-10-03-conversation-rhythm-stylex.md)
 
