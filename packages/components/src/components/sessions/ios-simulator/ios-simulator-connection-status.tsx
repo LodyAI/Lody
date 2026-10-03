@@ -1,6 +1,14 @@
 import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { CircleDashed, Copy, Link2Off, Monitor, RadioTower, TriangleAlert } from 'lucide-react';
+import {
+  CircleDashed,
+  Copy,
+  Info,
+  Link2Off,
+  Monitor,
+  RadioTower,
+  TriangleAlert,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
@@ -11,6 +19,7 @@ import { space, text } from '@lody/ui/tokens/scales.stylex';
 import type {
   IosSimulatorPanelStatus,
   IosSimulatorViewerState,
+  IosSimulatorViewerDiagnostics,
 } from '@/lib/ios-simulator/ios-simulator-types';
 import { useIosSimulatorStageLabel } from './ios-simulator-copy';
 
@@ -20,6 +29,7 @@ export type IosSimulatorConnectionStatusProps = {
   status: IosSimulatorPanelStatus;
   /** What the viewer page last reported for a ready preview. */
   viewerState?: IosSimulatorViewerState | null;
+  viewerDiagnostics?: IosSimulatorViewerDiagnostics | null;
   /** Name of the device `status` is about. */
   deviceName?: string;
   pendingAction?: IosSimulatorPendingAction;
@@ -28,6 +38,7 @@ export type IosSimulatorConnectionStatusProps = {
   onCancel?: () => void;
   onStop?: () => void;
   onCopyDiagnostics: () => void;
+  hasError?: boolean;
 };
 
 type StatusKind = 'idle' | 'preparing' | 'direct' | 'remote' | 'interrupted' | 'failed';
@@ -80,6 +91,7 @@ const styles = stylex.create({
   },
   actions: { display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: space[1.5] },
   copy: { marginInlineEnd: 'auto' },
+  info: { display: 'inline-block', verticalAlign: 'text-bottom' },
 });
 
 function StatusGlyph({ kind }: { kind: StatusKind }) {
@@ -94,11 +106,12 @@ function StatusGlyph({ kind }: { kind: StatusKind }) {
 /**
  * The toolbar's second control: how this Session's preview is connected, and
  * the only place to stop it. It never shows an address — a remote viewer rides
- * a private tunnel — and stopping never shuts the simulator down.
+ * an authenticated connection — and stopping never shuts the simulator down.
  */
 export function IosSimulatorConnectionStatus({
   status,
   viewerState = null,
+  viewerDiagnostics = null,
   deviceName,
   pendingAction = null,
   onRetry,
@@ -106,6 +119,7 @@ export function IosSimulatorConnectionStatus({
   onCancel,
   onStop,
   onCopyDiagnostics,
+  hasError = false,
 }: IosSimulatorConnectionStatusProps) {
   const { t } = useTranslation();
   const stageLabel = useIosSimulatorStageLabel();
@@ -143,12 +157,12 @@ export function IosSimulatorConnectionStatus({
     kind === 'direct'
       ? t(
           'sessions.iosSimulator.connection.directDetail',
-          'Streamed straight from this Mac. It works without a network connection.'
+          'Previewing on this Mac. No internet connection needed.'
         )
       : kind === 'remote'
         ? t(
             'sessions.iosSimulator.connection.remoteDetail',
-            'Streamed from the session’s Mac over a private connection that is never shared.'
+            'View and control the simulator on your session’s Mac.'
           )
         : kind === 'preparing'
           ? t(
@@ -170,6 +184,17 @@ export function IosSimulatorConnectionStatus({
                   'Choose a simulator and start a preview.'
                 );
 
+  const showDiagnostics =
+    hasError ||
+    kind === 'failed' ||
+    (status.phase === 'ready' && (viewerState === 'error' || viewerState === 'disconnected'));
+  const mode = kind === 'remote' && viewerState === 'ready' ? viewerDiagnostics?.transport : null;
+  const hasActions =
+    showDiagnostics ||
+    (kind === 'preparing' && Boolean(onCancel)) ||
+    (status.phase === 'ready' && Boolean(onStop)) ||
+    (kind === 'interrupted' && Boolean(onRestore)) ||
+    (kind === 'failed' && Boolean(onRetry));
   const showFacts = kind === 'direct' || kind === 'remote' || kind === 'interrupted';
   const accessibleName = t(
     'sessions.iosSimulator.connection.statusLabel',
@@ -202,6 +227,24 @@ export function IosSimulatorConnectionStatus({
         <div {...stylex.props(styles.panel)}>
           <Popover.Title {...stylex.props(styles.title)}>{title}</Popover.Title>
           <Popover.Description {...stylex.props(styles.detail)}>{detail}</Popover.Description>
+          {mode === 'webrtc' || mode === 'websocket' ? (
+            <p {...stylex.props(styles.detail)}>
+              <Info {...stylex.props(styles.info)} size={12} aria-hidden />{' '}
+              {mode === 'webrtc'
+                ? t('sessions.iosSimulator.connection.realtimeMode', 'Realtime mode')
+                : t('sessions.iosSimulator.connection.compatibleMode', 'Compatibility mode')}
+              {' — '}
+              {mode === 'webrtc'
+                ? t(
+                    'sessions.iosSimulator.connection.realtimeHint',
+                    'For responsive viewing and controls.'
+                  )
+                : t(
+                    'sessions.iosSimulator.connection.compatibleHint',
+                    'Keeps the preview available when realtime mode cannot connect.'
+                  )}
+            </p>
+          ) : null}
           {showFacts ? (
             <ul {...stylex.props(styles.facts)}>
               <li>
@@ -218,14 +261,16 @@ export function IosSimulatorConnectionStatus({
               </li>
             </ul>
           ) : null}
-          <Separator />
+          {hasActions ? <Separator /> : null}
           <div {...stylex.props(styles.actions)}>
-            <span {...stylex.props(styles.copy)}>
-              <Button type="button" variant="ghost" size="mini" onClick={onCopyDiagnostics}>
-                <Copy size={12} aria-hidden />
-                {t('sessions.iosSimulator.connection.copyDiagnostics', 'Copy diagnostics')}
-              </Button>
-            </span>
+            {showDiagnostics ? (
+              <span {...stylex.props(styles.copy)}>
+                <Button type="button" variant="ghost" size="mini" onClick={onCopyDiagnostics}>
+                  <Copy size={12} aria-hidden />
+                  {t('sessions.iosSimulator.connection.copyDiagnostics', 'Copy diagnostics')}
+                </Button>
+              </span>
+            ) : null}
             {kind === 'preparing' && onCancel ? (
               <Button
                 type="button"

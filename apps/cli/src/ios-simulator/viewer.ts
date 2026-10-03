@@ -14,13 +14,14 @@ ${simulatorViewerWebRtcScript}
 let rotation=${JSON.stringify(initialRotation)},rotateWithDevice=true;
 function displayRotation(){return rotateWithDevice?rotation:0}
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');
+let lastTransport='connecting';
 let parentOrigin,parentPort,visible=false,ws,pending,decoding=false,generation=0,point,pointer,wheelEnd,heartbeat,firstFrame,lastReport,painted=false,commandAbort,capturing=false;
 function layout(){if(!painted)return;const angle=displayRotation(),swap=angle%180!==0;const scale=Math.min((swap?innerHeight:innerWidth)/canvas.width,(swap?innerWidth:innerHeight)/canvas.height);Object.assign(canvas.style,{width:canvas.width*scale+'px',height:canvas.height*scale+'px',maxWidth:'none',maxHeight:'none',flexShrink:'0',transform:'rotate('+angle+'deg)'})}
 function replyToParent(value,transfer=[]){if(parentPort)parentPort.postMessage(value,transfer);else if(parentOrigin)parent.postMessage(value,parentOrigin,transfer)}
-function report(state){const rotation=displayRotation(),swap=rotation%180!==0,width=swap?canvas.height:canvas.width,height=swap?canvas.width:canvas.height;const key=state+':'+width+':'+height+':'+rotation;if(parentOrigin&&key!==lastReport){lastReport=key;replyToParent({type:'lody:ios-simulator:state',operationId,state,width,height,rotation})}}
-function send(value){if(ws?.readyState===1){if(ws.bufferedAmount>65536){const old=ws;ws=undefined;old.close();close();report('error');return}ws.send(JSON.stringify(value))}}
+function report(state){const rotation=displayRotation(),swap=rotation%180!==0,width=swap?canvas.height:canvas.width,height=swap?canvas.width:canvas.height;const diagnostics={transport:ws?.transport||(ws?'websocket':state==='connecting'?'connecting':lastTransport),codec:usingH264?'h264':'mjpeg',fallbackReason:rtcFallbackReason};const key=state+':'+width+':'+height+':'+rotation+':'+JSON.stringify(diagnostics);if(parentOrigin&&key!==lastReport){lastReport=key;replyToParent({type:'lody:ios-simulator:state',operationId,state,width,height,rotation,diagnostics})}}
+function send(value){if(ws?.readyState===1){if(ws.bufferedAmount>65536){const old=ws;lastTransport=old.transport||'websocket';ws=undefined;old.close();close();report('error');return}ws.send(JSON.stringify(value))}}
 function lift(){clearTimeout(wheelEnd);flushMove();if(point){const up={...point,type:'touch1-up'};point=undefined;pointer=undefined;send(up)}}
-function close(){lift();generation++;painted=false;commandAbort?.abort();clearInterval(heartbeat);clearTimeout(firstFrame);pending=undefined;if(ws){const old=ws;ws=undefined;old.close()}closeMedia();report('disconnected')}
+function close(){if(ws)lastTransport=ws.transport||'websocket';lift();generation++;painted=false;commandAbort?.abort();clearInterval(heartbeat);clearTimeout(firstFrame);pending=undefined;if(ws){const old=ws;ws=undefined;old.close()}closeMedia();report('disconnected')}
 ${simulatorViewerMediaScript}
 let exteriorRequested=false;
 async function sendExterior(){

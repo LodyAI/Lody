@@ -44,7 +44,6 @@ access; remote control binds a short-lived proof to the exact session, device/op
 action and daemon instance. OS controls discoverability; a versioned machine capability
 controls compatibility. Public local-only builds make no authenticated cloud calls.
 
-
 The same authorized session may view one operation from multiple devices. Local
 Electron and remote viewers use separate lazily created endpoints; status and start
 return the caller's transport, including during preparation. Opening another device
@@ -127,3 +126,5 @@ Same-machine preview preserves native resolution. An optional TURN service relay
 Interaction feedback takes priority over replaying stale queued animation. Preserve
 H.264 dependency safety and receiver credit when replacing a stale unsent chain;
 never discard a valid chain unless a replacement can be requested immediately.
+
+Connection details use “Realtime mode” and “Compatibility mode” for remote WebRTC and WebSocket respectively; neither implies a direct peer-to-peer route. Keep protocol names in diagnostics. Show Copy diagnostics only for an active failure or unexpected disconnection, not healthy, starting or intentionally stopped previews. Reports include allowlisted transport, codec and fallback stage plus client connectivity/capabilities, never SDP, ICE addresses or credentials.

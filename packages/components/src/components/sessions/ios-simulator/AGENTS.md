@@ -54,3 +54,8 @@ Decision and rationale:
   consume each request once per browser tab in sessionStorage; mobile stays opt-in.
   Side Chat actions bind the exact originating Session; the panel owner override is
   fenced to its parent/top-tab selection. Closing the sidebar never starts/stops a device.
+
+- Connection mode names are Realtime / Compatibility, never infer P2P from WebRTC.
+  Optional viewer diagnostics are allowlisted and accepted only after the existing
+  source/origin/operation checks. Copy diagnostics appears only for current errors;
+  healthy fallback is not an error. Never include SDP, ICE addresses or credentials.

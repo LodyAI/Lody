@@ -21,6 +21,7 @@ import type {
   IosSimulatorPanelStatus,
   IosSimulatorPreparingStage,
   IosSimulatorViewerState,
+  IosSimulatorViewerDiagnostics,
 } from '@/lib/ios-simulator/ios-simulator-types';
 import {
   IosSimulatorConnectionStatus,
@@ -64,6 +65,7 @@ export type IosSimulatorPanelViewProps = {
   status: IosSimulatorPanelStatus;
   /** What the viewer page last reported for the ready preview. */
   viewerState?: IosSimulatorViewerState | null;
+  viewerDiagnostics?: IosSimulatorViewerDiagnostics | null;
   /** Bumped to reload the viewer page after its stream dropped. */
   viewerReloadKey?: number;
   pendingAction?: IosSimulatorPendingAction;
@@ -81,7 +83,10 @@ export type IosSimulatorPanelViewProps = {
   onRestore: () => void;
   onRetry: () => void;
   onCopyDiagnostics: () => void;
-  onViewerStateChange?: (state: IosSimulatorViewerState) => void;
+  onViewerStateChange?: (
+    state: IosSimulatorViewerState,
+    diagnostics?: IosSimulatorViewerDiagnostics | null
+  ) => void;
   /**
    * The simulator's native controls and view options. Present only while this
    * Session's preview is ready; everything else about the panel stays as is.
@@ -375,6 +380,7 @@ export function IosSimulatorPanelView({
   selectedUdid,
   status,
   viewerState = null,
+  viewerDiagnostics = null,
   viewerReloadKey = 0,
   pendingAction = null,
   bootExpected = false,
@@ -710,12 +716,14 @@ export function IosSimulatorPanelView({
             <IosSimulatorConnectionStatus
               status={status}
               viewerState={viewerState}
+              viewerDiagnostics={viewerDiagnostics}
               deviceName={statusDevice?.name}
               pendingAction={pendingAction}
               onRetry={onRetry}
               onRestore={onRestore}
               onCancel={onCancel}
               onStop={onStop}
+              hasError={catalog.phase === 'error'}
               onCopyDiagnostics={onCopyDiagnostics}
             />
           </div>

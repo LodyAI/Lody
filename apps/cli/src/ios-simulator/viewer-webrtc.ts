@@ -1,9 +1,11 @@
 /** The fixed viewer's RTC adapter preserves the existing decoder and touch wire
  * contracts. It never replays input when changing transports. */
 export const simulatorViewerWebRtcScript = `
-let rtcDisabled=false;
+let rtcDisabled=false,rtcFallbackReason;
 function createSimulatorSocket(url){
+  if(preferWebRtc&&typeof RTCPeerConnection==='undefined')rtcFallbackReason='unsupported';
   if(!preferWebRtc||rtcDisabled||typeof RTCPeerConnection==='undefined')return new WebSocket(url);
+  let rtcStage='configuration';
   let state=0,pc,media,control,fallback,stopped=false,opened=false,frame,offset=0,command;
   const abort=new AbortController();
   const socket={
@@ -21,24 +23,26 @@ function createSimulatorSocket(url){
         try{control.send(JSON.stringify(value))}catch{rejectCommand()}
       });
     },
-    get rtc(){return !fallback&&state===1}
+    get rtc(){return !fallback&&state===1},
+    get transport(){return fallback?'websocket':opened?'webrtc':'connecting'}
   };
   function rejectCommand(){if(!command)return;const c=command;command=undefined;c.signal.removeEventListener('abort',c.cancel);c.reject(Error('RTC closed'))}
-  function failed(code=1000){
+  function failed(code=1000,reason='connection'){
     if(stopped||fallback||abort.signal.aborted)return;
-    rtcDisabled=true;frame=undefined;abort.abort();clearTimeout(timer);pc?.close();rejectCommand();
+    rtcFallbackReason=reason;rtcDisabled=true;frame=undefined;abort.abort();clearTimeout(timer);pc?.close();rejectCommand();
     if(opened){state=3;stopped=true;socket.onclose?.({code});return}
     // Nothing was sent yet: bootstrap can fall back without replaying input.
     fallback=new WebSocket(url);fallback.binaryType='arraybuffer';
     fallback.onopen=e=>socket.onopen?.(e);fallback.onmessage=e=>socket.onmessage?.(e);
     fallback.onclose=e=>socket.onclose?.(e);fallback.onerror=e=>socket.onerror?.(e);
   }
-  const timer=setTimeout(()=>failed(),12000);
+  const timer=setTimeout(()=>failed(1000,'timeout'),12000);
   const endpoint=name=>{const target=new URL(name,location.href);target.search=new URL(location.href).search;return target};
   async function read(response){if(!response.ok)throw Error('RTC signaling');const text=await response.text();if(text.length>70000)throw Error('RTC response');return JSON.parse(text)}
   void (async()=>{
     const config=await read(await fetch(endpoint('rtc-config'),{signal:abort.signal,redirect:'error'}));
     if(stopped||abort.signal.aborted)return;
+    rtcStage='negotiation';
     pc=new RTCPeerConnection({iceServers:config.iceServers,iceTransportPolicy:'all'});
     media=pc.createDataChannel('media',{ordered:true});control=pc.createDataChannel('control',{ordered:true});media.binaryType='arraybuffer';
     pc.onconnectionstatechange=()=>{if(['failed','disconnected'].includes(pc.connectionState))failed()};
@@ -78,7 +82,7 @@ function createSimulatorSocket(url){
     const answer=await read(await fetch(endpoint('rtc'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sdp:pc.localDescription.sdp,codec:url.searchParams.get('codec')==='h264'?'h264':'mjpeg'}),signal:abort.signal,redirect:'error'}));
     if(stopped||abort.signal.aborted)return;
     await pc.setRemoteDescription({type:'answer',sdp:answer.sdp});
-  })().catch(()=>{if(!abort.signal.aborted)failed()});
+  })().catch(()=>{if(!abort.signal.aborted)failed(1000,rtcStage)});
   return socket;
 }
 `;

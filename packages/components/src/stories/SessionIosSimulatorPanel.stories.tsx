@@ -152,7 +152,21 @@ export const PreviewingLocal: Story = {
 };
 
 export const PreviewingRemote: Story = {
-  args: { status: ready('remote'), viewerState: 'ready', controls },
+  args: {
+    status: ready('remote'),
+    viewerState: 'ready',
+    viewerDiagnostics: { transport: 'webrtc', codec: 'h264' },
+    controls,
+  },
+};
+
+export const CompatibilityMode: Story = {
+  args: {
+    status: ready('remote'),
+    viewerState: 'ready',
+    viewerDiagnostics: { transport: 'websocket', codec: 'h264', fallbackReason: 'timeout' },
+    controls,
+  },
 };
 
 /** A wide panel keeps every control on the second row. */
