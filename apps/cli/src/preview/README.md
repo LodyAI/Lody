@@ -2,6 +2,10 @@
 
 ## Process ownership
 
+Quick Tunnels start with `--protocol http2`, using TCP for the connection from
+cloudflared to Cloudflare's edge. They do not attempt QUIC or negotiate a transport
+fallback. This setting does not select the browser-to-Cloudflare protocol.
+
 ```text
 CLI / QuickTunnelSession
   └─ cloudflared-worker.js (private IPC ownership)

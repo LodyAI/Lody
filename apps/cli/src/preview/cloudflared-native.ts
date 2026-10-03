@@ -123,7 +123,7 @@ export async function startCloudflaredNative(options: {
         '--metrics',
         '127.0.0.1:0',
         '--protocol',
-        'auto',
+        'http2',
         '--url',
         proxy.origin,
       ],
