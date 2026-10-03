@@ -242,7 +242,10 @@ personal, eligible machine and repository App sources once, without a cloud poli
 lookup. The broker supplies optional managed tokens; owner-local credentials remain
 available during token-service failure. Native Git helpers use `GIT_EXEC_PATH`;
 standard URLs remain standard. Host operations pin the same owner snapshot through
-checkout. See [the contract](../../../../specs/github-identity-fallback.md) and
+checkout. Managed credential helpers also cover checkout filters and LFS; non-owner
+host children scrub inherited GitHub tokens. Owner refresh updates shell eligibility
+and retires the old runtime on transfer, since running children retain their old
+environments. The interrupted operation is not replayed. See [the contract](../../../../specs/github-identity-fallback.md) and
 [worktree rules](worktree/AGENTS.md) for ownership, write non-replay and isolation.
 
 ### Commit identity

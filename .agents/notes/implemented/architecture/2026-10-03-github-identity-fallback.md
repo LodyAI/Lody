@@ -51,13 +51,29 @@ Host snapshots remain usable if token service startup fails. Concurrent starts
 share one attempt; no health timer or self-recovery loop remains. This does not
 repair unrelated MCP availability or completion-hook contracts.
 
+## Review correction: owner changes and checkout credentials
+
+Review found two missing production boundaries: context rotation left the shell's
+machine-eligibility flag stale, and removing the credential helper left checkout
+filters outside managed selection. The original checkout fixture manually injected
+the missing helper, so its passing result did not validate production preparation.
+
+Owner refresh now updates shell eligibility and context together. A changed owner
+retires the existing runtime (including terminals holding old environment tokens)
+and fails the current operation explicitly; the next turn can create a fresh runtime.
+Participant changes without owner transfer do not terminate the runtime.
+Session and host preparation install the same pinned managed helper for Git credential
+requests, including LFS paths; non-owner host children also scrub inherited GitHub
+token variables and shell startup. Tests consume production preparation output,
+with a synthetic native helper/token that must never reach the non-owner filter.
+
 ## Verification and limits
 
 Owning suites cover candidate order, cloud outage with eligible local success,
 non-owner exclusion, source/owner cache partitioning and expiry, native recursive
 SSH cloning against synthetic local repositories, receive-pack advertisement
 without ref writes, checkout-time credentials, owner stability across participants,
-gh REST fallback and compound/partial-write non-replay. The final CLI suite passes 3425 tests (4 skipped) across 302 files; CLI bundling,
+gh REST fallback and compound/partial-write non-replay. The final CLI suite passes 3426 tests (4 skipped) across 302 files; CLI bundling,
 workspace typechecking, lint and platform/public boundary checks pass. Test processes
 use NODE_ENV=test and GIT_CONFIG_COUNT=0 to isolate inherited session routing.
 Documentation checking retains six pre-existing links into uninitialized Kimi/Pi

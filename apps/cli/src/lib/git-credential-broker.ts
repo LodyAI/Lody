@@ -419,6 +419,11 @@ export class GitCredentialBroker {
     return this.sessionContextTokens.has(sessionId);
   }
 
+  getSessionOwner(sessionId: string): string | undefined {
+    const token = this.sessionContextTokens.get(sessionId);
+    return token ? this.contexts.get(token)?.requesterUserId : undefined;
+  }
+
   /** Rotate only sessions that opted into managed credentials during preparation. */
   refreshSessionContext(context: GitCredentialBrokerSessionContext): string | undefined {
     if (!this.sessionContextTokens.has(context.sessionId)) return undefined;

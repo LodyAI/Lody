@@ -21,7 +21,7 @@ Contract: specs/session-orchestration.md.
   use the frozen Turn identity; GitHub network auth uses the trusted conversation owner.
 - Git: owner uses local config, no profile query; others never read it.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
-  Identity never restarts ACP/sandbox, even in prep.
+  Commit attribution never restarts ACP; owner changes retire the runtime.
 
 ## Dispatch
 

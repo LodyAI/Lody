@@ -14,7 +14,12 @@ Translation: current
 
 宿主从可信会话元数据读取 owner；新会话尚未发布时使用创建者。参与者切换不改变
 网络身份。宿主原子写入工作区本地上下文，包含不透明 token 和机器凭据可用资格。
-helper 每次捕获一个上下文；宿主 worktree 的 clone/fetch 和 checkout 使用固定快照。
+helper 每次捕获一个上下文。刷新检测到 owner 变化时，同步 shell 资格与上下文，
+终止旧 ACP/terminal 并报告 github_owner_changed：无法原地清除已启动进程的环境。
+被中断操作不重放；下一轮为新 owner 创建运行实例。宿主 worktree 的 clone/fetch
+和 checkout 使用固定快照。session 与宿主环境均安装 managed credential helper，
+覆盖 checkout filter 和 LFS 的 /info/lfs 路径；非 owner 宿主 checkout 不继承机器
+GitHub token 环境或 shell 启动文件。
 快照缺失或损坏属于配置错误，不能据此借用机器身份。这是进程凭据隔离，并非防御
 同一系统账户进程的 OS 沙箱。
 

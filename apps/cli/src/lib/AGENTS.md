@@ -14,7 +14,7 @@ end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
 - GitHub auth: conversation-owner personal → matching-owner machine → repo App,
   once per source. Failures advance without a policy RPC; local context grants
   machine eligibility. Never persist managed tokens or replay uncertain writes.
-  Each helper captures one context. Contract: [identity fallback](../../../../specs/github-identity-fallback.md).
+  Checkout/LFS share the pinned helper context. Contract: [identity fallback](../../../../specs/github-identity-fallback.md).
 
 - `cloud-cli-port.ts` is the sole official-build composition root for cloud clients and
   endpoint-derived adapters. Daemon runtime modules must not construct cloud SDK

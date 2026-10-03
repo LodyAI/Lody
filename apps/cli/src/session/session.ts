@@ -421,6 +421,11 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.gitIdentity.id === userId ? { ...this.gitIdentity } : null;
   }
 
+  updateGitHubCredentialPolicy(allowLocalAuth: boolean): void {
+    if (!this.config.githubCredentialPolicy) throw new Error('github_context_missing');
+    this.config.githubCredentialPolicy.allowLocalAuth = allowLocalAuth;
+  }
+
   updateEnv(env: Record<string, string | undefined>): void {
     const configEnv = this.config.env ?? {};
     for (const [key, value] of Object.entries(env)) {

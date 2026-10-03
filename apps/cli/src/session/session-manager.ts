@@ -1,3 +1,9 @@
+import { applyNonOwnerShellEnv } from '@/lib/non-owner-shell-env';
+import path from 'node:path';
+import {
+  ensureCredentialHelperAtPath,
+  buildCredentialHelperValueForPath,
+} from '@/lib/git-credential-helper-script';
 import { EventEmitter } from 'eventemitter3';
 import os from 'os';
 import { existsSync } from 'node:fs';
@@ -343,6 +349,7 @@ export interface ISession {
    * Takes effect on all subsequent exec() calls (each exec spawns a new process).
    */
   updateEnv(env: Record<string, string | undefined>): void;
+  updateGitHubCredentialPolicy(allowLocalAuth: boolean): void;
 }
 
 export type SessionMonitorRuntimeInfo = {
@@ -1707,6 +1714,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const contextFile = this.gitCredentialBroker!.getSessionContextFilePath(config.sessionId);
     if (contextFile) sessionEnv[LODY_GIT_CRED_CONTEXT_FILE_ENV] = contextFile;
     this.ensureGhShimSessionEnv(sessionEnv);
+    if (!allowLocalAuth) applyNonOwnerShellEnv(sessionEnv, brokerStateFilePath);
     // Native Git helper adapters keep remote URLs and wire protocols unchanged.
     // Save only caller config; each native attempt removes our SSH normalization.
     sessionEnv.LODY_GIT_LOCAL_CONFIG ??= JSON.stringify(
@@ -1732,6 +1740,22 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         ? 'url.https://github.com:443/.insteadOf'
         : 'url.https://github.com/.insteadOf';
       sessionEnv[`GIT_CONFIG_VALUE_${configCount++}`] = value;
+    }
+    // Checkout filters and LFS ask Git for credentials directly, outside HTTP transport.
+    const helperPath = path.join(
+      getGhShimHostBinDir(brokerStateFilePath),
+      'git-credential-lody.cjs'
+    );
+    ensureCredentialHelperAtPath(helperPath);
+    for (const host of ['https://github.com', 'https://www.github.com']) {
+      for (const [key, value] of [
+        [`credential.${host}.helper`, ''],
+        [`credential.${host}.helper`, buildCredentialHelperValueForPath(helperPath)],
+        [`credential.${host}.useHttpPath`, 'true'],
+      ] as const) {
+        sessionEnv[`GIT_CONFIG_KEY_${configCount}`] = key;
+        sessionEnv[`GIT_CONFIG_VALUE_${configCount++}`] = value;
+      }
     }
     sessionEnv.GIT_CONFIG_COUNT = String(configCount);
     sessionEnv.GIT_EXEC_PATH = getGhShimHostBinDir(brokerStateFilePath);
@@ -1761,12 +1785,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   ): Promise<void> {
     if (!this.gitCredentialBroker?.hasSessionContext(session.sessionId)) return;
     const owner = await this.resolveGitHubOwner(session.sessionId, requesterUserId);
-    const contextToken = this.gitCredentialBroker?.refreshSessionContext({
+    const previousOwner = this.gitCredentialBroker.getSessionOwner(session.sessionId);
+    const contextToken = this.gitCredentialBroker.refreshSessionContext({
       sessionId: session.sessionId,
       requesterUserId: owner,
       machineId: this.machineId,
     });
+    session.updateGitHubCredentialPolicy(owner === this.cloudPort.identity.userId);
     if (contextToken) session.updateEnv({ [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: contextToken });
+    if (previousOwner !== owner) {
+      // Existing children may contain the old owner's raw tokens. Never reuse them.
+      await session.terminate(true);
+      throw new Error(
+        'github_owner_changed: previous session processes were closed; start a new turn with the new owner'
+      );
+    }
   }
 
   private ensureGhShimSessionEnv(sessionEnv: Record<string, string>): void {
@@ -1855,6 +1888,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
     return {
       workspaceId: this.workspaceId,
+      allowLocalAuth: config.githubCredentialPolicy?.allowLocalAuth === true,
       url: brokerEnv.url,
       token: brokerEnv.token,
       contextToken,
@@ -1864,6 +1898,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           ([key]) =>
             key === 'PATH' ||
             key === 'GIT_EXEC_PATH' ||
+            key === 'BASH_ENV' ||
+            key === 'ZDOTDIR' ||
             key === 'LODY_GIT_LOCAL_CONFIG' ||
             /^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key)
         )

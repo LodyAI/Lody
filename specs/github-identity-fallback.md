@@ -19,8 +19,15 @@ The host reads the conversation owner from trusted session metadata; before a
 new session is published its creator is its owner. Participant changes do not
 change network identity. The host atomically writes a workspace-local context
 with an opaque context token and machine-eligibility boolean. Helpers capture it
-once. Host worktree operations carry an immutable context snapshot through
-clone/fetch and checkout. Missing/malformed snapshots are setup errors, not
+once. When a refresh observes an owner change, update shell eligibility with the
+context, terminate the old ACP/terminal runtime and report `github_owner_changed`.
+Existing child environments cannot be scrubbed in place. The interrupted operation
+is not replayed; a subsequent turn creates a fresh runtime for the new owner.
+Host worktree operations carry an immutable context snapshot through
+clone/fetch and checkout. Session/host environments install a managed Git credential
+helper for checkout filters and LFS, including repository `/info/lfs` paths. Host
+non-owner checkout processes cannot inherit machine GitHub token env or shell
+startup files. Missing/malformed snapshots are setup errors, not
 permission to borrow machine credentials. This is process credential isolation,
 not an OS sandbox against processes sharing the same user account.
 

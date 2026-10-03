@@ -7,10 +7,10 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId, RepoId, SessionId, WorkspaceId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
-import {
-  buildCredentialHelperValueForHost,
-  ensureCredentialHelperScript,
-} from '@/lib/git-credential-helper-script';
+import { SessionManager } from '../session-manager';
+import type { SessionConfig } from '../types';
+import type { LoroDocumentManager } from '@/lib/loro/doc';
+import { createTestCloudPort } from '../../../tests/test-cloud-port';
 import { materializeSpeculativeWorktree } from './speculative-worktree';
 import { ensureGitHubGitTransport } from '@/lib/github-git-transport';
 import type { GitCredentialBrokerAuth } from './worktree-manager';
@@ -152,6 +152,10 @@ describe('WorktreeManager host git credential broker routing', () => {
       ],
       upstream
     );
+    writeFileSync(
+      path.join(dataDir, 'empty-config'),
+      '[credential]\n\thelper = "!f() { echo username=machine; echo password=machine-owner-secret; }; f"\n'
+    );
     const head = nativeGit(['rev-parse', 'HEAD'], upstream);
     const bare = path.join(dataDir, 'repos', REPO_ID, 'bare.git');
     rmSync(bare, { recursive: true, force: true });
@@ -186,9 +190,10 @@ globalThis.fetch = async (url, init) => {
       `
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
+if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) throw new Error('host credential leaked');
 const input = fs.readFileSync(0);
 const result = spawnSync(${JSON.stringify(process.execPath)}, [${JSON.stringify(wrapper)}, 'credential', 'fill'], {
-  input: 'protocol=https\\nhost=github.com\\npath=owner/repo.git\\n\\n', encoding: 'utf8', env: process.env,
+  input: 'protocol=https\\nhost=github.com\\npath=owner/repo.git/info/lfs\\n\\n', encoding: 'utf8', env: process.env,
 });
 if (result.status !== 0 || !result.stdout.includes('password=synthetic-fixture-token')) {
   process.stderr.write(result.stderr); process.exit(1);
@@ -240,8 +245,7 @@ process.exit(result.status ?? 1);
         });
       }
     );
-    ensureCredentialHelperScript(REPO_ID);
-    const auth = (context: string): GitCredentialBrokerAuth => {
+    const auth = async (context: string): Promise<GitCredentialBrokerAuth> => {
       const stateFilePath = path.join(dataDir, context + '-broker.json');
       mkdirSync(stateFilePath + '.contexts', { recursive: true });
       writeFileSync(
@@ -252,30 +256,61 @@ process.exit(result.status ?? 1);
         stateFilePath + '.contexts/' + context + '.json',
         JSON.stringify({ version: 1, contextToken: context, allowLocalAuth: false })
       );
-      return {
-        stateFilePath,
-        workspaceId: context,
-        url: `http://${context}.test`,
-        token: context,
-        contextToken: context,
-        transportEnv: {
-          GIT_CONFIG_COUNT: checkoutCredentials ? '5' : '3',
-          GIT_CONFIG_KEY_0: 'credential.https://github.com.helper',
-          GIT_CONFIG_VALUE_0: '',
-          GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
-          GIT_CONFIG_VALUE_1: buildCredentialHelperValueForHost(REPO_ID),
-          GIT_CONFIG_KEY_2: 'credential.https://github.com.useHttpPath',
-          GIT_CONFIG_VALUE_2: 'true',
-          ...(checkoutCredentials
-            ? {
-                GIT_CONFIG_KEY_3: 'filter.credential-fixture.smudge',
-                GIT_CONFIG_VALUE_3: `${JSON.stringify(process.execPath)} ${JSON.stringify(smudge)}`,
-                GIT_CONFIG_KEY_4: 'filter.credential-fixture.required',
-                GIT_CONFIG_VALUE_4: 'true',
-              }
-            : {}),
+      const sessionManager = new SessionManager(
+        createLogger(),
+        'cli',
+        'machine',
+        'workspace',
+        {
+          repo: { getDocMeta: async () => ({ meta: { userId: context } }) },
+        } as unknown as LoroDocumentManager,
+        { cloudPort: createTestCloudPort() }
+      );
+      Object.assign(sessionManager, {
+        githubTokenManager: {},
+        gitCredentialBroker: {
+          ensureStarted: async () => ({ url: `http://${context}.test`, token: context, port: 0 }),
+          activateSessionContext: () => context,
+          getStateFilePath: () => stateFilePath,
+          getSessionContextFilePath: () => undefined,
         },
+      });
+      const production = sessionManager as unknown as {
+        prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void>;
+        resolveHostGitBrokerAuth(
+          source: { kind: 'github'; repoUrl: string },
+          config: SessionConfig
+        ): Promise<GitCredentialBrokerAuth>;
       };
+      const config = {
+        sessionId: context,
+        requesterUserId: context,
+        repoId: REPO_ID,
+        githubRepo: 'owner/repo',
+        env: {},
+      } as SessionConfig;
+      await production.prepareGitHubRepoSessionConfig(config);
+      const prepared = await production.resolveHostGitBrokerAuth(
+        { kind: 'github', repoUrl: REPO_URL },
+        config
+      );
+      // Only repository filter configuration is fixture-specific. Credentials,
+      // routing and pinned authority come from the actual production preparation.
+      if (checkoutCredentials) {
+        let count = Number(prepared.transportEnv.GIT_CONFIG_COUNT);
+        for (const [key, value] of [
+          [
+            'filter.credential-fixture.smudge',
+            `${JSON.stringify(process.execPath)} ${JSON.stringify(smudge)}`,
+          ],
+          ['filter.credential-fixture.required', 'true'],
+        ]) {
+          prepared.transportEnv[`GIT_CONFIG_KEY_${count}`] = key;
+          prepared.transportEnv[`GIT_CONFIG_VALUE_${count++}`] = value;
+        }
+        prepared.transportEnv.GIT_CONFIG_COUNT = String(count);
+      }
+      return prepared;
     };
     return {
       head,
@@ -301,7 +336,7 @@ process.exit(result.status ?? 1);
       if (!needsClone) fixture.seed();
       const manager = await newManager();
       const sessionId = `startup-${mode}` as SessionId;
-      const brokerAuth = fixture.auth('requester-a');
+      const brokerAuth = await fixture.auth('requester-a');
       const info =
         mode === 'speculative'
           ? (
@@ -340,6 +375,8 @@ process.exit(result.status ?? 1);
     'passes frozen credentials to checkout-time smudge filters during %s',
     async (mode) => {
       const fixture = nativeFixture(true, mode === 'retry');
+      vi.stubEnv('GH_TOKEN', 'machine-owner-env-secret');
+      vi.stubEnv('GITHUB_TOKEN', 'machine-owner-secondary-secret');
       fixture.seed();
       const manager = await newManager();
       const info = await manager.createWorktree(
@@ -347,7 +384,7 @@ process.exit(result.status ?? 1);
         undefined,
         mode === 'restore' ? 'fixture-base' : undefined,
         undefined,
-        fixture.auth('requester-a')
+        await fixture.auth('requester-a')
       );
       expect(readFileSync(path.join(info.hostPath, 'README.md'), 'utf8')).toBe('fixture content');
       expect(fixture.contexts()).toEqual(['requester-a', 'requester-a']);
@@ -385,7 +422,7 @@ process.exit(result.status ?? 1);
         undefined,
         undefined,
         undefined,
-        fixture.auth(requester)
+        await fixture.auth(requester)
       );
       expect(info.headSha).toBe(fixture.head);
     }
@@ -398,7 +435,13 @@ process.exit(result.status ?? 1);
     const manager = await newManager();
     const sessionId = 'denied-startup' as SessionId;
     await expect(
-      manager.createWorktree(sessionId, undefined, undefined, undefined, fixture.auth('revoked'))
+      manager.createWorktree(
+        sessionId,
+        undefined,
+        undefined,
+        undefined,
+        await fixture.auth('revoked')
+      )
     ).rejects.toThrow('invalid_context');
     expect(manager.hasWorktree(sessionId)).toBe(false);
     expect(fixture.contexts()).toEqual([]);

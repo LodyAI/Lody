@@ -13,7 +13,8 @@ and file responsibilities: [../README.md](../README.md).
 
 - Host clone/fetch must receive the prepared session's managed Git PATH/GIT_EXEC_PATH/config in
   `brokerAuth.transportEnv`, not just a helper: HTTP headers authenticate before
-  helpers. Pin the per-call owner context token; do not read a mutable session file.
+  helpers. Include the managed credential helper for checkout/LFS and scrub non-owner
+  token env. Pin the per-call owner context; never read a mutable session file.
 
 - INVARIANT: host-side git must receive its credential broker as an explicit argument
   (`WorktreeManager.ensureRepo({ brokerAuth })` or the per-call `createWorktree` argument),

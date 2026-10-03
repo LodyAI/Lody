@@ -38,12 +38,25 @@ broker 暴露安全错误码与关联编号，不吞掉原因。token 服务启�
 快照使用；并发启动共享一次尝试，不再有健康定时器或恢复循环。
 这不修复独立的 MCP 可用性或完成钩子契约问题。
 
+## 审查修正：owner 转移与 checkout 凭据
+
+审查发现两处生产边界遗漏：context 轮换未同步 shell 的机器资格，移除 helper 又使
+checkout filter 脱离托管选择。原测试 fixture 手动补装了缺失的 helper，因此通过结果
+不能证明生产准备正确。
+
+owner 刷新现在同时更新 shell 资格和上下文。实际 owner 改变时终止旧运行实例，
+包括持有旧 token 环境的 terminal，并明确中止当前操作；下一轮可创建新实例。
+仅切换参与者而未转移 owner 不终止实例。session 和宿主准备均安装固定上下文的
+managed helper，覆盖 LFS 路径；非 owner 宿主子进程还清除继承的 GitHub token
+和机器 shell 启动配置。测试直接使用生产准备输出，并放置不得进入非 owner filter
+的合成原生 helper/token。
+
 ## 验证与限制
 
 所属测试覆盖候选顺序、云故障时本机成功、非 owner 隔离、来源/owner 缓存分区和过期、
 针对本地合成仓库的真实递归 SSH clone、不修改 refs 的 receive-pack 通告、checkout
 凭据、参与者切换时 owner 稳定、gh REST 降级以及复合/部分写入不重放。
-最终 CLI 测试有 302 个文件、3425 个用例通过（4 个跳过）；CLI 打包、全仓类型检查、
+最终 CLI 测试有 302 个文件、3426 个用例通过（4 个跳过）；CLI 打包、全仓类型检查、
 lint、平台和公开边界检查通过。测试进程使用 NODE_ENV=test 和 GIT_CONFIG_COUNT=0
 隔离继承的会话路由。文档检查仍有 6 条指向未初始化 Kimi/Pi 子模块的既有链接错误。
 不执行生产部署。
