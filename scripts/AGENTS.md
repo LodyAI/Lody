@@ -50,6 +50,11 @@ maintenance commands here.
   A clean submodule is required for a publishable manifest; dirty artifacts are
   development-only and must never be uploaded to the managed-runtime channel.
 
+- `package-baguette-runtime.mjs` packages a prebuilt native binary and its resources,
+  verifies the executable/patch pins, and checks deterministic archive bytes twice.
+  `--print-pins` produces local candidate pins only. The runtime uses a distinct
+  Lody revision; rebuilds must never overwrite published immutable bytes.
+
 ## Install ownership
 
 - `package-pi-runtime.mjs` builds a frozen isolated Pi dependency closure, including

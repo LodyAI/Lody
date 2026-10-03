@@ -1,5 +1,14 @@
 import { memo, useEffect, useRef, type ReactNode } from 'react';
-import { FileDiff, Files, GitPullRequest, MessageSquare, MonitorPlay, Plus, X } from 'lucide-react';
+import {
+  FileDiff,
+  Files,
+  GitPullRequest,
+  MessageSquare,
+  MonitorPlay,
+  Plus,
+  Smartphone,
+  X,
+} from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { FileIcon } from '@/components/icons/file-icons';
 import { useHorizontalWheelScroll } from '@/hooks/use-horizontal-wheel-scroll';
@@ -12,7 +21,7 @@ import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/sha
 export type SessionSidePanelTabItem = {
   id: string;
   label: string;
-  kind: 'files' | 'changes' | 'pr' | 'browser' | 'session' | 'file' | 'diff';
+  kind: 'files' | 'changes' | 'pr' | 'browser' | 'ios-simulator' | 'session' | 'file' | 'diff';
   filePath?: string;
   closeable?: boolean;
   dirty?: boolean;
@@ -23,8 +32,8 @@ export type SessionSidePanelTabItem = {
 };
 
 export type SessionSidePanelOption = Omit<SessionSidePanelTabItem, 'id' | 'kind'> & {
-  id: 'files' | 'changes' | 'pr' | 'browser' | 'side-session';
-  kind: 'files' | 'changes' | 'pr' | 'browser' | 'session';
+  id: 'files' | 'changes' | 'pr' | 'browser' | 'ios-simulator' | 'side-session';
+  kind: 'files' | 'changes' | 'pr' | 'browser' | 'ios-simulator' | 'session';
 };
 
 const SIDE_SESSION_PANEL_PREFIX = 'side-session:';
@@ -141,6 +150,8 @@ function SidePanelTabIcon({ tab }: { tab: SessionSidePanelTabItem }) {
       return <GitPullRequest className="h-3.5 w-3.5 opacity-70" />;
     case 'browser':
       return <MonitorPlay className="h-3.5 w-3.5 opacity-70" />;
+    case 'ios-simulator':
+      return <Smartphone className="h-3.5 w-3.5 opacity-70" />;
     case 'session':
       return <MessageSquare className="h-3.5 w-3.5 opacity-70" />;
     case 'file':
@@ -311,17 +322,21 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         <div className={cn('flex shrink-0 items-center', WINDOW_DRAG_EXEMPT_CLASS)}>{moreSlot}</div>
       ) : null}
       <Menu.Root>
-        <Menu.Trigger render={<button
-            type="button"
-            disabled={availablePanels.length === 0}
-            aria-label={addPanelLabel}
-            className={cn(
-              'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent',
-              WINDOW_DRAG_EXEMPT_CLASS
-            )}
-          >
-            <Plus className="h-4 w-4" />
-          </button>}>
+        <Menu.Trigger
+          render={
+            <button
+              type="button"
+              disabled={availablePanels.length === 0}
+              aria-label={addPanelLabel}
+              className={cn(
+                'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent',
+                WINDOW_DRAG_EXEMPT_CLASS
+              )}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          }
+        >
           <button
             type="button"
             disabled={availablePanels.length === 0}

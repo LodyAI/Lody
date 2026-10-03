@@ -998,11 +998,13 @@ function UsageRangePanel({
   metric,
   selectedDayMs,
   onSelectDay,
+  onMoveDayAnchor,
 }: {
   timeline: SettingsUsageTimelineData;
   metric: UsageCalendarMetric;
   selectedDayMs: number | null;
   onSelectDay: (day: UsageSelectedDay | null) => void;
+  onMoveDayAnchor: (day: UsageSelectedDay) => void;
 }) {
   const { t } = useTranslation();
   const formats = useCalendarFormats();
@@ -1067,12 +1069,12 @@ function UsageRangePanel({
     const sync = () => {
       const element = selectedCellRef.current;
       if (!element || !root.contains(element)) return;
-      onSelectDay({ dayStartMs: selectedDayMs, anchorX: measureAnchorX(element) });
+      onMoveDayAnchor({ dayStartMs: selectedDayMs, anchorX: measureAnchorX(element) });
     };
     const observer = new ResizeObserver(sync);
     observer.observe(root);
     return () => observer.disconnect();
-  }, [measureAnchorX, onSelectDay, selectedDayMs]);
+  }, [measureAnchorX, onMoveDayAnchor, selectedDayMs]);
 
   const selectedDayTotal = useMemo(() => {
     if (selectedDayMs === null) return null;
@@ -1202,12 +1204,14 @@ function UsageHeatmap({
   metric,
   selectedDayMs,
   onSelectDay,
+  onMoveDayAnchor,
   windowStartMs,
 }: {
   model: UsageCalendarModel;
   metric: UsageCalendarMetric;
   selectedDayMs: number | null;
   onSelectDay: (day: UsageSelectedDay | null) => void;
+  onMoveDayAnchor: (day: UsageSelectedDay) => void;
   /**
    * First day of the selected range. Earlier days stay on screen but recede, so
    * 30d and all-time are the same skyline with a different day lit.
@@ -1305,7 +1309,7 @@ function UsageHeatmap({
     const root = rootRef.current;
     if (!scroller || !root) return undefined;
     const sync = () =>
-      onSelectDay({ dayStartMs: selectedDayMs, anchorX: measureAnchorX(selectedIndex) });
+      onMoveDayAnchor({ dayStartMs: selectedDayMs, anchorX: measureAnchorX(selectedIndex) });
     scroller.addEventListener('scroll', sync, { passive: true });
     const observer = new ResizeObserver(sync);
     observer.observe(root);
@@ -1313,7 +1317,7 @@ function UsageHeatmap({
       scroller.removeEventListener('scroll', sync);
       observer.disconnect();
     };
-  }, [measureAnchorX, onSelectDay, selectedDayMs, selectedIndex]);
+  }, [measureAnchorX, onMoveDayAnchor, selectedDayMs, selectedIndex]);
 
   const focusCell = useCallback((index: number) => {
     const next = Math.min(Math.max(index, 0), USAGE_CALENDAR_CELLS - 1);
@@ -2152,8 +2156,6 @@ export function UsageCalendarVisualization({
     (day: UsageSelectedDay | null) => {
       setSelectedDay(day);
       if (day) setCollapsingDay(day);
-      // Scroll and resize syncs only move the caret. Re-notifying the container
-      // on those would restart the day query for a day it already has.
       const nextDayStartMs = day?.dayStartMs ?? null;
       if (notifiedDayRef.current === nextDayStartMs) return;
       notifiedDayRef.current = nextDayStartMs;
@@ -2161,6 +2163,14 @@ export function UsageCalendarVisualization({
     },
     [onSelectedDayChange]
   );
+
+  // Exiting views can still measure their old cell. Position sync must never
+  // reopen a cleared day or replace a newer selection.
+  const moveDayAnchor = useCallback((day: UsageSelectedDay) => {
+    if (notifiedDayRef.current !== day.dayStartMs) return;
+    setSelectedDay(day);
+    setCollapsingDay(day);
+  }, []);
 
   // The hourly matrices remount on every range switch, which strands the caret
   // anchor — a selection only survives 30d <-> all-time, where the heatmap
@@ -2287,6 +2297,7 @@ export function UsageCalendarVisualization({
                   metric={metric}
                   selectedDayMs={selectedDay?.dayStartMs ?? null}
                   onSelectDay={selectDay}
+                  onMoveDayAnchor={moveDayAnchor}
                 />
               ) : (
                 <UsageHeatmap
@@ -2294,6 +2305,7 @@ export function UsageCalendarVisualization({
                   metric={metric}
                   selectedDayMs={selectedDay?.dayStartMs ?? null}
                   onSelectDay={selectDay}
+                  onMoveDayAnchor={moveDayAnchor}
                   windowStartMs={windowTimeline?.startMs}
                 />
               )}

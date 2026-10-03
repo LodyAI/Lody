@@ -1,4 +1,6 @@
 import { useSelectionStableValue } from '@/hooks/use-conversation-text-selection';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { conversationTextToken } from './conversation-font-size-classes';
 import {
   type ComponentPropsWithoutRef,
   type ComponentType,
@@ -160,7 +162,7 @@ const transformMdastChildren = (tree: unknown, transform: MdastChildTransformer)
 const MARKDOWN_BASE_CLASSNAME =
   // Body text uses the contrast-capped reading color; headings and bold take
   // the one step above it, so hierarchy reads by brightness (`--foreground-strong`).
-  'markdown-renderer max-w-none text-reading leading-[1.75] ' +
+  'markdown-renderer max-w-none text-reading ' +
   '[&_h1]:text-foreground-strong [&_h2]:text-foreground-strong [&_h3]:text-foreground-strong [&_h4]:text-foreground-strong [&_strong]:text-foreground-strong ' +
   '[&_p]:!mt-0 [&_p]:!mb-3 [&_p:has(+ul)]:!mb-2 [&_p:last-child]:!mb-0 [&_p:first-child]:!mt-0 ' +
   '[&_ul]:!my-2 [&_ul]:pl-3 [&_ul]:list-disc ' +
@@ -199,11 +201,11 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
   '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
   '[&_[data-streamdown="code-block"]]:!my-4 ' +
-  '[&_table]:!my-0 [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +
+  '[&_table]:!my-0 [&_table]:border-collapse ' +
   // Lines are foreground tints (the theme border melts into the canvas). No
   // column or row is assumed to be a label: cells share one color and weight;
   // only the header row, which Markdown always has, gets a faint band.
-  '[&_thead]:bg-muted/80 [&_:is(th,td)]:text-sm ' +
+  '[&_thead]:bg-muted/80 ' +
   '[&_th]:border-b [&_th]:border-foreground/[0.14] [&_th]:bg-foreground/[0.035] [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-normal [&_th]:align-top ' +
   '[&_td]:border-b [&_td]:border-foreground/[0.08] [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
   '[&_:is(th,td)+:is(th,td)]:border-l [&_:is(th,td)+:is(th,td)]:border-l-foreground/[0.08] ' +
@@ -211,6 +213,8 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_table_code]:!bg-foreground/[0.08] [&_table_code]:!ring-0 dark:[&_table_code]:!bg-foreground/[0.14]';
 
 const MARKDOWN_SIZE_CLASSNAME =
+  '[&_:is(h1,h2)]:leading-[var(--markdown-heading-line-height)] ' +
+  '[&_:is(h5,h6)]:leading-[var(--markdown-small-heading-line-height)] ' +
   '[&_h1]:text-[length:var(--markdown-h1-font-size)] ' +
   '[&_h2]:text-[length:var(--markdown-h2-font-size)] ' +
   '[&_h3]:text-[length:var(--markdown-body-font-size)] ' +
@@ -223,15 +227,36 @@ type MarkdownFontSizeStyle = CSSProperties & {
   '--markdown-h1-font-size': string;
   '--markdown-h2-font-size': string;
   '--markdown-small-heading-font-size': string;
+  '--markdown-heading-line-height': string;
+  '--markdown-small-heading-line-height': string;
+  '--markdown-code-font-size': string;
+  '--markdown-code-line-height': string;
+  '--markdown-caption-font-size': string;
+  '--markdown-caption-line-height': string;
 };
 
-function markdownFontSizeStyle(fontSize: ConversationFontSize): MarkdownFontSizeStyle {
+function markdownFontSizeStyle(
+  fontSize: ConversationFontSize,
+  compact: boolean
+): MarkdownFontSizeStyle {
+  const body = compact ? textScale.subheadlineSize : textScale.bodySize;
+  const leading = compact ? textScale.subheadlineLeading : textScale.bodyLeading;
   return {
-    fontSize: `${fontSize}px`,
-    '--markdown-body-font-size': `${fontSize}px`,
-    '--markdown-h1-font-size': `${fontSize + 4}px`,
-    '--markdown-h2-font-size': `${fontSize + 2}px`,
-    '--markdown-small-heading-font-size': `${Math.max(1, fontSize - 2)}px`,
+    fontSize: conversationTextToken(body, fontSize),
+    lineHeight: conversationTextToken(leading, fontSize),
+    '--markdown-body-font-size': conversationTextToken(body, fontSize),
+    '--markdown-h1-font-size': conversationTextToken(textScale.titleSize, fontSize),
+    '--markdown-h2-font-size': conversationTextToken(textScale.headlineSize, fontSize),
+    '--markdown-small-heading-font-size': conversationTextToken(textScale.footnoteSize, fontSize),
+    '--markdown-heading-line-height': conversationTextToken(textScale.titleLeading, fontSize),
+    '--markdown-small-heading-line-height': conversationTextToken(
+      textScale.footnoteLeading,
+      fontSize
+    ),
+    '--markdown-code-font-size': conversationTextToken(textScale.subheadlineSize, fontSize),
+    '--markdown-code-line-height': conversationTextToken(textScale.subheadlineLeading, fontSize),
+    '--markdown-caption-font-size': conversationTextToken(textScale.captionSize, fontSize),
+    '--markdown-caption-line-height': conversationTextToken(textScale.captionLeading, fontSize),
   };
 }
 
@@ -990,7 +1015,7 @@ const createMarkdownComponents = ({
       <code
         className={cn(
           className,
-          'rounded-sm bg-foreground/[0.06] px-1 py-px font-mono text-[0.85em] text-reading ring-0 dark:bg-foreground/[0.07]'
+          'rounded-sm bg-foreground/[0.06] px-1 py-px font-mono text-[length:var(--markdown-code-font-size)] leading-[var(--markdown-code-line-height)] text-reading ring-0 dark:bg-foreground/[0.07]'
         )}
         {...rest}
       >
@@ -1196,6 +1221,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   onAgentFileLinkClick,
   searchBlockId,
   headingAnchors = false,
+  compact = false,
 }: {
   text: string;
   size?: MarkdownRendererSize;
@@ -1208,6 +1234,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   searchBlockId?: string;
   /** Generate document heading ids and leave fragment clicks to the owning surface. */
   headingAnchors?: boolean;
+  /** Tool prose shares the control role without scaling nested code a second time. */
+  compact?: boolean;
 }) {
   ({ text, size, allowHtml, isStreaming, searchBlockId } = useSelectionStableValue({
     text,
@@ -1455,7 +1483,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         ref={containerRef}
         data-search-block-id={searchBlockId}
         className={cn(MARKDOWN_BASE_CLASSNAME, MARKDOWN_SIZE_CLASSNAME, className)}
-        style={markdownFontSizeStyle(normalizedSize)}
+        style={markdownFontSizeStyle(normalizedSize, compact)}
         onClick={handleContainerClick}
         onKeyDown={handleContainerKeyDown}
       >

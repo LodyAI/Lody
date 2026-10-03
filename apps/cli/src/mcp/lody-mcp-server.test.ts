@@ -178,7 +178,11 @@ describe('Lody MCP tool catalog', () => {
     const names = await listPublishedToolNames();
     expect(names).toContain('lody_feedback');
     expect(names).toEqual(
-      expect.arrayContaining(['lody_session_rename', 'lody_session_rename_many'])
+      expect.arrayContaining([
+        'lody_session_rename',
+        'lody_session_rename_many',
+        'lody_ios_simulator_preview',
+      ])
     );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
   });

@@ -39,6 +39,7 @@ type LocalPreviewProxyRecord = {
   token: string;
   active: boolean;
   remote: boolean;
+  visualAnnotation: boolean;
   onActivity?: (renew: boolean) => boolean;
   sockets: Set<Socket>;
   requests: Set<AbortController>;
@@ -61,6 +62,7 @@ type AcquireLocalPreviewEndpointOptions = {
   shareUrl?: string;
   resourceLimits?: PreviewResourceLimits;
   remote?: boolean;
+  visualAnnotation?: boolean;
   onActivity?: (renew: boolean) => boolean;
 };
 
@@ -337,7 +339,7 @@ export class LocalPreviewProxyManager {
       ...(options.shareUrl ? { shareUrl: options.shareUrl } : {}),
       target: options.target,
       capabilities: {
-        visualAnnotation: true,
+        visualAnnotation: options.visualAnnotation ?? true,
         shareable: Boolean(options.shareUrl),
       },
       createdAt: now,
@@ -348,6 +350,7 @@ export class LocalPreviewProxyManager {
       token,
       active: true,
       remote: options.remote ?? false,
+      visualAnnotation: options.visualAnnotation ?? true,
       onActivity: options.onActivity,
       sockets,
       requests: new Set(),
@@ -424,11 +427,13 @@ export class LocalPreviewProxyManager {
           'Quick Tunnels do not support Server-Sent Events. Use local preview for this endpoint.'
         );
       }
-      const injectedHtml = await maybeInjectVisualAnnotationRuntime(
-        localResponse,
-        method,
-        resourceLimits.maxResponseBodyBytes
-      );
+      const injectedHtml = record.visualAnnotation
+        ? await maybeInjectVisualAnnotationRuntime(
+            localResponse,
+            method,
+            resourceLimits.maxResponseBodyBytes
+          )
+        : null;
       if (injectedHtml) {
         const responseHeaders = this.buildResponseHeaders(
           record,

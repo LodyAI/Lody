@@ -140,6 +140,7 @@ function createPrDetailsResult(pr: GitHubPullRequestDetails = pullRequest) {
       checkRuns,
     },
     error: null,
+
     checksPermissionError: false,
     isRevalidating: false,
     refresh: mocks.refresh,

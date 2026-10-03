@@ -428,7 +428,7 @@ describe('session draft tabs', () => {
     });
   });
 
-  it('persists the browser side panel under the browser key', () => {
+  it('persists the Browser and iOS Simulator side panels as separate tabs', () => {
     installWindowStorage();
 
     writeStoredLastActiveTabState('session-1', {
@@ -436,16 +436,16 @@ describe('session draft tabs', () => {
       viewerTab: null,
       sidePanel: {
         open: true,
-        tab: 'browser',
-        tabs: ['files', 'browser'],
+        tab: 'ios-simulator',
+        tabs: ['files', 'browser', 'ios-simulator'],
         sideSessionId: null,
       },
     });
 
     expect(readStoredLastActiveTabState('session-1')?.sidePanel).toEqual({
       open: true,
-      tab: 'browser',
-      tabs: ['files', 'browser'],
+      tab: 'ios-simulator',
+      tabs: ['files', 'browser', 'ios-simulator'],
       sideSessionId: null,
     });
   });

@@ -25,6 +25,7 @@ import type { RequestPermissionRequest, RequestPermissionResponse } from '@agent
 import type { Logger } from '@/utils/logger';
 import { captureMessage } from '@/instrument';
 import type { SessionDocument } from '@/lib/loro/doc';
+import type { SessionBackend } from '@/session/session-backend';
 import type { SessionPlanEntry } from '@lody/shared';
 import { deriveLocationsFromToolCallContent } from './tool-call-history';
 import { buildMessageContentFromNotification } from './history-apply';
@@ -35,6 +36,30 @@ export {
   applyNotificationOnHistory,
   buildMessageContentFromNotification,
 } from './history-apply';
+
+type ACPHistoryCallbacksBackend = Pick<
+  SessionBackend,
+  'readHistoryCount' | 'readHistoryDirectory' | 'readTurn' | 'applyAgentBatch' | 'setPlan'
+>;
+
+/**
+ * Production SessionDocuments are always bound during initialization. Keep a
+ * legacy fallback only for small data-only test fixtures that do not expose a
+ * backend accessor; a real document must never silently write Loro history
+ * after a backend selection failed or was omitted.
+ */
+const resolveBoundHistoryBackend = <T>(
+  doc: SessionDocument,
+  explicit?: T
+): T | SessionBackend | undefined => {
+  const accessor = (doc as unknown as { getSessionBackend?: () => SessionBackend })
+    .getSessionBackend;
+  const bound = explicit ?? accessor?.call(doc);
+  if (!bound && typeof accessor === 'function') {
+    throw new Error(`Session backend is not bound for ${doc.sessionId}`);
+  }
+  return bound;
+};
 
 // ---------------------------------------------------------------------------
 // Cross-call enrichment state
@@ -157,12 +182,16 @@ export const handleACPUpdateMessage = async (
       diffs: readonly AcpStandardDiffBlockEvidence[],
       assistantEntryId?: string
     ) => void | Promise<void>;
+    /** Stable per-notification identities aligned with the input batch. */
+    operationIds?: readonly string[];
     logger?: Logger;
+    backend?: ACPHistoryCallbacksBackend;
   },
   model?: ModelInfo
 ) => {
   const batch = Array.isArray(messages) ? messages : [messages];
-  const validBatch = filterInvalidNotifications(batch, callbacks?.logger);
+  const valid = filterInvalidNotifications(batch, callbacks?.logger, callbacks?.operationIds);
+  const validBatch = valid.notifications;
   const rootEnrichedBatch = enrichNotificationBatch(validBatch, getEnrichmentState(doc));
   const childGroups = new Map<
     string,
@@ -209,9 +238,11 @@ export const handleACPUpdateMessage = async (
   }
   const terminalOutputState = getTerminalOutputState(doc);
   const terminalOutputSnapshot = cloneTerminalOutputState(terminalOutputState);
-  const persistableBatch = filterNotificationsForHistory(
-    compactTerminalNotificationsForHistory(enrichedBatch, terminalOutputState)
+  const persistable = filterNotificationsForHistory(
+    compactTerminalNotificationsForHistory(enrichedBatch, terminalOutputState),
+    valid.operationIds
   );
+  const persistableBatch = persistable.notifications;
   const latestPlan = extractLatestPlanSnapshot(validBatch);
   // Lazily get the turn ID only when actually needed to avoid errors on no-op batches.
   // Some notification batches (e.g., filtered session_info_update or tool_call_update)
@@ -228,6 +259,7 @@ export const handleACPUpdateMessage = async (
   };
 
   try {
+    const boundBackend = resolveBoundHistoryBackend(doc, callbacks?.backend);
     if (persistableBatch.length > 0) {
       const targetTurnId = getTargetTurnId();
       if (!targetTurnId && callbacks?.allowAutonomousAssistantEntry !== true) {
@@ -251,8 +283,9 @@ export const handleACPUpdateMessage = async (
           )
         );
         const createId = targetTurnId ? () => targetTurnId : uuidV4;
-        await doc.agentWrites.applyAgentBatch({
+        await (boundBackend ?? doc.agentWrites).applyAgentBatch({
           notifications: persistableBatch,
+          ...(persistable.operationIds ? { operationIds: persistable.operationIds } : {}),
           ...(targetTurnId ? { targetAssistantEntryId: targetTurnId } : {}),
           ...(targetOnly ? { entryBound: true } : {}),
           createId,
@@ -282,13 +315,15 @@ export const handleACPUpdateMessage = async (
     );
     if (evidenceRunKeys.size > 0 && (callbacks?.editCallback || callbacks?.standardDiffCallback)) {
       // Ownership comes from the committed run, not the turn that happened to flush it.
-      const directory = await doc.sessionData.history.readDirectory(
-        0,
-        await doc.sessionData.history.count()
-      );
+      const backend = boundBackend;
+      const directory = backend
+        ? await backend.readHistoryDirectory(0, await backend.readHistoryCount())
+        : await doc.sessionData.history.readDirectory(0, await doc.sessionData.history.count());
       for (const row of directory) {
         if (!row.turnId || row.scalars?.role !== 'assistant') continue;
-        const read = await doc.sessionData.history.readTurn(row.turnId);
+        const read = backend
+          ? await backend.readTurn(row.turnId)
+          : await doc.sessionData.history.readTurn(row.turnId);
         if (read.state !== 'ready') continue;
         for (const stored of read.turn.items ?? []) {
           if (
@@ -368,7 +403,8 @@ export const handleACPUpdateMessage = async (
   }
 
   if (latestPlan) {
-    await doc.setPlan(latestPlan);
+    if (callbacks?.backend) await callbacks.backend.setPlan(latestPlan);
+    else await doc.setPlan(latestPlan);
   }
 };
 
@@ -429,10 +465,15 @@ export const appendAutonomousACPNotifications = async (
 
 const filterInvalidNotifications = (
   batch: AcpSessionNotification[],
-  logger?: Logger
-): AcpSessionNotification[] => {
+  logger?: Logger,
+  operationIds?: readonly string[]
+): { notifications: AcpSessionNotification[]; operationIds?: string[] } => {
+  if (operationIds && operationIds.length !== batch.length) {
+    throw new Error('ACP notification operation IDs must match the input batch length');
+  }
   const out: AcpSessionNotification[] = [];
-  for (const message of batch) {
+  const outOperationIds: string[] = [];
+  for (const [index, message] of batch.entries()) {
     const { update, sessionId } = message;
     let validation = validateNotificationForHistory(update);
     if (
@@ -455,6 +496,7 @@ const filterInvalidNotifications = (
     }
     if (validation.ok) {
       out.push(message);
+      if (operationIds) outOperationIds.push(operationIds[index]!);
       continue;
     }
 
@@ -475,7 +517,10 @@ const filterInvalidNotifications = (
       },
     });
   }
-  return out;
+  return {
+    notifications: out,
+    ...(operationIds ? { operationIds: outOperationIds } : {}),
+  };
 };
 
 const validateNotificationForHistory = (
@@ -997,8 +1042,9 @@ const compactTerminalNotificationsForHistory = (
   });
 
 const filterNotificationsForHistory = (
-  batch: AcpSessionNotification[]
-): AcpSessionNotification[] => {
+  batch: AcpSessionNotification[],
+  operationIds?: readonly string[]
+): { notifications: AcpSessionNotification[]; operationIds?: string[] } => {
   const shouldKeep = (message: AcpSessionNotification): boolean => {
     const update = message.update;
     switch (update.sessionUpdate) {
@@ -1052,7 +1098,17 @@ const filterNotificationsForHistory = (
     return false;
   };
 
-  return batch.filter(shouldKeep);
+  const notifications: AcpSessionNotification[] = [];
+  const filteredOperationIds: string[] = [];
+  for (const [index, message] of batch.entries()) {
+    if (!shouldKeep(message)) continue;
+    notifications.push(message);
+    if (operationIds) filteredOperationIds.push(operationIds[index]!);
+  }
+  return {
+    notifications,
+    ...(operationIds ? { operationIds: filteredOperationIds } : {}),
+  };
 };
 
 /**
@@ -1309,6 +1365,7 @@ const createAssistantHistoryEntry = (id: string): SessionHistoryInput => ({
 export type ThreadGoalHistoryOptions = {
   targetEntryId?: string;
   createId?: () => string;
+  backend?: Pick<SessionBackend, 'applyHistoryAction'>;
 };
 
 export const upsertThreadGoalInHistory = async (
@@ -1321,58 +1378,78 @@ export const upsertThreadGoalInHistory = async (
     objective: sanitizeGoalObjective(goal.objective),
   };
 
-  await doc.sessionData.commands.applyHistoryAction({
-    kind: 'upsert-goal',
+  const action = {
+    kind: 'upsert-goal' as const,
     goal: sanitizedGoal,
     targetTurnId: options.targetEntryId,
     fallback: createAssistantHistoryEntry(
       options.targetEntryId ?? options.createId?.() ?? uuidV4()
     ),
-  });
+  };
+  const backend = resolveBoundHistoryBackend(doc, options.backend);
+  if (backend) {
+    await backend.applyHistoryAction(action);
+  } else {
+    await doc.sessionData.commands.applyHistoryAction(action);
+  }
 };
 
 export const clearThreadGoalFromHistory = async (
   doc: SessionDocument,
-  threadId: string
+  threadId: string,
+  options: { backend?: Pick<SessionBackend, 'applyHistoryAction'> } = {}
 ): Promise<void> => {
   // Mark the goal as cleared in-place so the snapshot remains visible until a new
   // goal arrives. The previous behavior removed the entry entirely, which made
   // the cleared state invisible to the user the moment they pressed clear.
-  await doc.sessionData.commands.applyHistoryAction({
-    kind: 'clear-goal',
+  const action = {
+    kind: 'clear-goal' as const,
     threadId,
     updatedAt: getServerNow(),
-  });
+  };
+  const backend = resolveBoundHistoryBackend(doc, options.backend);
+  if (backend) {
+    await backend.applyHistoryAction(action);
+  } else {
+    await doc.sessionData.commands.applyHistoryAction(action);
+  }
 };
 
 export const ensurePermissionRequestOnToolCall = async (
   doc: SessionDocument,
   requestId: string,
   request: RequestPermissionRequest,
-  _model?: ModelInfo
+  _model?: ModelInfo,
+  backend?: Pick<SessionBackend, 'applyHistoryAction'>
 ): Promise<boolean> => {
-  let persisted = false;
-  await doc.sessionData.commands
-    .applyHistoryAction({ kind: 'permission-request', requestId, request })
-    .then((result) => {
-      persisted = result.matched ?? false;
-    });
-  return persisted;
+  const action = {
+    kind: 'permission-request',
+    requestId,
+    request,
+  } as const;
+  const boundBackend = resolveBoundHistoryBackend(doc, backend);
+  const result = boundBackend
+    ? await boundBackend.applyHistoryAction(action)
+    : await doc.sessionData.commands.applyHistoryAction(action);
+  return result.matched ?? false;
 };
 
 export const updatePermissionOutcomeInHistory = async (
   doc: SessionDocument,
   requestId: string,
   outcome: RequestPermissionResponse['outcome'],
-  logger: Logger
-) => {
+  logger: Logger,
+  backend?: Pick<SessionBackend, 'respondPermission'>
+): Promise<boolean> => {
   // Domain command instead of a whole-history callback: the adapter locates the
   // matching tool call by request id and writes only that turn's outcome.
-  const result = await doc.sessionData.commands.respondPermission(
-    requestId,
-    outcome as PermissionOutcome
-  );
-  if (!result) logger.debug(`Permission outcome for ${requestId} not applied: not_found`);
+  const boundBackend = resolveBoundHistoryBackend(doc, backend);
+  const result = boundBackend
+    ? await boundBackend.respondPermission(requestId, outcome as PermissionOutcome)
+    : await doc.sessionData.commands.respondPermission(requestId, outcome as PermissionOutcome);
+  if (!result)
+    logger.debug(`Permission outcome for ${requestId} not applied: not_found_or_already_set`);
+  return result;
 };
 
 /**

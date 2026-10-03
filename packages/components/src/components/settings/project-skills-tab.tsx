@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
@@ -42,10 +43,10 @@ const styles = stylex.create({
     justifyContent: 'center',
     gap: space[2],
     paddingBlock: space[8],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
-  unreachable: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  unreachable: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   view: { display: 'flex', flexDirection: 'column', gap: space[3] },
   toolbar: {
     display: 'flex',
@@ -58,7 +59,7 @@ const styles = stylex.create({
     alignItems: 'center',
     gap: space[2],
     minWidth: 0,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   truncate: TRUNCATE,
@@ -79,7 +80,7 @@ const styles = stylex.create({
     paddingInline: space[3],
     color: colors.secondaryLabel,
   },
-  groupDir: { ...TRUNCATE, fontFamily: MONO, fontSize: type.caption, color: colors.label },
+  groupDir: { ...TRUNCATE, fontFamily: MONO, fontSize: uiText.footnoteSize, color: colors.label },
   /** A block inside the card is the region rung: a fill with no edge. */
   groupBody: {
     minWidth: 0,
@@ -95,7 +96,7 @@ const styles = stylex.create({
     gap: space[2],
     paddingInline: space[3],
     paddingBlock: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.destructive,
   },
   groupErrorIcon: { marginTop: '1px' },
@@ -103,7 +104,7 @@ const styles = stylex.create({
   groupFootnote: {
     paddingInline: space[3],
     paddingBlock: space[1.5],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   row: { paddingInline: space[3], paddingBlock: '8px' },
@@ -117,7 +118,7 @@ const styles = stylex.create({
     rowGap: space[1],
     minWidth: 0,
   },
-  rowName: { ...TRUNCATE, fontSize: type.caption, color: colors.label },
+  rowName: { ...TRUNCATE, fontSize: uiText.footnoteSize, color: colors.label },
   rowDescription: {
     display: '-webkit-box',
     WebkitBoxOrient: 'vertical',
@@ -125,7 +126,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     margin: 0,
     marginTop: '2px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   rowMeta: {
@@ -136,7 +137,7 @@ const styles = stylex.create({
     rowGap: '2px',
     minWidth: 0,
     marginTop: space[1],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   author: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
@@ -151,11 +152,15 @@ const styles = stylex.create({
     paddingBlock: space[8],
     textAlign: 'center',
   },
-  emptyTitle: { margin: 0, fontSize: type.caption, color: colors.label },
-  emptyBody: { margin: 0, maxWidth: '384px', fontSize: type.caption, color: colors.secondaryLabel },
+  emptyTitle: { margin: 0, fontSize: uiText.footnoteSize, color: colors.label },
+  emptyBody: {
+    margin: 0,
+    maxWidth: '384px',
+    fontSize: uiText.footnoteSize,
+    color: colors.secondaryLabel,
+  },
 });
 import { capturePickerSearchSelected } from '@/lib/picker-search-analytics';
-import { settingsType as type } from './type.stylex';
 import { settingsSurface as surface } from './surface';
 
 /**

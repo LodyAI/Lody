@@ -13,7 +13,12 @@ import { LocalPreviewProxyManager } from './local-preview-proxy';
 import { verifyPreviewTunnelRoundTrip } from './preview-tunnel-readiness';
 
 export type { PreviewCloseReason } from '@lody/shared';
-export type QuickTunnelClosed = { reason?: PreviewCloseReason; error?: Error };
+export type QuickTunnelClosed = {
+  reason?: PreviewCloseReason;
+  error?: Error;
+  /** Distinguishes resource cleanup failure from an already-cleaned connection failure. */
+  cleanupFailed?: true;
+};
 
 type Options = {
   sessionId: SessionId;
@@ -22,6 +27,9 @@ type Options = {
   runtimeBaseUrl: string;
   logger: Logger;
   now: () => number;
+  visualAnnotation?: boolean;
+  /** Media owners renew explicitly; continuous frames must not extend lifetime. */
+  renewOnTraffic?: boolean;
   download?: typeof ensureCloudflaredBinary;
   start?: typeof startCloudflaredProcess;
   verify?: typeof verifyPreviewTunnelRoundTrip;
@@ -132,7 +140,8 @@ export class QuickTunnelSession {
         target: this.options.target,
         connectionAddress: this.options.connectionAddress,
         remote: true,
-        onActivity: (renew) => this.activity(renew),
+        visualAnnotation: this.options.visualAnnotation,
+        onActivity: (renew) => this.activity(this.options.renewOnTraffic === false ? false : renew),
       });
       signal.throwIfAborted();
       child = await (this.options.start ?? startCloudflaredProcess)({
@@ -191,6 +200,7 @@ export class QuickTunnelSession {
       );
       if (failures.length) {
         outcome = {
+          cleanupFailed: true,
           error: new AggregateError(
             [...(outcome.error ? [outcome.error] : []), ...failures],
             'Quick Tunnel resource cleanup failed',

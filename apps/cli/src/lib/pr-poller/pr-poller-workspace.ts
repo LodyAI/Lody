@@ -59,7 +59,7 @@ export interface PrPollerWorkspaceHandle {
   waitForInitialSync(timeoutMs?: number): Promise<boolean>;
   resolveCredential(repoFullName: string): Promise<ResolvedGitHubCredential | null>;
   invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void;
-  /** Optional hosted webhook association, required before publication when present. */
+  /** Optional hosted webhook linkage; failure does not block summary publication. */
   associatePullRequest: ((args: AssociatePullRequestArgs) => Promise<boolean>) | null;
   /** Release owned resources (token manager). Idempotent. */
   dispose(): Promise<void>;

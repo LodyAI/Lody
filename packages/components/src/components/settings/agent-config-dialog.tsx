@@ -93,6 +93,8 @@ import { Field as UiField } from '@lody/ui/field';
 import { Textarea } from '@lody/ui/textarea';
 import { Select } from '@lody/ui/select';
 import { Tabs } from '@lody/ui/tabs';
+import { OptionSelector } from '@/components/shared/option-selector';
+import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Badge } from '@lody/ui/badge';
@@ -4155,24 +4157,23 @@ function TitleGenerationFields({
         return (
           <div key={sel.configId} {...stylex.props(styles.optionRow)}>
             <UiField.Label>{sel.label}</UiField.Label>
-            <Select.Root
-              items={sel.options}
+            {/* An agent can publish over a hundred options (the Devin model
+                catalog), so a long list gets a search field, and the popup is
+                pinned below the trigger — flipped up, a list this tall covers
+                the section it was opened from. */}
+            <OptionSelector
+              options={sel.options}
               value={(stored as string | undefined) ?? sel.currentValue}
-              onValueChange={(value) => {
-                if (value != null) onChange(sel.configId, value);
-              }}
-            >
-              <Select.Trigger>
-                <Select.Value />
-              </Select.Trigger>
-              <Select.Content>
-                {sel.options.map((opt) => (
-                  <Select.Item key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
+              onSelect={(option) => onChange(sel.configId, option.value)}
+              searchable={shouldOfferOptionSearch(sel.options.length)}
+              searchPlaceholder={t(
+                'settings.agent.dialog.optionSearchPlaceholder',
+                'Search options'
+              )}
+              emptyText={t('settings.agent.dialog.optionSearchEmpty', 'No options match')}
+              side="bottom"
+              avoidCollisions={false}
+            />
           </div>
         );
       })}

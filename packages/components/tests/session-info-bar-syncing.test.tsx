@@ -84,6 +84,34 @@ describe('SessionInfoBar syncing indicator', () => {
     expect(container.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('renders a simulator-only action and keeps browser and simulator actions independent', () => {
+    const simulator = vi.fn();
+    const browser = vi.fn();
+    act(() =>
+      root.render(<SessionInfoBar {...CONTEXT_LESS_PROPS} onOpenIosSimulator={simulator} />)
+    );
+    const action = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="iOS Simulator"]'
+    )!;
+    expect(action).not.toBeNull();
+    act(() => action.click());
+    expect(simulator).toHaveBeenCalledOnce();
+    act(() =>
+      root.render(
+        <SessionInfoBar
+          {...CONTEXT_LESS_PROPS}
+          onOpenIosSimulator={simulator}
+          onOpenBrowser={browser}
+        />
+      )
+    );
+    act(() =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Open preview"]')!.click()
+    );
+    expect(browser).toHaveBeenCalledOnce();
+    expect(simulator).toHaveBeenCalledOnce();
+  });
+
   it('renders and activates a reported preview action without staged context', () => {
     const onOpenBrowser = vi.fn();
     act(() => {

@@ -102,6 +102,8 @@ class FakeWorkspace {
   /** When set, invalidateCredential swaps this in (token rotation / scope change). */
   replacementCredential: ResolvedGitHubCredential | null = null;
   associateResult = true;
+  associateEffect: (() => void) | null = null;
+  writeEffect: (() => void) | null = null;
   hostedAssociation = true;
 
   readonly associateCalls: AssociatePullRequestArgs[] = [];
@@ -129,6 +131,7 @@ class FakeWorkspace {
       listAliveSessionMetas: this.listAliveSessionMetas,
       readOwnerMeta: this.readOwnerMeta,
       writeOwnerMeta: async (sessionId, patch) => {
+        this.writeEffect?.();
         this.writtenPatches.push({ sessionId, patch });
         const current = this.metas.get(sessionId) ?? makeMeta();
         this.metas.set(sessionId, { ...current, ...patch });
@@ -151,6 +154,7 @@ class FakeWorkspace {
         ? null
         : async (args) => {
             this.associateCalls.push(args);
+            this.associateEffect?.();
             return this.associateResult;
           },
       dispose: async () => {},
@@ -976,12 +980,9 @@ describe('PrPollScheduler', () => {
     expect(scheduler.counters.discoveries).toBe(1);
   });
 
-  it('a failed association keeps the discovery target due and retries the round', async () => {
+  it('publishes a discovered PR despite association rejection and retries without duplicate writes', async () => {
     const workspace = new FakeWorkspace('ws1');
     workspace.associateResult = false;
-    // The exact review-finding scenario: TERMINAL current PR + a newer PR on
-    // the branch. The fingerprint must not be committed on failure, or the
-    // owner would go idle-terminal and lose the new PR forever.
     workspace.metas.set(
       sid('s1'),
       makeMeta({
@@ -1003,20 +1004,165 @@ describe('PrPollScheduler', () => {
     await startWith([workspace]);
 
     expect(workspace.associateCalls).toHaveLength(1);
-    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(9, 'merged')]);
-    expect(scheduler.counters.discoveries).toBe(0);
-    // No fingerprint, no success stamp → NOT idle-terminal; the whole round
-    // (GitHub query included) retries at the attempt floor.
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(9, 'merged'), prMeta(55)]);
+    expect(scheduler.counters.discoveries).toBe(1);
     expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
     await advance(config.lowMinIntervalMs);
-    expect(calls()).toHaveLength(2);
     expect(workspace.associateCalls).toHaveLength(2);
+    expect(workspace.writtenPatches).toHaveLength(1);
 
-    // Once the association endpoint recovers, the PR lands and the owner
-    // reaches idle-terminal only after the NEXT successful discovery pass.
     workspace.associateResult = true;
     await advance(config.lowMinIntervalMs);
     expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(9, 'merged'), prMeta(55)]);
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(workspace.writtenPatches).toHaveLength(1);
+    await advance(config.lowStatusIntervalMs);
+    expect(workspace.associateCalls).toHaveLength(3);
+  });
+
+  it.each(['rejected', 'thrown'] as const)(
+    'publishes an ambient-credential PR when hosted association is %s',
+    async (failure) => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.credential = {
+        token: 'synthetic-gh-token',
+        source: 'gh',
+        credentialScope: 'github:ambient:github.com',
+      };
+      workspace.associateResult = false;
+      if (failure === 'thrown')
+        workspace.associateEffect = () => {
+          throw new Error('synthetic association transport failure');
+        };
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          project: {
+            kind: 'local',
+            localProjectId: 'local-1',
+            githubRepoFullName: 'owner/repo',
+          } as SessionMeta['project'],
+          branchName: 'feat/x',
+        })
+      );
+      clientHandler = async (batch) => {
+        const outcome = successOutcome(batch);
+        if (outcome.kind === 'success') {
+          for (const discovery of outcome.batch.discoveries)
+            discovery.prs = [observation(55, { status: 'draft', ciState: 'f', mergeState: 'c' })];
+          for (const status of outcome.batch.pullRequests)
+            status.pr = observation(status.prNumber, {
+              status: 'draft',
+              ciState: 'f',
+              mergeState: 'c',
+            });
+        }
+        return outcome;
+      };
+      await startWith([workspace]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55, 'draft')]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequestState?.[prMeta(55).url]).toMatchObject({
+        s: 'f',
+        m: 'c',
+      });
+      await advance(config.lowMinIntervalMs);
+      expect(workspace.writtenPatches).toHaveLength(1);
+      expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
+    }
+  );
+
+  it('clears an earlier fingerprint so a terminal observation with failed association retries after restart', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.associateResult = false;
+    workspace.metas.set(
+      sid('s1'),
+      makeMeta({
+        project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+        branchName: 'feat/x',
+      })
+    );
+    stateStore.getStored().discoveryFingerprints['ws1:s1'] = 'owner/repo|feat/x';
+    clientHandler = async (batch) => {
+      const outcome = successOutcome(batch);
+      if (outcome.kind === 'success')
+        for (const discovery of outcome.batch.discoveries)
+          discovery.prs = [observation(55, { status: 'merged' })];
+      return outcome;
+    };
+    await startWith([workspace]);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55, 'merged')]);
+    expect(stateStore.getStored().discoveryFingerprints['ws1:s1']).toBeUndefined();
+    scheduler.stop();
+    await scheduler.settle();
+    scheduler = makeScheduler();
+    workspace.associateResult = true;
+    await startWith([workspace]);
+    expect(stateStore.getStored().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    const callsAfterRecovery = calls().length;
+    await advance(config.lowDiscoveryIntervalMs);
+    expect(calls()).toHaveLength(callsAfterRecovery);
+  });
+
+  it.each(['branch', 'repo', 'deleted', 'migrated'] as const)(
+    'does not publish stale discovery when owner is %s during association',
+    async (change) => {
+      const workspace = new FakeWorkspace('ws1');
+      workspace.associateResult = false;
+      workspace.metas.set(
+        sid('s1'),
+        makeMeta({
+          project: { kind: 'github', repoFullName: 'owner/repo' } as SessionMeta['project'],
+          branchName: 'feat/x',
+        })
+      );
+      workspace.associateEffect = () => {
+        if (change === 'deleted') workspace.metas.delete(sid('s1'));
+        else
+          workspace.metas.set(
+            sid('s1'),
+            makeMeta({
+              project: {
+                kind: 'github',
+                repoFullName: change === 'repo' ? 'owner/other' : 'owner/repo',
+              } as SessionMeta['project'],
+              branchName: change === 'branch' ? 'feat/other' : 'feat/x',
+              machineId: change === 'migrated' ? ('machine-2' as MachineId) : LOCAL_MACHINE,
+            })
+          );
+      };
+      clientHandler = async (batch) => {
+        const outcome = successOutcome(batch);
+        if (outcome.kind === 'success')
+          for (const discovery of outcome.batch.discoveries) discovery.prs = [observation(55)];
+        return outcome;
+      };
+      await startWith([workspace]);
+      expect(workspace.metas.get(sid('s1'))?.pullRequests).toBeUndefined();
+      expect(workspace.writtenPatches).toEqual([]);
+      expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
+    }
+  );
+
+  it('retries failed metadata publication even after webhook association succeeded', async () => {
+    const workspace = new FakeWorkspace('ws1');
+    workspace.metas.set(sid('s1'), repoSession('owner/repo'));
+    workspace.writeEffect = () => {
+      throw new Error('synthetic metadata write failure');
+    };
+    clientHandler = async (batch) => {
+      const outcome = successOutcome(batch);
+      if (outcome.kind === 'success')
+        for (const discovery of outcome.batch.discoveries) discovery.prs = [observation(55)];
+      return outcome;
+    };
+    await startWith([workspace]);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toBeUndefined();
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBeUndefined();
+    workspace.writeEffect = null;
+    await advance(config.lowMinIntervalMs);
+    expect(workspace.metas.get(sid('s1'))?.pullRequests).toEqual([prMeta(55)]);
+    expect(scheduler.peekState().discoveryFingerprints['ws1:s1']).toBe('owner/repo|feat/x');
+    expect(workspace.associateCalls).toHaveLength(1);
   });
 
   it('a malformed discovery alias is not a confirmed empty result (no idle-terminal)', async () => {

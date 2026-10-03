@@ -7,8 +7,9 @@ lives in its `README.md`.
 
 ## One mention, five stages
 
-1. **Trigger and menu.** `@` opens the two-level menu; `$` opens skills and `/` or `、`
-   opens commands/shortcuts. `#` remains hydration-only. `enableAtMentions` decides what `@` can reach, and it
+1. **Trigger and menu.** `@` opens the two-level menu; `$` or `￥` opens skills and `/` or `、`
+   opens commands/shortcuts. The [skill trigger Spec](../../specs/skill-mention-triggers.md)
+   defines canonical insertion and unselected-text behavior. `#` remains hydration-only. `enableAtMentions` decides what `@` can reach, and it
    gates both trigger registration and whether `<Mention>` mounts at all — a
    source missing from that list silently degrades the composer to a plain
    textarea and drops its type.

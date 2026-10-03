@@ -74,6 +74,7 @@ function AppearanceHarness({ isElectron }: { isElectron: boolean }) {
   const [conversationFontSize, setConversationFontSize] = useState(14);
   const [conversationWideMode, setConversationWideMode] = useState(false);
   const [inlineMathEnabled, setInlineMathEnabled] = useState(false);
+  const [extendedCodeLanguagesEnabled, setExtendedCodeLanguagesEnabled] = useState(false);
   const [fontSize, setFontSize] = useState(13);
   const [fontLigaturesEnabled, setFontLigaturesEnabled] = useState(true);
 
@@ -89,6 +90,8 @@ function AppearanceHarness({ isElectron }: { isElectron: boolean }) {
       onConversationWideModeChange={setConversationWideMode}
       inlineMathEnabled={inlineMathEnabled}
       onInlineMathEnabledChange={setInlineMathEnabled}
+      extendedCodeLanguagesEnabled={extendedCodeLanguagesEnabled}
+      onExtendedCodeLanguagesEnabledChange={setExtendedCodeLanguagesEnabled}
       isElectron={isElectron}
       interfaceFontFamily={interfaceFontFamily}
       onInterfaceFontFamilyChange={setInterfaceFontFamily}
@@ -172,6 +175,8 @@ describe('AppearanceSettingsView', () => {
           onConversationWideModeChange={vi.fn()}
           inlineMathEnabled={false}
           onInlineMathEnabledChange={vi.fn()}
+          extendedCodeLanguagesEnabled={false}
+          onExtendedCodeLanguagesEnabledChange={vi.fn()}
           isElectron={false}
           interfaceFontFamily=""
           onInterfaceFontFamilyChange={vi.fn()}
@@ -214,6 +219,7 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).not.toContain('Terminal');
     expect(container?.textContent).toContain('Font ligatures');
     expect(container?.textContent).toContain('conversation, code, and tool output');
+    expect(container?.textContent).toContain('Extended code languages');
     const ligaturesSwitch = container?.querySelector<HTMLButtonElement>(
       'button[aria-label="Font ligatures"]'
     );
@@ -234,6 +240,18 @@ describe('AppearanceSettingsView', () => {
     expect(
       container
         ?.querySelector('button[aria-label="Render inline math"]')
+        ?.getAttribute('aria-checked')
+    ).toBe('true');
+    const extendedLanguagesSwitch = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Extended code languages"]'
+    );
+    expect(extendedLanguagesSwitch?.getAttribute('aria-checked')).toBe('false');
+    await act(async () => {
+      extendedLanguagesSwitch?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(
+      container
+        ?.querySelector('button[aria-label="Extended code languages"]')
         ?.getAttribute('aria-checked')
     ).toBe('true');
   });
@@ -316,6 +334,7 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).toContain('Font ligatures');
     expect(container?.textContent).toContain('conversation, code, and tool output');
     expect(container?.textContent).toContain('Render inline math');
+    expect(container?.textContent).toContain('Extended code languages');
     const ligaturesSwitch = container?.querySelector<HTMLButtonElement>(
       'button[aria-label="Font ligatures"]'
     );

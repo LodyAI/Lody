@@ -206,6 +206,7 @@ export class ScrollController {
   /** Shown again since the last transaction: the DOM position is not the reader's. */
   private reshown = false;
   private readonly reportedMinRow = new Set<string>();
+  private lastReportedScroll: number | null = null;
 
   constructor(options: ControllerOptions) {
     this.host = options.host;
@@ -320,7 +321,13 @@ export class ScrollController {
     const previous = this.committedPlan;
     this.committedPlan = this.lastPlan;
     if (this.rows.length === 0 || this.hidden) return;
-    if (!this.tx) this.beginTransaction(this.reshown ? 'reshow' : 'commit', previous);
+    // A parent setState from `onScroll` (hydration, the top fade) re-commits
+    // the list with the same layout. Starting a fresh cycle every time, then
+    // reporting the offset again, is the React #185 nested-update loop.
+    if (!this.tx) {
+      if (this.isSettled()) return;
+      this.beginTransaction(this.reshown ? 'reshow' : 'commit', previous);
+    }
     this.continueTransaction();
   }
 
@@ -408,7 +415,7 @@ export class ScrollController {
       maxScrollTop: maxNow,
       geometryRevision: this.geometry.revision,
     };
-    this.callbacks.onScroll?.(scrollTop);
+    this.reportScroll(scrollTop);
     if (rangeMoved) this.host.requestCommit(false);
   }
 
@@ -734,12 +741,19 @@ export class ScrollController {
       return;
     }
     this.pendingExternalMove = false;
-    this.lastObserved = {
-      scrollTop: actual,
-      maxScrollTop: maxNow,
-      geometryRevision: this.geometry.revision,
-    };
-    this.finishTransaction(tx, clampedExpected, actual, true);
+    // I3: an uncovered position is never accepted. Write can move the target
+    // (sent → follow, reply-room) after the prospective coverage check; mount
+    // the worst-case window instead of reporting the hole to React.
+    const covered = this.isCovered(actual, this.committedPlan);
+    if (!covered && this.requestCoverageCommit(tx)) return;
+    if (covered) {
+      this.lastObserved = {
+        scrollTop: actual,
+        maxScrollTop: maxNow,
+        geometryRevision: this.geometry.revision,
+      };
+    }
+    this.finishTransaction(tx, clampedExpected, actual, covered);
   }
 
   private finishTransaction(
@@ -767,7 +781,52 @@ export class ScrollController {
       this.firstCycleComplete = true;
       this.callbacks.onFirstCycle?.();
     }
-    if (accepted) this.callbacks.onScroll?.(actual);
+    if (accepted) this.reportScroll(actual);
+  }
+
+  /**
+   * The last accepted cycle still holds: same geometry, the DOM is at that
+   * offset, the intent's target has not moved, and the viewport is covered.
+   * Used so a React re-render that did not change the list does not start a
+   * new cycle (and does not re-enter `onScroll` from a layout effect).
+   */
+  private isSettled(): boolean {
+    if (this.reshown || !this.firstCycleComplete || this.dirty.size > 0 || this.glide) {
+      return false;
+    }
+    const plan = this.committedPlan;
+    const last = this.lastObserved;
+    if (!plan || !last) return false;
+    if (last.geometryRevision !== this.geometry.revision) return false;
+    for (let i = 0; i < plan.keys.length; i += 1) {
+      const index = this.geometry.indexOfKey(plan.keys[i]!);
+      if (index < 0 || !this.geometry.isMeasured(index)) return false;
+    }
+    this.refreshViewport(true);
+    const scrollTop = this.host.readScrollTop();
+    if (Math.abs(scrollTop - last.scrollTop) >= 0.5) return false;
+    if (!this.isCovered(scrollTop, plan)) return false;
+    return Math.abs(this.targetScrollTop() - scrollTop) <= EPSILON_PX;
+  }
+
+  /** Expand the window and commit again; false when this pass is out of commits. */
+  private requestCoverageCommit(tx: Transaction): boolean {
+    if (tx.supplementary >= MAX_SUPPLEMENTARY_COMMITS) return false;
+    if (tx.supplementary === 0) {
+      tx.worstCase = true;
+      tx.freezeNextPlan = true;
+    }
+    tx.supplementary += 1;
+    this.host.requestCommit(true);
+    return true;
+  }
+
+  private reportScroll(offset: number): void {
+    if (this.lastReportedScroll !== null && Math.abs(this.lastReportedScroll - offset) < 0.5) {
+      return;
+    }
+    this.lastReportedScroll = offset;
+    this.callbacks.onScroll?.(offset);
   }
 
   /** Read the sizes of committed rows that are new, stale or reported dirty. */

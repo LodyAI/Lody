@@ -25,15 +25,24 @@ machine. Missing credentials are retried, and credential changes are observed
 without restarting. Inability to query `/user` does not rule out PR access;
 unidentified credentials share a conservative quota bucket.
 
-Hosted association is required before publication only when the hosted port is
-present. Local mode publishes successful observations directly into owner session
-metadata. Missing authentication, inaccessible repositories and failed queries
+Successful exact-branch GitHub observations are published into owner session
+metadata in both local and hosted workspaces. Hosted webhook association is a
+separate effect: rejection or transport failure must not hide a verified PR or
+leave Create PR available. Retry association under the existing polling gates;
+only successful association and publication commit a discovery success stamp.
+An older discovery fingerprint must not suppress this retry after a terminal PR
+is published. Successful associations are remembered for the workspace runtime;
+after restart, eligible discoveries can idempotently re-establish them.
+Missing authentication, inaccessible repositories and failed queries
 never invent a PR or erase a previously successful observation. Login and access
 changes take effect at a subsequent eligible polling attempt, respecting cooldowns.
 
 The desktop reads the same metadata for local and hosted projects. Without hosted
 GitHub integration, PR links open GitHub in the browser; detailed checks, review
-and mutation APIs are not enabled by local summary access. Branch observation is
+and mutation APIs are not enabled by local summary access. When hosted detail
+reads fail — including an unconfirmed repository identity — a recorded PR keeps
+a recoverable presentation with its GitHub link rather than a bare failure, and
+mutation affordances stay unavailable until details load. Branch observation is
 event-driven; PR discovery and status use bounded background polling, not a new
 polling loop per view. Product-cloud requests remain forbidden in local mode.
 
@@ -42,3 +51,4 @@ polling loop per view. Product-cloud requests remain forbidden in local mode.
 - [Reconciler boundaries](../apps/cli/src/lib/pr-poller/AGENTS.md)
 - [Workspace Git observer](../apps/cli/src/session/workspace-git-service.ts)
 - [Decision](../.agents/notes/implemented/feature/2026-09-24-local-github-pr-observation.md)
+- [Hosted publication correction](../.agents/notes/proposed/bug-fix/2026-10-01-pr-observation-association.md)

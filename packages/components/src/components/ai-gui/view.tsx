@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { space } from '@lody/ui/tokens/scales.stylex';
+import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import {
   type ComponentPropsWithoutRef,
@@ -217,6 +217,7 @@ import {
   resolveSessionHistoryDurationMs,
 } from '@/lib/session-history-duration';
 import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import type { TurnIndexRow } from '@/lib/conversation-view';
 import { TurnPlaceholderRow, estimatePlaceholderHeight } from './turn-placeholder-row';
@@ -270,7 +271,6 @@ import {
 } from './chat-failed-error-report';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import {
-  compactConversationFontSize,
   conversationTextFontSizeStyle,
   userTextCollapsedHeight,
 } from './conversation-font-size-classes';
@@ -920,7 +920,12 @@ const ChatItem = memo(function ChatItem({
     return <>{emptyState}</>;
   }
   return (
-    <div className="flex justify-center py-6 text-sm font-medium text-muted-foreground text-center">
+    <div
+      className={cn(
+        stylex.props(activityTypography.body).className,
+        'flex justify-center py-6 font-medium text-muted-foreground text-center'
+      )}
+    >
       {noMessagesLabel}
     </div>
   );
@@ -2271,7 +2276,12 @@ export const SessionChatStreamView = forwardRef<
                 )}
                 <div className="min-h-0 flex-1">
                   {emptyState ?? (
-                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    <div
+                      className={cn(
+                        stylex.props(activityTypography.body).className,
+                        'flex h-full items-center justify-center text-muted-foreground'
+                      )}
+                    >
                       {noMessagesLabel}
                     </div>
                   )}
@@ -2750,7 +2760,10 @@ const OperationCompletionView = ({
       )}
       {showStatusCard ? (
         <div
-          className="flex items-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 text-sm"
+          className={cn(
+            stylex.props(activityTypography.body).className,
+            'flex items-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 '
+          )}
           title={completion.operationId}
         >
           <StatusIcon
@@ -2771,20 +2784,35 @@ const OperationCompletionView = ({
               )}
             </div>
             {completion.completion.type === 'error' ? (
-              <div className="mt-0.5 break-words text-xs text-muted-foreground">
+              <div
+                className={cn(
+                  stylex.props(activityTypography.footnote).className,
+                  'mt-0.5 break-words text-muted-foreground'
+                )}
+              >
                 {completion.completion.error.message}
               </div>
             ) : null}
             {untargetedProblems.map((problem, index) => (
               <div
                 key={`${problem.label ?? 'item'}-${index}`}
-                className="mt-0.5 break-words text-xs text-muted-foreground"
+                className={cn(
+                  stylex.props(activityTypography.footnote).className,
+                  'mt-0.5 break-words text-muted-foreground'
+                )}
               >
                 {problem.label ? `${problem.label}: ${problem.message}` : problem.message}
               </div>
             ))}
             {continuationNotice ? (
-              <div className="mt-0.5 text-xs text-muted-foreground">{continuationNotice}</div>
+              <div
+                className={cn(
+                  stylex.props(activityTypography.footnote).className,
+                  'mt-0.5 text-muted-foreground'
+                )}
+              >
+                {continuationNotice}
+              </div>
             ) : null}
           </div>
         </div>
@@ -2811,7 +2839,65 @@ const DashedNoticeRule = () => (
 );
 
 const noticeStyles = stylex.create({
-  footer: { paddingInline: space[2], paddingBottom: space[2] },
+  /**
+   * One wrapping row for the whole banner. Above the mobile breakpoint the
+   * detail and footer keep their own rows; at phone widths the copy-only case
+   * swaps those two orders so the footer rides the header's trailing edge
+   * instead of spending a row. When a capacity retry action is present the
+   * header is already occupied, so the footer keeps its row to avoid squeezing
+   * the title between two controls.
+   */
+  row: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: space[2],
+    rowGap: space[1.5],
+    paddingInline: space[2],
+    paddingTop: space[1.5],
+    paddingBottom: space[1.5],
+  },
+  /** A footer button's own bottom padding replaces the plain band's. */
+  rowWithFooter: {
+    paddingBottom: space[2],
+  },
+  label: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    fontSize: textScale.footnoteSize,
+    lineHeight: textScale.footnoteLeading,
+    fontWeight: 500,
+  },
+  action: { flexShrink: 0 },
+  detail: {
+    order: 4,
+    width: '100%',
+    minWidth: 0,
+  },
+  /** Applied only when copy is the sole trailing control. */
+  detailAfterFooter: {
+    '@media (max-width: 767px)': { order: 5 },
+  },
+  detailText: {
+    display: 'block',
+    minWidth: 0,
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'break-word',
+    fontSize: textScale.footnoteSize,
+    lineHeight: textScale.bodyLeading,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  footer: {
+    order: 5,
+    width: '100%',
+    flexShrink: 0,
+  },
+  /** Applied only when copy is the sole trailing control. */
+  footerInHeader: {
+    '@media (max-width: 767px)': { order: 4, width: 'auto' },
+  },
 });
 
 /**
@@ -2874,30 +2960,42 @@ const AgentNoticeBanner = ({
   // this same shadow ring for menus.
   const ringColor = `color-mix(in srgb, ${toneColor} 14%, hsl(var(--border)))`;
   const fillColor = `color-mix(in srgb, ${toneColor} 3.5%, transparent)`;
+  // Only lift copy into the header when it would be the sole trailing control.
+  // A capacity retry action already owns that edge, and moving copy beside it
+  // wraps a short title into a tall column on phones.
+  const copyRidesHeader = !action;
 
   return (
     <div
       style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
       className="w-full overflow-hidden rounded-lg"
     >
-      {/* Header and body read as one continuous band. The detail is a sibling
-          of the header rather than a child of the column beside the glyph:
-          hanging it off the label indented every line past the icon, which cost
-          width the card does not have. An action rides the header's trailing
-          edge so a retry stays on the same line as the message it answers. */}
-      <div className="flex items-center gap-2 px-2 py-1.5">
+      {/* Header, detail, and footer share one wrapping row. On phones without a
+          retry action the footer keeps the header's trailing edge and the detail
+          drops to its own full-width line, so copy no longer spends a separate
+          row; wider viewports keep detail and footer on their own rows below. */}
+      <div {...stylex.props(noticeStyles.row, footer ? noticeStyles.rowWithFooter : undefined)}>
         <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
-        <span className={cn('min-w-0 text-xs font-medium leading-4', accentClass)}>{label}</span>
-        {action ? <div className="ml-auto shrink-0">{action}</div> : null}
+        <span {...withClassName(stylex.props(noticeStyles.label), accentClass)}>{label}</span>
+        {action ? <div {...stylex.props(noticeStyles.action)}>{action}</div> : null}
+        {detail ? (
+          <div
+            {...stylex.props(
+              noticeStyles.detail,
+              copyRidesHeader && noticeStyles.detailAfterFooter
+            )}
+          >
+            <span {...stylex.props(noticeStyles.detailText)}>{detail}</span>
+          </div>
+        ) : null}
+        {footer ? (
+          <div
+            {...stylex.props(noticeStyles.footer, copyRidesHeader && noticeStyles.footerInHeader)}
+          >
+            {footer}
+          </div>
+        ) : null}
       </div>
-      {detail ? (
-        <div className="px-2 pb-1.5">
-          <span className="block min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
-            {detail}
-          </span>
-        </div>
-      ) : null}
-      {footer ? <div {...stylex.props(noticeStyles.footer)}>{footer}</div> : null}
     </div>
   );
 };
@@ -2942,7 +3040,12 @@ const SystemNoticeView = ({
         | undefined;
       if (!meta) return null;
       return (
-        <div className="flex items-center gap-3 py-4 text-xs text-muted-foreground/75">
+        <div
+          className={cn(
+            stylex.props(activityTypography.footnote).className,
+            'flex items-center gap-3 py-4 text-muted-foreground/75'
+          )}
+        >
           <DashedNoticeRule />
           {/* min-w-0 on the wrapper + truncate on the button: a long source
               title ellipsizes inside the column instead of pushing past it and
@@ -3014,7 +3117,12 @@ const SystemNoticeView = ({
             <Tooltip.Content side="top" className="max-w-xs text-center">
               <p>{tooltipContent}</p>
               {meta?.terminalOmitted && (
-                <p className="mt-1 text-xs opacity-80">
+                <p
+                  className={cn(
+                    stylex.props(activityTypography.footnote).className,
+                    'mt-1 opacity-80'
+                  )}
+                >
                   {t(
                     'sessions.systemNotices.resumeFromExternalChatHistory.terminalOmitted',
                     'Terminal output was omitted to fit context.'
@@ -3022,7 +3130,12 @@ const SystemNoticeView = ({
                 </p>
               )}
               {meta?.thinkingOmitted && (
-                <p className="mt-1 text-xs opacity-80">
+                <p
+                  className={cn(
+                    stylex.props(activityTypography.footnote).className,
+                    'mt-1 opacity-80'
+                  )}
+                >
                   {t(
                     'sessions.systemNotices.resumeFromExternalChatHistory.thinkingOmitted',
                     'Agent thinking was omitted to fit context.'
@@ -3032,7 +3145,14 @@ const SystemNoticeView = ({
             </Tooltip.Content>
           </Tooltip.Root>
         </Tooltip.Provider>
-        <span className="text-xs text-muted-foreground">{mainMessage}</span>
+        <span
+          className={cn(
+            stylex.props(activityTypography.footnote).className,
+            'text-muted-foreground'
+          )}
+        >
+          {mainMessage}
+        </span>
       </div>
 
       {/* Right divider line */}
@@ -3214,7 +3334,10 @@ const ChatFailedNoticeView = ({
       <button
         type="button"
         aria-label={isRetryCountdown ? stopAutoRetryLabel : undefined}
-        className="group relative isolate inline-grid h-7 shrink-0 place-items-center overflow-hidden rounded-full bg-muted-foreground/[0.04] px-2.5 text-xs font-normal tabular-nums text-foreground/80 transition-colors hover:bg-muted-foreground/[0.07] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        className={cn(
+          stylex.props(activityTypography.footnote).className,
+          'group relative isolate inline-grid h-7 shrink-0 place-items-center overflow-hidden rounded-full bg-muted-foreground/[0.04] px-2.5 font-normal tabular-nums text-foreground/80 transition-colors hover:bg-muted-foreground/[0.07] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50'
+        )}
         disabled={capacityRetry.pending || !capacityRetry.canRetry}
         onClick={isRetryCountdown ? capacityRetry.stopAutoRetry : capacityRetry.retry}
       >
@@ -3418,7 +3541,7 @@ const WorktreeScriptNoticeView = ({
           />
           <span
             className={cn(
-              'truncate text-[13px] font-medium leading-tight',
+              cn(stylex.props(activityTypography.control).className, 'truncate font-medium '),
               isFailed ? 'text-destructive' : 'text-muted-foreground'
             )}
           >
@@ -3629,7 +3752,10 @@ const UserMessageRowView = ({
         )}
       >
         <div
-          className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground"
+          className={cn(
+            stylex.props(activityTypography.caption).className,
+            'flex flex-row-reverse items-center gap-1.5 text-muted-foreground'
+          )}
           data-testid="user-message-metadata"
         >
           {showSenderIdentity && user?.name ? (
@@ -3907,11 +4033,22 @@ function UserMessageAuthorAvatar({
         <div className="flex items-center gap-3.5 p-4">
           <UserAvatar user={user} size="xlarge" className="shrink-0" />
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-foreground">
+            <div
+              className={cn(
+                stylex.props(activityTypography.body).className,
+                'truncate font-semibold text-foreground'
+              )}
+            >
               {user?.name?.trim() || displayName}
             </div>
             {user?.email ? (
-              <div className="mt-1 truncate text-xs text-muted-foreground" title={user.email}>
+              <div
+                className={cn(
+                  stylex.props(activityTypography.footnote).className,
+                  'mt-1 truncate text-muted-foreground'
+                )}
+                title={user.email}
+              >
                 {user.email}
               </div>
             ) : null}
@@ -4012,12 +4149,23 @@ const AssistantTurnTokenUsageRows = ({ usage }: { usage: SessionTurnTokenUsage }
   ];
   return (
     <div className="border-t border-border/60 px-3 py-2.5">
-      <div className="mb-1.5 text-[11px] font-medium text-foreground">
+      <div
+        className={cn(
+          stylex.props(activityTypography.caption).className,
+          'mb-1.5 font-medium text-foreground'
+        )}
+      >
         {t('sessions.turnConfig.tokens', 'Tokens')}
       </div>
       <dl className="space-y-1.5">
         {rows.map((row) => (
-          <div key={row.key} className="flex items-start justify-between gap-3 text-[11px]">
+          <div
+            key={row.key}
+            className={cn(
+              stylex.props(activityTypography.caption).className,
+              'flex items-start justify-between gap-3 '
+            )}
+          >
             <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
             <dd
               className="text-right font-medium tabular-nums text-foreground"
@@ -4122,13 +4270,24 @@ const AssistantTurnConfigInfoButton = ({
       </Tooltip.Provider>
       <Popover.Content align="start" side="bottom" sideOffset={6} className="w-64 gap-0 p-0">
         <div className="border-b border-border/60 px-3 py-2">
-          <div className="text-[11px] font-medium text-foreground">
+          <div
+            className={cn(
+              stylex.props(activityTypography.caption).className,
+              'font-medium text-foreground'
+            )}
+          >
             {t('sessions.turnConfig.title', 'Turn configuration')}
           </div>
         </div>
         <dl className="space-y-1.5 px-3 py-2.5">
           {configRows.map((row) => (
-            <div key={row.label} className="flex items-start justify-between gap-3 text-[11px]">
+            <div
+              key={row.label}
+              className={cn(
+                stylex.props(activityTypography.caption).className,
+                'flex items-start justify-between gap-3 '
+              )}
+            >
               <dt className="shrink-0 text-muted-foreground">{row.label}</dt>
               <dd className="flex min-w-0 items-center justify-end gap-1.5 text-right font-medium text-foreground">
                 {row.label === 'Model' ? (
@@ -4145,7 +4304,12 @@ const AssistantTurnConfigInfoButton = ({
             </div>
           ))}
           {configRows.length === 0 && !tokenUsage ? (
-            <p className="text-[11px] text-muted-foreground">
+            <p
+              className={cn(
+                stylex.props(activityTypography.caption).className,
+                'text-muted-foreground'
+              )}
+            >
               {t('sessions.turnConfig.empty', 'No configuration recorded for this turn.')}
             </p>
           ) : null}
@@ -4156,12 +4320,19 @@ const AssistantTurnConfigInfoButton = ({
   );
 };
 
-/* The turn reads on three steps: the reply is the text; a group summary
-   ("Worked for 12s", "Read 2 files") is a notch smaller and secondary; a step
-   under it is smaller again, at regular weight — a medium-weight gray reads as
-   a second, muddier kind of text. Steps carry no glyphs: the verb already says
+/* The reply uses body text; group summaries and steps share the secondary
+   control role at regular weight. Steps carry no glyphs: the verb already says
    what kind of step it is, and a column of icons was a second list beside it. */
-const ACTIVITY_PROCESS_TEXT_CLASS = 'text-[12.5px] font-normal leading-snug text-muted-foreground';
+const activityTypography = stylex.create({
+  control: { fontSize: textScale.subheadlineSize, lineHeight: textScale.subheadlineLeading },
+  body: { fontSize: textScale.bodySize, lineHeight: textScale.bodyLeading },
+  footnote: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
+  caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
+});
+const ACTIVITY_PROCESS_TEXT_CLASS = cn(
+  stylex.props(activityTypography.control).className,
+  'font-normal text-muted-foreground'
+);
 const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground/70';
 /* Match the prose's fixed 4px inset, independent of the root font size. */
 const ACTIVITY_STEP_BUTTON_CLASS = cn(
@@ -4174,12 +4345,14 @@ const ACTIVITY_STEP_TITLE_CLASS = cn(
   'min-w-0 flex-1 transition-colors group-hover:text-foreground',
   ACTIVITY_PROCESS_TEXT_CLASS
 );
-const ACTIVITY_STEP_BODY_CLASS =
-  'text-[12.5px] font-normal leading-[1.5] text-muted-foreground ' +
-  '[&_:is(h1,h2,h3,h4,h5,h6)]:!my-1 [&_:is(h1,h2,h3,h4,h5,h6)]:!text-[12.5px] ' +
-  '[&_:is(h1,h2,h3,h4,h5,h6)]:!font-medium [&_:is(h1,h2,h3,h4,h5,h6)]:!text-muted-foreground ' +
-  '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
-  '[&_p]:!mb-1 [&_p:last-child]:!mb-0 [&_li:not(:first-child)]:!mt-0.5';
+const ACTIVITY_STEP_BODY_CLASS = cn(
+  stylex.props(activityTypography.control).className,
+  'font-normal text-muted-foreground ' +
+    '[&_:is(h1,h2,h3,h4,h5,h6)]:!my-1 [&_:is(h1,h2,h3,h4,h5,h6)]:!text-[length:var(--markdown-body-font-size)] ' +
+    '[&_:is(h1,h2,h3,h4,h5,h6)]:!font-medium [&_:is(h1,h2,h3,h4,h5,h6)]:!text-muted-foreground ' +
+    '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
+    '[&_p]:!mb-1 [&_p:last-child]:!mb-0 [&_li:not(:first-child)]:!mt-0.5'
+);
 
 /* The collapsed activity group's label type; the live status row reuses it so
    "Working" reads as the next group label, not a separate widget. */
@@ -4189,7 +4362,7 @@ const PROCESS_STATUS_LINE_CLASS = (isMobile: boolean) =>
     'flex w-full items-center py-0.5 text-muted-foreground',
     isMobile
       ? cn('gap-1.5 pr-1', ACTIVITY_PROCESS_TEXT_CLASS)
-      : 'gap-1.5 px-[4px] text-[length:var(--markdown-body-font-size,1em)] leading-[1.75]'
+      : cn('gap-1.5 px-[4px]', stylex.props(activityTypography.body).className)
   );
 
 const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
@@ -4199,7 +4372,7 @@ const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
       ? cn('flex-1', ACTIVITY_PROCESS_TEXT_CLASS)
       : /* A notch under the reply, and set close: summaries and their steps
            are one compact list between paragraphs, not paragraphs themselves. */
-        'text-[length:calc(var(--markdown-body-font-size,1em)*0.9)] font-normal leading-[1.5]'
+        cn(stylex.props(activityTypography.control).className, 'font-normal')
   );
 
 /** Last intended rotate after a click. Survives Virtua remounting the row. */
@@ -4903,7 +5076,10 @@ export const AssistantTurnFooter = ({
       {(showFinishedMetadata || !!copyContext || hasTurnConfigInfo) && showActionBar ? (
         <div
           className={cn(
-            'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
+            cn(
+              stylex.props(activityTypography.caption).className,
+              'flex flex-wrap items-center justify-start text-muted-foreground'
+            ),
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
             !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
             !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100'
@@ -5036,7 +5212,10 @@ export const AssistantTurnFooter = ({
                 variant={isAccent ? 'primary' : 'secondary'}
                 size="small"
                 className={cn(
-                  'h-8 gap-1.5 rounded-md px-3 text-xs font-medium transition-colors',
+                  cn(
+                    stylex.props(activityTypography.footnote).className,
+                    'h-8 gap-1.5 rounded-md px-3 font-medium transition-colors'
+                  ),
                   isAccent
                     ? 'border border-primary/40 bg-primary/[0.12] text-primary shadow-xs hover:bg-primary/[0.18] hover:text-primary disabled:opacity-60'
                     : 'border-border/60 bg-background/60 text-foreground/85 shadow-none hover:bg-muted/55 hover:text-foreground'
@@ -5440,7 +5619,11 @@ const UserChatBubble = ({
   message = { ...message, items: useSelectionStableValue(message.items) };
   if (!message.items.length) {
     return variant === 'attachments' ? null : (
-      <span className="text-xs text-muted-foreground">No Message</span>
+      <span
+        className={cn(stylex.props(activityTypography.footnote).className, 'text-muted-foreground')}
+      >
+        No Message
+      </span>
     );
   }
 
@@ -5983,8 +6166,11 @@ export const WorkspaceUserImageBlock = ({
       {!cachedThumbnailUrl && !isThumbnailLoading && thumbnailLoadingError && (
         <div
           className={cn(
-            'flex items-center justify-center px-3 py-4 text-xs text-muted-foreground',
-            isThumbnail ? `${thumbnailFrameClass} p-2 text-xs` : `min-h-24 ${fullFrameWidthClass}`
+            cn(
+              stylex.props(activityTypography.footnote).className,
+              'flex items-center justify-center px-3 py-4 text-muted-foreground'
+            ),
+            isThumbnail ? `${thumbnailFrameClass} p-2` : `min-h-24 ${fullFrameWidthClass}`
           )}
         >
           {thumbnailLoadingError}
@@ -6273,7 +6459,12 @@ const WorkspaceSessionFileGroup = ({
           />
         ))}
         {overflowCount > 0 ? (
-          <span className="px-1 text-xs text-muted-foreground">
+          <span
+            className={cn(
+              stylex.props(activityTypography.footnote).className,
+              'px-1 text-muted-foreground'
+            )}
+          >
             {t('sessions.fileGroupOverflow', '+{{count}} more files', { count: overflowCount })}
           </span>
         ) : null}
@@ -6605,7 +6796,10 @@ const UserPlainTextBlock = ({
               type="button"
               variant="ghost"
               size="small"
-              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              className={cn(
+                stylex.props(activityTypography.footnote).className,
+                'h-7 px-2 text-muted-foreground hover:text-foreground'
+              )}
               onClick={() => setIsExpanded((prev) => !prev)}
             >
               {isExpanded ? 'Show less' : 'Show more'}
@@ -6726,7 +6920,12 @@ const ThoughtCard = ({
       left={
         <Fragment>
           <Sparkles className="h-3.5 w-3.5 flex-none shrink-0 text-muted-foreground" />
-          <span className="text-[13px] font-semibold leading-tight text-muted-foreground">
+          <span
+            className={cn(
+              stylex.props(activityTypography.control).className,
+              'font-semibold text-muted-foreground'
+            )}
+          >
             Agent thinking
           </span>
         </Fragment>
@@ -6752,7 +6951,12 @@ const PlanBlock = ({
   fontSize: ConversationFontSize;
 }) => (
   <div className="space-y-2 rounded-lg border border-border/70 bg-background/80 p-2.5">
-    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <div
+      className={cn(
+        stylex.props(activityTypography.footnote).className,
+        'flex items-center gap-2 font-semibold uppercase tracking-wide text-muted-foreground'
+      )}
+    >
       <ListChecks className="h-4 w-4" />
       Plan
     </div>
@@ -6984,7 +7188,12 @@ const GoalBlock = ({ goal }: { goal: GoalMessage }) => {
   const StatusIcon = meta.Icon;
 
   return (
-    <div className="flex w-full min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+    <div
+      className={cn(
+        stylex.props(activityTypography.caption).className,
+        'flex w-full min-w-0 items-center gap-2 text-muted-foreground'
+      )}
+    >
       <Target className="h-3 w-3 flex-none" aria-hidden="true" />
       <StatusIcon
         className={cn('h-2.5 w-2.5 flex-none', meta.textClassName, meta.pulse && 'animate-pulse')}
@@ -7300,7 +7509,8 @@ const ToolCallCard = memo(function ToolCallCard({
             <ToolDetailSection key={`text-${index}`}>
               <MarkdownRenderer
                 text={content.text}
-                size={compactConversationFontSize(fontSize)}
+                size={fontSize}
+                compact
                 className={ACTIVITY_STEP_BODY_CLASS}
                 onAgentFileLinkClick={onFilePathClick}
               />
@@ -7379,7 +7589,7 @@ const ToolCallCard = memo(function ToolCallCard({
                 className={cn(
                   isActivityRow
                     ? ACTIVITY_STEP_TITLE_CLASS
-                    : 'text-[13px] font-semibold leading-tight'
+                    : cn(stylex.props(activityTypography.control).className, 'font-semibold ')
                 )}
               >
                 {kindMeta?.label && TOOL_VERB_FORMS[kindMeta.label] ? (
@@ -7403,7 +7613,10 @@ const ToolCallCard = memo(function ToolCallCard({
                                 'inline-flex min-w-0 max-w-[min(100%,20rem)] shrink items-center truncate',
                                 ACTIVITY_PROCESS_TEXT_CLASS
                               )
-                            : 'inline-flex min-w-0 max-w-[240px] shrink items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px]',
+                            : cn(
+                                stylex.props(activityTypography.caption).className,
+                                'inline-flex min-w-0 max-w-[240px] shrink items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 '
+                              ),
                           isFilePathClickable
                             ? isActivityRow
                               ? /* The file name is a link inside the step: the pointer
@@ -7431,7 +7644,10 @@ const ToolCallCard = memo(function ToolCallCard({
                                   isFilePathClickable &&
                                     'underline-offset-2 group-hover:text-foreground hover:underline'
                                 )
-                              : 'font-mono text-xs'
+                              : cn(
+                                  stylex.props(activityTypography.footnote).className,
+                                  'font-mono '
+                                )
                           )}
                         >
                           {fileName}
@@ -7454,7 +7670,7 @@ const ToolCallCard = memo(function ToolCallCard({
                 'truncate',
                 isActivityRow
                   ? ACTIVITY_STEP_TITLE_CLASS
-                  : 'text-[13px] font-semibold leading-tight'
+                  : cn(stylex.props(activityTypography.control).className, 'font-semibold ')
               )}
             />
           )}
@@ -7569,7 +7785,14 @@ const StandardToolContentBlock = ({
       if (!src) return null;
       return (
         <div className="space-y-2">
-          <div className="text-xs font-medium text-muted-foreground">Image</div>
+          <div
+            className={cn(
+              stylex.props(activityTypography.footnote).className,
+              'font-medium text-muted-foreground'
+            )}
+          >
+            Image
+          </div>
           <img
             src={src}
             alt={content.annotations?.audience ? 'Shared image' : 'Generated image'}
@@ -7583,7 +7806,14 @@ const StandardToolContentBlock = ({
       if (!src) return null;
       return (
         <div className="space-y-2">
-          <div className="text-xs font-medium text-muted-foreground">Audio</div>
+          <div
+            className={cn(
+              stylex.props(activityTypography.footnote).className,
+              'font-medium text-muted-foreground'
+            )}
+          >
+            Audio
+          </div>
           <audio controls className="w-full">
             <source src={src} />
           </audio>
@@ -7630,7 +7860,14 @@ const StandardToolContentBlock = ({
       if (!href) return null;
       return (
         <div className="space-y-2">
-          <div className="text-xs font-medium text-muted-foreground">Resource</div>
+          <div
+            className={cn(
+              stylex.props(activityTypography.footnote).className,
+              'font-medium text-muted-foreground'
+            )}
+          >
+            Resource
+          </div>
           <a
             href={href}
             target="_blank"

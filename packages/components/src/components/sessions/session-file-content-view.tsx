@@ -30,6 +30,7 @@ import { useActiveVSCodeTheme, useResolvedTheme } from '../../theme-provider';
 import {
   conversationFontSizeAtom,
   currentWorkspaceIdAtom,
+  extendedCodeLanguagesEnabledAtom,
   fileViewerWordWrapAtom,
   getMachineMetaByIdAtomFamily,
   userAtom,
@@ -70,7 +71,12 @@ import {
   decideCodeCollabLiveTextUpdate,
   RecentLocalTextEchoTracker,
 } from '@/lib/code-collab-live-text-update';
-import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
+import {
+  getSessionFileLanguageId,
+  getSessionFileMonacoLanguageId,
+  isSessionFileShikiLanguage,
+  isSessionMarkdownPath,
+} from '@/lib/session-file-language';
 import { getOfficePreviewKind } from '@/lib/session-file-office-source';
 import { downloadBytesAsFile } from '@/lib/download-file';
 import { usePostHog } from '@posthog/react';
@@ -102,6 +108,7 @@ import type { SessionMonacoSelectionRestore } from '@/lib/session-monaco-editor-
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-offline-outline';
 import { SessionFileErrorState } from './session-file-error-state';
+import { SessionShikiTextViewer } from './session-shiki-text-viewer';
 import { ManagedPreviewSurface } from './managed-preview-surface';
 import { supportsCredentiallessManagedPreviewFrames } from './managed-preview-frame-cache';
 import {
@@ -250,6 +257,7 @@ function SessionFileContentViewImpl({
   const setWordWrapEnabled = useSetAtom(fileViewerWordWrapAtom);
   // Match the main conversation Markdown typography (settings → font size).
   const conversationFontSize = useAtomValue(conversationFontSizeAtom);
+  const extendedCodeLanguagesEnabled = useAtomValue(extendedCodeLanguagesEnabledAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -1118,6 +1126,13 @@ function SessionFileContentViewImpl({
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
     isSessionMarkdownPath(normalizedPath);
+  const sessionFileLanguageId = getSessionFileLanguageId(
+    normalizedPath,
+    extendedCodeLanguagesEnabled
+  );
+  const sessionFileShikiLanguage = isSessionFileShikiLanguage(sessionFileLanguageId)
+    ? sessionFileLanguageId
+    : null;
   const canCopyFullMarkdown =
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
@@ -1319,7 +1334,15 @@ function SessionFileContentViewImpl({
       body = (
         <div className="flex h-full min-h-0 flex-col">
           <div className="min-h-0 flex-1">
-            {isMarkdownTextFile && preferNativeMarkdownSelection ? (
+            {sessionFileShikiLanguage !== null && !isProviderFileEditable ? (
+              <SessionShikiTextViewer
+                key={liveFileId ?? normalizedPath}
+                path={normalizedPath}
+                text={resolveProviderEditorMountText(data.snapshot)}
+                language={sessionFileShikiLanguage}
+                className="h-full min-h-0"
+              />
+            ) : isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={liveFileId ?? normalizedPath}
                 text={resolveProviderEditorMountText(data.snapshot)}
@@ -1340,7 +1363,10 @@ function SessionFileContentViewImpl({
               <LazyProviderTextMonacoViewer
                 key={lspModelUri?.toString() ?? liveFileId ?? normalizedPath}
                 text={resolveProviderEditorMountText(data.snapshot)}
-                language={getSessionFileMonacoLanguageId(normalizedPath)}
+                language={getSessionFileMonacoLanguageId(
+                  normalizedPath,
+                  extendedCodeLanguagesEnabled
+                )}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}
                 vscodeTheme={activeVSCodeTheme ?? null}
@@ -1380,7 +1406,15 @@ function SessionFileContentViewImpl({
       body = (
         <div className="flex h-full min-h-0 flex-col">
           <div className="min-h-0 flex-1">
-            {isMarkdownTextFile && preferNativeMarkdownSelection ? (
+            {sessionFileShikiLanguage !== null ? (
+              <SessionShikiTextViewer
+                key={normalizedPath}
+                path={normalizedPath}
+                text={data.snapshot.text}
+                language={sessionFileShikiLanguage}
+                className="h-full min-h-0"
+              />
+            ) : isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={normalizedPath}
                 text={data.snapshot.text}
@@ -1393,7 +1427,10 @@ function SessionFileContentViewImpl({
               <LazyTextMonacoViewer
                 key={normalizedPath}
                 text={data.snapshot.text}
-                language={getSessionFileMonacoLanguageId(normalizedPath)}
+                language={getSessionFileMonacoLanguageId(
+                  normalizedPath,
+                  extendedCodeLanguagesEnabled
+                )}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}
                 vscodeTheme={activeVSCodeTheme ?? null}
@@ -1436,6 +1473,7 @@ function SessionFileContentViewImpl({
     !showMarkdownRendered &&
     !showCsvRendered &&
     !showHtmlRendered &&
+    !(sessionFileShikiLanguage !== null && !isProviderFileEditable) &&
     !(isMarkdownTextFile && preferNativeMarkdownSelection);
   const showWordWrapButton =
     isTextFileReady &&

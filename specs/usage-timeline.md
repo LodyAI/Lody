@@ -19,6 +19,13 @@ touched by the returned window, which may span eight dates. Clicking a bar or
 dot continues to open its UTC day breakdown. Desktop and responsive mobile
 surfaces use the same selected timeline and formatting rules.
 
+Changing ranges closes the selected day breakdown whenever either range is
+hourly (24h or 7d). A selection survives 30d ↔ All because those views share the same
+calendar cells. Resize and scroll synchronization may move the caret of the
+currently selected day; it must not reopen a closed breakdown or replace a
+different selection. Clicking a cell after a range change opens its day normally.
+Closing a breakdown does not invalidate its cached day snapshot.
+
 The client requests `day` and `week` with `granularity: hour`, then uses the
 returned `startMs`, `endMs`, `bucketSizeMs` and buckets. This presentation contract
 does not redefine the service's range selection or aggregation. Daily bucket
@@ -32,6 +39,7 @@ through; chart alignment provides no evidence about invoice correctness.
 - [Rendered skyline and matrix regressions](../packages/components/tests/usage-timeline.test.tsx)
 - [Cross-day and partial-bucket regressions](../packages/components/tests/usage-share-stats.test.ts)
 - [Decision and validation limits](../.agents/notes/implemented/bug-fix/2026-10-01-usage-timeline-time-basis.md)
+- [Selection lifetime and callback regressions](../.agents/notes/implemented/bug-fix/2026-10-02-usage-range-selection.md)
 
 The hosted service implementation is outside this public repository. Its range
 algorithm, aggregation endpoints and production responses remain unverified.

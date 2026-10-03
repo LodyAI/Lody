@@ -286,9 +286,9 @@ export function PrTabContainer({
     };
   }, [changeSelection, data, prDiff]);
 
-  const handleRefresh = useCallback(() => {
-    void refresh();
-  }, [refresh]);
+  // Returned so the error panel's Retry button can hold its pending state for
+  // the whole reload (slice fetches or the identity-resolution mutation).
+  const handleRefresh = useCallback(() => refresh(), [refresh]);
 
   const handleGrantChecksPermission = useCallback(() => {
     window.open(resolveGitHubAppInstallUrl(), '_blank', 'noopener,noreferrer');

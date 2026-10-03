@@ -34,12 +34,13 @@ declare global {
 
 export type PushMessageQueueInput = Omit<
   MessageQueueItemInput,
-  '$cid' | 'timestamp' | 'userTurnId' | 'isEditing' | 'editingStartedAt'
+  '$cid' | 'timestamp' | 'userTurnId' | 'operationId' | 'isEditing' | 'editingStartedAt'
 > & {
   isEditing?: boolean;
   editingStartedAt?: number;
   timestamp?: string;
   userTurnId?: string;
+  operationId?: string;
   attachments?: SessionAttachmentDraft[];
 };
 
@@ -318,6 +319,7 @@ export function useSessionDoc(
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      const userTurnId = item.userTurnId ?? uuidv4();
       const entry: Omit<MessageQueueItemInput, '$cid' | 'timestamp' | 'isEditing'> & {
         isEditing: boolean;
         timestamp: string;
@@ -325,13 +327,17 @@ export function useSessionDoc(
         ...item,
         isEditing: item.isEditing ?? false,
         editingStartedAt: item.editingStartedAt,
-        userTurnId: item.userTurnId ?? undefined,
+        userTurnId,
+        operationId: item.operationId ?? `queue:${userTurnId}`,
         timestamp: item.timestamp ?? new Date(getServerNow()).toISOString(),
       };
 
       const inputConfig = normalizeSessionTurnInputConfig(entry.acpSessionConfig);
-      const userTurnId = entry.userTurnId ?? uuidv4();
-      const { attachments, ...wireEntry } = { ...entry, attachments: item.attachments };
+      const { attachments, ...wireEntry } = {
+        ...entry,
+        userTurnId,
+        attachments: item.attachments,
+      };
       const pendingTurn = buildDraftUserHistoryEntry(
         {
           userId: entry.userId,

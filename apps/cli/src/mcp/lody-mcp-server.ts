@@ -123,6 +123,7 @@ import {
 import { registerScheduleTools } from './schedule-tools';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
 import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
+import { createSessionBackend } from '@/session/session-backend';
 import { version as cliVersion } from '@/pkg';
 import {
   configureWorkspaceMcpServer,
@@ -138,6 +139,8 @@ import { summarizeDiscoveryAgent as summarizeAgentConfig } from '@/lib/resource-
 import { SessionDiscoveryFilterShape, matchesSessionDiscovery } from '@/lib/discovery-query';
 import { getSessionCommandEnvironment } from '@/lib/session-command-environment';
 import { createSessionToolRegistrar, type SessionToolHandlers } from './session-tool-router';
+
+import { registerIosSimulatorPreviewTool } from './ios-simulator-tool';
 
 const PREVIEW_TOOL_NAME = 'lody_report_preview_candidate';
 const IMAGE_UPLOAD_TOOL_NAME = 'lody_upload_images';
@@ -1569,9 +1572,10 @@ const readSessionExecutionSnapshot = async (
   live: SessionLiveWorking
 ): Promise<SessionExecutionSnapshot> => {
   const sessionDoc = await manager.getOrCreateSessionDoc(session.id);
+  const backend = await createSessionBackend(sessionDoc, session);
   const [directory, queue] = await Promise.all([
-    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
-    sessionDoc.getMessageQueue(),
+    backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
+    backend.getMessageQueue(),
   ]);
   const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
   const queuedTurnCount =
@@ -1967,11 +1971,12 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
       );
     }
     const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(sessionDoc, session);
     // Bounded business paging: `limit` counts displayable turns, the cursor is a
     // raw position, and entries removed by the 128 KiB byte cap stay reachable.
     return await buildSessionHistoryForReader({
       sessionId,
-      history: sessionDoc.sessionData.history,
+      history: backend.history,
       limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
       ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
       maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
@@ -3759,12 +3764,29 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     }
   );
 
+  registerIosSimulatorPreviewTool(server, async (command) => {
+    const ctx = getSessionContext();
+    const response = await Effect.runPromise(
+      makeLocalControlClientAuto({ socketPath: ctx.localControlSocketPath }).machineRpc(
+        {
+          method: 'ios-simulator/agent-control',
+          machineId: ctx.machineId,
+          workspaceId: ctx.workspaceId,
+          params: { sessionId: ctx.sessionId, command },
+        },
+        { timeoutMs: SESSION_CONTROL_TIMEOUT_MS }
+      )
+    );
+    if (!response.ok) throw new Error('Simulator control unavailable.');
+    return response.result;
+  });
+
   server.registerTool(
     PREVIEW_TOOL_NAME,
     {
       title: 'Report frontend dev server preview',
       description:
-        "Use this immediately after starting or discovering a frontend/web dev server for the current Lody session. Report the loopback host and port before telling the user the server is ready. On remote-preview-enabled machines, a validated report from the session owner's active agent starts preparing the authenticated remote tunnel in the background. Reporting does not wait for tunnel readiness. Tell the user to click the Browser button in the bar directly above the message input to open the preview.",
+        "Use this immediately after starting or discovering a frontend/web dev server for the current Lody session. Report the loopback host and port before telling the user the server is ready. On remote-preview-enabled machines, a validated report from the session owner's active agent starts preparing the authenticated remote tunnel in the background. Reporting does not wait for tunnel readiness. Tell the user to click the Browser button in the bar directly above the message input to open the preview. For native iOS apps running in an iOS Simulator, use lody_ios_simulator_preview.",
       // Pass the full ZodObject (not `.shape`) so `.strict()` carries through to SDK
       // validation; the MCP SDK runs `safeParseAsync` against this before invoking the
       // handler, so no second `.parse(args)` is needed below.

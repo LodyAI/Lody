@@ -52,7 +52,9 @@ composition.
 
 `src/lib/pr-poller/` reconciles PR discovery/association, lifecycle, CI rollup, and merge/conflict
 state for this machine's sessions. It is the compensation path for a broken hosted GitHub webhook
-→ Streams fan-out, and its normative spec is `specs/pr-status-reconciler.md`.
+→ Streams fan-out. [PR observation](../../specs/local-github-pr-observation.md) defines
+summary publication independently of hosted webhook linkage: failed linkage remains
+retryable without hiding an authenticated exact-branch observation from the UI.
 
 `PrStatusPoller` is constructed in `LodyFleet.start()`; per-workspace handles
 (`pr-poller-workspace.ts`) are fact sources and write-back destinations only. All policy lives in

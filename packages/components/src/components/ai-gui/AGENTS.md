@@ -87,9 +87,8 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   A `run` task also needs subagentEvents v1 and `support.cancel`. Task rows and
   their ONE dialog: [README.md](README.md#subagent-tasks).
 
-- `--ui-font-size` is the 1em baseline; compact chrome is 0.9em. Conversation
-  body/headings/mono/terminal still scale through
-  `conversation-font-size-classes.ts`. Only streaming turns load the stream
+- Text roles use `@lody/ui` tokens; compact prose/code use subheadline, never nested `em`.
+  Message sizes use `conversation-font-size-classes.ts`; hosts require CSS typed division. Only streaming turns load the stream
   engine; else static. A remounted streaming row shows its existing text
   immediately; only later additions animate.
 - A Mermaid diagram in a message is a still preview until a pointer click

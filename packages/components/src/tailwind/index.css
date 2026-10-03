@@ -48,7 +48,7 @@
 :root {
   --diffs-token-light-font-style: normal;
   --diffs-token-dark-font-style: normal;
-  /* Appearance slider. Settings chrome is 1em of this; compact menus/pills 0.9em. */
+  /* Appearance's document baseline; @lody/ui text tokens derive every role. */
   --ui-font-size: 14px;
 
   /* Dialogs use CSS variables in Tailwind arbitrary z-index classes. Keep these
@@ -414,8 +414,6 @@ pre,
     background: transparent;
     color: var(--markdown-code-block-language);
     font-family: var(--font-mono);
-    font-size: 0.75em;
-    line-height: 1;
     letter-spacing: 0.02em;
     pointer-events: none;
   }
@@ -494,11 +492,6 @@ pre,
 
   .markdown-renderer [data-streamdown='code-block-body'] code {
     font-family: var(--font-mono);
-    /* One step below the conversation body (0.9em of `--ui-font-size`, 12.6px
-       at the default 14px): distinct from prose without the 0.85em cramp, and
-       it scales with the user's font-size setting. */
-    font-size: 0.9em;
-    line-height: 1.4;
     font-variant-ligatures: var(--lody-font-ligatures, contextual);
   }
 

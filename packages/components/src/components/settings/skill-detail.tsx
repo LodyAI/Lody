@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
 import type { MouseEvent } from 'react';
 import { User } from 'lucide-react';
@@ -15,7 +16,6 @@ import {
 import { withClassName } from '@/lib/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
-import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
   root: { display: 'flex', flexDirection: 'column', minHeight: 0 },
@@ -24,7 +24,7 @@ const styles = stylex.create({
   description: {
     margin: 0,
     marginTop: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   meta: {
@@ -34,7 +34,7 @@ const styles = stylex.create({
     columnGap: space[3],
     rowGap: space[1],
     marginTop: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   author: { display: 'inline-flex', alignItems: 'center', gap: space[1] },
@@ -48,7 +48,7 @@ const styles = stylex.create({
   },
   /** The body is set apart from the head by space, not a rule under it. */
   body: { flexGrow: 1, minHeight: 0, overflowY: 'auto', marginTop: space[4] },
-  empty: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  empty: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   title: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   fill: { flexGrow: 1, minHeight: 0 },
 });

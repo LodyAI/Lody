@@ -43,6 +43,7 @@ const hostedPresetPattern =
 const publicRuntimeArtifactHostPattern = /api\.lody\.ai/u;
 const publicRuntimeArtifactHostAllowlist = new Set([
   'README.md',
+  'apps/cli/src/ios-simulator/baguette-manifest.json',
   'packages/platform/src/runtime-artifacts.ts',
 ]);
 const hostedScriptNamePattern = /(?:^|:)(?:cloud|prod|production|staging)(?:$|:)/u;

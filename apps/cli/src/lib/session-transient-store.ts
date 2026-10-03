@@ -62,6 +62,8 @@ export type AssistantTurnACPUpdateTarget = {
 export type ACPUpdateTarget = AssistantTurnACPUpdateTarget;
 
 export type BufferedACPUpdate = {
+  /** Stable across flush retries so a backend can resume a partially accepted batch. */
+  operationId: string;
   notification: AcpSessionNotification;
   target: ACPUpdateTarget;
   /**

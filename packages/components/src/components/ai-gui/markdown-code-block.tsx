@@ -13,6 +13,8 @@ import { Check, Copy, Eye, EyeOff, WrapText } from 'lucide-react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { conversationFontSizeAtom } from '@/atoms/settings';
+import * as stylex from '@stylexjs/stylex';
+import { text } from '@lody/ui/tokens/scales.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { useMarkdownCodeTokens, type MarkdownCodeToken } from './markdown-code-highlight';
 
@@ -62,6 +64,17 @@ export function isMarkdownCodeFence(language: string, meta: string | undefined):
 }
 
 const COPY_FEEDBACK_MS = 2000;
+
+const typography = stylex.create({
+  code: {
+    fontSize: `var(--markdown-code-font-size, ${text.subheadlineSize})`,
+    lineHeight: `var(--markdown-code-line-height, ${text.subheadlineLeading})`,
+  },
+  caption: {
+    fontSize: `var(--markdown-caption-font-size, ${text.captionSize})`,
+    lineHeight: `var(--markdown-caption-line-height, ${text.captionLeading})`,
+  },
+});
 
 export function CodeBlockContainer({
   language,
@@ -134,7 +147,7 @@ const MarkdownCodeBody = memo(function MarkdownCodeBody({
   return (
     <div data-streamdown="code-block-body" data-language={language}>
       <pre>
-        <code>
+        <code {...stylex.props(typography.code)}>
           {lines.map((line, lineIndex) => (
             // Lines only append while a fence streams, so position is stable.
             <span key={lineIndex}>
@@ -180,7 +193,9 @@ export const MarkdownCodeToolbar = memo(function MarkdownCodeToolbar({
 
   return (
     <div data-streamdown="code-block-toolbar">
-      <div data-streamdown="code-block-header">{label ? <span>{label}</span> : null}</div>
+      <div data-streamdown="code-block-header" {...stylex.props(typography.caption)}>
+        {label ? <span>{label}</span> : null}
+      </div>
       <div data-streamdown="code-block-actions">
         {markdownPreview && onTogglePreview ? (
           <button
