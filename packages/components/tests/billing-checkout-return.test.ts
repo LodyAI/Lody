@@ -59,12 +59,30 @@ describe('billing checkout return marker', () => {
 describe('billing activation settlement', () => {
   const base = {
     effectivePlanTier: 'free' as const,
+    entitlementSource: 'free' as const,
+    checkoutPending: false,
     subscriptionSetupPending: false,
     autoRenewAfterGift: false,
   };
 
   it('stays pending for a free workspace and until gift setup lands', () => {
     expect(isBillingActivationSettled(base)).toBe(false);
+    expect(
+      isBillingActivationSettled({
+        ...base,
+        effectivePlanTier: 'plus',
+        entitlementSource: 'stripe_gift',
+      })
+    ).toBe(false);
+    expect(
+      isBillingActivationSettled({
+        ...base,
+        effectivePlanTier: 'plus',
+        entitlementSource: 'stripe_gift',
+        autoRenewAfterGift: true,
+        checkoutPending: true,
+      })
+    ).toBe(false);
     expect(isBillingActivationSettled({ ...base, effectivePlanTier: 'plus' })).toBe(true);
     // A gift member keeps Plus the whole time, so the tier alone cannot settle it.
     expect(
@@ -81,6 +99,7 @@ describe('billing activation settlement', () => {
       isBillingActivationSettled({
         ...base,
         effectivePlanTier: 'plus',
+        entitlementSource: 'stripe_gift',
         autoRenewAfterGift: true,
       })
     ).toBe(true);

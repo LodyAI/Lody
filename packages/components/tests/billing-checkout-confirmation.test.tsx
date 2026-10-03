@@ -13,8 +13,6 @@ import { PlatformContext } from '@lody/platform/react';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const reconcileCalls = vi.hoisted(() => ({ count: 0 }));
-
 vi.mock('@/hooks/use-authenticated-convex', () => ({
   useAuthenticatedConvex: () => ({ authSessionId: 'session-1' }),
 }));
@@ -37,7 +35,10 @@ import {
   markBillingCheckoutReturn,
   readBillingCheckoutReturn,
 } from '../src/components/settings/billing-checkout-return';
-import { OPTIMISTIC_BILLING_OVERVIEW } from '../src/components/settings/billing-overview-cache';
+import {
+  OPTIMISTIC_BILLING_OVERVIEW,
+  writeBillingOverviewCache,
+} from '../src/components/settings/billing-overview-cache';
 import { BillingSettingsComponent } from '../src/components/settings/billing-setting';
 import type { BillingOverviewData } from '../src/components/settings/billing-setting-pure';
 import { initI18n } from '../src/i18n';
@@ -51,7 +52,10 @@ function overview(patch: Partial<BillingOverviewData> = {}): BillingOverviewData
   };
 }
 
-function createPlatform(overviewRef: { current: BillingOverviewData }): PlatformProvider {
+type OverviewRef = { current: BillingOverviewData | undefined };
+type Reconcile = () => Promise<{ status: 'none' | 'pending' | 'paid' | 'expired' }>;
+
+function createPlatform(overviewRef: OverviewRef, reconcile: Reconcile): PlatformProvider {
   return {
     kind: 'cloud',
     identity: {
@@ -72,17 +76,7 @@ function createPlatform(overviewRef: { current: BillingOverviewData }): Platform
         operation.name === 'billing:getBillingOverview' ? overviewRef.current : undefined,
       useAction: (operation: { name: string }) => {
         if (operation.name === 'billing:reconcileWorkspaceCheckout') {
-          return async () => {
-            reconcileCalls.count += 1;
-            // First poll misses the not-yet-linked Stripe session; the retry
-            // must still confirm the payment instead of showing Free.
-            if (reconcileCalls.count === 1) return { status: 'none' };
-            overviewRef.current = overview({
-              effectivePlanTier: 'plus',
-              entitlementSource: 'stripe',
-            });
-            return { status: 'paid' };
-          };
+          return reconcile;
         }
         if (operation.name === 'billing:listBillingInvoices') {
           return async () => ({ invoices: [], upcoming: null });
@@ -102,7 +96,6 @@ describe('billing checkout return confirmation', () => {
   beforeEach(async () => {
     await initI18n('en');
     vi.useFakeTimers();
-    reconcileCalls.count = 0;
     window.history.replaceState({}, '', '/acme/settings/billing');
   });
 
@@ -114,11 +107,15 @@ describe('billing checkout return confirmation', () => {
     container?.remove();
     container = undefined;
     window.sessionStorage.clear();
+    window.localStorage.clear();
     vi.useRealTimers();
   });
 
-  async function renderBilling(overviewRef: { current: BillingOverviewData }) {
-    const platform = createPlatform(overviewRef);
+  async function renderBilling(
+    overviewRef: OverviewRef,
+    reconcile: Reconcile = async () => ({ status: 'pending' })
+  ) {
+    const platform = createPlatform(overviewRef, reconcile);
     const store = createStore();
     store.set(currentWorkspaceIdAtom, 'workspace-1');
     store.set(currentWorkspaceSlugAtom, 'acme');
@@ -126,39 +123,49 @@ describe('billing checkout return confirmation', () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    await act(async () => {
-      root?.render(
-        createElement(
-          JotaiProvider,
-          { store },
+    const rerender = async () =>
+      act(async () => {
+        root?.render(
           createElement(
-            PlatformContext.Provider,
-            { value: platform },
-            createElement(BillingSettingsComponent)
+            JotaiProvider,
+            { store },
+            createElement(
+              PlatformContext.Provider,
+              { value: platform },
+              createElement(BillingSettingsComponent)
+            )
           )
-        )
-      );
-    });
+        );
+      });
+    await rerender();
+    return rerender;
   }
 
   it('keeps the activating Plus state across a transient reconcile miss, then settles', async () => {
     window.history.replaceState({}, '', '/acme/settings/billing?checkout=success');
-    await renderBilling({ current: overview() });
+    const live: OverviewRef = { current: overview() };
+    let linked = false;
+    const rerender = await renderBilling(live, async () => {
+      if (!linked) return { status: 'none' };
+      live.current = overview({ effectivePlanTier: 'plus', entitlementSource: 'stripe' });
+      return { status: 'paid' };
+    });
 
     // First immediate reconcile misses; the page must stay on the activation
     // state instead of dropping to the pre-checkout free overview.
     expect(container!.textContent).toContain('Plus');
     expect(container!.textContent).toContain('Payment received');
-    expect(reconcileCalls.count).toBe(1);
 
     // The retry lands a paid subscription.
+    linked = true;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3_000);
     });
 
-    expect(reconcileCalls.count).toBeGreaterThanOrEqual(2);
+    await rerender();
+    expect(container!.textContent).not.toContain('Payment received');
     expect(container!.textContent).toContain('Plus');
-    expect(window.sessionStorage.length).toBe(0);
+    expect(readBillingCheckoutReturn('workspace-1')).toBeNull();
   });
 
   it('pretends nothing happened when the return says the checkout was canceled', async () => {
@@ -167,7 +174,109 @@ describe('billing checkout return confirmation', () => {
     await renderBilling({ current: overview() });
 
     expect(container!.textContent).not.toContain('Payment received');
-    expect(reconcileCalls.count).toBe(0);
     expect(readBillingCheckoutReturn('workspace-1')).toBeNull();
   });
+
+  it('keeps unpaid checkout available during and after the background check, including remount', async () => {
+    let resolve!: (result: { status: 'pending' }) => void;
+    await renderBilling(
+      { current: overview({ checkoutPending: true }) },
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    const expectCheckoutAvailable = () => {
+      const button = Array.from(container!.querySelectorAll('button')).find((item) =>
+        item.textContent?.includes('Continue checkout')
+      );
+      expect(button).toBeDefined();
+      expect(button!.disabled).toBe(false);
+      expect(container!.textContent).not.toContain('Payment received');
+    };
+    expectCheckoutAvailable();
+    await act(async () => resolve({ status: 'pending' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expectCheckoutAvailable();
+    await act(async () => root!.unmount());
+    container!.remove();
+    await renderBilling({ current: overview({ checkoutPending: true }) });
+    expectCheckoutAvailable();
+  });
+
+  it('confirms gift renewal through stale Plus cache and delayed live setup state', async () => {
+    const gift = overview({
+      effectivePlanTier: 'plus',
+      entitlementSource: 'stripe_gift',
+      giftStackingSupported: true,
+      scheduleManaged: true,
+    });
+    writeBillingOverviewCache('workspace-1', 'session-1', gift);
+    window.history.replaceState({}, '', '/acme/settings/billing?checkout=success');
+    const live: OverviewRef = { current: undefined };
+    let paid = false;
+    const rerender = await renderBilling(live, async () => ({ status: paid ? 'paid' : 'pending' }));
+    expect(readBillingCheckoutReturn('workspace-1')).not.toBeNull();
+    expect(container!.textContent).toContain('Payment received');
+
+    // Even a live pre-setup gift is already Plus; it does not prove renewal.
+    live.current = gift;
+    await rerender();
+    expect(readBillingCheckoutReturn('workspace-1')).not.toBeNull();
+    live.current = { ...gift, subscriptionSetupPending: true };
+    await rerender();
+    paid = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(container!.textContent).toContain('Payment method saved');
+    expect(readBillingCheckoutReturn('workspace-1')).not.toBeNull();
+
+    live.current = { ...gift, autoRenewAfterGift: true };
+    await rerender();
+    expect(container!.textContent).not.toContain('Payment method saved');
+    expect(readBillingCheckoutReturn('workspace-1')).toBeNull();
+  });
+
+  it('preserves confirmed payment across remount until the live overview lands', async () => {
+    const live: OverviewRef = { current: overview({ checkoutPending: true }) };
+    await renderBilling(live, async () => ({ status: 'paid' }));
+    expect(container!.textContent).toContain('Payment received');
+    expect(readBillingCheckoutReturn('workspace-1')).not.toBeNull();
+    await act(async () => root!.unmount());
+    container!.remove();
+    const rerender = await renderBilling(live, async () => ({ status: 'none' }));
+    expect(container!.textContent).toContain('Payment received');
+    live.current = overview({ effectivePlanTier: 'plus', entitlementSource: 'stripe' });
+    await rerender();
+    expect(container!.textContent).not.toContain('Payment received');
+    expect(readBillingCheckoutReturn('workspace-1')).toBeNull();
+  });
+
+  it.each(['expired', 'pending', 'error'] as const)(
+    'releases an unsuccessful return after %s',
+    async (status) => {
+      window.history.replaceState({}, '', '/acme/settings/billing?checkout=success');
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await renderBilling({ current: overview({ checkoutPending: true }) }, async () => {
+          if (status === 'error') throw new Error('temporary failure');
+          return { status };
+        });
+        if (status !== 'expired') {
+          expect(container!.textContent).toContain('Payment received');
+          await act(async () => {
+            await vi.advanceTimersByTimeAsync(120_000);
+          });
+        }
+        expect(container!.textContent).not.toContain('Payment received');
+        expect(container!.textContent).toContain('Continue checkout');
+        expect(readBillingCheckoutReturn('workspace-1')).toBeNull();
+      } finally {
+        errorLog.mockRestore();
+      }
+    }
+  );
 });

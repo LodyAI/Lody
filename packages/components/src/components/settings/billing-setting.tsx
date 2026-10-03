@@ -171,15 +171,12 @@ function CloudBillingSettings() {
   const [invoicesError, setInvoicesError] = useState(false);
   const [invoicesReloadKey, setInvoicesReloadKey] = useState(0);
   const [checkoutSuccessReturn, setCheckoutSuccessReturn] = useState(false);
-  const [reconciling, setReconciling] = useState(false);
-  const reconcileStartedRef = useRef(false);
   // Anchor the confirmation window to when the return was first seen, so a
   // reload inside an already-slow confirmation does not restart the wait.
   const checkoutReturnStartedAtRef = useRef<number | null>(null);
-  // The confirmation loop is keyed off refs so a reactive overview flip can
-  // settle it without restarting the effect.
-  const overviewRef = useRef(overview);
-  overviewRef.current = overview;
+  // Persisted/preloaded data can describe the state before Checkout. Only the
+  // live query may prove that the returned payment or gift setup has landed.
+  const activationSettled = isBillingActivationSettled(fetchedOverview);
   // Desktop: checkout/portal opened in the system browser; poll until Stripe
   // confirms so the app updates even if the user never clicks "back to Lody".
   const [externalCheckoutPending, setExternalCheckoutPending] = useState(false);
@@ -262,75 +259,59 @@ function CloudBillingSettings() {
     }
   }, [workspaceId]);
 
-  // Webhooks can lag behind the checkout redirect. Reconcile the in-flight
-  // checkout session against Stripe while we return from checkout (or see a
-  // pending checkout), so the reactive overview query flips to paid without
-  // waiting for the webhook. One reconcile is not enough: the Stripe session or
-  // the server's pending record can land a beat later, and a transient miss
-  // must not drop the page back to the pre-checkout free plan.
+  // An ordinary pending checkout gets one background check and keeps its payment
+  // entry available. Only a successful return retries transient misses while
+  // waiting for the webhook/reconcile write to reach the live overview.
   const shouldReconcile =
     checkoutSuccessReturn ||
     overview?.checkoutPending === true ||
     overview?.subscriptionSetupPending === true;
   useEffect(() => {
-    if (!workspaceId || !shouldReconcile || reconcileStartedRef.current) return undefined;
-    reconcileStartedRef.current = true;
+    if (!workspaceId || !shouldReconcile || activationSettled) return undefined;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline =
       (checkoutReturnStartedAtRef.current ?? Date.now()) + CHECKOUT_CONFIRMATION_WINDOW_MS;
-    const finish = (clearActivation: boolean) => {
-      if (cancelled) return;
-      setReconciling(false);
+    const finish = () => {
       clearBillingCheckoutReturn(workspaceId);
-      if (clearActivation) {
-        checkoutReturnStartedAtRef.current = null;
-        setCheckoutSuccessReturn(false);
-      }
+      checkoutReturnStartedAtRef.current = null;
+      setCheckoutSuccessReturn(false);
     };
     const tick = async () => {
-      if (cancelled) return;
-      // The reactive overview can land before the next Stripe round-trip; when
-      // it already proves activation, stop without another reconcile.
-      if (isBillingActivationSettled(overviewRef.current)) {
-        finish(false);
-        return;
-      }
       try {
         const result = await reconcileWorkspaceCheckoutRef.current({ workspaceId });
         if (cancelled) return;
         if (result.status === 'expired') {
-          // The checkout didn't go through after all; drop the processing banner.
-          finish(true);
+          finish();
           return;
         }
         if (result.status === 'paid') {
-          // Keep the activation banner until the reactive overview flips so the
-          // plan never flashes back to Free between reconcile and subscription.
-          finish(false);
+          // Keep the return marker and activation banner until the live overview
+          // lands, including across a reload between the write and query update.
+          if (!checkoutSuccessReturn) {
+            const startedAt = Date.now();
+            markBillingCheckoutReturn(workspaceId, startedAt);
+            checkoutReturnStartedAtRef.current = startedAt;
+            setCheckoutSuccessReturn(true);
+          }
           return;
         }
       } catch (error) {
         console.error('Failed to reconcile Stripe checkout:', error);
       }
-      if (cancelled) return;
+      if (cancelled || !checkoutSuccessReturn) return;
       if (Date.now() >= deadline) {
-        // Stripe still has not confirmed. Stop the banner so an abandoned
-        // checkout cannot leave it up forever; the reactive query still flips
-        // if the webhook lands later.
-        finish(true);
+        finish();
         return;
       }
       timer = setTimeout(() => void tick(), CHECKOUT_CONFIRMATION_INTERVAL_MS);
     };
-    setReconciling(true);
     void tick();
     return () => {
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
-      setReconciling(false);
     };
-  }, [workspaceId, shouldReconcile]);
+  }, [workspaceId, shouldReconcile, checkoutSuccessReturn, activationSettled]);
 
   // bfcache: navigating to Stripe and back can restore this page from the
   // back/forward cache with the pending spinner still set. Reset it.
@@ -391,12 +372,19 @@ function CloudBillingSettings() {
     }
     // Drop the per-tab return intent once the entitlement lands, so a later
     // remount does not reconcile an already-consumed checkout session.
-    if (checkoutSuccessReturn && isBillingActivationSettled(overview)) {
+    if (checkoutSuccessReturn && activationSettled) {
       checkoutReturnStartedAtRef.current = null;
       setCheckoutSuccessReturn(false);
       if (workspaceId) clearBillingCheckoutReturn(workspaceId);
     }
-  }, [checkoutSuccessReturn, externalCheckoutKind, externalCheckoutPending, overview, workspaceId]);
+  }, [
+    activationSettled,
+    checkoutSuccessReturn,
+    externalCheckoutKind,
+    externalCheckoutPending,
+    overview,
+    workspaceId,
+  ]);
 
   const returnUrl = (() => {
     if (typeof window === 'undefined') return undefined;
@@ -450,12 +438,6 @@ function CloudBillingSettings() {
             ? { successUrl: returnUrl, cancelUrl: returnUrl }
             : {}),
       });
-      // Record the intent before leaving the page: the web return reloads this
-      // route, and the success query param is only a hint that may already be
-      // gone if the user refreshes the confirmation screen.
-      const startedAt = Date.now();
-      markBillingCheckoutReturn(workspaceId, startedAt);
-      checkoutReturnStartedAtRef.current = startedAt;
       if ((await openCheckoutUrl(result.url)) === 'external') {
         setPendingAction(null);
         // The server decides whether Checkout charges now or only stores a
@@ -588,9 +570,6 @@ function CloudBillingSettings() {
         reloadInvoices();
       } else if (result.status === 'checkout_required') {
         toast.success(t('billing.redeemFounderSuccess'));
-        const startedAt = Date.now();
-        markBillingCheckoutReturn(workspaceId, startedAt);
-        checkoutReturnStartedAtRef.current = startedAt;
         if ((await openCheckoutUrl(result.url)) === 'external') {
           setExternalCheckoutPending(true);
         }
@@ -615,13 +594,8 @@ function CloudBillingSettings() {
     }
   };
 
-  // "Payment received, activating" banner: reconcile in flight, or we came
-  // back from a successful checkout but the reactive overview still reports
-  // the free tier (webhook/reconcile hasn't landed yet).
-  const paymentProcessing =
-    (reconciling || checkoutSuccessReturn) &&
-    overview != null &&
-    (overview.effectivePlanTier === 'free' || overview.subscriptionSetupPending);
+  // Checking an unpaid checkout does not imply that payment was received.
+  const paymentProcessing = checkoutSuccessReturn && !activationSettled && overview != null;
 
   return (
     <>

@@ -59,6 +59,8 @@ export function isBillingActivationSettled(
   overview:
     | {
         effectivePlanTier: 'free' | 'plus' | 'enterprise';
+        entitlementSource: 'free' | 'stripe' | 'stripe_gift' | 'enterprise';
+        checkoutPending: boolean;
         subscriptionSetupPending: boolean;
         autoRenewAfterGift: boolean;
       }
@@ -66,8 +68,9 @@ export function isBillingActivationSettled(
     | undefined
 ): boolean {
   if (!overview) return false;
-  if (overview.subscriptionSetupPending) return false;
-  return overview.autoRenewAfterGift || overview.effectivePlanTier !== 'free';
+  if (overview.checkoutPending || overview.subscriptionSetupPending) return false;
+  if (overview.entitlementSource === 'stripe_gift') return overview.autoRenewAfterGift;
+  return overview.effectivePlanTier !== 'free';
 }
 
 function billingReturnStorage(): Storage | null {
