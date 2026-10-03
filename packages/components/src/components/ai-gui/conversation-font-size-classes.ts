@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import { text } from '@lody/ui/tokens/scales.stylex';
 import type { ConversationFontSize } from '@/atoms/settings';
+import { conversation } from './conversation.tokens.stylex';
 
 /** Document baseline shared by product text and portalled controls. */
 export const UI_FONT_SIZE_CSS_VARIABLE = '--ui-font-size';
@@ -19,6 +20,14 @@ export function conversationTextFontSizeStyle(fontSize: ConversationFontSize): C
   return {
     fontSize: conversationTextToken(text.bodySize, fontSize),
     lineHeight: conversationTextToken(text.bodyLeading, fontSize),
+  };
+}
+
+/** Reading prose shares the body size while its leading can be themed separately. */
+export function conversationReadingFontSizeStyle(fontSize: ConversationFontSize): CSSProperties {
+  return {
+    fontSize: conversationTextToken(text.bodySize, fontSize),
+    lineHeight: conversationTextToken(conversation.readingLeading, fontSize),
   };
 }
 

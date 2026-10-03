@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from 'react';
 import {
   CodeBlockContainer,
+  CodeBlockBody,
   MarkdownCodeToolbar,
   parseMarkdownCodeBlockLabel,
   type MarkdownCodeBlockProps,
@@ -52,22 +53,18 @@ export const MarkdownDiffBlock = memo(function MarkdownDiffBlock({
         wrapped={wrapped}
         onToggleWrap={() => setWrapped((current) => !current)}
       />
-      <div data-streamdown="code-block-body">
-        <pre dir="ltr">
-          <code>
-            {lines.map((line, index) => (
-              <span
-                // A streamed block grows by appending lines, so its stable
-                // source position is the least disruptive key available.
-                key={index}
-                data-markdown-diff-line={getMarkdownDiffLineKind(line)}
-              >
-                {line}
-              </span>
-            ))}
-          </code>
-        </pre>
-      </div>
+      <CodeBlockBody>
+        {lines.map((line, index) => (
+          <span
+            // A streamed block grows by appending lines, so its stable
+            // source position is the least disruptive key available.
+            key={index}
+            data-markdown-diff-line={getMarkdownDiffLineKind(line)}
+          >
+            {line}
+          </span>
+        ))}
+      </CodeBlockBody>
     </CodeBlockContainer>
   );
 });

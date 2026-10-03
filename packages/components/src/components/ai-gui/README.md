@@ -20,6 +20,7 @@ the reasoning behind those rules.
 | Outline                 | `conversation-outline-*`                                                                          | Round ticks and navigation.                                                             |
 | Image sharing selection | [`message-selection.tsx`](message-selection.tsx)                                                  | Temporary message selection, drag rectangle, range modifiers, and edge scrolling.       |
 | Typography              | [`conversation-font-size-classes.ts`](conversation-font-size-classes.ts), `markdown-renderer.tsx` | Shared text roles; explicit preview size and compact tool prose without nested scaling. |
+| Spacing and surfaces    | [`conversation.tokens.stylex.ts`](conversation.tokens.stylex.ts), [`surface.ts`](surface.ts)      | Themeable conversation anatomy, activity rows and user bubbles.                         |
 
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
@@ -66,6 +67,27 @@ the reasoning behind those rules.
   [session-files-rendering.md](session-files-rendering.md) own attachment and
   image-preview rendering.
 
+## Spacing and themes
+
+Conversation spacing and colours use the semantic `conversation` StyleX variable
+group, derived from `@lody/ui` space, radius and colour tokens or the active VS Code
+palette. `surface.ts` owns shared row and bubble styles; the Markdown renderer and
+code block own their element styles. A host can apply `createTheme(conversation, …)`
+to a subtree to change these values without descendant utility overrides.
+
+Reading prose and user text use `readingLeading`, derived from the body role
+at 1.1 times its leading (22px at 14px). Compact tool prose and code retain their
+control leading. Explicit previews scale the reading token with their own size.
+Spacing follows the active interface leading through semantic `responseGap`,
+`roundGap`, `activityPitch`, `paragraphGap`, `surfaceGap` and `listItemGap` tokens.
+The user row reserves the response gap for its actions. The first assistant row
+adds no top gap; its last row reserves the next-round boundary only before a user
+turn. Footer actions and the next user's metadata share that reserve; larger
+footer content grows naturally. User text retains authored whitespace and the
+existing reading rail. The [rhythm Spec](../../../../../specs/conversation-rhythm.md)
+owns formulas and size examples; [the decision](../../../../../.agents/notes/implemented/simplification/2026-10-03-conversation-rhythm-stylex.md)
+records evidence and retained CSS boundaries.
+
 ## Coverage
 
 `InterfaceTypography.stories.tsx` composes real settings and surfaces;
@@ -73,6 +95,14 @@ the reasoning behind those rules.
 five-tier persistence, legacy preferences, themes and narrow desktop layout.
 See the [global scale decision](../../../../../.agents/notes/implemented/simplification/2026-10-03-interface-typography.md)
 for scope and retained exceptions.
+`AssistantTurnAlignment.ConversationRhythm` renders a synthetic two-round conversation;
+`ConversationRhythmTheme` applies a scoped StyleX theme to the same components.
+`ConversationRhythmReading` and its streaming variant add continuous mixed-script
+paragraphs to verify real wrapped-line pitch and compare reading density.
+The no-footer and edited-files variants exercise boundary reserves without a
+footer and with taller footer content. The typography browser suite checks all
+five interface sizes, measured activity/turn spacing, preserved
+user blank lines, keyboard access to actions, list pitch, folding, and token overrides.
 
 `tests/build-chat-stream-items.test.ts`, `tests/conversation-outline*.test.ts`,
 `tests/user-message-sender-identity.test.tsx`, the `ExtremeConversation` story,
