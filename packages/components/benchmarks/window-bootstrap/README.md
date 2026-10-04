@@ -51,29 +51,75 @@ and presentation ordering; it does not validate the full Lody React interface.
 
 ## Direct click without hover — 2026-10-04
 
-[Recorded samples, stages and hashes](results-direct-click-2026-10-04.json) compare
-bounded rendering/data handoff with the preceding implementation, keeping shared
-Session ownership enabled in both builds. The primary pair includes main
-`8872177b6` in both builds: the baseline restores the product delta to `fc6e52e9e`,
-except `view.tsx` comes from main to preserve its new StyleX/rhythm behavior.
-The artifact records this construction and also retains the earlier pre-merge pairs. The same M4 Max, Electron 43.7.6, dependency tree,
-bundled CLI and probe are used. The long pair runs after then before; the short pair
-runs before then after, with fresh isolated profiles and no concurrent tests/builds.
-CPU profiling and the native animation override are disabled. Three warmups per run
-are retained in the artifact but excluded from the medians.
+[Recorded samples, stages, patches and hashes](results-direct-click-2026-10-04.json)
+retain the earlier paired rendering comparison and the subsequent single-factor
+ablations. All runs use the same M4 Max, Electron 43.7.6, dependencies and staged
+CLI. Three warmups per run are retained but excluded from medians. Headline runs
+have no CPU profiling, native-animation override or concurrent builds/tests.
 
-| Synthetic entries / build context | Samples per build | Before / after show median | Before / after input confirmation median |
+| Comparison, 3,000 synthetic entries | Samples per build | Before / after show median | Before / after input confirmation median |
 | --- | --- | --- | --- |
-| 3,000, main `8872177b6` included | 10 | 323.28 / 232.39 ms | 381.61 / 286.60 ms |
-| 3,000, before main merge | 10 | 367.29 / 227.02 ms | 422.08 / 286.59 ms |
-| 100, before main merge | 5 | 238.24 / 201.83 ms | 280.59 / 258.32 ms |
+| Rejected removal-only check against `d7436bcb0` | 10 | 219.11 / 240.36 ms | 278.08 / 291.31 ms |
+| Earlier bounded rendering, main `8872177b6` included | 10 | 323.28 / 232.39 ms | 381.61 / 286.60 ms |
+| Earlier bounded rendering, before main merge | 10 | 367.29 / 227.02 ms | 422.08 / 286.59 ms |
 
-For the primary long pair, show improves 28.1% and input confirmation 24.9%. Show
-ranges 219.63–238.16 ms; input ranges 275.46–304.92 ms. The earlier pair improved
-38.2% / 32.1%; upstream rendering changes alter the baseline, so those percentages
-must not be applied to the merged version. These results remain perceptible
-and do **not** meet a sub-100 ms direct-opening target. The short fixture's smaller
-15.3% show improvement also demonstrates the remaining per-window mount cost.
+The confirmation sequence is combined candidate, unchanged control, then removal-only
+candidate. The control restores product opening code to `d7436bcb0`; the probe, CLI
+and dependencies are identical across these three builds.
+Removing the early
+acquisition regresses show by 9.7% and input confirmation by 4.8% in this sequence,
+so the product change is reverted. The unchanged control itself varied from 233.65
+to 219.11 ms across run blocks: small exploratory differences are not stable gains.
+This round claims **no additional product latency improvement**. These results remain perceptible and do **not** meet a sub-100 ms
+direct-opening target. Earlier improvements were 28.1% / 24.9% after main integration;
+upstream rendering changes invalidate applying the older 38.2% / 32.1% to that build.
+The earlier 100-entry pair measured 238.24 / 201.83 ms show and 280.59 / 258.32 ms
+input (five samples each), showing substantial per-window cost even with short history.
+
+### Ablation decisions
+
+Each of the first five rows changes one factor relative to `d7436bcb0`, not the
+preceding row. Seven measured samples each; sequential exploratory runs establish
+neither significance nor additive savings. The artifact includes the exact source
+patch for each variant. The combined build and removal-only confirmation are evaluated separately.
+
+| Variant | Show median | Input confirmation median | Decision |
+| --- | --- | --- | --- |
+| Unchanged control | 233.65 ms | 291.03 ms | Reference |
+| Acquire data concurrently with navigation | 237.58 ms | 287.97 ms | No established improvement; retain serial handoff |
+| Remove the early acquisition entirely | 237.96 ms | 284.79 ms | Reject after the longer confirmation regressed; retain the timer and temporary borrow |
+| Keep common workspace shell mounted across target binding | 219.67 ms | 283.30 ms | Reject the extra root-route/scope coupling for this limited gain |
+| Reduce global overscan from 800 to 200 px | 219.87 ms | 273.60 ms | Reject global policy; touch compensation changes and a desktop position regression fail acceptance |
+
+A separate five-sample diagnostic pair used one build and disabled input measurement.
+Removing the **entire composer** from the target, replacing only its measured height,
+changed show from 220.17 to 190.79 ms. This is a diagnostic omission, not a usable interface
+or proof that keeping an interactive composer mounted achieves that saving. Even the
+omitted-composer surface remains above 100 ms. The temporary replacement and persistent
+shell are absent from product code; no fake Session or draft identity is introduced.
+
+The final product retains its existing 800 px rendering and selection buffers.
+An intermediate 400 px desktop candidate preserved the 800 px touch buffer. The 200 px desktop experiment showed
+a 4 px wheel-position error; the original 800 px control passed. The 400 px build
+passed all four browser cases: first-frame coverage, wheel coverage/position, restored
+reading position, and windowed-outline far/near jumps. Model tests cover 40 seeds ×
+60 steps at both 400 and 800 px. Their oracle now follows the stored reading anchor:
+a shrunken row can put its next row at the viewport top, but re-expansion must restore
+the original row's saved offset rather than hold the incidental next row. Nevertheless,
+the combined 400 px / no-handoff candidate regressed show in the ten-sample reverse
+comparison: 219.11 → 237.13 ms (input 278.08 → 283.38 ms). It is rejected; passing
+correctness checks alone does not establish a performance benefit.
+
+All 105 completed first-show checks across the ten ablation/confirmation runs pass;
+89 also validate unique input, while the 16 composer-diagnostic samples intentionally
+disable it. These counts include 30 excluded warmups. No clean-window close prompt
+appears. The retained product also passes all four browser regressions.
+
+Two failed measurement starts are excluded and recorded: one overlapped a build;
+the next timed out before source Repo readiness while the abandoned isolated Electron
+process remained. The first browser run also reached an unrelated existing Storybook
+on port 6006; subsequent runs used the isolated clone on port 6125. The outline E2E
+now scrolls the windowed rail before clicking, rather than requiring offscreen DOM.
 
 This mode does not dispatch hover, modifier-hover or preparation intent. It rejects
 a target already being prepared and starts the timer immediately before dispatching
@@ -85,13 +131,15 @@ first acquisition of arbitrary uncached data. It cannot establish real-user P95.
 The product now constructs message elements only for the scroll engine's mounted
 plan and mounts only visible outline ticks plus retained interaction anchors. The
 initial owner response matches the 40-turn entry viewport and bounded preceding
-user context. A same-workspace acquisition gets up to 50 ms before route mounting;
-slow/failing storage still reaches the normal loading/error UI. An auxiliary
+user context. The retained same-workspace acquisition races a 50 ms deadline before
+route mounting; it is not a fixed 50 ms sleep. This gives cached data a chance to
+avoid loading-state render work while letting slow/failing storage reach the route.
+The route generation and temporary-reference release remain. An auxiliary
 conversation window mounts its collapsed sidebar on first expansion, then retains
 its state. Content hydration, initial scroll restoration and the two-frame native
 reveal gate remain required. The warm pool is still one runtime-only opt-in slot.
 
-In the final long run, the target renderer's DOM readiness median is 153.45 ms
+In the earlier bounded-rendering run, the target renderer's DOM readiness median was 153.45 ms
 after target receipt; main receives content readiness at 184.77 ms after click,
 then native show occurs at 232.39 ms. Stage medians are diagnostic and must not be
 summed as if they came from one sample. Sharing document ownership alone cannot
@@ -116,7 +164,7 @@ PROBE_DIRECT_CLICK=1 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 
 PROBE_PRODUCT_PREPARED=1 PROBE_RETARGET=1 PROBE_INTENT_LEAD_MS=0 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 3 retarget 1500
 ```
 
-The final main-integrated eight-stage resident probe completed 33 OS samples without forced GC or
+The earlier main-integrated eight-stage resident probe completed 33 OS samples without forced GC or
 close confirmations. Electron physical footprint was 752.91 MiB source-only at
 45 seconds, 983.04 MiB with one prepared view at 45 seconds, and 745.79 MiB after
 destroying preparation at ten seconds. The prepared view therefore adds about
@@ -128,7 +176,8 @@ matched memory A/B or an hours-long leak test. All windows use the same Session,
 external CLI/daemon memory is excluded, and distinct-session cache retention remains
 unmeasured. Samples and accounting are in the same result artifact.
 
-The neutral-shell direct mode is the primary latency comparison. Historical hover
+All runtime experiments were reverted. This round adds no resident surface/cache;
+memory was not remeasured. The neutral-shell direct mode is the primary latency comparison. Historical hover
 hits below intentionally move work before the click and must not substitute for it.
 Intermediate profiling/prefill runs and a probe-only native-animation experiment
 are excluded from the paired result and retained as exploration references. The

@@ -17,7 +17,9 @@ only after document persistence. Bounding outline/message rendering and handing
 entry data to the route then reduced a strict no-hover, 3,000-entry comparison from
 323/382 ms to 232/287 ms show/input medians (ten samples per build). This remains
 above a sub-100 ms target. The dedicated renderer and prepared view have explicit
-memory and first-open costs in the evaluation.
+memory and first-open costs in the evaluation. Subsequent ablations rejected more
+pre-mounting, smaller buffers and removal of the data handoff; no further product
+latency gain is claimed.
 
 ## Decision and boundaries
 
@@ -77,6 +79,32 @@ acquisition before route mounting, giving cached data up to 50 ms to arrive; slo
 or failed acquisition enters the ordinary loading/error route. A generation fences
 superseded targets, and the temporary store reference is released even after a
 timeout or retarget. This begins at a concrete target request, without hover lead.
+
+A subsequent single-factor ablation of the common workspace shell saved only about
+14 ms in a seven-sample exploratory run and added root-route/scope coupling; it was
+reverted. Removing the entire composer while preserving its measured box saved about
+29 ms against the same diagnostic build (five samples), yet still took 191 ms to
+show. This omitted an essential control and does not establish the benefit of an
+interactive persistent composer. No dummy Session or reusable-draft scheme was added.
+
+The initial 200 px overscan trial improved exploratory medians but changed touch
+compensation behavior and failed a desktop wheel-position check by 4 px. A 400 px
+desktop candidate passed all four browser cases, but the final ten-sample combined
+comparison regressed from 219/278 to 237/283 ms show/input. Removing only the data
+handoff then measured 240/291 ms against that same control. Both were reverted:
+keep the existing 800 px buffer and bounded data-before-route handoff. The deadline
+is a maximum, not a fixed sleep; eliminating that path did not improve end-to-end
+opening. The unchanged control also varied from 234 to 219 ms across blocks, so
+small sequential differences are not evidence of a stable gain.
+
+The [ablation record](../../../../packages/components/benchmarks/window-bootstrap/README.md#ablation-decisions)
+contains all ten runs, rejected patches, matching source hashes and failed starts.
+All 105 first-show checks pass (89 with unique input; the composer diagnostic has no
+input); counts include 30 excluded warmups. No extra resident view/cache or product
+abstraction remains. The model test now checks the stored reading anchor when a
+shrunk row puts its successor at the viewport top; growth must restore the original
+row offset. Browser tests scroll the windowed outline before clicking an offscreen
+round. These verification improvements and broader source hashing are retained.
 
 A separate native-animation experiment changed the exploratory show median only
 from 235.61 to 227.47 ms (three samples each). It does not justify shipping a native
@@ -149,11 +177,13 @@ owner replacement, uncertain tail-edit outcomes, later observers and connection/
 longer escape as unhandled rejections. Real desktop probes validate content and unique
 text insertion at first show; process-recovery evaluation checks an acknowledged write.
 
-The current six focused suites passed 75 tests, including 12 owner/client cases;
-Electron passed 199 tests. New cases cover lazy row construction, outline keyboard
+The four ablation-focused suites pass 132 tests, including 40 seeds × 60 operations
+at each of 400/800 px. All four real-browser regressions pass on the retained product.
+The earlier six owner/rendering suites passed 75 tests, including 12 owner/client
+cases; Electron passed 199 tests. New cases cover lazy row construction, outline keyboard
 navigation/preview retention, sidebar state, entry-tail readiness and target handoff
 timeouts/generation fencing. Type checks, production build, lint, i18n and platform/public/import
-boundaries passed. The broader `pnpm check` reached 4,784 passing components tests
+boundaries passed. The broader `pnpm check` reached 4,824 passing components tests
 with one failure in unchanged `boot-shell.test.tsx` (storage-unavailable fallback);
 that case also fails alone in the Node 26 environment. CLI's 3,474 and shared's 1,271
 tests passed. Documentation validation has six existing broken links into absent
