@@ -3,7 +3,6 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 const tiers = ['Smaller', 'Small', 'Default', 'Large', 'Larger'];
 const story = '/iframe.html?id=settings-interfacetypography--unified&viewMode=story';
 
-<<<<<<< HEAD
 async function renderedFonts(page: Page, selector: string) {
   const cdp = await page.context().newCDPSession(page);
   try {
@@ -105,7 +104,6 @@ test('swap keeps CJK readable before delayed subsets arrive without changing tex
     release();
   }
 });
-=======
 const rhythmStory =
   '/iframe.html?id=sessions-assistantturnalignment--conversation-rhythm&viewMode=story';
 
@@ -322,8 +320,6 @@ for (const mode of ['reading', 'reading-streaming']) {
     );
   });
 }
->>>>>>> origin/main
-
 async function metrics(element: Locator, font: number, leading?: number) {
   await expect(element).toBeVisible();
   await expect

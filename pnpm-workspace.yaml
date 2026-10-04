@@ -157,11 +157,8 @@ minimumReleaseAgeExclude:
   - '@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.280'
   - '@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.280'
   - '@anthropic-ai/claude-agent-sdk-win32-x64@0.3.280'
-<<<<<<< HEAD
   # pnpm 10.20 uses the first matching name rule, including npm alias versions.
   - '@openai/codex@0.154.0 || 0.156.0 || 0.156.0-darwin-arm64 || 0.156.0-darwin-x64 || 0.156.0-linux-arm64 || 0.156.0-linux-x64 || 0.156.0-win32-arm64 || 0.156.0-win32-x64 || 0.159.2 || 0.159.2-darwin-arm64 || 0.159.2-darwin-x64 || 0.159.2-linux-arm64 || 0.159.2-linux-x64 || 0.159.2-win32-arm64 || 0.159.2-win32-x64'
-=======
->>>>>>> origin/main
   # Exact dependency pins from the ACP adapters already selected on main.
   - '@anthropic-ai/sdk@0.126.0'
   - prettier@3.9.7

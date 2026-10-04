@@ -27,7 +27,6 @@ publishes one baseline. `@lody/ui` owns the existing text roles and their leadin
 surfaces choose a role, not a second scale or a parent-relative size. Nested code,
 compact tool prose and portal content must not multiply the scale twice.
 
-<<<<<<< HEAD
 | Role        | Size / leading at Default | Typical content                       |
 | ----------- | ------------------------- | ------------------------------------- |
 | caption     | 11 / 16px                 | Metadata, code language               |
@@ -36,16 +35,6 @@ compact tool prose and portal content must not multiply the scale twice.
 | body        | 14 / 20px                 | Sidebar titles, prompt, message prose |
 | headline    | 16 / 24px                 | Dialog heading                        |
 | title       | 18 / 24px                 | Page or Markdown primary heading      |
-=======
-| Role | Size / leading at Default | Typical content |
-| --- | --- | --- |
-| caption | 11 / 16px | Metadata, code language |
-| footnote | 12 / 16px | Groups, descriptions, tooltip |
-| subheadline | 13 / 18px | Controls, code, tool output |
-| body | 14 / 20px | Sidebar titles, prompt |
-| headline | 16 / 24px | Dialog heading |
-| title | 18 / 24px | Page or Markdown primary heading |
->>>>>>> origin/main
 
 Each size and leading is its Default value multiplied by the selected baseline
 divided by 14. Reading prose retains body size and uses the separately themeable
