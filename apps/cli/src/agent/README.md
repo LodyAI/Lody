@@ -259,8 +259,11 @@ its title settings.
 `session_info_update` with `_meta.lody.titleSource` `generated` or `explicit`
 feeds the existing sanitized, conditional title write. Fallback/unset or malformed
 tags are rejected; user titles are preserved. The generated tag requires the
-capability. Legacy explicit tags remain compatible. Failed provider generation
-leaves the draft title; there is no timeout-triggered duplicate generation.
+capability. Legacy explicit tags remain compatible. Failed provider generation is
+silent, so turn finalization arms a delayed fallback check
+(`provider-title-fallback.ts`, 90s): a title still missing or still a replaceable
+draft by then is generated locally, under the same draft-only write guard; a late
+provider title still replaces a locally generated one.
 
 The builtin Claude/Codex/Grok identity table remains compatibility for older
 managed runtimes. Overrides revoke that fallback, but can independently advertise

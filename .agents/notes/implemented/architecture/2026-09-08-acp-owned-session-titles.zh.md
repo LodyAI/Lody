@@ -109,6 +109,8 @@ Harness、registry 与自定义 provider 仍然依赖的廉价模型与最小权
 Codex 在首轮完成之后才生成标题，并且在被恢复的会话上完全跳过生成（此时其内部来源为 `unknown`），因此被
 恢复的 codex 会话不再获得 Lody 生成的标题。生成在 adapter 内部也是尽力而为，并会吞掉失败而不通知 client，
 因此一次失败的生成现在会让草稿标题留在原处，而不是回退到 Lody 的生成器。
+（2026-10-03 复议：观测到静默失败让整个 Provider 的会话永久停在草稿后，延迟兜底现已存在——见
+[后续笔记](../bug-fix/2026-10-03-provider-owned-title-fallback.zh.md)。）
 
 这个草稿标题原本只存在于从桌面输入框启动的会话。通过 `lody session create` 或 MCP `lody_session_create`
 工具创建的会话（通常是一个 agent 派发另一个 agent）完全没有标题，因此 Codex 子会话在整个首轮期间都没有名字

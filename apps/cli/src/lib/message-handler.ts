@@ -252,6 +252,10 @@ import {
 import type { AcpAgentEditEvidence, AcpStandardDiffBlockEvidence } from '@/lib/acp/history';
 import { mergeAcpRuntimeConfigUpdates } from '@/lib/acp/runtime-config';
 import { generateTitleIsolated, sanitizeTitle } from '@/agent/title-generator';
+import {
+  createProviderTitleFallback,
+  type ProviderTitleFallback,
+} from '@/lib/provider-title-fallback';
 import type { AgentSessionWarning } from '@/agent/agent-client';
 import {
   SessionActivePresenceController,
@@ -755,6 +759,7 @@ export class MessageHandler {
   private readonly store = new SessionTransientStore();
   private sessionActivePresence!: SessionActivePresenceController;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
+  private readonly providerTitleFallback: ProviderTitleFallback;
   // Note: titleGenerationInFlight, archiveInFlight are self-cleaning
   // and stay as independent tracking. All other per-session state lives in this.store.
   private sessionLifecycleWatchHandles: RepoWatchHandle[] = [];
@@ -2944,6 +2949,45 @@ export class MessageHandler {
     this.cloudPort = config.cloudPort;
     this.notificationService = this.cloudPort.notifications;
     this.usageTrackingService = this.cloudPort.usage;
+    this.providerTitleFallback = createProviderTitleFallback({
+      readSessionMeta: async (sessionId) =>
+        (await this.workspaceDocument.getOrCreateSessionDoc(sessionId)).getMetaState(),
+      readAgentConfig: (agentConfigId) =>
+        this.workspaceDocument.getAgentConfigById(agentConfigId, this.machineId),
+      readCachedSessionTitle: async (agentConfigId) =>
+        (
+          await this.workspaceDocument.getAcpCapabilities(
+            this.machineId,
+            agentConfigId as AgentConfigId
+          )
+        )?.sessionTitle,
+      readFirstUserPrompt: async (sessionId) => {
+        const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+        const backend = await this.getSessionBackend(sessionDoc);
+        const firstUser = (await backend.readHistory()).find((entry) => entry?.role === 'user');
+        return firstUser?.items
+          ?.filter((item) => item?.type === 'text')
+          .map((item) => item.text ?? '')
+          .join('\n')
+          .trim();
+      },
+      generateIfMissing: async (args) => {
+        await this.generateSessionTitleIfMissing(
+          args.sessionId,
+          args.cliType,
+          args.agentType,
+          args.taskPrompt,
+          args.env,
+          args.customAcp,
+          args.runtimeOverrides
+        );
+      },
+      schedule: (delayMs, run) => {
+        const timer = setTimeout(() => run(), delayMs);
+        timer.unref?.();
+        return { cancel: () => clearTimeout(timer) };
+      },
+    });
     this.localProjectControlService = new LocalProjectControlService(this.logger);
     this.codeCollabV2DiffStore = new CodeCollabV2DiffStore(this.workspaceId);
     const workspaceGitService = new WorkspaceGitService({
@@ -3123,6 +3167,9 @@ export class MessageHandler {
           customAcp,
           runtimeOverrides
         ),
+      scheduleProviderTitleFallback: async (sessionId) => {
+        await this.providerTitleFallback.scheduleFromTurnEnd(sessionId);
+      },
       processMessageQueue: async (sessionId) => await this.processMessageQueue(sessionId),
       syncLiveActivitySummary: async (userId) => {
         await this.syncLiveActivitySummary(userId);
@@ -9078,6 +9125,34 @@ export class MessageHandler {
     if (acpOwnsSessionTitleGeneration(cliType, agentType, runtimeOverrides)) {
       return;
     }
+    await this.generateSessionTitleIfMissing(
+      sessionId,
+      cliType,
+      agentType,
+      taskPrompt,
+      env,
+      customAcp,
+      runtimeOverrides,
+      titleConfig
+    );
+  }
+
+  /**
+   * The isolated generator behind the create-time path and the provider-owned
+   * fallback: one generation per Session at a time, an existing title only
+   * replaced while it is the creation draft, and the conditional write still
+   * guards against a provider-pushed title or user rename landing mid-flight.
+   */
+  private async generateSessionTitleIfMissing(
+    sessionId: SessionId,
+    cliType: AgentConfigCliType,
+    agentType: string,
+    taskPrompt: string,
+    env?: Record<string, string>,
+    customAcp?: CustomAcpLaunchSpec,
+    runtimeOverrides?: BuiltinRuntimeOverrides,
+    titleConfig?: TitleGenerationConfig
+  ): Promise<void> {
     const existingGeneration = this.titleGenerationInFlight.get(sessionId);
     if (existingGeneration) {
       try {
@@ -9739,6 +9814,7 @@ export class MessageHandler {
     this.logger.debug('Cleaning up message handler resources');
     this.cleanedUp = true;
     this.cancelAllCodeCollabTurnRetryTimers();
+    this.providerTitleFallback.dispose();
     if (this.machineRpcServerRetryTimer) {
       clearTimeout(this.machineRpcServerRetryTimer);
       this.machineRpcServerRetryTimer = null;

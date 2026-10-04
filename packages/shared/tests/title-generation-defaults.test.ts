@@ -4,6 +4,7 @@ import {
   getBuiltinTitleGenerationDefaults,
   acpOwnsSessionTitleGeneration,
   trustsUntaggedAcpSessionTitle,
+  shouldFallbackGenerateSessionTitle,
   type AcpConfigOptionSummary,
 } from '../src/ai';
 
@@ -189,6 +190,39 @@ describe('trustsUntaggedAcpSessionTitle', () => {
   it('never applies to registry or custom providers', () => {
     expect(trustsUntaggedAcpSessionTitle('registry', 'claude')).toBe(false);
     expect(trustsUntaggedAcpSessionTitle('custom', 'claude')).toBe(false);
+  });
+});
+
+describe('shouldFallbackGenerateSessionTitle', () => {
+  // The fallback is the safety net for a provider that owns its title but
+  // never delivers one — generation inside the adapter is best-effort and
+  // swallows failures, so the only signal is the title state itself.
+  it('runs only while the session still has no real title', () => {
+    expect(shouldFallbackGenerateSessionTitle(undefined, true)).toBe(false);
+    expect(shouldFallbackGenerateSessionTitle(null, true)).toBe(false);
+    expect(shouldFallbackGenerateSessionTitle({ title: undefined }, true)).toBe(true);
+    expect(shouldFallbackGenerateSessionTitle({ title: '  ' }, true)).toBe(true);
+    expect(shouldFallbackGenerateSessionTitle({ title: 'Task draft', titleSource: 'draft' }, true)).toBe(
+      true
+    );
+  });
+
+  it('keeps off once a title exists that the write guard protects', () => {
+    expect(shouldFallbackGenerateSessionTitle({ title: 'User named it', titleSource: 'user' }, true)).toBe(
+      false
+    );
+    expect(
+      shouldFallbackGenerateSessionTitle({ title: 'Generated once', titleSource: 'generated' }, true)
+    ).toBe(false);
+  });
+
+  it('never runs for a session whose provider does not own its title', () => {
+    // Non-owner sessions generate locally at creation already; a fallback
+    // there would only duplicate that work.
+    expect(shouldFallbackGenerateSessionTitle({ title: 'Task draft', titleSource: 'draft' }, false)).toBe(
+      false
+    );
+    expect(shouldFallbackGenerateSessionTitle({}, false)).toBe(false);
   });
 });
 

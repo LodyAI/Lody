@@ -21,7 +21,11 @@ The Provider pushes standard `session_info_update` notifications with `title` an
 source tags, empty titles and notifications for another ACP Session are rejected.
 Untagged titles remain supported only for legacy Claude/Grok. Lody sanitizes
 accepted titles and updates only draft/generated titles, preserving user renames.
-Provider failure leaves the draft title; no timeout starts a duplicate generator.
+Provider generation is best-effort and signals nothing when it fails, so after a
+completed turn leaves the title still missing or a replaceable draft for a grace
+period, Lody's isolated generator runs as the fallback; it applies the same
+draft-only write guard, and a Provider title arriving later still replaces a
+locally generated one.
 
 Capability probes and normal Session initialization persist the boolean support
 in the per-Provider cache. Settings hide isolated-generation options when matching

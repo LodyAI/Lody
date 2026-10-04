@@ -17,7 +17,9 @@ Provider 推送标准 `session_info_update`，包含 `title` 和 `_meta.lody.tit
 `generated` 需要声明能力；`explicit` 保留兼容接收。拒绝 `fallback`、`unset`、
 无效来源标签、空标题以及其他 ACP Session 的通知。仅旧版 Claude/Grok 接收无标签标题。
 Lody 清理标题内容，只更新 draft/generated 标题，保留用户手动命名。
-Provider 生成失败时保留草稿标题，不通过超时启动重复生成器。
+Provider 侧生成是尽力而为，失败时不发信号；一个完成的回合之后，标题仍缺失或
+仍是可替换的草稿并持续一段宽限时间时，Lody 以独立生成器兜底，沿用同一
+「仅草稿可写」守卫，Provider 标题随后到达仍可覆盖本地生成的标题。
 
 能力探测和正常 Session 初始化将支持标志持久化到各 Provider 的缓存。
 设置页面在匹配的能力数据表明 Provider 接管标题时隐藏独立生成选项，仍检查

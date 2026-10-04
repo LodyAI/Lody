@@ -611,6 +611,10 @@ export type SessionExecutionServiceDeps = {
     customAcp?: CustomAcpLaunchSpec,
     runtimeOverrides?: BuiltinRuntimeOverrides
   ) => Promise<void>;
+  /** Arms the provider-owned title fallback check for a turn that just
+   * completed; a no-op when the provider does not own titles or a real
+   * title already exists. */
+  scheduleProviderTitleFallback: (sessionId: SessionId) => Promise<void>;
   processMessageQueue: (sessionId: SessionId) => Promise<void>;
   syncLiveActivitySummary?: (userId: string) => Promise<void>;
   collectMachineResources: () => Promise<MachineResourceInfo>;
@@ -3654,6 +3658,17 @@ export class SessionExecutionService {
     await this.runTurnFinalizationStage(sessionId, turnId, 'captureTurnCompleted', async () => {
       await this.captureTurnCompleted(sessionId, sessionDoc, turnId);
     });
+    await this.runTurnFinalizationStage(
+      sessionId,
+      turnId,
+      'scheduleProviderTitleFallback',
+      async () => {
+        // A provider-owned title normally lands within seconds of this point;
+        // the fallback arms a delayed check for the sessions where it never
+        // does (adapter generation is best-effort and swallows failures).
+        await this.deps.scheduleProviderTitleFallback(sessionId);
+      }
+    );
     this.deps.logger.info(`Session chat completed: ${sessionId}`);
 
     try {
