@@ -39,6 +39,8 @@ import {
   buildSessionLaunchConfig,
   getMachineFlockDocId,
   getSessionRoomId,
+  isSessionDocRoomId,
+  SESSION_DOC_PREFIX,
   normalizeSessionPreparationRunConfigForDedup,
   isLoroRepoDocDeleted,
   type SessionLaunchConfig,
@@ -46,6 +48,7 @@ import {
   type McpServerId,
 } from '@lody/shared';
 import { Logger } from '@/utils/logger';
+import type { RepoWatchHandle } from 'loro-repo';
 import { SessionConfig, SessionOutputEvent, SessionErrorEvent, SessionExitEvent } from './types';
 import { LoroDocumentManager } from '../lib/loro/doc';
 import {
@@ -469,6 +472,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private githubTokenManager: CloudGithubTokenManager | null = null;
   private gitCredentialBroker: GitCredentialBroker | null = null;
   private readonly sessions = new Map<SessionId, Session>();
+  private readonly titleWorktreeManagers = new Map<
+    SessionId,
+    { manager: WorktreeManager; source: WorktreeManagerSource; config: SessionConfig }
+  >();
+  private readonly titleBranchRenameInFlight = new Map<SessionId, Promise<void>>();
+  private titleBranchMetadataWatch: RepoWatchHandle | null = null;
   /** Per-instance listener teardown for `detachSession`; see `registerSessionEvents`. */
   private readonly sessionEventDetachers = new WeakMap<ISession, () => void>();
   private readonly pendingSessionCreates = new Map<SessionId, Promise<ISession>>();
@@ -849,6 +858,30 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async initialize(): Promise<void> {
+    this.titleBranchMetadataWatch?.unsubscribe();
+    this.titleBranchMetadataWatch = this.workspaceDocument.repo.watch(
+      (event) => {
+        if (event.kind !== 'doc-metadata' || !isSessionDocRoomId(event.docId)) return;
+        const sessionId = event.docId.slice(SESSION_DOC_PREFIX.length) as SessionId;
+        if (!this.titleWorktreeManagers.has(sessionId)) return;
+        void (async () => {
+          const doc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+          const meta = await doc.getMetaState();
+          if (
+            meta?.title &&
+            (meta.titleSource === 'user' || meta.titleSource === 'generated') &&
+            meta.titleBranchRename?.state !== 'finished'
+          ) {
+            await this.maybeRenameWorktreeAfterTitle(sessionId, meta.title);
+          }
+        })().catch((error: unknown) => {
+          this.logger.debug(
+            `[${sessionId}] Failed to reconcile title branch: ${formatErrorMessage(error)}`
+          );
+        });
+      },
+      { kinds: ['doc-metadata'] }
+    );
     const recoveryGeneration = ++this.preparationRecoveryGeneration;
     this.detachPreparationRecovery?.();
     this.detachPreparationRecovery = this.workspaceDocument.onMetaRoomSynced((reason) => {
@@ -2183,6 +2216,27 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       if (!config.deferWorktreeMetaPersistence) {
         await sessionDoc.setBranchName(worktreeInfo.branch);
         await sessionDoc.setIsWorktree(true);
+        const currentMeta = await sessionDoc.getMetaState();
+        if (
+          !config.resume &&
+          !config.restoreBranchName &&
+          (!worktreeAlreadyExisted || (preparedWorktreeUsable && speculativeClaim === 'claimed')) &&
+          worktreeInfo.headSha &&
+          !currentMeta?.titleBranchRename
+        ) {
+          await this.workspaceDocument.repo.upsertDocMeta(sessionDoc.roomId, {
+            titleBranchRename: {
+              initialBranch: worktreeInfo.branch,
+              initialHead: worktreeInfo.headSha,
+              state: 'pending',
+            },
+          } as Partial<SessionMeta>);
+        }
+        this.titleWorktreeManagers.set(config.sessionId!, {
+          manager: worktreeManager,
+          source: worktreeTarget.target.source,
+          config,
+        });
       }
       workdir = worktreeInfo.hostPath;
       this.logger.debug(`[${config.sessionId}] Using worktree as workdir: ${workdir}`);
@@ -2247,8 +2301,80 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
     this.registerSessionEvents(session);
     this.sessions.set(config.sessionId!, session);
+    if (worktreeTarget && !config.deferWorktreeMetaPersistence) {
+      const titleMeta = await sessionDoc.getMetaState();
+      if (
+        titleMeta?.title &&
+        (titleMeta.titleSource === 'user' || titleMeta.titleSource === 'generated')
+      ) {
+        await this.maybeRenameWorktreeAfterTitle(config.sessionId!, titleMeta.title);
+      }
+    }
     await this.rebalanceSessionSandboxes();
     return session;
+  }
+
+  /** Apply the first accepted title to a newly allocated worktree branch. */
+  async maybeRenameWorktreeAfterTitle(sessionId: SessionId, title: string): Promise<void> {
+    const target = this.titleWorktreeManagers.get(sessionId);
+    if (!target) return;
+    const { manager } = target;
+    const previous = this.titleBranchRenameInFlight.get(sessionId);
+    if (previous) return previous;
+    const work = (async () => {
+      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      const meta = await sessionDoc.getMetaState();
+      const intent = meta?.titleBranchRename;
+      if (!intent || intent.state === 'finished') return;
+      if (intent.state === 'attempted') {
+        const actual = await manager.getCurrentBranchName(sessionId);
+        if (!actual) return;
+        if (actual && actual !== meta.branchName) await sessionDoc.setBranchName(actual);
+        await this.workspaceDocument.repo.upsertDocMeta(sessionDoc.roomId, {
+          titleBranchRename: { ...intent, state: 'finished' },
+        } as Partial<SessionMeta>);
+        return;
+      }
+      let renamed: string | null = null;
+      try {
+        renamed = await manager.renameInitialBranchFromTitle({
+          sessionId,
+          title,
+          initialBranch: intent.initialBranch,
+          initialHead: intent.initialHead,
+          hasPullRequest: Boolean(meta.pullRequests?.length),
+          brokerAuth: await this.resolveHostGitBrokerAuth(target.source, target.config),
+          beforeRename: async (targetBranch) => {
+            await this.workspaceDocument.repo.upsertDocMeta(sessionDoc.roomId, {
+              titleBranchRename: { ...intent, state: 'attempted', targetBranch },
+            } as Partial<SessionMeta>);
+            await this.workspaceDocument.persistPendingChanges(
+              'session-title-branch-rename-intent'
+            );
+          },
+        });
+      } finally {
+        // Git rename and metadata are separate writes. On recovery an attempted
+        // intent is reconciled against Git before any further title can act.
+        const actual = await manager.getCurrentBranchName(sessionId);
+        if (actual) {
+          if (actual !== meta.branchName) await sessionDoc.setBranchName(actual);
+          await this.workspaceDocument.repo.upsertDocMeta(sessionDoc.roomId, {
+            titleBranchRename: {
+              ...intent,
+              state: 'finished',
+              ...(renamed ? { targetBranch: renamed } : {}),
+            },
+          } as Partial<SessionMeta>);
+        }
+      }
+    })();
+    this.titleBranchRenameInFlight.set(sessionId, work);
+    try {
+      await work;
+    } finally {
+      this.titleBranchRenameInFlight.delete(sessionId);
+    }
   }
 
   async terminateSession(sessionId: SessionId, force: boolean = false): Promise<void> {
@@ -2259,16 +2385,20 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
 
     await session.terminate(force);
+    this.titleWorktreeManagers.delete(sessionId);
     this.logger.debug(`[${sessionId}] Session terminated`);
   }
 
   async cleanUp(options: { keepWorkspaceDocumentOpen?: boolean } = {}) {
+    this.titleBranchMetadataWatch?.unsubscribe();
+    this.titleBranchMetadataWatch = null;
     this.preparationRecoveryGeneration += 1;
     this.detachPreparationRecovery?.();
     this.detachPreparationRecovery = null;
     await this.preparationService.disposeAll();
     await this.preparationRecoveryChain;
     this.preparationSessions.clear();
+    this.titleWorktreeManagers.clear();
     this.preparationUserResolver.clear();
     await this.cleanupSessions();
     // MessageHandler owns the final ACP/Code Collab drain. It first stops all
