@@ -3015,15 +3015,16 @@ export class SessionExecutionService {
     ) {
       return;
     }
+    // `handleTurnError` always runs next in this flow and owns the classified
+    // notice for ACP-shaped errors (including auth-required) and agent
+    // disconnects. Recording a generic pre-prompt notice here as well would
+    // show the user two `chat_failed` entries for one failed turn.
+    if (parseACPError(error) || isAgentDisconnectedError(error)) {
+      return;
+    }
     runtime.prePromptFailureRecorded = true;
     const message = formatErrorMessage(error);
-    // A first turn on a brand-new session establishes the ACP session here, so
-    // an agent that requires sign-in fails before the prompt. Keep the specific
-    // reason: it is what lets the client offer the authentication flow instead
-    // of a generic "failed before the agent could start".
-    if (error instanceof AcpAuthenticationRequiredError) {
-      await this.deps.recordChatFailure(sessionDoc, 'acp_auth_required', message);
-    } else if (isGitExecutableNotFoundError(error)) {
+    if (isGitExecutableNotFoundError(error)) {
       await this.deps.recordChatFailure(
         sessionDoc,
         'turn_pre_prompt_failed',

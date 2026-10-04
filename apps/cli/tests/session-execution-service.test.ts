@@ -5692,6 +5692,350 @@ describe('SessionExecutionService', () => {
 
   it.each<{
     name: string;
+    error: unknown;
+    expectedReason: ChatFailedReason;
+    expectedMessage: string;
+    expectedCode?: string;
+    expectedTerminateForce?: boolean;
+  }>([
+    {
+      name: 'JSON-RPC internal error',
+      error: new RequestError(-32603, 'Internal error', {
+        details: 'workspace routing discovery failed',
+      }),
+      expectedReason: 'acp_internal_error',
+      expectedMessage: 'workspace routing discovery failed',
+      expectedTerminateForce: true,
+    },
+    {
+      name: 'authentication required error',
+      error: new AcpAuthenticationRequiredError([{ id: 'oauth-personal', name: 'Google' }]),
+      expectedReason: 'acp_auth_required',
+      expectedMessage: 'Authentication required',
+      expectedTerminateForce: false,
+    },
+    {
+      name: 'agent disconnect',
+      error: new Error('Connection is disposed'),
+      expectedReason: 'agent_disconnected',
+      expectedMessage: 'The agent process disconnected unexpectedly. Please try again.',
+      expectedTerminateForce: true,
+    },
+    {
+      name: 'ordinary non-ACP failure',
+      error: new Error('docker failed'),
+      expectedReason: 'turn_pre_prompt_failed',
+      expectedMessage: 'docker failed',
+    },
+    {
+      name: 'missing Git executable',
+      error: new GitExecutableNotFoundError(new Error('spawn git ENOENT')),
+      expectedReason: 'turn_pre_prompt_failed',
+      expectedMessage: 'Git is unavailable: Lody could not find the Git executable in PATH.',
+      expectedCode: 'git_executable_not_found',
+    },
+  ])('records exactly one visible chat_failed for a pre-prompt $name', async (testCase) => {
+    let history: SessionHistoryInput[] = [];
+    const sessionDoc = withHistoryPort({
+      getMetaState: vi.fn(async () => undefined),
+      getHistory: vi.fn(() => history),
+      setStatus: vi.fn(async () => {}),
+      setProject: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+      roomId: 'session-session-pre-prompt-fail',
+    });
+    const sessionManager = {
+      getSession: vi.fn(() => null),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(async () => {
+        throw testCase.error;
+      }),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      refreshGhTokenForSession: vi.fn(async () => {}),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({
+      sessionManager,
+      // Append through the history port the same system turn the real
+      // `recordChatFailure` writes, so the assertions read visible history
+      // instead of counting mock calls.
+      recordChatFailure: vi.fn(
+        async (_sessionDoc: unknown, reason: string, message?: string, code?: string) => {
+          await sessionDoc.updateHistory?.((entries: SessionHistoryInput[]) => [
+            ...entries,
+            {
+              id: `system-notice-${entries.length}`,
+              role: 'system',
+              timestamp: '2026-09-10T00:00:00.000Z',
+              fileDiff: [],
+              items: [
+                {
+                  type: 'system_notice',
+                  name: 'chat_failed',
+                  meta: { reason, ...(code ? { code } : {}), message },
+                },
+              ],
+            } as SessionHistoryInput,
+          ]);
+        }
+      ),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    await service.startSession({
+      type: 'session/create',
+      sessionId: 'session-pre-prompt-fail' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-pre-prompt-fail',
+      userId: 'user-2',
+      userName: 'User 2',
+      userEmail: 'user2@example.com',
+    });
+
+    const notices = history
+      .flatMap((entry) => entry.items ?? [])
+      .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.meta).toMatchObject({
+      reason: testCase.expectedReason,
+      message: testCase.expectedMessage,
+    });
+    if (testCase.expectedCode) {
+      expect(notices[0]?.meta).toMatchObject({ code: testCase.expectedCode });
+    }
+    if (testCase.expectedTerminateForce === undefined) {
+      expect(sessionManager.terminateSession).not.toHaveBeenCalled();
+    } else {
+      expect(sessionManager.terminateSession).toHaveBeenCalledWith(
+        'session-pre-prompt-fail',
+        testCase.expectedTerminateForce
+      );
+    }
+    expect(sessionManager.setSessionError).toHaveBeenCalledWith(
+      'session-pre-prompt-fail',
+      'execution_error'
+    );
+  });
+
+  it('records exactly one visible chat_failed when an ACP error hits after the prompt started', async () => {
+    let history: SessionHistoryInput[] = [];
+    const sessionDoc = withHistoryPort({
+      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      setStatus: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      getHistory: vi.fn(() => history),
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+    });
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      prompt: vi.fn(async () => {
+        throw new RequestError(-32603, 'Internal error', {
+          details: 'model exploded mid-turn',
+        });
+      }),
+      currentModel: undefined,
+    };
+    const session = {
+      sessionId: 'session-mid-turn-acp' as SessionId,
+      acpSessionId: 'acp-mid-turn' as ACPSessionId,
+      agentClient,
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => 'acp-mid-turn'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const sessionManager = {
+      getSession: vi.fn(() => session),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      refreshGhTokenForSession: vi.fn(async () => {}),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({
+      sessionManager,
+      recordChatFailure: vi.fn(
+        async (_sessionDoc: unknown, reason: string, message?: string, code?: string) => {
+          await sessionDoc.updateHistory?.((entries: SessionHistoryInput[]) => [
+            ...entries,
+            {
+              id: `system-notice-${entries.length}`,
+              role: 'system',
+              timestamp: '2026-09-10T00:00:00.000Z',
+              fileDiff: [],
+              items: [
+                {
+                  type: 'system_notice',
+                  name: 'chat_failed',
+                  meta: { reason, ...(code ? { code } : {}), message },
+                },
+              ],
+            } as SessionHistoryInput,
+          ]);
+        }
+      ),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    await service.continueSession({
+      type: 'session/chat',
+      sessionId: 'session-mid-turn-acp' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-mid-turn-acp',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
+    const notices = history
+      .flatMap((entry) => entry.items ?? [])
+      .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.meta).toMatchObject({
+      reason: 'acp_internal_error',
+      message: 'model exploded mid-turn',
+    });
+  });
+
+  it('records no chat_failed when a pending session create is cancelled before failing', async () => {
+    let createStarted!: () => void;
+    const createStartedPromise = new Promise<void>((resolve) => {
+      createStarted = resolve;
+    });
+    let rejectCreateSession!: (error: unknown) => void;
+    const createSessionPromise = new Promise<unknown>((_resolve, reject) => {
+      rejectCreateSession = reject;
+    });
+    let history: SessionHistoryInput[] = [];
+    const sessionDoc = withHistoryPort({
+      getMetaState: vi.fn(async () => undefined),
+      getHistory: vi.fn(() => history),
+      setStatus: vi.fn(async () => {}),
+      setProject: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      updateHistory: vi.fn(
+        async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+          history = update(history);
+        }
+      ),
+      roomId: 'session-session-create-cancel',
+    });
+    const sessionManager = {
+      getSession: vi.fn(() => null),
+      getPendingSession: vi.fn(() => null),
+      createSession: vi.fn(() => {
+        createStarted();
+        return createSessionPromise;
+      }),
+      setSessionError: vi.fn(),
+      terminateSession: vi.fn(),
+      refreshGhTokenForSession: vi.fn(async () => {}),
+    } as unknown as SessionManager;
+    const deps = createBaseDeps({
+      sessionManager,
+      beginConversationTurn: vi.fn(() => 'assistant-create-cancel'),
+      recordChatFailure: vi.fn(
+        async (_sessionDoc: unknown, reason: string, message?: string, code?: string) => {
+          await sessionDoc.updateHistory?.((entries: SessionHistoryInput[]) => [
+            ...entries,
+            {
+              id: `system-notice-${entries.length}`,
+              role: 'system',
+              timestamp: '2026-09-10T00:00:00.000Z',
+              fileDiff: [],
+              items: [
+                {
+                  type: 'system_notice',
+                  name: 'chat_failed',
+                  meta: { reason, ...(code ? { code } : {}), message },
+                },
+              ],
+            } as SessionHistoryInput,
+          ]);
+        }
+      ),
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+    });
+
+    const service = new SessionExecutionService(deps);
+    const startPromise = service.startSession({
+      type: 'session/create',
+      sessionId: 'session-create-cancel' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+      userTurnId: 'turn-create-cancel',
+      userId: 'user-2',
+      userName: 'User 2',
+      userEmail: 'user2@example.com',
+    });
+
+    await createStartedPromise;
+    await expect(
+      service.cancelSession({
+        type: 'session/cancel',
+        sessionId: 'session-create-cancel' as SessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        turnId: 'assistant-create-cancel',
+      })
+    ).resolves.toEqual({ success: true });
+
+    rejectCreateSession(
+      new RequestError(-32603, 'Internal error', { details: 'create raced a cancel' })
+    );
+    await startPromise;
+
+    const notices = history
+      .flatMap((entry) => entry.items ?? [])
+      .filter((item) => item.type === 'system_notice' && item.name === 'chat_failed');
+    expect(notices).toHaveLength(0);
+  });
+
+  it.each<{
+    name: string;
     errors: unknown[];
     expectedReason: ChatFailedReason;
     expectedMessage: unknown;
