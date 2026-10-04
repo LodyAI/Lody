@@ -10,13 +10,12 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   output. Never wire `searchBlockId` to tool, terminal, or diff renderers.
 - Window stream readiness must use the same hydration/initial-scroll conditions as
   viewport visibility; hydrated history alone cannot reveal a native window.
-- `SessionChatStreamView` scrolls only through `conversation-list/`'s
-  `ConversationListHandle`, backed by the
-  [scroll engine](../../lib/conversation-scroll/AGENTS.md). Stable row keys; map
-  history indexes to rows. Collapsed activity is one row; expanded details
-  are siblings, never nested scrollers or fixed-height process panels.
-- Native text selection retains its complete row corridor and history leases;
-  hold prose/folding, keep actions live, and release on clear. See [README.md](README.md#native-text-selection).
+- `SessionChatStreamView` scrolls through `conversation-list/`'s
+  `ConversationListHandle` and [scroll engine](../../lib/conversation-scroll/AGENTS.md)
+  only. Keep row keys stable; map history indexes to rows. Collapsed activity is one
+  row; expanded details are siblings, never nested scrollers or fixed-height panels.
+- Native selection retains its row corridor and history leases: hold prose/folding,
+  keep actions live, release on clear. [Contract](README.md#native-text-selection).
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
   history ids.
 - `leadingContent` is a real first row: include it in sticky counts and scroll
@@ -33,15 +32,13 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
 
 - Finished turns keep the answer/result tail visible and fold earlier work;
   streaming turns stay expanded.
-- The final answer is the final contiguous run of text before trailing
-  never-collapsed items, not always the last item: walk backward through
-  adjacent text blocks until a non-text boundary.
-- A turn may hold several `AssistantTurnRenderSegment`s; a plan approval inside a
-  running turn cuts a segment. Match ACP kind `switch_mode`, never a title
-  (`plan-surface.ts`). Keep
-  `workBlockKeys`, `hasVisibleFinalContent`, last-item visibility, and
-  `expandedWorkedGroups` per segment; expansion keys include the segment. Only
-  the last region may show a duration; earlier ones say "Finished working".
+- The final answer is the contiguous text run before trailing never-collapsed
+  items. Walk backward over adjacent text blocks to the first non-text boundary.
+- Plan approval cuts an `AssistantTurnRenderSegment` in a live turn. Match ACP
+  kind `switch_mode`, never a title (`plan-surface.ts`). Keep `workBlockKeys`,
+  `hasVisibleFinalContent`, last-item visibility and `expandedWorkedGroups` per
+  segment; expansion keys include it. Only the last segment shows duration;
+  earlier ones say "Finished working".
 - `shouldUseWorkedGroup` requires a finished turn, foldable work, and visible
   final content outside `workBlockKeys`. A cancelled/interrupted or tool-only
   turn with no answer stays expanded; `message.finished` cannot prove
@@ -66,31 +63,34 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   has no footer.
 - Streaming replies use a direct Copy action and turn-config info (set at open);
   Fork controls and loading need a finished turn.
-- The gutter belongs to `ConversationColumn`, not the list. EVERY row shares one left rail with no shell pad, INCLUDING
-  the contents of an expanded region: expanding reveals rows, it never shifts
-  them right; the chevron carries the hierarchy. Prose, desktop group/status
-  labels, and steps share a fixed 4px inset. Steps use `px-[4px]` with
-  no negative margin; the footer bleeds only on the trailing edge (`-mr-[7px]`).
+- `ConversationColumn` owns the gutter; the list and row shells add no horizontal
+  pad. EVERY row, including expanded details, shares one left rail. Expansion never
+  shifts content right; the chevron carries hierarchy. Prose and desktop process
+  labels/steps share StyleX `conversation.railInset` (4px). Steps have no negative
+  margin; footer bleed is trailing-only (`-mr-[7px]`).
   See `AssistantTurnAlignment.stories`.
+- Follow the StyleX [spacing contract](../../../../../specs/conversation-rhythm.md).
+  User rows own `responseGap`; last assistant rows own `roundGap`, including footer
+  and next-user metadata. Cache and memo comparison include boundary state.
 
 ## Conversation Outline
 
-- Before changing the outline rail, its arrival intent, or any row-index-to-scroll
-  conversion, read [conversation-outline.md](conversation-outline.md). It binds
-  every caller: `scrollRowToTop` is the ONE such conversion, group toggles never
-  scroll, and a jump is issued once: the scroll engine holds its row at the top.
+- Outline, arrival-intent and row-index-to-scroll changes follow
+  [conversation-outline.md](conversation-outline.md): only `scrollRowToTop` converts,
+  group toggles never scroll, and each jump issues once; the engine holds its row at top.
 
 ## Content Contracts
 
-- Native child cancel requires subagentCancellation v1 and an exact parent turn;
-  never use durable whole-turn Stop or invent a terminal state in the panel.
-  A `run` task also needs subagentEvents v1 and `support.cancel`. Task rows and
-  their ONE dialog: [README.md](README.md#subagent-tasks).
+- Child cancel needs subagentCancellation v1 and an exact parent turn; never
+  Stop the parent or invent terminal state. Runs also need subagentEvents v1
+  and `support.cancel`. Dialogs share turn renderers/grouping and one scroller:
+  [task rows and dialog](README.md#subagent-tasks).
 
-- Text roles use `@lody/ui` tokens; compact prose/code use subheadline, never nested `em`.
-  Message sizes use `conversation-font-size-classes.ts`; hosts require CSS typed division. Only streaming turns load the stream
-  engine; else static. A remounted streaming row shows its existing text
-  immediately; only later additions animate.
+- Text roles use `@lody/ui`; reading prose uses `conversation.readingLeading`.
+  Compact prose/code use subheadline, never nested `em`. Message sizes use
+  `conversation-font-size-classes.ts`; hosts require CSS typed division. Only live
+  turns load the stream engine. Remounted live rows show existing text immediately;
+  only additions animate.
 - A Mermaid diagram in a message is a still preview until a pointer click
   activates it, and an unmodified wheel is NEVER taken — activated or not.
   Deactivation preserves pan/zoom and activation adds no outline; see the

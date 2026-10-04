@@ -1,4 +1,4 @@
-import { type ReactElement, type ReactNode, useState } from 'react';
+import { type ComponentProps, type ReactElement, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, Folder } from 'lucide-react';
 
@@ -90,7 +90,7 @@ function DestinationRow({
   disabled,
   onSelect,
 }: {
-  icon: ReactNode;
+  icon: ComponentProps<typeof Menu.Item>['icon'];
   label: string;
   description: string;
   status?: string;
@@ -135,13 +135,7 @@ export function SessionForkDestinationList({
         options.map((option) => (
           <DestinationRow
             key={option.id}
-            icon={
-              option.id === 'new-worktree' ? (
-                <WorktreeIcon className="h-3.5 w-3.5" />
-              ) : (
-                <Folder className="h-3.5 w-3.5" />
-              )
-            }
+            icon={option.id === 'new-worktree' ? WorktreeIcon : Folder}
             label={option.label}
             description={option.description}
             status={option.status}
@@ -153,7 +147,7 @@ export function SessionForkDestinationList({
         <>
           {nativeForkAvailable && <Menu.Separator />}
           <DestinationRow
-            icon={<Copy className="h-3.5 w-3.5" />}
+            icon={Copy}
             label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
             description={t(
               'sessions.copyContextMarkdownHint',
@@ -209,7 +203,10 @@ export function SessionForkDestinationMenu({
     <Menu.Root open={resolvedOpen} onOpenChange={handleOpenChange}>
       <Tooltip.Provider>
         <Tooltip.Root open={resolvedOpen ? false : undefined}>
-          <Tooltip.Trigger delay={500} render={<Menu.Trigger render={children} disabled={disabled} />} />
+          <Tooltip.Trigger
+            delay={500}
+            render={<Menu.Trigger render={children} disabled={disabled} />}
+          />
           <Tooltip.Content>{tooltipLabel}</Tooltip.Content>
         </Tooltip.Root>
       </Tooltip.Provider>

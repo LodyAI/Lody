@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Check, ChevronsUpDown, Plus, Building2, LogOut } from 'lucide-react';
+import { ChevronsUpDown, Plus, Building2, LogOut } from 'lucide-react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudQuery } from '@lody/platform/react';
 import { useOrganization } from '../hooks/useOrganization';
@@ -209,57 +209,56 @@ function CloudOrganizationSwitcher() {
           <Menu.Content align="start" className="w-[250px]">
             <Menu.GroupLabel>{t('organization.workspaces')}</Menu.GroupLabel>
             <Menu.Separator />
-            {organizations.map((org) => (
-              <Menu.Item
-                key={org.id}
-                onClick={() => {
-                  void switchOrganization(org.id);
-                  setOpen(false);
-                  if (org.slug) {
-                    void navigate({
-                      to: '/$workspaceName/chat',
-                      params: { workspaceName: org.slug },
-                    });
-                  }
-                }}
-              >
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <WorkspaceAvatar
-                      workspace={{ name: org.name, logo: org.logo }}
-                      size="medium"
-                      className="shrink-0"
-                    />
-                    <span className="truncate text-sm">{org.name}</span>
-                    {planTierByWorkspaceId.has(org.id) ? (
-                      <Badge>
-                        {planTierByWorkspaceId.get(org.id) === 'enterprise'
-                          ? t('billing.plan.enterprise')
-                          : t('billing.plan.plus')}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  {org.id === activeOrganization.id && <Check className="h-4 w-4 shrink-0" />}
-                </div>
-              </Menu.Item>
-            ))}
+            <Menu.RadioGroup
+              value={activeOrganization.id}
+              onValueChange={(orgId) => {
+                const org = organizations.find((candidate) => candidate.id === orgId);
+                if (!org) return;
+                void switchOrganization(org.id);
+                setOpen(false);
+                if (org.slug) {
+                  void navigate({
+                    to: '/$workspaceName/chat',
+                    params: { workspaceName: org.slug },
+                  });
+                }
+              }}
+            >
+              {organizations.map((org) => (
+                <Menu.RadioItem key={org.id} value={org.id} indicator="check" indicatorSide="end">
+                  <WorkspaceAvatar
+                    workspace={{ name: org.name, logo: org.logo }}
+                    size="medium"
+                    className="shrink-0"
+                  />
+                  {org.name}
+                  {planTierByWorkspaceId.has(org.id) ? (
+                    <Badge>
+                      {planTierByWorkspaceId.get(org.id) === 'enterprise'
+                        ? t('billing.plan.enterprise')
+                        : t('billing.plan.plus')}
+                    </Badge>
+                  ) : null}
+                </Menu.RadioItem>
+              ))}
+            </Menu.RadioGroup>
             <Menu.Item
+              icon={Plus}
               onClick={() => {
                 setDialogOpen(true);
                 setOpen(false);
               }}
             >
-              <Plus className="mr-2 h-4 w-4" />
               {t('organization.createNew')}
             </Menu.Item>
             <Menu.Separator />
             <Menu.Item
+              tone="destructive"
+              icon={LogOut}
               onClick={() => {
                 void signOut();
               }}
-              className="text-destructive focus:text-destructive"
             >
-              <LogOut className="mr-2 h-4 w-4" />
               {t('organization.signOut')}
             </Menu.Item>
           </Menu.Content>

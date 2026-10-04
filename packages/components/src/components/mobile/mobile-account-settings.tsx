@@ -9,7 +9,6 @@ import {
   Copy,
   Trash2,
   ChevronDown,
-  Check,
   LogOut,
   KeyRound,
   Pencil,
@@ -556,32 +555,21 @@ export function MobileAccountSettings({
                         <ChevronDown className="h-3 w-3 opacity-50" />
                       </Menu.Trigger>
                       <Menu.Content align="end">
-                        <Menu.Item
-                          onClick={() => {
-                            void onUpdateRole(member, 'member');
+                        <Menu.RadioGroup
+                          value={member.role}
+                          onValueChange={(nextRole) => {
+                            if (nextRole === 'member' || nextRole === 'admin') {
+                              void onUpdateRole(member, nextRole);
+                            }
                           }}
                         >
-                          <Check
-                            className={cn(
-                              'mr-2 h-3.5 w-3.5',
-                              member.role === 'member' ? 'opacity-100' : 'opacity-0'
-                            )}
-                          />
-                          {t('organization.role.member')}
-                        </Menu.Item>
-                        <Menu.Item
-                          onClick={() => {
-                            void onUpdateRole(member, 'admin');
-                          }}
-                        >
-                          <Check
-                            className={cn(
-                              'mr-2 h-3.5 w-3.5',
-                              member.role === 'admin' ? 'opacity-100' : 'opacity-0'
-                            )}
-                          />
-                          {t('organization.role.admin')}
-                        </Menu.Item>
+                          <Menu.RadioItem value="member" indicator="check">
+                            {t('organization.role.member')}
+                          </Menu.RadioItem>
+                          <Menu.RadioItem value="admin" indicator="check">
+                            {t('organization.role.admin')}
+                          </Menu.RadioItem>
+                        </Menu.RadioGroup>
                       </Menu.Content>
                     </Menu.Root>
                   ) : (

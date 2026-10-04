@@ -56,7 +56,8 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
 
 - Sidebar footer: Help (`?`), Archive, Settings, in that order. Help retains the
   documentation, GitHub repository, community, GitHub Issues feedback, and bug-report menu; Archive is a direct
-  button and becomes the return action while open. See the
+  button and becomes the return action while open. Desktop controls share the UI
+  primitive's small size; mobile actions retain their touch targets. See the
   [footer Spec](../../../../specs/sidebar-footer.md).
 
 - [Zen layout](../../../../specs/zen-layout.md): `AppCommands` dispatches the shared

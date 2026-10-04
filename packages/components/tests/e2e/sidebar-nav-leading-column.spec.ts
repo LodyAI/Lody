@@ -1,5 +1,111 @@
 import { expect, test } from '@playwright/test';
 
+test('sidebar footer controls share a compact desktop height across identity states', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 900, height: 500 });
+  for (const theme of ['light', 'dark']) {
+    for (const story of ['default', 'long-name', 'syncing', 'local-identity']) {
+      await page.goto(
+        `/iframe.html?id=components-sidebarfooter--${story}&viewMode=story&globals=theme:${theme}`
+      );
+      const footer = page.locator('[data-sidebar-footer]');
+      await expect(footer).toBeVisible();
+      for (const fontSize of [12, 14, 18]) {
+        await page.evaluate(
+          (size) => document.documentElement.style.setProperty('--ui-font-size', `${size}px`),
+          fontSize
+        );
+        const geometry = await footer.evaluate((element) => {
+          const box = (node: Element) => {
+            const rect = node.getBoundingClientRect();
+            return {
+              left: rect.left,
+              right: rect.right,
+              width: rect.width,
+              height: rect.height,
+              centerY: rect.y + rect.height / 2,
+            };
+          };
+          const identity = element.querySelector(
+            '[data-workspace-switcher-trigger], [data-workspace-identity]'
+          )!;
+          return {
+            footer: box(element),
+            identity: box(identity),
+            actions: Array.from(element.querySelectorAll('button[aria-label]')).map((button) => ({
+              ...box(button),
+              glyph: box(button.querySelector('svg')!),
+            })),
+            overflow: element.scrollWidth > element.clientWidth,
+          };
+        });
+        expect(geometry.identity.height).toBe(28);
+        expect(geometry.footer.height).toBeLessThanOrEqual(37);
+        expect(geometry.overflow).toBe(false);
+        expect(geometry.actions).toHaveLength(3);
+        const controls = [geometry.identity, ...geometry.actions];
+        for (let index = 1; index < controls.length; index += 1) {
+          expect(controls[index].left - controls[index - 1].right).toBe(4);
+        }
+        for (const action of geometry.actions) {
+          expect(action.width).toBe(28);
+          expect(action.height).toBe(28);
+          expect(action.glyph.width).toBe(16);
+          expect(action.glyph.height).toBe(16);
+          expect(Math.abs(action.centerY - geometry.identity.centerY)).toBeLessThan(0.5);
+        }
+      }
+      if (story === 'local-identity') {
+        await expect(footer.locator('[data-workspace-switcher-trigger]')).toHaveCount(0);
+      } else {
+        const trigger = footer.locator('[data-workspace-switcher-trigger]');
+        await trigger.focus();
+        await page.keyboard.press('Enter');
+        await expect(page.getByRole('menuitemradio').first()).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(page.getByRole('menuitemradio').first()).toBeHidden();
+        await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      }
+    }
+  }
+});
+
+test('sidebar footer keeps mobile actions as 48px touch targets', async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 600 },
+    userAgent:
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  try {
+    await page.goto('/iframe.html?id=components-sidebarfooter--default&viewMode=story');
+    const footer = page.locator('[data-sidebar-footer]');
+    for (const name of ['Help', 'Archive', 'Settings']) {
+      const action = footer.getByRole('button', { name, exact: true });
+      await expect(action).toBeVisible();
+      const box = await action.boundingBox();
+      const glyph = await action.locator('svg').boundingBox();
+      expect(box?.width).toBe(48);
+      expect(box?.height).toBe(48);
+      expect(glyph?.width).toBe(20);
+      expect(glyph?.height).toBe(20);
+    }
+    await expect(footer.locator('[data-workspace-switcher-trigger]')).toHaveCount(0);
+    await footer.getByRole('button', { name: 'Archive', exact: true }).tap();
+    await expect(footer.getByRole('button', { name: 'Leave Archive' })).toHaveAttribute(
+      'aria-current',
+      'page'
+    );
+    await footer.getByRole('button', { name: 'Help', exact: true }).tap();
+    await expect(page.getByRole('menuitem', { name: 'Docs' })).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
 test.describe('compact navigation modal', () => {
   test.use({ viewport: { width: 500, height: 745 } });
 

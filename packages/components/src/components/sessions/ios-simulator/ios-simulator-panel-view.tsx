@@ -21,6 +21,7 @@ import type {
   IosSimulatorPanelStatus,
   IosSimulatorPreparingStage,
   IosSimulatorViewerState,
+  IosSimulatorViewerDiagnostics,
 } from '@/lib/ios-simulator/ios-simulator-types';
 import {
   IosSimulatorConnectionStatus,
@@ -81,7 +82,10 @@ export type IosSimulatorPanelViewProps = {
   onRestore: () => void;
   onRetry: () => void;
   onCopyDiagnostics: () => void;
-  onViewerStateChange?: (state: IosSimulatorViewerState) => void;
+  onViewerStateChange?: (
+    state: IosSimulatorViewerState,
+    diagnostics?: IosSimulatorViewerDiagnostics | null
+  ) => void;
   /**
    * The simulator's native controls and view options. Present only while this
    * Session's preview is ready; everything else about the panel stays as is.
@@ -716,6 +720,7 @@ export function IosSimulatorPanelView({
               onRestore={onRestore}
               onCancel={onCancel}
               onStop={onStop}
+              hasError={catalog.phase === 'error'}
               onCopyDiagnostics={onCopyDiagnostics}
             />
           </div>

@@ -526,7 +526,7 @@ export function SessionRowOpenedByMenuItems({
   return (
     <>
       {goToOpener ? (
-        <ContextMenu.Item icon={<CornerLeftUp />} onClick={goToOpener}>
+        <ContextMenu.Item icon={CornerLeftUp} onClick={goToOpener}>
           {goToOpenerLabel}
         </ContextMenu.Item>
       ) : null}

@@ -201,6 +201,7 @@ import { SessionSyncingIndicator } from './session-syncing-indicator';
 // Aliased while the vaul drawer below still holds the bare name; the two
 // merge when the mobile drawers migrate onto this primitive.
 import { Drawer as UiDrawer } from '@lody/ui/drawer';
+import { SessionMobileDiffDrawerContent } from './session-mobile-diff-drawer-content';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { Dialog } from '@/ui/dialog';
@@ -5889,7 +5890,7 @@ const SessionDetail = ({
           open={mobileDiffState !== null}
           onOpenChange={(open) => !open && handleCloseMobileDiff()}
         >
-          <UiDrawer.Content side="bottom" className="h-[85vh] flex flex-col p-0">
+          <SessionMobileDiffDrawerContent side="bottom" className="h-[85vh] flex flex-col p-0">
             <UiDrawer.Header className="shrink-0 border-b border-border px-4 py-3">
               <UiDrawer.Title className="text-sm font-medium">
                 {t('sessions.diffTab', 'Changes')}
@@ -5939,7 +5940,7 @@ const SessionDetail = ({
                 />
               )}
             </div>
-          </UiDrawer.Content>
+          </SessionMobileDiffDrawerContent>
         </UiDrawer.Root>
         {viewerTabs
           .filter((tab): tab is Extract<ViewerTab, { type: 'file' }> => tab.type === 'file')

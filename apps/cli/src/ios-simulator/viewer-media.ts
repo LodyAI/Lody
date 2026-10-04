@@ -43,7 +43,7 @@ function connect(){
   usingH264=!h264Disabled&&typeof VideoDecoder!=='undefined'&&typeof EncodedVideoChunk!=='undefined';
   if(usingH264)url.searchParams.set('codec','h264');
   videoLastSequence=0;videoRecovery=0;
-  const socket=new WebSocket(url);ws=socket;socket.binaryType='arraybuffer';
+  const socket=createSimulatorSocket(url);ws=socket;socket.binaryType='arraybuffer';
   socket.onopen=()=>{
     if(ws!==socket)return;
     streamConfig();send({type:'heartbeat'});
@@ -76,10 +76,10 @@ function connect(){
 }
 function flushMove(){
   cancelAnimationFrame(moveRequest);moveRequest=undefined;
-  if(queuedMove){send({...queuedMove,type:'touch1-move'});queuedMove=undefined}
+  if(queuedMove){send(queuedMove);queuedMove=undefined}
 }
 function queueMove(){
-  queuedMove={...point};if(moveRequest===undefined)moveRequest=requestAnimationFrame(flushMove);
+  queuedMove=touchMessage('move');if(moveRequest===undefined)moveRequest=requestAnimationFrame(flushMove);
 }
 function closeMedia(){
   clearTimeout(retryTimer);retryTimer=undefined;disposeVideo();
