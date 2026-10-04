@@ -68,6 +68,9 @@ import { FieldIssueMark } from './schedule-field-issue-mark';
 import { pickScheduleAgent, seedScheduleAgentRunRef } from './schedule-agent-defaults';
 import { readChatLandingDefaults } from '@/lib/chat-landing-defaults';
 
+const DARK =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
 const styles = stylex.create({
   mobileDetail: {
     display: 'flex',
@@ -77,6 +80,132 @@ const styles = stylex.create({
     minHeight: 0,
     // Mobile detail owns its top edge; desktop insets belong to the workspace shell.
     paddingTop: 'var(--safe-area-top, 0px)',
+  },
+  loadingMessage: { padding: '20px' },
+  readOnlyMessage: {
+    width: '100%',
+    maxWidth: '672px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    paddingLeft: {
+      default: '16px',
+      '@media (min-width: 640px)': '24px',
+    },
+    paddingRight: {
+      default: '16px',
+      '@media (min-width: 640px)': '24px',
+    },
+    paddingTop: '16px',
+    fontSize: '0.9em',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  blockedMessage: {
+    display: 'flex',
+    maxWidth: '672px',
+    alignItems: 'flex-start',
+    columnGap: '8px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    marginTop: '16px',
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--status-warning) / 0.4)',
+    borderRadius: 'var(--radius-lg)',
+    paddingLeft: {
+      default: '12px',
+      '@media (min-width: 640px)': '16px',
+    },
+    paddingRight: {
+      default: '12px',
+      '@media (min-width: 640px)': '16px',
+    },
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    fontSize: '0.9em',
+  },
+  warningIcon: {
+    marginTop: '2px',
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    color: 'hsl(var(--status-warning))',
+  },
+  detailContent: { minHeight: 0, flex: '1 1 0%', overflow: 'auto' },
+  page: {
+    display: 'flex',
+    height: '100%',
+    minHeight: 0,
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  errorNotice: {
+    paddingLeft: '20px',
+    paddingRight: '20px',
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    fontSize: '1em',
+    color: 'hsl(var(--destructive))',
+  },
+  content: { minHeight: 0, flex: '1 1 0%' },
+  history: {
+    width: '100%',
+    maxWidth: '672px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    paddingLeft: {
+      default: '16px',
+      '@media (min-width: 640px)': '24px',
+    },
+    paddingRight: {
+      default: '16px',
+      '@media (min-width: 640px)': '24px',
+    },
+    paddingBottom: '32px',
+  },
+  historyTitle: {
+    marginBottom: '6px',
+    paddingLeft: '12px',
+    paddingRight: '12px',
+    fontSize: '0.8em',
+    fontWeight: 400,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  noRuns: { padding: '12px', fontSize: '0.9em', color: 'hsl(var(--muted-foreground))' },
+  historyRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    columnGap: '12px',
+    paddingLeft: '12px',
+    paddingRight: '12px',
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    textAlign: 'left',
+    fontSize: '0.9em',
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': {
+        default: 'hsl(var(--foreground) / 0.03)',
+        [DARK]: 'hsl(0 0% 100% / 0.04)',
+      },
+    },
+  },
+  historyTitleText: {
+    minWidth: 0,
+    flex: '1 1 0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  historyMeta: { flexShrink: 0, fontSize: '0.85em', color: 'hsl(var(--muted-foreground))' },
+  historyTime: {
+    flexShrink: 0,
+    fontSize: '0.85em',
+    fontVariantNumeric: 'tabular-nums',
+    color: 'hsl(var(--muted-foreground))',
   },
 });
 
@@ -224,13 +353,15 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
       onOpenSession={openSession}
     />
   ) : !detail.ready ? (
-    <p className="p-5">{t('schedules.loading', 'Loading schedules…')}</p>
+    <p {...stylex.props(styles.loadingMessage)}>{t('schedules.loading', 'Loading schedules…')}</p>
   ) : !detail.document || !row ? (
-    <p className="p-5">{t('schedules.notFound', 'This schedule is unavailable or deleted.')}</p>
+    <p {...stylex.props(styles.loadingMessage)}>
+      {t('schedules.notFound', 'This schedule is unavailable or deleted.')}
+    </p>
   ) : (
     <>
       {!canManage ? (
-        <p className="mx-auto max-w-2xl px-4 pt-4 text-[0.9em] text-muted-foreground sm:px-6">
+        <p {...stylex.props(styles.readOnlyMessage)}>
           {t(
             'schedules.readOnly',
             'Only the owner can edit this schedule, using a machine with Schedule support.'
@@ -240,11 +371,8 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
       {registry.runtimes
         .filter((r) => r === matchingScheduleRuntime(row, registry.runtimes) && r.blockedCode)
         .map((r) => (
-          <p
-            className="mx-auto mt-4 flex max-w-2xl items-start gap-2 rounded-lg border-[0.5px] border-status-warning/40 px-3 py-2 text-[0.9em] sm:px-4"
-            key={r.machineId}
-          >
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-status-warning" />
+          <p {...stylex.props(styles.blockedMessage)} key={r.machineId}>
+            <AlertTriangle {...stylex.props(styles.warningIcon)} />
             <span>
               {t(
                 `schedules.errors.${r.blockedCode}`,
@@ -296,7 +424,7 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
             : undefined
         }
       />
-      <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto">
+      <div data-settings-surface="" {...stylex.props(styles.detailContent)}>
         {content}
       </div>
     </>
@@ -355,7 +483,7 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
     />
   );
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background" data-settings-surface="">
+    <div {...stylex.props(styles.page)} data-settings-surface="">
       <AlertDialog.Root
         open={!!confirmation}
         onOpenChange={(isOpen) => {
@@ -382,11 +510,11 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
         </AlertDialog.Content>
       </AlertDialog.Root>
       {error ? (
-        <p className="px-5 py-2 text-[1em] text-destructive" role="alert">
+        <p {...stylex.props(styles.errorNotice)} role="alert">
           {error}
         </p>
       ) : null}
-      <div className="min-h-0 flex-1">
+      <div {...stylex.props(styles.content)}>
         {mobile && scheduleId ? (
           <div {...stylex.props(styles.mobileDetail)}>{detailPane}</div>
         ) : (
@@ -754,12 +882,10 @@ function ScheduleSessionHistory({ scheduleId }: { scheduleId: string }) {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   // Under the editor, at the bottom of the open schedule.
   return (
-    <section className="mx-auto w-full max-w-2xl px-4 pb-8 sm:px-6">
-      <h2 className="mb-1.5 px-3 text-[0.8em] font-normal text-muted-foreground">
-        {t('schedules.history', 'Run history')}
-      </h2>
+    <section {...stylex.props(styles.history)}>
+      <h2 {...stylex.props(styles.historyTitle)}>{t('schedules.history', 'Run history')}</h2>
       {linked.length === 0 ? (
-        <p {...scheduleCardProps('px-3 py-3 text-[0.9em] text-muted-foreground')}>
+        <p {...scheduleCardProps(stylex.props(styles.noRuns).className)}>
           {t('schedules.noRuns', 'No Sessions have been created yet.')}
         </p>
       ) : (
@@ -787,20 +913,16 @@ function ScheduleHistoryRow({ session: s, onOpen }: { session: SessionMeta; onOp
   const { t } = useTranslation();
   const liveStatus = useAtomValue(sessionLiveStatusAtomFamily(s.id));
   return (
-    <button
-      key={s.id}
-      className="flex w-full items-center gap-3 px-3 py-2 text-left text-[0.9em] transition-colors hover:bg-foreground/[0.03] dark:hover:bg-white/[0.04]"
-      onClick={onOpen}
-    >
-      <span className="min-w-0 flex-1 truncate">
+    <button key={s.id} {...stylex.props(styles.historyRow)} onClick={onOpen}>
+      <span {...stylex.props(styles.historyTitleText)}>
         {s.title || t('schedules.openRun', 'Open run')}
       </span>
-      <span className="shrink-0 text-[0.85em] text-muted-foreground">
+      <span {...stylex.props(styles.historyMeta)}>
         {liveStatus
           ? t(`schedules.sessionState.${liveStatus.type}`, liveStatus.type)
           : t('schedules.sessionState.inactive', 'Inactive')}
       </span>
-      <time className="shrink-0 text-[0.85em] tabular-nums text-muted-foreground">
+      <time {...stylex.props(styles.historyTime)}>
         {new Date(s.createdAt).toLocaleString(undefined, {
           dateStyle: 'short',
           timeStyle: 'short',

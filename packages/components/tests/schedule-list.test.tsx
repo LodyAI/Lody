@@ -91,7 +91,9 @@ describe('schedule list rows', () => {
     container.remove();
   });
   const rowOf = (title: string) =>
-    [...container.querySelectorAll('.group')].find((row) => row.textContent?.includes(title))!;
+    [...container.querySelectorAll('[data-schedule-row]')].find((row) =>
+      row.textContent?.includes(title)
+    )!;
   const buttonIn = (row: Element, label: string) =>
     row.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
 

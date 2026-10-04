@@ -510,10 +510,10 @@ describe('SessionFileContentView', () => {
       machineOnline: false,
     });
     const statusBar = view.querySelector('[data-testid="session-file-realtime-status-bar"]');
-    const offlineIcon = statusBar?.querySelector('svg');
+    const offlineStatus = statusBar?.querySelector('[title="Machine is offline"]');
 
-    expect(offlineIcon).not.toBeNull();
-    expect(offlineIcon?.className.baseVal).toContain('text-muted-foreground');
+    expect(offlineStatus?.textContent).toBe('Offline');
+    expect(offlineStatus?.previousElementSibling?.getAttribute('aria-hidden')).toBe('true');
     expect(view.textContent).not.toContain('Host offline');
     // Freshly opened: the offline icon shows, but no misleading "Saved".
     expect(view.textContent).not.toContain('Saved');

@@ -64,6 +64,15 @@ primitives into product surfaces and may add layout or interaction constraints,
 while the primitive's props remain the owner of its visual variant, size, tone,
 and shape.
 
+For appearance-only migrations, keep each product component's visual rules in a
+module-level `stylex.create` definition and name styles by their semantic role.
+Reuse existing area surfaces and product tokens where they match; retain exact
+CSS variables and dimensions when no equivalent token exists. Keep runtime
+geometry and styles owned by external rendering engines at their existing dynamic
+boundary. Configure shared primitives through their documented props when those
+props reproduce the existing appearance. The [progressive StyleX migration note](../notes/implemented/simplification/2026-10-04-complex-surfaces-stylex.md) records the retained legacy overrides and
+the current application of these rules.
+
 Settings' `CompactRow` keeps its label and helper in separate text nodes. Its
 optional `labelId` and `helperId` let a caller associate a control with those
 nodes through `aria-labelledby` and `aria-describedby`; visual adjacency alone

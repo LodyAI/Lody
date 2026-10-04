@@ -234,8 +234,6 @@ describe('usage day selection across ranges', () => {
 
   function expectClosed() {
     expect(container.querySelector('output')!.textContent).toBe('closed');
-    const detail = container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"]');
-    if (detail) expect(detail.closest('.grid-rows-\\[0fr\\]')).not.toBeNull();
   }
 
   it.each([
@@ -265,12 +263,19 @@ describe('usage day selection across ranges', () => {
       await vi.advanceTimersByTimeAsync(500);
     });
     expectClosed();
-    const collapse = container.querySelector('.grid-rows-\\[0fr\\]')!;
-    await act(async () => collapse.dispatchEvent(new Event('transitionend', { bubbles: true })));
+    const exitingDetail = container.querySelector(
+      '[aria-label="workspace.usage.skyline.dayDetail"]'
+    )!;
+    expect(exitingDetail).not.toBeNull();
+    await act(async () =>
+      exitingDetail.dispatchEvent(new Event('transitionend', { bubbles: true }))
+    );
     expect(container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"]')).toBeNull();
     await selectRangeCell(to);
     expect(container.querySelector('output')!.textContent).toBe(String(Date.UTC(2026, 8, 30)));
-    expect(container.querySelector('.grid-rows-\\[1fr\\]')).not.toBeNull();
+    expect(
+      container.querySelector('[aria-label="workspace.usage.skyline.dayDetail"] p')?.textContent
+    ).toBe('Wed, Sep 30, 2026');
   });
 
   it.each(['day', 'month'] as const)(

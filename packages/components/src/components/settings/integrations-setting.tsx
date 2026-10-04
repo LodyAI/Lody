@@ -1,7 +1,10 @@
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { Button } from '@lody/ui/button';
 import { AlertCircle, CheckCircle2, Github } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useCloudAction, useCloudMutation } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
@@ -22,6 +25,69 @@ import { isNativeAppShell } from '@/lib/native-platform';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { useCloudQuery } from '@lody/platform/react';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
+
+const WIDE = '@media (min-width: 640px)';
+
+const styles = stylex.create({
+  personalIdentityCard: {
+    display: 'flex',
+    flexDirection: { default: 'column', [WIDE]: 'row' },
+    alignItems: { default: 'stretch', [WIDE]: 'center' },
+    justifyContent: { default: 'normal', [WIDE]: 'space-between' },
+    gap: space[3],
+    minWidth: 0,
+    padding: space[3],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: 'hsl(var(--background) / 0.4)',
+  },
+  identityDetails: { display: 'flex', alignItems: 'center', gap: space[3], minWidth: 0 },
+  avatar: {
+    flexShrink: 0,
+    width: '40px',
+    height: '40px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.4)',
+    borderRadius: radius.full,
+    objectFit: 'cover',
+  },
+  avatarFallback: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '40px',
+    height: '40px',
+    borderRadius: radius.full,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+    color: colors.secondaryLabel,
+  },
+  statusIcon: { width: '16px', height: '16px' },
+  identityCopy: { minWidth: 0 },
+  authorizedLogin: {
+    overflow: 'hidden',
+    margin: 0,
+    fontSize: '0.95rem',
+    fontWeight: 400,
+    letterSpacing: '-0.025em',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.label,
+  },
+  authorizationTitle: { margin: 0, fontSize: '0.9rem', fontWeight: 400, color: colors.label },
+  authorizationHint: {
+    overflow: 'hidden',
+    margin: '2px 0 0',
+    fontSize: '0.78rem',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.secondaryLabel,
+  },
+  authorizeIcon: { width: '14px', height: '14px' },
+});
 
 type GithubSocialAuthOptions = {
   provider: 'github';
@@ -80,41 +146,35 @@ export function GitHubPersonalIdentitySettingsCard({
      row itself (`GitHubSettingsView`). */
   if (!enabled) return null;
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border/40 bg-background/40 p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex min-w-0 items-center gap-3">
+    <div {...stylex.props(styles.personalIdentityCard)}>
+      <div {...stylex.props(styles.identityDetails)}>
         {authorizationReady && avatarUrl ? (
-          <img
-            src={avatarUrl}
-            alt=""
-            width={40}
-            height={40}
-            className="h-10 w-10 shrink-0 rounded-full border border-border/40 object-cover"
-          />
+          <img src={avatarUrl} alt="" width={40} height={40} {...stylex.props(styles.avatar)} />
         ) : (
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-foreground/[0.06] text-muted-foreground">
+          <div {...stylex.props(styles.avatarFallback)}>
             {authorizationReady ? (
-              <CheckCircle2 className="h-4 w-4" />
+              <CheckCircle2 {...stylex.props(styles.statusIcon)} />
             ) : (
-              <AlertCircle className="h-4 w-4" />
+              <AlertCircle {...stylex.props(styles.statusIcon)} />
             )}
           </div>
         )}
-        <div className="min-w-0">
+        <div {...stylex.props(styles.identityCopy)}>
           {authorizationReady ? (
-            <p className="truncate text-[0.95rem] font-normal tracking-tight text-foreground">
+            <p {...stylex.props(styles.authorizedLogin)}>
               {profile?.login
                 ? `@${profile.login}`
                 : t('settings.integrations.github.personalIdentityAuthorized', 'Connected')}
             </p>
           ) : (
             <>
-              <p className="text-[0.9rem] font-normal text-foreground">
+              <p {...stylex.props(styles.authorizationTitle)}>
                 {t(
                   'settings.integrations.github.personalIdentityNeedsAuth',
                   'Authorization needed'
                 )}
               </p>
-              <p className="mt-0.5 truncate text-[0.78rem] text-muted-foreground">
+              <p {...stylex.props(styles.authorizationHint)}>
                 {t(
                   'settings.integrations.github.personalIdentityMissing',
                   'Authorize to act as you.'
@@ -132,7 +192,11 @@ export function GitHubPersonalIdentitySettingsCard({
           onClick={onAuthorize}
           disabled={!workspaceReady || authorizing}
         >
-          {authorizing ? <Spinner className="h-3.5 w-3.5" /> : <Github className="h-3.5 w-3.5" />}
+          {authorizing ? (
+            <Spinner className="h-3.5 w-3.5" />
+          ) : (
+            <Github {...stylex.props(styles.authorizeIcon)} />
+          )}
           {t('settings.integrations.github.personalIdentityAuthorize', 'Authorize')}
         </Button>
       )}
