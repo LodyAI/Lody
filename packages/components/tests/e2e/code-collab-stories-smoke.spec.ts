@@ -100,3 +100,40 @@ for (const storyId of CODE_COLLAB_STORY_IDS) {
     expect(fatal, `Story ${storyId} produced console error(s):\n${summary}`).toEqual([]);
   });
 }
+
+test('keeps the narrow Monaco Find tooltip clear of its action button', async ({ page }) => {
+  test.setTimeout(60_000);
+
+  const storyId = 'sessions-codecollabmonacoeditor--realtime-status-bar-narrow';
+  const response = await page.goto(`/iframe.html?id=${storyId}&viewMode=story`);
+  expect(response?.ok(), `Story iframe did not return 2xx for ${storyId}`).toBeTruthy();
+
+  const editor = page.locator('.monaco-editor').first();
+  await expect(editor).toBeVisible({ timeout: 30_000 });
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+f');
+
+  const closeButton = page.getByLabel('Close (Escape)');
+  await expect(closeButton).toBeVisible();
+  await closeButton.hover();
+
+  const tooltip = page.locator('.workbench-hover-container').filter({ hasText: 'Close (Escape)' });
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip.locator('.hover-contents')).toHaveCSS('white-space', 'nowrap');
+
+  const buttonBounds = await closeButton.boundingBox();
+  const tooltipBounds = await tooltip.boundingBox();
+  expect(buttonBounds).not.toBeNull();
+  expect(tooltipBounds).not.toBeNull();
+  if (buttonBounds && tooltipBounds) {
+    const overlaps =
+      tooltipBounds.x < buttonBounds.x + buttonBounds.width &&
+      tooltipBounds.x + tooltipBounds.width > buttonBounds.x &&
+      tooltipBounds.y < buttonBounds.y + buttonBounds.height &&
+      tooltipBounds.y + tooltipBounds.height > buttonBounds.y;
+    expect(overlaps, 'Find tooltip must not overlap its originating action').toBe(false);
+  }
+
+  await closeButton.click();
+  await expect(closeButton).toBeHidden();
+});
