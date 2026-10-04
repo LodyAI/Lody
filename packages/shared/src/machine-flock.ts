@@ -1573,9 +1573,12 @@ const normalizeAgentConfigMeta = (value: unknown): AgentConfigMeta | undefined =
   if (!isMissing(value.runtimeOverrides)) {
     if (!isBuiltinRuntimeOverrides(value.runtimeOverrides)) return undefined;
     const runtimeOverrides = { ...value.runtimeOverrides };
-    // piExtensions only applies to builtin Pi; a foreign key must not count as
-    // an override for other agent types.
-    if (config.agentType !== 'pi') delete runtimeOverrides.piExtensions;
+    // piExtensions and piPath only apply to builtin Pi; a foreign key must not
+    // count as an override for other agent types.
+    if (config.agentType !== 'pi') {
+      delete runtimeOverrides.piExtensions;
+      delete runtimeOverrides.piPath;
+    }
     config.runtimeOverrides = runtimeOverrides;
   }
   if (!isMissing(value.prompt)) {

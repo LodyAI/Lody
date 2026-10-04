@@ -2760,6 +2760,7 @@
   "settings.agent.dialog.runtimeOverride.devinPlaceholder": "/path/to/devin",
   "settings.agent.dialog.runtimeOverride.grokPlaceholder": "/path/to/grok",
   "settings.agent.dialog.runtimeOverride.kimiPlaceholder": "/path/to/kimi",
+  "settings.agent.dialog.runtimeOverride.piPlaceholder": "/path/to/pi",
   "settings.agent.dialog.runtimeOverride.testing": "Testing…",
   "settings.agent.dialog.runtimeOverride.test": "Test runtime",
   "settings.agent.dialog.group.builtin": "Built-in",

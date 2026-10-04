@@ -87,6 +87,7 @@ export const BuiltinRuntimeOverridesSchema = z
     kimiPath: z.string().optional(),
     grokPath: z.string().optional(),
     devinPath: z.string().optional(),
+    piPath: z.string().optional(),
     piExtensions: z
       .array(z.string().trim().min(1).max(PI_EXTENSION_PATH_MAX_LENGTH))
       .max(PI_EXTENSIONS_MAX_SELECTIONS)

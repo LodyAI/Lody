@@ -342,9 +342,8 @@ const MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS = {
   devin: 'devinPath',
   claude: 'claudeCodeExecutable',
   codex: 'codexPath',
-  // Pi has no replacement binary. Its override is an extension list, handled in
-  // resolveExpectedAcpCapabilitySourceVersion because it changes which runtime
-  // version the launcher requires rather than which binary it runs.
+  // Pi keeps its managed adapter binary; piPath overrides the CLI the adapter
+  // spawns via LODY_PI_PATH and takes part in the override cache suffix.
   pi: null,
 } as const satisfies Record<ManagedBuiltinAgentType, keyof BuiltinRuntimeOverrides | null>;
 
@@ -599,6 +598,11 @@ async function resolveBuiltinACPProcessLaunch(
           signal: input.signal,
         })
       : await resolveManagedRuntimeForLaunch('pi', input);
+    // The managed runtime is the Pi ACP adapter; piPath overrides the Pi CLI
+    // the adapter spawns via LODY_PI_PATH. The empty string intentionally
+    // shadows inherited values; the adapter's trim-falsy check treats it as
+    // unset, so do not revert to a conditional undefined env.
+    const piPath = trimRuntimeOverride(input.runtimeOverrides?.piPath);
     return {
       command: process.execPath,
       args: [
@@ -606,6 +610,7 @@ async function resolveBuiltinACPProcessLaunch(
         ...extensions.flatMap((path) => ['-e', path]),
         ...(input.extraArgs ?? []),
       ],
+      env: { LODY_PI_PATH: piPath ?? '' },
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
     };
   }
