@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1243](https://github.com/LodyAI/Lody/pull/1243)
 
 [中文](2026-10-04-subagent-dialog-rendering.zh.md)
 
