@@ -98,6 +98,7 @@ import {
   listAliveSessionMetas,
   listAliveRoomIds,
   LocalDaemonAvailabilityError,
+  WorkspaceSyncUnavailableError,
   normalizeCliValue,
   printJson,
   resolveStructuredOutputMode as resolveOutputMode,
@@ -1021,14 +1022,21 @@ async function syncMachineFlockDocsForRead(
   machineIds: readonly MachineId[],
   reason: string
 ): Promise<void> {
-  await Promise.all(
-    Array.from(new Set(machineIds)).map(
-      async (machineId) =>
-        await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
-          reason: `${reason}:${machineId}`,
-        })
-    )
-  );
+  try {
+    await Promise.all(
+      Array.from(new Set(machineIds)).map(
+        async (machineId) =>
+          await manager.syncFlockDocOrThrow(getMachineFlockDocId(workspaceId, machineId), {
+            reason: `${reason}:${machineId}`,
+          })
+      )
+    );
+  } catch (error) {
+    throw new WorkspaceSyncUnavailableError({
+      message: 'Machine document synchronization is temporarily unavailable.',
+      cause: error,
+    });
+  }
 }
 
 export async function resolveLocalProjectRefOrThrow(

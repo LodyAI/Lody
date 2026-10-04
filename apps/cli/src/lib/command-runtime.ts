@@ -57,7 +57,7 @@ export const DAEMON_NOT_RUNNING_MESSAGE =
 export const DAEMON_BUSY_MESSAGE =
   'Local CLI daemon did not answer in time. It may be busy; retry the request and reuse the same operationId when present.';
 export const WORKSPACE_SYNC_UNAVAILABLE_MESSAGE =
-  'Workspace synchronization is temporarily unavailable. Retry the request and reuse the same operationId when present.';
+  'Workspace synchronization is temporarily unavailable. Retry the request after connectivity returns.';
 
 export class WorkspaceSyncUnavailableError extends Data.TaggedError(
   'WorkspaceSyncUnavailableError'

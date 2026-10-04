@@ -66,10 +66,7 @@ vi.mock('@lody/shared/node/local-ipc', async (importOriginal) => {
   };
 });
 
-import {
-  WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
-  WorkspaceSyncUnavailableError,
-} from '@/lib/command-runtime';
+import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
 
 import { __lodyMcpServerInternals } from './lody-mcp-server';
 
@@ -99,7 +96,8 @@ const expectRetryableSyncResult = (result: ReturnType<typeof mcpErrorResult>): v
     ok: false,
     error: {
       code: 'SYNC_UNAVAILABLE',
-      message: WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
+      message:
+        'Workspace synchronization is temporarily unavailable. No Operation was accepted; resend the full request with the same operationId and without resume.',
       retryable: true,
     },
   });

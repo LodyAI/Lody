@@ -62,6 +62,7 @@ const {
   SessionRenameManyToolInputSchema,
   SessionStatusManyToolInputSchema,
   mcpErrorResult,
+  syncBeforeOperationAcceptance,
   assertDifferentMcpSession,
   assertBatchSize,
   resolveSessionRenameItems,
@@ -275,6 +276,39 @@ describe('session MCP input schemas', () => {
       },
     });
     expect(result.isError).toBe(true);
+    expect(WORKSPACE_SYNC_UNAVAILABLE_MESSAGE).not.toContain('operationId');
+  });
+
+  it('classifies a failed fetch as a retryable dependency failure', () => {
+    const result = mcpErrorResult(new TypeError('fetch failed'));
+    const content = result.content[0];
+    if (!content || content.type !== 'text') throw new Error('expected text result');
+    expect(JSON.parse(content.text)).toEqual({
+      ok: false,
+      error: {
+        code: 'SYNC_UNAVAILABLE',
+        message: WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
+        retryable: true,
+      },
+    });
+  });
+
+  it('tells an unaccepted Operation caller to resend the full request', async () => {
+    const manager = {
+      syncMetaOrThrow: vi.fn(async () => {
+        throw new Error('Streams sync failed: network_error');
+      }),
+    } as unknown as Parameters<typeof syncBeforeOperationAcceptance>[0];
+
+    await expect(
+      syncBeforeOperationAcceptance(manager, 'mcp.session_create:operation')
+    ).rejects.toMatchObject({
+      code: 'SYNC_UNAVAILABLE',
+      retryable: true,
+      message: expect.stringContaining(
+        'resend the full request with the same operationId and without resume'
+      ),
+    });
   });
 
   it('keeps unknown MCP failures nonretryable', () => {
