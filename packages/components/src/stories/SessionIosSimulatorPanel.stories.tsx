@@ -152,7 +152,11 @@ export const PreviewingLocal: Story = {
 };
 
 export const PreviewingRemote: Story = {
-  args: { status: ready('remote'), viewerState: 'ready', controls },
+  args: {
+    status: ready('remote'),
+    viewerState: 'ready',
+    controls,
+  },
 };
 
 /** A wide panel keeps every control on the second row. */

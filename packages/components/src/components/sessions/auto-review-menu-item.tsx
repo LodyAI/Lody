@@ -56,8 +56,8 @@ export function AutoReviewMenuItem({
           branch — the standing mode is then an informed upgrade rather than the
           only way in. */}
       <Menu.Item
-        className="gap-2"
         disabled={active || reviewerConfigurationLoading}
+        icon={ScanEye}
         onClick={() => {
           if (!reviewerConfigurationReady) {
             onConfigurationRequired?.();
@@ -70,19 +70,51 @@ export function AutoReviewMenuItem({
           });
         }}
       >
-        <ScanEye className="h-3.5 w-3.5 shrink-0" />
-        <span className="min-w-0 flex-1">
-          {t('sessions.autoReview.reviewOnce', 'Review this branch')}
-        </span>
+        {t('sessions.autoReview.reviewOnce', 'Review this branch')}
       </Menu.Item>
 
       <Menu.Item
-        className="gap-2"
         disabled={!enabled && reviewerConfigurationLoading}
+        icon={ShieldCheck}
         // Navigation to a prerequisite closes the menu before the setup dialog
         // takes focus; the toggle paths keep it open so flipping the row back
         // does not feel like navigating away.
         closeOnClick={!enabled && !reviewerConfigurationReady}
+        endContent={
+          <>
+            <Popover.Root>
+              <Popover.Trigger
+                render={
+                  <button
+                    type="button"
+                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    aria-label={t('sessions.autoReview.whatThisDoes', 'What this does')}
+                    onClick={(event) => {
+                      // Reading what it does must not toggle it.
+                      event.stopPropagation();
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                }
+              />
+              <Popover.Content
+                align="end"
+                side="left"
+                className="w-80"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <AutoReviewContract budget={policy.budget} />
+              </Popover.Content>
+            </Popover.Root>
+            <Switch
+              checked={enabled}
+              className="pointer-events-none"
+              aria-label={t('sessions.autoReview.menuLabel', 'Auto review and merge')}
+            />
+          </>
+        }
         onClick={() => {
           if (!enabled && !reviewerConfigurationReady) {
             onConfigurationRequired?.();
@@ -95,37 +127,7 @@ export function AutoReviewMenuItem({
           }
         }}
       >
-        <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-        <span className="min-w-0 flex-1">
-          {t('sessions.autoReview.menuLabel', 'Auto review and merge')}
-        </span>
-        <Popover.Root>
-          <Popover.Trigger render={<button
-              type="button"
-              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label={t('sessions.autoReview.whatThisDoes', 'What this does')}
-              onClick={(event) => {
-                // Reading what it does must not toggle it.
-                event.stopPropagation();
-              }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-              <Info className="h-3.5 w-3.5" />
-            </button>}/>
-          <Popover.Content
-            align="end"
-            side="left"
-            className="w-80"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <AutoReviewContract budget={policy.budget} />
-          </Popover.Content>
-        </Popover.Root>
-        <Switch
-          checked={enabled}
-          className="pointer-events-none"
-          aria-label={t('sessions.autoReview.menuLabel', 'Auto review and merge')}
-        />
+        {t('sessions.autoReview.menuLabel', 'Auto review and merge')}
       </Menu.Item>
 
       <AutoReviewConfirmDialog

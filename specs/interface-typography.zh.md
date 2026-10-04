@@ -28,11 +28,13 @@ Appearance 中的字号选择应同步缩放普通界面文字，而不抹平层
 | caption | 11 / 16px | 元信息、代码语言 |
 | footnote | 12 / 16px | 分组、说明、Tooltip |
 | subheadline | 13 / 18px | 控件、代码、工具输出 |
-| body | 14 / 20px | 侧栏标题、输入、消息正文 |
+| body | 14 / 20px | 侧栏标题、输入 |
 | headline | 16 / 24px | 弹窗标题 |
 | title | 18 / 24px | 页面或 Markdown 主标题 |
 
-字号和行高均为 Default 值乘所选基准再除以 14。独立消息预览显式传入的字号
+字号和行高均为 Default 值乘所选基准再除以 14。阅读正文保留 body 字号，使用独立、
+可主题化的[会话阅读行高](conversation-rhythm.zh.md#间距合约)，默认 22px；界面 body
+仍为 20px，紧凑正文与代码保留 subheadline 行高。独立消息预览显式传入的字号
 不受宿主文档基准影响。
 
 目标为支持 CSS length/length 类型除法的现代内核。消息正文、代码、标题和终端输出

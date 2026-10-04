@@ -181,27 +181,12 @@ pre,
 }
 
 @layer components {
-  /* Agent prose sits 4px inside the rail so it does not read as proud of
-     bordered cards (tables, fenced code). Nested copy in those surfaces stay flush. */
-  .markdown-renderer :is(p, h1, h2, h3, h4, h5, h6) {
-    padding-inline: 4px;
-  }
-  .markdown-renderer > p {
-    text-align: start;
-  }
   /* Desktop settings content: in light themes the section/card surfaces take the
      theme's popover fill (white in Lody Light) instead of the gray --card, so
      grouped rows read as lifted panels on the page rather than gray-on-gray.
      Dark themes keep their tuned --card. */
   [data-settings-surface]:not(.dark *) {
     --card: var(--popover);
-  }
-
-  .markdown-renderer
-    :is(table, [data-streamdown='code-block'], [data-streamdown='mermaid-block'])
-    :is(p, h1, h2, h3, h4, h5, h6),
-  [data-tool-detail-sheet] .markdown-renderer :is(p, h1, h2, h3, h4, h5, h6) {
-    padding-inline: 0;
   }
 
   /* Markdown table columns (`markdown-table.tsx`). Every column keeps a
@@ -361,144 +346,6 @@ pre,
     --lody-shiki-token-changed: hsl(var(--modified-file));
   }
 
-  .markdown-renderer [data-streamdown='code-block'] {
-    --markdown-code-block-bg: hsl(var(--code-background));
-    --markdown-code-block-border: hsl(var(--code-border));
-    --markdown-code-block-foreground: hsl(var(--code-foreground));
-    --markdown-code-block-language: hsl(var(--code-foreground) / 0.55);
-    --markdown-code-block-action-bg: hsl(var(--code-background) / 0.88);
-    --markdown-code-block-action-border: hsl(var(--code-border) / 0.78);
-    position: relative;
-    /* Toolbar row, then the highlighted body. */
-    display: flex !important;
-    flex-direction: column !important;
-    width: 100%;
-    margin-block: 0.875rem !important;
-    overflow: hidden;
-    gap: 0 !important;
-    border: none !important;
-    border-radius: 0.5rem !important;
-    background: var(--markdown-code-block-bg) !important;
-    padding: 0 !important;
-    color: var(--markdown-code-block-foreground);
-  }
-
-  .dark .markdown-renderer [data-streamdown='code-block'] {
-    /* Same fill as the session composer (`dark:bg-input/90`). */
-    --markdown-code-block-bg: color-mix(in srgb, hsl(var(--input)) 90%, hsl(var(--background)));
-    --markdown-code-block-action-bg: var(--markdown-code-block-bg);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-toolbar'] {
-    display: flex;
-    min-height: 1.75rem;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding-inline: 0.625rem;
-    border-bottom: 0.5px solid var(--markdown-code-block-border);
-    color: var(--markdown-code-block-language);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-header'] {
-    position: static;
-    display: flex;
-    min-width: 0;
-    flex: 1;
-    height: auto !important;
-    align-items: center;
-    justify-content: flex-start;
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background: transparent;
-    color: var(--markdown-code-block-language);
-    font-family: var(--font-mono);
-    letter-spacing: 0.02em;
-    pointer-events: none;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-header'] span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] {
-    position: static;
-    z-index: 1;
-    display: flex;
-    height: auto;
-    flex-shrink: 0;
-    align-items: center;
-    gap: 0.125rem;
-    margin: 0;
-    transform: none;
-    padding: 0 !important;
-    border: 0 !important;
-    background: transparent !important;
-    color: var(--markdown-code-block-language);
-    opacity: 1;
-    backdrop-filter: none;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button {
-    display: inline-flex;
-    width: 1.5rem;
-    height: 1.5rem;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border-radius: 0.25rem;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button svg {
-    width: 0.875rem;
-    height: 0.875rem;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button:hover {
-    color: var(--markdown-code-block-foreground);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button[aria-pressed='true'] {
-    color: var(--markdown-code-block-foreground);
-    background: color-mix(in srgb, var(--markdown-code-block-foreground) 12%, transparent);
-  }
-
-  .markdown-renderer [data-markdown-preview='true'] {
-    padding: 0.5rem 0.375rem 0.75rem;
-    /* Keep the fence fill. `--background` here punched a hole through the
-       code-block surface when a markdown fence was previewed in-place. */
-    background: transparent;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] {
-    overflow-x: auto;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-    padding-block: 0.75rem !important;
-    padding-inline: 1rem !important;
-    color: var(--markdown-code-block-foreground);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] pre {
-    min-width: max-content;
-    margin: 0;
-    background: transparent !important;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] code {
-    font-family: var(--font-mono);
-    font-variant-ligatures: var(--lody-font-ligatures, contextual);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] pre > code > span {
-    display: block;
-  }
-
   /* A `diff` fence is often an explanatory, headerless snippet rather than a
      parseable patch. Its renderer marks rows directly so the
      semantic add/remove treatment works for both forms and while streaming. */
@@ -530,6 +377,7 @@ pre,
   }
 
   .markdown-renderer [data-markdown-diff-line] {
+    display: block;
     min-height: 1.4em;
     padding-inline: 1rem;
   }
@@ -553,24 +401,6 @@ pre,
 
   .markdown-renderer [data-markdown-diff-line='metadata'] {
     color: var(--markdown-code-block-language);
-  }
-
-  .markdown-renderer [data-code-wrap='true'] [data-streamdown='code-block-body'] {
-    overflow-x: hidden;
-  }
-
-  .markdown-renderer [data-code-wrap='true'] [data-streamdown='code-block-body'] pre {
-    width: 100%;
-    min-width: 0;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .markdown-renderer
-    [data-code-wrap='true']
-    [data-streamdown='code-block-actions']
-    button[aria-pressed='true'] {
-    color: var(--markdown-code-block-foreground);
   }
 
   .markdown-renderer [data-streamdown='mermaid-block'] {

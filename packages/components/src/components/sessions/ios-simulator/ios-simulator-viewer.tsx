@@ -12,6 +12,7 @@ import {
   IOS_SIMULATOR_VIEWER_VISIBILITY,
   getIosSimulatorAspectRatio,
   parseIosSimulatorViewerState,
+  parseIosSimulatorViewerDiagnostics,
 } from '@/lib/ios-simulator/ios-simulator-model';
 import {
   IOS_SIMULATOR_CAPTURE_TIMEOUT_MS,
@@ -29,7 +30,10 @@ import type {
   IosSimulatorHardwareButton,
   IosSimulatorQuarterTurns,
 } from '@/lib/ios-simulator/ios-simulator-hardware';
-import type { IosSimulatorViewerState } from '@/lib/ios-simulator/ios-simulator-types';
+import type {
+  IosSimulatorViewerState,
+  IosSimulatorViewerDiagnostics,
+} from '@/lib/ios-simulator/ios-simulator-types';
 import { IosSimulatorDeviceFrame } from './ios-simulator-device-frame';
 
 const styles = stylex.create({
@@ -64,7 +68,10 @@ export type IosSimulatorViewerProps = {
   rotateWithDevice?: boolean;
   /** The panel is on screen. Combined with the document's own visibility. */
   visible: boolean;
-  onStateChange: (state: IosSimulatorViewerState) => void;
+  onStateChange: (
+    state: IosSimulatorViewerState,
+    diagnostics?: IosSimulatorViewerDiagnostics | null
+  ) => void;
   /** The stream's shape changed, e.g. after the device turned. */
   onRotationChange?: (turns: IosSimulatorQuarterTurns) => void;
   onFullscreenChange?: (fullscreen: boolean) => void;
@@ -193,7 +200,7 @@ export const IosSimulatorViewer = forwardRef<IosSimulatorViewerHandle, IosSimula
             );
           }
         }
-        onStateChangeRef.current(state);
+        onStateChangeRef.current(state, parseIosSimulatorViewerDiagnostics(event.data));
       };
       receivePort.current = receive;
       const receiveWindow = (event: MessageEvent) => {

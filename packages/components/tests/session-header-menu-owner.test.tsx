@@ -94,9 +94,9 @@ describe('SessionHeaderMenu owner transfer', () => {
 
   /** Rows read "<avatar initials><name>", so match by substring, not equality. */
   function ownerRow(name: string): HTMLElement {
-    const row = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-      (item) => item.textContent?.includes(name)
-    );
+    const row = Array.from(
+      document.querySelectorAll<HTMLElement>('[role^="menuitem"]')
+    ).find((item) => item.textContent?.includes(name));
     expect(row, `owner row for ${name}`).toBeDefined();
     return row!;
   }

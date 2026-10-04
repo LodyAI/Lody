@@ -297,7 +297,7 @@ export function DesktopMachineMenu({
             key={option.value}
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
-            icon={<Monitor {...stylex.props(surface.glyph16)} aria-hidden="true" />}
+            icon={Monitor}
             endContent={
               option.value === value ? (
                 <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />
@@ -331,10 +331,7 @@ export function DesktopMachineMenu({
         {onAddMachine ? (
           <>
             {options.length > 0 ? <Menu.Separator /> : null}
-            <Menu.Item
-              onClick={onAddMachine}
-              icon={<Plus {...stylex.props(surface.glyph16)} aria-hidden="true" />}
-            >
+            <Menu.Item onClick={onAddMachine} icon={Plus}>
               {t('machinePairing.addMachine', 'Add machine')}
             </Menu.Item>
           </>

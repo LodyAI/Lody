@@ -15,7 +15,7 @@ product windows consume indexed, windowed projections through IPC. This removes
 repeated document import while retaining writer validation and acknowledging writes
 only after document persistence. Bounding outline/message rendering and handing
 entry data to the route then reduced a strict no-hover, 3,000-entry comparison from
-367/422 ms to 227/287 ms show/input medians (ten samples per build). This remains
+323/382 ms to 232/287 ms show/input medians (ten samples per build). This remains
 above a sub-100 ms target. The dedicated renderer and prepared view have explicit
 memory and first-open costs in the evaluation.
 
@@ -86,9 +86,10 @@ the shipped response follows the actual entry viewport plus bounded user context
 The directory, React provider/composer mount and native show still have costs. A
 sub-100 ms direct-open target remains unachieved; pre-rendered hits are not evidence
 for that target. The [direct-click evaluation](../../../../packages/components/benchmarks/window-bootstrap/README.md#direct-click-without-hover--2026-10-04)
-records matched builds, all samples and the remaining limits. All 48 latency
-content/input checks pass, including 15 excluded warmups. The final eight-stage
-resident probe adds 210–226 MiB for one prepared view and returns to 4.61 MiB above
+records matched builds, all samples and the remaining limits. All 74 latency
+content/input checks pass, including 21 excluded warmups; the primary pair preserves
+main `8872177b6` in both builds. The main-integrated eight-stage
+resident probe adds 230–237 MiB for one prepared view and returns to 10.11 MiB above
 source-only footprint after closing five auxiliaries; no auxiliary renderer remains.
 This single run retains the existing 250–300 MiB planning budget, without claiming
 a matched memory improvement or coverage of distinct-session cache retention.
@@ -152,9 +153,9 @@ The current six focused suites passed 75 tests, including 12 owner/client cases;
 Electron passed 199 tests. New cases cover lazy row construction, outline keyboard
 navigation/preview retention, sidebar state, entry-tail readiness and target handoff
 timeouts/generation fencing. Type checks, production build, lint, i18n and platform/public/import
-boundaries passed. The broader `pnpm check` reached 4,783 passing components tests
+boundaries passed. The broader `pnpm check` reached 4,784 passing components tests
 with one failure in unchanged `boot-shell.test.tsx` (storage-unavailable fallback);
-that case also fails alone in the Node 26 environment. CLI's 3,454 and shared's 1,271
+that case also fails alone in the Node 26 environment. CLI's 3,474 and shared's 1,271
 tests passed. Documentation validation has six existing broken links into absent
 isolated Kimi/Pi submodules in the evaluation clone (62 absent-submodule links in
 the dependency-free checkout), with no new-document link failures.

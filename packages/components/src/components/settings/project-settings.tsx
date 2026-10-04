@@ -1513,10 +1513,7 @@ function ProjectAddMenu({
       </Menu.Trigger>
       <Menu.Content align="end">
         {onAddLocalProject ? (
-          <Menu.Item
-            icon={<FolderPlus {...stylex.props(styles.glyph)} />}
-            onClick={() => onAddLocalProject()}
-          >
+          <Menu.Item icon={FolderPlus} onClick={() => onAddLocalProject()}>
             <span {...stylex.props(styles.menuText)}>
               <span>{t('chat.contextSwitch.addProject', 'Add a folder')}</span>
               <span {...stylex.props(styles.menuHint)}>
@@ -1529,10 +1526,7 @@ function ProjectAddMenu({
           </Menu.Item>
         ) : null}
         {onAddGitHubProject ? (
-          <Menu.Item
-            icon={<Github {...stylex.props(styles.glyph)} />}
-            onClick={() => onAddGitHubProject()}
-          >
+          <Menu.Item icon={Github} onClick={() => onAddGitHubProject()}>
             <span {...stylex.props(styles.menuText)}>
               <span>{t('chat.contextSwitch.addGitHubRepo', 'Add a GitHub repository')}</span>
               <span {...stylex.props(styles.menuHint)}>

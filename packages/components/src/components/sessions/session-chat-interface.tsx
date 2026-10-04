@@ -35,7 +35,6 @@ import {
   ArrowUp,
   Archive,
   ArchiveRestore,
-  Check,
   ChevronDown,
   Copy,
   CornerLeftUp,
@@ -1037,20 +1036,15 @@ export function SessionHeaderMenu({
               }
             }}
             title={openedBySession.title}
+            icon={CornerLeftUp}
           >
-            <CornerLeftUp className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">
-              {t('sessions.openedBy.openOpener', 'Opened by')}: {openedBySession.title}
-            </span>
+            {t('sessions.openedBy.openOpener', 'Opened by')}: {openedBySession.title}
           </Menu.Item>
         ) : null}
         {openedSessions.length > 0 ? (
           <Menu.Submenu>
-            <Menu.SubmenuTrigger>
-              <GitBranchPlus className="h-3.5 w-3.5 shrink-0" />
-              <span className="min-w-0 flex-1 truncate">
-                {t('sessions.openedBy.openedSessions', 'Opened sessions')} ({openedSessions.length})
-              </span>
+            <Menu.SubmenuTrigger icon={GitBranchPlus}>
+              {t('sessions.openedBy.openedSessions', 'Opened sessions')} ({openedSessions.length})
             </Menu.SubmenuTrigger>
             <Menu.Content className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
               {openedSessions.map((opened) => (
@@ -1061,7 +1055,7 @@ export function SessionHeaderMenu({
                   }}
                   title={opened.title}
                 >
-                  <span className="min-w-0 flex-1 truncate">{opened.title}</span>
+                  {opened.title}
                 </Menu.Item>
               ))}
             </Menu.Content>
@@ -1079,32 +1073,40 @@ export function SessionHeaderMenu({
     });
     if (openInIde.options.length === 1) {
       return (
-        <Menu.Item onClick={openInIde.onOpen}>
-          <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
+        <Menu.Item icon={SelectedIcon} onClick={openInIde.onOpen}>
           {openLabel}
         </Menu.Item>
       );
     }
     return (
       <Menu.Submenu>
-        <Menu.SubmenuTrigger>
-          <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">{openLabel}</span>
-        </Menu.SubmenuTrigger>
+        <Menu.SubmenuTrigger icon={SelectedIcon}>{openLabel}</Menu.SubmenuTrigger>
         <Menu.Content>
-          {openInIde.options.map((launcher) => {
-            const launcherId = getPathLauncherId(launcher);
-            const LauncherIcon = getPathLauncherIcon(launcher);
-            return (
-              <Menu.Item key={launcherId} onClick={() => openInIde.onSelect(launcher)}>
-                <LauncherIcon className="h-3.5 w-3.5 shrink-0" />
-                {launcher.label}
-                {launcherId === getPathLauncherId(openInIde.selected) ? (
-                  <Check className="ml-auto h-3.5 w-3.5 shrink-0" />
-                ) : null}
-              </Menu.Item>
-            );
-          })}
+          <Menu.RadioGroup
+            value={getPathLauncherId(openInIde.selected)}
+            onValueChange={(launcherId) => {
+              const target = openInIde.options.find(
+                (option) => getPathLauncherId(option) === launcherId
+              );
+              if (target) openInIde.onSelect(target);
+            }}
+          >
+            {openInIde.options.map((launcher) => {
+              const launcherId = getPathLauncherId(launcher);
+              const LauncherIcon = getPathLauncherIcon(launcher);
+              return (
+                <Menu.RadioItem
+                  key={launcherId}
+                  value={launcherId}
+                  icon={LauncherIcon}
+                  indicator="check"
+                  indicatorSide="end"
+                >
+                  {launcher.label}
+                </Menu.RadioItem>
+              );
+            })}
+          </Menu.RadioGroup>
         </Menu.Content>
       </Menu.Submenu>
     );
@@ -1167,10 +1169,10 @@ export function SessionHeaderMenu({
                   }
                   title={repoFullName}
                   aria-label={`${t('sessions.copyRepository', 'Copy repository')}: ${repoFullName}`}
+                  icon={Github}
+                  endContent={<Copy className="h-3 w-3 text-muted-foreground" />}
                 >
-                  <Github className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{repoFullName}</span>
-                  <Copy className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
+                  {repoFullName}
                 </Menu.Item>
               ) : null}
 
@@ -1201,8 +1203,9 @@ export function SessionHeaderMenu({
                       ? t('sessions.copyCurrentBranch', 'Copy current branch')
                       : t('sessions.copyBaseBranch', 'Copy base branch')
                   }: ${branchDisplayValue}`}
+                  icon={GitBranch}
+                  endContent={<Copy className="h-3 w-3 text-muted-foreground" />}
                 >
-                  <GitBranch className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{branchDisplayValue}</span>
                     {showBaseBranchContext ? (
@@ -1211,7 +1214,6 @@ export function SessionHeaderMenu({
                       </span>
                     ) : null}
                   </span>
-                  <Copy className="ml-auto mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                 </Menu.Item>
               ) : showProjectPath ? (
                 <Menu.Item
@@ -1223,10 +1225,10 @@ export function SessionHeaderMenu({
                   }
                   title={localPath}
                   aria-label={`${t('sessions.copyProjectPath', 'Copy project path')}: ${localPath}`}
+                  icon={Folder}
+                  endContent={<Copy className="h-3 w-3 text-muted-foreground" />}
                 >
-                  <Folder className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{localPath}</span>
-                  <Copy className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
+                  {localPath}
                 </Menu.Item>
               ) : null}
 
@@ -1279,16 +1281,21 @@ export function SessionHeaderMenu({
               own display option, right after identity, like Notion's page
               controls. A trailing Switch, not a checkmark; the row stays open
               so the flip is visible. */}
-          <Menu.Item closeOnClick={false} onClick={() => setConversationWide(!conversationWide)}>
-            <MoveHorizontal className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">{t('sessions.fullWidth', 'Full width')}</span>
-            <Switch
-              checked={conversationWide}
-              onCheckedChange={(checked) => setConversationWide(checked === true)}
-              onClick={(event) => event.stopPropagation()}
-              aria-label={t('sessions.fullWidth', 'Full width')}
-              className="ml-auto shrink-0"
-            />
+          <Menu.Item
+            closeOnClick={false}
+            onClick={() => setConversationWide(!conversationWide)}
+            icon={MoveHorizontal}
+            endContent={
+              <Switch
+                checked={conversationWide}
+                onCheckedChange={(checked) => setConversationWide(checked === true)}
+                onClick={(event) => event.stopPropagation()}
+                aria-label={t('sessions.fullWidth', 'Full width')}
+                className="shrink-0"
+              />
+            }
+          >
+            {t('sessions.fullWidth', 'Full width')}
           </Menu.Item>
 
           {openedByRelationRows}
@@ -1296,34 +1303,28 @@ export function SessionHeaderMenu({
           {openInIdeMenu}
 
           {onOpenPublicShare && (
-            <Menu.Item onClick={onOpenPublicShare}>
-              <Share2 className="h-3.5 w-3.5 shrink-0" />
+            <Menu.Item icon={Share2} onClick={onOpenPublicShare}>
               {t('sharing.manager.title', 'Share')}
             </Menu.Item>
           )}
 
           {onOpenSearch && (
             <Menu.Item
+              icon={Search}
               onClick={() => {
                 void onOpenSearch();
               }}
             >
-              <Search className="h-3.5 w-3.5 shrink-0" />
               {t('sessions.findInConversation', 'Find in session')}
             </Menu.Item>
           )}
 
           {onFork || onCopyConversationHistory ? (
             <Menu.Submenu>
-              <Menu.SubmenuTrigger>
-                {isForking ? (
-                  <Spinner className="h-3.5 w-3.5 shrink-0" />
-                ) : (
-                  <GitFork className="h-3.5 w-3.5 shrink-0" />
-                )}
-                <span className="min-w-0 flex-1 truncate">
-                  {t('sessions.forkSession', 'Fork session')}
-                </span>
+              <Menu.SubmenuTrigger
+                icon={isForking ? <Spinner size="small" label={null} /> : GitFork}
+              >
+                {t('sessions.forkSession', 'Fork session')}
               </Menu.SubmenuTrigger>
               <Menu.Content className="min-w-[13rem]">
                 {onFork &&
@@ -1337,18 +1338,22 @@ export function SessionHeaderMenu({
                         onClick={() => {
                           void onFork(option.id);
                         }}
+                        icon={
+                          option.id === 'new-worktree' ? (
+                            <WorktreeIcon className="h-full w-full" />
+                          ) : (
+                            <Folder size="100%" />
+                          )
+                        }
+                        endContent={
+                          option.status ? (
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {option.status}
+                            </span>
+                          ) : undefined
+                        }
                       >
-                        {option.id === 'new-worktree' ? (
-                          <WorktreeIcon className="h-3.5 w-3.5 shrink-0" />
-                        ) : (
-                          <Folder className="h-3.5 w-3.5 shrink-0" />
-                        )}
-                        <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                        {option.status ? (
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {option.status}
-                          </span>
-                        ) : null}
+                        {option.label}
                       </Menu.Item>
                     );
                     // The submenu usually opens toward the conversation, so the
@@ -1367,11 +1372,11 @@ export function SessionHeaderMenu({
                   })}
                 {onCopyConversationHistory && (
                   <Menu.Item
+                    icon={Copy}
                     onClick={() => {
                       void onCopyConversationHistory();
                     }}
                   >
-                    <Copy className="h-3.5 w-3.5" />
                     {t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
                   </Menu.Item>
                 )}
@@ -1381,53 +1386,54 @@ export function SessionHeaderMenu({
 
           {onRename && !isArchived && (
             <Menu.Item
+              icon={Pencil}
               onClick={() => {
                 void onRename();
               }}
             >
-              <Pencil className="h-3.5 w-3.5 shrink-0" />
               {t('sidebar.renameChat.title', 'Rename Chat')}
             </Menu.Item>
           )}
 
           {owner && !isArchived ? (
             <Menu.Submenu>
-              <Menu.SubmenuTrigger>
-                <UserRoundCog className="h-3.5 w-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">
-                  {t('sessions.owner.change', 'Change owner')}
-                </span>
+              <Menu.SubmenuTrigger icon={UserRoundCog}>
+                {t('sessions.owner.change', 'Change owner')}
               </Menu.SubmenuTrigger>
               <Menu.Content className="max-h-72 min-w-[200px] max-w-[280px] overflow-y-auto">
-                {owner.members.map((member) => {
-                  const isOwner = member.userId === owner.ownerUserId;
-                  const isPending = owner.pendingUserId === member.userId;
-                  return (
-                    <Menu.Item
-                      key={member.userId}
-                      disabled={owner.pendingUserId != null}
-                      onClick={() => {
-                        // Guard in the handler, not just via `disabled`: the
-                        // menu stays mounted while the write is in flight.
-                        if (isOwner || owner.pendingUserId != null) return;
-                        void owner.onChangeOwner(member.userId);
-                      }}
-                      title={member.email ?? member.name}
-                    >
-                      <UserAvatar
-                        user={{ id: member.userId, name: member.name, image: member.image }}
-                        size="mini"
-                        className="shrink-0"
-                      />
-                      <span className="min-w-0 flex-1 truncate">{member.name}</span>
-                      {isPending ? (
-                        <Spinner className="ml-auto h-3.5 w-3.5 shrink-0" />
-                      ) : isOwner ? (
-                        <Check className="ml-auto h-3.5 w-3.5 shrink-0" />
-                      ) : null}
-                    </Menu.Item>
-                  );
-                })}
+                <Menu.RadioGroup
+                  value={owner.ownerUserId}
+                  onValueChange={(userId) => {
+                    // Guard in the handler, not just via `disabled`: the
+                    // menu stays mounted while the write is in flight.
+                    if (userId === owner.ownerUserId || owner.pendingUserId != null) return;
+                    void owner.onChangeOwner(userId);
+                  }}
+                >
+                  {owner.members.map((member) => {
+                    const isPending = owner.pendingUserId === member.userId;
+                    return (
+                      <Menu.RadioItem
+                        key={member.userId}
+                        value={member.userId}
+                        disabled={owner.pendingUserId != null}
+                        title={member.email ?? member.name}
+                        indicator="check"
+                        indicatorSide="end"
+                        endContent={
+                          isPending ? <Spinner className="h-3.5 w-3.5 shrink-0" /> : undefined
+                        }
+                      >
+                        <UserAvatar
+                          user={{ id: member.userId, name: member.name, image: member.image }}
+                          size="mini"
+                          className="shrink-0"
+                        />
+                        {member.name}
+                      </Menu.RadioItem>
+                    );
+                  })}
+                </Menu.RadioGroup>
               </Menu.Content>
             </Menu.Submenu>
           ) : null}
@@ -1441,16 +1447,18 @@ export function SessionHeaderMenu({
               onClick={() => {
                 void onShareWithTeam?.();
               }}
+              icon={
+                sharing.visibility === 'unknown' ? (
+                  <Spinner size="small" label={null} />
+                ) : sharing.privateReason === 'machine-not-registered' ? (
+                  <Monitor size="100%" />
+                ) : sharing.canManage ? (
+                  Users
+                ) : (
+                  LockKeyhole
+                )
+              }
             >
-              {sharing.visibility === 'unknown' ? (
-                <Spinner className="h-3.5 w-3.5 shrink-0" />
-              ) : sharing.privateReason === 'machine-not-registered' ? (
-                <Monitor className="h-3.5 w-3.5 shrink-0" />
-              ) : sharing.canManage ? (
-                <Users className="h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
-              )}
               {sharing.visibility === 'unknown'
                 ? t('sessions.sharing.loadingAction', 'Checking sharing…')
                 : sharing.privateReason === 'machine-not-registered'
@@ -1465,10 +1473,7 @@ export function SessionHeaderMenu({
           ) : null}
 
           <Menu.Submenu>
-            <Menu.SubmenuTrigger>
-              <Copy className="h-3.5 w-3.5 shrink-0" />
-              {t('sessions.copy', 'Copy')}
-            </Menu.SubmenuTrigger>
+            <Menu.SubmenuTrigger icon={Copy}>{t('sessions.copy', 'Copy')}</Menu.SubmenuTrigger>
             <Menu.Content className="min-w-[200px]">
               {showBaseBranchContext ? (
                 <>
@@ -1480,8 +1485,8 @@ export function SessionHeaderMenu({
                       )
                     }
                     title={baseBranch}
+                    icon={GitBranch}
                   >
-                    <GitBranch className="h-3.5 w-3.5 shrink-0" />
                     {t('sessions.copyBaseBranch', 'Copy base branch')}
                   </Menu.Item>
                   <Menu.Separator />
@@ -1499,8 +1504,8 @@ export function SessionHeaderMenu({
                   trimmedWorkspacePath ||
                   t('sessions.copyPathUnavailable', 'Workspace path unavailable')
                 }
+                icon={Copy}
               >
-                <Copy className="h-3.5 w-3.5 shrink-0" />
                 {t('sessions.copyPath', 'Copy path')}
               </Menu.Item>
               <Menu.Item
@@ -1516,16 +1521,16 @@ export function SessionHeaderMenu({
                         'Conversation history is unavailable for this tab'
                       )
                 }
+                icon={Copy}
               >
-                <Copy className="h-3.5 w-3.5 shrink-0" />
                 {t('sessions.copyAsMarkdown', 'Copy as Markdown')}
               </Menu.Item>
               <Menu.Item
                 onClick={() => {
                   void onCopyUrl();
                 }}
+                icon={Copy}
               >
-                <Copy className="h-3.5 w-3.5 shrink-0" />
                 {t('sessions.copyUrl', 'Copy URL')}
               </Menu.Item>
             </Menu.Content>
@@ -1536,8 +1541,8 @@ export function SessionHeaderMenu({
             onClick={() => {
               onShareAsImage?.();
             }}
+            icon={Image}
           >
-            <Image className="h-3.5 w-3.5 shrink-0" />
             {t('sessions.shareAsImage', 'Share as image…')}
           </Menu.Item>
 
@@ -1557,19 +1562,19 @@ export function SessionHeaderMenu({
                       onClick={() => {
                         void onRestore();
                       }}
+                      icon={ArchiveRestore}
                     >
-                      <ArchiveRestore className="h-3.5 w-3.5 shrink-0" />
                       {t('archive.restore', 'Restore session')}
                     </Menu.Item>
                   )}
                   {onDelete && (
                     <Menu.Item
+                      tone="destructive"
                       onClick={() => {
                         void onDelete();
                       }}
-                      className="text-destructive focus:text-destructive"
+                      icon={Trash2}
                     >
-                      <Trash2 className="h-3.5 w-3.5 shrink-0" />
                       {t('archive.delete', 'Delete permanently')}
                     </Menu.Item>
                   )}
@@ -1582,8 +1587,8 @@ export function SessionHeaderMenu({
                     onClick={() => {
                       void onArchive();
                     }}
+                    icon={Archive}
                   >
-                    <Archive className="h-3.5 w-3.5 shrink-0" />
                     {t('sessions.archive', 'Archive session')}
                   </Menu.Item>
                 </>
@@ -6014,28 +6019,36 @@ export const SessionChatInterface = memo(
                 }
               />
               <Menu.Content align="end">
-                {pathLauncherOptions.map((launcher) => {
-                  const launcherId = getPathLauncherId(launcher);
-                  const LauncherIcon = getPathLauncherIcon(launcher);
-                  return (
-                    <Menu.Item
-                      key={launcherId}
-                      onClick={() => {
-                        void handleSelectPathLauncher(launcher);
-                      }}
-                    >
-                      <LauncherIcon className="h-3.5 w-3.5" />
-                      {launcher.label}
-                      {launcherId === getPathLauncherId(selectedPathLauncher) && (
-                        <Check className="ml-auto h-3.5 w-3.5" />
-                      )}
-                    </Menu.Item>
-                  );
-                })}
+                <Menu.RadioGroup
+                  value={getPathLauncherId(selectedPathLauncher)}
+                  onValueChange={(launcherId) => {
+                    const target = pathLauncherOptions.find(
+                      (option) => getPathLauncherId(option) === launcherId
+                    );
+                    if (target) void handleSelectPathLauncher(target);
+                  }}
+                >
+                  {pathLauncherOptions.map((launcher) => {
+                    const launcherId = getPathLauncherId(launcher);
+                    const LauncherIcon = getPathLauncherIcon(launcher);
+                    return (
+                      <Menu.RadioItem
+                        key={launcherId}
+                        value={launcherId}
+                        icon={LauncherIcon}
+                        indicator="check"
+                        indicatorSide="end"
+                      >
+                        {launcher.label}
+                      </Menu.RadioItem>
+                    );
+                  })}
+                </Menu.RadioGroup>
                 <Menu.Separator />
                 {ACTION_OPTIONS.map((action) => (
                   <Menu.Item
                     key={action.id}
+                    icon={action.Icon}
                     onClick={
                       action.id === 'copy-path'
                         ? () => {
@@ -6044,13 +6057,11 @@ export const SessionChatInterface = memo(
                         : undefined
                     }
                   >
-                    <action.Icon className="h-3.5 w-3.5" />
                     {t('sessions.copyPath', action.label)}
                   </Menu.Item>
                 ))}
                 {isElectronRendererForPathLaunch && (
-                  <Menu.Item onClick={handleOpenPathLauncherSettings}>
-                    <Plus className="h-3.5 w-3.5" />
+                  <Menu.Item icon={Plus} onClick={handleOpenPathLauncherSettings}>
                     {t('sessions.managePathLaunchers', 'Add more…')}
                   </Menu.Item>
                 )}

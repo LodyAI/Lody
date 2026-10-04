@@ -52,20 +52,26 @@ and presentation ordering; it does not validate the full Lody React interface.
 ## Direct click without hover — 2026-10-04
 
 [Recorded samples, stages and hashes](results-direct-click-2026-10-04.json) compare
-PR head `fc6e52e9e` with bounded rendering/data handoff, keeping shared Session
-ownership enabled in both builds. The same M4 Max, Electron 43.7.6, dependency tree,
+bounded rendering/data handoff with the preceding implementation, keeping shared
+Session ownership enabled in both builds. The primary pair includes main
+`8872177b6` in both builds: the baseline restores the product delta to `fc6e52e9e`,
+except `view.tsx` comes from main to preserve its new StyleX/rhythm behavior.
+The artifact records this construction and also retains the earlier pre-merge pairs. The same M4 Max, Electron 43.7.6, dependency tree,
 bundled CLI and probe are used. The long pair runs after then before; the short pair
 runs before then after, with fresh isolated profiles and no concurrent tests/builds.
 CPU profiling and the native animation override are disabled. Three warmups per run
 are retained in the artifact but excluded from the medians.
 
-| Synthetic entries | Samples per build | Before / after show median | Before / after input confirmation median |
+| Synthetic entries / build context | Samples per build | Before / after show median | Before / after input confirmation median |
 | --- | --- | --- | --- |
-| 3,000 | 10 | 367.29 / 227.02 ms | 422.08 / 286.59 ms |
-| 100 | 5 | 238.24 / 201.83 ms | 280.59 / 258.32 ms |
+| 3,000, main `8872177b6` included | 10 | 323.28 / 232.39 ms | 381.61 / 286.60 ms |
+| 3,000, before main merge | 10 | 367.29 / 227.02 ms | 422.08 / 286.59 ms |
+| 100, before main merge | 5 | 238.24 / 201.83 ms | 280.59 / 258.32 ms |
 
-For the long fixture, show improves 38.2% and input confirmation 32.1%. Final show
-ranges 220.89–247.66 ms; input ranges 266.41–319.78 ms. These results remain perceptible
+For the primary long pair, show improves 28.1% and input confirmation 24.9%. Show
+ranges 219.63–238.16 ms; input ranges 275.46–304.92 ms. The earlier pair improved
+38.2% / 32.1%; upstream rendering changes alter the baseline, so those percentages
+must not be applied to the merged version. These results remain perceptible
 and do **not** meet a sub-100 ms direct-opening target. The short fixture's smaller
 15.3% show improvement also demonstrates the remaining per-window mount cost.
 
@@ -85,17 +91,17 @@ conversation window mounts its collapsed sidebar on first expansion, then retain
 its state. Content hydration, initial scroll restoration and the two-frame native
 reveal gate remain required. The warm pool is still one runtime-only opt-in slot.
 
-In the final long run, the target renderer's DOM readiness median is 156.40 ms
-after target receipt; main receives content readiness at 187.89 ms after click,
-then native show occurs at 227.02 ms. Stage medians are diagnostic and must not be
+In the final long run, the target renderer's DOM readiness median is 153.45 ms
+after target receipt; main receives content readiness at 184.77 ms after click,
+then native show occurs at 232.39 ms. Stage medians are diagnostic and must not be
 summed as if they came from one sample. Sharing document ownership alone cannot
 remove the remaining provider/composer rendering, layout and presentation work.
 
-A separate zero-lead retarget regression deliberately prepares a neighboring
+A separate pre-merge zero-lead retarget regression deliberately prepares a neighboring
 Session, then requests the clicked target in the same renderer: 157.55 ms show /
 212.71 ms input medians (three samples), 0/3 ready hits. The previous target's
-readiness never authorizes showing the next one. Across the four paired runs and
-this retarget run, all 48 first-show/content/input checks pass (15 discarded
+readiness never authorizes showing the next one. Across both main-integrated runs, the four earlier paired runs and
+this retarget run, all 74 first-show/content/input checks pass (21 discarded
 warmups), with no native unload confirmation. A [first-show capture](app-direct-click-first-show.png)
 was visually checked. Input uses a unique inserted token retained after a frame;
 it includes focus/verification IPC and excludes physical keyboard input, IME and
@@ -110,14 +116,14 @@ PROBE_DIRECT_CLICK=1 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 
 PROBE_PRODUCT_PREPARED=1 PROBE_RETARGET=1 PROBE_INTENT_LEAD_MS=0 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 3 retarget 1500
 ```
 
-The final eight-stage resident probe completed 33 OS samples without forced GC or
-close confirmations. Electron physical footprint was 749.26 MiB source-only at
-45 seconds, 959.45 MiB with one prepared view at 45 seconds, and 733.48 MiB after
+The final main-integrated eight-stage resident probe completed 33 OS samples without forced GC or
+close confirmations. Electron physical footprint was 752.91 MiB source-only at
+45 seconds, 983.04 MiB with one prepared view at 45 seconds, and 745.79 MiB after
 destroying preparation at ten seconds. The prepared view therefore adds about
-210–226 MiB against those source-only observations; its renderer uses 191.31 MiB.
-After five auxiliaries close, the total is 753.87 MiB at 30 seconds, with no remaining
+230–237 MiB against those source-only observations; its renderer uses 205.58 MiB.
+After five auxiliaries close, the total is 763.02 MiB at 30 seconds, with no remaining
 auxiliary renderer. The existing 250–300 MiB planning budget remains appropriate
-for this fixture, not an enforced byte cap. This is one final-build run, not a new
+for this fixture, not an enforced byte cap. This is one main-integrated build run, not a new
 matched memory A/B or an hours-long leak test. All windows use the same Session,
 external CLI/daemon memory is excluded, and distinct-session cache retention remains
 unmeasured. Samples and accounting are in the same result artifact.

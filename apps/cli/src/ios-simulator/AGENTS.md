@@ -11,9 +11,10 @@
 - `devices.ts` owns simctl listing/boot; `host-controls.ts` owns fixed device controls.
   Validate foreign JSON and UDIDs; invoke argv directly. Listing never downloads a runtime, starts devices or opens a tunnel.
 - `gateway.ts` exposes only the fixed viewer, bound device stream and typed private
-  control endpoint. It is behind the authenticated preview proxy; never forward arbitrary Baguette routes or
-  messages. Validate every input and active lease. Frames/status probes do not renew
+  control endpoint. It is behind the authenticated preview proxy; never forward arbitrary Baguette requests. Validate every input and active lease. Frames/status probes do not renew
   idle expiry; only explicit viewer heartbeat or valid input does.
+- WS/RTC share validation and teardown; never replay input. Local viewers stay offline.
+  Lift single before dual; release both together. Keep ICE credentials ephemeral.
 - `guest-buttons.ts` owns the preview-local Home/App Switcher/Lock helper. Compile only
   bundled source with the installed simulator SDK into a private temporary directory;
   bind one guest service to the device; acknowledge releases, never replay uncertain

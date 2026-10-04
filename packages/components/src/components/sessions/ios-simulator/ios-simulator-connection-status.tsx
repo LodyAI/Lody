@@ -28,6 +28,7 @@ export type IosSimulatorConnectionStatusProps = {
   onCancel?: () => void;
   onStop?: () => void;
   onCopyDiagnostics: () => void;
+  hasError?: boolean;
 };
 
 type StatusKind = 'idle' | 'preparing' | 'direct' | 'remote' | 'interrupted' | 'failed';
@@ -94,7 +95,7 @@ function StatusGlyph({ kind }: { kind: StatusKind }) {
 /**
  * The toolbar's second control: how this Session's preview is connected, and
  * the only place to stop it. It never shows an address — a remote viewer rides
- * a private tunnel — and stopping never shuts the simulator down.
+ * an authenticated connection — and stopping never shuts the simulator down.
  */
 export function IosSimulatorConnectionStatus({
   status,
@@ -106,6 +107,7 @@ export function IosSimulatorConnectionStatus({
   onCancel,
   onStop,
   onCopyDiagnostics,
+  hasError = false,
 }: IosSimulatorConnectionStatusProps) {
   const { t } = useTranslation();
   const stageLabel = useIosSimulatorStageLabel();
@@ -143,12 +145,12 @@ export function IosSimulatorConnectionStatus({
     kind === 'direct'
       ? t(
           'sessions.iosSimulator.connection.directDetail',
-          'Streamed straight from this Mac. It works without a network connection.'
+          'Previewing on this Mac. No internet connection needed.'
         )
       : kind === 'remote'
         ? t(
             'sessions.iosSimulator.connection.remoteDetail',
-            'Streamed from the session’s Mac over a private connection that is never shared.'
+            'View and control the simulator on your session’s Mac.'
           )
         : kind === 'preparing'
           ? t(
@@ -170,6 +172,15 @@ export function IosSimulatorConnectionStatus({
                   'Choose a simulator and start a preview.'
                 );
 
+  const showDiagnostics =
+    hasError ||
+    kind === 'failed' ||
+    (status.phase === 'ready' && (viewerState === 'error' || viewerState === 'disconnected'));
+  const hasActions =
+    showDiagnostics ||
+    (kind === 'preparing' && Boolean(onCancel)) ||
+    (status.phase === 'ready' && Boolean(onStop)) ||
+    (kind === 'interrupted' && Boolean(onRestore));
   const showFacts = kind === 'direct' || kind === 'remote' || kind === 'interrupted';
   const accessibleName = t(
     'sessions.iosSimulator.connection.statusLabel',
@@ -218,14 +229,16 @@ export function IosSimulatorConnectionStatus({
               </li>
             </ul>
           ) : null}
-          <Separator />
+          {hasActions ? <Separator /> : null}
           <div {...stylex.props(styles.actions)}>
-            <span {...stylex.props(styles.copy)}>
-              <Button type="button" variant="ghost" size="mini" onClick={onCopyDiagnostics}>
-                <Copy size={12} aria-hidden />
-                {t('sessions.iosSimulator.connection.copyDiagnostics', 'Copy diagnostics')}
-              </Button>
-            </span>
+            {showDiagnostics ? (
+              <span {...stylex.props(styles.copy)}>
+                <Button type="button" variant="ghost" size="mini" onClick={onCopyDiagnostics}>
+                  <Copy size={12} aria-hidden />
+                  {t('sessions.iosSimulator.connection.copyDiagnostics', 'Copy diagnostics')}
+                </Button>
+              </span>
+            ) : null}
             {kind === 'preparing' && onCancel ? (
               <Button
                 type="button"

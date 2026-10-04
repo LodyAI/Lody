@@ -43,10 +43,10 @@ Base UI + StyleX primitives; compile with `@stylexjs/unplugin` and `stylex-optio
 - `Menu`, `ContextMenu` and `Menubar` share `src/popup/surface.ts` rows.
   Menu labels use weight 400; group headings retain emphasis. Menus use their
   own width floor rather than `--anchor-width`.
-- Whatever holds a glyph gives it a box, because this package's glyphs state
-  100% and StyleX has no descendant selector: a menu row's, a badge's, an
-  avatar's, an icon-only `Button`'s. A caller's icon states 100% too; a
-  checkbox row's box holds its mark only.
+- Whatever holds a glyph gives it a box — StyleX has no descendant selector:
+  a menu row's, a badge's, an avatar's, an icon-only `Button`'s. A menu `icon`
+  takes the component — the box mounts it at 100%; the element form keeps a
+  stated size for glyphs carrying props. Other boxes' glyphs state 100%.
 - Triggers use Base UI `render` for an existing element. Only default context-menu
   wrappers use `display: contents`; rendered triggers keep their box. A nested
   menu root goes inside the outer item's `render`. Product owns `finalFocus`.
