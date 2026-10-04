@@ -197,6 +197,16 @@ it('uses machine pills outside the settings pane and line tabs inside it', async
   mocks.inPane = true;
   await renderSetting();
   expect(container.querySelector('[role="tablist"]')).not.toBeNull();
+  expect(
+    [...container.querySelectorAll('button')].some(
+      (button) => button.textContent?.trim() === 'Refresh'
+    )
+  ).toBe(false);
+  expect(
+    [...container.querySelectorAll('button')].some(
+      (button) => button.textContent?.trim() === 'Create memory'
+    )
+  ).toBe(false);
 });
 
 it('shows the same in-page missing-install copy in the Role picker', async () => {

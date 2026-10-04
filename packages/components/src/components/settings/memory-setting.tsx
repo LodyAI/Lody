@@ -40,17 +40,11 @@ import { withClassName } from '@/lib/stylex';
 import { openExternalUrl } from '@/lib/native-browser';
 import { MachinePills } from './machine-pills';
 import { Field, FormMessage, Section } from './form-primitives';
-import {
-  SettingsPageActions,
-  SettingsPageLead,
-  useInSettingsPane,
-  useSettingsPane,
-} from './settings-page-header';
+import { SettingsPageLead, useInSettingsPane, useSettingsPane } from './settings-page-header';
 import { SettingsLineTabs } from './settings-line-tabs';
 
 const styles = stylex.create({
   page: { display: 'flex', flexDirection: 'column', gap: space[4], width: '100%', minWidth: 0 },
-  addGlyph: { width: '14px', height: '14px' },
 });
 
 type Provider = (typeof MEMORY_PROVIDERS)[number];
@@ -233,7 +227,6 @@ function MemoryProviderSection({
 }) {
   const { t } = useTranslation();
   const settingsPane = useSettingsPane();
-  const inSettingsPane = useInSettingsPane();
   const online = useMachineOnlineStatus(machineId) === 'online';
   const { result, busy, refresh, create } = useMemoryProvider(
     machineId,
@@ -242,10 +235,8 @@ function MemoryProviderSection({
   );
   const [open, setOpen] = useState(false);
   const { shown, onOpenChangeComplete } = useDialogExitSnapshot(open ? provider : null);
-  const ready = result?.status === 'ready';
-  const canMutate = online && supported && !busy;
   const openCreate = async () => {
-    if (ready) {
+    if (result?.status === 'ready') {
       setOpen(true);
       return;
     }
@@ -255,31 +246,6 @@ function MemoryProviderSection({
 
   return (
     <>
-      {inSettingsPane ? (
-        <SettingsPageActions>
-          <Button
-            type="button"
-            size="small"
-            variant="ghost"
-            disabled={!canMutate}
-            aria-label={t('settings.memory.refresh')}
-            onClick={() => void refresh()}
-          >
-            <RefreshCw {...stylex.props(styles.addGlyph)} />
-            {t('settings.memory.refresh')}
-          </Button>
-          <Button
-            type="button"
-            size="small"
-            variant="secondary"
-            disabled={!canMutate || (result !== undefined && !ready)}
-            onClick={() => void openCreate()}
-          >
-            <Plus {...stylex.props(styles.addGlyph)} />
-            {t('settings.memory.create')}
-          </Button>
-        </SettingsPageActions>
-      ) : null}
       <MemoryProviderPanel
         provider={provider}
         online={online}
