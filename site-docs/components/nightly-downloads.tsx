@@ -1,4 +1,4 @@
-import { Download, Laptop, MonitorDown } from 'lucide-react';
+import { Download, Laptop, MonitorDown, Smartphone } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   parseNightlyRelease,
@@ -9,7 +9,7 @@ import {
 const copy = {
   en: {
     switching:
-      'Quit Lody before opening Nightly, and quit Nightly before switching back. Changes synced to your account also appear in Stable.',
+      'On desktop, quit Lody before opening Nightly, and quit Nightly before switching back. Changes synced to your account also appear in Stable.',
     loading: 'Checking Nightly downloads…',
     unavailable: 'Nightly downloads are not available right now.',
     retry: 'Try again',
@@ -17,7 +17,7 @@ const copy = {
   },
   zh: {
     switching:
-      '打开 Nightly 前请先退出 Lody，切回正式版前请先退出 Nightly。同步到账号的数据修改也会出现在正式版中。',
+      '桌面端打开 Nightly 前请先退出 Lody，切回正式版前请先退出 Nightly。同步到账号的数据修改也会出现在正式版中。',
     loading: '正在获取 Nightly 下载…',
     unavailable: '当前暂无可用的 Nightly 下载。',
     retry: '重试',
@@ -72,32 +72,44 @@ export function NightlyDownloads({ locale }: { locale: 'en' | 'zh' }) {
           <p className="download-nightly__version">v{release.version}</p>
           <p className="download-nightly__description">
             {locale === 'zh'
-              ? `如已安装正式版，请先更新到 ${release.minimumStableVersion} 或更高版本，以支持两款应用互斥运行。`
-              : `If Stable is installed, update it to ${release.minimumStableVersion} or later so the two apps can prevent concurrent use.`}
+              ? `如已安装桌面正式版，请先更新到 ${release.minimumStableVersion} 或更高版本，以支持两款应用互斥运行。`
+              : `If desktop Stable is installed, update it to ${release.minimumStableVersion} or later so the two apps can prevent concurrent use.`}
           </p>
           <div className="download-grid">
-            {(['mac', 'win', 'linux'] as const).map((platform) => (
-              <article className="download-card" key={platform}>
-                <div className="download-card__header">
-                  {platform === 'win' ? (
-                    <MonitorDown aria-hidden="true" />
-                  ) : (
-                    <Laptop aria-hidden="true" />
-                  )}
-                  <h3>{platform === 'mac' ? 'macOS' : platform === 'win' ? 'Windows' : 'Linux'}</h3>
-                </div>
-                <div className="download-card__actions">
-                  {release.downloads
-                    .filter((item) => item.platform === platform)
-                    .map((item) => (
-                      <a className="download-card__action" href={item.href} key={item.href}>
-                        <span>{item.label}</span>
-                        <Download aria-hidden="true" />
-                      </a>
-                    ))}
-                </div>
-              </article>
-            ))}
+            {(['mac', 'win', 'linux', 'android'] as const)
+              .filter((platform) => release.downloads.some((item) => item.platform === platform))
+              .map((platform) => (
+                <article className="download-card" key={platform}>
+                  <div className="download-card__header">
+                    {platform === 'android' ? (
+                      <Smartphone aria-hidden="true" />
+                    ) : platform === 'win' ? (
+                      <MonitorDown aria-hidden="true" />
+                    ) : (
+                      <Laptop aria-hidden="true" />
+                    )}
+                    <h3>
+                      {platform === 'mac'
+                        ? 'macOS'
+                        : platform === 'win'
+                          ? 'Windows'
+                          : platform === 'android'
+                            ? 'Android'
+                            : 'Linux'}
+                    </h3>
+                  </div>
+                  <div className="download-card__actions">
+                    {release.downloads
+                      .filter((item) => item.platform === platform)
+                      .map((item) => (
+                        <a className="download-card__action" href={item.href} key={item.href}>
+                          <span>{item.label}</span>
+                          <Download aria-hidden="true" />
+                        </a>
+                      ))}
+                  </div>
+                </article>
+              ))}
           </div>
         </>
       ) : (
