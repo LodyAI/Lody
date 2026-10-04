@@ -1,19 +1,30 @@
+import { simulatorViewerWebRtcScript } from './viewer-webrtc';
 import { simulatorViewerMediaScript } from './viewer-media';
 /** Fixed Lody artifact, never project HTML. Media decoders own bounded queues and disposal. */
-export function simulatorViewerHtml(operationId: string, initialRotation = 0): string {
+export function simulatorViewerHtml(
+  operationId: string,
+  initialRotation = 0,
+  preferWebRtc = false
+): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body,canvas{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111}body{display:flex;align-items:center;justify-content:center}canvas{max-width:100%;max-height:100%;object-fit:contain;touch-action:none;display:block}</style></head><body><canvas draggable="false"></canvas><script>
 'use strict';
 const operationId=${JSON.stringify(operationId)};
+const preferWebRtc=${JSON.stringify(preferWebRtc)};
+${simulatorViewerWebRtcScript}
 let rotation=${JSON.stringify(initialRotation)},rotateWithDevice=true;
 function displayRotation(){return rotateWithDevice?rotation:0}
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');
-let parentOrigin,parentPort,visible=false,ws,pending,decoding=false,generation=0,point,pointer,wheelEnd,heartbeat,firstFrame,lastReport,painted=false,commandAbort,capturing=false;
+let lastTransport='connecting';
+let parentOrigin,parentPort,visible=false,ws,pending,decoding=false,generation=0,point,wheelEnd,heartbeat,firstFrame,lastReport,painted=false,commandAbort,capturing=false;
 function layout(){if(!painted)return;const angle=displayRotation(),swap=angle%180!==0;const scale=Math.min((swap?innerHeight:innerWidth)/canvas.width,(swap?innerWidth:innerHeight)/canvas.height);Object.assign(canvas.style,{width:canvas.width*scale+'px',height:canvas.height*scale+'px',maxWidth:'none',maxHeight:'none',flexShrink:'0',transform:'rotate('+angle+'deg)'})}
 function replyToParent(value,transfer=[]){if(parentPort)parentPort.postMessage(value,transfer);else if(parentOrigin)parent.postMessage(value,parentOrigin,transfer)}
-function report(state){const rotation=displayRotation(),swap=rotation%180!==0,width=swap?canvas.height:canvas.width,height=swap?canvas.width:canvas.height;const key=state+':'+width+':'+height+':'+rotation;if(parentOrigin&&key!==lastReport){lastReport=key;replyToParent({type:'lody:ios-simulator:state',operationId,state,width,height,rotation})}}
-function send(value){if(ws?.readyState===1){if(ws.bufferedAmount>65536){const old=ws;ws=undefined;old.close();close();report('error');return}ws.send(JSON.stringify(value))}}
-function lift(){clearTimeout(wheelEnd);flushMove();if(point){const up={...point,type:'touch1-up'};point=undefined;pointer=undefined;send(up)}}
-function close(){lift();generation++;painted=false;commandAbort?.abort();clearInterval(heartbeat);clearTimeout(firstFrame);pending=undefined;if(ws){const old=ws;ws=undefined;old.close()}closeMedia();report('disconnected')}
+function report(state){const rotation=displayRotation(),swap=rotation%180!==0,width=swap?canvas.height:canvas.width,height=swap?canvas.width:canvas.height;const diagnostics={transport:ws?.transport||(ws?'websocket':state==='connecting'?'connecting':lastTransport),codec:usingH264?'h264':'mjpeg',fallbackReason:rtcFallbackReason};const key=state+':'+width+':'+height+':'+rotation+':'+JSON.stringify(diagnostics);if(parentOrigin&&key!==lastReport){lastReport=key;replyToParent({type:'lody:ios-simulator:state',operationId,state,width,height,rotation,diagnostics})}}
+function send(value){if(ws?.readyState===1){if(ws.bufferedAmount>65536){const old=ws;lastTransport=old.transport||'websocket';ws=undefined;old.close();close();report('error');return}ws.send(JSON.stringify(value))}}
+const pointers=new Map();
+function touchMessage(phase){return {...point,type:(point.x1===undefined?'touch1-':'touch2-')+phase}}
+function endTouch(){clearTimeout(wheelEnd);flushMove();if(point){const up=touchMessage('up');point=undefined;send(up)}}
+function lift(){endTouch();pointers.clear()}
+function close(){if(ws)lastTransport=ws.transport||'websocket';lift();generation++;painted=false;commandAbort?.abort();clearInterval(heartbeat);clearTimeout(firstFrame);pending=undefined;if(ws){const old=ws;ws=undefined;old.close()}closeMedia();report('disconnected')}
 ${simulatorViewerMediaScript}
 let exteriorRequested=false;
 async function sendExterior(){
@@ -75,7 +86,8 @@ async function receiveParent(d){
   const timeout=setTimeout(()=>abort.abort(),12000);
   try{
     const url=new URL('control',location.href);url.search=new URL(location.href).search;
-    const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operationId,requestId:d.requestId,control:d.control}),signal:abort.signal,redirect:'error'});
+    const body={operationId,requestId:d.requestId,control:d.control};
+    const response=ws?.rtc?{ok:true,json:()=>ws.requestControl(body,abort.signal)}:await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:abort.signal,redirect:'error'});
     const result=await response.json();
     if(response.ok&&result.success===true&&[0,90,180,270].includes(result.rotation)){rotation=result.rotation;layout();report('ready')}
     const error=['unavailable','unsupported','failed','busy'].includes(result.error)?result.error:'failed';
@@ -86,12 +98,29 @@ async function receiveParent(d){
 addEventListener('visibilitychange',()=>{if(document.hidden)close();else connect()});addEventListener('pagehide',close);addEventListener('blur',lift);
 
 function position(e){const r=canvas.getBoundingClientRect(),u=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),v=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));const rotation=displayRotation(),p=rotation===90?{x:v,y:1-u}:rotation===180?{x:1-u,y:1-v}:rotation===270?{x:1-v,y:u}:{x:u,y:v};return{x:p.x*canvas.width,y:p.y*canvas.height,width:canvas.width,height:canvas.height}}
-canvas.onpointerdown=e=>{if(commandAbort||e.button!==0||pointer!==undefined||!canvas.width||ws?.readyState!==1)return;lift();pointer=e.pointerId;point=position(e);if(point.y>=point.height*.93)point.edge='bottom';canvas.setPointerCapture(pointer);send({...point,type:'touch1-down'});e.preventDefault()};canvas.onpointermove=e=>{if(pointer!==e.pointerId)return;point={...point,...position(e)};queueMove()};canvas.onpointerup=e=>{if(pointer===e.pointerId){point={...point,...position(e)};lift()}};canvas.onpointercancel=e=>{if(pointer===e.pointerId)lift()};canvas.onlostpointercapture=e=>{if(pointer===e.pointerId)lift()};
+function updateTouch(){
+  const values=[...pointers.values()];
+  if(values.length===2){const [a,b]=values;point={x1:a.x,y1:a.y,x2:b.x,y2:b.y,width:a.width,height:a.height}}
+  else if(point)point={...point,...values[0]};
+}
+canvas.onpointerdown=e=>{
+  if(commandAbort||e.button!==0||pointers.size===2||pointers.has(e.pointerId)||(pointers.size&&!point)||!canvas.width||ws?.readyState!==1)return;
+  endTouch();pointers.set(e.pointerId,position(e));
+  if(pointers.size===1){point=position(e);if(point.y>=point.height*.93)point.edge='bottom'}else updateTouch();
+  canvas.setPointerCapture(e.pointerId);send(touchMessage('down'));e.preventDefault();
+};
+canvas.onpointermove=e=>{if(!pointers.has(e.pointerId)||!point)return;pointers.set(e.pointerId,position(e));updateTouch();queueMove()};
+canvas.onpointerup=e=>{
+  if(!pointers.has(e.pointerId))return;
+  if(point){pointers.set(e.pointerId,position(e));updateTouch();endTouch()}
+  pointers.delete(e.pointerId);
+};
+canvas.onpointercancel=canvas.onlostpointercapture=e=>{if(pointers.has(e.pointerId)){endTouch();pointers.delete(e.pointerId)}};
 // Wheel deltas describe content scrolling; a finger moves in the opposite direction.
 // Reuse the single-touch protocol, and lift before restarting at a screen boundary.
 canvas.addEventListener('wheel',e=>{
   e.preventDefault();
-  if(commandAbort||e.ctrlKey||pointer!==undefined||ws?.readyState!==1||!canvas.width||!canvas.height)return;
+  if(commandAbort||e.ctrlKey||pointers.size!==0||ws?.readyState!==1||!canvas.width||!canvas.height)return;
   const r=canvas.getBoundingClientRect();
   if(!r.width||!r.height||!Number.isFinite(e.deltaX)||!Number.isFinite(e.deltaY))return;
   const unit=e.deltaMode===1?16:1;

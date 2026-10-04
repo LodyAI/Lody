@@ -47,6 +47,7 @@ import type {
   IosSimulatorDeviceEntry,
   IosSimulatorPanelStatus,
   IosSimulatorViewerState,
+  IosSimulatorViewerDiagnostics,
 } from '@/lib/ios-simulator/ios-simulator-types';
 import type { IosSimulatorPendingAction } from './ios-simulator-connection-status';
 import type { IosSimulatorScreenshotTarget, IosSimulatorViewMode } from './ios-simulator-controls';
@@ -147,6 +148,9 @@ function SessionIosSimulatorPanelController({
   const statusRef = useRef(status);
   statusRef.current = status;
   const [viewerState, setViewerState] = useState<IosSimulatorViewerState | null>(null);
+  const [viewerDiagnostics, setViewerDiagnostics] = useState<IosSimulatorViewerDiagnostics | null>(
+    null
+  );
   const [viewerReloadKey, setViewerReloadKey] = useState(0);
   const [pendingAction, setPendingAction] = useState<IosSimulatorPendingAction>(null);
   const [bootExpected, setBootExpected] = useState(false);
@@ -267,7 +271,10 @@ function SessionIosSimulatorPanelController({
   }, [operationId, pollTick, polling, refreshStatus]);
 
   // A new operation has a new viewer, which has not said anything yet.
-  useEffect(() => setViewerState(null), [operationId]);
+  useEffect(() => {
+    setViewerState(null);
+    setViewerDiagnostics(null);
+  }, [operationId]);
 
   // A preview that settles changes what the list says (booted, held by us).
   const previousPhase = useRef(status.phase);
@@ -387,6 +394,7 @@ function SessionIosSimulatorPanelController({
       // The stream dropped but the preview may still stand: reload the viewer
       // page and ask the machine where things are.
       setViewerState(null);
+      setViewerDiagnostics(null);
       setViewerReloadKey((key) => key + 1);
       void refreshStatus();
       return;
@@ -404,8 +412,9 @@ function SessionIosSimulatorPanelController({
   }, [refreshCatalog, refreshStatus, startAgain, statusUdid]);
 
   const handleViewerStateChange = useCallback(
-    (next: IosSimulatorViewerState) => {
+    (next: IosSimulatorViewerState, diagnostics?: IosSimulatorViewerDiagnostics | null) => {
       setViewerState(next);
+      if (diagnostics !== undefined) setViewerDiagnostics(diagnostics);
       // A dropped stream may mean the preview itself ended; ask once.
       if (next === 'disconnected' || next === 'error') void refreshStatus();
     },
@@ -608,6 +617,13 @@ function SessionIosSimulatorPanelController({
       availability,
       status,
       viewerState,
+      viewerDiagnostics,
+      client: {
+        online: navigator.onLine,
+        visible: document.visibilityState === 'visible',
+        webRtc: typeof RTCPeerConnection !== 'undefined',
+        webCodecs: typeof VideoDecoder !== 'undefined',
+      },
       device,
       runtime: runtimeEntry,
       catalog:
@@ -640,6 +656,7 @@ function SessionIosSimulatorPanelController({
     statusUdid,
     t,
     viewerState,
+    viewerDiagnostics,
   ]);
 
   return (

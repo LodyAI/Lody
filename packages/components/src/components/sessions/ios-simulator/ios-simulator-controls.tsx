@@ -34,7 +34,11 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import type { IosSimulatorControlId } from '@/lib/ios-simulator/ios-simulator-hardware';
 
-type Icon = ComponentType<{ size?: number | string; 'aria-hidden'?: boolean }>;
+type Icon = ComponentType<{
+  size?: number | string;
+  className?: string;
+  'aria-hidden'?: boolean;
+}>;
 
 export type IosSimulatorScreenshotTarget = 'attach' | 'save';
 export type IosSimulatorViewMode = 'device' | 'screen';
@@ -299,14 +303,14 @@ function AppearanceRows({ props }: { props: IosSimulatorControlsProps }) {
   return (
     <>
       <Menu.Item
-        icon={<Sun size="100%" aria-hidden />}
+        icon={Sun}
         disabled={disabled}
         onClick={() => props.onControl({ kind: 'appearance', appearance: 'light' })}
       >
         {t('sessions.iosSimulator.controls.light', 'Light appearance')}
       </Menu.Item>
       <Menu.Item
-        icon={<Moon size="100%" aria-hidden />}
+        icon={Moon}
         disabled={disabled}
         onClick={() => props.onControl({ kind: 'appearance', appearance: 'dark' })}
       >
@@ -322,17 +326,13 @@ function ScreenshotRows({ props }: { props: IosSimulatorControlsProps }) {
   return (
     <>
       <Menu.Item
-        icon={<Paperclip size="100%" aria-hidden />}
+        icon={Paperclip}
         disabled={disabled || !props.canAttach}
         onClick={() => props.onScreenshot('attach')}
       >
         {t('sessions.iosSimulator.controls.screenshotAttach', 'Attach screenshot to message')}
       </Menu.Item>
-      <Menu.Item
-        icon={<Download size="100%" aria-hidden />}
-        disabled={disabled}
-        onClick={() => props.onScreenshot('save')}
-      >
+      <Menu.Item icon={Download} disabled={disabled} onClick={() => props.onScreenshot('save')}>
         {t('sessions.iosSimulator.controls.screenshotSave', 'Save screenshot')}
       </Menu.Item>
     </>
@@ -374,12 +374,7 @@ function GroupRows({ group }: { group: ControlGroup }) {
     <Menu.Group>
       <Menu.GroupLabel>{group.label}</Menu.GroupLabel>
       {group.items.map(({ id, label, icon: IconComponent, disabled, onSelect }) => (
-        <Menu.Item
-          key={id}
-          icon={<IconComponent size="100%" aria-hidden />}
-          disabled={disabled}
-          onClick={onSelect}
-        >
+        <Menu.Item key={id} icon={IconComponent} disabled={disabled} onClick={onSelect}>
           {label}
         </Menu.Item>
       ))}

@@ -32,12 +32,15 @@ compact tool prose and portal content must not multiply the scale twice.
 | caption | 11 / 16px | Metadata, code language |
 | footnote | 12 / 16px | Groups, descriptions, tooltip |
 | subheadline | 13 / 18px | Controls, code, tool output |
-| body | 14 / 20px | Sidebar titles, prompt, message prose |
+| body | 14 / 20px | Sidebar titles, prompt |
 | headline | 16 / 24px | Dialog heading |
 | title | 18 / 24px | Page or Markdown primary heading |
 
 Each size and leading is its Default value multiplied by the selected baseline
-divided by 14. A standalone message preview with an explicit size retains that
+divided by 14. Reading prose retains body size and uses the separately themeable
+[conversation reading leading](conversation-rhythm.md#spacing-contract), 22px at
+Default; interface body remains 20px. Compact prose and code retain subheadline
+leading. A standalone message preview with an explicit size retains that
 size independently of the host document's baseline.
 
 The target is modern engines with CSS length/length typed division. Message prose,

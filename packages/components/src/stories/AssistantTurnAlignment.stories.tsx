@@ -8,7 +8,7 @@
  * indent (the prose used to carry `sm:px-2` and sat 8px right of the chevrons).
  */
 import type { Meta, StoryObj } from '@storybook/react';
-import { Provider, createStore } from 'jotai';
+import { Provider, createStore, useAtomValue } from 'jotai';
 import { expect, waitFor } from 'storybook/test';
 import type { ReactNode } from 'react';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
@@ -17,6 +17,11 @@ import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view'
 import { runtimeAtom } from '@/atoms';
 import { CONVERSATION_CONTENT_WIDTH_CLASS } from '@/lib/conversation-layout';
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { conversation } from '../components/ai-gui/conversation.tokens.stylex';
+import { conversationFontSizeAtom } from '@/atoms/settings';
+import { InterfaceFontController } from '@/components/interface-font-controller';
 
 /**
  * `usePermissionResponse` reports `isReady: !!runtime`, and a NOT-ready card
@@ -53,6 +58,210 @@ const renderMessageRow: SessionChatStreamViewProps['renderMessageRow'] = ({
   message,
   sessionId: storySessionId,
 }) => <MessageRowView message={message} sessionId={storySessionId} />;
+
+const rhythmStyles = stylex.create({
+  frame: { height: '1500px', width: '100%', backgroundColor: colors.background },
+});
+const rhythmTheme = stylex.createTheme(conversation, {
+  bubbleFill: 'rgb(24 64 80)',
+  readingLeading: '24px',
+  paragraphGap: '16px',
+  activityPitch: '28px',
+  responseGap: '48px',
+  roundGap: '80px',
+  surfaceGap: '24px',
+});
+
+const rhythmMessages: SessionHistoryParsed[] = [
+  {
+    id: 'rhythm-user-1',
+    role: 'user',
+    timestamp: '2026-10-01T08:00:00.000Z',
+    read: true,
+    items: [
+      {
+        type: 'text',
+        text: '检查文件重命名后搜索结果是否及时更新。Please preserve the open draft.\n\n验收：中文、English、数字 512 和标点都应正常。',
+      },
+    ],
+  },
+  {
+    id: 'rhythm-assistant-1',
+    role: 'assistant',
+    timestamp: '2026-10-01T08:00:01.000Z',
+    read: true,
+    finished: true,
+    items: [
+      {
+        type: 'tool_call',
+        toolCallId: 'rhythm-read',
+        kind: 'read',
+        title: 'Read search-index.ts',
+        status: 'completed',
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'rhythm-run',
+        kind: 'execute',
+        title: 'pnpm test search-index',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: '12 passed · 0 failed' } }],
+      },
+      {
+        type: 'text',
+        text: '索引更新与文件重命名共享一次提交。The open draft remains available.\n\n1. 保留会话标识与工作目录。\n2. 失败时返回明确的错误。\n3. 检查中文、English、512 和 punctuation。\n\n```ts\nconst generation = index.version;\nawait index.rename("新标题", { preserveDraft: true });\n```\n\n> Review: verify mixed text and punctuation in the same viewport.',
+      },
+    ],
+  },
+  {
+    id: 'rhythm-user-2',
+    role: 'user',
+    timestamp: '2026-10-01T08:01:00.000Z',
+    read: true,
+    items: [
+      {
+        type: 'text',
+        text: '补充验证说明，包含中英文混排。Add the verification results to the report.',
+      },
+    ],
+  },
+  {
+    id: 'rhythm-assistant-2',
+    role: 'assistant',
+    timestamp: '2026-10-01T08:01:01.000Z',
+    read: true,
+    finished: true,
+    items: [
+      {
+        type: 'tool_call',
+        toolCallId: 'rhythm-report',
+        kind: 'read',
+        title: 'Read verification.md',
+        status: 'completed',
+      },
+      {
+        type: 'text',
+        text: '验证说明已准备好。The results are ready for review.\n\n- 中文：标点、字面与换行。\n- English: rhythm, punctuation, and ambiguous glyphs.\n- Mixed text: baseline and CJK / Latin balance.',
+      },
+    ],
+  },
+];
+const rhythmItems: ChatStreamItem[] = rhythmMessages.map((message, turnIndex) => ({
+  type: 'message',
+  sessionId,
+  message,
+  turnIndex,
+}));
+
+export const ConversationRhythm: Story = {
+  args: { sessionId, items: rhythmItems, renderMessageRow },
+  render: () => <ConversationRhythmScene />,
+};
+
+export const ConversationRhythmTheme: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene themed />,
+};
+
+const rhythmWithoutFooter = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.role === 'assistant'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          finished: false,
+          items: item.message.items.filter((content) => content.type === 'text'),
+        },
+      }
+    : item
+);
+const rhythmWithFiles = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.id === 'rhythm-assistant-1'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          fileDiff: [
+            { filePath: 'src/search-index.ts', add: 12, del: 4 },
+            { filePath: 'tests/search-index.test.ts', add: 24, del: 2 },
+          ],
+        },
+      }
+    : item
+);
+
+const rhythmReadingItems = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.id === 'rhythm-assistant-1'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          items: item.message.items.map((content) =>
+            content.type === 'text'
+              ? {
+                  ...content,
+                  text: content.text.replace(
+                    '索引更新与文件重命名共享一次提交。The open draft remains available.',
+                    '索引更新与文件重命名共享一次提交。搜索列表会显示新的标题，已经打开的草稿继续保留光标、选择范围和未保存的内容。我们同时检查了较长的中文说明与 English text，确保自动换行后，每一行仍然容易追踪，不需要在段落之间反复寻找阅读位置。The open draft remains available while the search results refresh, and the same conversation stays selected throughout the update.\n\n验证覆盖普通重命名、连续修改和失败恢复。遇到错误时，界面保留用户已经输入的内容，并明确说明哪些操作没有完成。This paragraph describes the failure path with enough continuous text to compare line spacing, paragraph separation, and the transition from activity rows to the final answer.'
+                  ),
+                }
+              : content
+          ),
+        },
+      }
+    : item
+);
+
+export const ConversationRhythmReading: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmReadingItems} />,
+};
+
+export const ConversationRhythmReadingStreaming: Story = {
+  ...ConversationRhythm,
+  render: () => (
+    <ConversationRhythmScene
+      items={rhythmReadingItems.map((item) =>
+        item.type === 'message' && item.message.id === 'rhythm-assistant-1'
+          ? { ...item, message: { ...item.message, finished: false } }
+          : item
+      )}
+    />
+  ),
+};
+
+export const ConversationRhythmWithoutFooter: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmWithoutFooter} />,
+};
+
+export const ConversationRhythmWithFiles: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmWithFiles} />,
+};
+
+function ConversationRhythmScene({
+  themed = false,
+  items = rhythmItems,
+}: {
+  themed?: boolean;
+  items?: ChatStreamItem[];
+}) {
+  const fontSize = useAtomValue(conversationFontSizeAtom);
+  return (
+    <div {...stylex.props(rhythmStyles.frame, themed && rhythmTheme)}>
+      <InterfaceFontController enabled />
+      <SessionChatStreamView
+        sessionId={sessionId}
+        items={items}
+        conversationFontSize={fontSize}
+        renderMessageRow={({ message, sessionId: id }) => (
+          <MessageRowView message={message} sessionId={id} conversationFontSize={fontSize} />
+        )}
+      />
+    </div>
+  );
+}
 
 const streamingTurn: SessionHistoryParsed = {
   id: 'alignment-assistant',

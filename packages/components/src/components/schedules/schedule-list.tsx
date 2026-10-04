@@ -690,28 +690,28 @@ function ScheduleListRow({
     <ContextMenu.Root>
       <ContextMenu.Trigger render={rowElement} />
       <ContextMenu.Content>
-        <ContextMenu.Item icon={<ExternalLink />} onClick={onOpen}>
+        <ContextMenu.Item icon={ExternalLink} onClick={onOpen}>
           {t('schedules.open', 'Open')}
         </ContextMenu.Item>
         {canRun ? (
-          <ContextMenu.Item icon={<Play />} onClick={onRun}>
+          <ContextMenu.Item icon={Play} onClick={onRun}>
             {t('schedules.runNow', 'Run now')}
           </ContextMenu.Item>
         ) : null}
         {canToggle ? (
-          <ContextMenu.Item icon={row.enabled ? <Pause /> : <RotateCcw />} onClick={onToggle}>
+          <ContextMenu.Item icon={row.enabled ? Pause : RotateCcw} onClick={onToggle}>
             {toggleLabel}
           </ContextMenu.Item>
         ) : null}
         {lastSessionId && onOpenSession ? (
-          <ContextMenu.Item icon={<History />} onClick={() => onOpenSession(lastSessionId)}>
+          <ContextMenu.Item icon={History} onClick={() => onOpenSession(lastSessionId)}>
             {t('schedules.lastRun', 'Last run')}
           </ContextMenu.Item>
         ) : null}
         {canDelete ? (
           <>
             <ContextMenu.Separator />
-            <ContextMenu.Item tone="destructive" icon={<Trash2 />} onClick={onDelete}>
+            <ContextMenu.Item tone="destructive" icon={Trash2} onClick={onDelete}>
               {t('schedules.delete', 'Delete')}
             </ContextMenu.Item>
           </>

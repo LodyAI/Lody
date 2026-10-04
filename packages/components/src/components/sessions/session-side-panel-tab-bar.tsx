@@ -663,12 +663,11 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
           {availablePanels.map((panel) => (
             <Menu.Item
               key={panel.id}
-              className="gap-2"
+              icon={<SidePanelTabIcon tab={panel} />}
               disabled={panel.disabled}
               onClick={() => onPanelOpen(panel.id)}
             >
-              <SidePanelTabIcon tab={panel} />
-              <span>{panel.label}</span>
+              {panel.label}
             </Menu.Item>
           ))}
         </Menu.Content>

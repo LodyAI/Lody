@@ -107,7 +107,7 @@ describe('SessionHeaderMenu', () => {
   }
 
   function menuItem(label: string): HTMLElement {
-    const item = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+    const item = Array.from(document.querySelectorAll<HTMLElement>('[role^="menuitem"]')).find(
       (candidate) => candidate.textContent?.includes(label)
     );
     expect(item, label).toBeDefined();

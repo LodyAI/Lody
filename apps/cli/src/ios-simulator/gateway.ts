@@ -1,7 +1,13 @@
+import { createSimulatorRtcPeer } from './webrtc';
+import {
+  SimulatorIceServersSchema,
+  SimulatorOfferSchema,
+  type SimulatorIceServer,
+} from './webrtc-protocol';
 import { SimulatorH264Flow } from './h264-flow';
 import { SimulatorIdleRefresh, readSimulatorStill } from './idle-refresh';
 import { createHash, randomBytes } from 'node:crypto';
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage } from 'node:http';
 import type { Socket } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
@@ -15,7 +21,7 @@ import { createSimulatorDeviceControls } from './device-controls';
 import type { SimulatorHostControl } from './host-controls';
 import { SimulatorFrameFlow, jpegDimensions, simulatorScale } from './frame-flow';
 
-const Input = z
+const SingleInput = z
   .object({
     type: z.enum(['touch1-down', 'touch1-move', 'touch1-up']),
     x: z.number().finite().min(0).max(16384),
@@ -26,6 +32,19 @@ const Input = z
   })
   .strict()
   .refine((v) => v.x <= v.width && v.y <= v.height);
+const DualInput = z
+  .object({
+    type: z.enum(['touch2-down', 'touch2-move', 'touch2-up']),
+    x1: z.number().finite().min(0).max(16384),
+    y1: z.number().finite().min(0).max(16384),
+    x2: z.number().finite().min(0).max(16384),
+    y2: z.number().finite().min(0).max(16384),
+    width: z.number().int().min(1).max(16384),
+    height: z.number().int().min(1).max(16384),
+  })
+  .strict()
+  .refine((v) => v.x1 <= v.width && v.x2 <= v.width && v.y1 <= v.height && v.y2 <= v.height);
+const Input = z.union([SingleInput, DualInput]);
 const Heartbeat = z.object({ type: z.literal('heartbeat') }).strict();
 const MediaMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('keyframe-request') }).strict(),
@@ -51,6 +70,7 @@ export async function createSimulatorGateway(options: {
   port: number;
   softwareKeyboard?: boolean;
   remote?: boolean;
+  iceServers?: () => Promise<SimulatorIceServer[]>;
   signal?: AbortSignal;
   hostControl(control: SimulatorHostControl): Promise<void>;
   active(): boolean;
@@ -85,8 +105,49 @@ export async function createSimulatorGateway(options: {
     string,
     { hash: string; result: IosSimulatorDeviceControlResult }
   >();
+  const executeControl = async (raw: unknown): Promise<IosSimulatorDeviceControlResult> => {
+    const parsed = IosSimulatorDeviceControlRequestSchema.safeParse(raw);
+    if (!parsed.success || parsed.data.operationId !== options.operationId)
+      return { success: false, error: 'failed' };
+    if (!options.active() || controlAbort.signal.aborted)
+      return { success: false, error: 'unavailable' };
+    const { requestId, control } = parsed.data;
+    const hash = createHash('sha256').update(JSON.stringify(control)).digest('hex');
+    const prior = completedControls.get(requestId);
+    if (prior)
+      return prior.hash === hash
+        ? { ...prior.result, rotation: controls.rotation() }
+        : { success: false, error: 'failed' };
+    if (pendingControl) return { success: false, error: 'busy' };
+    for (const invalidate of invalidateStills) invalidate();
+    const task = controls
+      .execute(control)
+      .then((): IosSimulatorDeviceControlResult => {
+        if (!options.active() || controlAbort.signal.aborted)
+          return { success: false, error: 'unavailable' };
+        options.renew();
+        return { success: true, rotation: controls.rotation() };
+      })
+      .catch((): IosSimulatorDeviceControlResult => ({
+        success: false,
+        error: options.active() && !controlAbort.signal.aborted ? 'failed' : 'unavailable',
+      }));
+    pendingControl = task;
+    const result = await task;
+    pendingControl = undefined;
+    completedControls.set(requestId, { hash, result });
+    if (completedControls.size > 32) {
+      const oldest = completedControls.keys().next().value;
+      if (oldest !== undefined) completedControls.delete(oldest);
+    }
+    return result;
+  };
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
   let exterior: ReturnType<typeof readSimulatorExterior> | undefined;
+  const peers = new Set<Awaited<ReturnType<typeof createSimulatorRtcPeer>>>();
+  const negotiations = new Set<Promise<void>>();
+  const signalingRequests = new Set<IncomingMessage>();
+  let accepting = true;
   const server = createServer((req, res) => {
     if (!options.active()) {
       res.writeHead(410).end();
@@ -96,6 +157,107 @@ export async function createSimulatorGateway(options: {
     const requestedPath = requestPath.startsWith(remotePath)
       ? path + requestPath.slice(remotePath.length)
       : requestPath;
+    if (requestedPath === `${path}rtc` && req.method === 'POST') {
+      if (
+        !accepting ||
+        !validOrigin(req.headers.host, req.headers.origin) ||
+        req.headers.origin !== origin
+      ) {
+        res.writeHead(403).end();
+        return;
+      }
+      // Include in-flight offers in the bound; two viewers can attach concurrently.
+      if (peers.size + negotiations.size >= 4) {
+        res.writeHead(429).end();
+        return;
+      }
+      signalingRequests.add(req);
+      const bodyDeadline = setTimeout(() => req.destroy(), 10000);
+      const requestAbort = new AbortController();
+      res.once('close', () => {
+        if (!res.writableFinished) requestAbort.abort();
+      });
+      const task = (async () => {
+        if (req.headers['content-type'] !== 'application/json') {
+          res.writeHead(400).end();
+          return;
+        }
+        req.setTimeout(10000, () => req.destroy());
+        const chunks: Buffer[] = [];
+        let size = 0;
+        for await (const chunk of req) {
+          if (!Buffer.isBuffer(chunk) || (size += chunk.length) > 70 * 1024) {
+            res.writeHead(413).end();
+            return;
+          }
+          chunks.push(chunk);
+        }
+        clearTimeout(bodyDeadline);
+        signalingRequests.delete(req);
+        const offer = SimulatorOfferSchema.parse(
+          JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        );
+        const iceServers = SimulatorIceServersSchema.parse(
+          await (options.iceServers?.() ?? Promise.resolve([]))
+        );
+        if (!accepting || !options.active() || controlAbort.signal.aborted) {
+          res.writeHead(410).end();
+          return;
+        }
+        const stream = new URL(`${remotePath}stream`, origin);
+        stream.protocol = 'ws:';
+        if (offer.codec === 'h264') stream.searchParams.set('codec', 'h264');
+        let peer: Awaited<ReturnType<typeof createSimulatorRtcPeer>> | undefined;
+        peer = await createSimulatorRtcPeer({
+          sdp: offer.sdp,
+          iceServers,
+          streamUrl: stream.href,
+          origin: origin ?? '',
+          signal: AbortSignal.any([controlAbort.signal, requestAbort.signal]),
+          active: () => accepting && options.active(),
+          control: executeControl,
+          onClose: () => {
+            if (peer) peers.delete(peer);
+          },
+        });
+        if (!accepting || !options.active() || res.destroyed) {
+          await peer.close();
+          return;
+        }
+        peers.add(peer);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ sdp: peer.sdp }));
+      })().catch(() => {
+        if (!res.headersSent && !res.destroyed) res.writeHead(400).end();
+      });
+      negotiations.add(task);
+      void task.finally(() => {
+        clearTimeout(bodyDeadline);
+        signalingRequests.delete(req);
+        negotiations.delete(task);
+      });
+      return;
+    }
+    if (requestedPath === `${path}rtc-config` && req.method === 'GET') {
+      if (!accepting || !validOrigin(req.headers.host, req.headers.origin)) {
+        res.writeHead(403).end();
+        return;
+      }
+      void (async () => {
+        const iceServers = SimulatorIceServersSchema.parse(
+          await (options.iceServers?.() ?? Promise.resolve([]))
+        );
+        if (!accepting || !options.active()) {
+          res.writeHead(410).end();
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ iceServers }));
+      })().catch(() => {
+        if (!res.headersSent) res.writeHead(503).end();
+      });
+      return;
+    }
     if (
       req.method === 'GET' &&
       validOrigin(req.headers.host, req.headers.origin) &&
@@ -157,40 +319,7 @@ export async function createSimulatorGateway(options: {
         );
         if (!parsed.success || parsed.data.operationId !== options.operationId)
           return reply({ success: false, error: 'failed' }, 400);
-        if (!options.active() || controlAbort.signal.aborted)
-          return reply({ success: false, error: 'unavailable' }, 410);
-        const { requestId, control } = parsed.data;
-        const hash = createHash('sha256').update(JSON.stringify(control)).digest('hex');
-        const prior = completedControls.get(requestId);
-        if (prior)
-          return reply(
-            prior.hash === hash
-              ? { ...prior.result, rotation: controls.rotation() }
-              : { success: false, error: 'failed' }
-          );
-        if (pendingControl) return reply({ success: false, error: 'busy' });
-        for (const invalidate of invalidateStills) invalidate();
-        const task = controls
-          .execute(control)
-          .then((): IosSimulatorDeviceControlResult => {
-            if (!options.active() || controlAbort.signal.aborted)
-              return { success: false, error: 'unavailable' };
-            options.renew();
-            return { success: true, rotation: controls.rotation() };
-          })
-          .catch((): IosSimulatorDeviceControlResult => ({
-            success: false,
-            error: options.active() && !controlAbort.signal.aborted ? 'failed' : 'unavailable',
-          }));
-        pendingControl = task;
-        const result = await task;
-        pendingControl = undefined;
-        completedControls.set(requestId, { hash, result });
-        if (completedControls.size > 32) {
-          const oldest = completedControls.keys().next().value;
-          if (oldest !== undefined) completedControls.delete(oldest);
-        }
-        reply(result);
+        reply(await executeControl(parsed.data));
       })().catch(() => {
         if (!res.headersSent) reply({ success: false, error: 'failed' }, 400);
       });
@@ -211,7 +340,13 @@ export async function createSimulatorGateway(options: {
       'Content-Security-Policy':
         "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src blob:",
     });
-    res.end(simulatorViewerHtml(options.operationId, controls.rotation()));
+    res.end(
+      simulatorViewerHtml(
+        options.operationId,
+        controls.rotation(),
+        requestPath.startsWith(remotePath)
+      )
+    );
   });
   server.on('connection', (socket) => {
     sockets.add(socket);
@@ -361,7 +496,13 @@ export async function createSimulatorGateway(options: {
           upstream.once('close', finish);
           client.terminate();
           if (upstream.readyState === WebSocket.OPEN) {
-            if (touch) upstream.send(JSON.stringify({ ...touch, type: 'touch1-up' }));
+            if (touch)
+              upstream.send(
+                JSON.stringify({
+                  ...touch,
+                  type: touch.type.startsWith('touch2-') ? 'touch2-up' : 'touch1-up',
+                })
+              );
             touch = undefined;
             // close() drains the touch-up before its Close frame; terminate() would discard it.
             upstream.close();
@@ -429,25 +570,30 @@ export async function createSimulatorGateway(options: {
           return;
         }
         const input = parsed.data;
-        if ((input.type === 'touch1-down' && touch) || (input.type !== 'touch1-down' && !touch))
+        const down = input.type.endsWith('-down');
+        if ((down && touch) || (!down && !touch)) return;
+        if (touch && input.type.slice(0, 6) !== touch.type.slice(0, 6)) {
+          close();
           return;
-        // An edge belongs to the gesture's starting point, never a mid-drag switch.
+        }
+        // An edge belongs to a single-finger gesture's starting point.
         if (
-          (input.type === 'touch1-down' && input.edge && input.y < input.height * 0.93) ||
-          (touch && input.edge !== touch.edge)
+          'x' in input &&
+          ((down && input.edge && input.y < input.height * 0.93) ||
+            (touch && 'x' in touch && input.edge !== touch.edge))
         ) {
           close();
           return;
         }
         invalidateStill();
-        touch = input.type === 'touch1-up' ? undefined : input;
+        touch = input.type.endsWith('-up') ? undefined : input;
         options.renew();
         if (upstream.bufferedAmount > 64 * 1024) {
           close();
           return;
         }
         upstream.send(JSON.stringify(input));
-        if (input.type !== 'touch1-move') videoFlow?.prioritizeInteraction(now());
+        if (!input.type.endsWith('-move')) videoFlow?.prioritizeInteraction(now());
       });
       upstream.on('message', (data, binary) => {
         if (shuttingDown || !options.active()) {
@@ -500,7 +646,12 @@ export async function createSimulatorGateway(options: {
     path,
     remotePath,
     close: async () => {
+      accepting = false;
       controlAbort.abort();
+      for (const req of signalingRequests) req.destroy();
+      await Promise.allSettled(negotiations);
+      await Promise.all([...peers].map((peer) => peer.close()));
+      peers.clear();
       await pendingControl;
       completedControls.clear();
       await Promise.all([...connections].map((shutdown) => shutdown()));

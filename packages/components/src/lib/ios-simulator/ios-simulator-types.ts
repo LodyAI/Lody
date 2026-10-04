@@ -84,3 +84,10 @@ export type IosSimulatorPanelStatus =
 
 /** What the viewer page reports about its own stream, after the init handshake. */
 export type IosSimulatorViewerState = 'connecting' | 'ready' | 'disconnected' | 'error';
+
+/** Allowlisted viewer diagnostics; never includes ICE addresses, SDP or credentials. */
+export type IosSimulatorViewerDiagnostics = {
+  transport: 'webrtc' | 'websocket' | 'connecting';
+  codec: 'h264' | 'mjpeg';
+  fallbackReason?: 'unsupported' | 'timeout' | 'configuration' | 'negotiation' | 'connection';
+};

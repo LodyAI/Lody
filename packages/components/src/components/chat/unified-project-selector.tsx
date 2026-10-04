@@ -2,7 +2,6 @@ import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   ArrowUpRight,
-  Check,
   ChevronDown,
   CircleSlash2,
   FolderOpen,
@@ -273,9 +272,7 @@ function ProjectAccessStatus({
   const isAction = variant === 'trigger' && Boolean(onShare);
   const sharedClassName = cn(
     'inline-flex shrink-0 select-none items-center gap-1 text-muted-foreground',
-    variant === 'trigger' && [
-      'h-6 rounded-r-md px-2 text-[0.8em] font-medium transition-colors',
-    ],
+    variant === 'trigger' && ['h-6 rounded-r-md px-2 text-[0.8em] font-medium transition-colors'],
     variant === 'option' && 'text-[0.8em] font-medium',
     'text-foreground/75',
     isAction && 'cursor-pointer hover:text-foreground',
@@ -606,59 +603,65 @@ export function UnifiedProjectSelectorView({
           />
           <div className="scrollbar-pro max-h-[min(50vh,13rem)] overflow-y-auto">
             {filteredOptions.length > 0 ? (
-              filteredOptions.map((option) => {
-                // Local projects show only the name; the path lives in a hover
-                // tooltip. GitHub repos keep their inline description line.
-                const localPath =
-                  option.selection.kind === 'local' ? option.description : undefined;
-                const inlineDescription =
-                  option.selection.kind === 'github' ? option.description : undefined;
-                const labelNode = (
-                  <span className={cn('truncate', option.value === selectedValue && 'font-medium')}>
-                    {option.label}
-                  </span>
-                );
-                return (
-                  <Menu.Item
-                    key={option.value}
-                    onClick={() => onChange(option.selection)}
-                    className={cn(
-                      'gap-2 py-1.5',
-                      inlineDescription ? 'items-start' : 'items-center'
-                    )}
-                  >
-                    <span className={cn('shrink-0', inlineDescription && 'mt-0.5')}>
-                      {option.icon}
+              <Menu.RadioGroup
+                value={selectedValue ?? ''}
+                onValueChange={(value) => {
+                  const target = filteredOptions.find((option) => option.value === value);
+                  if (target) onChange(target.selection);
+                }}
+              >
+                {filteredOptions.map((option) => {
+                  // Local projects show only the name; the path lives in a hover
+                  // tooltip. GitHub repos keep their inline description line.
+                  const localPath =
+                    option.selection.kind === 'local' ? option.description : undefined;
+                  const inlineDescription =
+                    option.selection.kind === 'github' ? option.description : undefined;
+                  const labelNode = (
+                    <span
+                      className={cn('truncate', option.value === selectedValue && 'font-medium')}
+                    >
+                      {option.label}
                     </span>
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      {localPath ? (
-                        <Tooltip.Root>
-                          <Tooltip.Trigger render={labelNode} />
-                          <Tooltip.Content side="right" className="max-w-[22rem] break-all">
-                            {localPath}
-                          </Tooltip.Content>
-                        </Tooltip.Root>
-                      ) : (
-                        labelNode
+                  );
+                  return (
+                    <Menu.RadioItem
+                      key={option.value}
+                      value={option.value}
+                      indicator="check"
+                      indicatorSide="end"
+                      className={cn(
+                        'gap-2 py-1.5',
+                        inlineDescription ? 'items-start' : 'items-center'
                       )}
-                      {inlineDescription ? (
-                        <span className="line-clamp-2 text-[0.8em] leading-snug text-muted-foreground">
-                          {inlineDescription}
-                        </span>
+                    >
+                      <span className={cn('shrink-0', inlineDescription && 'mt-0.5')}>
+                        {option.icon}
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        {localPath ? (
+                          <Tooltip.Root>
+                            <Tooltip.Trigger render={labelNode} />
+                            <Tooltip.Content side="right" className="max-w-[22rem] break-all">
+                              {localPath}
+                            </Tooltip.Content>
+                          </Tooltip.Root>
+                        ) : (
+                          labelNode
+                        )}
+                        {inlineDescription ? (
+                          <span className="line-clamp-2 text-[0.8em] leading-snug text-muted-foreground">
+                            {inlineDescription}
+                          </span>
+                        ) : null}
+                      </span>
+                      {shouldShowPrivateSharingStatus(option.sharing) ? (
+                        <ProjectAccessStatus state={option.sharing} variant="option" />
                       ) : null}
-                    </span>
-                    {shouldShowPrivateSharingStatus(option.sharing) ? (
-                      <ProjectAccessStatus state={option.sharing} variant="option" />
-                    ) : null}
-                    {option.value === selectedValue ? (
-                      <Check
-                        className={cn('h-3.5 w-3.5 shrink-0', inlineDescription && 'mt-0.5')}
-                        aria-hidden="true"
-                      />
-                    ) : null}
-                  </Menu.Item>
-                );
-              })
+                    </Menu.RadioItem>
+                  );
+                })}
+              </Menu.RadioGroup>
             ) : (
               <div className="px-2.5 py-5 text-center text-[0.9em] text-muted-foreground">
                 {t('chat.projectPicker.emptyText', 'No projects found')}
@@ -666,17 +669,14 @@ export function UnifiedProjectSelectorView({
             )}
           </div>
           <Menu.Separator />
-          <Menu.Item onClick={() => onChange({ kind: 'none' })}>
-            <CircleSlash2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span>{clearLabel}</span>
+          <Menu.Item icon={CircleSlash2} onClick={() => onChange({ kind: 'none' })}>
+            {clearLabel}
           </Menu.Item>
-          <Menu.Item onClick={onAddLocalProject}>
-            <FolderPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span>{t('chat.contextSwitch.addProject', 'Add a folder')}</span>
+          <Menu.Item icon={FolderPlus} onClick={onAddLocalProject}>
+            {t('chat.contextSwitch.addProject', 'Add a folder')}
           </Menu.Item>
-          <Menu.Item onClick={onConnectGitRepo}>
-            <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span>{t('repos.connectMore', 'Connect more GitHub projects')}</span>
+          <Menu.Item icon={ArrowUpRight} onClick={onConnectGitRepo}>
+            {t('repos.connectMore', 'Connect more GitHub projects')}
           </Menu.Item>
         </Menu.Content>
       </Menu.Root>

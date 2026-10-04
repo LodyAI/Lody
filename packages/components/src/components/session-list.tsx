@@ -878,7 +878,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         />
         {onTogglePinSession ? (
           <ContextMenu.Item
-            icon={session.isPinned ? <PinOff /> : <Pin />}
+            icon={session.isPinned ? PinOff : Pin}
             onClick={() => {
               onTogglePinSession(session.sessionId, !session.isPinned);
             }}
@@ -888,7 +888,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={<Mail />}
+            icon={Mail}
             onClick={() => {
               onMarkSessionUnread?.(session.sessionId);
             }}
@@ -898,7 +898,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {onRenameSession ? (
           <ContextMenu.Item
-            icon={<Pencil />}
+            icon={Pencil}
             onClick={() => {
               beginRename(session.sessionId, session.title);
             }}
@@ -912,7 +912,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {onCopySessionUrl ? (
           <ContextMenu.Item
-            icon={<Link2 />}
+            icon={Link2}
             onClick={() => {
               onCopySessionUrl(session.sessionId);
             }}
@@ -922,7 +922,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {session.branchName ? (
           <ContextMenu.Item
-            icon={<GitBranch />}
+            icon={GitBranch}
             onClick={() => {
               void navigator.clipboard.writeText(session.branchName).catch(() => {});
             }}
@@ -935,11 +935,11 @@ const SessionGroupRow = memo(function SessionGroupRow({
             disabled={shareMenuState !== 'share'}
             icon={
               shareMenuState === 'share' ? (
-                <Users />
+                Users
               ) : shareMenuState === 'loading' ? (
-                <Spinner />
+                <Spinner size="small" label={null} />
               ) : (
-                <LockKeyhole />
+                LockKeyhole
               )
             }
             onClick={() => {
@@ -969,7 +969,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {onOpenPullRequest && prUrl ? (
           <ContextMenu.Item
-            icon={<GitPullRequest />}
+            icon={GitPullRequest}
             onClick={() => {
               onOpenPullRequest({
                 sessionId: session.sessionId,
@@ -1012,7 +1012,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
         ) : null}
         {onArchiveSession ? (
           <ContextMenu.Item
-            icon={<Archive />}
+            icon={Archive}
             onClick={() => {
               onArchiveSession(session.sessionId);
             }}

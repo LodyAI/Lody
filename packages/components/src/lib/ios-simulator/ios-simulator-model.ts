@@ -11,6 +11,7 @@ import type {
   IosSimulatorPanelStatus,
   IosSimulatorRuntimeEntry,
   IosSimulatorViewerState,
+  IosSimulatorViewerDiagnostics,
 } from './ios-simulator-types';
 
 export type IosSimulatorPanelAvailability = 'hidden' | 'upgrade-required' | 'available';
@@ -396,6 +397,30 @@ export function parseIosSimulatorViewerState(
     : null;
 }
 
+/** Called only after validating the viewer's source, origin, operation and state. */
+export function parseIosSimulatorViewerDiagnostics(
+  data: unknown
+): IosSimulatorViewerDiagnostics | null {
+  if (!data || typeof data !== 'object' || !('diagnostics' in data)) return null;
+  const d = data.diagnostics;
+  if (!d || typeof d !== 'object' || !('transport' in d) || !('codec' in d)) return null;
+  const transport = d.transport;
+  const codec = d.codec;
+  if (transport !== 'webrtc' && transport !== 'websocket' && transport !== 'connecting')
+    return null;
+  if (codec !== 'h264' && codec !== 'mjpeg') return null;
+  const reason = 'fallbackReason' in d ? d.fallbackReason : undefined;
+  const fallbackReason =
+    reason === 'unsupported' ||
+    reason === 'timeout' ||
+    reason === 'configuration' ||
+    reason === 'negotiation' ||
+    reason === 'connection'
+      ? reason
+      : undefined;
+  return { transport, codec, fallbackReason };
+}
+
 /** A default screen shape per family: the contract carries no screen size. */
 export function getIosSimulatorAspectRatio(family: IosSimulatorDeviceFamily | undefined): number {
   switch (family) {
@@ -478,6 +503,8 @@ export type IosSimulatorDiagnosticsInput = {
   availability: IosSimulatorPanelAvailability;
   status: IosSimulatorPanelStatus;
   viewerState: IosSimulatorViewerState | null;
+  viewerDiagnostics?: IosSimulatorViewerDiagnostics | null;
+  client?: { online: boolean; visible: boolean; webRtc: boolean; webCodecs: boolean };
   device?: IosSimulatorDeviceEntry | null;
   runtime?: IosSimulatorRuntimeEntry | null;
   catalog: { phase: string; deviceCount?: number; errorCode?: string; errorMessage?: string };
@@ -492,6 +519,16 @@ export function buildIosSimulatorDiagnostics(input: IosSimulatorDiagnosticsInput
     `protocol: ${input.availability}`,
     `catalog: ${input.catalog.phase}${input.catalog.deviceCount == null ? '' : ` devices=${input.catalog.deviceCount}`}${input.catalog.errorCode ? ` error=${input.catalog.errorCode}` : ''}`,
   ];
+  if (input.client)
+    lines.push(
+      `client: online=${input.client.online} visible=${input.client.visible} webrtc=${input.client.webRtc} webcodecs=${input.client.webCodecs}`
+    );
+  if (input.viewerDiagnostics) {
+    const d = input.viewerDiagnostics;
+    lines.push(
+      `connection: ${d.transport} codec=${d.codec} fallback=${d.fallbackReason ?? 'none'}`
+    );
+  } else lines.push('connection: unknown');
   if (input.catalog.errorMessage) lines.push(`catalog-error: ${input.catalog.errorMessage}`);
   if (device) {
     lines.push(

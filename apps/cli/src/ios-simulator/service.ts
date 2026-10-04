@@ -1,3 +1,4 @@
+import type { SimulatorIceServer } from './webrtc-protocol';
 import { readIdleSimulatorExterior } from './exterior';
 import { randomUUID } from 'node:crypto';
 import {
@@ -40,6 +41,9 @@ type Dependencies = {
   workspaceId: string;
   logger: Logger;
   runtimeBaseUrl: string;
+  iceServers?: (
+    sessionId: string
+  ) => Promise<{ iceServers: SimulatorIceServer[]; expiresAt: number }>;
   authorize(request: IosSimulatorRequest): Promise<void>;
   onAgentPreviewStarted?: (sessionId: string, operationId: string) => Promise<void>;
   leases?: SimulatorControlLeases;
@@ -347,8 +351,22 @@ export class IosSimulatorService {
       }
       void process.closed.then(() => op.abort.abort());
       const nativeProcess = process;
+      let ice: { iceServers: SimulatorIceServer[]; expiresAt: number } | undefined;
+      let icePending: Promise<{ iceServers: SimulatorIceServer[]; expiresAt: number }> | undefined;
       gateway = await (this.deps.gateway ?? createSimulatorGateway)({
         operationId: op.state.operationId,
+        iceServers: async () => {
+          if (!active()) throw new Error('Simulator closed.');
+          if (!this.deps.iceServers) return [];
+          if (!ice || ice.expiresAt - this.now() < 60_000) {
+            icePending ??= this.deps.iceServers(sessionId).finally(() => {
+              icePending = undefined;
+            });
+            ice = await icePending;
+          }
+          if (!active()) throw new Error('Simulator closed.');
+          return ice.iceServers;
+        },
         udid: device.udid,
         port: process.port,
         softwareKeyboard: /iphone|ipad/i.test(device.deviceType ?? ''),

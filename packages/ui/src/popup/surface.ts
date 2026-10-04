@@ -267,6 +267,12 @@ export const surface = stylex.create({
     color: popup.hint,
     pointerEvents: 'none',
   },
+  /**
+   * A component-form `icon` is mounted by the box itself with this class, so
+   * the box owns its size: an svg gets width/height 100% (beating px
+   * attributes), and any glyph component forwarding `className` fills the box.
+   */
+  itemIconGlyph: { display: 'block', width: '100%', height: '100%' },
   /** On a destructive row the icon is part of what the row says, not a hint. */
   itemIconInherit: { color: 'inherit' },
   /**
