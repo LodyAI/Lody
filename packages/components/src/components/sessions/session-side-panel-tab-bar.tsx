@@ -1,4 +1,7 @@
 import { memo, useEffect, useRef, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { space, radius } from '@lody/ui/tokens/scales.stylex';
+import { tabPillStyles } from '../shared/tab-pill-strip';
 import {
   FileDiff,
   Files,
@@ -16,7 +19,6 @@ import { ScrollArea } from '@/ui/scroll-area';
 import { Menu } from '@/ui/menu';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
-import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 
 export type SessionSidePanelTabItem = {
   id: string;
@@ -132,9 +134,322 @@ type SessionSidePanelTabBarProps = {
   className?: string;
 };
 
-const TAB_CLASS = `group relative flex h-7 max-w-[180px] shrink-0 cursor-default items-center gap-1.5 rounded-md text-[0.9em] transition-colors @max-[420px]/side-tabs:max-w-[175px] ${WINDOW_DRAG_EXEMPT_CLASS}`;
-const ACTIVE_TAB_CLASS = TAB_PILL_ACTIVE_CLASS;
-const INACTIVE_TAB_CLASS = TAB_PILL_INACTIVE_CLASS;
+const pulse = stylex.keyframes({ '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.5 } });
+
+const styles = stylex.create({
+  emptyState: {
+    containerName: 'empty-panel',
+    containerType: 'inline-size',
+    display: 'flex',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: space[6],
+  },
+  emptyContent: {
+    width: '100%',
+    maxWidth: '20rem',
+    textAlign: 'center',
+  },
+  emptyTitle: {
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+    fontWeight: 500,
+    color: 'hsl(var(--foreground))',
+  },
+  emptyGrid: {
+    display: 'grid',
+    gridTemplateColumns: {
+      default: 'repeat(1, minmax(0, 1fr))',
+      '@container empty-panel (min-width: 320px)': 'repeat(2, minmax(0, 1fr))',
+    },
+    gap: space[2],
+    marginTop: '16px',
+  },
+  emptyAction: {
+    display: 'flex',
+    minHeight: '40px',
+    alignItems: 'center',
+    gap: space[2],
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: {
+      default: 'hsl(var(--background))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--hover))',
+      },
+      ':disabled:hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--background))',
+      },
+    },
+    paddingInline: space[3],
+    textAlign: 'left',
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+    color: {
+      default: 'hsl(var(--foreground))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--hover-foreground))',
+      },
+      ':disabled:hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--foreground))',
+      },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    outline: {
+      default: null,
+      ':focus-visible': {
+        default: 'none',
+        '@media (forced-colors: active)': '2px solid transparent',
+      },
+    },
+    outlineOffset: {
+      default: null,
+      ':focus-visible': {
+        default: null,
+        '@media (forced-colors: active)': '2px',
+      },
+    },
+    '--tw-ring-color': {
+      default: null,
+      ':focus-visible': 'hsl(var(--ring) / 0.4)',
+    },
+    '--tw-ring-shadow': {
+      default: null,
+      ':focus-visible':
+        'var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentColor)',
+    },
+    boxShadow: {
+      default: null,
+      ':focus-visible':
+        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+    },
+    cursor: {
+      default: null,
+      ':disabled': 'not-allowed',
+    },
+    opacity: {
+      default: null,
+      ':disabled': 0.45,
+    },
+  },
+  emptyActionLabel: {
+    minWidth: 0,
+  },
+  container: {
+    containerName: 'side-tabs',
+    containerType: 'inline-size',
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: space[1],
+    paddingInline: '8px',
+  },
+  viewport: {
+    minWidth: 0,
+    flex: 1,
+  },
+  tabList: {
+    display: 'flex',
+    width: 'max-content',
+    minWidth: '100%',
+    height: '40px',
+    alignItems: 'center',
+    gap: space[1.5],
+  },
+  tab: {
+    position: 'relative',
+    display: 'flex',
+    height: '28px',
+    maxWidth: {
+      default: '180px',
+      '@container side-tabs (width < 420px)': '175px',
+    },
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[1.5],
+    borderRadius: 'var(--radius-md)',
+    cursor: 'default',
+    fontSize: '0.9em',
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  tabPadded: {
+    paddingInline: space[3],
+  },
+  tabCompact: {
+    paddingInline: '8px',
+  },
+  tabBusy: {
+    cursor: 'wait',
+    opacity: 0.7,
+  },
+  iconSlot: {
+    flexShrink: 0,
+  },
+  tabLabel: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  monoLabel: {
+    fontFamily: 'var(--font-mono)',
+  },
+  dirtyMark: {
+    width: '6px',
+    height: '6px',
+    flexShrink: 0,
+    borderRadius: radius.full,
+  },
+  conflictMark: {
+    backgroundColor: 'hsl(var(--status-danger))',
+  },
+  savingMark: {
+    backgroundColor: 'hsl(var(--status-info))',
+    animationName: pulse,
+    animationDuration: '2s',
+    animationTimingFunction: 'ease-in-out',
+    animationIterationCount: 'infinite',
+  },
+  dirtyWarningMark: {
+    backgroundColor: 'hsl(var(--status-warning))',
+  },
+  closeButton: {
+    marginInlineStart: 'auto',
+    flexShrink: 0,
+    borderRadius: 'var(--radius-sm)',
+    padding: '2px',
+    transitionProperty: 'opacity, background-color, color',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: {
+      default: null,
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--muted-foreground) / 0.1)',
+      },
+    },
+    color: {
+      default: null,
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--tab-hover-foreground))',
+      },
+    },
+  },
+  closeInactive: {
+    opacity: {
+      default: 0,
+      [stylex.when.ancestor(':where([role="tab"]):hover')]: {
+        default: null,
+        '@media (hover: hover)': 1,
+      },
+    },
+  },
+  closeVisible: {
+    opacity: 1,
+  },
+  closeIcon: {
+    width: '12px',
+    height: '12px',
+  },
+  tabGlyph: {
+    width: '14px',
+    height: '14px',
+  },
+  tabGlyphDimmed: {
+    width: '14px',
+    height: '14px',
+    opacity: 0.7,
+  },
+  addGlyph: {
+    width: '16px',
+    height: '16px',
+  },
+  slot: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+  },
+  addButton: {
+    display: 'flex',
+    width: '28px',
+    height: '28px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 'var(--radius-md)',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--hover-foreground))',
+      },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: {
+      default: null,
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--hover))',
+      },
+      ':disabled:hover': {
+        default: null,
+        '@media (hover: hover)': 'transparent',
+      },
+    },
+    outline: {
+      default: null,
+      ':focus-visible': {
+        default: 'none',
+        '@media (forced-colors: active)': '2px solid transparent',
+      },
+    },
+    outlineOffset: {
+      default: null,
+      ':focus-visible': {
+        default: null,
+        '@media (forced-colors: active)': '2px',
+      },
+    },
+    '--tw-ring-color': {
+      default: null,
+      ':focus-visible': 'hsl(var(--ring) / 0.4)',
+    },
+    '--tw-ring-shadow': {
+      default: null,
+      ':focus-visible':
+        'var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentColor)',
+    },
+    boxShadow: {
+      default: null,
+      ':focus-visible':
+        'var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)',
+    },
+    cursor: {
+      default: null,
+      ':disabled': 'default',
+    },
+    opacity: {
+      default: null,
+      ':disabled': 0.35,
+    },
+  },
+});
 
 function SidePanelTabIcon({ tab }: { tab: SessionSidePanelTabItem }) {
   if (tab.pending) {
@@ -142,23 +457,23 @@ function SidePanelTabIcon({ tab }: { tab: SessionSidePanelTabItem }) {
   }
   switch (tab.kind) {
     case 'files':
-      return <Files className="h-3.5 w-3.5 opacity-70" />;
+      return <Files {...stylex.props(styles.tabGlyphDimmed)} />;
     case 'changes':
     case 'diff':
-      return <FileDiff className="h-3.5 w-3.5 opacity-70" />;
+      return <FileDiff {...stylex.props(styles.tabGlyphDimmed)} />;
     case 'pr':
-      return <GitPullRequest className="h-3.5 w-3.5 opacity-70" />;
+      return <GitPullRequest {...stylex.props(styles.tabGlyphDimmed)} />;
     case 'browser':
-      return <MonitorPlay className="h-3.5 w-3.5 opacity-70" />;
+      return <MonitorPlay {...stylex.props(styles.tabGlyphDimmed)} />;
     case 'ios-simulator':
-      return <Smartphone className="h-3.5 w-3.5 opacity-70" />;
+      return <Smartphone {...stylex.props(styles.tabGlyphDimmed)} />;
     case 'session':
-      return <MessageSquare className="h-3.5 w-3.5 opacity-70" />;
+      return <MessageSquare {...stylex.props(styles.tabGlyphDimmed)} />;
     case 'file':
       return tab.filePath ? (
-        <FileIcon filePath={tab.filePath} className="h-3.5 w-3.5" />
+        <FileIcon filePath={tab.filePath} {...stylex.props(styles.tabGlyph)} />
       ) : (
-        <Files className="h-3.5 w-3.5 opacity-70" />
+        <Files {...stylex.props(styles.tabGlyphDimmed)} />
       );
   }
 
@@ -175,20 +490,20 @@ export function SessionSidePanelEmptyState({
   title: string;
 }) {
   return (
-    <div className="@container/empty-panel flex h-full items-center justify-center p-6">
-      <div className="w-full max-w-xs text-center">
-        <div className="text-sm font-medium text-foreground">{title}</div>
-        <div className="mt-4 grid grid-cols-1 gap-2 @min-[320px]/empty-panel:grid-cols-2">
+    <div {...stylex.props(styles.emptyState)}>
+      <div {...stylex.props(styles.emptyContent)}>
+        <div {...stylex.props(styles.emptyTitle)}>{title}</div>
+        <div {...stylex.props(styles.emptyGrid)}>
           {panels.map((panel) => (
             <button
               key={panel.id}
               type="button"
               disabled={panel.disabled}
-              className="flex min-h-10 items-center gap-2 rounded-md border border-border/70 bg-background px-3 text-left text-sm text-foreground transition-colors hover:bg-hover hover:text-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-background disabled:hover:text-foreground"
+              {...stylex.props(styles.emptyAction)}
               onClick={() => onPanelOpen(panel.id)}
             >
               <SidePanelTabIcon tab={panel} />
-              <span className="min-w-0">{panel.label}</span>
+              <span {...stylex.props(styles.emptyActionLabel)}>{panel.label}</span>
             </button>
           ))}
         </div>
@@ -219,23 +534,17 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
   }, [activeTabId]);
 
   return (
-    <div
-      className={cn(
-        '@container/side-tabs flex min-w-0 items-center gap-1 px-2',
-        windowDragClass,
-        className
-      )}
-    >
+    <div className={cn(stylex.props(styles.container).className, windowDragClass, className)}>
       <ScrollArea
         scrollableX
         horizontalOnly
         viewportRef={viewportRef}
-        className="min-w-0 flex-1"
+        className={stylex.props(styles.viewport).className}
         // Compact overlay bar: default horizontal track is too tall in this h-11 strip.
         horizontalScrollbarClassName="h-1 border-0 p-0"
         horizontalScrollbarThumbClassName="bg-[hsl(var(--scrollbar-thumb)/0.35)] hover:bg-[hsl(var(--scrollbar-thumb-hover)/0.5)]"
       >
-        <div role="tablist" className="flex h-10 w-max min-w-full items-center gap-1.5">
+        <div role="tablist" {...stylex.props(styles.tabList)}>
           {tabs.map((tab) => {
             const active = tab.id === activeTabId;
             // A tab busy with its own lifecycle work (e.g. a side chat being
@@ -256,10 +565,14 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
                 tabIndex={active ? 0 : -1}
                 aria-selected={active}
                 className={cn(
-                  TAB_CLASS,
-                  tab.closeable ? 'px-3' : 'px-2',
-                  active ? ACTIVE_TAB_CLASS : INACTIVE_TAB_CLASS,
-                  busy && 'cursor-wait opacity-70'
+                  stylex.props(
+                    stylex.defaultMarker(),
+                    styles.tab,
+                    tab.closeable ? styles.tabPadded : styles.tabCompact,
+                    active ? tabPillStyles.active : tabPillStyles.inactive,
+                    busy && styles.tabBusy
+                  ).className,
+                  WINDOW_DRAG_EXEMPT_CLASS
                 )}
                 onClick={() => {
                   if (!busy) onTabSelect(tab.id);
@@ -271,26 +584,28 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
                   }
                 }}
               >
-                <span className="shrink-0">
+                <span {...stylex.props(styles.iconSlot)}>
                   <SidePanelTabIcon tab={tab} />
                 </span>
                 {saveStateLabel ? (
                   <span
-                    className={cn(
-                      'h-1.5 w-1.5 shrink-0 rounded-full',
+                    {...stylex.props(
+                      styles.dirtyMark,
                       tab.conflict
-                        ? 'bg-status-danger'
+                        ? styles.conflictMark
                         : tab.saving
-                          ? 'animate-pulse bg-status-info'
-                          : 'bg-status-warning'
+                          ? styles.savingMark
+                          : styles.dirtyWarningMark
                     )}
                     aria-hidden="true"
                   />
                 ) : null}
                 <span
-                  className={cn(
-                    'truncate',
-                    tab.closeable && (tab.kind === 'file' || tab.kind === 'diff') && 'font-mono'
+                  {...stylex.props(
+                    styles.tabLabel,
+                    tab.closeable &&
+                      (tab.kind === 'file' || tab.kind === 'diff') &&
+                      styles.monoLabel
                   )}
                 >
                   {tab.label}
@@ -299,10 +614,9 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
                   <button
                     type="button"
                     disabled={busy}
-                    className={cn(
-                      'ml-auto shrink-0 rounded-sm p-0.5 transition-[opacity,background-color,color]',
-                      'hover:bg-muted-foreground/10 hover:text-tab-hover-foreground',
-                      active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    {...stylex.props(
+                      styles.closeButton,
+                      active ? styles.closeVisible : styles.closeInactive
                     )}
                     aria-label={closeTabLabel(tab.label)}
                     onClick={(event) => {
@@ -310,7 +624,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
                       if (!busy) onTabClose(tab.id);
                     }}
                   >
-                    <X className="h-3 w-3" />
+                    <X {...stylex.props(styles.closeIcon)} />
                   </button>
                 ) : null}
               </div>
@@ -319,7 +633,9 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         </div>
       </ScrollArea>
       {moreSlot ? (
-        <div className={cn('flex shrink-0 items-center', WINDOW_DRAG_EXEMPT_CLASS)}>{moreSlot}</div>
+        <div className={cn(stylex.props(styles.slot).className, WINDOW_DRAG_EXEMPT_CLASS)}>
+          {moreSlot}
+        </div>
       ) : null}
       <Menu.Root>
         <Menu.Trigger
@@ -328,12 +644,9 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
               type="button"
               disabled={availablePanels.length === 0}
               aria-label={addPanelLabel}
-              className={cn(
-                'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent',
-                WINDOW_DRAG_EXEMPT_CLASS
-              )}
+              className={cn(stylex.props(styles.addButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
             >
-              <Plus className="h-4 w-4" />
+              <Plus {...stylex.props(styles.addGlyph)} />
             </button>
           }
         >
@@ -341,12 +654,9 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
             type="button"
             disabled={availablePanels.length === 0}
             aria-label={addPanelLabel}
-            className={cn(
-              'flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent',
-              WINDOW_DRAG_EXEMPT_CLASS
-            )}
+            className={cn(stylex.props(styles.addButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
           >
-            <Plus className="h-4 w-4" />
+            <Plus {...stylex.props(styles.addGlyph)} />
           </button>
         </Menu.Trigger>
         <Menu.Content align="end" className="min-w-40">
@@ -363,7 +673,9 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         </Menu.Content>
       </Menu.Root>
       {endSlot ? (
-        <div className={cn('flex shrink-0 items-center', WINDOW_DRAG_EXEMPT_CLASS)}>{endSlot}</div>
+        <div className={cn(stylex.props(styles.slot).className, WINDOW_DRAG_EXEMPT_CLASS)}>
+          {endSlot}
+        </div>
       ) : null}
     </div>
   );
