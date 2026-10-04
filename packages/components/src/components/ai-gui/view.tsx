@@ -4700,6 +4700,8 @@ export const SubagentRunHistory = ({
             );
           case 'plan':
             return <PlanBlock entries={item.entries} fontSize={fontSize} />;
+          default:
+            return null;
         }
       }}
     />
