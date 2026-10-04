@@ -1,4 +1,4 @@
-import { Check, ChevronDown, GitMerge } from 'lucide-react';
+import { ChevronDown, GitMerge } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
@@ -143,20 +143,16 @@ export function PrMergeButton({
           }
         />
         <Menu.Content align="end" side={compact ? 'top' : 'bottom'}>
-          {MERGE_METHODS.map((candidate) => {
-            const isActive = candidate.value === method;
-            return (
-              <Menu.Item
-                key={candidate.value}
-                onClick={() => onSelectMethod?.(candidate.value)}
-              >
-                <Check
-                  className={cn('shrink-0', isActive ? 'text-foreground' : 'text-transparent')}
-                />
+          <Menu.RadioGroup
+            value={method}
+            onValueChange={(value) => onSelectMethod?.(value as GitHubMergeMethod)}
+          >
+            {MERGE_METHODS.map((candidate) => (
+              <Menu.RadioItem key={candidate.value} value={candidate.value} indicator="check">
                 {t(candidate.labelKey, candidate.labelFallback)}
-              </Menu.Item>
-            );
-          })}
+              </Menu.RadioItem>
+            ))}
+          </Menu.RadioGroup>
         </Menu.Content>
       </Menu.Root>
     </div>

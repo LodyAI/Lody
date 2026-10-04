@@ -42,6 +42,7 @@ import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Avatar, type AvatarSize } from '@lody/ui/avatar';
 import { Button, ButtonGroup } from '@lody/ui/button';
+import { Tabs } from '@lody/ui/tabs';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Textarea } from '@lody/ui/textarea';
@@ -52,6 +53,9 @@ import {
 } from '@/ui/diff-viewer/github-comment-thread';
 import { PR_STATUS_META, PullRequestBadge } from '@/components/sessions/pull-request-badge';
 import { Menu } from '@/ui/menu';
+import { PrChangesView } from './pr-changes-view';
+import type { UseGitHubPrDiffResult } from '@/hooks/use-github-pr-diff';
+import type { PrCommitSelection } from '@/lib/github-pr-diff';
 
 /** The tab's own width, not the window's: the PR tab lives in a resizable side panel. */
 const NARROW = '@container pr-tab (width < 420px)';
@@ -320,17 +324,36 @@ const styles = stylex.create({
   },
   noticeDanger: { backgroundColor: `color-mix(in oklab, transparent, ${colors.destructive} 10%)` },
   noticeWarning: { backgroundColor: `color-mix(in oklab, transparent, ${colors.warning} 10%)` },
-  noticeQuiet: {
-    alignItems: 'center',
-    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
-    color: colors.secondaryLabel,
-  },
   noticeBody: { flexGrow: 1, minWidth: 0, margin: 0 },
   noticeTitle: { margin: 0, fontWeight: 500 },
   noticeTitleDanger: { color: colors.destructive },
   noticeText: { margin: 0, marginTop: '2px', color: colors.secondaryLabel },
   noticeDetail: { margin: 0, marginTop: '2px', fontSize: '0.8em', color: colors.secondaryLabel },
-  noticeActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1.5] },
+  /** The degraded panel's actions sit on their own row under the text. */
+  noticeActionRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[2],
+    marginTop: space[3],
+  },
+  /** A link inside a sentence: accent, underlined under the pointer. */
+  textLink: {
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    boxShadow: 'none',
+    color: colors.accent,
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    lineHeight: 'inherit',
+    fontWeight: 500,
+    textDecorationLine: { default: 'none', ':hover': 'underline' },
+    textUnderlineOffset: '3px',
+    cursor: 'pointer',
+  },
+
   mark: { flexShrink: 0, width: '16px', height: '16px', marginTop: '2px' },
   markCentered: { marginTop: 0 },
 
@@ -533,11 +556,17 @@ export interface PrTabViewData {
   reviews: GitHubReview[];
   issueComments: GitHubIssueComment[];
   checkRuns: GitHubCheckRunsSummary;
+  changes?: UseGitHubPrDiffResult & {
+    selection: PrCommitSelection;
+    onSelectionChange: (selection: PrCommitSelection) => void;
+  };
 }
 
 export interface PrTabViewProps {
   repoFullName: string;
   prNumber: number;
+  /** Optional initial sub-tab for embedded fixtures and previews. */
+  initialTab?: 'summary' | 'changes';
   state: PrTabViewState;
   data?: PrTabViewData | null;
   error?: string | null;
@@ -553,7 +582,8 @@ export interface PrTabViewProps {
   /** `null` while we're still probing GitHub for branch existence, `true`
    *  when it's confirmed present, `false` when the branch is gone. */
   branchExists?: boolean | null;
-  onRefresh?: () => void;
+  /** May return the reload's promise; the failure panel's Retry tracks it. */
+  onRefresh?: () => void | Promise<unknown>;
   onPostComment?: (body: string) => Promise<void> | void;
   onGrantChecksPermission?: () => void;
   onSelectMergeMethod?: (method: GitHubMergeMethod) => void;
@@ -1178,7 +1208,7 @@ function PrPrimaryAction({
   const closeItem = canClose ? (
     <Menu.Item
       tone="destructive"
-      icon={<GitPullRequestClosed />}
+      icon={GitPullRequestClosed}
       onClick={() => void onSetState?.('closed')}
     >
       {t('sessions.prTab.closeAction', 'Close pull request')}
@@ -1242,7 +1272,7 @@ function PrPrimaryAction({
         </Menu.GroupLabel>
         <Menu.RadioGroup
           value={mergeMethod}
-          onValueChange={(value) => onSelectMergeMethod?.(value as GitHubMergeMethod)}
+          onValueChange={(value: string) => onSelectMergeMethod?.(value as GitHubMergeMethod)}
         >
           {HEADER_MERGE_METHODS.map((method) => (
             <Menu.RadioItem key={method.value} value={method.value}>
@@ -1639,14 +1669,21 @@ function PrBodySkeleton() {
 const COMPOSER_MAX_ROWS = 11;
 
 function Composer({
+  value,
+  onValueChange,
   isPending,
   onSubmit,
 }: {
+  /**
+   * The draft is owned by the view, not this box: when a failed reload hides
+   * the composer, the text survives and comes back with the next ready state.
+   */
+  value: string;
+  onValueChange: (value: string) => void;
   isPending: boolean;
   onSubmit: (body: string) => Promise<void> | void;
 }) {
   const { t } = useTranslation();
-  const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const canSubmit = value.trim().length > 0 && !isPending;
 
@@ -1690,16 +1727,21 @@ function Composer({
   const submit = useCallback(async () => {
     const body = value.trim();
     if (!body || isPending) return;
-    await onSubmit(body);
-    setValue('');
-  }, [isPending, onSubmit, value]);
+    try {
+      await onSubmit(body);
+    } catch {
+      // The container already toasted the failure; the draft stays.
+      return;
+    }
+    onValueChange('');
+  }, [isPending, onSubmit, onValueChange, value]);
 
   return (
     <div {...stylex.props(styles.composer)}>
       <Textarea
         ref={textareaRef}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => onValueChange(e.target.value)}
         placeholder={t('sessions.prTab.composerPlaceholder', 'Leave a comment')}
         rows={2}
         resize="none"
@@ -1724,6 +1766,116 @@ function Composer({
   );
 }
 
+/**
+ * The degraded face of a failed load — the same danger notice the surface has
+ * always used, but no longer a dead end. The tab exists because this session
+ * recorded a PR, so the notice keeps that context: the title says what failed,
+ * the body says a PR was found and where it can still be viewed, and the two
+ * actions that can still work — open on GitHub, retry the load — get visible
+ * pending feedback. The verbatim error stays visible as a quiet detail line —
+ * when it is a GitHub 404, a hedged hint names the other likely cause (the Lody
+ * GitHub App lacking repo access) and offers the install/access page as the one
+ * repair the user can actually run. Nothing here asserts webhook association or
+ * write access.
+ */
+function PrDetailsUnavailable({
+  githubUrl,
+  error,
+  isRefreshing,
+  onRetry,
+  onReviewAppAccess,
+}: {
+  githubUrl: string;
+  error: string | null;
+  isRefreshing: boolean;
+  onRetry?: () => void | Promise<unknown>;
+  /** Opens the GitHub App install page — the same destination the checks-permission grant uses. */
+  onReviewAppAccess?: () => void;
+}) {
+  const { t } = useTranslation();
+  const [retrying, setRetrying] = useState(false);
+  const retry = useCallback(() => {
+    if (!onRetry) return;
+    setRetrying(true);
+    // `onRetry` settles when the reload — slices, or the identity-resolution
+    // mutation — settles. A still-failing load re-arms the button against the
+    // unchanged error; a recovered load unmounts this panel.
+    let outcome: unknown;
+    try {
+      outcome = onRetry();
+    } catch {
+      setRetrying(false);
+      return;
+    }
+    void Promise.resolve(outcome).then(
+      () => setRetrying(false),
+      () => setRetrying(false)
+    );
+  }, [onRetry]);
+  const pending = retrying || isRefreshing;
+  const errorText = error !== null && error.trim() !== '' ? error : null;
+  // GitHub answers "you can't see that" with a 404, so a not-found detail load
+  // may be an app-access problem — hedged hint, never a claim.
+  const likelyNotFound = errorText !== null && /\b404\b/.test(errorText);
+  return (
+    <section
+      data-pr-unavailable=""
+      role="status"
+      {...stylex.props(styles.notice, styles.noticeDanger)}
+    >
+      <AlertCircle aria-hidden {...stylex.props(styles.mark, styles.danger)} />
+      <div {...stylex.props(styles.noticeBody)}>
+        <p {...stylex.props(styles.noticeTitle, styles.noticeTitleDanger)}>
+          {t('sessions.prTab.loadError', 'Failed to load pull request')}
+        </p>
+        <p {...stylex.props(styles.noticeText)}>
+          {t(
+            'sessions.prTab.foundBody',
+            'A pull request was found for this branch — Lody can’t show its details right now. You can still view it on GitHub.'
+          )}
+        </p>
+        {errorText !== null && <p {...stylex.props(styles.noticeDetail)}>{errorText}</p>}
+        {likelyNotFound && (
+          <p {...stylex.props(styles.noticeDetail)}>
+            {t(
+              'sessions.prTab.notFoundHint',
+              'A 404 can also mean the Lody GitHub App can’t access this repository.'
+            )}
+            {onReviewAppAccess && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  onClick={onReviewAppAccess}
+                  {...stylex.props(styles.textLink)}
+                >
+                  {t('sessions.prTab.reviewAppAccess', 'Review app access')}
+                </button>
+              </>
+            )}
+          </p>
+        )}
+        <div {...stylex.props(styles.noticeActionRow)}>
+          <Button
+            render={<a href={githubUrl} target="_blank" rel="noreferrer" />}
+            variant="secondary"
+            size="mini"
+          >
+            <Github aria-hidden {...stylex.props(styles.glyph14)} />
+            {t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
+          </Button>
+          {onRetry && (
+            <Button type="button" size="mini" variant="ghost" onClick={retry} disabled={pending}>
+              {pending && <Spinner {...stylex.props(styles.glyph14)} />}
+              {t('sessions.prTab.retry', 'Retry')}
+            </Button>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 type MergeKind = 'ready' | 'conflict' | 'checking' | 'blocked' | 'draft' | 'merged' | 'closed';
 
 function resolveMergeKind(pr: GitHubPullRequestDetails): MergeKind {
@@ -1739,6 +1891,7 @@ function resolveMergeKind(pr: GitHubPullRequestDetails): MergeKind {
 export const PrTabView = memo(function PrTabView({
   repoFullName,
   prNumber,
+  initialTab = 'summary',
   state,
   data,
   error,
@@ -1766,7 +1919,19 @@ export const PrTabView = memo(function PrTabView({
   className,
 }: PrTabViewProps) {
   const { t } = useTranslation();
+  const [activeTab, setActiveTab] = useState<'summary' | 'changes'>(initialTab);
+  // Held here, not in the composer: a failed reload unmounts the composer,
+  // and the draft must come back with the next ready state, not be lost.
+  const [commentDraft, setCommentDraft] = useState('');
+  useEffect(() => {
+    setCommentDraft('');
+  }, [prNumber, repoFullName]);
   const pr = data?.pullRequest;
+  const changes = data?.changes;
+  const changesAvailable = changes != null;
+  useEffect(() => {
+    setActiveTab(initialTab === 'changes' && changesAvailable ? 'changes' : 'summary');
+  }, [changesAvailable, initialTab, prNumber, repoFullName]);
   const conversation = data
     ? buildConversation(data.issueComments, data.reviewThreads, data.reviews)
     : [];
@@ -1799,28 +1964,21 @@ export const PrTabView = memo(function PrTabView({
       />
     ) : null;
 
-  const body = (
+  const summaryBody = (
     <div {...stylex.props(styles.gutter, embedded && styles.gutterEmbedded)}>
       <div {...stylex.props(styles.column, styles.body, embedded && styles.bodyEmbedded)}>
         {state === 'loading' && !pr && <PrBodySkeleton />}
 
         {state === 'error' && !pr && (
-          <div {...stylex.props(styles.notice, styles.noticeDanger)}>
-            <AlertCircle {...stylex.props(styles.mark, styles.danger)} />
-            <div {...stylex.props(styles.noticeBody)}>
-              <p {...stylex.props(styles.noticeTitle, styles.noticeTitleDanger)}>
-                {t('sessions.prTab.loadError', 'Failed to load pull request')}
-              </p>
-              {error && <p {...stylex.props(styles.noticeDetail)}>{error}</p>}
-            </div>
-            <div {...stylex.props(styles.noticeActions)}>
-              {onRefresh && (
-                <Button type="button" size="mini" variant="secondary" onClick={onRefresh}>
-                  {t('sessions.prTab.retry', 'Retry')}
-                </Button>
-              )}
-            </div>
-          </div>
+          <PrDetailsUnavailable
+            githubUrl={badgeMeta.url}
+            error={error ?? null}
+            isRefreshing={Boolean(isRefreshing)}
+            onRetry={onRefresh}
+            // Same destination the checks-permission grant uses: the GitHub
+            // App install page is where repo access gets fixed.
+            onReviewAppAccess={onGrantChecksPermission}
+          />
         )}
 
         {pr && (
@@ -1885,6 +2043,8 @@ export const PrTabView = memo(function PrTabView({
               )}
               {embedded && onPostComment && (
                 <Composer
+                  value={commentDraft}
+                  onValueChange={setCommentDraft}
                   isPending={Boolean(isPostingComment)}
                   onSubmit={(commentBody) => onPostComment(commentBody)}
                 />
@@ -1894,6 +2054,53 @@ export const PrTabView = memo(function PrTabView({
         )}
       </div>
     </div>
+  );
+
+  const changesBody = changes ? (
+    <div {...stylex.props(styles.gutter, embedded && styles.gutterEmbedded)}>
+      <div {...stylex.props(styles.column, styles.body, embedded && styles.bodyEmbedded)}>
+        <PrChangesView
+          state={changes.state}
+          commits={changes.commits}
+          files={changes.files}
+          selection={changes.selection}
+          onSelectionChange={changes.onSelectionChange}
+          contentByPath={changes.contentByPath}
+          onLoadFile={changes.loadFile}
+          onRefresh={() => void changes.refresh()}
+          error={changes.error}
+          historical={Boolean(changes.range?.historical)}
+        />
+      </div>
+    </div>
+  ) : null;
+
+  const body = (
+    <Tabs.Root
+      value={activeTab}
+      onValueChange={(value: string) => setActiveTab(value as 'summary' | 'changes')}
+      orientation="horizontal"
+    >
+      <div {...stylex.props(styles.gutter)}>
+        <div {...stylex.props(styles.column)}>
+          <Tabs.List size="small">
+            <Tabs.Tab value="summary">{t('sessions.prTab.summary', 'Summary')}</Tabs.Tab>
+            <Tabs.Tab value="changes" disabled={!changes}>
+              {t('sessions.prTab.changes', 'Changes')}
+              {pr && (
+                <>
+                  {' '}
+                  <span {...stylex.props(styles.additions)}>+{pr.additions}</span>{' '}
+                  <span {...stylex.props(styles.deletions)}>−{pr.deletions}</span>
+                </>
+              )}
+            </Tabs.Tab>
+          </Tabs.List>
+        </div>
+      </div>
+      <Tabs.Panel value="summary">{summaryBody}</Tabs.Panel>
+      {changesBody && <Tabs.Panel value="changes">{changesBody}</Tabs.Panel>}
+    </Tabs.Root>
   );
 
   return (
@@ -1927,13 +2134,13 @@ export const PrTabView = memo(function PrTabView({
                   variant="ghost"
                   size="small"
                   icon
-                  onClick={onRefresh}
+                  onClick={() => void onRefresh?.()}
                   aria-label={t('sessions.prTab.refresh', 'Refresh')}
                   title={t('sessions.prTab.refresh', 'Refresh')}
                 >
                   <Spinner
                     icon={RefreshCcw}
-                    spinning={isRefreshing || state === 'loading'}
+                    spinning={Boolean(isRefreshing) || state === 'loading'}
                     {...stylex.props(styles.fill)}
                   />
                 </Button>
@@ -1962,15 +2169,22 @@ export const PrTabView = memo(function PrTabView({
 
       <ScrollArea
         data-pr-content-scroll-area=""
-        {...stylex.props(styles.scroll, !embedded && onPostComment && styles.scrollUnderComposer)}
+        {...stylex.props(
+          styles.scroll,
+          !embedded && onPostComment && pr && activeTab === 'summary' && styles.scrollUnderComposer
+        )}
       >
         {body}
       </ScrollArea>
 
-      {!embedded && onPostComment && (
+      {/* The composer needs a loaded PR: without one the comment has no
+          confirmed target and posting would silently drop the draft. */}
+      {!embedded && onPostComment && pr && activeTab === 'summary' && (
         <div data-pr-comment-composer="" {...stylex.props(styles.composerDock, styles.gutter)}>
           <div {...stylex.props(styles.column)}>
             <Composer
+              value={commentDraft}
+              onValueChange={setCommentDraft}
               isPending={Boolean(isPostingComment)}
               onSubmit={(commentBody) => onPostComment(commentBody)}
             />

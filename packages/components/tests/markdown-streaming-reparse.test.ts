@@ -296,6 +296,34 @@ End of synthetic document.`,
     expect(copy?.getAttribute('aria-label')).toBe('Copied');
   });
 
+  it.each([false, true])(
+    'classifies table columns by content length (streaming: %s)',
+    async (isStreaming) => {
+      await renderMarkdown(
+        [
+          '| 项目 | 路径 | 状态 |',
+          '| --- | --- | --- |',
+          '| OSS：升级到 Electron 43 | `~/Code/lody-build/.lody-build/artifacts/20260930/Lody.app` | Draft |',
+          '| 私有仓库 | [a.md](a.md) | 已通过 CI；需要确认两项例外：electron-vite 6 beta 与 19 项隔离依赖 |',
+        ].join('\n'),
+        { isStreaming }
+      );
+
+      const table = container?.querySelector('[data-markdown-table] table');
+      // Short column 1 stays on one line; the path column breaks inside its
+      // token; the prose column wraps between words.
+      expect(table?.getAttribute('data-one-line-columns')).toBe('1');
+      expect(table?.getAttribute('data-break-anywhere-columns')).toBe('2');
+      // Both long columns are intrinsically wide and keep a higher floor.
+      expect(table?.getAttribute('data-wide-columns')).toBe('2 3');
+      // Every column carries a preferred width so a crowded table shrinks
+      // columns in proportion to their content, not down to a flat floor.
+      const cols = table?.querySelectorAll('colgroup > col');
+      expect(cols?.length).toBe(3);
+      expect((cols?.[1] as HTMLElement | undefined)?.style.width).toBe('30em');
+    }
+  );
+
   it('renders links that only name a GitHub PR or issue as reference labels', async () => {
     await renderMarkdown(
       [

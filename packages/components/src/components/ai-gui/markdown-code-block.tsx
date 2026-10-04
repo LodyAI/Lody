@@ -13,6 +13,10 @@ import { Check, Copy, Eye, EyeOff, WrapText } from 'lucide-react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { conversationFontSizeAtom } from '@/atoms/settings';
+import * as stylex from '@stylexjs/stylex';
+import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
+import { withClassName } from '@/lib/stylex';
+import { conversation } from './conversation.tokens.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { useMarkdownCodeTokens, type MarkdownCodeToken } from './markdown-code-highlight';
 
@@ -63,9 +67,111 @@ export function isMarkdownCodeFence(language: string, meta: string | undefined):
 
 const COPY_FEEDBACK_MS = 2000;
 
+const typography = stylex.create({
+  block: {
+    '--markdown-code-block-bg': {
+      default: conversation.codeFill,
+      ':is(.dark *)': conversation.codeDarkFill,
+    },
+    '--markdown-code-block-border': conversation.codeBorder,
+    '--markdown-code-block-foreground': conversation.codeText,
+    '--markdown-code-block-language': conversation.codeMeta,
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    width: '100%',
+    marginBlock: conversation.surfaceGap,
+    overflow: 'hidden',
+    gap: 0,
+    border: 0,
+    borderRadius: radius.small,
+    backgroundColor: 'var(--markdown-code-block-bg)',
+    padding: 0,
+    color: conversation.codeText,
+  },
+  toolbar: {
+    display: 'flex',
+    minHeight: '28px',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: space[2],
+    paddingInline: space[3],
+    borderBottom: `0.5px solid ${conversation.codeBorder}`,
+    color: conversation.codeMeta,
+  },
+  header: {
+    display: 'flex',
+    minWidth: 0,
+    flex: 1,
+    alignItems: 'center',
+    overflow: 'hidden',
+    fontFamily: 'var(--font-mono)',
+    letterSpacing: '0.02em',
+    pointerEvents: 'none',
+  },
+  label: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  actions: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: `calc(${space[1]} / 2)`,
+  },
+  action: {
+    display: 'inline-flex',
+    width: space[6],
+    height: space[6],
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
+    borderRadius: radius.mini,
+    color: {
+      default: conversation.codeMeta,
+      ':hover': conversation.codeText,
+      ':is([aria-pressed="true"])': conversation.codeText,
+    },
+    backgroundColor: {
+      default: 'transparent',
+      ':is([aria-pressed="true"])': `color-mix(in srgb, ${conversation.codeText} 12%, transparent)`,
+    },
+  },
+  icon: { width: '14px', height: '14px' },
+  body: {
+    overflowX: { default: 'auto', ':is([data-code-wrap="true"] *)': 'hidden' },
+    paddingBlock: space[3],
+    paddingInline: space[4],
+    color: conversation.codeText,
+  },
+  pre: {
+    minWidth: { default: 'max-content', ':is([data-code-wrap="true"] *)': 0 },
+    margin: 0,
+    backgroundColor: 'transparent',
+    whiteSpace: { default: 'pre', ':is([data-code-wrap="true"] *)': 'pre-wrap' },
+    overflowWrap: { default: 'normal', ':is([data-code-wrap="true"] *)': 'anywhere' },
+    width: { default: 'auto', ':is([data-code-wrap="true"] *)': '100%' },
+  },
+  line: { display: 'block' },
+  preview: {
+    paddingTop: space[2],
+    paddingInline: space[1.5],
+    paddingBottom: space[3],
+    backgroundColor: 'transparent',
+  },
+  code: {
+    fontFamily: 'var(--font-mono)',
+    fontVariantLigatures: 'var(--lody-font-ligatures, contextual)',
+    fontSize: `var(--markdown-code-font-size, ${text.subheadlineSize})`,
+    lineHeight: `var(--markdown-code-line-height, ${text.subheadlineLeading})`,
+  },
+  caption: {
+    fontSize: `var(--markdown-caption-font-size, ${text.captionSize})`,
+    lineHeight: `var(--markdown-caption-line-height, ${text.captionLeading})`,
+  },
+});
+
 export function CodeBlockContainer({
   language,
   isIncomplete,
+  className,
   ...props
 }: ComponentProps<'div'> & { language: string; isIncomplete: boolean }) {
   return (
@@ -74,6 +180,7 @@ export function CodeBlockContainer({
       data-language={language}
       data-streamdown="code-block"
       {...props}
+      {...withClassName(stylex.props(typography.block), className)}
     />
   );
 }
@@ -92,6 +199,7 @@ export function CodeBlockCopyButton({ code }: { code: string }) {
       data-streamdown="code-block-copy-button"
       aria-label={label}
       title={copied ? t('common.copied', 'Copied') : label}
+      {...stylex.props(typography.action)}
       onClick={() => {
         void writeTextToClipboard(code).then((ok) => {
           if (!ok) return;
@@ -101,7 +209,11 @@ export function CodeBlockCopyButton({ code }: { code: string }) {
         });
       }}
     >
-      {copied ? <Check size={14} /> : <Copy size={14} />}
+      {copied ? (
+        <Check {...stylex.props(typography.icon)} />
+      ) : (
+        <Copy {...stylex.props(typography.icon)} />
+      )}
     </button>
   );
 }
@@ -132,26 +244,36 @@ const MarkdownCodeBody = memo(function MarkdownCodeBody({
   const lines = useMarkdownCodeTokens(trimmed, language, isIncomplete);
 
   return (
-    <div data-streamdown="code-block-body" data-language={language}>
-      <pre>
-        <code>
-          {lines.map((line, lineIndex) => (
-            // Lines only append while a fence streams, so position is stable.
-            <span key={lineIndex}>
-              {line.length === 0 || (line.length === 1 && line[0]?.content === '')
-                ? '\n'
-                : line.map((token, tokenIndex) => (
-                    <span key={tokenIndex} style={markdownCodeTokenStyle(token)}>
-                      {token.content}
-                    </span>
-                  ))}
-            </span>
-          ))}
-        </code>
+    <CodeBlockBody data-language={language}>
+      {lines.map((line, lineIndex) => (
+        // Lines only append while a fence streams, so position is stable.
+        <span key={lineIndex} {...stylex.props(typography.line)}>
+          {line.length === 0 || (line.length === 1 && line[0]?.content === '')
+            ? '\n'
+            : line.map((token, tokenIndex) => (
+                <span key={tokenIndex} style={markdownCodeTokenStyle(token)}>
+                  {token.content}
+                </span>
+              ))}
+        </span>
+      ))}
+    </CodeBlockBody>
+  );
+});
+
+export function CodeBlockBody({ children, className, ...props }: ComponentProps<'div'>) {
+  return (
+    <div
+      {...props}
+      data-streamdown="code-block-body"
+      {...withClassName(stylex.props(typography.body), className)}
+    >
+      <pre dir="ltr" {...stylex.props(typography.pre)}>
+        <code {...stylex.props(typography.code)}>{children}</code>
       </pre>
     </div>
   );
-});
+}
 
 export const MarkdownCodeToolbar = memo(function MarkdownCodeToolbar({
   code,
@@ -179,18 +301,28 @@ export const MarkdownCodeToolbar = memo(function MarkdownCodeToolbar({
     : t('sessions.fileViewer.preview.show', 'Preview');
 
   return (
-    <div data-streamdown="code-block-toolbar">
-      <div data-streamdown="code-block-header">{label ? <span>{label}</span> : null}</div>
-      <div data-streamdown="code-block-actions">
+    <div data-streamdown="code-block-toolbar" {...stylex.props(typography.toolbar)}>
+      <div
+        data-streamdown="code-block-header"
+        {...stylex.props(typography.header, typography.caption)}
+      >
+        {label ? <span {...stylex.props(typography.label)}>{label}</span> : null}
+      </div>
+      <div data-streamdown="code-block-actions" {...stylex.props(typography.actions)}>
         {markdownPreview && onTogglePreview ? (
           <button
             type="button"
             aria-label={previewLabel}
             aria-pressed={previewing}
             title={previewLabel}
+            {...stylex.props(typography.action)}
             onClick={onTogglePreview}
           >
-            {previewing ? <EyeOff /> : <Eye />}
+            {previewing ? (
+              <EyeOff {...stylex.props(typography.icon)} />
+            ) : (
+              <Eye {...stylex.props(typography.icon)} />
+            )}
           </button>
         ) : null}
         {previewing ? null : (
@@ -199,9 +331,10 @@ export const MarkdownCodeToolbar = memo(function MarkdownCodeToolbar({
             aria-label={wrapLabel}
             aria-pressed={wrapped}
             title={wrapLabel}
+            {...stylex.props(typography.action)}
             onClick={onToggleWrap}
           >
-            <WrapText />
+            <WrapText {...stylex.props(typography.icon)} />
           </button>
         )}
         <CodeBlockCopyButton code={code} />
@@ -240,7 +373,7 @@ export const MarkdownFencedCodeBlock = memo(function MarkdownFencedCodeBlock({
         onTogglePreview={() => setPreviewing((current) => !current)}
       />
       {showPreview ? (
-        <div data-markdown-preview="true">
+        <div data-markdown-preview="true" {...stylex.props(typography.preview)}>
           <Suspense fallback={null}>
             <MarkdownPreview text={code} size={conversationFontSize} isStreaming={isIncomplete} />
           </Suspense>

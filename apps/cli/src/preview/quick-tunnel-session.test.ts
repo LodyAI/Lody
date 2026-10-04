@@ -114,6 +114,7 @@ describe('QuickTunnelSession ownership and idle expiry', () => {
     await expect(session.close('revoked')).rejects.toThrow('cleanup failed');
     const result = await session.closed;
     expect(result.error).toBeInstanceOf(AggregateError);
+    expect(result.cleanupFailed).toBe(true);
     expect(session.active).toBe(false);
   });
 

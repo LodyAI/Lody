@@ -1,4 +1,5 @@
 import { PagedFileViewer } from './paged-file-viewer';
+import * as stylex from '@stylexjs/stylex';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Copy,
@@ -23,13 +24,13 @@ import {
   type VisualAnnotationReferencePayload,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { cn } from '@/lib/utils';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { useActiveVSCodeTheme, useResolvedTheme } from '../../theme-provider';
 import {
   conversationFontSizeAtom,
   currentWorkspaceIdAtom,
+  extendedCodeLanguagesEnabledAtom,
   fileViewerWordWrapAtom,
   getMachineMetaByIdAtomFamily,
   userAtom,
@@ -70,7 +71,12 @@ import {
   decideCodeCollabLiveTextUpdate,
   RecentLocalTextEchoTracker,
 } from '@/lib/code-collab-live-text-update';
-import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
+import {
+  getSessionFileLanguageId,
+  getSessionFileMonacoLanguageId,
+  isSessionFileShikiLanguage,
+  isSessionMarkdownPath,
+} from '@/lib/session-file-language';
 import { getOfficePreviewKind } from '@/lib/session-file-office-source';
 import { downloadBytesAsFile } from '@/lib/download-file';
 import { usePostHog } from '@posthog/react';
@@ -102,12 +108,302 @@ import type { SessionMonacoSelectionRestore } from '@/lib/session-monaco-editor-
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { FamiconsCloudOfflineOutline } from '@/components/icons/famicons-cloud-offline-outline';
 import { SessionFileErrorState } from './session-file-error-state';
+import { SessionShikiTextViewer } from './session-shiki-text-viewer';
 import { ManagedPreviewSurface } from './managed-preview-surface';
+
 import { supportsCredentiallessManagedPreviewFrames } from './managed-preview-frame-cache';
 import {
   buildStaticHtmlPreviewDocument,
   getStaticHtmlPreviewLogicalUrl,
 } from './static-html-preview-document';
+const styles = stylex.create({
+  spinner16: { width: '16px', height: '16px', flexShrink: 0 },
+  spinner14: { width: '14px', height: '14px', flexShrink: 0 },
+  markdownPreview: {
+    width: '100%',
+    maxWidth: '48rem',
+    marginInline: 'auto',
+    padding: {
+      default: '12px',
+      '@media (min-width: 640px)': '16px',
+    },
+    userSelect: 'text',
+  },
+  centeredState: {
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    padding: '12px',
+    textAlign: 'center',
+    fontSize: '0.875rem',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  previewFrame: {
+    position: 'relative',
+    height: '100%',
+    minHeight: 0,
+    overflow: 'hidden',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  previewLoading: {
+    position: 'absolute',
+    insetBlockStart: '12px',
+    insetInlineEnd: '12px',
+    pointerEvents: 'none',
+    borderRadius: '4px',
+    backgroundColor: 'hsl(var(--background) / 0.9)',
+    padding: '6px',
+    color: 'hsl(var(--muted-foreground))',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  previewError: {
+    position: 'absolute',
+    insetBlockEnd: '12px',
+    insetInline: '12px',
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+    borderRadius: '6px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--status-warning) / 0.3)',
+    backgroundColor: 'hsl(var(--background) / 0.95)',
+    paddingBlock: '8px',
+    paddingInline: '12px',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    color: 'hsl(var(--foreground))',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  previewErrorIcon: {
+    marginTop: '2px',
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    color: 'hsl(var(--status-warning))',
+  },
+  contentColumn: { display: 'flex', height: '100%', minHeight: 0, flexDirection: 'column' },
+  contentFlexible: { minHeight: 0, flex: 1 },
+  truncatedNote: {
+    paddingBlock: '8px',
+    paddingInline: '12px',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  viewerRoot: {
+    display: 'flex',
+    height: '100%',
+    minHeight: 0,
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  toolbar: {
+    display: 'flex',
+    height: '2rem',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: '4px',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: 'hsl(var(--background))',
+    paddingInline: '8px',
+  },
+  toolbarActions: { display: 'flex', marginInlineStart: 'auto', alignItems: 'center', gap: '4px' },
+  toolButton: {
+    display: 'flex',
+    width: '24px',
+    height: '24px',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '4px',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':hover': 'hsl(var(--foreground))',
+    },
+    transitionProperty: 'color, background-color',
+    transitionDuration: '150ms',
+    backgroundColor: {
+      default: null,
+      ':hover': 'hsl(var(--accent))',
+    },
+    cursor: {
+      default: null,
+      ':disabled': 'not-allowed',
+    },
+    opacity: {
+      default: null,
+      ':disabled': 0.5,
+    },
+  },
+  toolButtonActive: { color: 'hsl(var(--foreground))' },
+  saveAvailable: {
+    color: {
+      default: 'hsl(var(--status-warning))',
+      ':hover': 'hsl(var(--status-warning))',
+    },
+    backgroundColor: {
+      default: null,
+      ':hover': 'hsl(var(--status-warning) / 0.1)',
+    },
+  },
+  icon: { width: '14px', height: '14px' },
+  iconSmall: { width: '12px', height: '12px', flexShrink: 0 },
+  contentBody: { position: 'relative', minHeight: 0, flex: 1, overflow: 'hidden' },
+  fullSize: { width: '100%', height: '100%' },
+  fullMinContent: { minWidth: 0, minHeight: '100%' },
+  sourceTextarea: {
+    width: '100%',
+    height: '100%',
+    minHeight: '240px',
+    resize: 'none',
+    overflow: 'auto',
+    borderWidth: 0,
+    backgroundColor: 'hsl(var(--background))',
+    padding: '12px',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '0.75rem',
+    lineHeight: '1.25rem',
+    color: 'hsl(var(--foreground))',
+    outline: 'none',
+  },
+  previewToggle: {
+    display: 'flex',
+    width: '24px',
+    height: '24px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '4px',
+    transitionProperty: 'color, background-color',
+    transitionDuration: '150ms',
+    backgroundColor: {
+      default: null,
+      ':hover': 'hsl(var(--accent))',
+    },
+    color: {
+      default: null,
+      ':hover': 'hsl(var(--foreground))',
+    },
+  },
+  previewToggleActive: { color: 'hsl(var(--foreground))' },
+  previewToggleInactive: { color: 'hsl(var(--muted-foreground))' },
+  smallTooltip: { fontSize: '0.75rem' },
+  statusBar: {
+    display: 'flex',
+    height: '24px',
+    minHeight: '24px',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: '8px',
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.5)',
+    backgroundColor: 'hsl(var(--background))',
+    paddingInline: '8px',
+    fontSize: '11px',
+    lineHeight: 1,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  statusItems: {
+    display: 'flex',
+    minWidth: 0,
+    flex: 1,
+    alignItems: 'center',
+    gap: '6px',
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+  },
+  statusItem: { display: 'flex', minWidth: 0, flexShrink: 0, alignItems: 'center', gap: '4px' },
+  statusSeparator: { marginInlineEnd: '2px', color: 'hsl(var(--muted-foreground) / 0.55)' },
+  statusDot: { width: '6px', height: '6px', flexShrink: 0, borderRadius: '9999px' },
+  statusPositiveDot: { backgroundColor: '#10b981' },
+  statusMutedDot: { backgroundColor: 'hsl(var(--muted-foreground) / 0.5)' },
+  statusWarningDot: { backgroundColor: '#f59e0b' },
+  statusDangerDot: { backgroundColor: 'hsl(var(--destructive))' },
+  statusDanger: { color: 'hsl(var(--destructive))' },
+  statusWarning: {
+    color: {
+      default: '#b45309',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        '#fcd34d',
+    },
+  },
+  statusPositive: { color: 'hsl(var(--foreground))' },
+  screenReaderOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  conflictBanner: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: '6px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'rgb(245 158 11 / 0.3)',
+    backgroundColor: 'rgb(245 158 11 / 0.1)',
+    paddingBlock: '4px',
+    paddingInline: '8px',
+    fontSize: '11px',
+    color: {
+      default: '#92400e',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        '#fcd34d',
+    },
+  },
+  conflictCopy: { color: 'hsl(var(--muted-foreground))' },
+  conflictActions: { display: 'flex', marginInlineStart: 'auto', gap: '6px' },
+  lspPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border))',
+    backgroundColor: 'hsl(var(--muted) / 0.3)',
+    paddingBlock: '8px',
+    paddingInline: '12px',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+  },
+  lspHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' },
+  lspTitle: { fontWeight: 500, color: 'hsl(var(--foreground))' },
+  foreground: { color: 'hsl(var(--foreground))' },
+  muted: { color: 'hsl(var(--muted-foreground))' },
+  destructive: { color: 'hsl(var(--destructive))' },
+  lspList: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  locationButton: {
+    width: '100%',
+    overflow: 'hidden',
+    textAlign: 'left',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':hover': 'hsl(var(--foreground))',
+    },
+    textDecoration: {
+      default: null,
+      ':hover': 'underline',
+    },
+  },
+  crossFile: { fontWeight: 500, color: 'hsl(var(--foreground))' },
+});
 
 type ViewData =
   | { status: 'loading' }
@@ -250,6 +546,7 @@ function SessionFileContentViewImpl({
   const setWordWrapEnabled = useSetAtom(fileViewerWordWrapAtom);
   // Match the main conversation Markdown typography (settings → font size).
   const conversationFontSize = useAtomValue(conversationFontSizeAtom);
+  const extendedCodeLanguagesEnabled = useAtomValue(extendedCodeLanguagesEnabledAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -1118,6 +1415,13 @@ function SessionFileContentViewImpl({
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
     isSessionMarkdownPath(normalizedPath);
+  const sessionFileLanguageId = getSessionFileLanguageId(
+    normalizedPath,
+    extendedCodeLanguagesEnabled
+  );
+  const sessionFileShikiLanguage = isSessionFileShikiLanguage(sessionFileLanguageId)
+    ? sessionFileLanguageId
+    : null;
   const canCopyFullMarkdown =
     data.status === 'ready' &&
     data.snapshot.kind === 'text' &&
@@ -1145,10 +1449,7 @@ function SessionFileContentViewImpl({
   // Typography tracks conversationFontSize so side-panel README preview matches
   // the left chat Markdown (default = text-sm; was hard-coded large/"base").
   const previewSurface: ReactNode = isMarkdownTextFile ? (
-    <div
-      className="mx-auto w-full max-w-3xl px-3 py-3 select-text sm:px-4 sm:py-4"
-      data-native-selection-allow
-    >
+    <div {...stylex.props(styles.markdownPreview)} data-native-selection-allow>
       {fileProvider ? (
         <MarkdownFileResources
           key={`${session.machineId}:${sessionId}`}
@@ -1215,8 +1516,8 @@ function SessionFileContentViewImpl({
 
   if (showProviderConnecting) {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-sm text-muted-foreground text-center">
-        <Spinner className="h-4 w-4" />
+      <div {...stylex.props(styles.centeredState)}>
+        <Spinner {...stylex.props(styles.spinner16)} />
         <span>
           {fileProviderMessage ??
             t('sessions.codeSession.connecting', 'Connecting to code session…')}
@@ -1225,8 +1526,8 @@ function SessionFileContentViewImpl({
     );
   } else if (showLocalLoading || data.status === 'loading') {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-sm text-muted-foreground text-center">
-        <Spinner className="h-4 w-4" />
+      <div {...stylex.props(styles.centeredState)}>
+        <Spinner {...stylex.props(styles.spinner16)} />
         <span>
           {shouldUseLocalFileContent
             ? localFileLoadingLabel
@@ -1270,7 +1571,7 @@ function SessionFileContentViewImpl({
     );
   } else if (showHtmlRendered && htmlPreviewDocument !== null) {
     body = (
-      <div className="relative h-full min-h-0 overflow-hidden bg-background">
+      <div {...stylex.props(styles.previewFrame)}>
         <ManagedPreviewSurface
           session={session}
           viewerUrl={htmlPreviewLogicalUrl}
@@ -1278,7 +1579,7 @@ function SessionFileContentViewImpl({
           documentHtml={htmlPreviewDocument}
           annotationEnabled={htmlAnnotationEnabled}
           command={htmlPreviewCommand}
-          className="h-full"
+          {...stylex.props(styles.fullSize)}
           visualAnnotationReferenceKeys={visualAnnotationReferenceKeys}
           onAnnotationAvailabilityChange={handleHtmlAnnotationAvailabilityChange}
           onRuntimeError={handleHtmlRuntimeError}
@@ -1289,16 +1590,13 @@ function SessionFileContentViewImpl({
           onToggleVisualAnnotationInChat={onToggleVisualAnnotationInChat}
         />
         {htmlPreviewLoading ? (
-          <div className="pointer-events-none absolute right-3 top-3 rounded bg-background/90 p-1.5 text-muted-foreground shadow-sm">
-            <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
+          <div {...stylex.props(styles.previewLoading)}>
+            <Spinner {...stylex.props(styles.spinner14)} aria-hidden="true" />
           </div>
         ) : null}
         {htmlRuntimeError ? (
-          <div className="absolute bottom-3 left-3 right-3 flex items-start gap-2 rounded-md border border-status-warning/30 bg-background/95 px-3 py-2 text-xs text-foreground shadow-sm">
-            <ShieldAlert
-              className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-warning"
-              aria-hidden="true"
-            />
+          <div {...stylex.props(styles.previewError)}>
+            <ShieldAlert {...stylex.props(styles.previewErrorIcon)} aria-hidden="true" />
             <span>{htmlRuntimeError}</span>
           </div>
         ) : null}
@@ -1317,9 +1615,17 @@ function SessionFileContentViewImpl({
   } else {
     if (shouldUseProviderFileContent) {
       body = (
-        <div className="flex h-full min-h-0 flex-col">
-          <div className="min-h-0 flex-1">
-            {isMarkdownTextFile && preferNativeMarkdownSelection ? (
+        <div {...stylex.props(styles.contentColumn)}>
+          <div {...stylex.props(styles.contentFlexible)}>
+            {sessionFileShikiLanguage !== null && !isProviderFileEditable ? (
+              <SessionShikiTextViewer
+                key={liveFileId ?? normalizedPath}
+                path={normalizedPath}
+                text={resolveProviderEditorMountText(data.snapshot)}
+                language={sessionFileShikiLanguage}
+                {...stylex.props(styles.fullSize)}
+              />
+            ) : isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={liveFileId ?? normalizedPath}
                 text={resolveProviderEditorMountText(data.snapshot)}
@@ -1340,7 +1646,10 @@ function SessionFileContentViewImpl({
               <LazyProviderTextMonacoViewer
                 key={lspModelUri?.toString() ?? liveFileId ?? normalizedPath}
                 text={resolveProviderEditorMountText(data.snapshot)}
-                language={getSessionFileMonacoLanguageId(normalizedPath)}
+                language={getSessionFileMonacoLanguageId(
+                  normalizedPath,
+                  extendedCodeLanguagesEnabled
+                )}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}
                 vscodeTheme={activeVSCodeTheme ?? null}
@@ -1361,7 +1670,7 @@ function SessionFileContentViewImpl({
             )}
           </div>
           {data.snapshot.truncated ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
+            <div {...stylex.props(styles.truncatedNote)}>
               {t('sessions.localProject.fileViewer.truncated', 'File content was truncated.')}
             </div>
           ) : null}
@@ -1378,9 +1687,17 @@ function SessionFileContentViewImpl({
       );
     } else {
       body = (
-        <div className="flex h-full min-h-0 flex-col">
-          <div className="min-h-0 flex-1">
-            {isMarkdownTextFile && preferNativeMarkdownSelection ? (
+        <div {...stylex.props(styles.contentColumn)}>
+          <div {...stylex.props(styles.contentFlexible)}>
+            {sessionFileShikiLanguage !== null ? (
+              <SessionShikiTextViewer
+                key={normalizedPath}
+                path={normalizedPath}
+                text={data.snapshot.text}
+                language={sessionFileShikiLanguage}
+                {...stylex.props(styles.fullSize)}
+              />
+            ) : isMarkdownTextFile && preferNativeMarkdownSelection ? (
               <NativeMarkdownSource
                 key={normalizedPath}
                 text={data.snapshot.text}
@@ -1393,7 +1710,10 @@ function SessionFileContentViewImpl({
               <LazyTextMonacoViewer
                 key={normalizedPath}
                 text={data.snapshot.text}
-                language={getSessionFileMonacoLanguageId(normalizedPath)}
+                language={getSessionFileMonacoLanguageId(
+                  normalizedPath,
+                  extendedCodeLanguagesEnabled
+                )}
                 selectedLines={selectedLines}
                 resolvedTheme={resolvedTheme}
                 vscodeTheme={activeVSCodeTheme ?? null}
@@ -1403,7 +1723,7 @@ function SessionFileContentViewImpl({
             )}
           </div>
           {data.snapshot.truncated ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
+            <div {...stylex.props(styles.truncatedNote)}>
               {t('sessions.localProject.fileViewer.truncated', 'File content was truncated.')}
             </div>
           ) : null}
@@ -1436,6 +1756,7 @@ function SessionFileContentViewImpl({
     !showMarkdownRendered &&
     !showCsvRendered &&
     !showHtmlRendered &&
+    !(sessionFileShikiLanguage !== null && !isProviderFileEditable) &&
     !(isMarkdownTextFile && preferNativeMarkdownSelection);
   const showWordWrapButton =
     isTextFileReady &&
@@ -1453,11 +1774,12 @@ function SessionFileContentViewImpl({
     showSaveButton ||
     showRefreshButton;
 
+  const viewerRootClassName = stylex.props(styles.viewerRoot).className;
   return (
-    <div className={cn('flex h-full min-h-0 flex-col overflow-hidden', className)}>
+    <div className={[viewerRootClassName, className].filter(Boolean).join(' ')}>
       {showViewerTopBar ? (
-        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/50 bg-background px-2">
-          <div className="ml-auto flex items-center gap-1">
+        <div {...stylex.props(styles.toolbar)}>
+          <div {...stylex.props(styles.toolbarActions)}>
             {showPreviewToggle ? (
               <FilePreviewToggle
                 active={filePreviewActive}
@@ -1501,9 +1823,9 @@ function SessionFileContentViewImpl({
                       )
                 }
                 aria-label={t('sessions.fileViewer.copyMarkdown', 'Copy full Markdown')}
-                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                {...stylex.props(styles.toolButton)}
               >
-                <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                <Copy {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
             {showHtmlRendered ? (
@@ -1514,12 +1836,12 @@ function SessionFileContentViewImpl({
                 disabled={!htmlAnnotationAvailable}
                 title={t('sessions.preview.annotation.addComment', 'Add comment')}
                 aria-label={t('sessions.preview.annotation.addComment', 'Add comment')}
-                className={cn(
-                  'flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50',
-                  htmlAnnotationEnabled ? 'text-foreground' : 'text-muted-foreground'
+                {...stylex.props(
+                  styles.toolButton,
+                  htmlAnnotationEnabled && styles.toolButtonActive
                 )}
               >
-                <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" />
+                <MessageCircle {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
             {showHtmlRendered ? (
@@ -1530,12 +1852,12 @@ function SessionFileContentViewImpl({
                 title={t('sessions.browser.reload', 'Reload')}
                 aria-label={t('sessions.browser.reload', 'Reload')}
                 aria-busy={isRefreshing}
-                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                {...stylex.props(styles.toolButton)}
               >
                 <Spinner
                   icon={RefreshCw}
                   spinning={isRefreshing}
-                  className="h-3.5 w-3.5"
+                  {...stylex.props(styles.spinner14)}
                   aria-hidden="true"
                 />
               </button>
@@ -1546,9 +1868,9 @@ function SessionFileContentViewImpl({
                 onClick={handleDownloadHtml}
                 title={t('sessions.fileActions.download', 'Download file')}
                 aria-label={t('sessions.fileActions.download', 'Download file')}
-                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                {...stylex.props(styles.toolButton)}
               >
-                <Download className="h-3.5 w-3.5" aria-hidden="true" />
+                <Download {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
             {showWordWrapButton ? (
@@ -1562,12 +1884,9 @@ function SessionFileContentViewImpl({
                     : t('sessions.fileViewer.wordWrapEnable', 'Wrap long lines')
                 }
                 aria-label={t('sessions.fileViewer.wordWrap', 'Wrap lines')}
-                className={cn(
-                  'flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground',
-                  wordWrapEnabled ? 'text-foreground' : 'text-muted-foreground'
-                )}
+                {...stylex.props(styles.toolButton, wordWrapEnabled && styles.toolButtonActive)}
               >
-                <WrapText className="h-3.5 w-3.5" aria-hidden="true" />
+                <WrapText {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
             {showSearchButton ? (
@@ -1576,9 +1895,9 @@ function SessionFileContentViewImpl({
                 onClick={() => setFindRequestSeq((seq) => seq + 1)}
                 title={t('sessions.fileViewer.search', 'Search')}
                 aria-label={t('sessions.fileViewer.search', 'Search')}
-                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                {...stylex.props(styles.toolButton)}
               >
-                <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                <Search {...stylex.props(styles.icon)} aria-hidden="true" />
               </button>
             ) : null}
             {showSaveButton ? (
@@ -1592,17 +1911,12 @@ function SessionFileContentViewImpl({
                     : t('sessions.fileViewer.save.withShortcut', 'Save (⌘S / Ctrl+S)')
                 }
                 aria-label={t('sessions.fileViewer.save', 'Save')}
-                className={cn(
-                  'flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50',
-                  canSaveProviderEditor
-                    ? 'text-status-warning hover:bg-status-warning/10 hover:text-status-warning'
-                    : 'text-muted-foreground'
-                )}
+                {...stylex.props(styles.toolButton, canSaveProviderEditor && styles.saveAvailable)}
               >
                 {saveStatus.kind === 'saving' ? (
-                  <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
+                  <Spinner {...stylex.props(styles.spinner14)} aria-hidden="true" />
                 ) : (
-                  <Save className="h-3.5 w-3.5" aria-hidden="true" />
+                  <Save {...stylex.props(styles.icon)} aria-hidden="true" />
                 )}
               </button>
             ) : null}
@@ -1621,12 +1935,12 @@ function SessionFileContentViewImpl({
                 }
                 aria-label={t('sessions.fileViewer.refresh', 'Refresh')}
                 aria-busy={isRefreshing}
-                className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                {...stylex.props(styles.toolButton)}
               >
                 <Spinner
                   icon={RefreshCw}
                   spinning={isRefreshing}
-                  className="h-3.5 w-3.5"
+                  {...stylex.props(styles.spinner14)}
                   aria-hidden="true"
                 />
               </button>
@@ -1634,12 +1948,12 @@ function SessionFileContentViewImpl({
           </div>
         </div>
       ) : null}
-      <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div {...stylex.props(styles.contentBody)}>
         {bodyUsesNativeScrolling ? (
-          <div className="h-full min-h-0 min-w-0">{body}</div>
+          <div {...stylex.props(styles.fullSize)}>{body}</div>
         ) : (
-          <ScrollArea className="h-full w-full">
-            <div className="min-h-full min-w-0">{body}</div>
+          <ScrollArea {...stylex.props(styles.fullSize)}>
+            <div {...stylex.props(styles.fullMinContent)}>{body}</div>
           </ScrollArea>
         )}
       </div>
@@ -1749,7 +2063,7 @@ function NativeMarkdownSource({
       spellCheck={false}
       aria-label={ariaLabel}
       data-native-selection-allow
-      className="h-full min-h-[240px] w-full resize-none overflow-auto border-0 bg-background p-3 font-mono text-xs leading-5 text-foreground outline-none"
+      {...stylex.props(styles.sourceTextarea)}
       onChange={(event) => {
         const nextValue = event.currentTarget.value;
         setValue(nextValue);
@@ -1796,9 +2110,9 @@ function FilePreviewToggle({
             aria-pressed={active}
             onClick={onToggle}
             aria-label={label}
-            className={cn(
-              'flex h-6 w-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground',
-              active ? 'text-foreground' : 'text-muted-foreground'
+            {...stylex.props(
+              styles.previewToggle,
+              active ? styles.previewToggleActive : styles.previewToggleInactive
             )}
           >
             {/* lucide's open Eye packs the iris + almond into 14px, so at stroke-width
@@ -1807,7 +2121,11 @@ function FilePreviewToggle({
               weight (measured ink coverage 20.2% vs 20.9%). The closed Eye has no
               iris (already lighter) and is shown alone in the active color, so it
               keeps the default weight. */}
-            <Icon className="h-3.5 w-3.5" strokeWidth={active ? 2 : 1.5} aria-hidden="true" />
+            <Icon
+              {...stylex.props(styles.icon)}
+              strokeWidth={active ? 2 : 1.5}
+              aria-hidden="true"
+            />
           </button>
         }
       />
@@ -1856,37 +2174,29 @@ export function SessionFileRealtimeStatusBar({
   if (items.length === 0) return null;
 
   return (
-    <div
-      data-testid="session-file-realtime-status-bar"
-      className="flex h-6 min-h-6 shrink-0 items-center gap-2 overflow-hidden whitespace-nowrap border-t border-border/50 bg-background px-2 text-[11px] leading-none text-muted-foreground"
-    >
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden whitespace-nowrap">
+    <div data-testid="session-file-realtime-status-bar" {...stylex.props(styles.statusBar)}>
+      <div {...stylex.props(styles.statusItems)}>
         {items.map((item, index) => (
-          <span key={item.key} className="flex min-w-0 shrink-0 items-center gap-1">
-            {index > 0 ? <span className="mr-0.5 text-muted-foreground/55">·</span> : null}
+          <span key={item.key} {...stylex.props(styles.statusItem)}>
+            {index > 0 ? <span {...stylex.props(styles.statusSeparator)}>·</span> : null}
             {item.icon === 'cloud-offline' ? (
               <FamiconsCloudOfflineOutline
-                className="h-3 w-3 shrink-0 text-muted-foreground"
+                {...stylex.props(styles.iconSmall, styles.muted)}
                 aria-hidden="true"
               />
             ) : (
-              <span
-                className={cn(
-                  'h-1.5 w-1.5 shrink-0 rounded-full',
-                  realtimeStatusDotClass(item.tone)
-                )}
-              />
+              <span {...stylex.props(styles.statusDot, realtimeStatusDotStyle(item.tone))} />
             )}
             <span
-              className={cn(
-                item.iconOnly === true ? 'sr-only' : 'truncate',
+              {...stylex.props(
+                item.iconOnly === true ? styles.screenReaderOnly : styles.truncate,
                 item.tone === 'danger'
-                  ? 'text-destructive'
+                  ? styles.statusDanger
                   : item.tone === 'warning'
-                    ? 'text-amber-700 dark:text-amber-300'
+                    ? styles.statusWarning
                     : item.tone === 'positive'
-                      ? 'text-foreground'
-                      : ''
+                      ? styles.statusPositive
+                      : null
               )}
               title={item.title ?? item.label}
             >
@@ -1987,16 +2297,16 @@ function liveStatusItem(
   return assertNever(status);
 }
 
-function realtimeStatusDotClass(tone: RealtimeStatusItem['tone']): string {
+function realtimeStatusDotStyle(tone: RealtimeStatusItem['tone']) {
   switch (tone) {
     case 'positive':
-      return 'bg-emerald-500';
+      return styles.statusPositiveDot;
     case 'muted':
-      return 'bg-muted-foreground/50';
+      return styles.statusMutedDot;
     case 'warning':
-      return 'bg-amber-500';
+      return styles.statusWarningDot;
     case 'danger':
-      return 'bg-destructive';
+      return styles.statusDangerDot;
   }
   return assertNever(tone);
 }
@@ -2058,8 +2368,8 @@ export function SessionFileConflictActionRow({
 }): ReactNode {
   const [pendingOverride, setPendingOverride] = useState(false);
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-t border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-800 dark:text-amber-300">
-      <span className="text-muted-foreground">
+    <div {...stylex.props(styles.conflictBanner)}>
+      <span {...stylex.props(styles.conflictCopy)}>
         {pendingOverride
           ? t(
               'sessions.fileSave.conflictOverrideWarn',
@@ -2070,7 +2380,7 @@ export function SessionFileConflictActionRow({
               'The file changed on disk while you were editing. Choose how to reconcile.'
             )}
       </span>
-      <span className="ml-auto flex gap-1.5">
+      <span {...stylex.props(styles.conflictActions)}>
         {pendingOverride ? (
           <>
             <Button variant="ghost" size="small" onClick={() => setPendingOverride(false)}>
@@ -2156,36 +2466,36 @@ function SessionFileLspPanel({
       ? t('sessions.lsp.definitionTitle', 'Go to Definition')
       : t('sessions.lsp.referencesTitle', 'Find References');
   return (
-    <div className="flex flex-col gap-1 border-t border-border bg-muted/30 px-3 py-2 text-xs">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium text-foreground">{actionLabel}</span>
+    <div {...stylex.props(styles.lspPanel)}>
+      <div {...stylex.props(styles.lspHeader)}>
+        <span {...stylex.props(styles.lspTitle)}>{actionLabel}</span>
         <Button variant="ghost" size="small" onClick={onDismiss}>
           {t('sessions.lsp.dismiss', 'Dismiss')}
         </Button>
       </div>
       {state.kind === 'pending' ? (
-        <span className="text-muted-foreground">
+        <span {...stylex.props(styles.muted)}>
           {t('sessions.lsp.pending', 'Querying host language service…')}
         </span>
       ) : null}
       {state.kind === 'error' ? (
-        <span className="text-destructive">
+        <span {...stylex.props(styles.destructive)}>
           {t('sessions.lsp.error', 'LSP request failed')}: {state.message}
         </span>
       ) : null}
       {state.kind === 'result' && state.result.status === 'unsupported' ? (
-        <span className="text-muted-foreground">
+        <span {...stylex.props(styles.muted)}>
           {t('sessions.lsp.unsupported', 'Host language service does not support this file')}:{' '}
           {state.result.message}
         </span>
       ) : null}
       {state.kind === 'result' && state.result.status === 'ready' ? (
         state.result.locations.length === 0 ? (
-          <span className="text-muted-foreground">
+          <span {...stylex.props(styles.muted)}>
             {t('sessions.lsp.empty', 'No locations found')}
           </span>
         ) : (
-          <ul className="flex flex-col gap-0.5">
+          <ul {...stylex.props(styles.lspList)}>
             {state.result.locations.map((location, index) => {
               const isCrossFile =
                 currentFileId !== undefined &&
@@ -2198,10 +2508,10 @@ function SessionFileLspPanel({
                 return (
                   <li
                     key={`${location.fileId}:${location.range.start.line}:${location.range.start.character}:${index}`}
-                    className="truncate text-muted-foreground"
+                    {...stylex.props(styles.truncate, styles.muted)}
                     title={titleHint}
                   >
-                    <span className="text-foreground">{location.path}</span>
+                    <span {...stylex.props(styles.foreground)}>{location.path}</span>
                     <span>
                       :{location.range.start.line + 1}:{location.range.start.character + 1}
                     </span>
@@ -2211,7 +2521,7 @@ function SessionFileLspPanel({
               return (
                 <li
                   key={`${location.fileId}:${location.range.start.line}:${location.range.start.character}:${index}`}
-                  className="truncate"
+                  {...stylex.props(styles.truncate)}
                 >
                   <button
                     type="button"
@@ -2224,12 +2534,9 @@ function SessionFileLspPanel({
                         character: location.range.start.character,
                       })
                     }
-                    className={cn(
-                      'w-full truncate text-left text-muted-foreground hover:text-foreground hover:underline',
-                      isCrossFile && 'font-medium text-foreground'
-                    )}
+                    {...stylex.props(styles.locationButton, isCrossFile && styles.crossFile)}
                   >
-                    <span className="text-foreground">{location.path}</span>
+                    <span {...stylex.props(styles.foreground)}>{location.path}</span>
                     <span>
                       :{location.range.start.line + 1}:{location.range.start.character + 1}
                     </span>

@@ -3880,6 +3880,7 @@ function WorkspaceChatLanding({
         <SessionUsagePopover
           rateLimits={selectedRateLimits}
           agentType={selectedConfig?.agentType ?? ''}
+          agentConfigId={selectedConfig?.id}
           modelId={selectedModelId}
           modelLabel={selectedModelLabel}
           showCodexResetForecast={showCodexResetForecast}
@@ -4167,6 +4168,7 @@ function WorkspaceChatLanding({
         <SessionUsagePopover
           rateLimits={selectedRateLimits}
           agentType={selectedConfig?.agentType ?? ''}
+          agentConfigId={selectedConfig?.id}
           modelId={selectedModelId}
           modelLabel={selectedModelLabel}
           showCodexResetForecast={showCodexResetForecast}

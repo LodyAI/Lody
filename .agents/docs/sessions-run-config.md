@@ -34,6 +34,16 @@ this page is the full text of the rules summarised there.
   modes; provider interaction modes stay inside the run-config dropdown. Both
   are also used by the desktop chat landing; `DesktopRunConfigMenu` receives an
   explicit agent selection/machine scope rather than reading `SessionMeta`.
+  All side submenus, including Role, anchor to their own trigger rows.
+  Option-only panels use top-edge alignment; searchable Model panels lift their
+  search header above the row so the option area starts beside it when space permits.
+  The shared menu primitive opens toward inline-end
+  (right in LTR); horizontal collisions may flip the side, and vertical collisions
+  shift the popup within the viewport. Searchable model menus use the same trigger
+  anchor while filtering, with dimensions determined by the current results.
+  Submenus do not center against the whole parent
+  popup or clamp to its bottom. Intent:
+  [run-config submenu placement](../../specs/composer-run-config-submenu-placement.md).
   Builtin DeepSeek Harness sessions using a non-Pro model show the same linked
   delegation-cost warning here and in `MobileRunConfigSheet`: until upstream DSH
   fixes child-route inheritance, a delegated child may use the session's
@@ -44,9 +54,23 @@ this page is the full text of the rules summarised there.
   keyboard focus to its trigger; Plan/Fast toggle rows intentionally stay open.
   Once the model list reaches `OPTION_SEARCH_MIN_OPTIONS`
   (`lib/fuzzy-option-filter.ts` — the same threshold and matcher the mobile
-  sheet uses) the Model submenu gains a fuzzy search row over
+  sheet uses) the Model submenu gains a top fuzzy-search field through
   `MenuOptionSearchList`: a provider may publish dozens of models, and scrolling
-  is not a way to find one. A search field inside a Radix menu must be
+  is not a way to find one. A content wrapper inside the popup caps the model
+  list at 20rem and the available height; the options scroll while search stays
+  visible. Filtering changes the content-driven popup size, including the empty-result
+  message. The positioner recalculates against the Model row: a shorter popup returns
+  to option-area alignment when space permits. The searchable panel uses a constant
+  -32px alignment offset (28px search field + 4px gap), determined by the unfiltered
+  catalog's search threshold, not the query. Short menus without search retain zero
+  offset. Neither previous dimensions nor a previous collision-resolved screen
+  position are retained. Results or the empty-result message appear below search.
+  Only options scroll; search stays
+  visible, not at an immutable screen coordinate while filtering.
+  Viewport collision handling and the cap still apply after a resize.
+  `Menu.Content`'s `style` prop reaches the positioner, so putting the
+  height cap there would let the popup outgrow its measured anchor geometry.
+  A search field inside a Radix menu must be
   `DropdownMenuSearchInput`, which owns the fight with the menu's typeahead and
   roving focus (its jsdoc has the details). `DropdownMenuSubTrigger` preserves
   that field's focus when a precise pointer keeps moving or clicks over the
@@ -144,10 +168,7 @@ this page is the full text of the rules summarised there.
   deliberately absent: a sentence about what one value allows belongs to the
   Role editor, not to a scan of what is pinned. Its machine is passed
   in rather than looked up, so the pane stays renderable without the workspace's
-  machine-visibility context. The submenu is vertically centered against the
-  parent menu when shorter; when taller, its bottom stops at the parent menu's
-  bottom so it does not extend over the docked composer's footer controls. It
-  shifts within a short viewport rather than flipping its alignment. Its two
+  machine-visibility context. Its two
   panes grow with their content up to 14rem, then scroll
   independently. Create stays at the bottom of the Role list pane while its
   rows scroll; it has no separator above it. The detail pane's header flows
@@ -203,6 +224,17 @@ this page is the full text of the rules summarised there.
   too; hiding it made the control look absent. `None` still leads the list and
   an unavailable Role is still listed, disabled, with its reason (from the
   shared `AGENT_ROLE_UNAVAILABLE_REASON_KEYS`).
+  `useSessionPendingConfig` bridges a locally held send's frozen run config and
+  Role into the same selection inputs while attachments prepare. Its per-session
+  subscription reads the latest entry identity, so progress does not rebuild the
+  selector catalog. Explicit next-draft edits still win, and an older turn's
+  runtime snapshot is suppressed until the held turn becomes a history/queue
+  source. Both representations use the same logical Turn fence. A landed history
+  entry remains the temporary source while its rendered document snapshot catches
+  up; cancellation has no landed entry and releases the source. A newer durable
+  Turn permanently supersedes an observed older local source. Config controls keep
+  their normal faces while submission locks their menus or sheet, including models
+  exposed only through ACP config selectors. Intent: [attachment send boundary](../../specs/session-files.md#61-send-boundary).
   The Role editor is a Dialog, so every composer hosts it outside its menu /
   drawer — and the in-session one mounts it only while OPEN, because it reads
   machine visibility and the composer must stay renderable in hosts that do not

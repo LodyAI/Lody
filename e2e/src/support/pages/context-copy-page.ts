@@ -61,16 +61,19 @@ export class ContextCopyPage {
     const conversation = this.page.locator('[data-conversation-scroll-engine]');
     await conversation.hover();
     await this.page.mouse.wheel(0, -1000);
-    await expect.poll(() => conversation.evaluate((element) => element.scrollTop)).toBe(0);
     const firstPrompt = this.page.getByText(FIRST_PROMPT_MARKER);
     await expect(firstPrompt).toBeVisible({ timeout: 30_000 });
+    // The scroll engine can settle 1–2px from zero. Wait for the actual menu
+    // anchor to enter the viewport before hover/click can scroll it into view.
+    await expect(firstPrompt).toBeInViewport({ ratio: 1 });
     await firstPrompt.hover();
-    await this.page
+    const forkButton = this.page
       .getByTestId('user-message-metadata')
       .locator('..')
       .filter({ hasText: FIRST_PROMPT_MARKER })
-      .getByRole('button', { name: /^(Fork session|分叉会话)$/u })
-      .click();
+      .getByRole('button', { name: /^(Fork session|分叉会话)$/u });
+    await expect(forkButton).toBeInViewport({ ratio: 1 });
+    await forkButton.click();
     await this.copyFromForkMenu();
   }
 

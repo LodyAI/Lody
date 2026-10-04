@@ -93,6 +93,8 @@ import { Field as UiField } from '@lody/ui/field';
 import { Textarea } from '@lody/ui/textarea';
 import { Select } from '@lody/ui/select';
 import { Tabs } from '@lody/ui/tabs';
+import { OptionSelector } from '@/components/shared/option-selector';
+import { shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Badge } from '@lody/ui/badge';
@@ -1008,6 +1010,16 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
   },
   {
     kind: 'builtin',
+    value: 'builtin:devin',
+    label: 'Devin',
+    descriptionKey: 'settings.agent.dialog.option.devin.description',
+    descriptionDefault: 'Cognition Devin coding agent runtime',
+    cliType: 'builtin',
+    agentType: 'devin',
+    searchKeys: 'devin cognition',
+  },
+  {
+    kind: 'builtin',
     value: 'builtin:grok',
     label: 'Grok',
     descriptionKey: 'settings.agent.dialog.option.grok.description',
@@ -1722,7 +1734,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // answers "Authentication is not supported"; do not offer a button that can
   // only fail.
   const usesProtocolAuthentication =
-    usesAcpProtocolAuthentication(formData.cliType) &&
+    usesAcpProtocolAuthentication(formData.cliType, formData.agentType) &&
     machineSupportsAcpProtocolAuthentication(machine);
   const boundChatgptCodex =
     mode.kind === 'edit' && managedCodexForm && codexAuth?.mode === 'chatgpt';
@@ -1737,7 +1749,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         }) ||
           (authRequired && usesProtocolAuthentication))
       : authRequired &&
-        ((isManagedBuiltin && formData.agentType !== 'pi') || usesProtocolAuthentication);
+        ((isManagedBuiltin && formData.agentType !== 'pi' && formData.agentType !== 'devin') ||
+          usesProtocolAuthentication);
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
@@ -1747,9 +1760,11 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           ? 'claudeCodeExecutable'
           : formData.agentType === 'kimi'
             ? 'kimiPath'
-            : formData.agentType === 'grok'
-              ? 'grokPath'
-              : null;
+            : formData.agentType === 'devin'
+              ? 'devinPath'
+              : formData.agentType === 'grok'
+                ? 'grokPath'
+                : null;
   const builtinRuntimeOverrideValue = builtinRuntimeOverrideKey
     ? (formData.runtimeOverrides?.[builtinRuntimeOverrideKey] ?? '')
     : '';
@@ -2993,15 +3008,20 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                               'settings.agent.dialog.runtimeOverride.kimiPlaceholder',
                               '/path/to/kimi'
                             )
-                          : formData.agentType === 'grok'
+                          : formData.agentType === 'devin'
                             ? t(
-                                'settings.agent.dialog.runtimeOverride.grokPlaceholder',
-                                '/path/to/grok'
+                                'settings.agent.dialog.runtimeOverride.devinPlaceholder',
+                                '/path/to/devin'
                               )
-                            : t(
-                                'settings.agent.dialog.runtimeOverride.claudePlaceholder',
-                                '/path/to/claude'
-                              )
+                            : formData.agentType === 'grok'
+                              ? t(
+                                  'settings.agent.dialog.runtimeOverride.grokPlaceholder',
+                                  '/path/to/grok'
+                                )
+                              : t(
+                                  'settings.agent.dialog.runtimeOverride.claudePlaceholder',
+                                  '/path/to/claude'
+                                )
                     }
                     autoComplete="off"
                     spellCheck={false}
@@ -4137,24 +4157,23 @@ function TitleGenerationFields({
         return (
           <div key={sel.configId} {...stylex.props(styles.optionRow)}>
             <UiField.Label>{sel.label}</UiField.Label>
-            <Select.Root
-              items={sel.options}
+            {/* An agent can publish over a hundred options (the Devin model
+                catalog), so a long list gets a search field, and the popup is
+                pinned below the trigger — flipped up, a list this tall covers
+                the section it was opened from. */}
+            <OptionSelector
+              options={sel.options}
               value={(stored as string | undefined) ?? sel.currentValue}
-              onValueChange={(value) => {
-                if (value != null) onChange(sel.configId, value);
-              }}
-            >
-              <Select.Trigger>
-                <Select.Value />
-              </Select.Trigger>
-              <Select.Content>
-                {sel.options.map((opt) => (
-                  <Select.Item key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
+              onSelect={(option) => onChange(sel.configId, option.value)}
+              searchable={shouldOfferOptionSearch(sel.options.length)}
+              searchPlaceholder={t(
+                'settings.agent.dialog.optionSearchPlaceholder',
+                'Search options'
+              )}
+              emptyText={t('settings.agent.dialog.optionSearchEmpty', 'No options match')}
+              side="bottom"
+              avoidCollisions={false}
+            />
           </div>
         );
       })}

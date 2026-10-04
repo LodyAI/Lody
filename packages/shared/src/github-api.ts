@@ -16,6 +16,9 @@ import type {
   GitHubMergeableState,
   GitHubMergeMethod,
   GitHubPullRequestDetails,
+  GitHubCommitComparison,
+  GitHubPullRequestCommit,
+  GitHubPullRequestFile,
   GitHubPullRequestState,
   GitHubReactionRollup,
   GitHubReview,
@@ -100,6 +103,49 @@ const GithubMentionIssuesResponseSchema = z.array(GithubMentionIssueOrPrSchema);
 const GithubPullRequestHeadSchema = z
   .object({
     head: z.object({ sha: z.string() }).passthrough(),
+  })
+  .passthrough();
+
+const GithubPullRequestCommitSchema = z
+  .object({
+    sha: z.string(),
+    html_url: z.string().url().nullable().optional(),
+    commit: z
+      .object({
+        message: z.string(),
+        author: z
+          .object({ date: z.string().nullable().optional() })
+          .passthrough()
+          .nullable()
+          .optional(),
+      })
+      .passthrough(),
+    author: z.object({ login: z.string() }).passthrough().nullable().optional(),
+    parents: z.array(z.object({ sha: z.string() }).passthrough()).optional(),
+  })
+  .passthrough();
+
+const GithubPullRequestCommitsSchema = z.array(GithubPullRequestCommitSchema);
+
+const GithubCompareFileSchema = z
+  .object({
+    filename: z.string(),
+    previous_filename: z.string().nullable().optional(),
+    status: z.string(),
+    additions: z.number().optional(),
+    deletions: z.number().optional(),
+    changes: z.number().optional(),
+    sha: z.string().optional(),
+    blob_url: z.string().url().nullable().optional(),
+    raw_url: z.string().url().nullable().optional(),
+    patch: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+const GithubCompareResponseSchema = z
+  .object({
+    merge_base_commit: z.object({ sha: z.string() }).passthrough().nullable().optional(),
+    files: z.array(GithubCompareFileSchema).nullable().optional(),
   })
   .passthrough();
 
@@ -1907,7 +1953,7 @@ const GithubPullRequestDetailsSchema = z
     merged: z.boolean().optional(),
     draft: z.boolean().optional(),
     html_url: z.string(),
-    base: z.object({ ref: z.string() }).passthrough(),
+    base: z.object({ ref: z.string(), sha: z.string().optional() }).passthrough(),
     head: z.object({ ref: z.string(), sha: z.string() }).passthrough(),
     user: GithubUserSchema.nullable(),
     created_at: z.string(),
@@ -1933,6 +1979,7 @@ const GithubPullRequestDetailsSchema = z
       draft: item.draft ?? false,
       htmlUrl: item.html_url,
       baseRef: item.base.ref,
+      baseSha: item.base.sha ?? undefined,
       headRef: item.head.ref,
       headSha: item.head.sha,
       user: item.user,
@@ -2053,6 +2100,88 @@ export async function githubFetchPullRequestDetails(
     GithubPullRequestDetailsSchema,
     options
   );
+}
+
+/** Fetch commits in GitHub's oldest-to-newest pull request order. */
+export async function githubFetchPullRequestCommits(
+  token: string,
+  repoFullName: string,
+  prNumber: number,
+  options?: GitHubReadRequestOptions
+): Promise<GitHubPullRequestCommit[]> {
+  const commits: GitHubPullRequestCommit[] = [];
+  let nextUrl: string | null =
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/commits?per_page=100`;
+  while (nextUrl && commits.length < 250) {
+    const response = await fetch(nextUrl, { headers: authHeaders(token), cache: options?.cache });
+    const text = await response.text();
+    if (!response.ok) {
+      if (response.status === 401) throw new GitHubAuthError();
+      throw new Error(`GitHub API error: ${response.status} ${text}`);
+    }
+    const page = GithubPullRequestCommitsSchema.parse(JSON.parse(text) as unknown);
+    commits.push(
+      ...page.map((item): GitHubPullRequestCommit => ({
+        sha: item.sha,
+        message: item.commit.message.split('\n')[0] ?? item.commit.message,
+        authorLogin: item.author?.login ?? null,
+        authoredAt: item.commit.author?.date ?? null,
+        htmlUrl: item.html_url ?? null,
+        parentSha: item.parents?.[0]?.sha ?? null,
+      }))
+    );
+    nextUrl = parseNextLink(response.headers.get('link'));
+  }
+  return commits.slice(0, 250);
+}
+
+/** Compare two immutable refs and return the changed files. */
+export async function githubCompareCommits(
+  token: string,
+  repoFullName: string,
+  from: string,
+  to: string,
+  options?: GitHubReadRequestOptions
+): Promise<GitHubCommitComparison> {
+  const compareRef = `${from}...${to}`;
+  const files: z.infer<typeof GithubCompareFileSchema>[] = [];
+  let mergeBaseSha: string | null = null;
+  let nextUrl: string | null =
+    `https://api.github.com/repos/${repoFullName}/compare/${encodeURIComponent(compareRef)}?per_page=100`;
+  while (nextUrl && files.length < 300) {
+    const response = await fetch(nextUrl, {
+      headers: authHeaders(token),
+      cache: options?.cache,
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      if (response.status === 401) throw new GitHubAuthError();
+      throw new Error(`GitHub API error: ${response.status} ${text}`);
+    }
+    const result = GithubCompareResponseSchema.parse(JSON.parse(text) as unknown);
+    mergeBaseSha ??= result.merge_base_commit?.sha ?? null;
+    files.push(...(result.files ?? []));
+    nextUrl = parseNextLink(response.headers.get('link'));
+  }
+  return {
+    mergeBaseSha,
+    files: files.slice(0, 300).map((item): GitHubPullRequestFile => ({
+      path: item.filename,
+      previousPath: item.previous_filename ?? null,
+      status: (item.status === 'deleted'
+        ? 'removed'
+        : ['added', 'modified', 'removed', 'renamed', 'copied', 'changed'].includes(item.status)
+          ? item.status
+          : 'changed') as GitHubPullRequestFile['status'],
+      additions: item.additions ?? 0,
+      deletions: item.deletions ?? 0,
+      changes: item.changes ?? 0,
+      sha: item.sha ?? null,
+      blobUrl: item.blob_url ?? null,
+      rawUrl: item.raw_url ?? null,
+      patch: item.patch ?? null,
+    })),
+  };
 }
 
 /**

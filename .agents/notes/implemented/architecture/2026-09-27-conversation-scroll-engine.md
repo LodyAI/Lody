@@ -177,7 +177,9 @@ Invariants are checked at the commit boundary, against the committed DOM.
   the anchor resolves and is reachable, readable otherwise, and never hidden.
 - **I8 No inferred intent.** Geometry never releases or re-arms follow. The only
   geometry-driven mode change is the defined hand-off from `sent` to `follow` when the
-  reply fills the reserved room.
+  reply fills the reserved room. Reader movement re-arms follow when it reaches the
+  end: a downward scroll within 4px of the current bottom, or a downward scroll
+  sequence that comes to rest (`scrollend`) at a bottom the range had while it ran.
 
 ## Proposal
 
@@ -819,6 +821,28 @@ collected after release, through the diagnostics below.
   - **StrictMode.** The unmount cleanup disposed the controller for good, but StrictMode's
     development remount runs the cleanup and then the setup again on a live component.
     The setup now calls `resume()`, and a StrictMode adapter test covers it.
+- **Fast flings stopped short of the end while a reply streamed (found after release,
+  2026-09-29).** Rows that stream in while the reader is above are never mounted, so
+  the range below is estimated and usually too short. A fast downward fling mounts and
+  measures them on the way, and the engine grows the range, but the compositor clamps
+  the fling against the range of the last frame it received. When the main thread is
+  behind, as during streaming, the fling dies at that stale bottom. The next scroll
+  event then sees a bottom that has already moved, so the 4px re-arm rule never
+  matched. The reader was left reading, up to a screen short of the end, while the
+  output kept growing below. The engine now records every bottom the range had during a
+  scroll sequence. When a downward sequence comes to rest at one of them, it re-arms
+  follow and moves to the real end.
+  - A model test reproduces the stale bottom; it fails on the old rule. A second test
+    keeps a downward scroll that rests anywhere else in reading mode. The seeded
+    sequences gained a "scroll down and come to rest" step. That step exposed an
+    over-strict I5 check: a clamped reading position moves toward its anchor once it
+    becomes reachable (see `read` handling above), so I5 now applies only to positions
+    that were resolved before the change.
+  - In the real desktop, driven by compositor fling gestures during a streaming
+    reply, 3 of 16 fast flings on the old build stopped at a stale bottom and stayed in
+    reading mode; all 32 on the fixed build ended at the end, following. The race
+    depends on how far the main thread falls behind (one old-build run of 8 hit it
+    zero times), so the model test is the deterministic guard.
 - **Tests that relied on the old path.**
   - The hydration e2e's cold-tail tests asserted that the viewport stays hidden until
     rows are measured. They now assert the tail, or the saved reading row, is in place

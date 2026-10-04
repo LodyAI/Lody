@@ -23,6 +23,11 @@ this page is the full text of the rules summarised there.
   conversation/turn diff without a file focus keeps its all-files-open default.
   On mobile, the diff-header action closes the diff sheet before opening the
   file drawer so the diff modal cannot cover the destination viewer.
+  `SessionMobileDiffDrawerContent` explicitly portals the diff into the nearest
+  session drawer's popup host. The legacy Vaul/Radix modal locks pointer events
+  on the body; a Base UI drawer portalled there can pass scrolling through to
+  the conversation. Keep this choice local to the mobile diff rather than changing
+  the default container of every modal.
 - Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
   `session-file-content-view.tsx`.
 - **What a client may DO with a session file is one model, `hooks/use-session-file-actions.ts`,

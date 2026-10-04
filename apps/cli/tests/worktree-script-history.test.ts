@@ -27,13 +27,15 @@ describe('worktree script history recorder', () => {
       }
     );
     const waitUntilSynced = vi.fn(async () => true);
-    const sessionDoc = withHistoryPort({
+    const fixture = withHistoryPort({
       updateHistory,
       waitUntilSynced,
-    }) as unknown as SessionDocument;
+    });
+    const sessionDoc = fixture as unknown as SessionDocument;
 
     const recorder = createWorktreeScriptHistoryRecorder({
       sessionDoc,
+      backend: fixture,
       sessionId: 'session-1' as SessionId,
       phase: 'setup',
       logger: testLogger,
@@ -132,13 +134,15 @@ describe('worktree script history recorder', () => {
       }
     );
     const waitUntilSynced = vi.fn(async () => true);
-    const sessionDoc = withHistoryPort({
+    const fixture = withHistoryPort({
       updateHistory,
       waitUntilSynced,
-    }) as unknown as SessionDocument;
+    });
+    const sessionDoc = fixture as unknown as SessionDocument;
 
     const recorder = createWorktreeScriptHistoryRecorder({
       sessionDoc,
+      backend: fixture,
       sessionId: 'session-1' as SessionId,
       phase: 'setup',
       logger: testLogger,

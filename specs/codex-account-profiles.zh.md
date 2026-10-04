@@ -28,6 +28,10 @@ OSS 组合保持纯本地。API 请求经过用户执行机器上的进程级回
 切换身份。新目录不复制全局认证、历史或会话数据库。托管账户拒绝自定义运行时和改变
 身份的环境变量。预备、启动、恢复、分叉、编辑重发、验证和标题回退使用同一宿主绑定。
 
+提供商用量快照也使用该绑定。执行机器按提供商配置和限额层级分别存储快照，任何 Codex
+账户都不能覆盖或显示另一账户的配额。已有提供商绑定时，不得把归属未知的旧机器级、
+类型级快照认作该提供商的数据。删除提供商时一并删除其隔离快照。
+
 不同账户和同一 ChatGPT 账户的多个原生进程都可并发运行。每进程使用记录仅用于在全部
 原生进程退出后清理删除账户的凭据；未知孤儿进程不阻止新会话。Lody 不另加凭据刷新
 协调或账户调度。托管 ChatGPT 会话打开时，如明确报错 refresh token 已被重复使用，
@@ -47,5 +51,6 @@ API 密钥轮换先暂存新代次，以不执行工具的合成 Responses 请�
 
 实现归属：[账户存储](../apps/cli/src/agent/codex-profile-store.ts)、
 [凭据转发](../apps/cli/src/agent/codex-credential-broker.ts)、
-[决策及验证限制](../.agents/notes/proposed/architecture/2026-09-26-codex-account-profiles.zh.md)。
+[决策及验证限制](../.agents/notes/proposed/architecture/2026-09-26-codex-account-profiles.zh.md)、
+[限额隔离](../.agents/notes/implemented/bug-fix/2026-09-30-provider-rate-limit-isolation.zh.md)。
 草案不表示全部生命周期或平台验收已经完成。

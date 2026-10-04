@@ -116,6 +116,11 @@ test('finishing a selected turn keeps its prose mounted until selection is clear
 }) => {
   await openAtStart(page);
   const first = page.locator(paragraph(0)).first();
+  // Begin through the native pointer path, which waits for the row's layout.
+  await first.dblclick({ position: { x: 25, y: 10 } });
+  await expect
+    .poll(() => page.evaluate(() => getSelection()!.toString().length))
+    .toBeGreaterThan(0);
   await first.evaluate((element) => {
     const node = element.firstChild!;
     Reflect.set(window, '__selectionAnchor', node);

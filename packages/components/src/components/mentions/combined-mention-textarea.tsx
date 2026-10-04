@@ -54,6 +54,7 @@ import {
 } from '@/components/mentions/mention-project-file-source';
 import {
   SKILL_MENTION_TRIGGER,
+  SKILL_MENTION_TRIGGER_ALIAS,
   SkillMentionHydrator,
   getAllowedSkillMentionDirs,
   type SkillMentionAgent,
@@ -290,7 +291,7 @@ function TwoLevelMentionMenu({
         ],
       },
       emptyState:
-        sessionProjectScope === 'current'
+        sessionProjectScope === 'current' && visibleSessionItems.length === 0
           ? {
               message:
                 sessionProjectKey === 'chat'
@@ -1028,10 +1029,11 @@ export const CombinedMentionTextarea = React.forwardRef<
     const triggers = React.useMemo(() => {
       const nextTriggers: string[] = [];
       // Every mention type is reachable through `@`; skills also retain their
-      // direct `$` entry point, and commands accept `/` and `、` because they must
+      // direct `$` / `￥` entry points, and commands accept `/` and `、` because they must
       // own the whole prompt.
       if (enableAtMentions) nextTriggers.push('@');
-      if (enableSkillMentions) nextTriggers.push(SKILL_MENTION_TRIGGER);
+      if (enableSkillMentions)
+        nextTriggers.push(SKILL_MENTION_TRIGGER, SKILL_MENTION_TRIGGER_ALIAS);
       if (enableShortcutMentions || (enableCommandMentions && isSlashOnly))
         nextTriggers.push('/', '、');
       return nextTriggers;

@@ -71,15 +71,14 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
   default/plan only for agents that advertise the legacy option; planning must not
   change permission policy.
 
-- Daemon-backed workflows negotiate versions through
-  `MachineMeta.protocolCapabilities`; never infer from the CLI release. Missing
-  capabilities mean unsupported. Set and version checks share one binding in
-  `packages/shared/src/machine-protocol-capabilities.ts` so a key never travels
-  without its version.
+- Daemon workflows gate on `MachineMeta.protocolCapabilities`, never CLI version.
+  Missing means unsupported; keep key/version pairs in `machine-protocol-capabilities.ts`.
 - ACP capability `cacheVersion` controls refresh freshness, never readability. Consumers
   preserve understood fields from parsed older or newer entries during mixed-version
   operation, adapting only fields with known incompatible semantics; runtime-override source
   matching remains a separate applicability gate.
+- Rate limits use `agentConfigId + limitId`; bound Providers ignore legacy
+  machine/type rows, and deletion removes scoped rows.
 
 ## Session goal control
 

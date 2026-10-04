@@ -128,6 +128,7 @@ const DaemonRunnerLaunchOutcomeSchema = z.discriminatedUnion('status', [
     status: z.literal('ready'),
     pid: z.number().int().positive(),
     instanceId: z.string().min(1),
+    cliVersion: z.string().min(1).optional(),
   }),
   z.object({
     status: z.literal('occupied'),
@@ -183,10 +184,21 @@ type DaemonRunnerWaitResult = {
 /** Translate the runner report and identify outcomes whose child must be awaited. */
 export function interpretDaemonRunnerLaunchOutcome(
   outcome: DaemonRunnerLaunchOutcome,
-  runnerPid: number
+  runnerPid: number,
+  expectedVersion?: string
 ): DaemonRunnerWaitResult {
   switch (outcome.status) {
     case 'ready':
+      if (expectedVersion !== undefined && outcome.cliVersion !== expectedVersion) {
+        return {
+          outcome: {
+            status: 'error',
+            runnerPid,
+            message: `Daemon reported version ${outcome.cliVersion ?? 'unknown'}; expected ${expectedVersion}`,
+          },
+          cancelRunner: true,
+        };
+      }
       return {
         outcome: { status: 'ready', pid: runnerPid, instanceId: outcome.instanceId },
         cancelRunner: false,
@@ -297,9 +309,9 @@ export async function terminateSpawnedDaemonRunner(
  */
 export async function spawnDaemonRunnerAndAwaitReady(
   passthroughArgs: string[],
-  options: { timeoutMs?: number } = {}
+  options: { timeoutMs?: number; installation?: { bin: string; version: string } } = {}
 ): Promise<SpawnDaemonRunnerResult> {
-  const bin = resolveLodyBin();
+  const bin = options.installation?.bin ?? resolveLodyBin();
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     [DAEMON_RUNNER_READY_FD_ENV]: String(DAEMON_RUNNER_READY_FD),
@@ -376,7 +388,11 @@ export async function spawnDaemonRunnerAndAwaitReady(
         finish({ status: 'error', runnerPid, message: 'invalid readiness report' }, true);
         return;
       }
-      const interpreted = interpretDaemonRunnerLaunchOutcome(outcome.data, runnerPid);
+      const interpreted = interpretDaemonRunnerLaunchOutcome(
+        outcome.data,
+        runnerPid,
+        options.installation?.version
+      );
       finish(interpreted.outcome, interpreted.cancelRunner);
     });
     // EOF without a report means the runner exited before its Worker became ready.

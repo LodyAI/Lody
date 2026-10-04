@@ -258,6 +258,7 @@ function presetShowcase(presetId: string, label: string, brandId: AgentBrandId):
 const FEATURED_SHOWCASE_AGENTS: ShowcaseAgent[] = [
   builtinShowcase('kimi', 'Kimi'),
   builtinShowcase('grok', 'Grok'),
+  builtinShowcase('devin', 'Devin'),
   registryShowcase('amp-acp', 'Amp'),
   registryShowcase('cursor', 'Cursor'),
   registryShowcase('opencode', 'OpenCode'),

@@ -17,11 +17,11 @@ Contract: specs/session-orchestration.md.
   substitute.
 - Derive the human identity from the active dispatch/execution runtime and fail closed when none
   exists; retries and recovery never reread mutable history.
-- Machine and Provider credentials stay execution-host scoped; attribution, authorization,
-  GitHub, and Git identity use the frozen identity, never the Session owner.
+- Machine/Provider credentials stay host-scoped. Attribution, authorization and commits
+  use the frozen Turn identity; GitHub network auth uses the trusted conversation owner.
 - Git: owner uses local config, no profile query; others never read it.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
-  Identity never restarts ACP/sandbox, even in prep.
+  Commit attribution never restarts ACP; owner changes retire the runtime.
 
 ## Dispatch
 

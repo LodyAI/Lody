@@ -1,4 +1,11 @@
 import { useSelectionStableValue } from '@/hooks/use-conversation-text-selection';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { radius, space } from '@lody/ui/tokens/scales.stylex';
+import * as stylex from '@stylexjs/stylex';
+import { withClassName } from '@/lib/stylex';
+import { conversation } from './conversation.tokens.stylex';
+import { conversationTextToken } from './conversation-font-size-classes';
 import {
   type ComponentPropsWithoutRef,
   type ComponentType,
@@ -74,6 +81,7 @@ import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-act
 import { ContextMenu } from '@/ui/armed-overlays';
 import { MarkdownFileImage, MarkdownFileResourcesContext } from './markdown-file-image';
 import { resolveMarkdownImagePath } from '@/lib/session-file-open-target';
+import { rehypeHeadingAnchors } from './markdown-heading-anchors';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
 
@@ -156,81 +164,202 @@ const transformMdastChildren = (tree: unknown, transform: MdastChildTransformer)
   walk(root);
 };
 
+const markdownStyles = stylex.create({
+  root: { maxWidth: 'none', color: conversation.reading },
+  paragraph: {
+    marginTop: 0,
+    marginBottom: { default: conversation.paragraphGap, ':has(+ ul)': space[2], ':last-child': 0 },
+    textAlign: 'start',
+    display: { default: 'block', ':is(li > p)': 'inline' },
+    paddingInline: {
+      default: conversation.railInset,
+      ':is(li > p, table *, [data-streamdown] *, [data-tool-detail-sheet] *)': 0,
+    },
+  },
+  compactParagraph: { marginBottom: { default: space[1], ':last-child': 0 } },
+  list: {
+    marginBlock: { default: space[2], ':is(li > ul, li > ol)': space[1] },
+    paddingLeft: { default: 0, ':is(.contains-task-list)': space[3] },
+    listStyleType: { default: 'none', ':is(.contains-task-list)': 'disc' },
+  },
+  listItem: {
+    position: 'relative',
+    marginTop: { default: 0, ':not(:first-child)': conversation.listItemGap },
+    marginBottom: 0,
+    paddingBlock: 0,
+    paddingLeft: { default: space[6], ':is(.task-list-item)': 0 },
+    '::before': {
+      position: 'absolute',
+      content: "''",
+      left: '10px',
+      top: '0.75em',
+      width: space[1],
+      height: space[1],
+      transform: 'translateY(-50%)',
+      borderRadius: radius.full,
+      backgroundColor: 'currentColor',
+      whiteSpace: 'nowrap',
+      textAlign: 'right',
+    },
+  },
+  orderedItem: {
+    '::before': {
+      content: 'counter(list-item) "."',
+      left: 0,
+      top: 0,
+      width: '18px',
+      height: 'auto',
+      transform: 'none',
+      backgroundColor: 'transparent',
+    },
+  },
+  compactListItem: { marginTop: { default: 0, ':not(:first-child)': `calc(${space[1]} / 2)` } },
+  taskItem: { '::before': { content: 'none' } },
+  quote: {
+    marginTop: conversation.paragraphGap,
+    marginBottom: { default: conversation.paragraphGap, ':last-child': 0 },
+    borderLeft: `2px solid ${colors.separator}`,
+    paddingLeft: space[3],
+    color: colors.secondaryLabel,
+  },
+  strong: { color: conversation.strong, fontWeight: 600 },
+  rule: {
+    marginBlock: conversation.surfaceGap,
+    border: 0,
+    borderTop: `1px solid ${colors.separator}`,
+  },
+  heading: {
+    marginTop: { default: conversation.surfaceGap, ':first-child': 0 },
+    marginBottom: space[2],
+    paddingInline: {
+      default: conversation.railInset,
+      ':is(table *, [data-streamdown] *, [data-tool-detail-sheet] *)': 0,
+    },
+    fontWeight: 600,
+    color: conversation.strong,
+    fontSize: 'var(--markdown-body-font-size)',
+  },
+  h1: {
+    marginTop: { default: space[6], ':first-child': 0 },
+    fontSize: 'var(--markdown-h1-font-size)',
+    lineHeight: 'var(--markdown-heading-line-height)',
+    letterSpacing: '-0.025em',
+  },
+  h2: {
+    marginTop: { default: `calc(${space[4]} + ${space[1]})`, ':first-child': 0 },
+    fontSize: 'var(--markdown-h2-font-size)',
+    lineHeight: 'var(--markdown-heading-line-height)',
+    letterSpacing: '-0.025em',
+  },
+  h4: { marginBottom: space[1.5] },
+  smallHeading: {
+    marginTop: { default: conversation.paragraphGap, ':first-child': 0 },
+    marginBottom: space[1.5],
+    fontSize: 'var(--markdown-small-heading-font-size)',
+    lineHeight: 'var(--markdown-small-heading-line-height)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.025em',
+  },
+  muted: { color: colors.secondaryLabel },
+  compactHeading: {
+    marginTop: { default: space[1], ':first-child': 0 },
+    marginBottom: space[1],
+    fontSize: 'var(--markdown-body-font-size)',
+    fontWeight: 500,
+    color: colors.secondaryLabel,
+  },
+  inlineCode: {
+    borderRadius: radius.mini,
+    backgroundColor: `color-mix(in srgb, ${colors.label} 6%, transparent)`,
+    paddingInline: space[1],
+    paddingBlock: '1px',
+    fontFamily: 'var(--font-mono)',
+    fontSize: 'var(--markdown-code-font-size)',
+    lineHeight: 'var(--markdown-code-line-height)',
+    color: conversation.reading,
+  },
+});
+
+const MarkdownListKindContext = createContext<'unordered' | 'ordered' | 'task'>('unordered');
+const MarkdownCompactContext = createContext(false);
+
+function MarkdownListItem({
+  node: _node,
+  className,
+  ...props
+}: ComponentPropsWithoutRef<'li'> & ExtraProps) {
+  const kind = useContext(MarkdownListKindContext);
+  const compact = useContext(MarkdownCompactContext);
+  return (
+    <li
+      {...props}
+      {...withClassName(
+        stylex.props(
+          markdownStyles.listItem,
+          compact && markdownStyles.compactListItem,
+          kind === 'ordered' && markdownStyles.orderedItem,
+          kind === 'task' && markdownStyles.taskItem
+        ),
+        className
+      )}
+    />
+  );
+}
+
 const MARKDOWN_BASE_CLASSNAME =
-  // Body text uses the contrast-capped reading color; headings and bold take
-  // the one step above it, so hierarchy reads by brightness (`--foreground-strong`).
-  'markdown-renderer max-w-none text-reading leading-[1.75] ' +
-  '[&_h1]:text-foreground-strong [&_h2]:text-foreground-strong [&_h3]:text-foreground-strong [&_h4]:text-foreground-strong [&_strong]:text-foreground-strong ' +
-  '[&_p]:!mt-0 [&_p]:!mb-3 [&_p:has(+ul)]:!mb-2 [&_p:last-child]:!mb-0 [&_p:first-child]:!mt-0 ' +
-  '[&_ul]:!my-2 [&_ul]:pl-3 [&_ul]:list-disc ' +
-  '[&_ul:not(.contains-task-list)]:pl-0 [&_ul:not(.contains-task-list)]:list-none ' +
-  '[&_ul:not(.contains-task-list)>li]:relative [&_ul:not(.contains-task-list)>li]:pl-6 ' +
-  "[&_ul:not(.contains-task-list)>li]:before:absolute [&_ul:not(.contains-task-list)>li]:before:left-[10px] [&_ul:not(.contains-task-list)>li]:before:top-[0.75em] [&_ul:not(.contains-task-list)>li]:before:size-1 [&_ul:not(.contains-task-list)>li]:before:-translate-y-1/2 [&_ul:not(.contains-task-list)>li]:before:rounded-full [&_ul:not(.contains-task-list)>li]:before:bg-current [&_ul:not(.contains-task-list)>li]:before:content-[''] " +
-  // Ordered lists mirror the unordered custom-marker layout above so both list
-  // types share the same text indent and marker lane. `counter(list-item)` is
-  // the UA built-in: `display: list-item` keeps incrementing it under
-  // `list-none`, and it honors <ol start> / <li value> (mdast emits `start`).
-  '[&_ol]:!my-2 [&_ol]:pl-0 [&_ol]:list-none ' +
-  '[&_ol>li]:relative [&_ol>li]:pl-6 ' +
-  // Keep the counter and period on one line even when the conversation uses a
-  // wide font. The 18px marker lane is intentionally narrower than some
-  // glyph pairs; wrapping here drops the period beside the following item.
-  "[&_ol>li]:before:absolute [&_ol>li]:before:left-0 [&_ol>li]:before:w-[18px] [&_ol>li]:before:whitespace-nowrap [&_ol>li]:before:text-right [&_ol>li]:before:content-[counter(list-item)'.'] " +
-  // Loose-list paragraphs render inline so a loose list keeps the tight
-  // layout — between-item spacing must come from the <li> box itself, not the
-  // inner <p>. `mt-1` on non-first items keeps list edges flush with the
-  // `ul`/`ol` margins.
-  '[&_li>p]:inline [&_li]:!my-0 [&_li]:!py-0 [&_li:not(:first-child)]:!mt-1 [&_ul>li:not(:first-child)]:!mt-1 [&_ol>li:not(:first-child)]:!mt-1 [&_li>ul]:!my-1 [&_li>ol]:!my-1 ' +
-  '[&_blockquote]:!my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground ' +
-  '[&_strong]:font-semibold ' +
-  '[&_hr]:!my-4 [&_hr]:border-0 [&_hr]:border-t [&_hr]:border-border ' +
-  '[&_h1]:!mt-6 [&_h1]:!mb-2 [&_h1]:font-semibold [&_h1]:tracking-tight ' +
-  '[&_h2]:!mt-5 [&_h2]:!mb-2 [&_h2]:font-semibold [&_h2]:tracking-tight ' +
-  '[&_h3]:!mt-4 [&_h3]:!mb-2 [&_h3]:font-semibold ' +
-  '[&_h4]:!mt-4 [&_h4]:!mb-1.5 [&_h4]:font-semibold ' +
-  '[&_h5]:!mt-3 [&_h5]:!mb-1.5 [&_h5]:font-semibold [&_h5]:uppercase [&_h5]:tracking-wide ' +
-  '[&_h6]:!mt-3 [&_h6]:!mb-1.5 [&_h6]:font-semibold [&_h6]:uppercase [&_h6]:tracking-wide [&_h6]:text-muted-foreground ' +
-  '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
+  'markdown-renderer ' +
   // Color marks a link; the underline appears on hover only (a standing one
   // made dense CJK prose read as crowded).
   '[&_a]:no-underline [&_a]:underline-offset-2 [&_a]:decoration-current/60 [&_a:hover]:underline ' +
   '[&_.katex-display]:!my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1 ' +
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
   '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
-  '[&_[data-streamdown="code-block"]]:!my-4 ' +
-  '[&_table]:!my-0 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +
+  '[&_table]:!my-0 [&_table]:border-collapse ' +
   // Lines are foreground tints (the theme border melts into the canvas). No
   // column or row is assumed to be a label: cells share one color and weight;
   // only the header row, which Markdown always has, gets a faint band.
-  '[&_thead]:bg-muted/80 [&_:is(th,td)]:text-sm [&_th]:whitespace-nowrap ' +
+  '[&_thead]:bg-muted/80 ' +
   '[&_th]:border-b [&_th]:border-foreground/[0.14] [&_th]:bg-foreground/[0.035] [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-normal [&_th]:align-top ' +
   '[&_td]:border-b [&_td]:border-foreground/[0.08] [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
   '[&_:is(th,td)+:is(th,td)]:border-l [&_:is(th,td)+:is(th,td)]:border-l-foreground/[0.08] ' +
   '[&_tbody_tr:last-child_td]:border-b-0 ' +
   '[&_table_code]:!bg-foreground/[0.08] [&_table_code]:!ring-0 dark:[&_table_code]:!bg-foreground/[0.14]';
 
-const MARKDOWN_SIZE_CLASSNAME =
-  '[&_h1]:text-[length:var(--markdown-h1-font-size)] ' +
-  '[&_h2]:text-[length:var(--markdown-h2-font-size)] ' +
-  '[&_h3]:text-[length:var(--markdown-body-font-size)] ' +
-  '[&_h4]:text-[length:var(--markdown-body-font-size)] ' +
-  '[&_h5]:text-[length:var(--markdown-small-heading-font-size)] ' +
-  '[&_h6]:text-[length:var(--markdown-small-heading-font-size)]';
-
 type MarkdownFontSizeStyle = CSSProperties & {
   '--markdown-body-font-size': string;
   '--markdown-h1-font-size': string;
   '--markdown-h2-font-size': string;
   '--markdown-small-heading-font-size': string;
+  '--markdown-heading-line-height': string;
+  '--markdown-small-heading-line-height': string;
+  '--markdown-code-font-size': string;
+  '--markdown-code-line-height': string;
+  '--markdown-caption-font-size': string;
+  '--markdown-caption-line-height': string;
 };
 
-function markdownFontSizeStyle(fontSize: ConversationFontSize): MarkdownFontSizeStyle {
+function markdownFontSizeStyle(
+  fontSize: ConversationFontSize,
+  compact: boolean
+): MarkdownFontSizeStyle {
+  const body = compact ? textScale.subheadlineSize : textScale.bodySize;
+  const leading = compact ? textScale.subheadlineLeading : conversation.readingLeading;
   return {
-    fontSize: `${fontSize}px`,
-    '--markdown-body-font-size': `${fontSize}px`,
-    '--markdown-h1-font-size': `${fontSize + 4}px`,
-    '--markdown-h2-font-size': `${fontSize + 2}px`,
-    '--markdown-small-heading-font-size': `${Math.max(1, fontSize - 2)}px`,
+    fontSize: conversationTextToken(body, fontSize),
+    lineHeight: conversationTextToken(leading, fontSize),
+    '--markdown-body-font-size': conversationTextToken(body, fontSize),
+    '--markdown-h1-font-size': conversationTextToken(textScale.titleSize, fontSize),
+    '--markdown-h2-font-size': conversationTextToken(textScale.headlineSize, fontSize),
+    '--markdown-small-heading-font-size': conversationTextToken(textScale.footnoteSize, fontSize),
+    '--markdown-heading-line-height': conversationTextToken(textScale.titleLeading, fontSize),
+    '--markdown-small-heading-line-height': conversationTextToken(
+      textScale.footnoteLeading,
+      fontSize
+    ),
+    '--markdown-code-font-size': conversationTextToken(textScale.subheadlineSize, fontSize),
+    '--markdown-code-line-height': conversationTextToken(textScale.subheadlineLeading, fontSize),
+    '--markdown-caption-font-size': conversationTextToken(textScale.captionSize, fontSize),
+    '--markdown-caption-line-height': conversationTextToken(textScale.captionLeading, fontSize),
   };
 }
 
@@ -750,6 +879,11 @@ const KATEX_REHYPE_PLUGIN = [
 ] satisfies NonNullable<StreamdownProps['rehypePlugins']>[number];
 const MARKDOWN_REHYPE_PLUGINS = [KATEX_REHYPE_PLUGIN];
 const HTML_MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize, KATEX_REHYPE_PLUGIN];
+const ANCHORED_MARKDOWN_REHYPE_PLUGINS = [...MARKDOWN_REHYPE_PLUGINS, rehypeHeadingAnchors];
+const ANCHORED_HTML_MARKDOWN_REHYPE_PLUGINS = [
+  ...HTML_MARKDOWN_REHYPE_PLUGINS,
+  rehypeHeadingAnchors,
+];
 
 const STREAMING_HANDOFF_DELAY_MS = 1000;
 
@@ -826,10 +960,6 @@ function MarkdownPre({
   return <MarkdownFencedCodeBlock {...block} />;
 }
 
-type MarkdownTableProps = ComponentPropsWithoutRef<'table'> & {
-  node?: unknown;
-};
-
 const AgentFileLink = ({
   href,
   children,
@@ -873,19 +1003,30 @@ const AgentFileLink = ({
       aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
       className={cn(
         'm-0 inline-flex max-w-full items-baseline gap-1 rounded-sm border-0 bg-transparent p-0 align-baseline font-[inherit] leading-[inherit] text-markdown-link no-underline shadow-none transition-colors',
-        'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+        'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        // In a table cell the chip flows as inline text so the cell decides
+        // whether the path wraps (see `markdown-table.tsx`); a truncated path
+        // there would dictate the column's minimum width.
+        '[:is(th,td)_&]:inline [:is(th,td)_&]:text-start'
       )}
     >
       <MonochromeFileIcon
         filePath={iconPath}
-        className="h-[1.38em] w-[1.38em] shrink-0 self-center"
+        className="h-[1.38em] w-[1.38em] shrink-0 self-center [:is(th,td)_&]:mr-1 [:is(th,td)_&]:inline-block [:is(th,td)_&]:align-[-0.33em]"
       />
-      <span className="min-w-0 truncate">{children}</span>
+      <span
+        className={cn(
+          'min-w-0 truncate',
+          '[:is(th,td)_&]:overflow-visible [:is(th,td)_&]:text-clip [:is(th,td)_&]:[white-space:inherit] [:is(th,td)_&]:[line-break:anywhere]'
+        )}
+      >
+        {children}
+      </span>
       {!hasOpenAction ? (
         didCopy ? (
-          <Check className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
+          <Check className="h-[0.85em] w-[0.85em] shrink-0 self-center [:is(th,td)_&]:ml-1 [:is(th,td)_&]:inline-block [:is(th,td)_&]:align-[-0.1em]" />
         ) : (
-          <Copy className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
+          <Copy className="h-[0.85em] w-[0.85em] shrink-0 self-center [:is(th,td)_&]:ml-1 [:is(th,td)_&]:inline-block [:is(th,td)_&]:align-[-0.1em]" />
         )
       ) : null}
     </button>
@@ -955,6 +1096,8 @@ const createMarkdownComponents = ({
   getAgentFileLinkContextMenuItems,
   readonly,
   theme,
+  headingAnchors,
+  compact,
 }: {
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
@@ -962,31 +1105,137 @@ const createMarkdownComponents = ({
   getAgentFileLinkContextMenuItems?: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
   readonly: boolean;
   theme: ResolvedTheme;
+  headingAnchors: boolean;
+  compact: boolean;
 }): Components => ({
   p: ({ children, className, node: _node, ...props }) => (
-    <p {...props} className={className}>
+    <p
+      {...props}
+      {...withClassName(
+        stylex.props(markdownStyles.paragraph, compact && markdownStyles.compactParagraph),
+        className
+      )}
+    >
       {children}
     </p>
+  ),
+  ul: ({ node: _node, className, ...props }) => (
+    <MarkdownListKindContext.Provider
+      value={className?.split(' ').includes('contains-task-list') ? 'task' : 'unordered'}
+    >
+      <ul {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+    </MarkdownListKindContext.Provider>
+  ),
+  ol: ({ node: _node, className, ...props }) => (
+    <MarkdownListKindContext.Provider value="ordered">
+      <ol {...props} {...withClassName(stylex.props(markdownStyles.list), className)} />
+    </MarkdownListKindContext.Provider>
+  ),
+  li: MarkdownListItem,
+  blockquote: ({ node: _node, className, ...props }) => (
+    <blockquote {...props} {...withClassName(stylex.props(markdownStyles.quote), className)} />
+  ),
+  strong: ({ node: _node, className, ...props }) => (
+    <strong {...props} {...withClassName(stylex.props(markdownStyles.strong), className)} />
+  ),
+  hr: ({ node: _node, className, ...props }) => (
+    <hr {...props} {...withClassName(stylex.props(markdownStyles.rule), className)} />
+  ),
+  h1: ({ node: _node, className, ...props }) => (
+    <h1
+      {...props}
+      {...withClassName(
+        stylex.props(
+          markdownStyles.heading,
+          markdownStyles.h1,
+          compact && markdownStyles.compactHeading
+        ),
+        className
+      )}
+    />
+  ),
+  h2: ({ node: _node, className, ...props }) => (
+    <h2
+      {...props}
+      {...withClassName(
+        stylex.props(
+          markdownStyles.heading,
+          markdownStyles.h2,
+          compact && markdownStyles.compactHeading
+        ),
+        className
+      )}
+    />
+  ),
+  h3: ({ node: _node, className, ...props }) => (
+    <h3
+      {...props}
+      {...withClassName(
+        stylex.props(markdownStyles.heading, compact && markdownStyles.compactHeading),
+        className
+      )}
+    />
+  ),
+  h4: ({ node: _node, className, ...props }) => (
+    <h4
+      {...props}
+      {...withClassName(
+        stylex.props(
+          markdownStyles.heading,
+          markdownStyles.h4,
+          compact && markdownStyles.compactHeading
+        ),
+        className
+      )}
+    />
+  ),
+  h5: ({ node: _node, className, ...props }) => (
+    <h5
+      {...props}
+      {...withClassName(
+        stylex.props(
+          markdownStyles.heading,
+          markdownStyles.smallHeading,
+          compact && markdownStyles.compactHeading
+        ),
+        className
+      )}
+    />
+  ),
+  h6: ({ node: _node, className, ...props }) => (
+    <h6
+      {...props}
+      {...withClassName(
+        stylex.props(
+          markdownStyles.heading,
+          markdownStyles.smallHeading,
+          markdownStyles.muted,
+          compact && markdownStyles.compactHeading
+        ),
+        className
+      )}
+    />
   ),
   pre: (props) => <MarkdownPre {...props} theme={theme} />,
   code: (props: MarkdownCodeProps) => {
     const { className, children, style: _style, node: _node, ...rest } = props;
     return (
-      <code
-        className={cn(
-          className,
-          'rounded-sm bg-foreground/[0.06] px-1 py-px font-mono text-[0.85em] text-reading ring-0 dark:bg-foreground/[0.07]'
-        )}
-        {...rest}
-      >
+      <code {...withClassName(stylex.props(markdownStyles.inlineCode), className)} {...rest}>
         {children}
       </code>
     );
   },
-  table: (props: MarkdownTableProps) => <MarkdownTable {...props} />,
+  table: (props) => <MarkdownTable {...props} />,
   a: (props: MarkdownLinkProps) => {
     const { children, href, node: _node, rel, ...rest } = props;
     if (!href) return <span>{children}</span>;
+    if (headingAnchors && href.startsWith('#')) {
+      return (
+        <a {...rest} href={href}>
+          {children}
+        </a>
+      );
+    }
     const linkedSessionId = parseSessionLinkHref(href);
     if (linkedSessionId) {
       return (
@@ -1173,6 +1422,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   isStreaming = false,
   onAgentFileLinkClick,
   searchBlockId,
+  headingAnchors = false,
+  compact = false,
 }: {
   text: string;
   size?: MarkdownRendererSize;
@@ -1183,6 +1434,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   isStreaming?: boolean;
   onAgentFileLinkClick?: (href: string) => void;
   searchBlockId?: string;
+  /** Generate document heading ids and leave fragment clicks to the owning surface. */
+  headingAnchors?: boolean;
+  /** Tool prose shares the control role without scaling nested code a second time. */
+  compact?: boolean;
 }) {
   ({ text, size, allowHtml, isStreaming, searchBlockId } = useSelectionStableValue({
     text,
@@ -1238,6 +1493,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         getAgentFileLinkContextMenuItems,
         readonly: readonly !== null,
         theme: resolvedTheme,
+        headingAnchors,
+        compact,
       }),
     [
       copyAgentFileLabel,
@@ -1246,12 +1503,20 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       openAgentFileLabel,
       readonly,
       resolvedTheme,
+      headingAnchors,
+      compact,
     ]
   );
 
   const components = useSelectionStableValue(currentComponents);
   const remarkPlugins = inlineMathEnabled ? INLINE_MATH_REMARK_PLUGINS : MARKDOWN_REMARK_PLUGINS;
-  const rehypePlugins = allowHtml ? HTML_MARKDOWN_REHYPE_PLUGINS : MARKDOWN_REHYPE_PLUGINS;
+  const rehypePlugins = headingAnchors
+    ? allowHtml
+      ? ANCHORED_HTML_MARKDOWN_REHYPE_PLUGINS
+      : ANCHORED_MARKDOWN_REHYPE_PLUGINS
+    : allowHtml
+      ? HTML_MARKDOWN_REHYPE_PLUGINS
+      : MARKDOWN_REHYPE_PLUGINS;
   const normalizedSize = normalizeMarkdownRendererSize(size);
   // The engine keeps revealing its buffered tail after the stream ends. Staying
   // mounted briefly lets that reveal finish instead of jumping to the full text.
@@ -1417,12 +1682,15 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   }, [search?.isOpen, search?.query, searchBlockId, searchMatch, text]);
 
   return (
-    <>
+    <MarkdownCompactContext.Provider value={compact}>
       <div
         ref={containerRef}
         data-search-block-id={searchBlockId}
-        className={cn(MARKDOWN_BASE_CLASSNAME, MARKDOWN_SIZE_CLASSNAME, className)}
-        style={markdownFontSizeStyle(normalizedSize)}
+        {...withClassName(
+          stylex.props(markdownStyles.root, compact && markdownStyles.muted),
+          cn(MARKDOWN_BASE_CLASSNAME, className)
+        )}
+        style={markdownFontSizeStyle(normalizedSize, compact)}
         onClick={handleContainerClick}
         onKeyDown={handleContainerKeyDown}
       >
@@ -1458,6 +1726,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           through the React tree, and inside the container the viewer's own
           clicks would reach the delegated open handler above. */}
       <MermaidDiagramViewer selection={diagramSelection} onClose={closeDiagram} />
-    </>
+    </MarkdownCompactContext.Provider>
   );
 });

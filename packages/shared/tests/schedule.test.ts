@@ -14,12 +14,9 @@ import {
   scheduleRunIds,
   scheduleRunKey,
 } from '../src/schedule-registry';
-import {
-  hasExplicitSchedulePermission,
-  ScheduleAgentSchema,
-  ScheduleDefinitionSchema,
-} from '../src/schedule-types';
+import { ScheduleAgentSchema, ScheduleDefinitionSchema } from '../src/schedule-types';
 import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule-repository';
+import { zonedLocalInputToInstant, instantToZonedLocalInput } from '../src/schedule-recurrence';
 
 const definition = () =>
   ScheduleDefinitionSchema.parse({
@@ -281,37 +278,7 @@ it('reads a saved definition back with the fingerprint the Registry published, o
   expect(scheduleDefinitionFingerprint(read!)).toBe(row!.definitionFingerprint);
 });
 
-it('uses explicit advertised permission categories, rejecting unrelated modes and credential options', () => {
-  const permission = {
-    id: 'arbitrary_provider_option',
-    category: '_permission',
-    name: 'Permissions',
-    type: 'select' as const,
-    currentValue: 'safe',
-    options: [{ value: 'safe', name: 'Safe' }],
-  };
-  const capability = { modes: [{ id: 'plan', name: 'Plan' }], configOptions: [permission] };
-  expect(
-    hasExplicitSchedulePermission({ agentConfigId: 'agent', modeId: 'plan' }, capability)
-  ).toBe(false);
-  expect(
-    hasExplicitSchedulePermission(
-      { agentConfigId: 'agent', configOptionValues: { arbitrary_provider_option: 'safe' } },
-      capability
-    )
-  ).toBe(true);
-  expect(
-    hasExplicitSchedulePermission(
-      { agentConfigId: 'agent', configOptionValues: { arbitrary_provider_option: 'unknown' } },
-      capability
-    )
-  ).toBe(false);
-  expect(
-    hasExplicitSchedulePermission(
-      { agentConfigId: 'agent', modeId: 'plan' },
-      { modes: capability.modes }
-    )
-  ).toBe(true);
+it('rejects credential options in schedule definitions', () => {
   expect(
     ScheduleAgentSchema.safeParse({
       agentConfigId: 'agent',
@@ -353,6 +320,52 @@ describe('Chat-mode schedules carry no project', () => {
     };
     return port;
   };
+
+  it.each([
+    ['2026-10-01T02:21', '2026-10-01T09:21:00.000Z'],
+    ['2026-11-01T01:30', '2026-11-01T08:30:00.000Z'],
+  ])(
+    'saves and restores the Once instant before evaluating its due slot (%s)',
+    async (input, at) => {
+      const zone = 'America/Los_Angeles';
+      const port = memoryPort();
+      const repo = new ScheduleRepository(port, 'workspace' as never);
+      const instant = zonedLocalInputToInstant(input, zone)!;
+      expect(instant).toBe(Date.parse(at));
+      await repo.save({
+        scheduleId: 'test',
+        draft: { ...chatDraft(), trigger: { kind: 'once', at: new Date(instant).toISOString() } },
+        actorId: 'owner',
+        now: instant - 60_000,
+        activationId: 'activation',
+        activityId: 'created',
+        create: true,
+      });
+      const doc = (await port.openPersistedDoc('schedule-test')).doc;
+      const peer = new LoroDoc();
+      peer.import(doc.export({ mode: 'snapshot' }));
+      const restored = await new ScheduleRepository(
+        {
+          ...port,
+          openPersistedDoc: async () => ({ doc: peer }),
+        },
+        'workspace' as never
+      ).read('test');
+      expect(restored!.definition.trigger).toEqual({ kind: 'once', at });
+      expect(scheduleDefinitionFingerprint(restored!)).toBe(
+        (await repo.list())[0]!.definitionFingerprint
+      );
+      expect(instantToZonedLocalInput(instant, zone)).toBe(input);
+      expect(
+        previewSchedule(restored!.definition.trigger, restored!.definition.activeFrom, instant - 1)
+      ).toEqual([instant]);
+      const due = evaluateSchedule(restored!.definition, undefined, instant);
+      expect(due.due).toEqual({ scheduledFor: instant, disposition: 'run' });
+      expect(
+        evaluateSchedule(restored!.definition, due.evaluatedThrough, instant + 60_000).due
+      ).toBeUndefined();
+    }
+  );
 
   it('accepts a definition with no project and keeps the field absent through the doc', async () => {
     const repo = new ScheduleRepository(memoryPort(), 'workspace' as never);

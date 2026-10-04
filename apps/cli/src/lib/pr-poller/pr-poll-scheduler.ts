@@ -109,6 +109,7 @@ type WorkspaceRuntime = {
   metadataUpdateTimer: NodeJS.Timeout | null;
   presenceWakeTimer: NodeJS.Timeout | null;
   lastCredentialLogAtMs: number;
+  confirmedAssociations: Map<SessionId, Set<string>>;
 };
 
 /** Per-owner effect outcome of one applied batch (gates the success stamps). */
@@ -210,6 +211,7 @@ export class PrPollScheduler {
       metadataUpdateTimer: null,
       presenceWakeTimer: null,
       lastCredentialLogAtMs: 0,
+      confirmedAssociations: new Map(),
     };
     this.workspaces.set(handle.workspaceId, runtime);
 
@@ -689,6 +691,11 @@ export class PrPollScheduler {
       for (const entry of runtime.entries) {
         validOwners.add(`${runtime.handle.workspaceId}:${entry.ownerSessionId}`);
       }
+      for (const owner of runtime.confirmedAssociations.keys()) {
+        if (!validOwners.has(`${runtime.handle.workspaceId}:${owner}`)) {
+          runtime.confirmedAssociations.delete(owner);
+        }
+      }
     }
     for (const key of Object.keys(this.state.discoveryFingerprints)) {
       const workspaceId = key.split(':')[0] ?? '';
@@ -1159,26 +1166,48 @@ export class PrPollScheduler {
         observations: args.observations,
         discovered,
         runtimeBranch: freshContext.branch,
+        confirmedAssociationUrls: runtime.handle.associatePullRequest
+          ? (runtime.confirmedAssociations.get(ownerSessionId) ?? new Set())
+          : undefined,
       });
       if (associationPlan) {
         const observation = discovered.find((pr) => pr.url === associationPlan.url);
-        const associated =
+        let associated =
           !runtime.handle.associatePullRequest ||
-          (await runtime.handle.associatePullRequest({
-            repoFullName,
-            prNumber: associationPlan.prNumber,
-            prUrl: associationPlan.url,
-            branch: freshContext.branch ?? '',
-            status: associationPlan.status,
-            ownerSessionId,
-          }));
-        if (associated && observation) {
-          this.counters.discoveries += 1;
+          (runtime.confirmedAssociations.get(ownerSessionId)?.has(associationPlan.url) ?? false);
+        try {
+          if (!associated && runtime.handle.associatePullRequest)
+            associated = await runtime.handle.associatePullRequest({
+              repoFullName,
+              prNumber: associationPlan.prNumber,
+              prUrl: associationPlan.url,
+              branch: freshContext.branch ?? '',
+              status: associationPlan.status,
+              ownerSessionId,
+            });
+        } catch (error) {
+          logger.debug(
+            `[pr-poller] Webhook association failed for ${associationPlan.url}: ${formatErrorMessage(error)}`
+          );
+        }
+        if (associated) {
+          runtime.confirmedAssociations.set(ownerSessionId, new Set([associationPlan.url]));
+        } else {
+          discoveryOk = false;
+          // An earlier empty discovery must not make a newly published terminal
+          // PR idle while its webhook association still needs retrying.
+          const key = `${runtime.handle.workspaceId}:${ownerSessionId}`;
+          delete this.state.discoveryFingerprints[key];
+          this.deps.stateStore.deleteDiscoveryFingerprint(key);
+        }
+        if (observation) {
+          if (!(freshMeta.pullRequests ?? []).some((pr) => pr.url === observation.url))
+            this.counters.discoveries += 1;
           logger.debug(
             `[pr-poller] Discovered PR #${associationPlan.prNumber} (${associationPlan.status}) for session ${ownerSessionId}; observation accepted`
           );
-          // Hosted mode requires webhook association first; local mode publishes
-          // directly after the authenticated GitHub observation.
+          // Repository read access proves the summary. Hosted webhook linkage
+          // is a separate effect and must not hide an observed PR from the UI.
           freshMeta = await runtime.handle.readOwnerMeta(ownerSessionId);
           if (
             !freshMeta ||
@@ -1187,11 +1216,13 @@ export class PrPollScheduler {
           ) {
             return failed;
           }
+          const publicationContext = resolveOwnerRepositoryContext(freshMeta);
+          if (
+            publicationContext.repoFullName !== repoFullName ||
+            publicationContext.branch !== args.queriedBranch
+          )
+            return failed;
           newlyAssociated.push(observation);
-        } else {
-          // A configured hosted association must land before any local write; retry the whole
-          // round (query included) at the attempt floor.
-          discoveryOk = false;
         }
       }
 

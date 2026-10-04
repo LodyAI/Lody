@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+Follow-up PR: [#1166](https://github.com/LodyAI/Lody/pull/1166)
+
 [English](2026-09-26-boot-shell-first-paint.md)
 
 ## 摘要
@@ -10,7 +12,8 @@ Translation: current
 Lody 所有的加载态都由 React 绘制，所以在渲染 bundle 下载、执行并完成首次 commit 之前，
 窗口只是一块空画布。加载慢时，这意味着数秒的空白，然后是一个形状不同的占位，最后才是真实布局。
 现在，窗口的第一帧是内联进 `index.html` 的静态启动外壳：按用户保存的宽度和主题画出侧栏列，
-内容区正中是 Lody 标志。React 的启动与鉴权闸口渲染同一份标记，所以唯一可见的变化是真实布局出现。
+内容区正中是 Lody 标志。React 的启动与鉴权闸口渲染同一份标记；重定向保留外壳，
+懒加载布局自己持有 fallback，所以这些过渡不会清空画布。
 代价是一段需要 CSP hash 的小型内联脚本，以及从内置主题复制出来的颜色，由测试锁定。
 
 ## 问题
@@ -24,6 +27,11 @@ React 绘制的一切在首次 commit 之前都不存在：`LoadingPlaceholder`�
 
 入口样式表让 Web 端更糟：Vite 把它链接在 `<head>` 里，它会阻塞首帧，直到整份产品 CSS
 下载完成。所以即使 `index.html` 里有标记，也要等 CSS 下完才显示。
+
+2026-09-30 检查后的事实更正：React 与静态标记一致，并未覆盖只包含 `Navigate` 的提交，
+也未覆盖云端布局的空 Suspense fallback。原有 fallback 仅覆盖本地布局。
+确认未登录后，工作区闸口也会在根路由重定向 effect 执行前返回 `null`。
+这些间隙会在目标页面出现前移除静态外壳。
 
 ## 决策
 
@@ -40,6 +48,7 @@ React 绘制的一切在首次 commit 之前都不存在：`LoadingPlaceholder`�
   它读取 `ThemeProvider` 将要应用的主题（用户保存的选择，否则跟随系统偏好），
   在 `<html>` 上设置 `dark` 或 `light`。它还判断工作区侧栏是否会显示：
   非工作区路由、设置页、侧栏折叠时都不显示；会话窗口默认折叠，辅助窗口读取自己的存储。
+  默认 `/` 入口仅显示标志，依据[启动进入 chat landing](../simplification/2026-09-29-startup-chat-landing.zh.md)。
   结果以 `data-lody-boot-sidebar` 记录在 `<html>` 上，宽度写入一个 CSS 变量。
   React 的副本读取同样的属性，所以只判断一次。脚本只读不写；任何失败都退回为浅色画布加居中标志。
 - **安全区与布局根节点一致。** 外壳按 `env(safe-area-inset-*)` 给上、左、右加内边距，
@@ -51,7 +60,11 @@ React 绘制的一切在首次 commit 之前都不存在：`LoadingPlaceholder`�
 - **启动闸口使用外壳。** `LoadingPlaceholder` 新增 `variant="boot"`。
   `routes/index.tsx`、`routes/$workspaceName.tsx` 与 `_auth.tsx` 中的路由闸口
   （启动本地工作区、登录中、加载工作区）改用它。`viewport` 保留给面板内的调用方（会话详情、登录页）。
-  本地布局的 `RouteSuspense` 在所有路由上都以外壳作为 fallback。`CriticalWorkspaceShell` 已删除；
+  `BootNavigate` 在路由重定向旁绘制外壳，直到目标页面提交；登录、规范 slug 和创建工作区的
+  重定向都使用它。确认未登录后仍绘制外壳，由根路由负责失效处理及导航；隐藏的预热窗口
+  在 `/` 仍不绘制内容。`PreloadedMainLayout` 自己持有外壳 Suspense fallback，覆盖所有本地和
+  云端分支，包括 `workspaceReady={false}`，调用方不会再遗漏 fallback。chunk 到达后，现有内容区占位继续等待路由、runtime
+  和 doc-meta 归属一致。数据就绪、权限及组织切换闸口均不被绕过。`CriticalWorkspaceShell` 已删除；
   它在非 chat 路由上回退为 `null`，会让窗口再次变空白。
 - **样式表放到外壳之后。** 构建时，插件把 `<head>` 里的样式表链接移到 `<body>` 末尾。
   在那里它只阻塞其后的内容，所以外壳立即绘制；而 module 脚本仍会等待阻塞脚本的样式表，
@@ -83,7 +96,7 @@ React 绘制的一切在首次 commit 之前都不存在：`LoadingPlaceholder`�
 - `tests/boot-shell.test.tsx` 覆盖：
   - 脚本的主题解析；
   - 侧栏判断（工作区、hash 路由、保存的宽度及其夹取、折叠、设置、登录、onboarding、
-    有无上次路由的根路径、会话窗口与辅助窗口）以及存储失败时的回退；
+    忽略旧上次路由存储的根路径、会话窗口与辅助窗口）以及存储失败时的回退；
   - 注入的脚本与 CSP hash 一致；
   - 标记处理与样式表移动；
   - React 与静态标记一致；
@@ -95,11 +108,23 @@ React 绘制的一切在首次 commit 之前都不存在：`LoadingPlaceholder`�
 - 在 Xvfb 下录制了改动前后的桌面端重载：通过主进程的 `file:` handler，
   把每个脚本、样式表和 wasm 请求都延迟 1.5 秒。
 
+2026-09-30 的回归覆盖中，`home-route.test.tsx` 用显式 Promise 暂停目标页面加载，
+检查静态标记被替换后的 React 外壳，并在释放后检查 chat、登录和创建工作区页面。
+它覆盖缓存与已解析的登录状态、本地入口，以及保持中性的预热窗口。
+`preloaded-main-layout.test.tsx` 延迟布局 import，检查外壳移除、布局状态保留及预加载后的立即绘制。
+
+上述套件加上 `boot-failure.test.ts` 通过了 67 个测试，复用现有 checkout 的依赖链接（`NODE_ENV=test`，
+关闭 Node 26 的实验性 Web Storage，使存储由 jsdom 提供）。渲染入口 CSP 的 5 个测试通过。
+路由生成、改动文件的 Oxfmt 和 Oxlint 检查通过。完整 `pnpm check` 因包依赖缺失而停止；
+组件类型检查另有共享层与 provider API 不匹配、预览依赖缺失的问题，改动的源文件没有报错。
+文档检查报告 62 条指向未填充 ACP 子模块的断链，本次文档没有报错。
+没有重新录制打包后的窗口启动，也没有新的启动延迟测量结果。
+
 ## 局限
 
 - Web 宿主在本仓库之外。它需要接入插件和标记；如果 CSP 通过响应头下发，还要加入 hash。
   Web 端的首帧时间没有在这里测量。
 - 内联的标志让每个入口 HTML 增加约 8KB 的 base64；Web 宿主的 CSP 需要允许 `data:` 图片
   （桌面渲染进程已经允许）。
-- Electron `BrowserWindow` 的背景色仍然跟随系统主题。保存的主题与系统不同的用户，
-  在文档绘制之前可能看到一帧颜色不对的原生窗口。
+- 原生窗口主题持久化现由[已提交的启动主题决策](2026-09-29-committed-startup-theme.zh.md)负责。
+  原生背景色仍可能与外壳的内置主题颜色不同。

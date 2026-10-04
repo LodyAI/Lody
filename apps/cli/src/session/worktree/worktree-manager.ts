@@ -1,3 +1,4 @@
+import { GITHUB_CREDENTIAL_ENV_KEYS } from '@/lib/gh-token-env';
 import { RepoId, SessionId } from '@lody/shared';
 import { resolveLocalProjectBranchAtRootPath } from '@lody/shared/node/local-project';
 import spawn from 'cross-spawn';
@@ -105,6 +106,8 @@ type RepoFetchMode = 'skip' | 'best-effort' | 'required';
  * caches by `repoId` alone, so two workspaces sharing a repo share one instance.
  */
 export type GitCredentialBrokerAuth = {
+  /** Host-derived ownership; absent is not permission to inherit machine tokens. */
+  allowLocalAuth?: boolean;
   workspaceId: string;
   url: string;
   token: string;
@@ -118,6 +121,16 @@ const buildBrokerAuthEnv = (auth: GitCredentialBrokerAuth | undefined): NodeJS.P
   auth
     ? {
         ...auth.transportEnv,
+        ...(!auth.allowLocalAuth
+          ? Object.fromEntries(
+              [
+                ...GITHUB_CREDENTIAL_ENV_KEYS,
+                ...Object.keys(process.env).filter((key) =>
+                  GITHUB_CREDENTIAL_ENV_KEYS.includes(key.toUpperCase())
+                ),
+              ].map((key) => [key, undefined])
+            )
+          : {}),
         LODY_GIT_CRED_BROKER_URL: auth.url,
         LODY_GIT_CRED_BROKER_TOKEN: auth.token,
         LODY_GIT_CRED_CONTEXT_TOKEN: auth.contextToken,

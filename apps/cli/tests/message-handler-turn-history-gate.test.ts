@@ -141,6 +141,9 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
   it.each([false, true, 'write-failure', 'new-turn'] as const)(
     'drains text before a permission tool (buffered tool: %s)',
     async (includeTool) => {
+      // This path exercises real LoroRepo writes. Native async completion does
+      // not use Vitest's fake clock and can be starved on a loaded CI runner.
+      vi.useRealTimers();
       const sessionId = 'permission-order' as SessionId;
       const { repo, doc, handler } = await createHandlerHarness(sessionId);
       try {

@@ -5,7 +5,6 @@ import path from 'path';
 import { Logger, getLogger } from '@/utils/logger';
 import { GitHubTokenFetchError } from '@/lib/github-token-manager';
 import type { CloudGithubTokenManager } from '@lody/platform';
-import { formatErrorMessage } from '@/utils/format-error';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 /**
@@ -57,6 +56,8 @@ export const createGitCredentialBrokerHandler = (options: {
   ownerUserId?: string;
 }): http.RequestListener => {
   const handleRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
+    const requestId = randomBytes(8).toString('hex');
+    const startedAt = Date.now();
     try {
       // Health check endpoint - no auth required, used for internal liveness checks
       if (req.method === 'GET' && req.url === '/health') {
@@ -138,7 +139,8 @@ export const createGitCredentialBrokerHandler = (options: {
           res.end(JSON.stringify({ error: 'invalid_context' }));
           return;
         }
-        const policy = await options.tokenManager.getCredentialPolicy(context);
+        // Compatibility for older helpers: local eligibility never needs cloud policy.
+        const policy = { personalEnabled: true };
         if (!isContextCurrent()) return;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(
@@ -232,22 +234,46 @@ export const createGitCredentialBrokerHandler = (options: {
     } catch (error) {
       if (error instanceof GitHubTokenFetchError) {
         options.logger.debug(
-          `[git-cred-broker] Token fetch failed for repo: code=${error.code} message="${error.message}"`
+          `[git-cred-broker] request=${requestId} path=${req.url} code=${error.code} elapsedMs=${Date.now() - startedAt}`
         );
         res.writeHead(403, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: error.code, message: error.message }));
+        res.end(JSON.stringify({ error: error.code, requestId }));
         return;
       }
-      const errorMessage = formatErrorMessage(error);
-      options.logger.debug(`credential broker request failed: ${errorMessage}`);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
+      const code =
+        error instanceof Error &&
+        'code' in error &&
+        typeof error.code === 'string' &&
+        /^[A-Za-z0-9_]{1,64}$/.test(error.code)
+          ? error.code
+          : 'upstream_error';
+      const causeCode =
+        error instanceof Error &&
+        error.cause &&
+        typeof error.cause === 'object' &&
+        'code' in error.cause &&
+        typeof error.cause.code === 'string' &&
+        /^[A-Za-z0-9_]{1,64}$/.test(error.cause.code)
+          ? error.cause.code
+          : undefined;
+      options.logger.debug(
+        `[git-cred-broker] ${JSON.stringify({
+          requestId,
+          path: req.url,
+          code,
+          causeCode,
+          errorType: error instanceof Error ? error.name : 'unknown',
+          elapsedMs: Date.now() - startedAt,
+        })}`
+      );
+      res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(
         JSON.stringify({
-          error: req.url === '/github-auth-context' ? 'policy_unavailable' : 'internal_error',
-          message:
-            req.url === '/github-auth-context'
-              ? 'Cannot verify GitHub identity preferences. Check the Lody connection and machine access, then retry.'
-              : errorMessage,
+          error:
+            error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name)
+              ? 'timeout'
+              : (causeCode ?? code),
+          requestId,
         })
       );
     }
@@ -257,7 +283,6 @@ export const createGitCredentialBrokerHandler = (options: {
   };
 };
 
-const DEFAULT_HEALTH_CHECK_INTERVAL_MS = 30_000; // 30 seconds
 const HEALTH_CHECK_TIMEOUT_MS = 5_000; // 5 seconds
 
 /**
@@ -306,8 +331,6 @@ export class GitCredentialBroker {
   private readonly sessionContextTokens = new Map<string, string>();
   private server: http.Server | null = null;
   private env: GitCredentialBrokerEnv | null = null;
-  private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
-  private isRecovering = false;
 
   constructor(options: {
     tokenManager: CloudGithubTokenManager;
@@ -331,6 +354,11 @@ export class GitCredentialBroker {
     return state ? `${state}.sessions/${encodeURIComponent(sessionId)}.json` : undefined;
   }
 
+  getPinnedContextFilePath(contextToken: string): string | undefined {
+    const state = this.getStateFilePath();
+    return state ? `${state}.contexts/${contextToken}.json` : undefined;
+  }
+
   private readonly resolveContext = (
     contextToken: string
   ): GitCredentialBrokerSessionContext | null => this.contexts.get(contextToken) ?? null;
@@ -345,7 +373,13 @@ export class GitCredentialBroker {
     });
   }
 
-  async ensureStarted(): Promise<GitCredentialBrokerEnv> {
+  private starting?: Promise<GitCredentialBrokerEnv>;
+
+  ensureStarted(): Promise<GitCredentialBrokerEnv> {
+    return (this.starting ??= this.start());
+  }
+
+  private async start(): Promise<GitCredentialBrokerEnv> {
     if (this.env && this.server) {
       return this.env;
     }
@@ -378,10 +412,16 @@ export class GitCredentialBroker {
 
     this.logger.debug(`Git credential broker listening on 0.0.0.0:${port}`);
 
-    // Start periodic health checks
-    this.startHealthCheck();
-
     return this.env;
+  }
+
+  hasSessionContext(sessionId: string): boolean {
+    return this.sessionContextTokens.has(sessionId);
+  }
+
+  getSessionOwner(sessionId: string): string | undefined {
+    const token = this.sessionContextTokens.get(sessionId);
+    return token ? this.contexts.get(token)?.requesterUserId : undefined;
   }
 
   /** Rotate only sessions that opted into managed credentials during preparation. */
@@ -405,16 +445,26 @@ export class GitCredentialBroker {
       // so stale subprocesses still holding it via env get invalid_context (403)
       // instead of silently resolving to the new requester's identity.
       this.contexts.delete(existingToken);
+      const previousFile = this.getPinnedContextFilePath(existingToken);
+      if (previousFile) removeFileIfExists(previousFile);
     }
 
     const contextToken = randomBytes(32).toString('hex');
     this.sessionContextTokens.set(context.sessionId, contextToken);
     this.contexts.set(contextToken, context);
-    const file = this.getSessionContextFilePath(context.sessionId);
-    if (file) {
+    const snapshot = JSON.stringify({
+      version: 1,
+      contextToken,
+      allowLocalAuth: context.requesterUserId === this.ownerUserId,
+    });
+    for (const file of [
+      this.getPinnedContextFilePath(contextToken),
+      this.getSessionContextFilePath(context.sessionId),
+    ]) {
+      if (!file) continue;
       mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
       const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
-      writeFileSync(temporary, JSON.stringify({ contextToken }), { mode: 0o600 });
+      writeFileSync(temporary, snapshot, { mode: 0o600 });
       renameSync(temporary, file);
     }
     return contextToken;
@@ -465,150 +515,18 @@ export class GitCredentialBroker {
     });
   }
 
-  /**
-   * Start periodic health checks. If a health check fails, attempt to recover
-   * by restarting the broker.
-   */
-  private startHealthCheck(): void {
-    if (this.healthCheckTimer) {
-      return;
-    }
-
-    this.healthCheckTimer = setInterval(() => {
-      void (async () => {
-        if (this.isRecovering) {
-          return;
-        }
-
-        const isHealthy = await this.checkHealth();
-        if (!isHealthy && this.env) {
-          this.logger.debug('Git credential broker health check failed, attempting recovery...');
-          await this.recover();
-        }
-      })();
-    }, DEFAULT_HEALTH_CHECK_INTERVAL_MS);
-
-    // Don't prevent process exit
-    this.healthCheckTimer.unref();
-  }
-
-  /**
-   * Stop periodic health checks.
-   */
-  private stopHealthCheck(): void {
-    if (this.healthCheckTimer) {
-      clearInterval(this.healthCheckTimer);
-      this.healthCheckTimer = null;
-    }
-  }
-
-  /**
-   * Attempt to recover the broker by restarting it.
-   * Preserves the same auth token and tries to bind to the same port so existing
-   * containers can still connect without needing new environment variables.
-   */
-  private async recover(): Promise<void> {
-    if (this.isRecovering) {
-      return;
-    }
-
-    this.isRecovering = true;
-    const previousToken = this.env?.token;
-    const previousUrl = this.env?.url;
-    // Extract previous port from URL
-    const previousPort = previousUrl ? parseInt(new URL(previousUrl).port, 10) : null;
-
-    try {
-      // Close the old server if it exists
-      if (this.server) {
-        const oldServer = this.server;
-        this.server = null;
-        await new Promise<void>((resolve) => oldServer.close(() => resolve()));
-      }
-
-      if (!previousToken) {
-        this.logger.error('Cannot recover broker: no previous token available');
-        this.env = null;
-        delete process.env.LODY_GIT_CRED_BROKER_URL;
-        delete process.env.LODY_GIT_CRED_BROKER_TOKEN;
-        return;
-      }
-
-      // Create a new server with the same token so containers don't need new env
-      const server = http.createServer(this.createHandler(previousToken));
-
-      // Try to bind to the same port first so existing containers keep working.
-      // If that fails (port in use), fall back to a dynamic port.
-      // Bind to 0.0.0.0 to allow container access via bridge network.
-      let boundPort: number;
-      if (previousPort) {
-        try {
-          await new Promise<void>((resolve, reject) => {
-            server.listen(previousPort, '0.0.0.0', () => resolve());
-            server.once('error', (err) => reject(err));
-          });
-          boundPort = previousPort;
-        } catch {
-          // Previous port unavailable, try dynamic port
-          this.logger.debug(
-            `Could not rebind to previous port ${previousPort}, using dynamic port`
-          );
-          await new Promise<void>((resolve, reject) => {
-            server.listen(0, '0.0.0.0', () => resolve());
-            server.once('error', (err) => reject(err));
-          });
-          const address = server.address();
-          if (!address || typeof address === 'string') {
-            server.close();
-            throw new Error('Failed to bind credential broker during recovery');
-          }
-          boundPort = address.port;
-        }
-      } else {
-        await new Promise<void>((resolve, reject) => {
-          server.listen(0, '0.0.0.0', () => resolve());
-          server.once('error', (err) => reject(err));
-        });
-        const address = server.address();
-        if (!address || typeof address === 'string') {
-          server.close();
-          throw new Error('Failed to bind credential broker during recovery');
-        }
-        boundPort = address.port;
-      }
-
-      const url = `http://127.0.0.1:${boundPort}`;
-      this.server = server;
-      this.env = { url, port: boundPort, token: previousToken };
-      process.env.LODY_GIT_CRED_BROKER_URL = url;
-      // Token stays the same, but update env in case it was cleared
-      process.env.LODY_GIT_CRED_BROKER_TOKEN = previousToken;
-
-      // Update state file so containers can find the new broker
-      writeBrokerStateFile(this.env, this.workspaceId);
-
-      if (boundPort === previousPort) {
-        this.logger.debug(`Git credential broker recovered on same port ${boundPort}`);
-      } else {
-        this.logger.debug(
-          `Git credential broker recovered on port ${boundPort} (was ${previousPort}). ` +
-            `State file updated - containers will use new address.`
-        );
-      }
-    } catch (error) {
-      this.logger.error(`Failed to recover git credential broker: ${formatErrorMessage(error)}`);
-      this.env = null;
-      delete process.env.LODY_GIT_CRED_BROKER_URL;
-      delete process.env.LODY_GIT_CRED_BROKER_TOKEN;
-      removeBrokerStateFile(this.workspaceId);
-    } finally {
-      this.isRecovering = false;
-    }
-  }
-
   async shutdown(): Promise<void> {
-    this.stopHealthCheck();
+    if (this.starting) await this.starting.catch(() => undefined);
+    this.starting = undefined;
+    for (const token of this.contexts.keys()) {
+      const file = this.getPinnedContextFilePath(token);
+      if (file) removeFileIfExists(file);
+    }
     this.contexts.clear();
+    for (const sessionId of this.sessionContextTokens.keys()) {
+      const file = this.getSessionContextFilePath(sessionId);
+      if (file) removeFileIfExists(file);
+    }
     this.sessionContextTokens.clear();
 
     if (!this.server) {

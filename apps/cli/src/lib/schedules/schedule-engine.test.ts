@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildScheduleRegistryRow,
   ScheduleDefinitionSchema,
+  zonedLocalInputToInstant,
   type ScheduleDocument,
 } from '@lody/shared';
 import { findNextDispatchableUserTurn } from '@/session/session-dispatch-logic';
@@ -43,10 +44,9 @@ afterEach(() => {
   for (const store of stores.splice(0)) store.close();
 });
 
-function harness() {
+function harness(d = document()) {
   const store = new ScheduleStore<{ prompt: string }>(':memory:');
   stores.push(store);
-  const d = document();
   let row = buildScheduleRegistryRow(d);
   let now = 60_000;
   let ready = true;
@@ -106,6 +106,28 @@ function harness() {
 }
 
 describe('Schedule worker handoff', () => {
+  it('dispatches a machine-clock Once slot at its saved instant, retaining the ledger on restart', async () => {
+    const instant = zonedLocalInputToInstant('2026-10-01T02:21', 'America/Los_Angeles');
+    expect(instant).toBe(Date.parse('2026-10-01T09:21:00Z'));
+    const d = document();
+    d.definition.trigger = { kind: 'once', at: '2026-10-01T09:21:00.000Z' };
+    d.definition.activeFrom = Date.parse('2026-10-01T00:00:00Z');
+    const h = harness(d);
+    h.time(Date.parse('2026-10-01T09:20:59Z'));
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toEqual([]);
+    h.time(Date.parse('2026-10-01T09:21:00Z'));
+    await h.engine.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toMatchObject([
+      { scheduledFor: instant, state: 'dispatched' },
+    ]);
+    h.time(Date.parse('2026-10-01T09:22:00Z'));
+    const restarted = new ScheduleEngine(h.ports);
+    restarted.restoreOccupancy();
+    await restarted.evaluate();
+    expect(h.store.history('workspace', 'schedule')).toHaveLength(1);
+    expect(h.store.history('workspace', 'schedule')[0]?.scheduledFor).toBe(instant);
+  });
   it('never materializes before initial/reconnect sync and never dispatches twice', async () => {
     const h = harness();
     h.ready(false);
@@ -229,7 +251,7 @@ describe('Schedule worker handoff', () => {
   it('waits for target permission recovery without spending attempts or losing the slot', async () => {
     const h = harness();
     h.ports.validateTarget = async () => {
-      throw new ScheduleConfigurationError('PERMISSION_UNAVAILABLE');
+      throw new ScheduleConfigurationError('PROJECT_UNAVAILABLE');
     };
     await h.engine.evaluate();
     await h.engine.evaluate();
@@ -237,11 +259,11 @@ describe('Schedule worker handoff', () => {
     expect(h.store.unfinished('workspace')[0]).toMatchObject({
       state: 'retry_wait',
       attempts: 0,
-      errorCode: 'PERMISSION_UNAVAILABLE',
+      errorCode: 'PROJECT_UNAVAILABLE',
     });
     expect(h.slots.isBusy('agent')).toBe(false);
     expect(h.ports.publish).toHaveBeenLastCalledWith(
-      expect.objectContaining({ queueState: 'blocked', blockedCode: 'PERMISSION_UNAVAILABLE' })
+      expect.objectContaining({ queueState: 'blocked', blockedCode: 'PROJECT_UNAVAILABLE' })
     );
     h.ports.validateTarget = async () => {};
     h.time(90_000);

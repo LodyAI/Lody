@@ -311,10 +311,10 @@ export function defaultScheduleRecurrence(timeZone = getDeviceTimeZone()): Sched
   return { kind: 'daily', hour: 9, minute: 0, timeZone };
 }
 
-function timeOfDayOf(recurrence: ScheduleRecurrence): ScheduleTimeOfDay {
+function timeOfDayOf(recurrence: ScheduleRecurrence, timeZone: string): ScheduleTimeOfDay {
   if (recurrence.kind === 'once') {
-    const at = new Date(recurrence.at);
-    return { hour: at.getHours(), minute: at.getMinutes(), timeZone: getDeviceTimeZone() };
+    const at = wallClockParts(Date.parse(recurrence.at), timeZone);
+    return { hour: at.hour, minute: at.minute, timeZone };
   }
   if (recurrence.kind === 'minutes' || recurrence.kind === 'hours')
     return { hour: 9, minute: 0, timeZone: recurrence.timeZone };
@@ -336,10 +336,12 @@ function timeOfDayOf(recurrence: ScheduleRecurrence): ScheduleTimeOfDay {
 export function changeScheduleRecurrenceKind(
   current: ScheduleRecurrence,
   kind: Exclude<ScheduleRecurrenceKind, 'unsupported'>,
-  now: number
+  now: number,
+  timeZone = scheduleRecurrenceTimeZone(current)
 ): ScheduleRecurrence {
   if (current.kind === kind) return current;
-  const time = timeOfDayOf(current);
+  const time = timeOfDayOf(current, timeZone);
+  const today = wallClockParts(now, time.timeZone);
   switch (kind) {
     case 'daily':
       return { kind, ...time };
@@ -349,11 +351,17 @@ export function changeScheduleRecurrenceKind(
       return {
         kind,
         weekdays:
-          current.kind === 'weekdays' ? [...WORKWEEK] : [new Date(now).getDay() as ScheduleWeekday],
+          current.kind === 'weekdays'
+            ? [...WORKWEEK]
+            : [
+                new Date(
+                  Date.UTC(today.year, today.month - 1, today.day)
+                ).getUTCDay() as ScheduleWeekday,
+              ],
         ...time,
       };
     case 'monthly':
-      return { kind, days: [new Date(now).getDate()], ...time };
+      return { kind, days: [today.day], ...time };
     case 'hours':
       return { kind, every: 1, timeZone: time.timeZone };
     case 'minutes':
@@ -483,8 +491,8 @@ export function instantToZonedLocalInput(ms: number, timeZone: string): string {
 
 /**
  * The instant a `YYYY-MM-DDTHH:mm` wall time in `timeZone` names, or `null` for
- * malformed input. A time skipped by a DST gap resolves forward, the same as a
- * browser's local `datetime-local`.
+ * malformed input. A DST gap resolves forward by the gap; a repeated wall time
+ * chooses the earlier instant. Stored instants are never parsed again on restore.
  */
 export function zonedLocalInputToInstant(value: string, timeZone: string): number | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
@@ -495,8 +503,13 @@ export function zonedLocalInputToInstant(value: string, timeZone: string): numbe
     const p = wallClockParts(ms, timeZone);
     return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - ms;
   };
-  // Two passes settle the offset on either side of a DST transition.
-  let instant = asUtc - offsetAt(asUtc);
-  instant = asUtc - offsetAt(instant);
+  // Sample both sides of the local date: iterating offsets oscillates across a
+  // gap and can choose the pre-gap wall time. Exact candidates also disambiguate folds.
+  const candidates = [
+    ...new Set([asUtc - offsetAt(asUtc - 86_400_000), asUtc - offsetAt(asUtc + 86_400_000)]),
+  ].sort((a, b) => a - b);
+  const instant =
+    candidates.find((candidate) => instantToZonedLocalInput(candidate, timeZone) === value) ??
+    candidates[candidates.length - 1]!;
   return Number.isFinite(instant) ? instant : null;
 }

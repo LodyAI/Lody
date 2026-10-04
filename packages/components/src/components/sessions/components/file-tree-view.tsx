@@ -476,7 +476,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
           return (
             <ContextMenu.Item
               key={menuItem.id}
-              icon={<ItemIcon aria-hidden="true" />}
+              icon={ItemIcon}
               onClick={() => menuItem.run(item.id)}
             >
               {menuItem.label}

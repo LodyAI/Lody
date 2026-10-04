@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import {
   AlertCircle,
@@ -117,6 +118,103 @@ const buildActionIcon = ({
   return <Eye className="h-4 w-4" aria-hidden="true" />;
 };
 
+const styles = stylex.create({ frame: { position: 'relative', overflow: 'hidden' } });
+
+/** The delivered card layout, also used while attachment preparation is pending. */
+export function SessionFileCardLayout({
+  fileName,
+  subtitle,
+  icon,
+  actionIcon,
+  isInteractive = false,
+  isMuted = false,
+  failed = false,
+  onClick,
+  secondaryAction,
+  progress,
+  className,
+}: {
+  fileName: string;
+  subtitle: string;
+  icon: ReactNode;
+  actionIcon: ReactNode;
+  isInteractive?: boolean;
+  isMuted?: boolean;
+  failed?: boolean;
+  onClick?: () => void;
+  secondaryAction?: ReactNode;
+  progress?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        stylex.props(styles.frame).className,
+        'group flex w-full max-w-sm items-center gap-1 rounded-xl border px-3 py-2.5 text-left',
+        'border-border/60 bg-card/80 transition-[background-color,border-color,box-shadow] duration-150',
+        isInteractive &&
+          'hover:border-border hover:bg-accent/50 hover:shadow-sm active:scale-[0.99]',
+        isMuted && 'opacity-70',
+        failed && 'border-destructive/30 bg-destructive/[0.04]',
+        className
+      )}
+    >
+      <button
+        type="button"
+        onClick={isInteractive ? onClick : undefined}
+        disabled={!isInteractive}
+        aria-label={fileName}
+        className={cn(
+          'flex min-w-0 flex-1 items-center gap-3 text-left',
+          isInteractive ? 'cursor-pointer' : 'cursor-default'
+        )}
+      >
+        <span
+          className={cn(
+            'flex size-10 shrink-0 items-center justify-center rounded-lg transition-colors',
+            isMuted
+              ? 'bg-muted text-muted-foreground'
+              : 'bg-muted/70 text-muted-foreground group-hover:bg-background group-hover:text-foreground'
+          )}
+        >
+          {icon}
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="truncate text-sm font-medium leading-tight text-foreground">
+            {fileName}
+          </span>
+          <span
+            className={cn(
+              'truncate text-xs leading-tight text-muted-foreground tabular-nums',
+              failed && 'text-destructive'
+            )}
+            title={failed ? subtitle : undefined}
+          >
+            {subtitle}
+          </span>
+        </span>
+        {actionIcon ? (
+          <span
+            className={cn(
+              'flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors',
+              /* One rest tone for every icon in a turn — an interactive affordance
+                 resting DIMMER than the static chrome around it read as disabled.
+                 Hover still brightens it. */
+              isInteractive
+                ? 'text-muted-foreground group-hover:bg-background group-hover:text-foreground'
+                : 'text-muted-foreground'
+            )}
+          >
+            {actionIcon}
+          </span>
+        ) : null}
+      </button>
+      {secondaryAction}
+      {progress}
+    </div>
+  );
+}
+
 /**
  * Pure file-attachment card. The action (preview vs download vs nothing) is
  * derived from the block and its storage owner's retention policy. Publication
@@ -166,78 +264,35 @@ export function SessionFileCard({
   const downloadLabel = t('sessions.fileActions.download', 'Download file');
 
   return (
-    <div
-      className={cn(
-        'group flex w-full max-w-sm items-center gap-1 rounded-xl border px-3 py-2.5 text-left',
-        'border-border/60 bg-card/80 transition-[background-color,border-color,box-shadow] duration-150',
-        isInteractive &&
-          'hover:border-border hover:bg-accent/50 hover:shadow-sm active:scale-[0.99]',
-        isMuted && 'opacity-70',
-        className
-      )}
-    >
-      <button
-        type="button"
-        onClick={isInteractive ? handleClick : undefined}
-        disabled={!isInteractive}
-        aria-label={file.fileName}
-        className={cn(
-          'flex min-w-0 flex-1 items-center gap-3 text-left',
-          isInteractive ? 'cursor-pointer' : 'cursor-default'
-        )}
-      >
-        <span
-          className={cn(
-            'flex size-10 shrink-0 items-center justify-center rounded-lg transition-colors',
-            isMuted
-              ? 'bg-muted text-muted-foreground'
-              : 'bg-muted/70 text-muted-foreground group-hover:bg-background group-hover:text-foreground'
-          )}
-        >
-          <Icon className="size-5" aria-hidden="true" />
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate text-sm font-medium leading-tight text-foreground">
-            {file.fileName}
-          </span>
-          <span className="truncate text-xs leading-tight text-muted-foreground tabular-nums">
-            {subtitle}
-          </span>
-        </span>
-        {actionIcon ? (
-          <span
-            className={cn(
-              'flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors',
-              /* One rest tone for every icon in a turn — an interactive affordance
-                 resting DIMMER than the static chrome around it read as disabled.
-                 Hover still brightens it. */
-              isInteractive
-                ? 'text-muted-foreground group-hover:bg-background group-hover:text-foreground'
-                : 'text-muted-foreground'
-            )}
+    <SessionFileCardLayout
+      fileName={file.fileName}
+      subtitle={subtitle}
+      icon={<Icon className="size-5" aria-hidden="true" />}
+      actionIcon={actionIcon}
+      isInteractive={isInteractive}
+      isMuted={isMuted}
+      onClick={handleClick}
+      className={className}
+      secondaryAction={
+        showDownloadAction ? (
+          <button
+            type="button"
+            onClick={() => onDownload?.(file)}
+            disabled={isDownloading}
+            aria-busy={isDownloading}
+            aria-label={downloadLabel}
+            title={downloadLabel}
+            className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {actionIcon}
-          </span>
-        ) : null}
-      </button>
-      {showDownloadAction ? (
-        <button
-          type="button"
-          onClick={() => onDownload?.(file)}
-          disabled={isDownloading}
-          aria-busy={isDownloading}
-          aria-label={downloadLabel}
-          title={downloadLabel}
-          className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isDownloading ? (
-            <Spinner className="h-4 w-4" aria-hidden="true" />
-          ) : (
-            <Download className="h-4 w-4" aria-hidden="true" />
-          )}
-        </button>
-      ) : null}
-    </div>
+            {isDownloading ? (
+              <Spinner className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <Download className="h-4 w-4" aria-hidden="true" />
+            )}
+          </button>
+        ) : null
+      }
+    />
   );
 }
 

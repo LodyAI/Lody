@@ -1,7 +1,8 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import QRCode from 'qrcode';
-import { cn } from '@/lib/utils';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { formatCompactNumber, formatUsdCompact, formatUsdTight } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { ensureShareThemeScopes } from '@/components/share-theme-scope';
@@ -39,28 +40,6 @@ export type UsageShareCardFooter = 'card' | 'canvas';
  * because a backdrop is the default. Both were sized up until the framed
  * variant has real headroom rather than landing flush against its footer.
  */
-const ASPECT_SIZE: Record<UsageShareCardAspect, { width: number; height: number }> = {
-  portrait: { width: 576, height: 720 },
-  wide: { width: 704, height: 396 },
-};
-
-export const USAGE_SHARE_BACKDROP_STYLES: Record<
-  Exclude<UsageShareCardBackdrop, 'none'>,
-  CSSProperties
-> = {
-  lody: {
-    background:
-      'radial-gradient(52% 38% at 18% 12%, rgba(53,200,176,0.45), transparent 70%),' +
-      'radial-gradient(48% 36% at 86% 16%, rgba(47,119,191,0.5), transparent 70%),' +
-      'radial-gradient(70% 55% at 68% 96%, rgba(31,79,127,0.65), transparent 75%),' +
-      'radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(2,10,18,0.55) 100%),' +
-      'linear-gradient(165deg, #0a1c2b 0%, #0c2438 55%, #081626 100%)',
-  },
-  aurora: { background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 45%, #db2777 100%)' },
-  ocean: { background: 'linear-gradient(135deg, #0369a1 0%, #0891b2 50%, #34d399 100%)' },
-  sunset: { background: 'linear-gradient(135deg, #9a3412 0%, #ea580c 45%, #f59e0b 100%)' },
-};
-
 export interface UsageShareCardProps {
   /** 53-week calendar, used when the range's graphic is the year. */
   calendar: UsageCalendarModel;
@@ -89,6 +68,306 @@ export interface UsageShareCardProps {
 
 const DEFAULT_SHARE_URL = 'https://lody.ai';
 
+const DARK_THEME =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
+const styles = stylex.create({
+  backdropLody: {
+    backgroundImage:
+      'radial-gradient(52% 38% at 18% 12%, rgba(53,200,176,0.45), transparent 70%), radial-gradient(48% 36% at 86% 16%, rgba(47,119,191,0.5), transparent 70%), radial-gradient(70% 55% at 68% 96%, rgba(31,79,127,0.65), transparent 75%), radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(2,10,18,0.55) 100%), linear-gradient(165deg, #0a1c2b 0%, #0c2438 55%, #081626 100%)',
+  },
+  backdropAurora: {
+    backgroundImage: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 45%, #db2777 100%)',
+  },
+  backdropOcean: {
+    backgroundImage: 'linear-gradient(135deg, #0369a1 0%, #0891b2 50%, #34d399 100%)',
+  },
+  backdropSunset: {
+    backgroundImage: 'linear-gradient(135deg, #9a3412 0%, #ea580c 45%, #f59e0b 100%)',
+  },
+  textHero: { fontSize: '54px', lineHeight: 1.45 },
+  textHeroWide: { fontSize: '32px', lineHeight: 1.45 },
+  textStat: { fontSize: '20px', lineHeight: 1.45 },
+  textStatWide: { fontSize: '15px', lineHeight: 1.45 },
+  textBody: { fontSize: '13px', lineHeight: 1.45 },
+  textMeta: { fontSize: '11px', lineHeight: 1.45 },
+  textMicro: { fontSize: '10px', lineHeight: 1.45 },
+  padX: { paddingInline: space[6] },
+  bandPortrait: { gap: '20px' },
+  bandWide: { gap: space[3] },
+  padPortrait: { paddingBlock: space[6] },
+  padWide: { paddingBlock: space[3] },
+  stackPortrait: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  stackWide: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  splitPortrait: { display: 'flex', flexDirection: 'column', gap: space[4] },
+  splitWide: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  rowsPortrait: { display: 'flex', flexDirection: 'column', gap: space[2] },
+  rowsWide: { display: 'flex', flexDirection: 'column', gap: space[1] },
+  axisPortrait: { marginBlockEnd: space[2] },
+  axisWide: { marginBlockEnd: space[1] },
+  graphic: { height: '58px' },
+  axis: { position: 'relative', height: '12px' },
+  axisLabel: {
+    position: 'absolute',
+    insetBlockStart: 0,
+    lineHeight: 1,
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 70%, transparent)',
+  },
+  svg: { display: 'block', width: '100%', height: 'auto' },
+  hourBars: { display: 'flex', alignItems: 'flex-end', columnGap: '1px' },
+  hourBar: {
+    minWidth: 0,
+    flex: '1 1 0%',
+    borderStartStartRadius: '1px',
+    borderStartEndRadius: '1px',
+  },
+  weekRows: { display: 'flex', flexDirection: 'column', justifyContent: 'space-between' },
+  weekRow: { display: 'flex', flex: '1 1 0%', alignItems: 'center' },
+  weekLine: { display: 'flex', flex: '1 1 0%', alignItems: 'center', columnGap: '1px' },
+  weekCell: { display: 'flex', minWidth: 0, flex: '1 1 0%', justifyContent: 'center' },
+  split: { flexShrink: 0 },
+  splitBar: {
+    display: 'flex',
+    height: '6px',
+    overflow: 'hidden',
+    borderRadius: '9999px',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--foreground)) 7%, transparent)',
+  },
+  splitRows: { display: 'flex', flexWrap: 'wrap', columnGap: space[4], rowGap: space[2] },
+  splitRow: { display: 'flex', minWidth: 0, alignItems: 'center', gap: space[2] },
+  splitMark: { width: '6px', height: '6px', flexShrink: 0, borderRadius: '9999px' },
+  splitLabel: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  splitValue: {
+    marginInlineStart: 'auto',
+    flexShrink: 0,
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
+  },
+  splitPercent: {
+    flexShrink: 0,
+    textAlign: 'right',
+    fontWeight: 400,
+    color: 'hsl(var(--foreground))',
+  },
+  splitPercentFull: { marginInlineStart: space[4], width: '40px' },
+  splitPercentCompact: { marginInlineStart: 'auto' },
+  modelIcon: { width: '14px', height: '14px', flexShrink: 0 },
+  statCell: { minWidth: 0 },
+  statValue: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 400,
+    lineHeight: 1,
+    fontVariantNumeric: 'tabular-nums',
+    color: 'hsl(var(--foreground))',
+  },
+  statLabel: {
+    marginBlockStart: space[1],
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    lineHeight: 1.25,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  heroValue: {
+    whiteSpace: 'nowrap',
+    fontWeight: 400,
+    lineHeight: 1,
+    letterSpacing: '-0.025em',
+    fontVariantNumeric: 'tabular-nums',
+    color: 'hsl(var(--foreground))',
+  },
+  heroUnits: { fontWeight: 400, color: 'hsl(var(--muted-foreground))' },
+  heroWide: { display: 'flex', minWidth: 0, alignItems: 'baseline', gap: space[2] },
+  heroPortrait: { minWidth: 0 },
+  heroUnitLine: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: space[2],
+    marginBlockStart: space[2],
+  },
+  period: {
+    marginBlockStart: space[2],
+    fontVariantNumeric: 'tabular-nums',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
+  },
+  header: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
+  logoSmall: { width: '16px', height: '16px', transform: 'scale(1.64)', borderRadius: '6px' },
+  logoMedium: { width: '20px', height: '20px', transform: 'scale(1.64)', borderRadius: '6px' },
+  logoLarge: { width: '24px', height: '24px', transform: 'scale(1.64)', borderRadius: '6px' },
+  brand: { fontWeight: 400, color: 'hsl(var(--foreground))' },
+  range: {
+    marginInlineStart: 'auto',
+    borderRadius: '9999px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    paddingBlock: '4px',
+    paddingInline: '8px',
+    fontWeight: 400,
+    lineHeight: 1,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  heatmap: { flexShrink: 0 },
+  heatCaption: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 80%, transparent)',
+  },
+  footer: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    marginBlockStart: 'auto',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border))',
+    backgroundColor: 'hsl(var(--card))',
+    paddingInline: space[6],
+  },
+  footerWide: { gap: space[2], paddingBlock: space[3] },
+  footerPortrait: { gap: space[3], paddingBlock: space[4] },
+  footerFramed: {
+    backgroundColor: {
+      default: 'white',
+      [DARK_THEME]: 'color-mix(in oklab, white 4%, transparent)',
+    },
+  },
+  footerUnframed: {
+    borderColor: {
+      default: 'color-mix(in oklab, black 6%, transparent)',
+      [DARK_THEME]: 'color-mix(in oklab, white 8%, transparent)',
+    },
+  },
+  footerWorkspace: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 400,
+    color: 'hsl(var(--foreground))',
+  },
+  footerFlex: { minWidth: 0, flex: '1 1 0%' },
+  footerHost: {
+    marginBlockStart: '2px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    lineHeight: 1.25,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  footerDomain: {
+    marginInlineStart: 'auto',
+    fontWeight: 400,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  qr: {
+    flexShrink: 0,
+    borderRadius: '3px',
+    backgroundColor: {
+      default: 'white',
+      [DARK_THEME]: 'color-mix(in oklab, white 90%, transparent)',
+    },
+    padding: space[1],
+  },
+  qrWide: { marginInlineStart: space[2], width: '32px', height: '32px' },
+  qrPortrait: { width: '40px', height: '40px' },
+  card: {
+    position: 'relative',
+    display: 'flex',
+    width: '100%',
+    height: '100%',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    color: 'hsl(var(--card-foreground))',
+    backgroundColor: 'hsl(var(--card))',
+  },
+  cardFramed: {
+    borderRadius: '16px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab, black 6%, transparent)',
+      [DARK_THEME]: 'color-mix(in oklab, white 10%, transparent)',
+    },
+    boxShadow: '0 24px 64px -16px rgb(0 0 0 / 45%)',
+  },
+  cardUnframed: {
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'color-mix(in oklab, black 8%, transparent)',
+      [DARK_THEME]: 'color-mix(in oklab, white 9%, transparent)',
+    },
+  },
+  cardBand: {
+    position: 'relative',
+    display: 'flex',
+    minHeight: 0,
+    flex: '1 1 0%',
+    flexDirection: 'column',
+  },
+  cardBandWide: { justifyContent: 'space-between' },
+  heroBand: { display: 'flex', alignItems: 'baseline', gap: space[4] },
+  statGroup: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'baseline',
+    gap: space[4],
+    marginInlineStart: 'auto',
+  },
+  statInline: { display: 'flex', alignItems: 'baseline', gap: space[2] },
+  cardHeroCenter: { marginBlock: 'auto' },
+  statGrid: {
+    display: 'grid',
+    flexShrink: 0,
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: space[4],
+    borderBlockWidth: '1px',
+    borderBlockStyle: 'solid',
+    borderBlockColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    paddingBlock: space[3],
+  },
+  canvasSignOff: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: '10px',
+    marginBlockStart: space[4],
+  },
+  canvasWorkspace: { fontWeight: 400, letterSpacing: '0.025em', color: 'rgb(255 255 255 / 90%)' },
+  canvasDomain: { fontWeight: 400, color: 'rgb(255 255 255 / 60%)' },
+  canvasQr: {
+    marginInlineStart: 'auto',
+    width: '36px',
+    height: '36px',
+    borderRadius: '3px',
+    backgroundColor: 'white',
+    padding: space[1],
+    boxShadow: '0 2px 10px rgb(0 0 0 / 25%)',
+  },
+  root: { display: 'flex', flexDirection: 'column', padding: space[6] },
+  rootNoFrame: { padding: 0 },
+  rootOnCanvas: { paddingBlockEnd: '20px' },
+  rootPortrait: { width: '576px', height: '720px' },
+  rootWide: { width: '704px', height: '396px' },
+  content: { display: 'flex', minHeight: 0, flex: '1 1 0%' },
+});
+
+export const USAGE_SHARE_BACKDROP_STYLES = {
+  lody: styles.backdropLody,
+  aurora: styles.backdropAurora,
+  ocean: styles.backdropOcean,
+  sunset: styles.backdropSunset,
+};
+
 /**
  * The card's whole type scale. Every text node picks a role from here rather
  * than an arbitrary size: an exported image has no hover state or tooltip to
@@ -97,17 +376,17 @@ const DEFAULT_SHARE_URL = 'https://lody.ai';
  */
 const TEXT = {
   /** The one number the card exists to deliver. */
-  hero: 'text-[54px]',
-  heroWide: 'text-[32px]',
+  hero: styles.textHero,
+  heroWide: styles.textHeroWide,
   /** Headline cell values. */
-  stat: 'text-[20px]',
-  statWide: 'text-[15px]',
+  stat: styles.textStat,
+  statWide: styles.textStatWide,
   /** Brand, unit, workspace — anything read before the details. */
-  body: 'text-[13px]',
+  body: styles.textBody,
   /** Cell labels, legend rows, the range chip. */
-  meta: 'text-[11px]',
+  meta: styles.textMeta,
   /** Month ticks and the heatmap caption. */
-  micro: 'text-[10px]',
+  micro: styles.textMicro,
 } as const;
 
 /**
@@ -115,7 +394,7 @@ const TEXT = {
  * brand mark, the hero, the heatmap and the workspace name all share a left
  * edge. Vertical padding differs by format because only the height budget does.
  */
-const PAD_X = 'px-6';
+const PAD_X = styles.padX;
 
 /**
  * Vertical rhythm is the one thing the two formats may disagree about, because
@@ -124,27 +403,33 @@ const PAD_X = 'px-6';
  * rows rather than sprinkled per element, so "the wide card is tighter" stays a
  * single decision. Every value is on the same 4px grid.
  */
-const RHYTHM: Record<
-  UsageShareCardAspect,
-  { band: string; padY: string; stack: string; split: string; rows: string; axis: string }
-> = {
+type CardRhythm = {
+  band: typeof styles.bandPortrait | typeof styles.bandWide;
+  padY: typeof styles.padPortrait | typeof styles.padWide;
+  stack: typeof styles.stackPortrait | typeof styles.stackWide;
+  split: typeof styles.splitPortrait | typeof styles.splitWide;
+  rows: typeof styles.rowsPortrait | typeof styles.rowsWide;
+  axis: typeof styles.axisPortrait | typeof styles.axisWide;
+};
+
+const RHYTHM: Record<UsageShareCardAspect, CardRhythm> = {
   portrait: {
-    band: 'gap-5',
-    padY: 'pt-6 pb-6',
-    stack: 'space-y-2',
+    band: styles.bandPortrait,
+    padY: styles.padPortrait,
+    stack: styles.stackPortrait,
     // The 100% bar summarises the legend, so it needs a group-sized gap. At the
     // row gap it reads as the list's first item instead of its summary.
-    split: 'space-y-4',
-    rows: 'space-y-2',
-    axis: 'mb-2',
+    split: styles.splitPortrait,
+    rows: styles.rowsPortrait,
+    axis: styles.axisPortrait,
   },
   wide: {
-    band: 'gap-3',
-    padY: 'pt-3 pb-3',
-    stack: 'space-y-1',
-    split: 'space-y-2',
-    rows: 'space-y-1',
-    axis: 'mb-1',
+    band: styles.bandWide,
+    padY: styles.padWide,
+    stack: styles.stackWide,
+    split: styles.splitWide,
+    rows: styles.rowsWide,
+    axis: styles.axisWide,
   },
 };
 
@@ -154,7 +439,7 @@ const RHYTHM: Record<
  * the 53-week grid renders at (its aspect ratio against the content width), and the
  * hourly graphics fit themselves to it rather than the other way round.
  */
-const GRAPHIC_H = 'h-[58px]';
+const GRAPHIC_H = styles.graphic;
 
 /** Heatmap geometry in SVG units; the SVG scales to whatever column holds it. */
 const HEAT_CELL = 10;
@@ -206,7 +491,7 @@ function UsageShareHeatmap({
   calendar: UsageCalendarModel;
   lit: UsageShareStats['litDayStartMs'];
   locale: string;
-  axisGap: string;
+  axisGap: CardRhythm['axis'];
 }) {
   const scale = createUsageHeatScale(calendar);
   const width = HEAT_COLUMNS * (HEAT_CELL + HEAT_GAP) - HEAT_GAP;
@@ -215,18 +500,18 @@ function UsageShareHeatmap({
     <div>
       {/* Labels live in HTML, not in the SVG: the grid scales to its column and
           SVG text would scale with it, so the two formats would disagree. */}
-      <div className={cn('relative h-[12px]', axisGap)}>
+      <div {...stylex.props(styles.axis, axisGap)}>
         {monthTicks(calendar, locale).map((tick) => (
           <span
             key={tick.column}
-            className={cn('absolute top-0 leading-none text-muted-foreground/70', TEXT.micro)}
+            {...stylex.props(styles.axisLabel, TEXT.micro)}
             style={{ left: `${(tick.column / HEAT_COLUMNS) * 100}%` }}
           >
             {tick.label}
           </span>
         ))}
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="block h-auto w-full" role="presentation">
+      <svg viewBox={`0 0 ${width} ${height}`} {...stylex.props(styles.svg)} role="presentation">
         {calendar.cells.map((cell) => {
           const inWindow = !lit || (cell.dayStartMs >= lit.fromMs && cell.dayStartMs <= lit.toMs);
           return (
@@ -251,13 +536,13 @@ function UsageShareHeatmap({
 }
 
 /** Hour ticks under an hourly graphic, the axis counterpart of the month ticks. */
-function HourAxis({ gap }: { gap: string }) {
+function HourAxis({ gap }: { gap: CardRhythm['axis'] }) {
   return (
-    <div className={cn('relative h-[12px]', gap)}>
+    <div {...stylex.props(styles.axis, gap)}>
       {[0, 6, 12, 18].map((hour) => (
         <span
           key={hour}
-          className={cn('absolute top-0 leading-none text-muted-foreground/70', TEXT.micro)}
+          {...stylex.props(styles.axisLabel, TEXT.micro)}
           style={{ left: `${(hour / 24) * 100}%` }}
         >
           {String(hour).padStart(2, '0')}
@@ -272,18 +557,18 @@ function HourAxis({ gap }: { gap: string }) {
  * skyline. Height carries magnitude; the fill lightens with share of the peak, so
  * a quiet hour still reads as present rather than as a gap.
  */
-function UsageShareHours({ values, axisGap }: { values: number[]; axisGap: string }) {
+function UsageShareHours({ values, axisGap }: { values: number[]; axisGap: CardRhythm['axis'] }) {
   const max = Math.max(...values, 0);
   return (
     <div>
       <HourAxis gap={axisGap} />
-      <div className={cn('flex items-end gap-px', GRAPHIC_H)}>
+      <div {...stylex.props(styles.hourBars, GRAPHIC_H)}>
         {values.map((value, index) => {
           const share = max > 0 ? value / max : 0;
           return (
             <div
               key={index}
-              className="min-w-0 flex-1 rounded-t-[1px]"
+              {...stylex.props(styles.hourBar)}
               style={{
                 height: value > 0 ? `${Math.max(7, share * 100)}%` : '2px',
                 backgroundColor:
@@ -309,7 +594,7 @@ function UsageShareWeekHours({
   axisGap,
 }: {
   rows: Array<{ dayStartMs: number; values: number[] }>;
-  axisGap: string;
+  axisGap: CardRhythm['axis'];
 }) {
   const max = Math.max(0, ...rows.flatMap((row) => row.values));
   return (
@@ -320,17 +605,17 @@ function UsageShareWeekHours({
           each, which cannot hold any size on the card's type scale — the first
           attempt used an off-scale 8px and read as a squeezed column. Rows run
           oldest to newest, and the headline already names the span. */}
-      <div className={cn('flex flex-col justify-between', GRAPHIC_H)}>
+      <div {...stylex.props(styles.weekRows, GRAPHIC_H)}>
         {rows.map((row) => (
-          <div key={row.dayStartMs} className="flex flex-1 items-center">
-            <div className="flex flex-1 items-center gap-px">
+          <div key={row.dayStartMs} {...stylex.props(styles.weekRow)}>
+            <div {...stylex.props(styles.weekLine)}>
               {row.values.map((value, hour) => {
                 const share = max > 0 ? value / max : 0;
                 const size = value > 0 ? 2.5 + share * 4.5 : 2;
                 return (
-                  <div key={hour} className="flex min-w-0 flex-1 justify-center">
+                  <div key={hour} {...stylex.props(styles.weekCell)}>
                     <div
-                      className="rounded-full"
+                      {...stylex.props(styles.splitMark)}
                       style={{
                         width: `${size}px`,
                         height: `${size}px`,
@@ -367,15 +652,15 @@ function UsageShareSplit({
   locale: string;
   formatValue: (value: number) => string;
   /** Bar-to-legend gap and row-to-row gap, from the format's rhythm. */
-  split: string;
-  rows: string;
+  split: CardRhythm['split'];
+  rows: CardRhythm['rows'];
 }) {
   if (slices.length === 0) return null;
   const percent = new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 });
   const rows = compact ? slices.slice(0, 2) : slices;
   return (
-    <div className={cn('shrink-0', split)}>
-      <div className="flex h-1.5 overflow-hidden rounded-full bg-foreground/[0.07]">
+    <div {...stylex.props(styles.split, split)}>
+      <div {...stylex.props(styles.splitBar)}>
         {slices.map((slice, index) => (
           <div
             key={slice.id}
@@ -386,11 +671,11 @@ function UsageShareSplit({
           />
         ))}
       </div>
-      <div className={compact ? 'flex flex-wrap gap-x-4 gap-y-2' : rowGap}>
+      <div {...stylex.props(compact ? styles.splitRows : rowGap)}>
         {rows.map((slice, index) => (
-          <div key={slice.id} className="flex min-w-0 items-center gap-2">
+          <div key={slice.id} {...stylex.props(styles.splitRow)}>
             <span
-              className="size-1.5 shrink-0 rounded-full"
+              {...stylex.props(styles.splitMark)}
               style={{ backgroundColor: `hsl(var(--chart-${(index % 5) + 1}))` }}
             />
             {subject === 'team' ? (
@@ -399,25 +684,24 @@ function UsageShareSplit({
                 <Avatar.Fallback>{slice.label.slice(0, 2).toUpperCase()}</Avatar.Fallback>
               </Avatar.Root>
             ) : (
-              <ModelBrandIcon modelId={slice.id} className="size-3.5 shrink-0" />
+              <ModelBrandIcon
+                modelId={slice.id}
+                className={stylex.props(styles.modelIcon).className}
+              />
             )}
-            <span className={cn('min-w-0 truncate text-muted-foreground', TEXT.meta)}>
-              {slice.label}
-            </span>
+            <span {...stylex.props(styles.splitLabel, TEXT.meta)}>{slice.label}</span>
             {/* Percent alone hides scale: 52% of a quiet week and of a heavy
                 month are not the same fact, so the row carries both. */}
             {compact ? null : (
-              <span
-                className={cn('ml-auto shrink-0 tabular-nums text-muted-foreground/80', TEXT.meta)}
-              >
+              <span {...stylex.props(styles.splitValue, TEXT.meta)}>
                 {formatValue(slice.value)}
               </span>
             )}
             <span
-              className={cn(
-                'shrink-0 text-right font-normal tabular-nums text-foreground',
+              {...stylex.props(
+                styles.splitPercent,
                 TEXT.meta,
-                compact ? 'ml-auto' : 'ml-4 w-10'
+                compact ? styles.splitPercentCompact : styles.splitPercentFull
               )}
             >
               {percent.format(slice.share)}
@@ -431,15 +715,9 @@ function UsageShareSplit({
 
 function StatCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <div
-        className={cn('truncate font-normal leading-none tabular-nums text-foreground', TEXT.stat)}
-      >
-        {value}
-      </div>
-      <div className={cn('mt-1 truncate leading-tight text-muted-foreground', TEXT.meta)}>
-        {label}
-      </div>
+    <div {...stylex.props(styles.statCell)}>
+      <div {...stylex.props(styles.statValue, TEXT.stat)}>{value}</div>
+      <div {...stylex.props(styles.statLabel, TEXT.meta)}>{label}</div>
     </div>
   );
 }
@@ -509,7 +787,6 @@ export function UsageShareCard({
   }, [shareUrl, showQr]);
 
   const wide = aspect === 'wide';
-  const size = ASPECT_SIZE[aspect];
   const rhythm = RHYTHM[aspect];
   const framed = backdrop !== 'none';
   // Without a backdrop there is nothing to print the sign-off on.
@@ -558,12 +835,7 @@ export function UsageShareCard({
   const trioCells = wide ? allCells.slice(0, 3) : allCells;
 
   const heroValue = (
-    <span
-      className={cn(
-        'whitespace-nowrap font-normal leading-none tracking-tight tabular-nums text-foreground',
-        wide ? TEXT.heroWide : TEXT.hero
-      )}
-    >
+    <span {...stylex.props(styles.heroValue, wide ? TEXT.heroWide : TEXT.hero)}>
       {formatHeadline(stats.total)}
     </span>
   );
@@ -581,7 +853,7 @@ export function UsageShareCard({
   // also print a token count somewhere, or the reader has to guess which is the
   // subject.
   const heroUnits = (
-    <span className={cn('font-normal text-muted-foreground', TEXT.body)}>
+    <span {...stylex.props(styles.heroUnits, TEXT.body)}>
       {metric === 'tokens' ? t('workspace.usage.tokens') : t('workspace.usage.cost')}
     </span>
   );
@@ -589,39 +861,30 @@ export function UsageShareCard({
   // Portrait stacks the unit under the number; wide sets it on the same
   // baseline, because 16:9 pays for every row of height.
   const hero = wide ? (
-    <div className="flex min-w-0 items-baseline gap-2">
+    <div {...stylex.props(styles.heroWide)}>
       {heroValue}
       {heroUnits}
     </div>
   ) : (
-    <div className="min-w-0">
+    <div {...stylex.props(styles.heroPortrait)}>
       {heroValue}
-      <div className="mt-2 flex items-baseline gap-2">{heroUnits}</div>
-      <div className={cn('mt-2 tabular-nums text-muted-foreground/80', TEXT.meta)}>
-        {periodDates}
-      </div>
+      <div {...stylex.props(styles.heroUnitLine)}>{heroUnits}</div>
+      <div {...stylex.props(styles.period, TEXT.meta)}>{periodDates}</div>
     </div>
   );
 
   const header = (
-    <div className="flex shrink-0 items-center gap-2">
-      <img src={lodyLogo} alt="" className="size-4 scale-[1.64] rounded-md" />
-      <span className={cn('font-normal text-foreground', TEXT.body)}>Lody</span>
-      <span
-        className={cn(
-          'ml-auto rounded-full border border-border/70 px-2 py-1 font-normal leading-none text-muted-foreground',
-          TEXT.meta
-        )}
-      >
-        {rangeLabel}
-      </span>
+    <div {...stylex.props(styles.header)}>
+      <img src={lodyLogo} alt="" {...stylex.props(styles.logoSmall)} />
+      <span {...stylex.props(styles.brand, TEXT.body)}>Lody</span>
+      <span {...stylex.props(styles.range, TEXT.meta)}>{rangeLabel}</span>
     </div>
   );
 
   // One slot, three visual languages — the same split the Usage screen makes, so a
   // 24h card is an hour skyline rather than a year with one cell lit.
   const heatmap = (
-    <div className={cn('shrink-0', rhythm.stack)}>
+    <div {...stylex.props(styles.heatmap, rhythm.stack)}>
       {graphic.kind === 'hours' ? (
         <UsageShareHours values={graphic.values} axisGap={rhythm.axis} />
       ) : graphic.kind === 'weekHours' ? (
@@ -634,7 +897,7 @@ export function UsageShareCard({
           axisGap={rhythm.axis}
         />
       )}
-      <div className={cn('flex items-center justify-between text-muted-foreground/80', TEXT.micro)}>
+      <div {...stylex.props(styles.heatCaption, TEXT.micro)}>
         <span>
           {graphic.kind === 'hours'
             ? t('workspace.usage.shareImage.hoursCaption')
@@ -658,89 +921,57 @@ export function UsageShareCard({
    */
   const footer = (
     <div
-      className={cn(
-        'relative mt-auto flex items-center border-t',
-        wide ? 'gap-2 py-3' : 'gap-3 py-4',
-        PAD_X,
-        framed
-          ? 'border-border bg-white dark:bg-white/[0.04]'
-          : 'border-black/[0.06] dark:border-white/[0.08]'
+      {...stylex.props(
+        styles.footer,
+        wide ? styles.footerWide : styles.footerPortrait,
+        framed ? styles.footerFramed : styles.footerUnframed,
+        PAD_X
       )}
     >
-      <img
-        src={lodyLogo}
-        alt=""
-        className={cn('scale-[1.64] rounded-md', wide ? 'size-5' : 'size-6')}
-      />
+      <img src={lodyLogo} alt="" {...stylex.props(wide ? styles.logoMedium : styles.logoLarge)} />
       {wide ? (
         <>
-          <div className={cn('min-w-0 truncate font-normal text-foreground', TEXT.body)}>
+          <div {...stylex.props(styles.footerWorkspace, TEXT.body)}>
             {workspaceName?.trim() || 'Lody'}
           </div>
-          <span className={cn('ml-auto font-normal text-muted-foreground', TEXT.meta)}>
-            lody.ai
-          </span>
+          <span {...stylex.props(styles.footerDomain, TEXT.meta)}>lody.ai</span>
         </>
       ) : (
-        <div className="min-w-0 flex-1">
-          <div className={cn('truncate font-normal leading-tight text-foreground', TEXT.body)}>
+        <div {...stylex.props(styles.footerFlex)}>
+          <div {...stylex.props(styles.footerWorkspace, TEXT.body)}>
             {workspaceName?.trim() || 'Lody'}
           </div>
-          <div className={cn('mt-0.5 truncate leading-tight text-muted-foreground', TEXT.meta)}>
-            lody.ai
-          </div>
+          <div {...stylex.props(styles.footerHost, TEXT.meta)}>lody.ai</div>
         </div>
       )}
       {qrDataUrl ? (
         <img
           src={qrDataUrl}
           alt={t('chatShareCard.qrAlt')}
-          className={cn(
-            'shrink-0 rounded-[3px] bg-white p-1 dark:bg-white/90',
-            wide ? 'ml-2 size-8' : 'size-10'
-          )}
+          {...stylex.props(styles.qr, wide ? styles.qrWide : styles.qrPortrait)}
         />
       ) : null}
     </div>
   );
 
   const card = (
-    <div
-      className={cn(
-        'relative flex h-full w-full flex-col overflow-hidden text-card-foreground',
-        framed
-          ? 'rounded-2xl border border-black/[0.06] bg-card shadow-[0_24px_64px_-16px_rgba(0,0,0,0.45)] dark:border-white/10'
-          : 'border border-black/[0.08] bg-card dark:border-white/[0.09]'
-      )}
-    >
+    <div {...stylex.props(styles.card, framed ? styles.cardFramed : styles.cardUnframed)}>
       {wide ? (
         // Two columns: the number and its trio read as one headline on the
         // left, the year and the split as one graphic on the right. Stacking
         // all five blocks vertically does not fit 16:9 without shrinking the
         // heatmap past the point where a single day is still a square.
         <div
-          className={cn(
-            'relative flex min-h-0 flex-1 flex-col justify-between',
-            rhythm.band,
-            rhythm.padY,
-            PAD_X
-          )}
+          {...stylex.props(styles.cardBand, styles.cardBandWide, rhythm.band, rhythm.padY, PAD_X)}
         >
           {header}
-          <div className="flex items-baseline gap-4">
+          <div {...stylex.props(styles.heroBand)}>
             {hero}
-            <div className="ml-auto flex shrink-0 items-baseline gap-4">
+            <div {...stylex.props(styles.statGroup)}>
               {trioCells.map((cell) => (
-                <div key={cell.label} className="flex items-baseline gap-2">
-                  <span
-                    className={cn(
-                      'font-normal leading-none tabular-nums text-foreground',
-                      TEXT.statWide
-                    )}
-                  >
-                    {cell.value}
-                  </span>
-                  <span className={cn('text-muted-foreground', TEXT.meta)}>{cell.label}</span>
+                <div key={cell.label} {...stylex.props(styles.statInline)}>
+                  <span {...stylex.props(styles.statValue, TEXT.statWide)}>{cell.value}</span>
+                  <span {...stylex.props(styles.splitLabel, TEXT.meta)}>{cell.label}</span>
                 </div>
               ))}
             </div>
@@ -757,14 +988,12 @@ export function UsageShareCard({
           />
         </div>
       ) : (
-        <div
-          className={cn('relative flex min-h-0 flex-1 flex-col', rhythm.band, rhythm.padY, PAD_X)}
-        >
+        <div {...stylex.props(styles.cardBand, rhythm.band, rhythm.padY, PAD_X)}>
           {header}
           {/* The headline owns this band alone. The space beside and around it is
               deliberate: see the AGENTS note before filling it with anything. */}
-          <div className="my-auto">{hero}</div>
-          <div className="grid shrink-0 grid-cols-4 gap-4 border-y border-border/60 py-3">
+          <div {...stylex.props(styles.cardHeroCenter)}>{hero}</div>
+          <div {...stylex.props(styles.statGrid)}>
             {trioCells.map((cell) => (
               <StatCell key={cell.label} {...cell} />
             ))}
@@ -791,40 +1020,32 @@ export function UsageShareCard({
    * the card's light/dark tokens do not describe what is behind it.
    */
   const canvasSignOff = (
-    <div className="mt-4 flex shrink-0 items-center gap-2.5">
-      <img src={lodyLogo} alt="" className="size-5 scale-[1.64] rounded-md" />
-      <span className={cn('font-normal tracking-wide text-white/90', TEXT.body)}>
+    <div {...stylex.props(styles.canvasSignOff)}>
+      <img src={lodyLogo} alt="" {...stylex.props(styles.logoMedium)} />
+      <span {...stylex.props(styles.canvasWorkspace, TEXT.body)}>
         {workspaceName?.trim() || 'Lody'}
       </span>
-      <span className={cn('font-normal text-white/60', TEXT.meta)}>lody.ai</span>
+      <span {...stylex.props(styles.canvasDomain, TEXT.meta)}>lody.ai</span>
       {qrDataUrl ? (
-        <img
-          src={qrDataUrl}
-          alt={t('chatShareCard.qrAlt')}
-          className="ml-auto size-9 rounded-[3px] bg-white p-1 shadow-[0_2px_10px_rgba(0,0,0,0.25)]"
-        />
+        <img src={qrDataUrl} alt={t('chatShareCard.qrAlt')} {...stylex.props(styles.canvasQr)} />
       ) : null}
     </div>
   );
 
+  const rootStyles = stylex.props(
+    styles.root,
+    !framed && styles.rootNoFrame,
+    onCanvas && styles.rootOnCanvas,
+    wide ? styles.rootWide : styles.rootPortrait,
+    backdrop !== 'none' && USAGE_SHARE_BACKDROP_STYLES[backdrop]
+  );
+
   return (
     <div
-      className={cn(
-        'flex flex-col',
-        themeScopeClass,
-        framed ? 'p-6' : '',
-        // The sign-off replaces the in-card band, so the card keeps most of the
-        // height it gives up to the canvas row and nets more room for content.
-        onCanvas ? 'pb-5' : '',
-        className
-      )}
-      style={{
-        width: size.width,
-        height: size.height,
-        ...(framed ? USAGE_SHARE_BACKDROP_STYLES[backdrop] : {}),
-      }}
+      {...rootStyles}
+      className={[rootStyles.className, themeScopeClass, className].filter(Boolean).join(' ')}
     >
-      <div className="flex min-h-0 flex-1">{card}</div>
+      <div {...stylex.props(styles.content)}>{card}</div>
       {onCanvas ? canvasSignOff : null}
     </div>
   );

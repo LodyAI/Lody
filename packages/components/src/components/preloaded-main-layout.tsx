@@ -1,4 +1,5 @@
-import { lazy, useRef, type ComponentProps } from 'react';
+import { lazy, Suspense, useRef, type ComponentProps } from 'react';
+import { BootShell } from './boot-shell';
 import type { MainLayout } from './main-layout';
 
 let prepared: typeof MainLayout | undefined;
@@ -30,5 +31,10 @@ export function PreloadedMainLayout(props: ComponentProps<typeof MainLayout>) {
   // React.lazy first encounters even a previously fulfilled native Promise as
   // pending. A prepared module can render directly, avoiding that suspension.
   const Layout = useRef(prepared ?? LazyMainLayout).current;
-  return <Layout {...props} />;
+  // Every entry path needs the same frame while the layout chunk is pending.
+  return (
+    <Suspense fallback={<BootShell />}>
+      <Layout {...props} />
+    </Suspense>
+  );
 }

@@ -51,11 +51,12 @@ function formatWeekdayList(weekdays: readonly ScheduleWeekday[], locale?: string
   return conjunction.format(list);
 }
 
-/** Plain-language sentence for a rule, without its time zone. */
+/** Plain-language rule; a Once summary names the zone used to display its instant. */
 export function describeRecurrence(
   recurrence: ScheduleRecurrence,
   t: TFunction,
-  locale?: string
+  locale?: string,
+  timeZone = scheduleRecurrenceTimeZone(recurrence)
 ): string {
   switch (recurrence.kind) {
     case 'minutes':
@@ -98,7 +99,7 @@ export function describeRecurrence(
         : t('schedules.requireMonthDay', 'Choose at least one day of the month.');
     case 'once':
       return t('schedules.summary.once', 'Once, on {{time}}', {
-        time: formatInstant(Date.parse(recurrence.at), getDeviceTimeZone(), locale),
+        time: `${formatInstant(Date.parse(recurrence.at), timeZone, locale)} (${timeZone})`,
       });
     case 'unsupported':
       return t('schedules.summary.unsupported', 'Advanced rule ({{rule}})', {
@@ -120,9 +121,14 @@ export function describeRecurrence(
 }
 
 /** A trigger in words; a manual one has no rule to describe. */
-export function describeTrigger(trigger: ScheduleTrigger, t: TFunction, locale?: string): string {
+export function describeTrigger(
+  trigger: ScheduleTrigger,
+  t: TFunction,
+  locale?: string,
+  timeZone = triggerTimeZone(trigger)
+): string {
   if (trigger.kind === 'manual') return t('schedules.trigger.manual', 'Manual');
-  return describeRecurrence(triggerToRecurrence(trigger), t, locale);
+  return describeRecurrence(triggerToRecurrence(trigger), t, locale, timeZone);
 }
 
 /** Where runs go, in words. */
@@ -141,11 +147,12 @@ export function describeDestination(destination: ScheduleDestination, t: TFuncti
   }
 }
 
-/** The zone a trigger's wall clock is authored in. */
-export function triggerTimeZone(trigger: ScheduleTrigger): string {
-  return trigger.kind === 'manual'
-    ? getDeviceTimeZone()
-    : scheduleRecurrenceTimeZone(triggerToRecurrence(trigger));
+/** The display clock; calendar triggers retain their authored zone. */
+export function triggerTimeZone(
+  trigger: ScheduleTrigger,
+  machineTimeZone = getDeviceTimeZone()
+): string {
+  return trigger.kind === 'cron' ? trigger.timeZone : machineTimeZone;
 }
 
 export function formatInstant(at: number, timeZone: string, locale?: string): string {

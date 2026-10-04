@@ -48,16 +48,77 @@ for (const openWith of ['hover', 'click', 'keyboard'] as const) {
         await model.hover();
       }
       await expect(search).toBeFocused();
+      const modelMenu = page.getByRole('menu').last();
+      await expect.poll(() => modelMenu.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+      await expect
+        .poll(async () => {
+          const submenu = await modelMenu.boundingBox();
+          const viewport = page.viewportSize();
+          return (
+            !!submenu &&
+            !!viewport &&
+            submenu.y >= 0 &&
+            submenu.y + submenu.height <= viewport.height &&
+            submenu.height <= 329
+          );
+        })
+        .toBe(true);
+      const initialMenu = await modelMenu.boundingBox();
+      expect(initialMenu).not.toBeNull();
+      const expectSearchAnchored = async () => {
+        await expect(search).toBeFocused();
+        await expect
+          .poll(async () => {
+            const menu = await modelMenu.boundingBox();
+            const field = await search.boundingBox();
+            const row = await model.boundingBox();
+            const viewport = page.viewportSize();
+            if (!menu || !field || !row || !viewport) return Infinity;
+            const top = Math.max(8, Math.min(row.y - 32, viewport.height - 8 - menu.height));
+            return Math.max(Math.abs(menu.y - top), Math.abs(field.y - (menu.y + 4)));
+          })
+          .toBeLessThan(1);
+      };
       if (openWith !== 'keyboard') {
         // A real pointer keeps moving over the trigger after the submenu opens.
         await model.hover({ position: { x: 12, y: 12 } });
         if (openWith === 'click') await model.click({ position: { x: 12, y: 12 } });
         await expect(search).toBeFocused();
       }
-      await page.keyboard.type('54m');
+      for (const character of '54m') {
+        await page.keyboard.type(character);
+        await expectSearchAnchored();
+      }
       await expect(search).toHaveValue('54m');
       const match = page.getByRole('menuitemradio');
       await expect(match).toHaveText(['5.4-mini']);
+      const result = await match.boundingBox();
+      const field = await search.boundingBox();
+      expect(result).not.toBeNull();
+      expect(field).not.toBeNull();
+      expect(field!.y + field!.height).toBeLessThanOrEqual(result!.y);
+      const modelRow = await model.boundingBox();
+      expect(modelRow).not.toBeNull();
+      expect(Math.abs(result!.y - (modelRow!.y + 4))).toBeLessThan(1);
+      await expect
+        .poll(async () => (await modelMenu.boundingBox())?.height ?? Infinity)
+        .toBeLessThan(100);
+      await search.fill('zzzz-no-model');
+      await expect(match).toHaveCount(0);
+      await expect(modelMenu.getByText('No models match', { exact: true })).toBeVisible();
+      await expectSearchAnchored();
+      await expect
+        .poll(async () => (await modelMenu.boundingBox())?.height ?? Infinity)
+        .toBeLessThan(100);
+      await search.fill('');
+      await expect(match).toHaveCount(10);
+      await expectSearchAnchored();
+      await expect
+        .poll(async () => Math.abs((await modelMenu.boundingBox())!.height - initialMenu!.height))
+        .toBeLessThan(1);
+      await search.fill('54m');
+      await expect(match).toHaveText(['5.4-mini']);
+      await expectSearchAnchored();
       await page.keyboard.press('ArrowDown');
       await expect(match).toBeFocused();
       await page.keyboard.press('Escape');
@@ -67,6 +128,36 @@ for (const openWith of ['hover', 'click', 'keyboard'] as const) {
     }
   });
 }
+
+test('run-config submenus align with their own trigger rows when space permits', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.goto('/iframe.html?id=sessions-composerrunconfigmenu--closed&viewMode=story');
+  await page.getByRole('button', { name: 'Run configuration', exact: true }).click();
+  for (const name of ['Role', 'Agent', 'Model', 'Reasoning']) {
+    const row = page
+      .getByRole('menu')
+      .first()
+      .getByRole('menuitem', { name: new RegExp(`^${name}`) });
+    const target = await row.boundingBox();
+    expect(target).not.toBeNull();
+    // Move through the submenu's pointer corridor rather than waiting for it to clear.
+    await page.mouse.move(target!.x + target!.width / 2, target!.y + target!.height / 2, {
+      steps: 8,
+    });
+    await expect(row).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('menu')).toHaveCount(2);
+    await expect
+      .poll(async () => {
+        const trigger = await row.boundingBox();
+        const submenu = await page.getByRole('menu').last().boundingBox();
+        if (!trigger || !submenu || submenu.x < trigger.x + trigger.width) return Infinity;
+        return Math.abs(trigger.y - submenu.y);
+      })
+      .toBeLessThan(1);
+  }
+});
 
 test.describe('model search on touch', () => {
   test.use({ hasTouch: true });
@@ -378,9 +469,12 @@ test.describe('attachment upload submission', () => {
 
 test.describe('composer selector leading column', () => {
   /* A selector's popup is spatially a child of its trigger: its painted edge
-     stays on the trigger's edge, and the rows' leading icon column continues
-     the trigger's leading glyph on the same X, rather than establishing a
-     second grid inside the popup's own inset. */
+     stays on the trigger's edge, while its rows keep the shared popup inset —
+     their leading icons sit on the menu's own column (inset + item pad), not
+     on the trigger's mark. The trigger seats its glyph on its own geometry:
+     centred on the icon-only square, one item pad in on a labeled trigger.
+     An earlier lead margin that chased the row column left the icon-only
+     glyph visibly off-centre once the rows kept the inset. */
   const cases = [
     // The machine selector is deliberately exempt: it keeps the popup's own
     // inset grid by owner decision, so only the run-config family is pinned.
@@ -389,17 +483,19 @@ test.describe('composer selector leading column', () => {
       story: 'sessions-desktoprunconfigmenu--locked-agent',
       trigger: 'Run configuration',
       leadingRows: ['Plan', 'Fast'],
+      iconOnly: false,
     },
     {
       name: 'permission',
       story: 'sessions-desktoprunconfigmenu--locked-agent',
       trigger: /^Permission:/,
       leadingRows: ['Read-only', 'Agent', 'Full access'],
+      iconOnly: true,
     },
   ];
 
-  for (const { name, story, trigger, leadingRows } of cases) {
-    test(`${name} menu's icon column continues the trigger's`, async ({ page }) => {
+  for (const { name, story, trigger, leadingRows, iconOnly } of cases) {
+    test(`${name} menu keeps the popup inset column`, async ({ page }) => {
       await page.goto(`/iframe.html?id=${story}&viewMode=story`);
       const triggerButton = page.getByRole('button', {
         name: trigger,
@@ -415,13 +511,15 @@ test.describe('composer selector leading column', () => {
         );
       });
       // The surface must stay parented: its painted edge sits ON the
-      // trigger's edge — sliding the popup to reach the column is a
-      // regression, the rows reach back instead.
-      const [triggerLeft, popupLeft] = await Promise.all([
-        triggerButton.evaluate((el) => el.getBoundingClientRect().left),
+      // trigger's edge — sliding the popup to reach a column is a regression.
+      const [triggerBox, popupLeft] = await Promise.all([
+        triggerButton.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return { left: r.left, center: r.left + r.width / 2 };
+        }),
         menu.evaluate((el) => el.getBoundingClientRect().left),
       ]);
-      expect(Math.abs(popupLeft - triggerLeft)).toBeLessThanOrEqual(0.75);
+      expect(Math.abs(popupLeft - triggerBox.left)).toBeLessThanOrEqual(0.75);
       const triggerCenter = await triggerButton
         .locator('svg')
         .first()
@@ -429,6 +527,10 @@ test.describe('composer selector leading column', () => {
           const r = el.getBoundingClientRect();
           return r.left + r.width / 2;
         });
+      // The icon-only square centres its glyph; a labeled trigger's leading
+      // glyph sits one item pad (8px) in, the centre of its 16px box.
+      const expectedTriggerCenter = iconOnly ? triggerBox.center : triggerBox.left + 16;
+      expect(Math.abs(triggerCenter - expectedTriggerCenter)).toBeLessThanOrEqual(0.75);
       const leadingCenters = await page.evaluate(() => {
         const items = [
           ...document.querySelectorAll<HTMLElement>(
@@ -455,11 +557,12 @@ test.describe('composer selector leading column', () => {
       for (const label of leadingRows) {
         const row = leadingCenters.find((r) => r.text.startsWith(label));
         expect(row, `leading icon of row "${label}"`).toBeTruthy();
-        expect(Math.abs(row!.center - triggerCenter)).toBeLessThanOrEqual(0.75);
       }
-      // And the column is a column: every leading icon sits on one X.
+      // The rows keep the shared inset: every leading icon sits on the
+      // menu's own column — popup edge + 4px inset + 8px item pad + half
+      // the 16px icon box.
       for (const row of leadingCenters) {
-        expect(Math.abs(row.center - triggerCenter)).toBeLessThanOrEqual(0.75);
+        expect(Math.abs(row.center - (popupLeft + 20))).toBeLessThanOrEqual(0.75);
       }
     });
   }

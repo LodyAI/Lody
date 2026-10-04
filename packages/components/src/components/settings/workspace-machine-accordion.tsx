@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MachineViewMeta } from '@lody/shared';
@@ -11,7 +12,6 @@ import { UserAvatar } from '@/components/user-avatar';
 import { withClassName } from '@/lib/stylex';
 import { settingsRecordsCard } from './compact-layout';
 import type { MachineTabOwner } from './machine-tab-list';
-import { settingsType as type } from './type.stylex';
 
 export type WorkspaceMachineAccordionMeta = {
   machine: MachineViewMeta;
@@ -120,7 +120,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontWeight: 400,
     color: colors.label,
   },

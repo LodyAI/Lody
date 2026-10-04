@@ -56,6 +56,11 @@ That tolerance must not authorize creating new malformed items locally.
 - New history accepts existing legacy built-in CLI selector normalization without rewriting
   stored history. Steer config edits parse only changed fields.
 - Queue promotion removes its queued row only after history acceptance; failed writes retain it.
+- Each buffered ACP notification keeps a stable operation ID across automatic retries. If a backend
+  commits only a batch prefix before a later write fails, retrying the buffered entries reuses those
+  IDs and the backend treats an already-accepted ID as idempotent. Filtering and batch splitting
+  preserve the ID-to-notification pairing. Separately enqueued provider notifications remain distinct
+  even when their payloads match.
 - Dispatch and activation checks resolve duplicate turn IDs to the last stored row,
   matching targeted history reads and writes. Earlier copies cannot revive a terminal
   last copy. Full history export preserves every stored row; this is not deduplication.

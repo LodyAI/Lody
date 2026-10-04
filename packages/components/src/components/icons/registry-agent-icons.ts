@@ -70,7 +70,6 @@ export const REGISTRY_AGENT_ICON_SVGS: Partial<Record<string, string>> = {
   kilo: kiloSvg,
   kimchi: kimchiSvg,
   kimi: kimiSvg,
-  'kimi-code': kimiSvg,
   'minimax-code': minimaxCodeSvg,
   'minion-code': minionCodeSvg,
   'mistral-vibe': mistralVibeSvg,

@@ -1,13 +1,13 @@
 # Lody MCP server guidelines
 
-Parent instructions apply.
+Parent instructions apply. Background: [README.md](README.md).
 
-- Local Session/catalog tools route through `session/call-tool` to the daemon's
-  existing repo. `session-tool-router.ts` reuses SDK-parsed MCP arguments and
-  parses daemon inputs; `session-command-environment.ts` scopes identity and
-  host operations with AsyncLocalStorage. Require an active local user Turn and
-  exact workspace/machine scope; never open a second local writer replica.
-  Cloud keeps its authenticated command runtime and remote recovery confirmation.
+- Route local Session/catalog tools via `session/call-tool` to the daemon repo, never a
+  second writer. Reuse SDK-parsed arguments and validate daemon inputs in
+  `session-tool-router.ts`; scope identity/host operations with AsyncLocalStorage in
+  `session-command-environment.ts`. Require an active local user Turn and exact
+  workspace/machine scope. Cloud retains authenticated commands and remote recovery
+  confirmation.
 
 - MCP sharing requires the active Turn user to equal the CLI authenticated account.
   Fail closed on shared-machine account mismatch; never substitute the machine owner.
@@ -21,43 +21,37 @@ Parent instructions apply.
 - Dedicated credential fields accept `${VAR}` references or daemon environment passthrough,
   not literal secrets. Tool responses must never echo connection values.
 - Configurations affect only later turns or sessions; the running Agent does not hot-load them.
-- The MCP HTTP host answers a strict HTTP client (Grok's Rust `rmcp`), which reports a
-  never-completing response as a transport failure, not an MCP error. Every request must
-  reach a terminated response: `GET /mcp` is answered with 405 rather than handed to the
-  SDK, which in stateless JSON mode opens an SSE stream it can never write to or close.
-- Agent child processes reach the host over loopback, so a proxy must never intercept it.
-  `@lody/shared/proxy-env` `withLoopbackNoProxy` is applied last when assembling agent env
-  (`session.ts` `buildShellEnv`, `acp-runner.ts`) and writes BOTH `NO_PROXY` and
-  `no_proxy`: clients disagree about a present-but-empty value, and Rust `reqwest` reads
-  the uppercase spelling first and treats an empty one as "bypass nothing".
+- Terminate every HTTP response; answer `GET /mcp` with 405 rather than SDK SSE.
+- Apply `withLoopbackNoProxy` last in agent env assembly (`session.ts` `buildShellEnv`,
+  `acp-runner.ts`), setting both `NO_PROXY` and `no_proxy` to bypass loopback.
+  [HTTP/proxy rationale](README.md#http-and-loopback).
 - Bound every Agent-authored persisted field, collection, complete configuration, and catalog.
   Serialize per-workspace Agent configuration writes before checking local name/count bounds;
   the shared CRDT is not a global CAS. Keep catalog writes locally durable while surfacing sync
   failures as unsynced.
-- `session_create` and `session_create_many` resolve an explicit Agent Role id directly from
-  the workspace catalog; no driving-Turn mention authorization is required. Resolve its target,
-  Prompt prefix, revision, and concrete run config before Operation acceptance. Recovery uses
-  the frozen canonical Prompt and target dispatch config and never rereads the mutable catalog.
-  A Role may target any reachable Machine, whatever the requester's context; a Local Project
-  requester defaults to a child only for a same-Machine Role. `readDelegatedMachineAccess`
-  requires both the executing Machine owner and the driving human to be able to use the target
-  (owned, or shared plus shared project); never decide it from synced `MachineMeta.ownerUserId`
-  ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-28-mcp-cross-machine-agent-role.md)).
-- Session orchestration derives its human identity from the active execution runtime populated
-  by the dispatch payload, not from the daemon credential, Session owner, or observed history.
-  An absent active runtime fails closed; never reconstruct invocation identity from history.
-  Freeze the source Turn id and invoking user with every accepted Operation. Store the user
-  once as `requesterUserId` and the causal Turn as `sourceTurnId`. The
-  Operation's requester Session id already identifies the source Session, and a single-value
-  actor tag adds no information. Recovery uses the Operation's owner Machine plus current
-  authorization; it does not freeze the daemon account that originally accepted the Operation.
-  Every MCP Session path rejects a runtime invocation without userId.
+- Create tools resolve explicit Role ids from the catalog without mention authorization.
+  Before accepting an Operation, freeze the Role target, Prompt prefix, revision and run
+  config. Recovery uses the frozen canonical Prompt and dispatch config, never rereading
+  the Role. Roles may target any reachable Machine; Local
+  Projects default to child Sessions only for same-Machine Roles. `readDelegatedMachineAccess`
+  requires access for both executing Machine owner and driving human (owned, or shared with
+  shared project), never trusting synced `MachineMeta.ownerUserId`.
+- Derive orchestration identity only from the active execution runtime's dispatch payload;
+  reject absent runtime/userId, never infer from daemon credential, Session owner or history.
+  Freeze `requesterUserId` and `sourceTurnId` at Operation acceptance; requester Session id
+  already identifies the Session, so add no duplicate actor tag. Recovery uses the Operation
+  owner Machine and current authorization, not a frozen daemon account.
 - Direct Role creation stays on the ordinary `lody_session_create` and
   `lody_session_create_many` tools. When `agentRoleId` is present, tolerate manual Machine, Agent,
   and run-config fields but remove them before resolution: the current Role row is authoritative
   and those fields must not influence validation, canonical identity, recovery, or dispatch.
 
 ## Session tool contracts
+
+- `lody_ios_simulator_preview` is the native-app tool; web previews remain
+  `lody_report_preview_candidate`. Bind local agent-control RPC to MCP session context;
+  the daemon resolves the active user. Return operation handles, never viewer URLs or
+  raw preview/transport errors. Reuse simulator lifecycle/schema, never a second owner.
 
 - Resource discovery uses `lib/resource-discovery.ts` for CLI and MCP. Resolve the
   active Turn user for MCP, never the daemon owner. Role list/get use
@@ -69,27 +63,25 @@ Parent instructions apply.
   contain no canonical prompt or assistant output. See
   [discovery Spec](../../../../specs/resource-discovery.md).
 
-- MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.
-  Create/chat Commands require a caller-chosen Operation id, and Create persists the Operation
-  before its fallible availability step: a transient post-accept failure returns the active fixed
-  target for daemon replay, and `session_create({ operationId, resume: true })` recovers it without
-  the prompt. Completion is delivered automatically — no public wait tool — and legacy `wait=true`
-  is a temporary adapter new callers must not use.
-- Chat follow-ups inherit omitted mode/model/options from the target's last model turn
-  (else its last matching turn). Explicit fields and category options
-  win; a model change drops old options. Validate effort/Fast against the final model:
-  probe mismatch cannot reject them, and missing per-model data defers to runtime. Drop
-  incompatible inherited selectors; fill builtin mode only when still empty.
-  ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-17-chat-follow-up-inherits-target-run-config.md))
-- `lody_session_create_options` publishes valid run-config values per agent config and stays
-  sparse by default (online Machines, one agent config, the current local project, no GitHub
-  fetch), expanding only through explicit query inputs.
-- Machine liveness is THREE-state. `getOnlineMachineIds()` returning null means the presence room
-  could not be joined — status UNKNOWN, never offline. Block a dispatch or report `MACHINE_OFFLINE`
-  only for a definite `offline`; an unknown Machine proceeds and fails against its own deadline,
-  and a surface reporting liveness carries the state, not a boolean. Collapsing unknown to offline
-  refused healthy Machines and silently emptied candidate lists during a cold start or reconnect
-  backoff. Contract: `specs/loro-ephemeral-presence-channel.md`.
+- Use stable machine/session/agent-config ids and strict, narrow input schemas.
+  Create/chat require caller-chosen Operation ids. Create persists before availability checks;
+  transient post-accept failure returns the active fixed target for daemon replay.
+  `session_create({ operationId, resume: true })` recovers without a prompt. Deliver completion
+  automatically; expose no wait tool and forbid new callers from using legacy `wait=true`.
+- Chat inherits omitted mode/model/options from the target's last model turn, else last
+  matching turn. Explicit fields/category options win; model changes drop old options.
+  Validate effort/Fast against the final model, never reject on probe mismatch; missing
+  per-model data defers to runtime. Drop incompatible inherited selectors; fill builtin
+  mode only if empty. [Inheritance rationale](README.md#chat-configuration).
+- `lody_session_create_options` publishes modes and option ids/types/choices per agent config,
+  never current values. Stay sparse by default (online Machines, one agent config, the current
+  local project, no GitHub fetch), expanding only through explicit query inputs.
+  Explicit permissions may exceed the parent; follow the caller's user authorization.
+- Machine presence is online/offline/unknown. `getOnlineMachineIds() === null` means
+  unknown; block dispatch/report `MACHINE_OFFLINE` only for definite offline. Unknown
+  proceeds under its own deadline. Expose three-state liveness, never a boolean.
+  Contract: `specs/loro-ephemeral-presence-channel.md`;
+  [cold-start rationale](README.md#machine-presence).
 - `session_list` defaults to 20 (maximum 100) and `session_history` to 10 (maximum 50 and 128 KiB);
   keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
   and `session_status_many` derive busy/idle from the same history, durable queue, presence, and

@@ -35,6 +35,7 @@ export * from 'loro-mirror';
 import type { RateLimit } from 'acp-extension-core';
 
 export const RATE_LIMIT_ENTRY_KEY_SEPARATOR = '::';
+const PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX = 'provider';
 
 /**
  * Known limitId values used to distinguish rate limit tiers.
@@ -45,21 +46,53 @@ export const CODEX_SPARK_LIMIT_ID = 'codex_bengalfox';
 
 export const getRateLimitEntryKey = (
   cliType: CliType,
-  limitId: string | null | undefined
+  limitId: string | null | undefined,
+  agentConfigId?: AgentConfigId | null
 ): string => {
   const id = limitId?.trim() || cliType;
+  if (agentConfigId) {
+    return [
+      PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX,
+      encodeURIComponent(agentConfigId),
+      cliType,
+      encodeURIComponent(id),
+    ].join(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
+  }
   return `${cliType}${RATE_LIMIT_ENTRY_KEY_SEPARATOR}${id}`;
 };
 
 export const parseRateLimitEntryKey = (
   key: string
 ): {
+  agentConfigId: AgentConfigId | null;
   cliType: string;
   limitId: string | null;
 } => {
+  const parts = key.split(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
+  if (
+    parts.length === 4 &&
+    parts[0] === PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX &&
+    parts[1] &&
+    parts[2] &&
+    parts[3]
+  ) {
+    try {
+      return {
+        agentConfigId: decodeURIComponent(parts[1]) as AgentConfigId,
+        cliType: parts[2],
+        limitId: decodeURIComponent(parts[3]),
+      };
+    } catch {
+      // Malformed scoped keys stay unreadable rather than being attributed to
+      // an unrelated provider through the legacy parser below.
+      return { agentConfigId: null, cliType: '', limitId: null };
+    }
+  }
+
   const separatorIndex = key.indexOf(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
   if (separatorIndex === -1) {
     return {
+      agentConfigId: null,
       cliType: key,
       limitId: null,
     };
@@ -69,12 +102,14 @@ export const parseRateLimitEntryKey = (
   const limitId = key.slice(separatorIndex + RATE_LIMIT_ENTRY_KEY_SEPARATOR.length);
   if (!limitId) {
     return {
+      agentConfigId: null,
       cliType,
       limitId: null,
     };
   }
 
   return {
+    agentConfigId: null,
     cliType,
     limitId,
   };
@@ -893,6 +928,49 @@ export type PendingScheduledTask = {
   timeZone?: string;
 };
 
+export type SessionHistoryBackendKind = 'loro' | 'roost';
+
+/** Backend selected for newly created sessions. Flip only after its adapter is ready. */
+export const NEW_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+
+/** Missing discriminator means a legacy session and must remain pinned to Loro. */
+export const LEGACY_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+
+/**
+ * Resolve the immutable history backend choice for an opened session.
+ *
+ * Keep this policy in the shared package so the CLI and renderer cannot
+ * accidentally assign different meanings to a missing discriminator while a
+ * document is still being bootstrapped.
+ */
+export const resolveSessionHistoryBackendKind = (
+  meta?: Pick<{ historyBackend?: SessionHistoryBackendKind }, 'historyBackend'> | null
+): SessionHistoryBackendKind => meta?.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND;
+
+export type SessionQueuePromotionState =
+  | 'prepared'
+  | 'history_accepted'
+  | 'activation_published'
+  | 'queue_consumed';
+
+export type SessionQueuePromotionRecord = {
+  queueCid: string;
+  userTurnId: string;
+  state: SessionQueuePromotionState;
+  updatedAt: number;
+};
+
+export type SessionSteerOperationRecord = {
+  operationId: string;
+  userTurnId: string;
+  expectedTurnId: string;
+  cancellationPolicy: 'promote' | 'preserve';
+  phase: 'prepared' | 'submitted' | 'settled';
+  delivery: 'not_submitted' | 'applied' | 'not_applied' | 'unknown';
+  status: 'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown';
+  updatedAt: number;
+};
+
 export type SessionMeta = {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
@@ -922,6 +1000,8 @@ export type SessionMeta = {
   isPinned?: boolean;
   cliType: AgentConfigCliType;
   agentType: AgentType;
+  /** Backend selected when this session was created. Missing means legacy Loro. */
+  historyBackend?: SessionHistoryBackendKind;
   agentConfigId?: AgentConfigId;
   /**
    * Agent Role this session was created from, and the Role revision that was
@@ -974,6 +1054,10 @@ export type SessionMeta = {
     string,
     'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown'
   >;
+  /** Durable provider-delivery evidence, keyed by stable steer operation id. */
+  steerOperationLedger?: Record<string, SessionSteerOperationRecord>;
+  /** Recoverable queue promotion receipts, keyed by the stable operation id. */
+  queuePromotionLedger?: Record<string, SessionQueuePromotionRecord>;
   /** Assistant turn id the client wants to stop; cancel is ignored unless it matches the machine's in-memory active turn. */
   lastCanceledTurn?: string;
   /** Latest user history entry id that the machine has fully handled. */
@@ -1020,6 +1104,8 @@ export type SessionMeta = {
   pinnedHistoryId?: string;
   /** Preview candidate summary for list/header UI; full state lives in session doc `preview`. */
   previewCandidate?: SessionPreviewCandidateMeta;
+  /** Last agent-started simulator operation (UUID only); UI discovery hint, never live state or authority. */
+  iosSimulatorPreviewRequestId?: string;
   /** Preview connection summary for list/header UI; full state lives in session doc `preview`. */
   previewConnection?: SessionPreviewConnectionMeta;
   /** External native history projection cursor for imported sessions. */
@@ -1129,6 +1215,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   project: schema.Any({ required: false }),
   userId: schema.String(),
   userTurnId: schema.String({ required: false }),
+  /** Stable queue promotion identity; legacy rows derive it from userTurnId/$cid. */
+  operationId: schema.String({ required: false }),
   timestamp: schema.String(),
   isEditing: schema.Boolean({ required: false }),
   // Calibrated server time (`getServerNow()`) when the current editor entered the row.

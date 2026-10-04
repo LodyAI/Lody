@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { motion, useReducedMotion } from 'framer-motion';
-import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { cn } from '@/lib/utils';
+import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/ui/resizable';
 import { FocusScope } from '@/ui/focus-scope';
 import { useIsCompactDesktop } from '@/hooks/use-mobile';
@@ -47,6 +48,64 @@ export type DesktopSessionDetailLayoutProps = {
 /** The conversation column keeps at least this much width when a sidebar
  *  min-width request is honored; below that the request is dropped. */
 const MAIN_COLUMN_MIN_WIDTH_PX = 500;
+
+const styles = stylex.create({
+  root: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+  },
+  group: {
+    width: '100%',
+    height: '100%',
+  },
+  chatPanel: {
+    minWidth: '280px',
+  },
+  conversation: {
+    display: 'flex',
+    height: '100%',
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  conversationBody: {
+    position: 'relative',
+    display: 'flex',
+    minHeight: 0,
+    flex: 1,
+    flexDirection: 'column',
+  },
+  chatSurface: {
+    minHeight: 0,
+    flex: 1,
+    overflow: 'hidden',
+  },
+  compactOverlay: {
+    position: 'absolute',
+    inset: 0,
+    zIndex: 10,
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  fullHeight: {
+    height: '100%',
+  },
+  panel: {
+    backgroundColor: 'hsl(var(--background))',
+    transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
+  },
+  panelTransition: {
+    transitionProperty: 'flex-grow, min-width',
+  },
+  sidebarContent: {
+    height: '100%',
+  },
+  sidebarHidden: {
+    visibility: 'hidden',
+    pointerEvents: 'none',
+  },
+});
 
 export function DesktopSessionDetailLayout({
   defaultSizes,
@@ -146,10 +205,10 @@ export function DesktopSessionDetailLayout({
   const transitionDuration = animatesSidebar ? '220ms' : '0ms';
 
   return (
-    <div ref={groupWrapperRef} className="relative h-full w-full">
+    <div ref={groupWrapperRef} {...stylex.props(styles.root)}>
       <ResizablePanelGroup
         direction="horizontal"
-        className="h-full w-full"
+        className={stylex.props(styles.group).className}
         autoSaveId="session-detail-panels"
       >
         <ResizablePanel
@@ -157,24 +216,30 @@ export function DesktopSessionDetailLayout({
           order={1}
           defaultSize={defaultSizes.main}
           minSize={15}
-          className="min-w-[280px]"
+          className={stylex.props(styles.chatPanel).className}
         >
           <FocusScope
             id={WORKSPACE_FOCUS_SCOPES.sessionConversation}
             data-lody-action-scope="conversation"
-            className="group/close-scope flex h-full flex-col bg-background"
+            className={cn(
+              'group/close-scope',
+              stylex.props(stylex.defaultMarker(), styles.conversation).className
+            )}
           >
             {topBar}
-            <div className="relative flex min-h-0 flex-1 flex-col">
-              <div className="min-h-0 flex-1 overflow-hidden">{chatSurfaces}</div>
+            <div {...stylex.props(styles.conversationBody)}>
+              <div {...stylex.props(styles.chatSurface)}>{chatSurfaces}</div>
               {terminalDock}
               {/* Compact desktop: the side panel takes over the region below
                   the top bar instead of splitting it — a 280px+280px split no
                   longer fits. The split panel above stays collapsed so the
                   open state (and its remembered width) survives un-compact. */}
               {compact && sidebarOpen && (
-                <div className="absolute inset-0 z-10 flex flex-col bg-background">
-                  <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionSidePanel} className="h-full">
+                <div {...stylex.props(styles.compactOverlay)}>
+                  <FocusScope
+                    id={WORKSPACE_FOCUS_SCOPES.sessionSidePanel}
+                    className={stylex.props(styles.fullHeight).className}
+                  >
                     {secondaryPanel}
                   </FocusScope>
                 </div>
@@ -216,7 +281,7 @@ export function DesktopSessionDetailLayout({
             // not rewrite `sidebarOpen`.
             if (splitSidebarOpen) onSidebarCollapse();
           }}
-          className={cn('bg-background', !isResizing && 'transition-[flex-grow,min-width]')}
+          {...stylex.props(styles.panel, !isResizing && styles.panelTransition)}
           style={{
             minWidth: splitSidebarOpen ? 280 : 0,
             // While dragging, kill the transition entirely. Removing only the
@@ -224,7 +289,6 @@ export function DesktopSessionDetailLayout({
             // defaults to `all`, so the inline duration alone would animate
             // every flex-grow update and make the drag lag behind the pointer.
             transitionDuration: isResizing ? '0ms' : transitionDuration,
-            transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)',
           }}
         >
           {/* Compact + open renders the panel in the overlay above instead,
@@ -232,7 +296,10 @@ export function DesktopSessionDetailLayout({
               compact + closed, where the collapsed panel must stay mounted. */}
           {(!compact || !sidebarOpen) && (
             <motion.div
-              className={cn('h-full', !splitSidebarOpen && 'invisible pointer-events-none')}
+              className={
+                stylex.props(styles.sidebarContent, !splitSidebarOpen && styles.sidebarHidden)
+                  .className
+              }
               initial={false}
               animate={{ x: splitSidebarOpen ? 0 : '100%' }}
               aria-hidden={!splitSidebarOpen}
@@ -241,7 +308,10 @@ export function DesktopSessionDetailLayout({
                 ease: [0.32, 0.72, 0, 1],
               }}
             >
-              <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionSidePanel} className="h-full">
+              <FocusScope
+                id={WORKSPACE_FOCUS_SCOPES.sessionSidePanel}
+                className={stylex.props(styles.fullHeight).className}
+              >
                 {secondaryPanel}
               </FocusScope>
             </motion.div>

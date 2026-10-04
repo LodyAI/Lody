@@ -86,7 +86,11 @@ this page is the full text of the rules summarised there.
   reattach, and navigates only after the target publishes committed root-Session meta. Dirty-source
   confirmation means committed `HEAD` only; never imply that uncommitted or untracked files move.
   Browser side-panel state and the mobile deep link are named `browser` / `?browser=1`; the removed
-  `preview` values are not migrated. Once opened, keep `SessionBrowserPanel` mounted while other fixed side-panel
+  `preview` values are not migrated. The iOS Simulator is a separate fixed panel beside it
+  (`ios-simulator` / `?simulator=1`), offered only when the tab Session's target machine is a Mac;
+  it shares no state with Browser, stays mounted once opened like Browser, polls only while a
+  preview is preparing and on screen, and tells its still-mounted viewer when it is hidden. Its rules live in
+  [ios-simulator/AGENTS.md](../../packages/components/src/components/sessions/ios-simulator/AGENTS.md). Once opened, keep `SessionBrowserPanel` mounted while other fixed side-panel
   tabs are active so managed DOM state and Electron native-view history survive tab switches.
   The desktop layout also keeps the whole side panel mounted while COLLAPSED (it only hides it), so
   anything in there that polls or holds a connection must take an explicit on-screen prop and pause

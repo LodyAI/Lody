@@ -74,15 +74,16 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async startSession(sessionId, meta, entry, dispatch) {
-      await Promise.all([
-        deps.repo.upsertDocMeta(
-          getSessionRoomId(sessionId as SessionId),
-          meta as Parameters<LoroRepo['upsertDocMeta']>[1]
-        ),
-        withSessionStore(sessionId, async (store) => {
-          await store.sessionData.commands.appendTurn(entry);
-        }),
-      ]);
+      // Backend selection is part of the session identity. Publish metadata
+      // before the first history write so a crash cannot leave an orphaned
+      // document that a later opener interprets as legacy Loro.
+      await deps.repo.upsertDocMeta(
+        getSessionRoomId(sessionId as SessionId),
+        meta as Parameters<LoroRepo['upsertDocMeta']>[1]
+      );
+      await withSessionStore(sessionId, async (store) => {
+        await store.sessionData.commands.appendTurn(entry);
+      });
       void dispatch;
     },
 
@@ -161,7 +162,19 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       await withSessionStore(sessionId, (store) => {
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
-          draft.mq = [...mq, item as MessageQueueItem];
+          const userTurnId = item.userTurnId;
+          const operationId =
+            item.operationId ??
+            (typeof userTurnId === 'string' && userTurnId.length > 0
+              ? `queue:${userTurnId}`
+              : undefined);
+          draft.mq = [
+            ...mq,
+            {
+              ...item,
+              ...(operationId ? { operationId } : {}),
+            } as MessageQueueItem,
+          ];
         });
       });
       await bumpMessageQueueWatermark(sessionId);

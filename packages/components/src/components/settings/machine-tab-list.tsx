@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, ListFilter, LockKeyhole, Users } from 'lucide-react';
@@ -13,7 +14,6 @@ import { corner, focus, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { UserAvatar } from '@/components/user-avatar';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { settingsSurface as surface } from './surface';
-import { settingsType as type } from './type.stylex';
 
 export type MachineTabListVariant = 'compact' | 'detailed';
 
@@ -411,7 +411,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontWeight: 400,
     color: colors.secondaryLabel,
   },
@@ -431,7 +431,7 @@ const styles = stylex.create({
     paddingInline: space[2],
     paddingBlock: space[4],
     textAlign: 'center',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   emptyAction: { marginTop: space[2] },
@@ -487,7 +487,7 @@ const styles = stylex.create({
     minWidth: 0,
   },
   detailedNameLine: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
-  detailedName: { minWidth: 0, fontSize: type.caption, fontWeight: 400 },
+  detailedName: { minWidth: 0, fontSize: uiText.footnoteSize, fontWeight: 400 },
   detailedMeta: {
     display: 'flex',
     flexWrap: 'wrap',
