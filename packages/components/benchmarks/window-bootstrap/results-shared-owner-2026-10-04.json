@@ -1,0 +1,1515 @@
+{
+  "date": "2026-10-04",
+  "scope": "Local macOS desktop, synthetic histories, fresh isolated profiles; three warmups per run excluded",
+  "runs": [
+    {
+      "variant": "baseline",
+      "shared": false,
+      "entries": 3000,
+      "retainedWindows": 0,
+      "intentLeadMs": 0,
+      "sourceFixtureToConversationMs": 1225.8447909999995,
+      "unloadConfirmations": 0,
+      "ownerRecovery": null,
+      "artifactDirectory": "/tmp/lody-app-bench-eAS29O",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": false,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16"
+      },
+      "summary": {
+        "showMs": {
+          "median": 499.0112079999999,
+          "min": 485.2702500000014,
+          "max": 571.2480830000004
+        },
+        "inputMs": {
+          "median": 594.6441660000019,
+          "min": 563.4589169999999,
+          "max": 675.5882920000004
+        },
+        "workingSetMiB": {
+          "median": 1454.640625,
+          "min": 1390.3125,
+          "max": 1537.671875
+        }
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "showMs": 571.2777919999999,
+          "inputMs": 673.5762500000001,
+          "workingSetMiB": 1602.53125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 541.1124159999999,
+          "inputMs": 683.9913749999996,
+          "workingSetMiB": 1573.828125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 648.6805839999997,
+          "inputMs": 783.5019169999996,
+          "workingSetMiB": 1535.140625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 571.2480830000004,
+          "inputMs": 675.5882920000004,
+          "workingSetMiB": 1537.671875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 538.1568750000006,
+          "inputMs": 643.7116249999999,
+          "workingSetMiB": 1390.3125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 499.0112079999999,
+          "inputMs": 594.6441660000019,
+          "workingSetMiB": 1425.953125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 490.2676250000004,
+          "inputMs": 571.7346660000003,
+          "workingSetMiB": 1536.109375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 485.2702500000014,
+          "inputMs": 563.4589169999999,
+          "workingSetMiB": 1454.640625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        }
+      ]
+    },
+    {
+      "variant": "shared",
+      "shared": true,
+      "entries": 3000,
+      "retainedWindows": 0,
+      "intentLeadMs": 0,
+      "sourceFixtureToConversationMs": 2265.061667,
+      "unloadConfirmations": 0,
+      "ownerRecovery": {
+        "acknowledgedWriteRecovered": true,
+        "viewRecovered": true,
+        "elapsedMs": 1128.8815000000031
+      },
+      "artifactDirectory": "/tmp/lody-app-bench-xQ8nNb",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16"
+      },
+      "summary": {
+        "showMs": {
+          "median": 414.58400000000256,
+          "min": 391.81495800000084,
+          "max": 463.4592920000032
+        },
+        "inputMs": {
+          "median": 505.4145830000016,
+          "min": 452.6275829999977,
+          "max": 551.1577500000021
+        },
+        "workingSetMiB": {
+          "median": 1853.09375,
+          "min": 1730.484375,
+          "max": 1894.125
+        }
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "showMs": 509.6578330000002,
+          "inputMs": 589.5832920000003,
+          "workingSetMiB": 1747.765625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 400.42525000000023,
+          "inputMs": 506.8899160000001,
+          "workingSetMiB": 1883.703125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 415.39604099999997,
+          "inputMs": 523.3425829999996,
+          "workingSetMiB": 1889.34375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 419.29312500000015,
+          "inputMs": 505.4145830000016,
+          "workingSetMiB": 1891.9375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 391.81495800000084,
+          "inputMs": 509.62233299999934,
+          "workingSetMiB": 1894.125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 463.4592920000032,
+          "inputMs": 551.1577500000021,
+          "workingSetMiB": 1853.09375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 392.0186670000003,
+          "inputMs": 452.6275829999977,
+          "workingSetMiB": 1730.484375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 414.58400000000256,
+          "inputMs": 495.6410419999993,
+          "workingSetMiB": 1745.046875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        }
+      ]
+    },
+    {
+      "variant": "baseline-ready",
+      "shared": false,
+      "entries": 3000,
+      "retainedWindows": 0,
+      "intentLeadMs": null,
+      "sourceFixtureToConversationMs": 1193.975375,
+      "unloadConfirmations": 0,
+      "ownerRecovery": null,
+      "artifactDirectory": "/tmp/lody-app-bench-SP0quC",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": false,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16",
+        "probeSha256": "993077f71a971e3c2f656e8efdb0551e3a7701e219ac41b0f6941a81277b01df"
+      },
+      "summary": {
+        "showMs": {
+          "median": 95.52637500000128,
+          "min": 73.84437500000058,
+          "max": 97.18925000000127
+        },
+        "inputMs": {
+          "median": 177.25075000000106,
+          "min": 163.74212500000067,
+          "max": 179.69054099999994
+        },
+        "workingSetMiB": {
+          "median": 1789.046875,
+          "min": 1699.734375,
+          "max": 1803.703125
+        }
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "showMs": 87.03437500000018,
+          "inputMs": 253.895708,
+          "workingSetMiB": 1854.140625,
+          "readyAtClick": true,
+          "preparationMs": 414.7677909999993,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 85.9031670000004,
+          "inputMs": 196.8122919999987,
+          "workingSetMiB": 1865.515625,
+          "readyAtClick": true,
+          "preparationMs": 386.123458,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 53.44416699999965,
+          "inputMs": 107.56687500000044,
+          "workingSetMiB": 1780.625,
+          "readyAtClick": true,
+          "preparationMs": 392.3121250000004,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 97.18925000000127,
+          "inputMs": 177.25075000000106,
+          "workingSetMiB": 1789.046875,
+          "readyAtClick": true,
+          "preparationMs": 383.25245800000084,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 73.84437500000058,
+          "inputMs": 163.74212500000067,
+          "workingSetMiB": 1699.734375,
+          "readyAtClick": true,
+          "preparationMs": 382.9547500000008,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 95.52637500000128,
+          "inputMs": 179.69054099999994,
+          "workingSetMiB": 1803.703125,
+          "readyAtClick": true,
+          "preparationMs": 382.093832999999,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        }
+      ]
+    },
+    {
+      "variant": "shared-ready",
+      "shared": true,
+      "entries": 3000,
+      "retainedWindows": 0,
+      "intentLeadMs": null,
+      "sourceFixtureToConversationMs": 1989.5156669999997,
+      "unloadConfirmations": 0,
+      "ownerRecovery": null,
+      "artifactDirectory": "/tmp/lody-app-bench-kZWuGj",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16"
+      },
+      "summary": {
+        "showMs": {
+          "median": 83.14291700000103,
+          "min": 76.34245799999917,
+          "max": 88.74045800000022
+        },
+        "inputMs": {
+          "median": 162.29058299999815,
+          "min": 133.13425000000097,
+          "max": 172.63395800000035
+        },
+        "workingSetMiB": {
+          "median": 1933.890625,
+          "min": 1926.265625,
+          "max": 1941.890625
+        }
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "showMs": 90.45762500000001,
+          "inputMs": 162.34645900000032,
+          "workingSetMiB": 1918.015625,
+          "readyAtClick": true,
+          "preparationMs": 294.59179200000017,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 76.63791700000002,
+          "inputMs": 187.26629200000025,
+          "workingSetMiB": 2037.78125,
+          "readyAtClick": true,
+          "preparationMs": 286.50395899999967,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 92.23616699999911,
+          "inputMs": 149.76816699999836,
+          "workingSetMiB": 1921.296875,
+          "readyAtClick": true,
+          "preparationMs": 289.92399999999907,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 88.74045800000022,
+          "inputMs": 172.63395800000035,
+          "workingSetMiB": 1933.890625,
+          "readyAtClick": true,
+          "preparationMs": 293.4235410000001,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 83.14291700000103,
+          "inputMs": 133.13425000000097,
+          "workingSetMiB": 1941.890625,
+          "readyAtClick": true,
+          "preparationMs": 288.46662500000093,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 76.34245799999917,
+          "inputMs": 162.29058299999815,
+          "workingSetMiB": 1926.265625,
+          "readyAtClick": true,
+          "preparationMs": 287.88600000000224,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        }
+      ]
+    },
+    {
+      "variant": "baseline-many",
+      "shared": false,
+      "entries": 3000,
+      "retainedWindows": 5,
+      "intentLeadMs": 0,
+      "sourceFixtureToConversationMs": 1186.925209,
+      "unloadConfirmations": 0,
+      "ownerRecovery": null,
+      "artifactDirectory": "/tmp/lody-app-bench-gTeVBG",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": false,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16",
+        "probeSha256": "993077f71a971e3c2f656e8efdb0551e3a7701e219ac41b0f6941a81277b01df"
+      },
+      "summary": {
+        "showMs": {
+          "median": 488.2561249999999,
+          "min": 441.32016699999986,
+          "max": 503.6416250000002
+        },
+        "inputMs": {
+          "median": 565.403957999999,
+          "min": 512.8376669999998,
+          "max": 623.9879580000015
+        },
+        "workingSetMiB": {
+          "median": 3033.90625,
+          "min": 1764.5625,
+          "max": 4321.734375
+        }
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "showMs": 563.5328330000002,
+          "inputMs": 644.7853329999998,
+          "workingSetMiB": 1767.265625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 550.1176660000001,
+          "inputMs": 680.9215830000003,
+          "workingSetMiB": 1858.109375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 507.35120800000004,
+          "inputMs": 654.2237920000007,
+          "workingSetMiB": 1781.0,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 482.15208299999904,
+          "inputMs": 547.1770419999993,
+          "workingSetMiB": 1764.5625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 441.32016699999986,
+          "inputMs": 512.8376669999998,
+          "workingSetMiB": 2457.59375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 488.2561249999999,
+          "inputMs": 607.3966669999991,
+          "workingSetMiB": 3033.90625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 488.91999999999825,
+          "inputMs": 565.403957999999,
+          "workingSetMiB": 3556.6875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 503.6416250000002,
+          "inputMs": 623.9879580000015,
+          "workingSetMiB": 4321.734375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        }
+      ]
+    },
+    {
+      "variant": "shared-many",
+      "shared": true,
+      "entries": 3000,
+      "retainedWindows": 5,
+      "intentLeadMs": 0,
+      "sourceFixtureToConversationMs": 1952.142792,
+      "unloadConfirmations": 0,
+      "ownerRecovery": null,
+      "artifactDirectory": "/tmp/lody-app-bench-OpR6mF",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16",
+        "probeSha256": "993077f71a971e3c2f656e8efdb0551e3a7701e219ac41b0f6941a81277b01df"
+      },
+      "summary": {
+        "showMs": {
+          "median": 395.4126660000002,
+          "min": 379.78941699999996,
+          "max": 401.8899999999994
+        },
+        "inputMs": {
+          "median": 481.05383299999994,
+          "min": 459.51795800000036,
+          "max": 486.65058300000237
+        },
+        "workingSetMiB": {
+          "median": 2998.0625,
+          "min": 2091.609375,
+          "max": 4006.953125
+        }
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "showMs": 424.70095799999945,
+          "inputMs": 503.56033299999945,
+          "workingSetMiB": 2205.40625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 381.2712499999998,
+          "inputMs": 497.9630420000003,
+          "workingSetMiB": 2204.21875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 417.07779200000004,
+          "inputMs": 491.739375000001,
+          "workingSetMiB": 2111.96875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 401.8899999999994,
+          "inputMs": 481.05383299999994,
+          "workingSetMiB": 2091.609375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 397.9689580000013,
+          "inputMs": 459.51795800000036,
+          "workingSetMiB": 2699.015625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 391.4426249999997,
+          "inputMs": 459.66100000000006,
+          "workingSetMiB": 2998.0625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 379.78941699999996,
+          "inputMs": 485.7690419999999,
+          "workingSetMiB": 3479.765625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 395.4126660000002,
+          "inputMs": 486.65058300000237,
+          "workingSetMiB": 4006.953125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        }
+      ]
+    },
+    {
+      "variant": "shared-repeat",
+      "shared": true,
+      "entries": 3000,
+      "retainedWindows": 0,
+      "intentLeadMs": 0,
+      "sourceFixtureToConversationMs": 1961.202875,
+      "unloadConfirmations": 0,
+      "ownerRecovery": null,
+      "artifactDirectory": "/tmp/lody-app-bench-5S11s1",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16",
+        "probeSha256": "993077f71a971e3c2f656e8efdb0551e3a7701e219ac41b0f6941a81277b01df"
+      },
+      "summary": {
+        "showMs": {
+          "median": 379.79712500000096,
+          "min": 349.3329589999994,
+          "max": 398.91162500000064
+        },
+        "inputMs": {
+          "median": 468.5242914999999,
+          "min": 427.27879100000064,
+          "max": 518.4184160000004
+        },
+        "workingSetMiB": {
+          "median": 2077.7109375,
+          "min": 1961.546875,
+          "max": 2198.625
+        }
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "showMs": 409.0444159999997,
+          "inputMs": 502.7879160000002,
+          "workingSetMiB": 2102.84375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 357.4370000000008,
+          "inputMs": 424.73754200000076,
+          "workingSetMiB": 2116.625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 389.9031249999989,
+          "inputMs": 444.8441669999993,
+          "workingSetMiB": 2187.203125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 349.3329589999994,
+          "inputMs": 478.98254199999974,
+          "workingSetMiB": 2194.203125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 398.26641700000073,
+          "inputMs": 497.6897079999999,
+          "workingSetMiB": 2198.625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 364.4755830000013,
+          "inputMs": 427.27879100000064,
+          "workingSetMiB": 2075.078125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 398.91162500000064,
+          "inputMs": 483.1868749999994,
+          "workingSetMiB": 2009.125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 374.7455829999999,
+          "inputMs": 446.23979099999997,
+          "workingSetMiB": 2018.734375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 386.28612500000236,
+          "inputMs": 518.4184160000004,
+          "workingSetMiB": 2127.25,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 384.5157910000016,
+          "inputMs": 433.7536660000005,
+          "workingSetMiB": 1961.546875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 375.0784590000003,
+          "inputMs": 452.38708399999814,
+          "workingSetMiB": 1974.484375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 397.9386250000025,
+          "inputMs": 472.33858300000065,
+          "workingSetMiB": 2080.34375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 361.5744589999995,
+          "inputMs": 464.7099999999991,
+          "workingSetMiB": 2092.578125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        }
+      ]
+    },
+    {
+      "variant": "baseline-repeat",
+      "shared": false,
+      "entries": 3000,
+      "retainedWindows": 0,
+      "intentLeadMs": 0,
+      "sourceFixtureToConversationMs": 1192.3405830000002,
+      "unloadConfirmations": 0,
+      "ownerRecovery": null,
+      "artifactDirectory": "/tmp/lody-app-bench-lPKt5r",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": false,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16",
+        "probeSha256": "993077f71a971e3c2f656e8efdb0551e3a7701e219ac41b0f6941a81277b01df"
+      },
+      "summary": {
+        "showMs": {
+          "median": 499.03581250000025,
+          "min": 448.1435419999998,
+          "max": 560.7557919999999
+        },
+        "inputMs": {
+          "median": 621.6967920000006,
+          "min": 502.7452080000003,
+          "max": 663.1140420000011
+        },
+        "workingSetMiB": {
+          "median": 1605.7109375,
+          "min": 1389.5,
+          "max": 1874.828125
+        }
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "showMs": 509.4234999999999,
+          "inputMs": 619.126209,
+          "workingSetMiB": 1763.125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 491.2313749999994,
+          "inputMs": 597.1892079999998,
+          "workingSetMiB": 1952.6875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": true,
+          "showMs": 446.3613750000004,
+          "inputMs": 545.8052499999994,
+          "workingSetMiB": 1874.6875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 459.19841599999927,
+          "inputMs": 559.8217499999992,
+          "workingSetMiB": 1846.96875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 496.8597499999996,
+          "inputMs": 628.411709,
+          "workingSetMiB": 1874.828125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 448.1435419999998,
+          "inputMs": 502.7452080000003,
+          "workingSetMiB": 1787.96875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 485.3087080000005,
+          "inputMs": 578.7759579999984,
+          "workingSetMiB": 1787.671875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 560.7557919999999,
+          "inputMs": 663.1140420000011,
+          "workingSetMiB": 1697.359375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 547.5568749999984,
+          "inputMs": 662.7046249999985,
+          "workingSetMiB": 1485.421875,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 520.7812919999997,
+          "inputMs": 647.7976669999989,
+          "workingSetMiB": 1501.453125,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 489.45929199999955,
+          "inputMs": 560.296709000002,
+          "workingSetMiB": 1389.5,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 522.5555839999979,
+          "inputMs": 629.5553749999999,
+          "workingSetMiB": 1507.109375,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        },
+        {
+          "warmup": false,
+          "showMs": 501.2118750000009,
+          "inputMs": 614.9818750000013,
+          "workingSetMiB": 1514.0625,
+          "readyAtClick": false,
+          "preparationMs": null,
+          "checks": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "inputAccepted": true
+        }
+      ]
+    }
+  ],
+  "baseRevision": "9bdac2851",
+  "build": "Same final desktop/CLI build; owner enabled versus LODY_SHARED_SESSION_OWNER=0; evaluated in a separate clone with Node 26.10.0 and Electron 43.7.6.",
+  "timingBoundary": "Before source Session row Command-click dispatch to native show / verified unique composer input after an animation frame. Synthetic insertion is not physical input latency.",
+  "runOrder": [
+    "baseline",
+    "shared",
+    "shared-ready",
+    "baseline-ready",
+    "baseline-many",
+    "shared-many",
+    "shared-repeat",
+    "baseline-repeat"
+  ],
+  "harness": "Final ready/many/repeat probes focus the source and await two animation frames after unread metadata changes before dispatching hover. Initial baseline/shared probes predate this untimed setup correction. Both use the current app.setWindowWarmup IPC and release/unload the fixture import handle.",
+  "finalProbeSha256": "993077f71a971e3c2f656e8efdb0551e3a7701e219ac41b0f6941a81277b01df",
+  "excludedAttempts": [
+    {
+      "artifactDirectory": "/tmp/lody-app-bench-3tQUy7",
+      "error": "Timed out: production prepared Session",
+      "evidence": "No intent IPC was recorded; source focus and metadata settlement were added to the harness. The exact cancellation trigger was not isolated."
+    },
+    {
+      "artifactDirectory": "/tmp/lody-app-bench-qulPO4",
+      "error": "Timed out: production prepared Session",
+      "evidence": "No intent IPC was recorded; source focus and metadata settlement were added to the harness. The exact cancellation trigger was not isolated."
+    }
+  ],
+  "limits": [
+    "Fresh isolated profiles and synthetic 3000-entry histories only. No real conversations or product profile used.",
+    "Sequential small samples with three excluded warmups each; no stable population P95 or real-world prepared hit-rate claim.",
+    "Process working sets are summed at input confirmation and may double-count shared pages. They are not physical RAM, retained heap, or steady-state RSS.",
+    "sourceFixtureToConversationMs includes fixture import, flush, unload, and first Session migration; it is not whole-app startup.",
+    "The original reported unload warning was not reproduced. Zero confirmations only applies to these synthetic clean-close probes.",
+    "Immediate-click primary table uses ten-sample reversed-order repeat; the first five-sample pair is retained separately, not pooled.",
+    "Metadata/workspace/UI initialization and per-view directory/rendering still exist; owner renderer adds first-open cost and memory."
+  ]
+}

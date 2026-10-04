@@ -10,8 +10,7 @@ PR: [#885](https://github.com/LodyAI/Lody/pull/885), [#914](https://github.com/L
 
 Warm windows exposed Loading, transient Session Not Found, or a blank message
 viewport. Adoption now preserves the real target and presents only after history,
-layout and scroll restoration are ready; peer snapshots keep independent durable
-state. Shell/runtime optimization reduced the measured 3,000-entry opening median
+layout and scroll restoration are ready; durable bootstrap retains unsent edits. Shell/runtime optimization reduced the measured 3,000-entry opening median
 from 1,139 ms to 431 ms. macOS local mode now uses the same opt-in spare to prepare
 a predicted Session before the click and directly claim its existing renderer.
 Misses and clicks before preparation finishes still wait; this is not universal
@@ -87,15 +86,20 @@ Cloud and dual-mode runtimes do not participate in peer sharing.
 
 The first stage of the [prepared-surface proposal](../../proposed/architecture/2026-09-23-prepared-session-surfaces.md)
 is integrated into the existing developer warmup setting, still off by default.
-Row hover/focus waits 150 ms; opening a Session menu requests immediately. Capture
-listeners are necessary because row controls stop bubbling. A click cancels pending
-intent so a fast open does not later start competing speculation.
+Ordinary row hover waits 40 ms. Command/Control intent, middle-button down, keyboard
+focus and Session menus request immediately; a modifier pressed over a pending row
+promotes it immediately. Touch hover is ignored, and delayed requests recheck the
+row identity after virtualization. Capture listeners observe controls that stop
+bubbling. Click, blur and visibility transitions release source intent.
 
 Main owns one target-bound hidden window in place of the neutral spare, with a
-30-second expiry and two-second cancellation grace for menu-to-click handoff.
-Requests are source-bound; renewal fences stale cancellation, and readiness includes
-a fresh preparation ID. Changing targets destroys the old view. Expiry, cancellation,
-source close and renderer failure release unclaimed resources. A claimed view keeps
+30-second expiry and eight-second cancellation grace for brief departure/return.
+Requests are source-bound; renewal fences stale cancellation. Same-source intent
+changes within one workspace retarget the existing renderer, replacing its binding
+and revoking readiness before navigation. A mismatched claim can likewise reuse
+that renderer within the same workspace. Old target/generation replies cannot
+show it. Another workspace or a new intent source replaces the unclaimed view;
+source close, expiry and renderer failure release it. A claimed view keeps
 its lifetime and five-second recovery deadline; it adopts reload identity without
 navigating. Neutral replacement starts after presentation or unclaimed disposal.
 
@@ -103,13 +107,37 @@ The renderer's explicit preparation state suppresses read receipts, workspace
 ownership (notifications, badges and background owner work), navigation autofocus
 and external-history refresh while allowing real hydration and layout. Main sends
 activation only after showing the window. Content removal and viewport resize
-revoke readiness. Live synchronization continues; source state and independent
-durable replicas retain their existing contracts. The native animation addon stays
+revoke readiness. Live synchronization continues; local Session data ownership is
+shared as described in the [owner decision](../architecture/2026-10-04-shared-desktop-session-owner.md). The native animation addon stays
 probe-only because its independent benefit was not established.
 
 ## Verification and limits
 
-The macOS product path passes 39 relevant component tests and 168 Electron tests;
+The October single-slot update retains the existing opt-in setting and one-renderer
+limit. Intent/retarget tests cover generation fencing, stale cancellation, expiry,
+focus/modifier promotion and touch/virtualized rows. The
+[October evaluation](../../../../packages/components/benchmarks/window-bootstrap/README.md#single-slot-intent-and-retargeting--2026-10-04)
+records actual hit rates, latency, renderer reuse and memory. Released Session stores
+still follow the ten-minute cache policy; a single renderer is not a hard byte cap.
+
+On the 3,000-entry M4 Max fixture, 350 ms ordinary hover improved prepared hits from
+0/5 to 5/5 and show/input medians from 101.41/188.74 to 24.76/97.07 ms. Command intent
+with 300 ms lead likewise changed 0/5 to 5/5 and 102.24/187.84 to 33.26/96.49 ms.
+All 72 completed first-show/input checks passed, including warmups. Zero-lead clicks
+still took 338.73/402.29 ms; retargeting an existing prepared renderer with zero lead
+took 218.24/274.63 ms and did not count the previous target as a prepared hit.
+The final eight-stage memory run used 224.74 MiB extra footprint for one prepared
+view and returned to within 6.61 MiB of source-only residency 30 seconds after closing
+five auxiliaries. Two excluded OS sampling failures motivated reading the kernel
+counter directly. These are small sequential synthetic trials, not population hit
+rates, P95 guarantees or a long-run distinct-document memory budget.
+
+The current focused regression suites pass 53 tests and Electron passes 199.
+Components/Electron type checks, production build, lint, i18n and public/platform/import
+boundaries pass. Documentation checking retains six pre-existing links into absent
+isolated Kimi/Pi submodules; no new-document links fail.
+
+The earlier September macOS product path passed 39 relevant component tests and 168 Electron tests;
 components/Electron typechecks and the OSS app build pass. The real Session-row
 Command-click probe measured ready-hit show/input-confirmation medians of
 32.50/82.46 ms (ten samples), zero-lead 451.13/492.84 ms (five), and 200 ms lead
@@ -121,7 +149,6 @@ and its cause remains unestablished. Stage diagnostics and a full rerun passed.
 The [benchmark README](../../../../packages/components/benchmarks/window-bootstrap/README.md#macos-production-preparation)
 owns reproducible commands, raw measurements and timing limits. Physical input,
 IME, Spaces/multi-display behavior and memory budgets remain unverified.
-
 
 The provider, renderer readiness, stream rendering and sticky-scroll suites pass
 48 deterministic tests. They cover pre-route initialization, ready/in-flight claim
@@ -157,6 +184,6 @@ all eight captures per corrected run passed, including three discarded warmups.
 This validates the previously omitted React/scroll boundary; the earlier 152.39 ms
 synthetic-DOM measurement did not exercise it. All optimized runs also passed the
 first-show checks. Opening is faster but still perceptible; this is not a zero-delay guarantee.
-The CLI artifact was reused rather than rebuilt from this checkout. Root `pnpm check`
-still stops at missing `packages/ignore` dependencies; `docs check` reports existing
-links into absent ACP submodules. The PR remains draft.
+The CLI artifact was reused rather than rebuilt from this checkout. In that September environment, root `pnpm check`
+stopped at missing `packages/ignore` dependencies and `docs check` reported existing
+links into absent ACP submodules. Current October verification is reported above.

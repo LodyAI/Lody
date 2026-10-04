@@ -163,6 +163,7 @@ export default defineConfig(({ mode }) => {
           // with code paths that might themselves crash on boot.
           input: {
             index: resolve(__dirname, 'src/renderer/index.html'),
+            sessionOwner: resolve(__dirname, 'src/renderer/session-owner.html'),
             devbar: resolve(__dirname, 'src/renderer/devbar.html'),
             recovery: resolve(__dirname, 'src/renderer/recovery.html')
           },

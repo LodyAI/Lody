@@ -406,7 +406,9 @@ export function createConversationViewFromReader(
     if (disposed || idleCancel) return;
     idleCancel = scheduleIdle(() => {
       idleCancel = null;
-      void runIdleChunk();
+      // A remote owner can disappear during background hydration. The next
+      // observation refreshes it; an idle task must not leak a rejected promise.
+      void runIdleChunk().catch(() => resolveReady());
     });
   };
 
@@ -726,7 +728,9 @@ export function createConversationViewFromReader(
         dirtyIds.add(id);
       }
     }
-    void flushDirty();
+    void flushDirty().catch(() => {
+      // A fresh observation after reconnect retries projection reads.
+    });
   };
 
   const buildInitial = (entries: readonly SessionDirectoryRow[]) => {

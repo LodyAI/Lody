@@ -28,8 +28,10 @@
   The repo owns persistence and remote convergence barriers.
 - A snapshot is the HistoryWriter's detached, unforgeable stored-copy handle.
   Its existing provenance WeakMap is authoritative. Source disposal does not
-  invalidate a capture held by a fork. Do not add a second handle registry,
-  backend capabilities, store tokens or source-lifetime coupling.
+  invalidate a capture held by a fork. Do not add a second provenance registry or
+  source-lifetime coupling. Desktop IPC may retain the original handle behind a
+  connection-scoped opaque reference; resolve it back to that handle before invoking
+  the writer, fence owner restart, and release it on client close or collection.
 - Tail replacement rechecks the expected user/provider boundary and active goal
   inside the write. Await conditional rollback before persisting follow-up meta;
   rollback retains later appends and refuses to overwrite concurrent edits.

@@ -450,6 +450,10 @@ export function useCodeCollabSaveText(
       if (!isDirty()) {
         return;
       }
+      console.warn('[unload-blocked] editor save', {
+        buffered: pendingTextRef.current !== null,
+        status: statusRef.current.kind,
+      });
       event.preventDefault();
       event.returnValue = '';
     };

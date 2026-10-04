@@ -77,6 +77,10 @@ export function prepareWindow(
     requested = { source, target, requestId }
     return
   }
+  if (prepared?.sourceId === source.webContents.id && prepared.retarget(target, requestId)) {
+    requested = { source, target, requestId }
+    return
+  }
   clearPreparation()
   requested = { source, target, requestId }
   const close = (): void => clearPreparation()
@@ -234,6 +238,7 @@ export function scheduleWindowWarmUp(): void {
  */
 export function claimWarmWindow(target: ElectronWindowTarget): BrowserWindow | null {
   const candidate = prepared
+  if (candidate && !candidate.matches(target)) candidate.retarget(target, crypto.randomUUID())
   if (candidate && !candidate.isClaimed && candidate.matches(target)) {
     const window = candidate.window
     stopWatchingSource?.()

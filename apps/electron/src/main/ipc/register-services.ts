@@ -1,3 +1,4 @@
+import { SessionOwnerIpc } from './services/session-owner-ipc'
 import { ipcMain, type IpcMainEvent } from 'electron'
 import { createServices, type MergeIpcService } from 'electron-ipc-decorator'
 import { IPC_PUSH_CHANNELS, IPC_SEND_CHANNELS } from '@lody/shared/electron-ipc'
@@ -32,6 +33,7 @@ export const IPC_SERVICE_CONSTRUCTORS = [
   NotificationsIpc,
   PublicBrowserIpc,
   SessionControlIpc,
+  SessionOwnerIpc,
   TerminalIpc,
   UpdaterIpc
 ] as const

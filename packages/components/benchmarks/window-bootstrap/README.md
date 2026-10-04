@@ -45,10 +45,10 @@ and presentation ordering; it does not validate the full Lody React interface.
 Apple M4 Max, macOS arm64, Electron 39.5.1 / Chromium 142.
 
 | Entries | Disk hit: before / fixed median | Peer only: fixed median | Disk hit: before / fixed P95 |
-| --- | --- | --- | --- |
-| 100 | 4.20 / 4.50 ms | 4.40 ms | 4.70 / 8.40 ms |
-| 1,000 | 16.15 / 16.40 ms | 17.50 ms | 29.00 / 32.60 ms |
-| 3,000 | 39.55 / 39.50 ms | 41.80 ms | 71.60 / 60.70 ms |
+| ------- | ------------------------------- | ----------------------- | ---------------------------- |
+| 100     | 4.20 / 4.50 ms                  | 4.40 ms                 | 4.70 / 8.40 ms               |
+| 1,000   | 16.15 / 16.40 ms                | 17.50 ms                | 29.00 / 32.60 ms             |
+| 3,000   | 39.55 / 39.50 ms                | 41.80 ms                | 71.60 / 60.70 ms             |
 
 The table ends at readable history. In the peer-only scenario the baseline has no
 history and needs unmeasured daemon synchronization; no overall speedup percentage
@@ -84,15 +84,15 @@ source-window IPC dispatch. It includes target React rendering and initial scrol
 with current desktop source. Only the runtime-provider change was removed for the
 baseline. Runs were sequential with separate fresh profiles, not alternating trials.
 
-| Renderer | Samples | Median claim to show | Range |
-| --- | --- | --- | --- |
-| Before workspace preinitialization | 5 | 820.30 ms | 812.81–848.28 ms |
-| With workspace preinitialization | 10 | 1,057.22 ms | 1,038.96–1,356.23 ms |
-| With preinitialization and visible-stream readiness | 5 | 1,140.84 ms | 1,102.16–2,708.94 ms |
-| Repeated with committed real-app runner | 5 | 1,139.32 ms | 1,118.41–1,162.37 ms |
-| Seed cold storage before Repo adoption | 5 | 700.14 ms | 689.76–719.29 ms |
-| Also preload workspace layout code | 5 | 430.77 ms | 424.24–463.15 ms |
-| Same optimized path, 100 entries | 5 | 256.56 ms | 248.05–261.43 ms |
+| Renderer                                            | Samples | Median claim to show | Range                |
+| --------------------------------------------------- | ------- | -------------------- | -------------------- |
+| Before workspace preinitialization                  | 5       | 820.30 ms            | 812.81–848.28 ms     |
+| With workspace preinitialization                    | 10      | 1,057.22 ms          | 1,038.96–1,356.23 ms |
+| With preinitialization and visible-stream readiness | 5       | 1,140.84 ms          | 1,102.16–2,708.94 ms |
+| Repeated with committed real-app runner             | 5       | 1,139.32 ms          | 1,118.41–1,162.37 ms |
+| Seed cold storage before Repo adoption              | 5       | 700.14 ms            | 689.76–719.29 ms     |
+| Also preload workspace layout code                  | 5       | 430.77 ms            | 424.24–463.15 ms     |
+| Same optimized path, 100 entries                    | 5       | 256.56 ms            | 248.05–261.43 ms     |
 
 Preinitialization worked: every sampled spare already had its Repo and target
 metadata before claim, and claim did not recreate its runtime. It alone did not
@@ -117,7 +117,6 @@ remain after claim. The earlier 152.39 ms synthetic-DOM probe did not exercise t
 React lifecycle. One earlier baseline process crashed before completion and was
 excluded; its replacement run completed. These small sequential samples and the
 earlier outlier cannot establish a stable tail distribution.
-
 
 ## macOS prepared-content prototype
 
@@ -152,15 +151,14 @@ measures Chromium text insertion with focus/verification IPC overhead, not physi
 keyboard latency or IME correctness. Capture begins at native show, concurrently
 with validation; native show is not proof of display scanout.
 
-
 [Recorded macOS prototype results](results-macos-prepared-2026-09-23.json), 3,000
 entries on the reference M4 Max, with the same built desktop and CLI:
 
-| Path | Samples | Native show median | Unique input confirmed median |
-| --- | --- | --- | --- |
-| Current production opening path | 5 | 443.82 ms | 490.78 ms |
-| Target prepared before request | 5 | 38.31 ms | 84.64 ms |
-| Prepared target, native animation disabled | 10 | 40.76 ms | 90.15 ms |
+| Path                                       | Samples | Native show median | Unique input confirmed median |
+| ------------------------------------------ | ------- | ------------------ | ----------------------------- |
+| Current production opening path            | 5       | 443.82 ms          | 490.78 ms                     |
+| Target prepared before request             | 5       | 38.31 ms           | 84.64 ms                      |
+| Prepared target, native animation disabled | 10      | 40.76 ms           | 90.15 ms                      |
 
 All 29 first-show/input checks passed, including warmups. The ten native samples
 ranged from 32.85–75.72 ms for show and 80.73–144.70 ms for input confirmation.
@@ -194,11 +192,11 @@ PROBE_PRODUCT_PREPARED=1 PROBE_INTENT_LEAD_MS=200 PROBE_INPUT=1 node benchmarks/
 [Recorded production-path results](results-macos-product-2026-09-23.json), same
 M4 Max, 3,000 synthetic entries and existing CLI 0.93.3:
 
-| Intent timing | Ready hits | Samples | Show median | Input confirmed median |
-| --- | --- | --- | --- | --- |
-| Wait for prepared content | 100% | 10 | 32.50 ms | 82.46 ms |
-| Click immediately | 0% | 5 | 451.13 ms | 492.84 ms |
-| Click 200 ms after hover | 0% | 5 | 346.94 ms | 421.82 ms |
+| Intent timing             | Ready hits | Samples | Show median | Input confirmed median |
+| ------------------------- | ---------- | ------- | ----------- | ---------------------- |
+| Wait for prepared content | 100%       | 10      | 32.50 ms    | 82.46 ms               |
+| Click immediately         | 0%         | 5       | 451.13 ms   | 492.84 ms              |
+| Click 200 ms after hover  | 0%         | 5       | 346.94 ms   | 421.82 ms              |
 
 All 29 completed checks including warmups passed content, input and unchanged
 pre-click read-receipt checks. Ready-hit preparation costs 404.42 ms median before
@@ -217,7 +215,215 @@ were inspected; the input probe explicitly focuses the composer.
 
 The [implementation note](../../../../.agents/notes/implemented/bug-fix/2026-09-22-warm-window-content-readiness.md)
 owns cancellation, expiry and speculative-effect suppression. Shared data ownership
-and GPU preview remain in the linked architecture proposal.
+is evaluated below; GPU preview remains proposed.
+
+## Shared Session owner — 2026-10-04
+
+[Recorded samples and build hashes](results-shared-owner-2026-10-04.json) compare the
+same final desktop/CLI build on Apple M4 Max, macOS arm64, Electron 43.7.6, using
+3,000 synthetic history entries and fresh isolated profiles. The local shared owner
+is enabled by default. `LODY_SHARED_SESSION_OWNER=0` selects the former independent
+Session replicas for this isolated comparison; it is not a product rollback or
+cache migration command. The [architecture note](../../../../.agents/notes/implemented/architecture/2026-10-04-shared-desktop-session-owner.md)
+owns persistence, author boundaries and owner recovery.
+
+| Scenario                                              | Samples per variant | Independent / shared show median | Independent / shared input median |
+| ----------------------------------------------------- | ------------------- | -------------------------------- | --------------------------------- |
+| Immediate click, reversed-order repeat                | 10                  | 499.04 / 379.80 ms               | 621.70 / 468.52 ms                |
+| Target ready before click                             | 3                   | 95.53 / 83.14 ms                 | 177.25 / 162.29 ms                |
+| Retain successive auxiliary windows, one through five | 5                   | 488.26 / 395.41 ms               | 565.40 / 481.05 ms                |
+
+The ten-sample repeat ran shared first, then independent: show improved 23.9% and
+input confirmation 24.6%. An earlier five-sample pair ran in the opposite order and
+measured 499.01 / 414.58 ms show and 594.64 / 505.41 ms input, improvements of 16.9%
+and 15.0%. Both pairs are retained separately. These small sequential runs establish
+an improvement in this fixture, not a stable percentage across machines or a P95.
+Those ready hits excluded target preparation and the then-current 150 ms intent debounce.
+
+All 70 first-show/content/input checks passed, including 24 discarded warmups.
+Every completed probe preserved pre-click unread state and closed without a native
+unload confirmation. A [first-show capture](app-shared-owner-first-show.png) was
+visually checked. One forced owner-renderer crash recovered an acknowledged write
+and the source view in 1,128.88 ms. This does not prove that an unacknowledged command
+failed; uncertain writes remain unreplayed. The original user-reported close veto
+was not reproduced, and product guards now log their blocking category/count/state.
+
+The separate owner has a measurable cost. In the ten-sample one-at-a-time repeat,
+the median sum of process working sets increased from 1,605.71 to 2,077.71 MiB
+(+472 MiB). At the fifth simultaneously retained auxiliary window, it decreased
+from 4,321.73 to 4,006.95 MiB (7.3%). These samples include the source, warm pool,
+owner and application processes; shared pages may be counted more than once.
+They are neither physical RAM usage nor a steady-state memory budget. The median
+fixture-import-to-first-source-conversation interval across four fresh runs per
+variant increased from 1,193.16 to 1,975.36 ms. This includes synthetic import,
+flush/unload and initial cache migration, not whole-app startup. A DOM-free owner
+would need browser storage and transport dependencies extracted before it could
+remove the extra renderer cost.
+
+Run each variant sequentially, with no concurrent builds or tests:
+
+```sh
+LODY_SHARED_SESSION_OWNER=0 PROBE_PRODUCT_PREPARED=1 PROBE_INTENT_LEAD_MS=0 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 10 independent 1500
+LODY_SHARED_SESSION_OWNER=1 PROBE_PRODUCT_PREPARED=1 PROBE_INTENT_LEAD_MS=0 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 10 shared 1500
+```
+
+Omit `PROBE_INTENT_LEAD_MS` for an intentional prepared hit. Add
+`PROBE_KEEP_WINDOWS=1` to retain measured windows until the run ends, or
+`PROBE_OWNER_RECOVERY=1` to test acknowledged-write recovery after the timed samples
+(shared variant only). Repeat in reverse order. Runtime flags are inherited by
+the built desktop; the runner always uses temporary storage.
+
+The harness was corrected to use `app.setWindowWarmup`, and to release/unload its
+fixture-only store before timing. Two exploratory ready-hit attempts timed out
+without any preparation IPC. The final harness focuses the source and waits for
+metadata changes to settle before dispatching hover; both variants then completed.
+Those failures remain in the results with artifact paths. The exact cancellation
+trigger was not isolated. Probe setup changes are outside the click timer; no failed
+sample was retried inside a measured run. Physical keyboard/IME latency, display
+scanout, real prediction hit rate, cold application startup and other history sizes
+remain outside this evaluation.
+
+### Idle memory and retention
+
+The [resident-memory samples](results-resident-owner-2026-10-04.json) use the same
+3,000-entry fixture/build in fresh profiles. The current macOS probe requires Xcode
+command-line tools to compile a temporary counter reader; it is never bundled into
+the product. Run from components:
+
+```sh
+LODY_SHARED_SESSION_OWNER=1 PROBE_RESIDENT_MEMORY=1 node benchmarks/window-bootstrap/run-app.mjs 1 resident-shared 1500
+LODY_SHARED_SESSION_OWNER=0 PROBE_RESIDENT_MEMORY=1 node benchmarks/window-bootstrap/run-app.mjs 1 resident-independent 1500
+```
+
+One sequential run per variant completed all eight stages and 66 OS samples in
+total. The table reports each stage's last sample, in MiB:
+
+| State                                      | Observation after readiness | Independent |   Shared |
+| ------------------------------------------ | --------------------------- | ----------: | -------: |
+| Source only, warmup disabled               | 45 s                        |      616.15 |   742.37 |
+| Source + neutral spare                     | 10 s                        |      797.37 |   924.79 |
+| Source + hidden prepared Session           | 45 s                        |      859.20 |   969.42 |
+| Prepared window destroyed, warmup disabled | 10 s                        |      596.15 |   733.65 |
+| Source + one visible auxiliary             | 10 s                        |    1,040.43 | 1,140.73 |
+| Source + three visible auxiliaries         | 10 s after third is ready   |    1,982.22 | 1,941.05 |
+| Source + five visible auxiliaries          | 10 s after fifth is ready   |    2,887.14 | 2,574.08 |
+| All auxiliaries closed, source remains     | 30 s                        |      606.90 |   753.93 |
+
+The shared owner's source-only cost is +126.22 MiB in this idle comparison. Its
+data renderer accounts for about 131–147 MiB at the final stage samples. A prepared renderer
+settles to 203.71 MiB, versus 229.89 MiB with independent data ownership; the rest
+of the app includes the source, main, GPU and utility processes. In the shared run,
+holding prepared content adds 227.05 MiB over initial source-only residency, or
+235.77 MiB over the sample after destroying that prepared window. The latter also
+releases about 32 MiB from the GPU. This supports an initial **250–300 MiB extra
+budget for one hot view** on this fixture, not an enforced product cap or a claim
+about arbitrary histories. Expanding to several hidden renderers is not justified
+by this measurement; a single prepared slot remains the current product behavior.
+
+After five windows close, shared residency returns to 753.93 MiB, 11.56 MiB above
+the initial 742.37 MiB. All auxiliary renderer processes are gone and no native
+close confirmation occurred. This bounds retention in this run; it does not prove
+leak freedom. The neutral spare is only ten seconds old, so the 44.63 MiB difference
+between neutral and prepared totals is **not** a reliable pure content cost: GC and
+process ages differ. Five visible windows also have different ages, and their final
+sample is not a fully settled five-window memory budget.
+
+This mode observes source-only memory for 45 seconds, a neutral spare for 10 seconds,
+and hidden prepared content for 45 seconds. It renews production preparation with
+fresh request IDs so the normal 30-second expiry does not destroy the measured view.
+It then disables preparation, opens one/three/five visible auxiliary windows with
+the pool disabled, and samples for 30 seconds after closing them all. Samples wait
+for actual UI/close signals before starting their observation intervals. No GC is
+forced; debugger heap inspection runs only after the final OS sample of each stage.
+The five auxiliaries display the **same** Session, so this does not measure five
+independent Session documents or a multi-entry hidden-view cache. The source remains
+open. Released stores also have a ten-minute cache grace period in
+[the runtime](../../src/providers/create-workspace-runtime.ts); this run does not
+exercise eviction of multiple distinct Session documents.
+
+The primary counter is macOS kernel physical footprint, summed over the Electron
+processes returned by `app.getAppMetrics`. The earlier resident comparison read
+`footprint`'s `auxiliary.phys_footprint`; the current probe uses a temporary native
+helper calling `proc_pid_rusage` / `RUSAGE_INFO_V4` / `ri_phys_footprint`, avoiding
+VM-region scans during teardown. It includes main, GPU,
+utility and renderer processes; external CLI/daemon processes are excluded. Each
+PID is attributed to the source, owner, neutral spare, prepared view or auxiliary.
+Electron [working sets](https://www.electronjs.org/docs/latest/api/structures/memory-info)
+are retained separately, and CDP heap counters are a diagnostic subset, not total
+process memory. The earlier +472 MiB value was a working-set difference at input
+confirmation, not an idle-residency measurement; the counters must not be mixed.
+
+The initial short observation revealed substantial natural reclamation between
+10 and 30 seconds. It also caught a renderer exiting between PID enumeration and
+OS sampling. The final probe waits for renderer exit after window destruction,
+records any PID that exits during sampling, and rejects other counter failures.
+Exploratory failures remain recorded. These are
+bounded idle observations, not an hours-long leak test or a population memory budget.
+
+## Single-slot intent and retargeting — 2026-10-04
+
+The [recorded comparison](results-single-slot-2026-10-04.json) keeps shared Session
+ownership enabled in every run. The before build restores only the previous intent,
+prepared-window and warm-service implementations; dependencies and bundled CLI are
+identical. The final build/source was restored after that comparison. Source/build
+hashes and all warmup/measured samples are retained.
+
+Ordinary hover now waits 40 ms; Command/Control, middle-button down and keyboard
+focus prepare immediately. One hidden renderer can navigate to a new target within
+the same workspace, with a fresh preparation generation and revoked readiness.
+A mismatched claim uses the same path. Pointer departure retains a bounded eight-second
+grace period, allowing a quick return. The pool remains one optional slot.
+
+| Scenario                           | Samples per variant | Before / after ready hits | Before / after show median | Before / after input median |
+| ---------------------------------- | ------------------- | ------------------------- | -------------------------- | --------------------------- |
+| Ordinary hover, click after 350 ms | 5                   | 0/5 / 5/5                 | 101.41 / 24.76 ms          | 188.74 / 97.07 ms           |
+| Command-hover, click after 300 ms  | 5                   | 0/5 / 5/5                 | 102.24 / 33.26 ms          | 187.84 / 96.49 ms           |
+| Ordinary hover, click after 450 ms | 5                   | 5/5 / 5/5                 | 40.63 / 30.64 ms           | 100.61 / 99.14 ms           |
+
+The shorter-lead comparisons ran after first, then before. The 450 ms pair ran in
+the opposite order and already hit in both builds; it does not establish a large
+presentation-only improvement. Three-sample final-build probes also measured
+338.73 / 402.29 ms show/input with zero lead, 36.13 / 100.10 ms when retargeting a
+previously prepared neighboring Session with 450 ms lead, and 46.26 / 116.47 ms
+after leaving a ready row for three seconds before clicking. Retarget checks keep
+the same renderer PID and require the clicked Session's visible stream marker;
+generation tests reject stale readiness. The return check verifies that the
+prepared renderer was not destroyed during the grace period.
+An additional zero-lead retarget probe stayed in the same renderer and measured
+218.24 / 274.63 ms, with 0/3 prepared hits: the previous Session's readiness did
+not count as readiness for the clicked target. All 72 first-show/content/input
+checks passed across completed latency runs, including 30 excluded warmups, with
+zero close confirmations. The clicked Session was already open in the source;
+these results do not measure first acquisition of an arbitrary uncached document.
+
+Run from components with a built desktop and staged CLI:
+
+```sh
+LODY_SHARED_SESSION_OWNER=1 PROBE_PRODUCT_PREPARED=1 PROBE_INTENT_LEAD_MS=350 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 5 intent 1500
+LODY_SHARED_SESSION_OWNER=1 PROBE_PRODUCT_PREPARED=1 PROBE_INTENT_META=1 PROBE_INTENT_LEAD_MS=300 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 5 command-intent 1500
+LODY_SHARED_SESSION_OWNER=1 PROBE_PRODUCT_PREPARED=1 PROBE_RETARGET=1 PROBE_INTENT_LEAD_MS=450 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 3 retarget 1500
+LODY_SHARED_SESSION_OWNER=1 PROBE_PRODUCT_PREPARED=1 PROBE_RETURN_MS=3000 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 3 return 1500
+```
+
+These small sequential samples use fixed synthetic intent timing, not physical
+pointer trajectories or measured real-user prediction rates. Immediate unprepared
+clicks still wait for rendering; the result is not universal instant opening or a
+P95 claim. The existing developer warmup option must be enabled (the probe enables
+it through production IPC). No default or persistence setting changed. Released
+Session stores retain their existing ten-minute cache grace period, so one renderer
+is not an enforced memory-byte ceiling across arbitrary distinct Sessions.
+
+The final-build resident probe completed all eight stages and 33 OS samples. After
+45 seconds, source-only footprint was 811.91 MiB and source plus prepared content
+was 1,036.65 MiB: +224.74 MiB. The prepared renderer itself used 203.53 MiB. After
+closing five auxiliaries, footprint returned to 818.52 MiB within 30 seconds, with
+no remaining auxiliary renderer and no close confirmation. This supports retaining
+the initial 250–300 MiB extra budget for one hot view on this fixture. It does not
+establish the budget for repeated distinct-session retargeting or a multi-slot pool.
+Two earlier final-build memory attempts failed in the system `footprint` utility's
+VM-region traversal during teardown, even after waiting for renderer exit. Their
+artifact paths are retained as exclusions. The final counter reader uses the kernel
+`proc_pid_rusage` footprint counter directly and does not traverse the address map.
 
 ## Earlier regression
 

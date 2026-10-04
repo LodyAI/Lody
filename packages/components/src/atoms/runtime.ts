@@ -108,7 +108,7 @@ export type SessionDocStore = {
   readonly roomId: string;
   /** Immutable history ownership selected from the session catalog. */
   readonly historyBackend: SessionHistoryBackendKind;
-  readonly doc: LoroDoc;
+  readonly doc?: LoroDoc;
   readonly firstSynced: Promise<void>;
   acquireSync: () => () => void;
   getSyncState: () => RoomSyncState;
@@ -120,6 +120,12 @@ export type SessionDocStore = {
   readonly history: ConversationView;
   /** CRDT-neutral history reads, commands and stored-copy capabilities. */
   readonly sessionData: SessionData;
+  readonly queueCommands?: {
+    enqueue(item: Record<string, unknown>): Promise<void>;
+    remove(id: string): Promise<void>;
+    update(id: string, patch: Record<string, unknown>): Promise<void>;
+    reorder(ids: readonly string[]): Promise<void>;
+  };
   dispose: () => void;
   /**
    * Resolves when all pending local CRDT changes have been flushed to the server.
@@ -196,10 +202,9 @@ export type WorkspaceRuntime = {
   /**
    * The authored-write seam. Every durable repo mutation the renderer performs
    * goes through this instead of calling `repo.*` / `sessionStore.setState`
-   * directly. Web authors directly. Electron selects per target: remote targets
-   * author directly into the cloud plane, while the local target forwards an
-   * intent to the CLI, which is its sole author. See
-   * `providers/workspace-writer.ts`.
+   * directly. Local Electron shares one UI Session author in the data renderer;
+   * other compositions author in their own runtime. The CLI remains the agent
+   * author. See `providers/workspace-writer.ts`.
    */
   readonly writer: WorkspaceWriter;
   /** Resolve and register immutable session ownership before opening target rooms. */
@@ -234,7 +239,10 @@ export type WorkspaceRuntime = {
     fn: (store: SessionDocStore) => Promise<T> | T
   ) => Promise<T>;
   releaseSessionStore: (sessionId: SessionId) => Promise<void>;
-  acquireSessionStore: (sessionId: SessionId) => Promise<SessionDocStore>;
+  acquireSessionStore: (
+    sessionId: SessionId,
+    bootstrapSnapshot?: Uint8Array
+  ) => Promise<SessionDocStore>;
   /**
    * The session's store if it is already open, synchronously, without taking a
    * reference. Lets a newly mounted conversation render a cached session in

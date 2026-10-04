@@ -159,7 +159,8 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async enqueueSessionMessage(sessionId, item) {
-      await withSessionStore(sessionId, (store) => {
+      const forwarded = await withSessionStore(sessionId, (store) => {
+        if (store.queueCommands) return store.queueCommands.enqueue(item).then(() => true);
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const userTurnId = item.userTurnId;
@@ -176,22 +177,26 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
             } as MessageQueueItem,
           ];
         });
+        return false;
       });
-      await bumpMessageQueueWatermark(sessionId);
+      if (!forwarded) await bumpMessageQueueWatermark(sessionId);
     },
 
     async removeSessionMessage(sessionId, itemId) {
-      await withSessionStore(sessionId, (store) => {
+      const forwarded = await withSessionStore(sessionId, (store) => {
+        if (store.queueCommands) return store.queueCommands.remove(itemId).then(() => true);
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.filter((item) => item.$cid !== itemId);
         });
+        return false;
       });
-      await bumpMessageQueueWatermark(sessionId);
+      if (!forwarded) await bumpMessageQueueWatermark(sessionId);
     },
 
     async updateSessionMessage(sessionId, itemId, patch) {
-      await withSessionStore(sessionId, (store) => {
+      const forwarded = await withSessionStore(sessionId, (store) => {
+        if (store.queueCommands) return store.queueCommands.update(itemId, patch).then(() => true);
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           draft.mq = mq.map((item) =>
@@ -200,12 +205,15 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
               : item
           );
         });
+        return false;
       });
-      await bumpMessageQueueWatermark(sessionId);
+      if (!forwarded) await bumpMessageQueueWatermark(sessionId);
     },
 
     async reorderSessionMessages(sessionId, orderedItemIds) {
-      await withSessionStore(sessionId, (store) => {
+      const forwarded = await withSessionStore(sessionId, (store) => {
+        if (store.queueCommands)
+          return store.queueCommands.reorder(orderedItemIds).then(() => true);
         store.setState((draft: SessionDocDraft) => {
           const mq = (draft.mq ?? []) as MessageQueueItem[];
           const byCid = new Map(mq.map((item) => [item.$cid, item] as const));
@@ -224,8 +232,9 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
           }
           draft.mq = ordered;
         });
+        return false;
       });
-      await bumpMessageQueueWatermark(sessionId);
+      if (!forwarded) await bumpMessageQueueWatermark(sessionId);
     },
 
     async mutatePreviewVisualComments(sessionId, mutation) {

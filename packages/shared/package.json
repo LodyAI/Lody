@@ -56,6 +56,10 @@
       "types": "./src/visual-annotation-inspector-global.ts",
       "import": "./src/visual-annotation-inspector-global.ts"
     },
+    "./session-owner-protocol": {
+      "types": "./src/session-owner-protocol.ts",
+      "import": "./src/session-owner-protocol.ts"
+    },
     "./electron-ipc": {
       "types": "./src/electron-ipc.ts",
       "import": "./src/electron-ipc.ts"

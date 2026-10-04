@@ -7,7 +7,7 @@ import {
 
 /** One target-bound spare. Until claimed it retains hidden-spare lifetime. */
 export class PreparedWindow {
-  readonly binding: PreparedWindowTarget
+  binding: PreparedWindowTarget
   ready = false
   get isClaimed(): boolean {
     return this.claimed
@@ -43,6 +43,23 @@ export class PreparedWindow {
     clearTimeout(this.expiry)
     this.expiry = setTimeout(() => this.dispose(), 30_000)
     this.expiry.unref?.()
+  }
+
+  /** Reuse the hidden renderer; old target acknowledgements cannot authorize show. */
+  retarget(target: ElectronWindowTarget, requestId: string): boolean {
+    if (
+      this.claimed ||
+      this.cancelled ||
+      this.window.isDestroyed() ||
+      target.workspace !== this.binding.workspace ||
+      !target.sessionId
+    )
+      return false
+    this.ready = false
+    this.binding = { ...target, preparationId: crypto.randomUUID() }
+    this.renew(requestId)
+    this.start()
+    return true
   }
 
   fail(): void {
@@ -101,7 +118,7 @@ export class PreparedWindow {
   cancel(sourceId: number, requestId: string): void {
     if (this.claimed || this.sourceId !== sourceId || this.requestId !== requestId) return
     clearTimeout(this.expiry)
-    this.expiry = setTimeout(() => this.dispose(), 2000)
+    this.expiry = setTimeout(() => this.dispose(), 8000)
     this.expiry.unref?.()
   }
 

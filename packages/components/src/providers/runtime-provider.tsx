@@ -1,3 +1,4 @@
+import { getElectronSessionOwnerTransport } from './electron-session-owner';
 import { SessionPendingSendsHost } from '../components/chat/session-pending-sends-host';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
@@ -271,7 +272,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           workspaceIdSource,
           eagerSyncSurface,
         });
+        const sessionOwner =
+          isLocalPlatform && isElectronRenderer()
+            ? await getElectronSessionOwnerTransport()
+            : undefined;
+        if (disposed) return;
         workspaceRuntime = await createWorkspaceRuntime({
+          ...(sessionOwner ? { sessionOwner } : {}),
           accountId,
           workspaceSlug,
           workspaceId: effectiveWorkspaceId,

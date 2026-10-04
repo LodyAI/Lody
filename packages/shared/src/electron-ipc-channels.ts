@@ -1,3 +1,4 @@
+import type { SessionOwnerEvent, SessionOwnerMessage } from './session-owner-protocol';
 import type {
   LocalLoroDataPlaneClientMessage,
   LocalLoroDataPlaneServerMessage,
@@ -18,6 +19,11 @@ import type {
 } from './electron-ipc';
 
 export type IpcPushMap = {
+  'sessionOwner.event': SessionOwnerEvent;
+  'sessionOwner.request': Omit<SessionOwnerMessage, 'request'> & {
+    request: SessionOwnerMessage['request'] | 'shutdown';
+  };
+  'sessionOwner.releaseClient': string;
   'terminal.event':
     | TerminalDataEvent
     | TerminalExitEvent
@@ -58,6 +64,9 @@ export type IpcSendMap = {
 };
 
 export const IPC_PUSH_CHANNELS = {
+  sessionOwnerEvent: 'sessionOwner.event',
+  sessionOwnerRequest: 'sessionOwner.request',
+  sessionOwnerReleaseClient: 'sessionOwner.releaseClient',
   terminalEvent: 'terminal.event',
   loroEvent: 'loro.event',
   loroStatus: 'loro.status',

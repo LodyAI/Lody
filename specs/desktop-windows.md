@@ -54,13 +54,30 @@ The optional developer window warm-up prepares the shell and, in local mode, the
 implicit workspace runtime, Repo, and metadata sync before a target is selected.
 A matching claim retains that runtime, including initialization still in flight.
 The neutral route does not mount target Session UI or publish a workspace route.
-Local-only windows reuse same-workspace peer metadata and already loaded Session
-snapshots without sharing persistence or sync cursors. Snapshot import merges local
-edits; authoritative synchronization continues independently.
+Local-only windows share one application-owned Session data renderer. A second view
+reads an indexed projection and a bounded tail without importing another Session
+document. The data renderer retains the UI author, existing history validation and
+stored-copy provenance; the CLI remains the agent author. Each product window keeps
+its own metadata Repo, sync cursors, draft, editor and attachment preparation.
+
+Accepted Session history/queue commands await document persistence. Closing one
+view releases its leases without closing other views or discarding acknowledged
+writes. Application quit drains the owner before stopping transports. Owner failure
+rejects pending commands with an uncertain outcome, never automatically retries them,
+and reconnects read subscriptions with a fresh incarnation. Old per-window snapshots
+merge into the owner without replacing unsent edits or deleting the old cache.
+Loading failures must remain observable. Shared data does not waive unload protection
+for window-owned pending attachments and unsaved editors.
 On macOS local mode, the same opt-in spare may become a target-specific prepared
 Session after row hover/keyboard focus or opening a Session menu. Main bounds this
-to one hidden view, expires it, and cancels it when its source closes or the intent
-changes. Before presentation, this view may render and synchronize but must not
+to one hidden view and destroys it on source close or expiry. Brief pointer departure
+may retain the prepared target for a bounded grace period. Explicit modifier-key,
+middle-button or keyboard-focus intent starts preparation immediately; ordinary
+hover is briefly debounced and touch movement does not speculate. Changing target
+within the same workspace reuses the hidden renderer, resets readiness with a fresh
+generation, and waits for the new target; a claim for another target may use this
+same path. It never enlarges the pool or reuses another workspace's content.
+Before presentation, this view may render and synchronize but must not
 mark read, claim workspace notification ownership, autofocus, or refresh external
 history as an opening side effect. Preparation leaves the source view unchanged.
 A matching claim presents the existing renderer without navigation; only actual
