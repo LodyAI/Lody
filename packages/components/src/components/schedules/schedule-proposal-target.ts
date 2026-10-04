@@ -108,6 +108,7 @@ export function resolveScheduleProposalTarget(args: {
 
   const configOptionValues = scheduleOptionValues(runConfig.configOptionValues);
   const agent: AgentRunRef = {
+    memory: role?.runConfig.memory,
     agentConfigId: agentConfig.id as AgentConfigId,
     ...(runConfig.modeId ? { modeId: runConfig.modeId } : {}),
     ...(runConfig.modelId ? { modelId: runConfig.modelId } : {}),

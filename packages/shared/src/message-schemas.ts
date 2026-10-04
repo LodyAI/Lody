@@ -1,3 +1,4 @@
+import { MemoryBindingSchema } from './memory-provider';
 import { z } from 'zod';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
 import {
@@ -379,6 +380,7 @@ export const ACPTurnConfigSchema = z
     modeId: z.string().optional(),
     modelId: z.string().optional(),
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
+    memory: MemoryBindingSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
     agentRoleRevision: z.number().int().nonnegative().optional(),
@@ -475,6 +477,7 @@ export const normalizeSessionTurnInputConfig = (
     normalized.configOptionValues = configOptionValues;
   }
 
+  if (record.memory !== undefined) normalized.memory = MemoryBindingSchema.parse(record.memory);
   const mcpServerIds = normalizeMcpServerIdSelection(record.mcpServerIds);
   if (mcpServerIds) {
     normalized.mcpServerIds = mcpServerIds;
@@ -931,6 +934,7 @@ export const SessionPreparationRunConfigSchema = z
         Object.entries(values).filter(([configId]) => !isSensitiveAcpConfigOptionId(configId))
       )
     ).optional(),
+    memory: MemoryBindingSchema.optional(),
     mcpServerIds: z
       .array(z.string())
       .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])

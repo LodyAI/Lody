@@ -1,3 +1,4 @@
+import { MemoryBindingSchema } from '@lody/shared';
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
 import { Effect, Fiber } from 'effect';
 import {
@@ -2003,6 +2004,7 @@ export class SessionDispatchWatcher {
         modeId: entry.inputConfig?.modeId,
         modelId: entry.inputConfig?.modelId,
         configOptionValues: entry.inputConfig?.configOptionValues,
+        memory: entry.inputConfig?.memory,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
@@ -2046,6 +2048,7 @@ export class SessionDispatchWatcher {
         modeId: entry.inputConfig?.modeId,
         modelId: entry.inputConfig?.modelId,
         configOptionValues: entry.inputConfig?.configOptionValues,
+        memory: entry.inputConfig?.memory,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
@@ -2105,6 +2108,10 @@ export class SessionDispatchWatcher {
       configOptionValues: isConfigOptionValueRecord(queuedItem.acpSessionConfig?.configOptionValues)
         ? queuedItem.acpSessionConfig.configOptionValues
         : undefined,
+      memory:
+        queuedItem.acpSessionConfig?.memory === undefined
+          ? undefined
+          : MemoryBindingSchema.parse(queuedItem.acpSessionConfig.memory),
       mcpServerIds: normalizeMcpServerIdSelection(queuedItem.acpSessionConfig?.mcpServerIds) ?? [],
       agentRoleId: queuedItem.acpSessionConfig?.agentRoleId,
       agentRoleRevision: queuedItem.acpSessionConfig?.agentRoleRevision,

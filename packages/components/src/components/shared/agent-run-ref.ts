@@ -6,6 +6,7 @@ import type { AgentConfigId } from '@lody/shared';
  * follows its agent when the agent moves.
  */
 export type AgentRunRef = {
+  memory?: import('@lody/shared').MemoryBinding;
   agentConfigId: AgentConfigId;
   modeId?: string;
   modelId?: string;

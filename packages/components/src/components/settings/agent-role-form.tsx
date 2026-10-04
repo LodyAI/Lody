@@ -1,4 +1,4 @@
-import { useId, type FormEvent } from 'react';
+import { useId, type FormEvent, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -30,7 +30,7 @@ import { Textarea } from '@lody/ui/textarea';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { EmojiField } from './emoji-field';
-import { Field, FormMessage, Section } from './form-primitives';
+import { Field, FormMessage, Section, CollapsibleSection } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 
 const styles = stylex.create({
@@ -78,6 +78,7 @@ export type AgentRoleFormProps = {
   onSubmit: () => void;
   onCancel: () => void;
   className?: string;
+  memoryPicker?: ReactNode;
 };
 
 /**
@@ -106,6 +107,7 @@ export function AgentRoleForm({
   onSubmit,
   onCancel,
   className,
+  memoryPicker,
 }: AgentRoleFormProps) {
   const { t } = useTranslation();
   const fieldId = useId();
@@ -198,7 +200,11 @@ export function AgentRoleForm({
                   // Changing machine clears the config: an agent config belongs
                   // to exactly one machine, and carrying the old id over is how
                   // a Role would silently point at nothing.
-                  update({ machineId: machineId as MachineId, agentConfigId: null });
+                  update({
+                    machineId: machineId as MachineId,
+                    agentConfigId: null,
+                    memory: undefined,
+                  });
                 }}
               >
                 <Select.Trigger
@@ -331,13 +337,9 @@ export function AgentRoleForm({
           </Section>
         ) : null}
 
-        {/* Stated rather than left to be discovered: a Role looks like a
-            standing assistant, so its owner has to be told the sessions it
-            creates keep nothing between them. */}
-        <div {...stylex.props(surface.formBlock)}>
-          <p {...stylex.props(catalog.blockTitle)}>{t('settings.agentRoles.form.memory')}</p>
-          <p {...stylex.props(catalog.blockHint)}>{t('settings.agentRoles.form.memoryHint')}</p>
-        </div>
+        <CollapsibleSection title={t('settings.agentRoles.form.memory')}>
+          {memoryPicker ?? <p>{t('settings.memory.noMachine')}</p>}
+        </CollapsibleSection>
 
         <div {...stylex.props(surface.formBlock, catalog.blockRow)}>
           <div {...stylex.props(catalog.blockText)}>

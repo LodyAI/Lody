@@ -3096,6 +3096,7 @@ function WorkspaceChatLanding({
         mcpServerIds: mcpSelection.selectedIds,
         agentRoleId: activeAgentRole?.id ?? null,
         agentRoleRevision: activeAgentRole?.revision,
+        memory: activeAgentRole?.runConfig.memory,
       });
       const pendingHistoryEntry = buildDraftUserHistoryEntry(
         {
@@ -4301,6 +4302,7 @@ function WorkspaceChatLanding({
   const preparationRunConfig = useMemo(
     () =>
       buildSessionPreparationRunConfig({
+        memory: activeAgentRole?.runConfig.memory,
         modeId: modeOptions.length > 0 ? selectedModeId : null,
         modelId: modelOptions.length > 0 ? selectedModelId : null,
         configOptionValues: dispatchConfigOptionValues,
@@ -4309,6 +4311,7 @@ function WorkspaceChatLanding({
     [
       dispatchConfigOptionValues,
       mcpSelection.selectedIds,
+      activeAgentRole?.runConfig.memory,
       modeOptions.length,
       modelOptions.length,
       selectedModeId,

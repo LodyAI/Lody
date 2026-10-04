@@ -1,3 +1,4 @@
+import type { MemoryBinding } from './memory-provider';
 import type { AcpModelControls } from './acp-model-capabilities';
 import {
   AvailableCommand,
@@ -1887,6 +1888,7 @@ export type IssuePRMention = {
 };
 
 export type ACPTurnConfig = {
+  memory?: MemoryBinding;
   prompt: string;
   inputBlocks?: SessionInputBlock[];
   cliType: AgentConfigCliType;

@@ -1,3 +1,4 @@
+import { handleMemoryProviderRequest } from './memory-providers';
 import { IosSimulatorService } from '@/ios-simulator/service';
 import { listMcpTools } from '@/mcp/list-mcp-tools';
 import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
@@ -3364,6 +3365,7 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             agentType,
           }),
+        memoryProvider: handleMemoryProviderRequest,
         listMachinePiExtensions: async ({ configId }) =>
           await this.executionService.listMachinePiExtensions(configId),
         installMachineAcpBinary: async ({ agentType, onAcpBinaryProgress }) =>
@@ -6693,6 +6695,8 @@ export class MessageHandler {
       }
       case 'session/terminate':
         return await this.terminateAcpSession(request.params.sessionId as SessionId);
+      case 'machine/memory':
+        return await handleMemoryProviderRequest(request.params);
       case 'machine/pi-extensions':
         return await this.executionService.listMachinePiExtensions(
           request.params.configId as AgentConfigId | undefined

@@ -37,6 +37,7 @@ export type TurnIndexInputConfig = Pick<
   | 'modelId'
   | 'cliType'
   | 'agentType'
+  | 'memory'
   | 'mcpServerIds'
   | 'configOptionValues'
 >;

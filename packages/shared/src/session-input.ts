@@ -1,3 +1,4 @@
+import type { MemoryBinding } from './memory-provider';
 import type {
   ACPSessionConfig,
   AcpConfigOptionValue,
@@ -60,6 +61,7 @@ export type SessionConversationConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  memory?: MemoryBinding;
   mcpServerIds?: McpServerId[];
   /** Null is an explicit None; undefined means the selected Turn predates this field. */
   agentRoleId?: AgentRoleId | null;
@@ -168,6 +170,7 @@ export const resolveSessionConversationConfig = (
       ...(inputConfig.configOptionValues && Object.keys(inputConfig.configOptionValues).length > 0
         ? { configOptionValues: inputConfig.configOptionValues }
         : {}),
+      ...(inputConfig.memory ? { memory: inputConfig.memory } : {}),
       ...(inputConfig.mcpServerIds ? { mcpServerIds: inputConfig.mcpServerIds } : {}),
       ...(inputConfig.agentRoleId !== undefined ? { agentRoleId: inputConfig.agentRoleId } : {}),
       ...(typeof inputConfig.agentRoleId === 'string' && inputConfig.agentRoleRevision !== undefined
@@ -623,6 +626,7 @@ export const buildSessionTurnInputConfig = (args: {
   modeId?: string | null;
   modelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
+  memory?: MemoryBinding;
   mcpServerIds?: readonly McpServerId[] | null;
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
@@ -643,6 +647,7 @@ export const buildSessionTurnInputConfig = (args: {
       args.configOptionValues && Object.keys(args.configOptionValues).length > 0
         ? args.configOptionValues
         : undefined,
+    memory: args.memory,
     mcpServerIds: args.mcpServerIds ? [...args.mcpServerIds] : undefined,
     ...(args.agentRoleId !== undefined ? { agentRoleId: args.agentRoleId } : {}),
     ...(typeof args.agentRoleId === 'string' && args.agentRoleRevision !== undefined

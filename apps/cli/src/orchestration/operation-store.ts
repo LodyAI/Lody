@@ -1,3 +1,4 @@
+import { MemoryBindingSchema } from '@lody/shared';
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
@@ -72,6 +73,7 @@ const FrozenConfigSchema = z
             modeId: z.string().optional(),
             modelId: z.string().optional(),
             configOptionValues: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
+            memory: MemoryBindingSchema.optional(),
             inheritSessionDefaults: z.literal(false).optional(),
           })
           // Older stored configs may still carry `taskToolsEnabled`; drop it.

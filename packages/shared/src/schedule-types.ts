@@ -1,3 +1,4 @@
+import { MemoryBindingSchema } from './memory-provider';
 import { z } from 'zod';
 
 import { ProjectRefSchema } from './message-schemas';
@@ -66,6 +67,7 @@ export const DEFAULT_SCHEDULE_DESTINATION: ScheduleDestination = { kind: 'new_se
 
 export const ScheduleAgentSchema = z
   .object({
+    memory: MemoryBindingSchema.optional(),
     agentConfigId: z.string().min(1),
     modeId: z.string().min(1).optional(),
     modelId: z.string().min(1).optional(),

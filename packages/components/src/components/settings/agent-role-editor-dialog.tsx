@@ -1,3 +1,4 @@
+import { RoleMemoryPicker } from './memory-setting';
 import { useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -231,6 +232,17 @@ export function AgentRoleEditorDialog({
         {editor && editorValue ? (
           <AgentRoleForm
             value={editorValue}
+            memoryPicker={
+              editorValue.machineId ? (
+                <RoleMemoryPicker
+                  machineId={editorValue.machineId}
+                  value={editorValue.memory}
+                  onChange={(memory) => {
+                    if (openEditor) onChange({ ...openEditor, value: { ...editorValue, memory } });
+                  }}
+                />
+              ) : undefined
+            }
             // A panel fading out is not edited: a change there would reopen it.
             onChange={(value) => {
               if (openEditor) onChange({ ...openEditor, value });

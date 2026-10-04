@@ -269,3 +269,8 @@ Peek and claim are synchronous published-resource snapshots. A prepared resource
 open target-machine Flock to synchronously resolve launch config, but dispatch and claim
 rescan the current row. Durable creation claims the marker only when repo, source, and base
 branch target identity match, runs setup, then permits the first prompt.
+
+Memory identity references travel with turn configuration. `Session.createAgent` maps
+them through `../lib/memory-providers.ts` at spawn; the execution service restarts a
+resident ACP process when the next turn changes identity. See the
+[memory Spec](../../../../specs/agent-role-memory.md).

@@ -1,3 +1,4 @@
+import { MemorySetting } from './memory-setting';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Bug, X } from 'lucide-react';
@@ -571,6 +572,8 @@ function SettingsTabContent({ tabId }: { tabId: SettingsTabId }) {
           onSelectedMachineChange={setSelectedMachineId}
         />
       );
+    case 'memory':
+      return <MemorySetting />;
     case 'agent-roles':
       return <AgentRolesSetting />;
     case 'prompt-shortcuts':

@@ -4019,7 +4019,15 @@ describe('SessionExecutionService', () => {
     expect(textBlocks[0]?.text).toContain('inspect the attached trace');
   });
 
-  it('restores a missing session for chat using stored ACP session id', async () => {
+  it.each([
+    { scenario: 'missing process', live: false, memory: undefined },
+    {
+      scenario: 'changed memory identity',
+      live: true,
+      memory: { providerId: 'nowledge-mem', memoryId: 'reviewer' },
+    },
+    { scenario: 'unlinked memory identity', live: true, memory: undefined },
+  ])('restores ACP with frozen configuration after $scenario', async ({ live, memory }) => {
     const codexAuth = {
       mode: 'chatgpt' as const,
       profileId: '60a84cb4-50fd-4590-9f69-6055ffef0c57',
@@ -4064,10 +4072,27 @@ describe('SessionExecutionService', () => {
       applyExecutionPlaneLimits: vi.fn(async () => {}),
     };
 
+    let retired = !live;
+    const oldSession = {
+      ...restoredSession,
+      getMemoryBinding: () => ({ providerId: 'nowledge-mem', memoryId: 'previous' }),
+      agentClient: {
+        ...agentClient,
+        prompt: async () => {
+          throw new Error('Old memory process must not receive the new prompt');
+        },
+      },
+    };
     const sessionManager = {
-      getSession: vi.fn(() => null),
+      getSession: vi.fn(() => (retired ? null : oldSession)),
+      retireSessionForReconfiguration: async (session: unknown) => {
+        expect(session).toBe(oldSession);
+        retired = true;
+      },
       getPendingSession: vi.fn(() => null),
       createSession: vi.fn(async (config, agentStart) => {
+        expect(retired).toBe(true);
+        expect(config.memory).toEqual(memory);
         expect(config.sessionId).toBe('session-1');
         expect(config.resume).toBe(true);
         expect(config.githubRepo).toBe('owner/repo');
@@ -4105,7 +4130,7 @@ describe('SessionExecutionService', () => {
       machineId: 'machine-1',
       workspaceId: 'workspace-1' as WorkspaceId,
       project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
-      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+      acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex', memory },
       userTurnId: 'turn-user-1',
       userId: 'user-1',
       userName: 'User',

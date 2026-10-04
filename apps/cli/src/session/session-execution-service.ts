@@ -4816,6 +4816,7 @@ export class SessionExecutionService {
           agentCliType: acpSessionConfig.cliType,
           agentType: acpSessionConfig.agentType,
           configOptionValues: acpSessionConfig.configOptionValues,
+          memory: acpSessionConfig.memory,
           mcpServerIds: acpSessionConfig.mcpServerIds ?? [],
           customAcp: resumeCustomAcp,
           runtimeOverrides: resumeRuntimeOverrides,
@@ -5460,6 +5461,19 @@ export class SessionExecutionService {
           let readySession = session;
           if (
             readySession &&
+            JSON.stringify(readySession.getMemoryBinding?.() ?? null) !==
+              JSON.stringify(acpSessionConfig.memory ?? null)
+          ) {
+            yield* ctx.abortIfCancelled();
+            const previousSession = readySession;
+            yield* self.tryPromise(() =>
+              self.deps.sessionManager.retireSessionForReconfiguration(previousSession)
+            );
+            readySession = null;
+            session = null;
+          }
+          if (
+            readySession &&
             (!readySession.agentClient?.isCreated() || !readySession.acpSessionId)
           ) {
             const pending = self.deps.sessionManager.getPendingSession(sessionId);
@@ -5645,6 +5659,7 @@ export class SessionExecutionService {
       agentCliType: acpSessionConfig.cliType,
       agentType: acpSessionConfig.agentType,
       configOptionValues: acpSessionConfig.configOptionValues,
+      memory: acpSessionConfig.memory,
       mcpServerIds: acpSessionConfig.mcpServerIds ?? [],
       agentConfigId: existingMeta?.agentConfigId,
       customAcp: acpSessionConfig.customAcp,

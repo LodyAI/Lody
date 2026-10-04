@@ -1912,6 +1912,7 @@ export const SessionChatInputArea = memo(
             ? {
                 agentRoleId: selectedAgentRoleItemId,
                 agentRoleRevision: selectedAgentRoleItemRevision,
+                memory: selectedAgentRoleItem?.role.runConfig.memory,
               }
             : null
           : sessionAgentRole.turnSelection,
@@ -1919,6 +1920,7 @@ export const SessionChatInputArea = memo(
         agentRoleControl,
         selectedAgentRoleItemId,
         selectedAgentRoleItemRevision,
+        selectedAgentRoleItem?.role.runConfig.memory,
         sessionAgentRole.turnSelection,
       ]
     );

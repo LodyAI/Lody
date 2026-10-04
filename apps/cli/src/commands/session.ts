@@ -3,6 +3,7 @@ import {
   getDeclaredModelControls,
   getModelEffortChoices,
   machineSupportsPreparedSessionInputProtocol,
+  machineSupportsMemoryProviders,
 } from '@lody/shared';
 import {
   materializePreparedSessionInput,
@@ -1339,6 +1340,7 @@ async function appendUserPromptHistory(args: {
 }
 
 function buildCliHistoryInputConfig(args: {
+  memory?: import('@lody/shared').MemoryBinding;
   prompt: string;
   cliType: SessionMeta['cliType'];
   agentType: SessionMeta['agentType'];
@@ -1349,6 +1351,7 @@ function buildCliHistoryInputConfig(args: {
   chainDepth?: number;
 }): NonNullable<SessionHistoryInput['inputConfig']> {
   return {
+    memory: args.memory,
     prompt: args.prompt,
     cliType: args.cliType,
     agentType: args.agentType,
@@ -1364,6 +1367,7 @@ function buildCliHistoryInputConfig(args: {
 }
 
 export type ResolvedTurnDispatchConfig = {
+  memory?: import('@lody/shared').MemoryBinding;
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
@@ -1531,6 +1535,7 @@ function mergeTurnDispatchConfig(
   fallbackConfig: ResolvedTurnDispatchConfig | undefined
 ): ResolvedTurnDispatchConfig {
   return {
+    memory: explicitConfig.memory ?? fallbackConfig?.memory,
     modeId: explicitConfig.modeId ?? fallbackConfig?.modeId,
     modelId: explicitConfig.modelId ?? fallbackConfig?.modelId,
     configOptionValues: explicitConfig.configOptionValues ?? fallbackConfig?.configOptionValues,
@@ -1771,6 +1776,7 @@ export function resolveTurnDispatchConfigFromInputConfig(
     return undefined;
   }
   return {
+    ...(inputConfig.memory ? { memory: inputConfig.memory } : {}),
     ...(inputConfig.modeId ? { modeId: inputConfig.modeId } : {}),
     ...(inputConfig.modelId ? { modelId: inputConfig.modelId } : {}),
     ...(inputConfig.configOptionValues
@@ -1849,6 +1855,7 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
       }
     : undefined;
   const compatible = filterCompatibleInheritedTurnConfig(inherited, args.capability);
+  if (compatible && previous?.memory) compatible.memory = previous.memory;
   if (compatible) {
     compatible.configOptionValues = filterCompatibleTurnConfigOptionValues(
       inherited?.configOptionValues,
@@ -3060,6 +3067,13 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
   localOnly?: boolean;
 }): Promise<ResolvedTurnDispatchConfig> {
   const { frozenInheritedInputConfig, ...dispatchConfig } = args.dispatchConfig;
+  if (dispatchConfig.memory) {
+    const machine = (await listMachineMetasForWorkspace(args.manager)).find(
+      (entry) => entry.id === args.agentConfig.machineId
+    );
+    if (!machineSupportsMemoryProviders(machine))
+      throw new Error('Update the target machine to use memory providers.');
+  }
   const inheritedDispatchConfig =
     frozenInheritedInputConfig !== undefined
       ? resolveTurnDispatchConfigFromInputConfig(frozenInheritedInputConfig, args.agentConfig)
@@ -3256,6 +3270,7 @@ export async function prepareSessionInput(
       prompt: buildAgentPrompt(prompt, agentConfig.prompt ?? ''),
       cliType: agentConfig.cliType,
       agentType: agentConfig.agentType,
+      memory: effectiveDispatchConfig.memory,
       modeId: effectiveDispatchConfig.modeId ?? undefined,
       modelId: effectiveDispatchConfig.modelId ?? undefined,
       configOptionValues: effectiveDispatchConfig.configOptionValues,
@@ -3520,6 +3535,7 @@ export async function sendSessionChatResult(
       prompt,
       cliType: session.cliType,
       agentType: session.agentType,
+      memory: effectiveDispatchConfig.memory,
       modeId: effectiveDispatchConfig.modeId,
       modelId: effectiveDispatchConfig.modelId,
       configOptionValues: effectiveDispatchConfig.configOptionValues,

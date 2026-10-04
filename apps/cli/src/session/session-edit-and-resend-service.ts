@@ -1,3 +1,4 @@
+import { resolveSessionConversationConfig, type MemoryBinding } from '@lody/shared';
 import {
   buildPendingUserHistoryEntry,
   getServerNow,
@@ -158,7 +159,8 @@ export class SessionEditAndResendService {
       runtime = await this.getOrRestoreRuntime(
         meta,
         spec.requestedByUserId,
-        resolveSessionMcpSelection(history)
+        resolveSessionMcpSelection(history),
+        resolveSessionConversationConfig(history).memory
       );
       const agentClient = runtime.agentClient;
       oldAcpSessionId = runtime.acpSessionId;
@@ -474,7 +476,8 @@ export class SessionEditAndResendService {
   private async getOrRestoreRuntime(
     meta: SessionMeta,
     requestedByUserId: string,
-    mcpServerIds: McpServerId[]
+    mcpServerIds: McpServerId[],
+    memory?: MemoryBinding
   ): Promise<ISession> {
     const existing = this.deps.sessionManager.getSession(meta.id);
     if (existing) return existing;
@@ -496,6 +499,7 @@ export class SessionEditAndResendService {
         agentConfigId: meta.agentConfigId,
         agentCliType: meta.cliType,
         agentType: meta.agentType,
+        memory,
         mcpServerIds,
         customAcp: agentConfig.customAcp,
         runtimeOverrides: agentConfig.runtimeOverrides,

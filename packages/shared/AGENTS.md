@@ -102,17 +102,17 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
   upload. Settings neither await nor report upload; upload failure must not fail or
   roll back a durable write. CLI reports its sync result. See
   [catalog explanation](../../.agents/docs/workspace-catalog-durability.md).
-- Roles use one workspace Flock `agentRole` family; sharing updates `visibility`.
-  Store no secrets, API keys, MCP selections, or memory; apply
-  `isSensitiveAgentRoleConfigOptionKey` on read and write. Roles pin permission via
-  `runConfig.modeId` or `_permission`; hide the separate composer permission button
-  when pinned, but keep warning-tone modes visibly marked on every such surface.
-  Role-level auto-approval policy is out of scope. Settings/mentions use
-  `canReadAgentRole`/`canManageAgentRole`; MCP resolves explicit Role ids from the
-  catalog without requiring mention-scoped authorization.
-- Roles bind exact `machineId + agentConfigId`, never fall back, and remain listed
-  with precise reasons but unmentionable when machine/config/model/mode is unavailable.
-  Before Operation acceptance, MCP resolves the current `agentRoleId` row and freezes
-  canonical Prompt, target, Role revision, and dispatch config into the Operation;
-  edits/deletion cannot change recovery or retry. `SessionMeta.agentRoleId` and
-  `agentRoleRevision` are display-only creation provenance.
+- Roles use one workspace Flock `agentRole` family; sharing changes `visibility`.
+  No secrets, API keys, MCP selections or memory contents. Apply
+  `isSensitiveAgentRoleConfigOptionKey` on read/write. Permission pins use
+  `runConfig.modeId` or `_permission`: hide the separate composer permission
+  button but retain warning-tone markings. No Role-level auto-approval policy.
+  Settings/mentions use `canReadAgentRole`/`canManageAgentRole`; explicit MCP
+  lookup needs no mention grant.
+- Roles bind exact `machineId + agentConfigId` without fallback. Unavailable
+  machine/config/model/mode stays listed with reasons but cannot be mentioned.
+  MCP freezes the current Role's Prompt, target, revision and dispatch config
+  before Operation acceptance; edits/deletion cannot change retries/recovery.
+  `SessionMeta.agentRoleId`/`agentRoleRevision` are display-only provenance.
+- Memory stores provider/id references, frozen per turn. Commands and environment
+  mapping are daemon-owned; follow the [memory contract](../../specs/agent-role-memory.md).

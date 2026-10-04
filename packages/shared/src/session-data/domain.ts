@@ -140,6 +140,7 @@ export const SESSION_DIRECTORY_INPUT_CONFIG_KEYS = [
   'modelId',
   'cliType',
   'agentType',
+  'memory',
   'mcpServerIds',
   'configOptionValues',
 ] as const;

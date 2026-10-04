@@ -37,6 +37,7 @@ export type ComposerAgentRoleItem = {
 export type SessionTurnAgentRoleSelection =
   | {
       agentRoleId: AgentRoleId;
+      memory?: import('@lody/shared').MemoryBinding;
       agentRoleRevision: number;
     }
   | null
@@ -57,17 +58,19 @@ export function resolveProgrammaticTurnAgentRole({
   composer,
   durableRoleId,
   durableRoleRevision,
+  durableMemory,
 }: {
   requested?: SessionTurnAgentRoleSelection;
   composer?: SessionTurnAgentRoleSelection;
   durableRoleId?: AgentRoleId | null;
+  durableMemory?: import('@lody/shared').MemoryBinding;
   durableRoleRevision?: number;
 }): SessionTurnAgentRoleSelection {
   if (requested !== undefined) return requested;
   if (composer !== undefined) return composer;
   if (durableRoleId === null) return null;
   return durableRoleId && typeof durableRoleRevision === 'number'
-    ? { agentRoleId: durableRoleId, agentRoleRevision: durableRoleRevision }
+    ? { agentRoleId: durableRoleId, agentRoleRevision: durableRoleRevision, memory: durableMemory }
     : undefined;
 }
 
@@ -205,6 +208,7 @@ export function resolvePendingAgentRoleSelection({
  * `machine_offline` Role as a missing config.
  */
 export const AGENT_ROLE_UNAVAILABLE_REASON_KEYS = {
+  memory_unsupported: 'settings.memory.unsupported',
   machine_unknown: 'settings.agentRoles.unavailable.machineUnknown',
   machine_offline: 'settings.agentRoles.unavailable.machineOffline',
   agent_config_missing: 'settings.agentRoles.unavailable.agentConfigMissing',

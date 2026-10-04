@@ -912,3 +912,50 @@ describe('session-input helpers', () => {
     }
   });
 });
+
+it('freezes a memory identity in turn input and restores the same identity from history', () => {
+  const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+  const inputConfig = buildSessionTurnInputConfig({
+    prompt: 'Review this',
+    cliType: 'builtin',
+    agentType: 'codex',
+    memory,
+  });
+  const doc = new Loro();
+  const mirror = new Mirror({
+    doc,
+    schema: sessionDocSchema,
+    initialState: {
+      session: { id: 'memory-session' as SessionId },
+      history: [],
+      mq: [],
+    } satisfies Partial<SessionDoc>,
+    throwOnValidationError: true,
+  });
+  mirror.setState((prev) => ({
+    ...prev,
+    history: [{ id: 'memory-turn', role: 'user', inputConfig }],
+  }));
+  expect(
+    normalizeSessionTurnInputConfig(mirror.getState().history[0]?.inputConfig)?.memory
+  ).toEqual(memory);
+  mirror.dispose();
+  expect(
+    resolveSessionConversationConfig([{ id: 'turn-1', role: 'user', inputConfig }]).memory
+  ).toEqual(memory);
+  expect(
+    resolveSessionConversationConfig([
+      { id: 'turn-1', role: 'user', inputConfig },
+      {
+        id: 'turn-2',
+        role: 'user',
+        inputConfig: buildSessionTurnInputConfig({
+          prompt: 'Continue',
+          cliType: 'builtin',
+          agentType: 'codex',
+          agentRoleId: null,
+        }),
+      },
+    ]).memory
+  ).toBeUndefined();
+});
