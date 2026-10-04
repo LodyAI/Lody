@@ -2853,6 +2853,14 @@ export class MessageHandler {
       if (typeof command.agentRoleRevision === 'number') {
         options.agentRoleRevision = command.agentRoleRevision;
       }
+      // Frozen beside the composed Role prompt at Operation acceptance: the
+      // draft title comes from the user's task text, never the prefix. `null`
+      // marks a Role create whose user prompt held nothing draftable.
+      if (typeof command.titleDraft === 'string' && command.titleDraft.trim()) {
+        options.draftTitle = command.titleDraft;
+      } else if (command.titleDraft === null) {
+        options.draftTitle = '';
+      }
       if (typeof command.useCurrentSessionAsParent === 'boolean') {
         options.useCurrentSessionAsParent = command.useCurrentSessionAsParent;
       }

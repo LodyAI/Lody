@@ -35,6 +35,7 @@ import {
   SessionImageUploadResponseSchema,
   SessionIdSchema,
   collectViewedSessionIdsFromPresence,
+  deriveDraftSessionTitle,
   findFreshSessionPresenceState,
   shouldBypassSessionQuota,
   type LodySessionPresenceState,
@@ -1263,6 +1264,15 @@ const buildMcpRunConfigCanonicalCommand = (input: {
 type ResolvedMcpSessionCreate = {
   input: SessionCreateCommandInput;
   prompt: string;
+  /**
+   * Draft-title source frozen beside the composed prompt when a Role prefix was
+   * prepended: the user's own task text, so the session's draft title names the
+   * task rather than the Role's standing instruction (same rule as the desktop
+   * composer). `null` means the user prompt held nothing draftable. Absent when
+   * no prefix was composed, leaving the daemon to derive from the prompt as
+   * before.
+   */
+  titleDraft?: string | null;
   dispatchConfig: ResolvedTurnDispatchConfig;
   role?: AgentRole;
 };
@@ -1343,9 +1353,13 @@ const resolveMcpSessionCreate = (
     ...(useCurrentSessionAsParent !== undefined ? { useCurrentSessionAsParent } : {}),
     ...(workContext !== undefined ? { workContext } : {}),
   } as SessionCreateCommandInput;
+  const promptPrefix = role.promptPrefix?.trim();
   return {
     input: resolvedInput,
     prompt: composeAgentRolePrompt(role.promptPrefix, input.prompt),
+    // Frozen with the Operation: recovery derives the draft from the user's
+    // task text, never the composed prompt, and never rereads the Role.
+    ...(promptPrefix ? { titleDraft: deriveDraftSessionTitle(input.prompt) ?? null } : {}),
     dispatchConfig: {
       ...role.runConfig,
       inheritSessionDefaults: false,
@@ -1366,6 +1380,7 @@ const buildResolvedMcpCreateCanonicalCommand = (
         agentRoleId: resolved.role.id,
         agentRoleRevision: resolved.role.revision,
         agentRoleRunConfig: resolved.role.runConfig,
+        ...(resolved.role.promptPrefix?.trim() ? { titleDraft: resolved.titleDraft ?? null } : {}),
       }
     : buildMcpRunConfigCanonicalCommand(resolved.input)),
   ...(resolved.input.useCurrentSessionAsParent !== undefined
@@ -1375,10 +1390,19 @@ const buildResolvedMcpCreateCanonicalCommand = (
   ...(deadlineSeconds !== undefined ? { deadlineSeconds } : {}),
 });
 
-const bindAgentRoleCreateOptions = (options: CreateOptions, role: AgentRole | undefined): void => {
+const bindAgentRoleCreateOptions = (
+  options: CreateOptions,
+  resolved: ResolvedMcpSessionCreate
+): void => {
+  const role = resolved.role;
   if (!role) return;
   options.agentRoleId = role.id;
   options.agentRoleRevision = role.revision;
+  // The local create path needs the same split the canonical command froze:
+  // draft from the user's task text, not the Role prefix.
+  if (role.promptPrefix?.trim()) {
+    options.draftTitle = resolved.titleDraft ?? '';
+  }
 };
 
 const buildMcpCreateOptions = (
@@ -2593,7 +2617,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     await assertMachineNotOfflineForSingleCommand(manager, targetMachineId, ctx);
     const createOptions = buildMcpCreateOptions(resolved.input, ctx);
     bindMcpCreateContext(createOptions, invoking.identity, currentSession);
-    bindAgentRoleCreateOptions(createOptions, resolved.role);
+    bindAgentRoleCreateOptions(createOptions, resolved);
     createOptions.workspaceMetaPrewriteSatisfied = true;
     let effectiveDispatchConfig: ResolvedTurnDispatchConfig;
     try {
@@ -3123,7 +3147,7 @@ const startSessionCreateManyOperation = async (
         }
         const options = buildMcpCreateOptions(resolved.input, ctx);
         bindMcpCreateContext(options, invoking.identity, requester);
-        bindAgentRoleCreateOptions(options, resolved.role);
+        bindAgentRoleCreateOptions(options, resolved);
         try {
           const effectiveDispatchConfig = await validateSessionCreateOptions({
             auth,
@@ -3218,7 +3242,7 @@ const startSessionCreateManyOperation = async (
         try {
           const options = buildMcpCreateOptions(resolved.input, ctx);
           bindMcpCreateContext(options, invoking.identity, requester);
-          bindAgentRoleCreateOptions(options, resolved.role);
+          bindAgentRoleCreateOptions(options, resolved);
           options.sessionId = storedItem.target.sessionId;
           options.userTurnId = storedItem.target.userTurnId;
           options.chainDepth = invoking.chainDepth + 1;
@@ -3529,6 +3553,7 @@ export const __lodyMcpServerInternals = {
   buildWaitErrorResponse,
   buildMcpCreateOptions,
   bindMcpCreateContext,
+  bindAgentRoleCreateOptions,
   buildMcpTurnDispatchConfig,
   composeAgentRolePrompt,
   loadWorkspaceAgentRoleCatalog,
@@ -3983,7 +4008,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           );
           const options = buildMcpCreateOptions(resolved.input, ctx);
           bindMcpCreateContext(options, invoking.identity, currentSession);
-          bindAgentRoleCreateOptions(options, resolved.role);
+          bindAgentRoleCreateOptions(options, resolved);
           options.workspaceMetaPrewriteSatisfied = true;
           const result = await createSessionResult(
             auth,

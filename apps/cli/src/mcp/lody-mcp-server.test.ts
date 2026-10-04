@@ -70,6 +70,7 @@ const {
   buildWaitErrorResponse,
   buildMcpCreateOptions,
   bindMcpCreateContext,
+  bindAgentRoleCreateOptions,
   buildMcpTurnDispatchConfig,
   composeAgentRolePrompt,
   loadWorkspaceAgentRoleCatalog,
@@ -665,6 +666,7 @@ describe('session MCP input schemas', () => {
     });
     expect(buildResolvedMcpCreateCanonicalCommand(resolved)).toMatchObject({
       prompt: 'Act as a careful reviewer.\n\nReview the current diff.',
+      titleDraft: 'Review the current diff.',
       agentRoleId: 'reviewer',
       agentRoleRevision: 7,
       machineId: 'remote-machine',
@@ -1067,6 +1069,58 @@ describe('session MCP input schemas', () => {
       }
     }
   );
+
+  it('freezes the draft title from the user task text when a Role prompt is composed', () => {
+    const frozenInputConfig = {} as SessionTurnInputConfig;
+    const requester = { machineId: 'current-machine', project: undefined };
+    const longTask =
+      'Fix the login flow so OAuth tokens stop expiring early, including the deep detail line';
+    const prefixed = resolveMcpSessionCreate(
+      { operationId: 'role-draft-1', prompt: longTask, agentRoleId: 'reviewer' },
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole({ promptPrefix: '你是实现角色，只处理明确范围内的代码和测试。' })
+    );
+
+    // The draft names the task, not the Role instruction, and keeps the
+    // composer's first-line rule with its 50-character cap.
+    expect(prefixed.titleDraft).toBe(longTask.slice(0, 50));
+    expect(buildResolvedMcpCreateCanonicalCommand(prefixed)).toMatchObject({
+      titleDraft: longTask.slice(0, 50),
+    });
+    const options: { draftTitle?: string; agentRoleId?: string } = {};
+    bindAgentRoleCreateOptions(options as never, prefixed);
+    expect(options.draftTitle).toBe(longTask.slice(0, 50));
+
+    // A Role with no prompt prefix composes nothing: no draft override, and
+    // the daemon derives from the prompt exactly as before.
+    const unprefixed = resolveMcpSessionCreate(
+      { operationId: 'role-draft-2', prompt: 'Pair on this.', agentRoleId: 'reviewer' },
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole()
+    );
+    expect(unprefixed).not.toHaveProperty('titleDraft');
+    const plainCommand = buildResolvedMcpCreateCanonicalCommand(unprefixed);
+    expect(plainCommand).not.toHaveProperty('titleDraft');
+    const plainOptions: { draftTitle?: string } = {};
+    bindAgentRoleCreateOptions(plainOptions as never, unprefixed);
+    expect(plainOptions.draftTitle).toBeUndefined();
+
+    // A task with nothing draftable still freezes `null`, so recovery stores
+    // no draft at all rather than falling back to the prefixed prompt.
+    const empty = resolveMcpSessionCreate(
+      { operationId: 'role-draft-3', prompt: '   ', agentRoleId: 'reviewer' },
+      { chainDepth: 0, frozenInputConfig },
+      requester,
+      agentRole({ promptPrefix: 'Act as a careful reviewer.' })
+    );
+    expect(empty.titleDraft).toBeNull();
+    expect(buildResolvedMcpCreateCanonicalCommand(empty)).toMatchObject({ titleDraft: null });
+    const emptyOptions: { draftTitle?: string } = {};
+    bindAgentRoleCreateOptions(emptyOptions as never, empty);
+    expect(emptyOptions.draftTitle).toBe('');
+  });
 
   it('defers run config to capability resolution instead of guessing ACP option ids', () => {
     expect(
