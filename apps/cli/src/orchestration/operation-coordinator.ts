@@ -4,6 +4,7 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
 import type { RepoWatchHandle } from 'loro-repo';
+import { SessionCreateDispatchValidationError } from '@/commands/session';
 
 import {
   buildMissingEmail,
@@ -622,6 +623,7 @@ export class LodyOperationCoordinator {
           }
         } catch (error) {
           if (signal.aborted) return item;
+          this.recordMaterializationFailure(operation, index, 'target-document-sync', error);
           if (!isAtDeadline()) {
             const delayMs = this.armMaterializationFailureRetry(operation, index);
             this.options.logger.warn(
@@ -641,6 +643,16 @@ export class LodyOperationCoordinator {
           await this.options.materializeTarget(operation, item, index, signal);
         } catch (error) {
           if (signal.aborted) return item;
+          if (error instanceof SessionCreateDispatchValidationError) {
+            this.clearMaterializationRetry(operation, index);
+            return {
+              status: 'failed',
+              ...(item.label ? { label: item.label } : {}),
+              target: item.target,
+              error: makeLodyError('COMMAND_REJECTED', error.message, false),
+            };
+          }
+          this.recordMaterializationFailure(operation, index, 'target-input-write', error);
           const delayMs = this.armMaterializationFailureRetry(operation, index);
           this.options.logger.warn(
             `[orchestration] Target materialization failed ` +
@@ -655,13 +667,22 @@ export class LodyOperationCoordinator {
       }
       if (!alreadyMaterialized) {
         this.clearMaterializationRetry(operation, index);
+        const failure = this.withStore((store) =>
+          store.getItemMaterializationFailure(
+            operation.requesterSessionId,
+            operation.operationId,
+            index
+          )
+        );
         return {
           status: 'failed',
           ...(item.label ? { label: item.label } : {}),
           target: item.target,
           error: makeLodyError(
             'TARGET_TIMEOUT',
-            'Target input was not durably materialized before the Operation deadline.',
+            failure
+              ? `Target input was not durably materialized before the Operation deadline. Last ${failure.phase} failure: ${failure.message}`
+              : 'Target input was not durably materialized before the Operation deadline.',
             false
           ),
         };
@@ -751,6 +772,32 @@ export class LodyOperationCoordinator {
       };
     }
     return item;
+  }
+
+  private recordMaterializationFailure(
+    operation: StoredLodyOperation,
+    index: number,
+    phase: string,
+    error: unknown
+  ): void {
+    try {
+      this.withStore((store) =>
+        store.recordItemMaterializationFailure(
+          operation.requesterSessionId,
+          operation.operationId,
+          index,
+          this.materializationClaimToken,
+          phase,
+          error instanceof Error ? error.message : String(error)
+        )
+      );
+    } catch (storeError) {
+      this.options.logger.warn(
+        `[orchestration] Could not retain ${phase} failure for ${operation.operationId}:${index}: ${
+          storeError instanceof Error ? storeError.message : String(storeError)
+        }`
+      );
+    }
   }
 
   private async isTargetInputDurable(sessionId: SessionId, userTurnId: string): Promise<boolean> {

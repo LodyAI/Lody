@@ -907,6 +907,7 @@ describe('session MCP input schemas', () => {
       modelId: 'gpt-5.5',
       configOptionValues: { 'fast-mode': false, reasoning_effort: 'high', plan_mode: true },
       inheritSessionDefaults: false,
+      validatedConfigIds: ['reasoning_effort'],
     });
   });
 

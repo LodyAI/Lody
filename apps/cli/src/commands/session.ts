@@ -1367,6 +1367,8 @@ export type ResolvedTurnDispatchConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
+  /** Frozen ids already checked against the selected model, not the probe snapshot. */
+  validatedConfigIds?: string[];
   /** Prevent create replay from re-reading mutable defaults from the requester history. */
   inheritSessionDefaults?: false;
   /**
@@ -1386,6 +1388,14 @@ export type ResolvedTurnDispatchConfig = {
   runConfig?: AgentRunConfigSelection;
 };
 
+/** A create selector rejected by the resolved target capability cannot heal on retry. */
+export class SessionCreateDispatchValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SessionCreateDispatchValidationError';
+  }
+}
+
 /**
  * Turns a semantic run-config selection into the concrete mode/model/config
  * option values the target agent advertises. Explicit ids on the config win over
@@ -1403,9 +1413,13 @@ export function applyAgentRunConfigSelection(
   validatedConfigIds: ReadonlySet<string>;
   unverifiedSelections: readonly string[];
 } {
-  const { runConfig, ...rest } = config;
+  const { runConfig, validatedConfigIds, ...rest } = config;
   if (!hasAgentRunConfigSelection(runConfig)) {
-    return { config: rest, validatedConfigIds: new Set(), unverifiedSelections: [] };
+    return {
+      config: rest,
+      validatedConfigIds: new Set(validatedConfigIds),
+      unverifiedSelections: [],
+    };
   }
   const resolved = resolveAgentRunConfigSelection(
     {
@@ -1436,7 +1450,10 @@ export function applyAgentRunConfigSelection(
       ...((resolved.modelId ?? rest.modelId) ? { modelId: resolved.modelId ?? rest.modelId } : {}),
       ...(Object.keys(configOptionValues).length > 0 ? { configOptionValues } : {}),
     },
-    validatedConfigIds: new Set(resolved.validatedConfigIds ?? []),
+    validatedConfigIds: new Set([
+      ...(validatedConfigIds ?? []),
+      ...(resolved.validatedConfigIds ?? []),
+    ]),
     unverifiedSelections: resolved.unverifiedSelections ?? [],
   };
 }
@@ -3096,13 +3113,30 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
         localOnly: args.localOnly,
       })
     : undefined;
-  const requested = applyAgentRunConfigSelection(dispatchConfig, capability);
-  validateTurnModeAndModel(requested.config, capability);
-  validateTurnConfigOptionValues(
-    requested.config.configOptionValues,
-    capability,
-    requested.validatedConfigIds
-  );
+  let requested;
+  try {
+    requested = applyAgentRunConfigSelection(dispatchConfig, capability);
+    validateTurnModeAndModel(requested.config, capability);
+    // Durable Operations and Role creates carry concrete options without runConfig.
+    // Recompute target-model validation rather than using the probe's option list.
+    const targetModelId =
+      requested.config.modelId ??
+      getTurnSelectorConfigOptionValue(requested.config.configOptionValues, capability, 'model');
+    const modelValidatedIds = validateModelDependentTurnConfigOptionValues(
+      requested.config.configOptionValues,
+      capability,
+      targetModelId
+    );
+    validateTurnConfigOptionValues(
+      requested.config.configOptionValues,
+      capability,
+      new Set([...requested.validatedConfigIds, ...modelValidatedIds])
+    );
+  } catch (error) {
+    throw new SessionCreateDispatchValidationError(
+      error instanceof Error ? error.message : String(error)
+    );
+  }
   const inherited = filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability);
   if (inherited) {
     // Raw selectors must override inherited scalar selectors, which the runtime
@@ -3123,6 +3157,9 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
       capability
     ),
     inheritSessionDefaults: false,
+    ...(requested.validatedConfigIds.size > 0
+      ? { validatedConfigIds: [...requested.validatedConfigIds] }
+      : {}),
   };
 }
 

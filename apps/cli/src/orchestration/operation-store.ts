@@ -72,6 +72,7 @@ const FrozenConfigSchema = z
             modeId: z.string().optional(),
             modelId: z.string().optional(),
             configOptionValues: z.record(z.string(), z.union([z.string(), z.boolean()])).optional(),
+            validatedConfigIds: z.array(z.string()).optional(),
             inheritSessionDefaults: z.literal(false).optional(),
           })
           // Older stored configs may still carry `taskToolsEnabled`; drop it.
@@ -673,6 +674,55 @@ export class LodyOperationStore {
       .immediate();
   }
 
+  recordItemMaterializationFailure(
+    requesterSessionId: SessionId,
+    operationId: string,
+    itemIndex: number,
+    claimToken: string,
+    phase: string,
+    message: string
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO operation_item_materialization_failures (
+           requester_session_id, operation_id, item_index, phase, message
+         ) SELECT ?, ?, ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM operation_item_materializations
+           WHERE requester_session_id = ? AND operation_id = ?
+             AND item_index = ? AND claim_token = ?
+         )
+         ON CONFLICT(requester_session_id, operation_id, item_index)
+         DO UPDATE SET phase = excluded.phase, message = excluded.message`
+      )
+      .run(
+        requesterSessionId,
+        operationId,
+        itemIndex,
+        phase.slice(0, 64),
+        message.slice(0, 1024),
+        requesterSessionId,
+        operationId,
+        itemIndex,
+        claimToken
+      );
+  }
+
+  getItemMaterializationFailure(
+    requesterSessionId: SessionId,
+    operationId: string,
+    itemIndex: number
+  ): { phase: string; message: string } | undefined {
+    return this.db
+      .prepare(
+        `SELECT phase, message FROM operation_item_materialization_failures
+         WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
+      )
+      .get(requesterSessionId, operationId, itemIndex) as
+      | { phase: string; message: string }
+      | undefined;
+  }
+
   markItemInputDurable(
     requesterSessionId: SessionId,
     operationId: string,
@@ -708,6 +758,12 @@ export class LodyOperationStore {
           .prepare(
             `DELETE FROM operation_item_materializations
            WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
+          )
+          .run(requesterSessionId, operationId, itemIndex);
+        this.db
+          .prepare(
+            `DELETE FROM operation_item_materialization_failures
+             WHERE requester_session_id = ? AND operation_id = ? AND item_index = ?`
           )
           .run(requesterSessionId, operationId, itemIndex);
         return this.get(requesterSessionId, operationId);
@@ -1487,6 +1543,18 @@ export class LodyOperationStore {
           ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS operation_item_materialization_failures (
+        requester_session_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        item_index INTEGER NOT NULL,
+        phase TEXT NOT NULL,
+        message TEXT NOT NULL,
+        PRIMARY KEY (requester_session_id, operation_id, item_index),
+        FOREIGN KEY (requester_session_id, operation_id)
+          REFERENCES operations (requester_session_id, operation_id)
+          ON DELETE CASCADE
+      );
+
       CREATE TABLE IF NOT EXISTS operation_progress_settlements (
         requester_session_id TEXT NOT NULL,
         operation_id TEXT NOT NULL,
@@ -1540,6 +1608,7 @@ export class LodyOperationStore {
       'table:delivery_execution_state',
       'trigger:deliveries_insert_execution_state',
       'table:operation_item_materializations',
+      'table:operation_item_materialization_failures',
       'table:operation_progress_settlements',
       'table:orchestration_meta',
     ]);

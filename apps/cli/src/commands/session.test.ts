@@ -27,6 +27,7 @@ import type { MachineAccessCheckResult } from '@/lib/workspace';
 import {
   type MachineAccessReaders,
   applyAgentRunConfigSelection,
+  prepareSessionInput,
   runSessionOperationWithSyncedMetadata,
   assertSupportedParentDepth,
   confirmDispatchSyncedBestEffort,
@@ -543,6 +544,50 @@ describe('session command helpers', () => {
     expect(() =>
       validateTurnConfigOptionValues(requested.config.configOptionValues, capability)
     ).toThrow(/Allowed values/);
+  });
+
+  it('preserves target-model validation when a frozen create config is replayed', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'gpt-6-sol',
+          options: [
+            { value: 'gpt-6-sol', name: 'GPT 6' },
+            { value: 'gpt-5.6-sol', name: 'GPT 5.6' },
+          ],
+        },
+      ],
+      models: [],
+      modelReasoningEfforts: { 'gpt-6-sol': [], 'gpt-5.6-sol': ['medium'] },
+    };
+    const accepted = applyAgentRunConfigSelection(
+      {
+        runConfig: { modelId: 'gpt-5.6-sol', reasoningEffort: 'medium' },
+      },
+      capability
+    );
+    const frozen = {
+      ...accepted.config,
+      validatedConfigIds: [...accepted.validatedConfigIds],
+      inheritSessionDefaults: false as const,
+    };
+    const replayed = applyAgentRunConfigSelection(frozen, capability);
+    expect(replayed.validatedConfigIds.has('reasoning_effort')).toBe(true);
+    expect(() =>
+      validateTurnConfigOptionValues(
+        replayed.config.configOptionValues,
+        capability,
+        replayed.validatedConfigIds
+      )
+    ).not.toThrow();
+    expect(() =>
+      validateTurnConfigOptionValues(replayed.config.configOptionValues, capability)
+    ).toThrow(/Unknown ACP config option/);
   });
 
   it('drops inherited ACP config options that are no longer compatible', () => {
@@ -2154,5 +2199,122 @@ describe('delegated machine access', () => {
       allowed: false,
       reason: 'not_visible',
     });
+  });
+});
+
+describe('Session create target-model validation', () => {
+  const capability: AcpCapabilityCacheEntry = {
+    cliType: 'builtin',
+    agentType: 'devin',
+    modes: [],
+    models: [
+      { modelId: 'model-a', name: 'Model A' },
+      { modelId: 'model-b', name: 'Model B' },
+    ],
+    configOptions: [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        currentValue: 'model-a',
+        options: [
+          { value: 'model-a', name: 'Model A' },
+          { value: 'model-b', name: 'Model B' },
+        ],
+      },
+      {
+        id: 'thought_level',
+        name: 'Reasoning',
+        category: 'thought_level',
+        type: 'select',
+        currentValue: 'high',
+        options: [
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+        ],
+      },
+    ],
+    fetchedAt: 1,
+  };
+  const prepare = (
+    dispatchConfig: Parameters<typeof prepareSessionInput>[6],
+    snapshot = capability
+  ) => {
+    const agentConfig = {
+      id: 'agent',
+      machineId: 'machine',
+      cliType: 'builtin',
+      agentType: 'devin',
+    } as AgentConfigMeta;
+    const targetMachine = { id: 'machine', ownerUserId: 'owner' } as MachineMeta;
+    const manager = {
+      repo: {
+        getDocMeta: async () => undefined,
+        getWorkspaceMeta: async () => undefined,
+        openFlockDoc: async () => ({
+          flock: {
+            scan: ({ prefix }: { prefix: readonly string[] }) =>
+              prefix[0] === 'acpCapability'
+                ? [{ key: ['acpCapability', 'agent'], value: snapshot }]
+                : [],
+          },
+        }),
+      },
+    } as unknown as Parameters<typeof prepareSessionInput>[2];
+    return prepareSessionInput(
+      { userId: 'owner', machineId: 'machine' } as Parameters<typeof prepareSessionInput>[0],
+      { id: 'workspace' } as Parameters<typeof prepareSessionInput>[1],
+      manager,
+      'Run the task',
+      { workspaceMetaPrewriteSatisfied: true, bypassSessionQuota: true },
+      { ...dispatchConfig, inheritSessionDefaults: false },
+      { targetMachine, agentConfig }
+    );
+  };
+
+  it('preserves semantic selections through concrete durable replay', async () => {
+    const accepted = await prepare({ runConfig: { modelId: 'model-b', reasoningEffort: 'low' } });
+    expect(accepted.userTurn.inputConfig).toMatchObject({
+      modelId: 'model-b',
+      configOptionValues: { thought_level: 'low' },
+    });
+    const frozen = {
+      modelId: accepted.userTurn.inputConfig!.modelId,
+      configOptionValues: accepted.userTurn.inputConfig!.configOptionValues,
+    };
+    const replayed = await prepare(JSON.parse(JSON.stringify(frozen)));
+    expect(replayed.userTurn.inputConfig).toMatchObject(frozen);
+  });
+
+  it('accepts concrete Role options with a target model in the option map', async () => {
+    const prepared = await prepare({
+      configOptionValues: { model: 'model-b', thought_level: 'low' },
+    });
+    expect(prepared.userTurn.inputConfig?.configOptionValues).toEqual({
+      model: 'model-b',
+      thought_level: 'low',
+    });
+  });
+
+  it('still rejects invalid effort for the probed model and declared target model', async () => {
+    await expect(
+      prepare({ modelId: 'model-a', configOptionValues: { thought_level: 'low' } })
+    ).rejects.toThrow(/Invalid value for config option/);
+    await expect(
+      prepare(
+        { modelId: 'model-b', configOptionValues: { thought_level: 'low' } },
+        {
+          ...capability,
+          modelReasoningEfforts: { 'model-b': ['high'] },
+        }
+      )
+    ).rejects.toThrow(/Invalid reasoning effort for model model-b/);
+  });
+
+  it('does not exempt unrelated options from snapshot validation', async () => {
+    await expect(
+      prepare({ modelId: 'model-b', configOptionValues: { thought_level: 'low', unknown: true } })
+    ).rejects.toThrow(/Unknown ACP config option/);
   });
 });
