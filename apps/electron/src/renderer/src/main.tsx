@@ -20,6 +20,8 @@ import {
 } from '@lody/components/i18n'
 import { languageAtom } from '@lody/components/atoms/settings'
 import { sidebarCollapsedAtom } from '@lody/components/atoms/sidebar-state'
+import { runtimeAtom } from '@lody/components/atoms/runtime'
+import { createWindowTargetNavigator } from './window-target-navigation'
 import '@lody/components/tailwind/index.css'
 import { jotaiStore } from '@lody/components/lib'
 import { collectBootDiagnostics, renderBootFailure } from '@lody/components/lib/boot-failure'
@@ -133,6 +135,22 @@ function RendererCommitSentinel(): null {
 function installWarmWindowBinding(router: ReturnType<typeof createRouter>): void {
   let preparation: PreparedWindowTarget | null = null
   let stopObserving: (() => void) | undefined
+  const navigateWithData = createWindowTargetNavigator({
+    getRuntime: () => jotaiStore.get(runtimeAtom),
+    reportError: (error) => console.warn('[Lody] Window target acquisition failed', error),
+    applyRoute: (target) =>
+      target.sessionId
+        ? router.navigate({
+            to: '/$workspaceName/sessions/$sessionId',
+            params: { workspaceName: target.workspace, sessionId: target.sessionId },
+            search: { tab: `session:${target.sessionId}` },
+            state: { focusComposerSessionId: target.sessionId }
+          })
+        : router.navigate({
+            to: '/$workspaceName/chat',
+            params: { workspaceName: target.workspace }
+          })
+  })
   const navigate = (
     target: { workspace: string; sessionId?: string },
     completed: () => void
@@ -144,22 +162,11 @@ function installWarmWindowBinding(router: ReturnType<typeof createRouter>): void
     }
     jotaiStore.set(sidebarCollapsedAtom, Boolean(target.sessionId))
 
-    const navigation = target.sessionId
-      ? router.navigate({
-          to: '/$workspaceName/sessions/$sessionId',
-          params: { workspaceName: target.workspace, sessionId: target.sessionId },
-          search: { tab: `session:${target.sessionId}` },
-          state: { focusComposerSessionId: target.sessionId }
-        })
-      : router.navigate({
-          to: '/$workspaceName/chat',
-          params: { workspaceName: target.workspace }
-        })
     // Main keeps the native window hidden until this exact target has painted.
-    void navigation.finally(() => {
+    void navigateWithData(target, () => {
       clearWarmWindowFlag()
       completed()
-    })
+    }).catch((error) => console.error('[Lody] Window target navigation failed', error))
   }
   onIpcEvent('app.windowTarget', (target) => {
     stopObserving?.()

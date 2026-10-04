@@ -11,7 +11,12 @@ import { WORKSPACE_FOCUS_SCOPES } from '../src/atoms/focus-layer';
 import { WebWorkspaceLayout } from '../src/components/web-workspace-layout';
 import { SidebarVisibilityGate } from '../src/components/sidebar-visibility-gate';
 
-const layout = vi.hoisted(() => ({ compact: false }));
+const layout = vi.hoisted(() => ({ compact: false, sessionWindow: false }));
+
+vi.mock('../src/lib/desktop-window', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/desktop-window')>()),
+  isSessionWindow: () => layout.sessionWindow,
+}));
 
 vi.mock('@tanstack/react-router', () => ({
   useLocation: ({ select }: { select: (location: { pathname: string }) => string }) =>
@@ -40,6 +45,7 @@ describe('desktop sidebar toggle', () => {
     container?.remove();
     container = undefined;
     layout.compact = false;
+    layout.sessionWindow = false;
   });
 
   function render(node: React.ReactNode) {
@@ -177,7 +183,29 @@ describe('desktop sidebar toggle', () => {
     expect(input.value).toBe('unsaved filter');
   });
 
-  it('mounts the hidden sidebar before its first open so the first toggle retains state', () => {
+  it('defers an auxiliary Session sidebar until first use, then retains its state', () => {
+    layout.sessionWindow = true;
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, true);
+    render(
+      <Provider store={store}>
+        <WebWorkspaceLayout>
+          <div data-content="" />
+        </WebWorkspaceLayout>
+      </Provider>
+    );
+    expect(container!.querySelector('[data-sidebar-identity]')).toBeNull();
+    flushSync(() => store.set(sidebarCollapsedAtom, false));
+    const sidebar = container!.querySelector('[data-sidebar-identity]')!;
+    const input = sidebar.querySelector('input')!;
+    input.value = 'retained auxiliary filter';
+    flushSync(() => store.set(sidebarCollapsedAtom, true));
+    flushSync(() => store.set(sidebarCollapsedAtom, false));
+    expect(container!.querySelector('[data-sidebar-identity]')).toBe(sidebar);
+    expect(input.value).toBe('retained auxiliary filter');
+  });
+
+  it('mounts the primary hidden sidebar before its first open so the first toggle retains state', () => {
     const store = createStore();
     store.set(sidebarCollapsedAtom, true);
     store.set(sidebarLastWidthAtom, 900);

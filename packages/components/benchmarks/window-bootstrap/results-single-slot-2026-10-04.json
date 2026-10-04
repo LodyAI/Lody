@@ -1,0 +1,6190 @@
+{
+  "date": "2026-10-04",
+  "baseRevision": "9bdac2851",
+  "method": "Shared Session owner enabled in every run. Before build uses pre-change HEAD versions of window-preparation-intent.ts, prepared-window.ts and window-warm-service.ts; all other application/CLI source and dependencies match. Final output and sources restored after comparison. Three warmups excluded per latency run.",
+  "scope": "M4 Max/macOS/Electron 43.7.6; fresh profiles; synthetic 3000-entry Session; retarget scenario adds a second synthetic Session.",
+  "limits": [
+    "Small sequential samples; fixed synthetic pointer intent lead times do not establish real-user hit rates or population P95.",
+    "Native show and synthetic text insertion are not display scanout, physical input or IME latency.",
+    "Zero-lead unprepared clicks still pay rendering; this does not promise universally instantaneous opening.",
+    "Retarget verifies renderer PID reuse and matching visible target. Return probe waits three seconds after pointer exit. No multi-slot pool is added.",
+    "Single renderer is not a hard memory-byte cap: distinct Session stores retain their existing ten-minute cache grace period."
+  ],
+  "excludedAttempts": [
+    {
+      "artifactDirectory": "/tmp/lody-app-bench-YtZPHF",
+      "reason": "macOS footprint VM-region scan failed during teardown, including after waiting for renderer exit. Final probe reads the kernel footprint counter through proc_pid_rusage without traversing VM regions; no application crash occurred."
+    },
+    {
+      "artifactDirectory": "/tmp/lody-app-bench-Pf1x3h",
+      "reason": "macOS footprint VM-region scan failed during teardown, including after waiting for renderer exit. Final probe reads the kernel footprint counter through proc_pid_rusage without traversing VM regions; no application crash occurred."
+    }
+  ],
+  "runs": [
+    {
+      "name": "before",
+      "artifactDirectory": "/tmp/lody-app-bench-gqamyS",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16",
+        "probeSha256": "88bd202edd305596c94478bb20e3687900af926875e900ab9dd8269d4fb013a7",
+        "residentProbeSha256": "4bb88b852fc208892eba1e3c4aa8d75aaa57a828c54b0638e7597346b40836d2"
+      },
+      "entries": 3000,
+      "intentLeadMs": 450,
+      "retarget": false,
+      "returnAfterMs": 0,
+      "commandIntent": false,
+      "unloadConfirmations": 0,
+      "summary": {
+        "samples": 5,
+        "hitRate": 1,
+        "showMedianMs": 40.633333999998285,
+        "inputMedianMs": 100.61100000000079
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "claimToShowMs": 64.95454199999949,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 158.23804199999995
+          },
+          "readyAtClick": true,
+          "preparationMs": 296.81154199999946,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 298608,
+              "peakWorkingSetSize": 340400
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 115584,
+              "peakWorkingSetSize": 126720
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42336,
+              "peakWorkingSetSize": 47808
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 737040,
+              "peakWorkingSetSize": 767680
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 390704,
+              "peakWorkingSetSize": 391264
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 433792,
+              "peakWorkingSetSize": 433792
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 96224,
+              "peakWorkingSetSize": 96224
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 62.03016600000046,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 129.04470800000126
+          },
+          "readyAtClick": true,
+          "preparationMs": 294.33116699999937,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 300896,
+              "peakWorkingSetSize": 340400
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 109888,
+              "peakWorkingSetSize": 126720
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42384,
+              "peakWorkingSetSize": 47808
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 682128,
+              "peakWorkingSetSize": 767680
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 265728,
+              "peakWorkingSetSize": 391264
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 436256,
+              "peakWorkingSetSize": 436256
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 89904,
+              "peakWorkingSetSize": 89904
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 61.92699999999968,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 137.54991599999994
+          },
+          "readyAtClick": true,
+          "preparationMs": 292.5016250000008,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 298432,
+              "peakWorkingSetSize": 340400
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 106640,
+              "peakWorkingSetSize": 126720
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42368,
+              "peakWorkingSetSize": 47808
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 636000,
+              "peakWorkingSetSize": 767680
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 278128,
+              "peakWorkingSetSize": 391264
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 430208,
+              "peakWorkingSetSize": 430208
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 37.58129200000076,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 100.61100000000079
+          },
+          "readyAtClick": true,
+          "preparationMs": 281.24420800000007,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 307312,
+              "peakWorkingSetSize": 340400
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 101936,
+              "peakWorkingSetSize": 126720
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42464,
+              "peakWorkingSetSize": 47808
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 636432,
+              "peakWorkingSetSize": 767680
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 278336,
+              "peakWorkingSetSize": 391264
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 433088,
+              "peakWorkingSetSize": 433088
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 0,
+              "peakWorkingSetSize": 0
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 33.49562499999956,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 80.04608299999927
+          },
+          "readyAtClick": true,
+          "preparationMs": 291.9891660000012,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 281488,
+              "peakWorkingSetSize": 340400
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 102080,
+              "peakWorkingSetSize": 126720
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42464,
+              "peakWorkingSetSize": 47808
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 626512,
+              "peakWorkingSetSize": 767680
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 278512,
+              "peakWorkingSetSize": 391264
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 429088,
+              "peakWorkingSetSize": 429088
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 40.633333999998285,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 100.14320899999802
+          },
+          "readyAtClick": true,
+          "preparationMs": 281.9871669999993,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 294048,
+              "peakWorkingSetSize": 340400
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 102672,
+              "peakWorkingSetSize": 126720
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42464,
+              "peakWorkingSetSize": 47808
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 626608,
+              "peakWorkingSetSize": 767680
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 278864,
+              "peakWorkingSetSize": 391264
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 432384,
+              "peakWorkingSetSize": 432384
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94432,
+              "peakWorkingSetSize": 94432
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 63.41991599999892,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 100.69208300000173
+          },
+          "readyAtClick": true,
+          "preparationMs": 276.260291999999,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 306064,
+              "peakWorkingSetSize": 340400
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 102512,
+              "peakWorkingSetSize": 126720
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42480,
+              "peakWorkingSetSize": 47808
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 626656,
+              "peakWorkingSetSize": 767680
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 279520,
+              "peakWorkingSetSize": 391264
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 432928,
+              "peakWorkingSetSize": 432928
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 51.79883400000108,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 113.00408400000015
+          },
+          "readyAtClick": true,
+          "preparationMs": 293.2666250000002,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 318608,
+              "peakWorkingSetSize": 340400
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 102896,
+              "peakWorkingSetSize": 126720
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42480,
+              "peakWorkingSetSize": 47808
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 626864,
+              "peakWorkingSetSize": 767680
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 279568,
+              "peakWorkingSetSize": 391264
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 434416,
+              "peakWorkingSetSize": 434416
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 90336,
+              "peakWorkingSetSize": 90336
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "after",
+      "artifactDirectory": "/tmp/lody-app-bench-b7THt4",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "1ab4b52e72a2001af03a117969f1a85993e0e7979a6e604e318547cc02113612",
+        "probeSha256": "e2632a7054a09a67b3ece0aabea5e31295a702ebdf493bcdcf84fc0df9a54f1a",
+        "residentProbeSha256": "4bb88b852fc208892eba1e3c4aa8d75aaa57a828c54b0638e7597346b40836d2"
+      },
+      "entries": 3000,
+      "intentLeadMs": 450,
+      "retarget": false,
+      "returnAfterMs": 0,
+      "commandIntent": false,
+      "unloadConfirmations": 0,
+      "summary": {
+        "samples": 5,
+        "hitRate": 1,
+        "showMedianMs": 30.636125000000902,
+        "inputMedianMs": 99.13845799999763
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "claimToShowMs": 30.323999999999614,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 99.68087500000001
+          },
+          "readyAtClick": true,
+          "preparationMs": 294.8068750000002,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 321888,
+              "peakWorkingSetSize": 354080
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 114352,
+              "peakWorkingSetSize": 126336
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42656,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 789728,
+              "peakWorkingSetSize": 883552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 391392,
+              "peakWorkingSetSize": 391392
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 440816,
+              "peakWorkingSetSize": 441552
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 43.11316599999918,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 110.90716599999905
+          },
+          "readyAtClick": true,
+          "preparationMs": 289.6116670000001,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 319728,
+              "peakWorkingSetSize": 354080
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 103840,
+              "peakWorkingSetSize": 126336
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42528,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 651952,
+              "peakWorkingSetSize": 883552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 278016,
+              "peakWorkingSetSize": 391440
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 373696,
+              "peakWorkingSetSize": 401328
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94272,
+              "peakWorkingSetSize": 94272
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 25.685749999998734,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 86.48112500000025
+          },
+          "readyAtClick": true,
+          "preparationMs": 292.8115420000013,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 332784,
+              "peakWorkingSetSize": 354080
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 104064,
+              "peakWorkingSetSize": 126336
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42544,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 654304,
+              "peakWorkingSetSize": 883552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 293456,
+              "peakWorkingSetSize": 391440
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 451424,
+              "peakWorkingSetSize": 451424
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 66.30458399999952,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 128.32237499999974
+          },
+          "readyAtClick": true,
+          "preparationMs": 286.36529100000007,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 289888,
+              "peakWorkingSetSize": 354080
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 99680,
+              "peakWorkingSetSize": 126336
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42656,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 654592,
+              "peakWorkingSetSize": 883552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 293792,
+              "peakWorkingSetSize": 391440
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 448032,
+              "peakWorkingSetSize": 448032
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 85056,
+              "peakWorkingSetSize": 85056
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 27.319499999999607,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 86.21383400000013
+          },
+          "readyAtClick": true,
+          "preparationMs": 280.4001250000001,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 302064,
+              "peakWorkingSetSize": 354080
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 99456,
+              "peakWorkingSetSize": 126336
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42656,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 646768,
+              "peakWorkingSetSize": 883552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 293872,
+              "peakWorkingSetSize": 391440
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 443024,
+              "peakWorkingSetSize": 443024
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 25.279582999999548,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 99.13845799999763
+          },
+          "readyAtClick": true,
+          "preparationMs": 278.66100000000006,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 314528,
+              "peakWorkingSetSize": 354080
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 100224,
+              "peakWorkingSetSize": 126336
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42656,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 646704,
+              "peakWorkingSetSize": 883552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 293840,
+              "peakWorkingSetSize": 391440
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 446224,
+              "peakWorkingSetSize": 446224
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94400,
+              "peakWorkingSetSize": 94400
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 30.636125000000902,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 99.86025000000154
+          },
+          "readyAtClick": true,
+          "preparationMs": 303.66866599999776,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 326960,
+              "peakWorkingSetSize": 354080
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 100864,
+              "peakWorkingSetSize": 126336
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42672,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 646880,
+              "peakWorkingSetSize": 883552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 284992,
+              "peakWorkingSetSize": 391440
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 443040,
+              "peakWorkingSetSize": 443040
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 31.239125000000058,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 83.92762499999662
+          },
+          "readyAtClick": true,
+          "preparationMs": 329.27058300000135,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 291584,
+              "peakWorkingSetSize": 354080
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 101040,
+              "peakWorkingSetSize": 126336
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42672,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 647088,
+              "peakWorkingSetSize": 883552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 282320,
+              "peakWorkingSetSize": 391440
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 439728,
+              "peakWorkingSetSize": 439728
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "zero",
+      "artifactDirectory": "/tmp/lody-app-bench-pPCAxL",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "1ab4b52e72a2001af03a117969f1a85993e0e7979a6e604e318547cc02113612",
+        "probeSha256": "e2632a7054a09a67b3ece0aabea5e31295a702ebdf493bcdcf84fc0df9a54f1a",
+        "residentProbeSha256": "4bb88b852fc208892eba1e3c4aa8d75aaa57a828c54b0638e7597346b40836d2"
+      },
+      "entries": 3000,
+      "intentLeadMs": 0,
+      "retarget": false,
+      "returnAfterMs": 0,
+      "commandIntent": false,
+      "unloadConfirmations": 0,
+      "summary": {
+        "samples": 3,
+        "hitRate": 0,
+        "showMedianMs": 338.73483300000044,
+        "inputMedianMs": 402.2904159999998
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "claimToShowMs": 377.07758399999966,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 437.38970900000004
+          },
+          "readyAtClick": false,
+          "preparationMs": null,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 366720,
+              "peakWorkingSetSize": 366720
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 123248,
+              "peakWorkingSetSize": 134480
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48192,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 827680,
+              "peakWorkingSetSize": 865552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 390944,
+              "peakWorkingSetSize": 391488
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 432384,
+              "peakWorkingSetSize": 432384
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 83280,
+              "peakWorkingSetSize": 83280
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 336.5493749999996,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 397.65216599999985
+          },
+          "readyAtClick": false,
+          "preparationMs": null,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 380336,
+              "peakWorkingSetSize": 380336
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 124288,
+              "peakWorkingSetSize": 135744
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48320,
+              "peakWorkingSetSize": 48320
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828304,
+              "peakWorkingSetSize": 865552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 391200,
+              "peakWorkingSetSize": 391840
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 430240,
+              "peakWorkingSetSize": 430240
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 338.4969170000004,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 413.9031670000004
+          },
+          "readyAtClick": false,
+          "preparationMs": null,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 369376,
+              "peakWorkingSetSize": 384528
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 124800,
+              "peakWorkingSetSize": 136368
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48320,
+              "peakWorkingSetSize": 48320
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828528,
+              "peakWorkingSetSize": 865552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380000,
+              "peakWorkingSetSize": 393088
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 431824,
+              "peakWorkingSetSize": 431824
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94464,
+              "peakWorkingSetSize": 94464
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 350.489375000001,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 402.2904159999998
+          },
+          "readyAtClick": false,
+          "preparationMs": null,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 377488,
+              "peakWorkingSetSize": 384528
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 119712,
+              "peakWorkingSetSize": 136368
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48416,
+              "peakWorkingSetSize": 48416
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828608,
+              "peakWorkingSetSize": 865552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380048,
+              "peakWorkingSetSize": 393088
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 430048,
+              "peakWorkingSetSize": 430048
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 338.73483300000044,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 413.1738329999989
+          },
+          "readyAtClick": false,
+          "preparationMs": null,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 389808,
+              "peakWorkingSetSize": 389808
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 119888,
+              "peakWorkingSetSize": 136368
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48416,
+              "peakWorkingSetSize": 48416
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 801632,
+              "peakWorkingSetSize": 865552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380240,
+              "peakWorkingSetSize": 393088
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 427744,
+              "peakWorkingSetSize": 427744
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 326.93583299999955,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 379.6267919999991
+          },
+          "readyAtClick": false,
+          "preparationMs": null,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 342784,
+              "peakWorkingSetSize": 393744
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 120064,
+              "peakWorkingSetSize": 136368
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48416,
+              "peakWorkingSetSize": 48416
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 801648,
+              "peakWorkingSetSize": 865552
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380256,
+              "peakWorkingSetSize": 393088
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 430512,
+              "peakWorkingSetSize": 430512
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94528,
+              "peakWorkingSetSize": 94528
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "retarget",
+      "artifactDirectory": "/tmp/lody-app-bench-2TuynK",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "1ab4b52e72a2001af03a117969f1a85993e0e7979a6e604e318547cc02113612",
+        "probeSha256": "e2632a7054a09a67b3ece0aabea5e31295a702ebdf493bcdcf84fc0df9a54f1a",
+        "residentProbeSha256": "4bb88b852fc208892eba1e3c4aa8d75aaa57a828c54b0638e7597346b40836d2"
+      },
+      "entries": 3000,
+      "intentLeadMs": 450,
+      "retarget": true,
+      "returnAfterMs": 0,
+      "commandIntent": false,
+      "unloadConfirmations": 0,
+      "summary": {
+        "samples": 3,
+        "hitRate": 1,
+        "showMedianMs": 36.134125000000495,
+        "inputMedianMs": 100.10241700000006
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "claimToShowMs": 44.78575000000001,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 101.39937499999996
+          },
+          "readyAtClick": true,
+          "preparationMs": 192.02408400000058,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 370096,
+              "peakWorkingSetSize": 370096
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 123056,
+              "peakWorkingSetSize": 134192
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48144,
+              "peakWorkingSetSize": 48144
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 875104,
+              "peakWorkingSetSize": 875104
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 388064,
+              "peakWorkingSetSize": 388064
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 460000,
+              "peakWorkingSetSize": 460000
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 90080,
+              "peakWorkingSetSize": 90080
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 31.86225000000013,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 116.76525000000038
+          },
+          "readyAtClick": true,
+          "preparationMs": 181.90120800000113,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 383632,
+              "peakWorkingSetSize": 383632
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 124080,
+              "peakWorkingSetSize": 136480
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48304,
+              "peakWorkingSetSize": 48304
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 882240,
+              "peakWorkingSetSize": 882240
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380176,
+              "peakWorkingSetSize": 390400
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 461504,
+              "peakWorkingSetSize": 461504
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94416,
+              "peakWorkingSetSize": 94416
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 33.03766700000051,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 84.32087499999943
+          },
+          "readyAtClick": true,
+          "preparationMs": 187.6967910000003,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 366464,
+              "peakWorkingSetSize": 387552
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 119824,
+              "peakWorkingSetSize": 136480
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48400,
+              "peakWorkingSetSize": 48400
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 882768,
+              "peakWorkingSetSize": 882768
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380224,
+              "peakWorkingSetSize": 390400
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 455520,
+              "peakWorkingSetSize": 455520
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94352,
+              "peakWorkingSetSize": 94352
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 36.134125000000495,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 102.96912499999962
+          },
+          "readyAtClick": true,
+          "preparationMs": 184.38012499999968,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 380976,
+              "peakWorkingSetSize": 387552
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 119648,
+              "peakWorkingSetSize": 136480
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48480,
+              "peakWorkingSetSize": 48480
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 884976,
+              "peakWorkingSetSize": 895424
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 381136,
+              "peakWorkingSetSize": 390400
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 452496,
+              "peakWorkingSetSize": 452496
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 88288,
+              "peakWorkingSetSize": 88288
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 43.47883300000103,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 100.10241700000006
+          },
+          "readyAtClick": true,
+          "preparationMs": 190.29750000000058,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 393664,
+              "peakWorkingSetSize": 393664
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 120288,
+              "peakWorkingSetSize": 136480
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48480,
+              "peakWorkingSetSize": 48480
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 886272,
+              "peakWorkingSetSize": 895424
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 342832,
+              "peakWorkingSetSize": 390400
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 454480,
+              "peakWorkingSetSize": 454480
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 74288,
+              "peakWorkingSetSize": 74288
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 28.952250000002095,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 99.80325000000084
+          },
+          "readyAtClick": true,
+          "preparationMs": 205.43033300000025,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 316016,
+              "peakWorkingSetSize": 397696
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 109904,
+              "peakWorkingSetSize": 136480
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 44448,
+              "peakWorkingSetSize": 48480
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 806976,
+              "peakWorkingSetSize": 895424
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 287504,
+              "peakWorkingSetSize": 390400
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 453648,
+              "peakWorkingSetSize": 453648
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 90064,
+              "peakWorkingSetSize": 90064
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "return",
+      "artifactDirectory": "/tmp/lody-app-bench-x0nvsQ",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "1ab4b52e72a2001af03a117969f1a85993e0e7979a6e604e318547cc02113612",
+        "probeSha256": "e2632a7054a09a67b3ece0aabea5e31295a702ebdf493bcdcf84fc0df9a54f1a",
+        "residentProbeSha256": "4bb88b852fc208892eba1e3c4aa8d75aaa57a828c54b0638e7597346b40836d2"
+      },
+      "entries": 3000,
+      "intentLeadMs": null,
+      "retarget": false,
+      "returnAfterMs": 3000,
+      "commandIntent": false,
+      "unloadConfirmations": 0,
+      "summary": {
+        "samples": 3,
+        "hitRate": 1,
+        "showMedianMs": 46.256249999998545,
+        "inputMedianMs": 116.4733750000014
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "claimToShowMs": 59.065207999999984,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 133.52950000000055
+          },
+          "readyAtClick": true,
+          "preparationMs": 280.69145899999967,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 376592,
+              "peakWorkingSetSize": 376592
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 121776,
+              "peakWorkingSetSize": 133552
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48176,
+              "peakWorkingSetSize": 48176
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 829168,
+              "peakWorkingSetSize": 866752
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 395664,
+              "peakWorkingSetSize": 395696
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 528896,
+              "peakWorkingSetSize": 528896
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 38.108791999999085,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 77.15720899999906
+          },
+          "readyAtClick": true,
+          "preparationMs": 287.3312079999996,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 378240,
+              "peakWorkingSetSize": 378976
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 117968,
+              "peakWorkingSetSize": 133552
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48432,
+              "peakWorkingSetSize": 48432
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 826752,
+              "peakWorkingSetSize": 866752
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 384816,
+              "peakWorkingSetSize": 397584
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 532704,
+              "peakWorkingSetSize": 532704
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 27.163916000001336,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 100.9174579999999
+          },
+          "readyAtClick": true,
+          "preparationMs": 285.2652079999989,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 259280,
+              "peakWorkingSetSize": 382368
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 101440,
+              "peakWorkingSetSize": 133552
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42144,
+              "peakWorkingSetSize": 48432
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 613888,
+              "peakWorkingSetSize": 866752
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 267312,
+              "peakWorkingSetSize": 397584
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 531168,
+              "peakWorkingSetSize": 531168
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 80752,
+              "peakWorkingSetSize": 80752
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 46.256249999998545,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 105.04879200000141
+          },
+          "readyAtClick": true,
+          "preparationMs": 298.7365409999984,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 273488,
+              "peakWorkingSetSize": 382368
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 102576,
+              "peakWorkingSetSize": 133552
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42160,
+              "peakWorkingSetSize": 48432
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 615344,
+              "peakWorkingSetSize": 866752
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 267664,
+              "peakWorkingSetSize": 397584
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 530960,
+              "peakWorkingSetSize": 530960
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94416,
+              "peakWorkingSetSize": 94416
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 56.54179099999965,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 116.4733750000014
+          },
+          "readyAtClick": true,
+          "preparationMs": 282.39300000000003,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 290704,
+              "peakWorkingSetSize": 382368
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 102368,
+              "peakWorkingSetSize": 133552
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42160,
+              "peakWorkingSetSize": 48432
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 569328,
+              "peakWorkingSetSize": 866752
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 268192,
+              "peakWorkingSetSize": 397584
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 512816,
+              "peakWorkingSetSize": 512816
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94432,
+              "peakWorkingSetSize": 94432
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 43.797874999996566,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 119.57758299999841
+          },
+          "readyAtClick": true,
+          "preparationMs": 288.07574999999997,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 225616,
+              "peakWorkingSetSize": 382368
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 102544,
+              "peakWorkingSetSize": 133552
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42192,
+              "peakWorkingSetSize": 48432
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 453568,
+              "peakWorkingSetSize": 866752
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 259472,
+              "peakWorkingSetSize": 397584
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 531376,
+              "peakWorkingSetSize": 531376
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "after350",
+      "artifactDirectory": "/tmp/lody-app-bench-igdHrL",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "1ab4b52e72a2001af03a117969f1a85993e0e7979a6e604e318547cc02113612",
+        "probeSha256": "e2632a7054a09a67b3ece0aabea5e31295a702ebdf493bcdcf84fc0df9a54f1a",
+        "residentProbeSha256": "4bb88b852fc208892eba1e3c4aa8d75aaa57a828c54b0638e7597346b40836d2"
+      },
+      "entries": 3000,
+      "intentLeadMs": 350,
+      "retarget": false,
+      "returnAfterMs": 0,
+      "commandIntent": false,
+      "unloadConfirmations": 0,
+      "summary": {
+        "samples": 5,
+        "hitRate": 1,
+        "showMedianMs": 24.756000000001222,
+        "inputMedianMs": 97.06679200000144
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "claimToShowMs": 25.67175000000043,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 97.87529199999972
+          },
+          "readyAtClick": true,
+          "preparationMs": 284.9779579999995,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 336304,
+              "peakWorkingSetSize": 336304
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 116176,
+              "peakWorkingSetSize": 127920
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42752,
+              "peakWorkingSetSize": 47056
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 788032,
+              "peakWorkingSetSize": 827024
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 391968,
+              "peakWorkingSetSize": 392288
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 432720,
+              "peakWorkingSetSize": 432720
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 87472,
+              "peakWorkingSetSize": 87472
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 37.684666999999536,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 110.46883399999933
+          },
+          "readyAtClick": true,
+          "preparationMs": 297.2672500000008,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 350496,
+              "peakWorkingSetSize": 350496
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 117744,
+              "peakWorkingSetSize": 129056
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42912,
+              "peakWorkingSetSize": 47056
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 788720,
+              "peakWorkingSetSize": 827024
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 392336,
+              "peakWorkingSetSize": 392864
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 436000,
+              "peakWorkingSetSize": 436000
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 37.91600000000108,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 105.79704100000163
+          },
+          "readyAtClick": true,
+          "preparationMs": 307.24566700000105,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 324944,
+              "peakWorkingSetSize": 350512
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 117904,
+              "peakWorkingSetSize": 129200
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42912,
+              "peakWorkingSetSize": 47056
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 782560,
+              "peakWorkingSetSize": 827024
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 364800,
+              "peakWorkingSetSize": 392864
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 431616,
+              "peakWorkingSetSize": 431616
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 89104,
+              "peakWorkingSetSize": 89104
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 35.681790999999066,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 103.62170800000058
+          },
+          "readyAtClick": true,
+          "preparationMs": 279.91108299999905,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 333440,
+              "peakWorkingSetSize": 350512
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 113296,
+              "peakWorkingSetSize": 129200
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42992,
+              "peakWorkingSetSize": 47056
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 782656,
+              "peakWorkingSetSize": 827024
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 364992,
+              "peakWorkingSetSize": 392864
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 429472,
+              "peakWorkingSetSize": 429472
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 78208,
+              "peakWorkingSetSize": 78208
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 30.07220799999959,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 85.91662499999984
+          },
+          "readyAtClick": true,
+          "preparationMs": 280.2610829999994,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 342592,
+              "peakWorkingSetSize": 350512
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 114192,
+              "peakWorkingSetSize": 129200
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42992,
+              "peakWorkingSetSize": 47056
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 782736,
+              "peakWorkingSetSize": 827024
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 365152,
+              "peakWorkingSetSize": 392864
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 436432,
+              "peakWorkingSetSize": 436432
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 24.435207999998966,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 94.10058299999946
+          },
+          "readyAtClick": true,
+          "preparationMs": 281.1206250000014,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 306336,
+              "peakWorkingSetSize": 350512
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 114240,
+              "peakWorkingSetSize": 129200
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42992,
+              "peakWorkingSetSize": 47056
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 782848,
+              "peakWorkingSetSize": 827024
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 365296,
+              "peakWorkingSetSize": 392864
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 436160,
+              "peakWorkingSetSize": 436160
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 24.756000000001222,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 97.06679200000144
+          },
+          "readyAtClick": true,
+          "preparationMs": 282.25662499999817,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 318448,
+              "peakWorkingSetSize": 350512
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 114896,
+              "peakWorkingSetSize": 129200
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 43008,
+              "peakWorkingSetSize": 47056
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 646400,
+              "peakWorkingSetSize": 827024
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 365440,
+              "peakWorkingSetSize": 392864
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 432928,
+              "peakWorkingSetSize": 432928
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 22.709624999999505,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 108.5215840000019
+          },
+          "readyAtClick": true,
+          "preparationMs": 297.92816700000185,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 326400,
+              "peakWorkingSetSize": 350512
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 108832,
+              "peakWorkingSetSize": 129200
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42944,
+              "peakWorkingSetSize": 47056
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 604848,
+              "peakWorkingSetSize": 827024
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 341440,
+              "peakWorkingSetSize": 392864
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 436816,
+              "peakWorkingSetSize": 436816
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 155600,
+              "peakWorkingSetSize": 155600
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "after-command",
+      "artifactDirectory": "/tmp/lody-app-bench-hx30sa",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "1ab4b52e72a2001af03a117969f1a85993e0e7979a6e604e318547cc02113612",
+        "probeSha256": "e2632a7054a09a67b3ece0aabea5e31295a702ebdf493bcdcf84fc0df9a54f1a",
+        "residentProbeSha256": "4bb88b852fc208892eba1e3c4aa8d75aaa57a828c54b0638e7597346b40836d2",
+        "preparationSha256": "cdd770655e877ec30f6229a6f543a5a7a796e72b3299b1234f56c7034d399779"
+      },
+      "entries": 3000,
+      "intentLeadMs": 300,
+      "retarget": false,
+      "returnAfterMs": 0,
+      "commandIntent": true,
+      "unloadConfirmations": 0,
+      "summary": {
+        "samples": 5,
+        "hitRate": 1,
+        "showMedianMs": 33.264415999998164,
+        "inputMedianMs": 96.48500000000058
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "claimToShowMs": 35.54966700000023,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 92.91433400000005
+          },
+          "readyAtClick": true,
+          "preparationMs": 296.05245900000045,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 367504,
+              "peakWorkingSetSize": 367504
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 121008,
+              "peakWorkingSetSize": 132160
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48176,
+              "peakWorkingSetSize": 48176
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828800,
+              "peakWorkingSetSize": 869648
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 391344,
+              "peakWorkingSetSize": 391888
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 433856,
+              "peakWorkingSetSize": 433856
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 85872,
+              "peakWorkingSetSize": 85872
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 28.790750000000116,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 77.92325000000073
+          },
+          "readyAtClick": true,
+          "preparationMs": 283.60795899999994,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 381552,
+              "peakWorkingSetSize": 381552
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 122960,
+              "peakWorkingSetSize": 134000
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48336,
+              "peakWorkingSetSize": 48336
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 829456,
+              "peakWorkingSetSize": 869648
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 391648,
+              "peakWorkingSetSize": 392160
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 433888,
+              "peakWorkingSetSize": 433888
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94304,
+              "peakWorkingSetSize": 94304
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 32.66658300000017,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 81.46179200000006
+          },
+          "readyAtClick": true,
+          "preparationMs": 295.6245830000007,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 370240,
+              "peakWorkingSetSize": 385664
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 123200,
+              "peakWorkingSetSize": 134816
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48336,
+              "peakWorkingSetSize": 48336
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 829520,
+              "peakWorkingSetSize": 869648
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380704,
+              "peakWorkingSetSize": 393888
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 431184,
+              "peakWorkingSetSize": 431184
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 37.99579099999937,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 96.74387500000012
+          },
+          "readyAtClick": true,
+          "preparationMs": 293.6680830000005,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 378560,
+              "peakWorkingSetSize": 385664
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 118560,
+              "peakWorkingSetSize": 134816
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48432,
+              "peakWorkingSetSize": 48432
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 830752,
+              "peakWorkingSetSize": 869648
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380800,
+              "peakWorkingSetSize": 393888
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 433664,
+              "peakWorkingSetSize": 433664
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 34.49383300000045,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 102.55624999999964
+          },
+          "readyAtClick": true,
+          "preparationMs": 277.8288339999999,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 382352,
+              "peakWorkingSetSize": 385664
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 119184,
+              "peakWorkingSetSize": 134816
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48416,
+              "peakWorkingSetSize": 48432
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 830816,
+              "peakWorkingSetSize": 869648
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380944,
+              "peakWorkingSetSize": 393888
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 436240,
+              "peakWorkingSetSize": 436240
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94416,
+              "peakWorkingSetSize": 94416
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 28.150042000001122,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 87.34333400000105
+          },
+          "readyAtClick": true,
+          "preparationMs": 294.5439580000002,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 335584,
+              "peakWorkingSetSize": 386208
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 118800,
+              "peakWorkingSetSize": 134816
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48352,
+              "peakWorkingSetSize": 48432
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 818992,
+              "peakWorkingSetSize": 869648
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 378160,
+              "peakWorkingSetSize": 393888
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 430992,
+              "peakWorkingSetSize": 430992
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 28.880208999999013,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 86.70879199999763
+          },
+          "readyAtClick": true,
+          "preparationMs": 281.91670800000065,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 347840,
+              "peakWorkingSetSize": 386208
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 119488,
+              "peakWorkingSetSize": 134816
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48352,
+              "peakWorkingSetSize": 48432
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 677008,
+              "peakWorkingSetSize": 869648
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 378240,
+              "peakWorkingSetSize": 393888
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 435200,
+              "peakWorkingSetSize": 435200
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94336,
+              "peakWorkingSetSize": 94336
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 33.264415999998164,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 96.48500000000058
+          },
+          "readyAtClick": true,
+          "preparationMs": 279.0948329999992,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 359952,
+              "peakWorkingSetSize": 386208
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 119312,
+              "peakWorkingSetSize": 134816
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48352,
+              "peakWorkingSetSize": 48432
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 677024,
+              "peakWorkingSetSize": 869648
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 378272,
+              "peakWorkingSetSize": 393888
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 430480,
+              "peakWorkingSetSize": 430480
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "before350",
+      "artifactDirectory": "/tmp/lody-app-bench-4JTNEf",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "8dff7c850eea7c302abdea241ff1cb68bbc8724ca51014bd8b6a4786154546f9",
+        "probeSha256": "e2632a7054a09a67b3ece0aabea5e31295a702ebdf493bcdcf84fc0df9a54f1a",
+        "residentProbeSha256": "4bb88b852fc208892eba1e3c4aa8d75aaa57a828c54b0638e7597346b40836d2",
+        "preparationSha256": "2cb29046659d4c1f77326c63eb472ba3786a831a247e6812a35e31441c6dd98d"
+      },
+      "entries": 3000,
+      "intentLeadMs": 350,
+      "retarget": false,
+      "returnAfterMs": 0,
+      "commandIntent": false,
+      "unloadConfirmations": 0,
+      "summary": {
+        "samples": 5,
+        "hitRate": 0,
+        "showMedianMs": 101.40766699999949,
+        "inputMedianMs": 188.73670800000036
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "claimToShowMs": 77.8774169999997,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 155.15245799999957
+          },
+          "readyAtClick": false,
+          "preparationMs": 282.31124999999975,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 366944,
+              "peakWorkingSetSize": 366944
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 123520,
+              "peakWorkingSetSize": 135152
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48064,
+              "peakWorkingSetSize": 48064
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828112,
+              "peakWorkingSetSize": 866816
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 390912,
+              "peakWorkingSetSize": 391472
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 430992,
+              "peakWorkingSetSize": 430992
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94304,
+              "peakWorkingSetSize": 94304
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 52.03337499999998,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 144.30070799999976
+          },
+          "readyAtClick": false,
+          "preparationMs": 282.1269169999996,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 380976,
+              "peakWorkingSetSize": 380976
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 125248,
+              "peakWorkingSetSize": 136256
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48192,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828688,
+              "peakWorkingSetSize": 866816
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 391168,
+              "peakWorkingSetSize": 391728
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 431856,
+              "peakWorkingSetSize": 431856
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94320,
+              "peakWorkingSetSize": 94320
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 103.30216699999983,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 163.34599999999955
+          },
+          "readyAtClick": false,
+          "preparationMs": 283.8002919999999,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 393664,
+              "peakWorkingSetSize": 393664
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 125504,
+              "peakWorkingSetSize": 136880
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48192,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 826320,
+              "peakWorkingSetSize": 866816
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380000,
+              "peakWorkingSetSize": 393120
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 433872,
+              "peakWorkingSetSize": 433872
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 82.43720799999937,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 162.19333299999926
+          },
+          "readyAtClick": false,
+          "preparationMs": 286.67575000000033,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 344528,
+              "peakWorkingSetSize": 397664
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 120688,
+              "peakWorkingSetSize": 136880
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48288,
+              "peakWorkingSetSize": 48288
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 826368,
+              "peakWorkingSetSize": 866816
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380112,
+              "peakWorkingSetSize": 393120
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 434496,
+              "peakWorkingSetSize": 434496
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94336,
+              "peakWorkingSetSize": 94336
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 87.19187500000044,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 188.73670800000036
+          },
+          "readyAtClick": false,
+          "preparationMs": 280.0420830000003,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 356720,
+              "peakWorkingSetSize": 397664
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 120576,
+              "peakWorkingSetSize": 136880
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48288,
+              "peakWorkingSetSize": 48288
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 826464,
+              "peakWorkingSetSize": 866816
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380160,
+              "peakWorkingSetSize": 393120
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 431664,
+              "peakWorkingSetSize": 431664
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 93568,
+              "peakWorkingSetSize": 93568
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 101.40766699999949,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 158.65900000000147
+          },
+          "readyAtClick": false,
+          "preparationMs": 274.483083000001,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 368992,
+              "peakWorkingSetSize": 397664
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 121168,
+              "peakWorkingSetSize": 136880
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48320,
+              "peakWorkingSetSize": 48320
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 714128,
+              "peakWorkingSetSize": 866816
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380272,
+              "peakWorkingSetSize": 393120
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 432048,
+              "peakWorkingSetSize": 432048
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94288,
+              "peakWorkingSetSize": 94288
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 190.3864169999979,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 267.9726249999985
+          },
+          "readyAtClick": false,
+          "preparationMs": 287.99795900000026,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 393232,
+              "peakWorkingSetSize": 397664
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 121328,
+              "peakWorkingSetSize": 136880
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48320,
+              "peakWorkingSetSize": 48320
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 720336,
+              "peakWorkingSetSize": 866816
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 381648,
+              "peakWorkingSetSize": 393120
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 442992,
+              "peakWorkingSetSize": 442992
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 0,
+              "peakWorkingSetSize": 0
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 134.13987500000076,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 196.79833299999882
+          },
+          "readyAtClick": false,
+          "preparationMs": 303.03587499999776,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 358880,
+              "peakWorkingSetSize": 397664
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 121840,
+              "peakWorkingSetSize": 136880
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48320,
+              "peakWorkingSetSize": 48320
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 720400,
+              "peakWorkingSetSize": 866816
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 381648,
+              "peakWorkingSetSize": 393120
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 439536,
+              "peakWorkingSetSize": 439536
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 91088,
+              "peakWorkingSetSize": 91088
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "before-command",
+      "artifactDirectory": "/tmp/lody-app-bench-wrxWTs",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "8dff7c850eea7c302abdea241ff1cb68bbc8724ca51014bd8b6a4786154546f9",
+        "probeSha256": "e2632a7054a09a67b3ece0aabea5e31295a702ebdf493bcdcf84fc0df9a54f1a",
+        "residentProbeSha256": "4bb88b852fc208892eba1e3c4aa8d75aaa57a828c54b0638e7597346b40836d2",
+        "preparationSha256": "2cb29046659d4c1f77326c63eb472ba3786a831a247e6812a35e31441c6dd98d"
+      },
+      "entries": 3000,
+      "intentLeadMs": 300,
+      "retarget": false,
+      "returnAfterMs": 0,
+      "commandIntent": true,
+      "unloadConfirmations": 0,
+      "summary": {
+        "samples": 5,
+        "hitRate": 0,
+        "showMedianMs": 102.24250000000029,
+        "inputMedianMs": 187.83554100000038
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "claimToShowMs": 114.41329100000075,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 204.81170800000018
+          },
+          "readyAtClick": false,
+          "preparationMs": 303.3752089999998,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 368880,
+              "peakWorkingSetSize": 368880
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 122784,
+              "peakWorkingSetSize": 134384
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48160,
+              "peakWorkingSetSize": 48192
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828128,
+              "peakWorkingSetSize": 867616
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 391120,
+              "peakWorkingSetSize": 391264
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 431536,
+              "peakWorkingSetSize": 431536
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94320,
+              "peakWorkingSetSize": 94320
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 113.48516699999982,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 214.87687499999993
+          },
+          "readyAtClick": false,
+          "preparationMs": 283.2021670000004,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 382688,
+              "peakWorkingSetSize": 382688
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 124352,
+              "peakWorkingSetSize": 135584
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48320,
+              "peakWorkingSetSize": 48320
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828736,
+              "peakWorkingSetSize": 867616
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 391424,
+              "peakWorkingSetSize": 391984
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 429520,
+              "peakWorkingSetSize": 429520
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 96160,
+              "peakWorkingSetSize": 96160
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 106.50933299999997,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 168.3938330000001
+          },
+          "readyAtClick": false,
+          "preparationMs": 292.0212080000001,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 371120,
+              "peakWorkingSetSize": 386528
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 124352,
+              "peakWorkingSetSize": 135584
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48320,
+              "peakWorkingSetSize": 48320
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828912,
+              "peakWorkingSetSize": 867616
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380304,
+              "peakWorkingSetSize": 393408
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 432384,
+              "peakWorkingSetSize": 432384
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 87616,
+              "peakWorkingSetSize": 87616
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 98.92995800000062,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 196.56937499999913
+          },
+          "readyAtClick": false,
+          "preparationMs": 305.8579170000012,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 379312,
+              "peakWorkingSetSize": 386528
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 120096,
+              "peakWorkingSetSize": 135584
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48416,
+              "peakWorkingSetSize": 48416
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828336,
+              "peakWorkingSetSize": 867616
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380384,
+              "peakWorkingSetSize": 393408
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 430640,
+              "peakWorkingSetSize": 430640
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 90592,
+              "peakWorkingSetSize": 90592
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 105.99591700000019,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 167.0437920000004
+          },
+          "readyAtClick": false,
+          "preparationMs": 280.36974999999984,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 391904,
+              "peakWorkingSetSize": 391904
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 120256,
+              "peakWorkingSetSize": 135584
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48416,
+              "peakWorkingSetSize": 48416
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828416,
+              "peakWorkingSetSize": 867616
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380464,
+              "peakWorkingSetSize": 393408
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 429888,
+              "peakWorkingSetSize": 429888
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94400,
+              "peakWorkingSetSize": 94400
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 81.33162500000071,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 138.07324999999946
+          },
+          "readyAtClick": false,
+          "preparationMs": 279.9080410000006,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 346240,
+              "peakWorkingSetSize": 395728
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 120176,
+              "peakWorkingSetSize": 135584
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48416,
+              "peakWorkingSetSize": 48416
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 828416,
+              "peakWorkingSetSize": 867616
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380512,
+              "peakWorkingSetSize": 393408
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 428096,
+              "peakWorkingSetSize": 428096
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 102.24250000000029,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 187.83554100000038
+          },
+          "readyAtClick": false,
+          "preparationMs": 284.8888330000009,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 358480,
+              "peakWorkingSetSize": 395728
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 120752,
+              "peakWorkingSetSize": 135584
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48416,
+              "peakWorkingSetSize": 48416
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 701888,
+              "peakWorkingSetSize": 867616
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380560,
+              "peakWorkingSetSize": 393408
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 433680,
+              "peakWorkingSetSize": 433680
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94384,
+              "peakWorkingSetSize": 94384
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 134.6933339999996,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 230.67845899999884
+          },
+          "readyAtClick": false,
+          "preparationMs": 297.505000000001,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 370688,
+              "peakWorkingSetSize": 395728
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 120976,
+              "peakWorkingSetSize": 135584
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 48416,
+              "peakWorkingSetSize": 48416
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 701904,
+              "peakWorkingSetSize": 867616
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380608,
+              "peakWorkingSetSize": 393408
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 432544,
+              "peakWorkingSetSize": 432544
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94304,
+              "peakWorkingSetSize": 94304
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "retarget-zero",
+      "artifactDirectory": "/tmp/lody-app-bench-VDXh2m",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "1ab4b52e72a2001af03a117969f1a85993e0e7979a6e604e318547cc02113612",
+        "probeSha256": "3f6a0467bc8cb8dd4666f30d0eff8bbbc7fb751805adc1c7ed95691267ec272d",
+        "residentProbeSha256": "df260e254f89892a4208689b376ccebe1d8a79b5579c0b46bfb6dc51a58a37d4",
+        "preparationSha256": "cdd770655e877ec30f6229a6f543a5a7a796e72b3299b1234f56c7034d399779"
+      },
+      "entries": 3000,
+      "intentLeadMs": 0,
+      "retarget": true,
+      "returnAfterMs": 0,
+      "commandIntent": false,
+      "unloadConfirmations": 0,
+      "summary": {
+        "samples": 3,
+        "hitRate": 0,
+        "showMedianMs": 218.23604199999863,
+        "inputMedianMs": 274.63350000000173
+      },
+      "samples": [
+        {
+          "warmup": true,
+          "claimToShowMs": 244.88237500000014,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 301.7449999999999
+          },
+          "readyAtClick": false,
+          "preparationMs": 194.5852079999995,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 345344,
+              "peakWorkingSetSize": 354768
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 119280,
+              "peakWorkingSetSize": 130336
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 45328,
+              "peakWorkingSetSize": 47968
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 846176,
+              "peakWorkingSetSize": 878000
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 391168,
+              "peakWorkingSetSize": 391760
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 436160,
+              "peakWorkingSetSize": 436160
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 216.027333,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 262.1275000000005
+          },
+          "readyAtClick": false,
+          "preparationMs": 181.24595800000134,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 358688,
+              "peakWorkingSetSize": 358688
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 120800,
+              "peakWorkingSetSize": 132096
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 45488,
+              "peakWorkingSetSize": 47968
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 831680,
+              "peakWorkingSetSize": 878000
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380272,
+              "peakWorkingSetSize": 393328
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 437056,
+              "peakWorkingSetSize": 437056
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 88112,
+              "peakWorkingSetSize": 88112
+            }
+          ]
+        },
+        {
+          "warmup": true,
+          "claimToShowMs": 231.96591699999954,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 278.5895419999997
+          },
+          "readyAtClick": false,
+          "preparationMs": 199.90762499999983,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 320032,
+              "peakWorkingSetSize": 362752
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 115664,
+              "peakWorkingSetSize": 132096
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42336,
+              "peakWorkingSetSize": 47968
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 822800,
+              "peakWorkingSetSize": 878000
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 380288,
+              "peakWorkingSetSize": 393328
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 435248,
+              "peakWorkingSetSize": 435248
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 90528,
+              "peakWorkingSetSize": 90528
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 217.76824999999917,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 271.3073750000003
+          },
+          "readyAtClick": false,
+          "preparationMs": 178.20695800000067,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 317888,
+              "peakWorkingSetSize": 362752
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 110800,
+              "peakWorkingSetSize": 132096
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42368,
+              "peakWorkingSetSize": 47968
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 822912,
+              "peakWorkingSetSize": 878000
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 381232,
+              "peakWorkingSetSize": 393328
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 434800,
+              "peakWorkingSetSize": 434800
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 88800,
+              "peakWorkingSetSize": 88800
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 226.9662500000013,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 277.4248750000006
+          },
+          "readyAtClick": false,
+          "preparationMs": 180.89366599999994,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 332352,
+              "peakWorkingSetSize": 362752
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 111072,
+              "peakWorkingSetSize": 132096
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42432,
+              "peakWorkingSetSize": 47968
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 814848,
+              "peakWorkingSetSize": 878000
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 381312,
+              "peakWorkingSetSize": 393328
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 435088,
+              "peakWorkingSetSize": 435088
+            }
+          ]
+        },
+        {
+          "warmup": false,
+          "claimToShowMs": 218.23604199999863,
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 274.63350000000173
+          },
+          "readyAtClick": false,
+          "preparationMs": 176.16600000000108,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "memory": [
+            {
+              "type": "Browser",
+              "workingSetSize": 286304,
+              "peakWorkingSetSize": 362752
+            },
+            {
+              "type": "GPU",
+              "workingSetSize": 111456,
+              "peakWorkingSetSize": 132096
+            },
+            {
+              "type": "Utility",
+              "workingSetSize": 42448,
+              "peakWorkingSetSize": 47968
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 815040,
+              "peakWorkingSetSize": 878000
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 381376,
+              "peakWorkingSetSize": 393328
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 435760,
+              "peakWorkingSetSize": 435760
+            },
+            {
+              "type": "Tab",
+              "workingSetSize": 94544,
+              "peakWorkingSetSize": 94544
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "memory",
+      "artifactDirectory": "/tmp/lody-app-bench-kl47IK",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "1ab4b52e72a2001af03a117969f1a85993e0e7979a6e604e318547cc02113612",
+        "probeSha256": "3f6a0467bc8cb8dd4666f30d0eff8bbbc7fb751805adc1c7ed95691267ec272d",
+        "residentProbeSha256": "4ea82e7ae5f6201f1f5bbf0886dea0bc2f020a5cd7d96cf2e514cab830ebe7e9",
+        "preparationSha256": "cdd770655e877ec30f6229a6f543a5a7a796e72b3299b1234f56c7034d399779",
+        "memorySamplerSha256": "db8f6474d603e79f942de041eb23ad744e90fded32741f3e232e13e0a9817f90"
+      },
+      "variant": "intent-memory",
+      "sharedSessionOwner": true,
+      "entries": 3000,
+      "unloadConfirmations": 0,
+      "residentMemory": {
+        "scope": "Electron app.getAppMetrics process set; external CLI/daemon processes excluded",
+        "metric": "Sum of macOS footprint auxiliary.phys_footprint bytes; working sets retained separately",
+        "forcedGC": false,
+        "stages": [
+          {
+            "name": "source-only",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 350176,
+                    "physFootprintBytes": 212338632
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 107072,
+                    "physFootprintBytes": 635602024
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 47872,
+                    "physFootprintBytes": 7799672
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 692592,
+                    "physFootprintBytes": 606488808
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 382528,
+                    "physFootprintBytes": 290817704
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1671.8357467651367,
+                "workingSetMiB": 1543.203125,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 305008,
+                    "physFootprintBytes": 212846536
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 90976,
+                    "physFootprintBytes": 116032592
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 43936,
+                    "physFootprintBytes": 7750520
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 784464,
+                    "physFootprintBytes": 688867632
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 337168,
+                    "physFootprintBytes": 282035904
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1246.9608154296875,
+                "workingSetMiB": 1524.953125,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 30000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 255840,
+                    "physFootprintBytes": 156960760
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 91008,
+                    "physFootprintBytes": 109085776
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 43968,
+                    "physFootprintBytes": 7750520
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 532416,
+                    "physFootprintBytes": 419580208
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 216688,
+                    "physFootprintBytes": 157533888
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 811.4921112060547,
+                "workingSetMiB": 1113.203125,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 45000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 256288,
+                    "physFootprintBytes": 157403128
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 91008,
+                    "physFootprintBytes": 109085776
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 43968,
+                    "physFootprintBytes": 7750520
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 532432,
+                    "physFootprintBytes": 419580208,
+                    "heap": {
+                      "backingStorageSize": 28766729,
+                      "embedderHeapUsedSize": 11292408,
+                      "totalSize": 88424448,
+                      "usedSize": 83829164
+                    }
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 216688,
+                    "physFootprintBytes": 157533888,
+                    "heap": {
+                      "backingStorageSize": 6992784,
+                      "embedderHeapUsedSize": 720496,
+                      "totalSize": 32833536,
+                      "usedSize": 31668648
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 811.9139862060547,
+                "workingSetMiB": 1113.65625,
+                "sampler": "proc_pid_rusage"
+              }
+            ]
+          },
+          {
+            "name": "neutral-shell",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 260736,
+                    "physFootprintBytes": 160008208
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 91520,
+                    "physFootprintBytes": 459129936
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44256,
+                    "physFootprintBytes": 7930744
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 534112,
+                    "physFootprintBytes": 419662128
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 218992,
+                    "physFootprintBytes": 157746880
+                  },
+                  {
+                    "pid": 24340,
+                    "role": "shell",
+                    "windowId": 3,
+                    "workingSetKiB": 315456,
+                    "physFootprintBytes": 166348624
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1307.3220443725586,
+                "workingSetMiB": 1430.734375,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 260928,
+                    "physFootprintBytes": 160172048
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 91344,
+                    "physFootprintBytes": 112526416
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44256,
+                    "physFootprintBytes": 7930744
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 534112,
+                    "physFootprintBytes": 419662128
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 218992,
+                    "physFootprintBytes": 157746880
+                  },
+                  {
+                    "pid": 24340,
+                    "role": "shell",
+                    "windowId": 3,
+                    "workingSetKiB": 315472,
+                    "physFootprintBytes": 166299472
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 976.8845443725586,
+                "workingSetMiB": 1430.765625,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 261072,
+                    "physFootprintBytes": 160303120
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 91344,
+                    "physFootprintBytes": 112460880
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44256,
+                    "physFootprintBytes": 7930744
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 534112,
+                    "physFootprintBytes": 419662128
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 218992,
+                    "physFootprintBytes": 157746880
+                  },
+                  {
+                    "pid": 24340,
+                    "role": "shell",
+                    "windowId": 3,
+                    "workingSetKiB": 315440,
+                    "physFootprintBytes": 166266704
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 976.9157943725586,
+                "workingSetMiB": 1430.875,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 261632,
+                    "physFootprintBytes": 160614416
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 91344,
+                    "physFootprintBytes": 112460880
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44336,
+                    "physFootprintBytes": 8012664
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 534112,
+                    "physFootprintBytes": 419662128,
+                    "heap": {
+                      "backingStorageSize": 28770960,
+                      "embedderHeapUsedSize": 11292408,
+                      "totalSize": 88686592,
+                      "usedSize": 83875868
+                    }
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 218992,
+                    "physFootprintBytes": 157746880,
+                    "heap": {
+                      "backingStorageSize": 6996801,
+                      "embedderHeapUsedSize": 720496,
+                      "totalSize": 33095680,
+                      "usedSize": 31717076
+                    }
+                  },
+                  {
+                    "pid": 24340,
+                    "role": "shell",
+                    "windowId": 3,
+                    "workingSetKiB": 332656,
+                    "physFootprintBytes": 185190440,
+                    "heap": {
+                      "backingStorageSize": 17459808,
+                      "embedderHeapUsedSize": 4623864,
+                      "totalSize": 82165760,
+                      "usedSize": 63833780
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 995.3378753662109,
+                "workingSetMiB": 1448.3125,
+                "sampler": "proc_pid_rusage"
+              }
+            ]
+          },
+          {
+            "name": "prepared-target",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 265424,
+                    "physFootprintBytes": 163219472
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96464,
+                    "physFootprintBytes": 554746960
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44336,
+                    "physFootprintBytes": 8012664
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 534128,
+                    "physFootprintBytes": 419678512
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 222448,
+                    "physFootprintBytes": 159286976
+                  },
+                  {
+                    "pid": 24340,
+                    "role": "prepared",
+                    "windowId": 3,
+                    "workingSetKiB": 419296,
+                    "physFootprintBytes": 262064144
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1494.4159774780273,
+                "workingSetMiB": 1545.015625,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 267392,
+                    "physFootprintBytes": 158697488
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 92992,
+                    "physFootprintBytes": 148505704
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44624,
+                    "physFootprintBytes": 7832440
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536896,
+                    "physFootprintBytes": 404801816
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 232528,
+                    "physFootprintBytes": 167904960
+                  },
+                  {
+                    "pid": 24340,
+                    "role": "prepared",
+                    "windowId": 3,
+                    "workingSetKiB": 570608,
+                    "physFootprintBytes": 416008304
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1243.3535690307617,
+                "workingSetMiB": 1704.140625,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 20000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 267440,
+                    "physFootprintBytes": 159221776
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 93008,
+                    "physFootprintBytes": 141837416
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44624,
+                    "physFootprintBytes": 7832440
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536896,
+                    "physFootprintBytes": 404801816
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 232528,
+                    "physFootprintBytes": 167904960
+                  },
+                  {
+                    "pid": 24340,
+                    "role": "prepared",
+                    "windowId": 3,
+                    "workingSetKiB": 490752,
+                    "physFootprintBytes": 270223472
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1098.4629440307617,
+                "workingSetMiB": 1626.21875,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 30000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 265056,
+                    "physFootprintBytes": 156157968
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 93008,
+                    "physFootprintBytes": 141837416
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44624,
+                    "physFootprintBytes": 7832440
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536896,
+                    "physFootprintBytes": 404801816
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 232528,
+                    "physFootprintBytes": 167904960
+                  },
+                  {
+                    "pid": 24340,
+                    "role": "prepared",
+                    "windowId": 3,
+                    "workingSetKiB": 379472,
+                    "physFootprintBytes": 212830320
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1040.8066940307617,
+                "workingSetMiB": 1515.21875,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 45000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 265088,
+                    "physFootprintBytes": 156338192
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 93024,
+                    "physFootprintBytes": 141837416
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44624,
+                    "physFootprintBytes": 7832440
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536384,
+                    "physFootprintBytes": 402065688,
+                    "heap": {
+                      "backingStorageSize": 28790712,
+                      "embedderHeapUsedSize": 11952848,
+                      "totalSize": 87900160,
+                      "usedSize": 84805988
+                    }
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 232592,
+                    "physFootprintBytes": 165512896,
+                    "heap": {
+                      "backingStorageSize": 7258481,
+                      "embedderHeapUsedSize": 4597464,
+                      "totalSize": 39387136,
+                      "usedSize": 34098704
+                    }
+                  },
+                  {
+                    "pid": 24340,
+                    "role": "prepared",
+                    "windowId": 3,
+                    "workingSetKiB": 380048,
+                    "physFootprintBytes": 213420144,
+                    "heap": {
+                      "backingStorageSize": 17463183,
+                      "embedderHeapUsedSize": 10938384,
+                      "totalSize": 83886080,
+                      "usedSize": 79980316
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1036.6504440307617,
+                "workingSetMiB": 1515.390625,
+                "sampler": "proc_pid_rusage"
+              }
+            ]
+          },
+          {
+            "name": "after-preparation-disabled",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 265136,
+                    "physFootprintBytes": 156698640
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 92144,
+                    "physFootprintBytes": 108135504
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44704,
+                    "physFootprintBytes": 7750520
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536384,
+                    "physFootprintBytes": 402065688
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 232608,
+                    "physFootprintBytes": 165529280
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 801.2577362060547,
+                "workingSetMiB": 1143.53125,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 265248,
+                    "physFootprintBytes": 156846096
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 92144,
+                    "physFootprintBytes": 108135504
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44704,
+                    "physFootprintBytes": 7750520
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536384,
+                    "physFootprintBytes": 402065688
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 232608,
+                    "physFootprintBytes": 165529280
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 801.3983612060547,
+                "workingSetMiB": 1143.640625,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 265392,
+                    "physFootprintBytes": 156321808
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 92144,
+                    "physFootprintBytes": 108102736
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44704,
+                    "physFootprintBytes": 7750520
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536384,
+                    "physFootprintBytes": 402065688
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 232608,
+                    "physFootprintBytes": 165529280
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 800.8671112060547,
+                "workingSetMiB": 1143.78125,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 265552,
+                    "physFootprintBytes": 156338192
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 92144,
+                    "physFootprintBytes": 108102736
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44704,
+                    "physFootprintBytes": 7750520
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536384,
+                    "physFootprintBytes": 402065688,
+                    "heap": {
+                      "backingStorageSize": 28790763,
+                      "embedderHeapUsedSize": 11952848,
+                      "totalSize": 87900160,
+                      "usedSize": 84810064
+                    }
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 232608,
+                    "physFootprintBytes": 165529280,
+                    "heap": {
+                      "backingStorageSize": 7258481,
+                      "embedderHeapUsedSize": 4597464,
+                      "totalSize": 39387136,
+                      "usedSize": 34101876
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 800.8827362060547,
+                "workingSetMiB": 1143.9375,
+                "sampler": "proc_pid_rusage"
+              }
+            ]
+          },
+          {
+            "name": "auxiliary-1",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 268832,
+                    "physFootprintBytes": 163088424
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97776,
+                    "physFootprintBytes": 552207440
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44784,
+                    "physFootprintBytes": 7832440
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536320,
+                    "physFootprintBytes": 397691160
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 233040,
+                    "physFootprintBytes": 166643392
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 421200,
+                    "physFootprintBytes": 267913184
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1483.3221817016602,
+                "workingSetMiB": 1564.40625,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 270672,
+                    "physFootprintBytes": 162056232
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97648,
+                    "physFootprintBytes": 431211624
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44784,
+                    "physFootprintBytes": 7832440
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536320,
+                    "physFootprintBytes": 397691160
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 234592,
+                    "physFootprintBytes": 166004416
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 529760,
+                    "physFootprintBytes": 374802448
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1468.275375366211,
+                "workingSetMiB": 1673.609375,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 270672,
+                    "physFootprintBytes": 161794088
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 93392,
+                    "physFootprintBytes": 189727824
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44800,
+                    "physFootprintBytes": 7832440
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 536320,
+                    "physFootprintBytes": 397691160
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 234592,
+                    "physFootprintBytes": 166004416
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 529664,
+                    "physFootprintBytes": 374704144
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1237.6347274780273,
+                "workingSetMiB": 1669.375,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 270624,
+                    "physFootprintBytes": 161253416
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 93360,
+                    "physFootprintBytes": 153306192
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 44800,
+                    "physFootprintBytes": 7816056
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 537328,
+                    "physFootprintBytes": 399542552,
+                    "heap": {
+                      "backingStorageSize": 28785168,
+                      "embedderHeapUsedSize": 12088624,
+                      "totalSize": 88424448,
+                      "usedSize": 84916896
+                    }
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 234592,
+                    "physFootprintBytes": 166004416,
+                    "heap": {
+                      "backingStorageSize": 7171747,
+                      "embedderHeapUsedSize": 3440688,
+                      "totalSize": 39387136,
+                      "usedSize": 33608308
+                    }
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 529968,
+                    "physFootprintBytes": 375015440,
+                    "heap": {
+                      "backingStorageSize": 17473108,
+                      "embedderHeapUsedSize": 20242224,
+                      "totalSize": 236453888,
+                      "usedSize": 175671232
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1204.4316024780273,
+                "workingSetMiB": 1670.578125,
+                "sampler": "proc_pid_rusage"
+              }
+            ]
+          },
+          {
+            "name": "auxiliary-3",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 276400,
+                    "physFootprintBytes": 170870824
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 95536,
+                    "physFootprintBytes": 677315688
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 45008,
+                    "physFootprintBytes": 8061816
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 519136,
+                    "physFootprintBytes": 399935768
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 223712,
+                    "physFootprintBytes": 166086336
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 531936,
+                    "physFootprintBytes": 375310352
+                  },
+                  {
+                    "pid": 25898,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 492336,
+                    "physFootprintBytes": 339773552
+                  },
+                  {
+                    "pid": 25984,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 419632,
+                    "physFootprintBytes": 263817232
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2289.9356536865234,
+                "workingSetMiB": 2542.671875,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 229312,
+                    "physFootprintBytes": 171083816
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 92592,
+                    "physFootprintBytes": 704726144
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42656,
+                    "physFootprintBytes": 8078200
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 455936,
+                    "physFootprintBytes": 400623896
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 227632,
+                    "physFootprintBytes": 171181760
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 531888,
+                    "physFootprintBytes": 375261200
+                  },
+                  {
+                    "pid": 25898,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 527584,
+                    "physFootprintBytes": 376162440
+                  },
+                  {
+                    "pid": 25984,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 506096,
+                    "physFootprintBytes": 349964352
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2438.623245239258,
+                "workingSetMiB": 2552.4375,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 229200,
+                    "physFootprintBytes": 170870824
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 87728,
+                    "physFootprintBytes": 300876928
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42656,
+                    "physFootprintBytes": 8078200
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 455936,
+                    "physFootprintBytes": 400623896
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 227632,
+                    "physFootprintBytes": 171181760
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 531888,
+                    "physFootprintBytes": 375261200
+                  },
+                  {
+                    "pid": 25898,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 527376,
+                    "physFootprintBytes": 375949448
+                  },
+                  {
+                    "pid": 25984,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 506032,
+                    "physFootprintBytes": 349898816
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2053.013870239258,
+                "workingSetMiB": 2547.3125,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 229200,
+                    "physFootprintBytes": 170575912
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 87696,
+                    "physFootprintBytes": 216581248
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42656,
+                    "physFootprintBytes": 8078200
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 455936,
+                    "physFootprintBytes": 400623896,
+                    "heap": {
+                      "backingStorageSize": 28785388,
+                      "embedderHeapUsedSize": 12088624,
+                      "totalSize": 88424448,
+                      "usedSize": 85047272
+                    }
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 227632,
+                    "physFootprintBytes": 171181760,
+                    "heap": {
+                      "backingStorageSize": 7212884,
+                      "embedderHeapUsedSize": 5882392,
+                      "totalSize": 42795008,
+                      "usedSize": 34820260
+                    }
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 531888,
+                    "physFootprintBytes": 375261200,
+                    "heap": {
+                      "backingStorageSize": 17477042,
+                      "embedderHeapUsedSize": 20598704,
+                      "totalSize": 236453888,
+                      "usedSize": 175846096
+                    }
+                  },
+                  {
+                    "pid": 25898,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 527392,
+                    "physFootprintBytes": 375965832,
+                    "heap": {
+                      "backingStorageSize": 17472217,
+                      "embedderHeapUsedSize": 20005656,
+                      "totalSize": 234618880,
+                      "usedSize": 172066096
+                    }
+                  },
+                  {
+                    "pid": 25984,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 506048,
+                    "physFootprintBytes": 349915200,
+                    "heap": {
+                      "backingStorageSize": 17472213,
+                      "embedderHeapUsedSize": 19950840,
+                      "totalSize": 213647360,
+                      "usedSize": 170013944
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1972.3732452392578,
+                "workingSetMiB": 2547.3125,
+                "sampler": "proc_pid_rusage"
+              }
+            ]
+          },
+          {
+            "name": "auxiliary-5",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 233648,
+                    "physFootprintBytes": 178243624
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96080,
+                    "physFootprintBytes": 750765256
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42928,
+                    "physFootprintBytes": 8356728
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 456096,
+                    "physFootprintBytes": 400902424
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 228368,
+                    "physFootprintBytes": 172410560
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 532112,
+                    "physFootprintBytes": 375457808
+                  },
+                  {
+                    "pid": 25898,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 529104,
+                    "physFootprintBytes": 376064136
+                  },
+                  {
+                    "pid": 25984,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 508080,
+                    "physFootprintBytes": 350275648
+                  },
+                  {
+                    "pid": 26276,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 495648,
+                    "physFootprintBytes": 342935664
+                  },
+                  {
+                    "pid": 26278,
+                    "role": "auxiliary",
+                    "windowId": 8,
+                    "workingSetKiB": 422240,
+                    "physFootprintBytes": 273237984
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 3079.080421447754,
+                "workingSetMiB": 3461.234375,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 233712,
+                    "physFootprintBytes": 175212584
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 95152,
+                    "physFootprintBytes": 767329504
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42928,
+                    "physFootprintBytes": 8356728
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 456096,
+                    "physFootprintBytes": 400902424
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 229232,
+                    "physFootprintBytes": 173524672
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 532112,
+                    "physFootprintBytes": 375457808
+                  },
+                  {
+                    "pid": 25898,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 529104,
+                    "physFootprintBytes": 376064136
+                  },
+                  {
+                    "pid": 25984,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 508032,
+                    "physFootprintBytes": 350226496
+                  },
+                  {
+                    "pid": 26276,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 531760,
+                    "physFootprintBytes": 380274824
+                  },
+                  {
+                    "pid": 26278,
+                    "role": "auxiliary",
+                    "windowId": 8,
+                    "workingSetKiB": 526400,
+                    "physFootprintBytes": 370837520
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 3221.6898880004883,
+                "workingSetMiB": 3598.171875,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 233728,
+                    "physFootprintBytes": 175081512
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 90544,
+                    "physFootprintBytes": 365315224
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42928,
+                    "physFootprintBytes": 8356728
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 456096,
+                    "physFootprintBytes": 400902424
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 229232,
+                    "physFootprintBytes": 173524672
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 532112,
+                    "physFootprintBytes": 375457808
+                  },
+                  {
+                    "pid": 25898,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 529104,
+                    "physFootprintBytes": 376064136
+                  },
+                  {
+                    "pid": 25984,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 508032,
+                    "physFootprintBytes": 350226496
+                  },
+                  {
+                    "pid": 26276,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 531568,
+                    "physFootprintBytes": 380078216
+                  },
+                  {
+                    "pid": 26278,
+                    "role": "auxiliary",
+                    "windowId": 8,
+                    "workingSetKiB": 526288,
+                    "physFootprintBytes": 370706448
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2837.8616943359375,
+                "workingSetMiB": 3593.390625,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 233536,
+                    "physFootprintBytes": 174934056
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 90496,
+                    "physFootprintBytes": 283673752
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42928,
+                    "physFootprintBytes": 8356728
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 456096,
+                    "physFootprintBytes": 400902424,
+                    "heap": {
+                      "backingStorageSize": 28785608,
+                      "embedderHeapUsedSize": 12088624,
+                      "totalSize": 88686592,
+                      "usedSize": 85222572
+                    }
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 229232,
+                    "physFootprintBytes": 171148992,
+                    "heap": {
+                      "backingStorageSize": 7044075,
+                      "embedderHeapUsedSize": 1381360,
+                      "totalSize": 42532864,
+                      "usedSize": 34278740
+                    }
+                  },
+                  {
+                    "pid": 25613,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 460944,
+                    "physFootprintBytes": 258902032,
+                    "heap": {
+                      "backingStorageSize": 17471996,
+                      "embedderHeapUsedSize": 10792568,
+                      "totalSize": 167772160,
+                      "usedSize": 81993716
+                    }
+                  },
+                  {
+                    "pid": 25898,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 529104,
+                    "physFootprintBytes": 376064136,
+                    "heap": {
+                      "backingStorageSize": 17476139,
+                      "embedderHeapUsedSize": 20007272,
+                      "totalSize": 234618880,
+                      "usedSize": 172254228
+                    }
+                  },
+                  {
+                    "pid": 25984,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 508032,
+                    "physFootprintBytes": 350226496,
+                    "heap": {
+                      "backingStorageSize": 17476147,
+                      "embedderHeapUsedSize": 20407408,
+                      "totalSize": 213647360,
+                      "usedSize": 170228048
+                    }
+                  },
+                  {
+                    "pid": 26276,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 531584,
+                    "physFootprintBytes": 380094600,
+                    "heap": {
+                      "backingStorageSize": 17472223,
+                      "embedderHeapUsedSize": 21019120,
+                      "totalSize": 237240320,
+                      "usedSize": 193674636
+                    }
+                  },
+                  {
+                    "pid": 26278,
+                    "role": "auxiliary",
+                    "windowId": 8,
+                    "workingSetKiB": 526352,
+                    "physFootprintBytes": 370771984,
+                    "heap": {
+                      "backingStorageSize": 17472210,
+                      "embedderHeapUsedSize": 20302664,
+                      "totalSize": 235143168,
+                      "usedSize": 173212056
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2646.5179443359375,
+                "workingSetMiB": 3523.734375,
+                "sampler": "proc_pid_rusage"
+              }
+            ]
+          },
+          {
+            "name": "after-all-closed",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 232720,
+                    "physFootprintBytes": 174114856
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 90560,
+                    "physFootprintBytes": 473646208
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42528,
+                    "physFootprintBytes": 7947128
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 456096,
+                    "physFootprintBytes": 400902424
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 229232,
+                    "physFootprintBytes": 171148992
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1170.8828048706055,
+                "workingSetMiB": 1026.5,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 232560,
+                    "physFootprintBytes": 172083240
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 86416,
+                    "physFootprintBytes": 115049600
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42528,
+                    "physFootprintBytes": 7947128
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 456496,
+                    "physFootprintBytes": 400017688
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 229232,
+                    "physFootprintBytes": 171148992
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 826.1171798706055,
+                "workingSetMiB": 1022.6875,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 232624,
+                    "physFootprintBytes": 171264040
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 86432,
+                    "physFootprintBytes": 114001024
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42528,
+                    "physFootprintBytes": 7897976
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 456880,
+                    "physFootprintBytes": 400394520
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 229232,
+                    "physFootprintBytes": 171148992
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 824.6484298706055,
+                "workingSetMiB": 1023.140625,
+                "sampler": "proc_pid_rusage"
+              },
+              {
+                "offsetMs": 30000,
+                "processes": [
+                  {
+                    "pid": 23150,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 232512,
+                    "physFootprintBytes": 167987240
+                  },
+                  {
+                    "pid": 23151,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 86432,
+                    "physFootprintBytes": 110855296
+                  },
+                  {
+                    "pid": 23152,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 42528,
+                    "physFootprintBytes": 7897976
+                  },
+                  {
+                    "pid": 23155,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 456880,
+                    "physFootprintBytes": 400394520,
+                    "heap": {
+                      "backingStorageSize": 28785828,
+                      "embedderHeapUsedSize": 12177696,
+                      "totalSize": 89210880,
+                      "usedSize": 85531440
+                    }
+                  },
+                  {
+                    "pid": 23358,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 229232,
+                    "physFootprintBytes": 171148992,
+                    "heap": {
+                      "backingStorageSize": 7044075,
+                      "embedderHeapUsedSize": 1496008,
+                      "totalSize": 42532864,
+                      "usedSize": 34284680
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 818.5234298706055,
+                "workingSetMiB": 1023.03125,
+                "sampler": "proc_pid_rusage"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

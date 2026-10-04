@@ -177,9 +177,13 @@ test('outline jumps land their round at the top, far and near, while rows hydrat
   await settleFrames(page, 30);
   // Far, then near (the rows around the first target are hydrating), then back.
   for (const round of [400, 410, 1200, 1195, 10, 5]) {
-    await page.locator(`[data-outline-index="${round}"]`).evaluate((element) => {
-      (element as HTMLElement).click();
-    });
+    // The outline is windowed: scroll its native strip to materialize the target.
+    await page.getByRole('navigation', { name: 'Conversation outline' }).evaluate((rail, index) => {
+      const strip = rail.firstElementChild as HTMLElement;
+      const tick = rail.querySelector('li')!;
+      strip.scrollTop = index * tick.getBoundingClientRect().height;
+    }, round);
+    await page.locator(`[data-outline-index="${round}"]`).click();
     await settleFrames(page, 60);
     const landed = await page.evaluate((index) => {
       const viewport = document.querySelector('[data-message-selection-scroll]')!;

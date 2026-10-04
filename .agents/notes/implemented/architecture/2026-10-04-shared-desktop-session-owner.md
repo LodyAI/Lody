@@ -1,0 +1,206 @@
+# Shared desktop Session ownership
+
+Status: implemented
+Translation: current
+PR: [#1241](https://github.com/LodyAI/Lody/pull/1241)
+
+[中文](2026-10-04-shared-desktop-session-owner.zh.md)
+
+## Abstract
+
+Opening a second local desktop window used to import another Session document and
+construct another history projection before it could display the conversation.
+One main-owned data renderer now retains Session documents and the UI writer;
+product windows consume indexed, windowed projections through IPC. This removes
+repeated document import while retaining writer validation and acknowledging writes
+only after document persistence. Bounding outline/message rendering and handing
+entry data to the route then reduced a strict no-hover, 3,000-entry comparison from
+323/382 ms to 232/287 ms show/input medians (ten samples per build). This remains
+above a sub-100 ms target. The dedicated renderer and prepared view have explicit
+memory and first-open costs in the evaluation. Subsequent ablations rejected more
+pre-mounting, smaller buffers and removal of the data handoff; no further product
+latency gain is claimed.
+
+## Decision and boundaries
+
+The data renderer is independent of the optional warm-window pool. It starts with
+local workspace composition and retains its own Repo/storage/cursor namespace.
+Each product window still owns metadata, drafts, attachment preparation, editors
+and its ConversationView. The CLI remains the agent author; UI commands never become
+CLI write-intent commands. Cloud/web composition remains direct.
+
+The owner reuses SessionData/HistoryWriter for history and WorkspaceWriter for queue
+changes. The first response includes a cached shallow directory and the initial
+40-turn viewport, extended backward to the preceding user within a 50-turn bound.
+The client finishes this bounded tail before exposing its store; subsequent body
+reads are batched. Eager hydration can resolve readiness without an extra idle
+callback. The owner reads its authoritative directory directly rather than waiting
+for its own UI projection. Each viewer still constructs an O(total) directory. Full export/fork reads remain explicit. The connection retains actual
+writer-captured snapshot handles behind opaque IPC references; this lookup grants
+no independent copy provenance. Collection or connection close releases them.
+Rollback handles also hold their source store until release.
+
+Main authenticates product frames and the exact data renderer. Leases, sequence
+numbers and owner incarnations fence stale observations and replies. Closing one
+view releases only its subscriptions; quit drains accepted operations before stopping
+relays. A dead owner rejects pending commands as potentially committed, without
+replay. View subscriptions reopen, invalidate their projections and read persisted
+state. Failed reopening remains an error rather than creating a second writer.
+
+Existing per-window Session snapshots seed cold owner storage before subscription,
+merge into already owned documents, persist, and remain in their original cache; storage/cursor checkpoints are never shared by independent Repos.
+History/queue acknowledgements wait for per-document persistence, not a Repo-wide
+flush. Queue watermarks also persist before acknowledgement. Pending attachments
+and editor drafts remain window-owned, so their unload protection remains necessary.
+Their guards now log only the blocking kind/count/status, without message or file
+contents. The reported original close veto remains unestablished.
+
+A full utility-process migration was not selected: the current runtime uses browser
+IndexedDB and Electron's renderer transport. Reusing it keeps one synchronization
+and writer implementation, at the cost of another Chromium renderer. Moving only
+the owner into a DOM-free worker requires extracting those runtime dependencies;
+this change does not claim that memory optimization.
+
+## Direct-click rendering
+
+Sharing the document did not remove target rendering after a click. Profiling the
+same 3,000-entry fixture found that the outline still mounted 1,500 ticks and the
+message view built React elements for the entire history before the scroll engine
+selected its mounted rows. The outline now mounts a viewport slice with overscan,
+preserving its full scroll extent and focus/hover anchors. The message view supplies
+a row factory to the engine, which constructs only the mounted plan, including
+selection-retained rows. These changes preserve initial-scroll and visible-stream
+readiness rather than revealing incomplete content sooner.
+
+An auxiliary conversation window defers its initially hidden sidebar until first
+expansion, then retains the mounted view on collapse. The primary window retains
+its existing behavior. Explicit target navigation begins a same-workspace store
+acquisition before route mounting, giving cached data up to 50 ms to arrive; slow
+or failed acquisition enters the ordinary loading/error route. A generation fences
+superseded targets, and the temporary store reference is released even after a
+timeout or retarget. This begins at a concrete target request, without hover lead.
+
+A subsequent single-factor ablation of the common workspace shell saved only about
+14 ms in a seven-sample exploratory run and added root-route/scope coupling; it was
+reverted. Removing the entire composer while preserving its measured box saved about
+29 ms against the same diagnostic build (five samples), yet still took 191 ms to
+show. This omitted an essential control and does not establish the benefit of an
+interactive persistent composer. No dummy Session or reusable-draft scheme was added.
+
+The initial 200 px overscan trial improved exploratory medians but changed touch
+compensation behavior and failed a desktop wheel-position check by 4 px. A 400 px
+desktop candidate passed all four browser cases, but the final ten-sample combined
+comparison regressed from 219/278 to 237/283 ms show/input. Removing only the data
+handoff then measured 240/291 ms against that same control. Both were reverted:
+keep the existing 800 px buffer and bounded data-before-route handoff. The deadline
+is a maximum, not a fixed sleep; eliminating that path did not improve end-to-end
+opening. The unchanged control also varied from 234 to 219 ms across blocks, so
+small sequential differences are not evidence of a stable gain.
+
+The [ablation record](../../../../packages/components/benchmarks/window-bootstrap/README.md#ablation-decisions)
+contains all ten runs, rejected patches, matching source hashes and failed starts.
+All 105 first-show checks pass (89 with unique input; the composer diagnostic has no
+input); counts include 30 excluded warmups. No extra resident view/cache or product
+abstraction remains. The model test now checks the stored reading anchor when a
+shrunk row puts its successor at the viewport top; growth must restore the original
+row offset. Browser tests scroll the windowed outline before clicking an offscreen
+round. These verification improvements and broader source hashing are retained.
+
+A separate native-animation experiment changed the exploratory show median only
+from 235.61 to 227.47 ms (three samples each). It does not justify shipping a native
+addon. The current product retains Electron presentation and its two-frame content
+gate. An earlier eager 90-turn prefill delayed mounting without a useful gain;
+the shipped response follows the actual entry viewport plus bounded user context.
+The directory, React provider/composer mount and native show still have costs. A
+sub-100 ms direct-open target remains unachieved; pre-rendered hits are not evidence
+for that target. The [direct-click evaluation](../../../../packages/components/benchmarks/window-bootstrap/README.md#direct-click-without-hover--2026-10-04)
+records matched builds, all samples and the remaining limits. All 74 latency
+content/input checks pass, including 21 excluded warmups; the primary pair preserves
+main `8872177b6` in both builds. The main-integrated eight-stage
+resident probe adds 230–237 MiB for one prepared view and returns to 10.11 MiB above
+source-only footprint after closing five auxiliaries; no auxiliary renderer remains.
+This single run retains the existing 250–300 MiB planning budget, without claiming
+a matched memory improvement or coverage of distinct-session cache retention.
+
+## Evaluation
+
+The [desktop runner](../../../../packages/components/benchmarks/window-bootstrap/README.md)
+uses generated conversations, isolated profiles and the same built CLI/application
+for both variants. `LODY_SHARED_SESSION_OWNER=0` selects the former independent
+Session replicas **for isolated comparison**, not a cache migration/rollback path.
+The harness now uses the current warmup IPC, releases its import-only fixture handle,
+records process working sets and rejects unexpected native close confirmations.
+
+The [recorded evaluation](../../../../packages/components/benchmarks/window-bootstrap/README.md#shared-session-owner--2026-10-04)
+contains samples, build hashes, reproduction commands and failed attempts. On M4 Max /
+Electron 43.7.6, the final reversed-order ten-sample repeat reduced immediate-click
+show from 499.04 to 379.80 ms and input confirmation from 621.70 to 468.52 ms. The
+earlier five-sample pair improved by 16.9% / 15.0%, so 24% is not a universal target.
+Ready hits measured 83.14 ms show / 162.29 ms input with sharing (three samples).
+All 70 completed content/input/clean-close checks passed, including warmups. Forced
+owner death recovered an acknowledged write and the source view in 1,128.88 ms.
+
+At input confirmation, one-at-a-time opening increased the median summed process
+working set by 472 MiB; at the fifth retained auxiliary window it was 7.3% lower.
+These are opening-time samples, not steady residency. The fresh fixture import /
+first-source-conversation interval increased from 1.19 to 1.98 seconds; this includes
+legacy cache migration and is not whole-app startup. The extra renderer is a real
+cost, while document sharing becomes more useful across simultaneous views.
+Two exploratory prepared-hit probes timed out before intent IPC; the final runner
+focuses the source and settles metadata updates before hover. Both variants then
+passed, but the exact cancellation trigger was not isolated.
+
+The [idle-memory evaluation](../../../../packages/components/benchmarks/window-bootstrap/README.md#idle-memory-and-retention)
+adds 45-second source/prepared observations and a 30-second post-close observation,
+without forced GC. Using macOS physical-footprint accounting for Electron processes
+(excluding external CLI/daemon processes), source-only memory was 616.15 MiB with
+independent ownership and 742.37 MiB with sharing. One prepared hidden view brought
+the shared total to 969.42 MiB: about 227–236 MiB extra versus the before/after source
+samples. The data renderer used about 131–147 MiB; the settled prepared renderer used
+203.71 MiB. These counters differ from the earlier summed working sets.
+
+After closing five auxiliaries, the shared total returned to 753.93 MiB, with no
+auxiliary renderer processes remaining. Both variants completed eight stages, with
+66 OS samples total and no close confirmation. One preliminary run exposed natural
+reclamation after ten seconds and a process-exit sampling race; it is excluded from
+the final comparison. A 250–300 MiB extra budget for one hot view is a reasonable
+initial proposal for this fixture. Multiple hidden views remain unimplemented.
+All windows here share one Session and the source remains open; distinct documents,
+their ten-minute store-cache grace period, and hours-long retention are unmeasured.
+
+## Verification and limits
+
+Behavioral tests use real Loro readers/writers across a structured-clone transport:
+shared ownership, independent closure, an edit during initial observation, legacy
+merge, cross-session snapshot provenance, storage failure, concurrent queue identities,
+owner replacement, uncertain tail-edit outcomes, later observers and connection/workspace fencing. Reader background failures no
+longer escape as unhandled rejections. Real desktop probes validate content and unique
+text insertion at first show; process-recovery evaluation checks an acknowledged write.
+
+The four ablation-focused suites pass 132 tests, including 40 seeds × 60 operations
+at each of 400/800 px. All four real-browser regressions pass on the retained product.
+The earlier six owner/rendering suites passed 75 tests, including 12 owner/client
+cases; Electron passed 199 tests. New cases cover lazy row construction, outline keyboard
+navigation/preview retention, sidebar state, entry-tail readiness and target handoff
+timeouts/generation fencing. Type checks, production build, lint, i18n and platform/public/import
+boundaries passed. The broader `pnpm check` reached 4,824 passing components tests
+with one failure in unchanged `boot-shell.test.tsx` (storage-unavailable fallback);
+that case also fails alone in the Node 26 environment. CLI's 3,474 and shared's 1,271
+tests passed. Documentation validation has six existing broken links into absent
+isolated Kimi/Pi submodules in the evaluation clone (62 absent-submodule links in
+the dependency-free checkout), with no new-document link failures.
+
+Validation ran in a separate clone because the nested checkout has no dependencies.
+Existing submodule/lockfile drift required a non-frozen install there; its lockfile
+was not copied back. Both performance variants used the same dependency tree and
+built CLI. The installed product and its profiles were not changed.
+
+Timing excludes physical input, display scanout and IME. Prepared hits are an ideal
+case, not a claim about prediction hit rate. Opening-time working sets, idle macOS
+footprints and diagnostic JS heap counters are recorded separately. None establishes
+a population memory budget. Small sequential runs do
+not establish a population P95. Old auxiliary caches can only be merged when that
+cache namespace is opened; they are not deleted or scanned globally.
+
+Intent: [desktop windows](../../../../specs/desktop-windows.md). Prior investigation:
+[close diagnostics](../../proposed/architecture/2026-10-04-desktop-window-lifecycle-diagnostics.md).

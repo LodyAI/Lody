@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const fs = require('node:fs');
 
 app.setAppPath(process.env.PROBE_APP_PATH);
@@ -17,9 +17,16 @@ const rounds = Number(process.env.PROBE_ROUNDS ?? 1500);
 const answer = 'Answer for round ' + (rounds - 1) + '.';
 const preparedMode = process.env.PROBE_PREPARED === '1';
 const productPreparedMode = process.env.PROBE_PRODUCT_PREPARED === '1';
+const directClickMode = process.env.PROBE_DIRECT_CLICK === '1';
 const checkInput = process.env.PROBE_INPUT === '1';
-const intentLeadMs = process.env.PROBE_INTENT_LEAD_MS === undefined ? null : Number(process.env.PROBE_INTENT_LEAD_MS);
-if (intentLeadMs !== null && (!Number.isFinite(intentLeadMs) || intentLeadMs < 0)) throw new Error('Invalid intent lead time');
+const retargetMode = process.env.PROBE_RETARGET === '1';
+const returnAfterMs = Number(process.env.PROBE_RETURN_MS ?? 0);
+if (!Number.isFinite(returnAfterMs) || returnAfterMs < 0 || returnAfterMs > 7000)
+  throw new Error('Return delay must be between zero and 7000 ms');
+const intentLeadMs =
+  process.env.PROBE_INTENT_LEAD_MS === undefined ? null : Number(process.env.PROBE_INTENT_LEAD_MS);
+if (intentLeadMs !== null && (!Number.isFinite(intentLeadMs) || intentLeadMs < 0))
+  throw new Error('Invalid intent lead time');
 const nativeHost = process.env.PROBE_NATIVE_ADDON ? require(process.env.PROBE_NATIVE_ADDON) : null;
 let heldWindow = null;
 let sourceWindow = null;
@@ -42,16 +49,46 @@ ipcMain.handle('app.benchmarkPresent', (event) => {
   win.focus();
 });
 const records = [];
+let unloadConfirmations = 0;
+// Only synthetic, isolated probe windows run here. A clean close must not prompt.
+dialog.showMessageBoxSync = () => {
+  unloadConfirmations++;
+  return 1;
+};
 const log = (x) => {
   records.push(x);
   fs.appendFileSync(output + '.jsonl', JSON.stringify(x) + '\n');
 };
 const registerHandler = ipcMain.handle.bind(ipcMain);
-ipcMain.handle = (channel, handler) => registerHandler(channel, (event, ...args) => {
-  if (channel === 'app.prepareWindow' || channel === 'app.cancelPreparedWindow')
-    log({ kind: 'intent-ipc', channel, sourceVisible: BrowserWindow.fromWebContents(event.sender)?.isVisible(), args });
-  return handler(event, ...args);
-});
+ipcMain.handle = (channel, handler) =>
+  registerHandler(channel, (event, ...args) => {
+    if (channel === 'app.prepareWindow' || channel === 'app.cancelPreparedWindow')
+      log({
+        kind: 'intent-ipc',
+        channel,
+        sourceVisible: BrowserWindow.fromWebContents(event.sender)?.isVisible(),
+        args,
+      });
+    const started = performance.now();
+    const result = handler(event, ...args);
+    if (directClickMode && channel === 'sessionOwner.request') {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      void Promise.resolve(result).then(
+        () => {
+          if (win?.__claim)
+            log({
+              kind: 'owner-request',
+              id: win.id,
+              method: args[0]?.method,
+              afterClaimMs: started - win.__claim,
+              durationMs: performance.now() - started,
+            });
+        },
+        () => {}
+      );
+    }
+    return result;
+  });
 let running = null;
 app.on('browser-window-created', (_createdEvent, win) => {
   win.__created = performance.now();
@@ -74,6 +111,7 @@ app.on('browser-window-created', (_createdEvent, win) => {
   };
   wc.send = (channel, ...args) => {
     if (channel === 'app.prepareWindowTarget') {
+      win.__targetReady = false;
       win.__preparing = args[0];
       win.__prepareStarted = performance.now();
       log({ kind: 'prepare-target', id: win.id, at: win.__prepareStarted });
@@ -109,7 +147,10 @@ app.on('browser-window-created', (_createdEvent, win) => {
     const claimToShowMs = performance.now() - win.__claim;
     log({ kind: 'native-show-event', id: win.id, claimToShowMs });
     try {
-      const capture = wc.capturePage().then(image => { log({kind: 'capture-complete', id: win.id}); return image; });
+      const capture = wc.capturePage().then((image) => {
+        log({ kind: 'capture-complete', id: win.id });
+        return image;
+      });
       const inputResult = checkInput
         ? (async () => {
             const token = 'prepared-window-probe-' + win.id;
@@ -121,11 +162,11 @@ app.on('browser-window-created', (_createdEvent, win) => {
       })()`);
             if (!focused) throw new Error('Composer not editable at first show');
             await wc.insertText(token);
-            log({kind: 'input-inserted', id: win.id});
+            log({ kind: 'input-inserted', id: win.id });
             await wc.executeJavaScript(
               'new Promise(resolve => requestAnimationFrame(() => resolve()))'
             );
-            log({kind: 'input-frame', id: win.id});
+            log({ kind: 'input-frame', id: win.id });
             const accepted = await wc.executeJavaScript(
               `document.querySelector('textarea[data-lody-composer-input]')?.value.includes(${JSON.stringify(token)})`
             );
@@ -143,7 +184,7 @@ app.on('browser-window-created', (_createdEvent, win) => {
       void inputResult.catch(() => {});
       void capture.catch(() => {});
       const state = await wc.executeJavaScript(
-        `({ready:!!document.querySelector('[data-window-session-ready]'),answer:document.body.innerText.includes(${JSON.stringify(answer)}),loading:document.body.innerText.includes('Loading'),missing:document.body.innerText.includes('Session not found'),streamVisible:(()=>{const e=document.querySelector('[data-message-selection-scroll]');return !!e && getComputedStyle(e).visibility==='visible'})()})`
+        `({ready:!!document.querySelector('[data-window-session-stream-ready="session-conversation-view-fixture"]'),answer:document.body.innerText.includes(${JSON.stringify(answer)}),loading:document.body.innerText.includes('Loading'),missing:document.body.innerText.includes('Session not found'),streamVisible:(()=>{const e=document.querySelector('[data-message-selection-scroll]');return !!e && getComputedStyle(e).visibility==='visible'})()})`
       );
       const screenshot = output + '-' + win.id + '.png';
       const [captured, input] = await Promise.all([capture, inputResult]);
@@ -156,6 +197,11 @@ app.on('browser-window-created', (_createdEvent, win) => {
         screenshot,
         input,
         preparationMs: win.__prepareMs ?? null,
+        openingTrace: directClickMode
+          ? await wc.executeJavaScript(
+              '({ stages: window.__openingStages, scroll: window.__lodyScrollEngineLog?.dump() })'
+            )
+          : undefined,
       };
       log(row);
       running?.resolve(row);
@@ -164,7 +210,7 @@ app.on('browser-window-created', (_createdEvent, win) => {
     }
   };
   win.on('show', () => {
-    void checkShownWindow().catch(error => running?.reject(error));
+    void checkShownWindow().catch((error) => running?.reject(error));
   });
 });
 require(process.env.PROBE_ENTRY);
@@ -194,14 +240,22 @@ void app.whenReady().then(async () => {
       'source Repo'
     );
     sourceWindow = source;
+    const sourceConversationStarted = performance.now();
     const binary = fs.readFileSync(process.env.PROBE_FIXTURE, 'utf8');
     await source.webContents.executeJavaScript(`(async()=>{
  const repo=window.repo;const machine=(await repo.listDoc()).find(x=>x.docId.startsWith('machine-')).meta;
  const sessionId='session-conversation-view-fixture';const room='session-'+sessionId;
- const handle=await repo.acquireDoc(room);window.__syntheticSession=handle;
+ const handle=await repo.acquireDoc(room);
  handle.doc.import(Uint8Array.from(atob(${JSON.stringify(binary)}),x=>x.charCodeAt(0)));
  await repo.upsertDocMeta(room,{id:sessionId,machineId:machine.id,userId:machine.ownerUserId,createdAt:new Date().toISOString(),lastMessageAt:Date.now(),title:'Warm window benchmark — synthetic ${rounds * 2} entries',status:'idle',cliType:'builtin',agentType:'claude',isArchived:false});
- await repo.flush();location.hash='/local/sessions/'+sessionId;
+ await repo.flush();handle.release();await repo.unloadDoc(room);
+ if (${retargetMode}) {
+   const neighbor = room + '-neighbor'; const copy = await repo.acquireDoc(neighbor);
+   copy.doc.import(Uint8Array.from(atob(${JSON.stringify(binary)}),x=>x.charCodeAt(0)));
+   await repo.upsertDocMeta(neighbor, {...(await repo.getDocMeta(room)).meta, id: sessionId+'-neighbor', title:'Synthetic neighboring Session'});
+   await repo.flush();copy.release();await repo.unloadDoc(neighbor);
+ }
+ location.hash='/local/sessions/'+sessionId;
  })()`);
     await waitFor(
       () =>
@@ -210,10 +264,36 @@ void app.whenReady().then(async () => {
         ),
       'source conversation'
     );
-    await source.webContents.executeJavaScript(
-      `window.ipc.invoke('app.setDevbarControl',{enabled:false,agentAccess:false,warmupEnabled:true})`
-    );
+    const sourceConversationMs = performance.now() - sourceConversationStarted;
+    if (process.env.PROBE_RESIDENT_MEMORY === '1') {
+      const residentMemory = await require('./resident-memory-probe.cjs')({
+        source,
+        answer,
+        output,
+        waitFor,
+        log,
+      });
+      if (unloadConfirmations) throw new Error('Resident probe clean close triggered confirmation');
+      fs.writeFileSync(
+        output + '.json',
+        JSON.stringify(
+          {
+            variant: process.env.PROBE_VARIANT,
+            sharedSessionOwner: process.env.LODY_SHARED_SESSION_OWNER !== '0',
+            entries: rounds * 2,
+            unloadConfirmations,
+            residentMemory,
+          },
+          null,
+          2
+        )
+      );
+      console.log('PROBE_RESULT ' + output + '.json');
+      return;
+    }
+    await source.webContents.executeJavaScript(`window.ipc.invoke('app.setWindowWarmup',true)`);
     const results = [];
+    const retained = [];
     for (let i = 0; i < repeats + 3; i++) {
       const spare = await waitFor(
         () =>
@@ -235,25 +315,83 @@ void app.whenReady().then(async () => {
         await spare.webContents.debugger.sendCommand('Profiler.enable');
         await spare.webContents.debugger.sendCommand('Profiler.start');
       }
-      if (productPreparedMode) {
+      if (directClickMode) {
+        source.focus();
+        if (spare.__preparing) throw new Error('Direct click must not prepare a target');
+        await spare.webContents.executeJavaScript(`(() => {
+          window.__openingStages = [];
+          const record = (stage) => window.__openingStages.push({ stage, at: performance.now() });
+          record('armed');
+          const pending = new Map([
+            ['session', '[data-window-session-ready]'],
+            ['stream', '[data-message-selection-scroll]'],
+            ['ready', '[data-window-session-stream-ready]'],
+            ['composer', 'textarea[data-lody-composer-input]'],
+          ]);
+          const observer = new MutationObserver(() => {
+            for (const [stage, selector] of pending) {
+              if (document.querySelector(selector)) { record(stage); pending.delete(stage); }
+            }
+            if (!pending.size) observer.disconnect();
+          });
+          observer.observe(document, { subtree: true, childList: true, attributes: true,
+            attributeFilter: ['data-window-session-ready', 'data-window-session-stream-ready'] });
+          window.ipc.on('app.windowTarget', () => record('target'));
+        })()`);
+      } else if (productPreparedMode) {
+        source.focus();
+        if (retargetMode) {
+          await source.webContents.executeJavaScript(
+            `window.ipc.invoke('app.prepareWindow', {workspace:'local',sessionId:'session-conversation-view-fixture-neighbor'}, 'probe-neighbor-${i}')`
+          );
+          await waitFor(() => spare.__targetReady, 'neighboring prepared Session');
+          spare.__neighborPid = spare.webContents.getOSProcessId();
+        }
         await source.webContents.executeJavaScript(`(async () => {
           const room = 'session-session-conversation-view-fixture';
           const meta = (await window.repo.getDocMeta(room)).meta;
           await window.repo.upsertDocMeta(room, { ...meta, lastReadAt: 0 });
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           const row = document.querySelector('[data-sidebar-session-id="session-conversation-view-fixture"]');
           if (!row) throw new Error('Missing real Session row');
           row.dispatchEvent(new MouseEvent('pointerout', { bubbles: true }));
-          row.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+          row.dispatchEvent(new MouseEvent('pointerover', { bubbles: true, metaKey: ${process.env.PROBE_INTENT_META === '1'} }));
         })()`);
-        if (intentLeadMs === null) await waitFor(() => spare.__targetReady, 'production prepared Session');
-        else await new Promise(resolve => setTimeout(resolve, intentLeadMs));
+        if (intentLeadMs === null)
+          await waitFor(
+            () =>
+              spare.__targetReady &&
+              spare.__preparing?.sessionId === 'session-conversation-view-fixture',
+            'production prepared Session'
+          );
+        else await new Promise((resolve) => setTimeout(resolve, intentLeadMs));
+        if (returnAfterMs) {
+          await waitFor(() => spare.__targetReady, 'prepared Session before leaving row');
+          await source.webContents.executeJavaScript(
+            `document.querySelector('[data-sidebar-session-id="session-conversation-view-fixture"]').dispatchEvent(new MouseEvent('pointerout', {bubbles:true}))`
+          );
+          await new Promise((resolve) => setTimeout(resolve, returnAfterMs));
+          if (spare.isDestroyed()) throw new Error('Brief row exit discarded prepared renderer');
+        }
+        if (
+          retargetMode &&
+          (spare.isDestroyed() || spare.webContents.getOSProcessId() !== spare.__neighborPid)
+        )
+          throw new Error('Retarget recreated the prepared renderer');
         if (spare.isVisible()) throw new Error('Speculative window became visible');
         const untouched = await source.webContents.executeJavaScript(`(async () =>
           (await window.repo.getDocMeta('session-session-conversation-view-fixture')).meta.lastReadAt === 0)()`);
-        const targetUnread = !spare.__preparing || await spare.webContents.executeJavaScript(`(async () =>
-          (await window.repo.getDocMeta('session-session-conversation-view-fixture')).meta.lastReadAt === 0)()`);
+        const targetUnread =
+          !spare.__preparing ||
+          (await spare.webContents.executeJavaScript(`(async () =>
+          (await window.repo.getDocMeta('session-session-conversation-view-fixture')).meta.lastReadAt === 0)()`));
         if (!untouched || !targetUnread) throw new Error('Preparation marked Session read');
-        log({ kind: 'speculative-side-effects', id: spare.id, unreadPreserved: true, hidden: true });
+        log({
+          kind: 'speculative-side-effects',
+          id: spare.id,
+          unreadPreserved: true,
+          hidden: true,
+        });
       }
       if (preparedMode) {
         heldWindow = spare;
@@ -283,13 +421,17 @@ void app.whenReady().then(async () => {
         running = { resolve, reject };
       });
       const timeout = setTimeout(() => running?.reject(new Error('No show')), 10000);
-      const readyAtClick = Boolean(spare.__targetReady);
+      const readyAtClick = Boolean(
+        spare.__targetReady &&
+        (!productPreparedMode ||
+          spare.__preparing?.sessionId === 'session-conversation-view-fixture')
+      );
       const started = performance.now();
-      if (productPreparedMode) spare.__claim = started;
+      if (productPreparedMode || directClickMode) spare.__claim = started;
       await source.webContents.executeJavaScript(
         preparedMode
           ? `window.ipc.invoke('app.benchmarkPresent')`
-          : productPreparedMode
+          : productPreparedMode || directClickMode
             ? `document.querySelector('[data-sidebar-session-id="session-conversation-view-fixture"]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true }))`
             : `window.ipc.invoke('app.openWindow',{workspace:'local',sessionId:'session-conversation-view-fixture'})`
       );
@@ -316,23 +458,101 @@ void app.whenReady().then(async () => {
         readyAtClick,
         requestToProbeCompleteMs: performance.now() - started,
         warmup: i < 3,
+        memory: app.getAppMetrics().map(({ type, memory }) => ({ type, ...memory })),
       });
       heldWindow = null;
+      if (process.env.PROBE_KEEP_WINDOWS === '1' && i >= 3) {
+        retained.push(spare);
+        continue;
+      }
       const closed = new Promise((resolve) => spare.once('closed', resolve));
       spare.close();
       await closed;
+      if (unloadConfirmations)
+        throw new Error('Clean auxiliary window triggered an unload confirmation');
+    }
+    for (const window of retained) {
+      const closed = new Promise((resolve) => window.once('closed', resolve));
+      window.close();
+      await closed;
+    }
+    if (unloadConfirmations)
+      throw new Error('Clean retained windows triggered unload confirmations');
+    let ownerRecovery = null;
+    if (process.env.PROBE_OWNER_RECOVERY === '1') {
+      const owner = BrowserWindow.getAllWindows().find((w) =>
+        w.webContents.getURL().includes('session-owner.html')
+      );
+      if (!owner) throw new Error('Shared owner not running');
+      const setup = await source.webContents.executeJavaScript(`(async () => {
+        const local = await window.ipc.invoke('localPlatform.getSnapshot');
+        const base = { workspaceId: local.workspace.workspaceId, sessionId: 'session-conversation-view-fixture', leaseId: 'recovery-probe' };
+        const request = (method, args=[]) => window.ipc.invoke('sessionOwner.request', { ...base, method, args });
+        const opened = await request('open'); if (!opened.ok) throw new Error(opened.error);
+        const turn = { id: 'recovery-probe-turn', role: 'user', timestamp: '2026-01-01T00:00:00.000Z', items: [{ type: 'text', text: 'Synthetic durable recovery check' }] };
+        const written = await request('appendTurn', [turn]); if (!written.ok) throw new Error(written.error);
+        return base;
+      })()`);
+      const started = performance.now();
+      owner.webContents.forcefullyCrashRenderer();
+      await waitFor(
+        () =>
+          BrowserWindow.getAllWindows().some(
+            (w) => w !== owner && w.webContents.getURL().includes('session-owner.html')
+          ),
+        'replacement data renderer'
+      );
+      const recovered = await source.webContents.executeJavaScript(`(async () => {
+        const base = { ...${JSON.stringify(setup)}, leaseId: 'recovery-probe-new' };
+        const request = (method, args=[]) => window.ipc.invoke('sessionOwner.request', { ...base, method, args });
+        const opened = await request('open'); if (!opened.ok) throw new Error(opened.error);
+        const read = await request('readTurn', ['recovery-probe-turn']);
+        await request('close');
+        return read.ok && read.value.state === 'ready';
+      })()`);
+      if (!recovered) throw new Error('Acknowledged write missing after owner crash');
+      await waitFor(
+        () =>
+          source.webContents.executeJavaScript(
+            "document.body.innerText.includes('Synthetic durable recovery check')"
+          ),
+        'view recovery'
+      );
+      ownerRecovery = {
+        acknowledgedWriteRecovered: recovered,
+        viewRecovered: true,
+        elapsedMs: performance.now() - started,
+      };
     }
     fs.writeFileSync(
       output + '.json',
       JSON.stringify(
         {
           variant: process.env.PROBE_VARIANT,
+          sharedSessionOwner: process.env.LODY_SHARED_SESSION_OWNER !== '0',
+          unloadConfirmations,
+          sourceConversationMs,
+          ownerRecovery,
+          retargetMode,
+          returnAfterMs,
+          commandIntent: process.env.PROBE_INTENT_META === '1',
+          retainedWindows: retained.length,
           preparedMode,
           productPreparedMode,
+          directClickMode,
           nativeAnimationDisabled: !!nativeHost,
-          timingBoundary: productPreparedMode ? 'source row Command-click dispatch' : preparedMode ? 'prepared host presentation IPC' : 'target navigation IPC',
+          timingBoundary:
+            productPreparedMode || directClickMode
+              ? 'source row Command-click dispatch'
+              : preparedMode
+                ? 'prepared host presentation IPC'
+                : 'target navigation IPC',
           intentLeadMs,
-          hitRate: productPreparedMode ? results.filter(r => !r.warmup && r.readyAtClick).length / repeats : preparedMode ? 1 : null,
+          hitRate: productPreparedMode
+            ? results.filter((r) => !r.warmup && r.readyAtClick).length / repeats
+            : preparedMode
+              ? 1
+              : null,
           entries: rounds * 2,
           spareMinimumAgeMs: 1500,
           source: 'real desktop renderer / synthetic CRDT fixture / bundled CLI',

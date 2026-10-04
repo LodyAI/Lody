@@ -1,3 +1,4 @@
+import { SessionOwnerService } from './services/session-owner-service'
 import { handleWindowContentReady } from './window-target'
 import { installLocalFileResourceProtocol } from './services/local-file-resource-protocol'
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron'
@@ -272,7 +273,9 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
       markOnboardingCompleted()
       setMainWindowProductReloadTarget(window)
     }
+    const sessionOwnerService = new SessionOwnerService()
     registerIpcServices({
+      sessionOwnerService,
       appIconService,
       cliService,
       appUpdaterService,
@@ -343,6 +346,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
         windowsTrayService.stop()
         windowBadgeService.reset()
         terminalRelay.destroy()
+        await sessionOwnerService.shutdown()
         loroDataPlaneRelay.destroy()
         appUpdaterService.stop()
         publicBrowserService.destroyAll()

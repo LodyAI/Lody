@@ -1434,3 +1434,17 @@ describe('createConversationViewFromReader audit regressions', () => {
     }
   });
 });
+
+it('resolves an eagerly hydrated entry window without waiting for background idle work', async () => {
+  const f = openView(backends[0]!, 3, { tailKeep: 4 });
+  try {
+    await f.view.ready;
+    expect(f.view.turnCount).toBe(7);
+    for (let index = 3; index < 7; index++) expect(f.view.isHydrated(index)).toBe(true);
+    expect(f.view.isHydrated(0)).toBe(false);
+  } finally {
+    f.view.dispose();
+    f.data.dispose();
+    f.teardown();
+  }
+});

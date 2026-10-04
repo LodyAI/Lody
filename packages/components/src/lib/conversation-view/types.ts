@@ -137,3 +137,17 @@ export const conversationTailStart = (turnCount: number, tailKeep: number): numb
 
 export const DEFAULT_MAX_HYDRATED = 200;
 export const DEFAULT_TAIL_KEEP = 20;
+
+/** Entry viewport body window, before the first measured visible-range report. */
+export const INITIAL_CONVERSATION_WINDOW_TURNS = 40;
+
+/** Include bounded preceding user context for assistant run configuration. */
+export function precedingUserRangeStart(
+  from: number,
+  roleAt: (index: number) => string | undefined
+): number {
+  const start = Math.max(0, from);
+  for (let index = start - 1; index >= Math.max(0, start - 50); index--)
+    if (roleAt(index) === 'user') return index;
+  return start;
+}

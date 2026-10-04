@@ -16,6 +16,8 @@ macOS local target preparation shares the opt-in spare's single slot. Bind readi
 to sender, target and generation; cancellation belongs to its source request.
 Expire unclaimed views and destroy them on source close. Claim adopts identity and
 reload target without remounting; activate renderer effects only after native show.
+Retarget only within the same workspace, reuse the single hidden renderer, and
+revoke readiness with a fresh generation before navigation; stale replies cannot show it.
 The [window Spec](../../../../specs/desktop-windows.md) owns the behavior contract.
 
 ## Startup theme

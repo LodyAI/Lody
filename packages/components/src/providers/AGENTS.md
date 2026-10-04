@@ -44,7 +44,7 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Each `resolveWorkspaceDataScope` wait names its `blocker`; keep scan failures on the scope.
   [Stuck report](../../../../.agents/notes/implemented/feature/2026-09-26-workspace-sync-stuck-telemetry.md).
 
-## Workspace runtime
+## Runtime
 
 - A neutral local warm spare may initialize the implicit workspace runtime without
   publishing route context. A matching claim must retain that runtime or its in-flight
@@ -65,6 +65,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   state into the existing repo document; never replace unsent local edits or share
   the UI repo's persistence/cursors with the worker. Intent:
   [background prefetch](../../../../specs/session-background-prefetch.zh.md).
+- Local Electron Sessions use `shared-session-owner`; persist before acknowledgement,
+  never replay uncertain writes. [Ownership](../../../../specs/desktop-windows.md).
 - `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
   target ownership and transport selection; do not restore a second writer or a
   proxy-authoring/write-intent mirror.
@@ -78,9 +80,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   replace a live document. Import before constructing the history reader to avoid
   replaying bulk-import events through an initialized projection.
 - Repo storage, LoroDoc Streams cursors, and eager-sync high-water state must use the
-  same per-renderer cache namespace. A checkpoint must never be shared by independently
-  persisted Repo views. Meta/Flock cursors are replica-bound
-  (`workspace-streams-transport.ts`): never route them through a separate cursor store;
+  same per-renderer namespace; independent Repo views never share checkpoints.
+  Meta/Flock cursors stay replica-bound in `workspace-streams-transport.ts`;
   delete Meta progress via `repo.getReplicaCheckpointStore`.
 - Transport state is selected per room, never merged. Runtime stores use
   `getReadinessTransportForRoom`; hooks without the router use the structural binding in

@@ -728,120 +728,119 @@ function prng(seed: number) {
 }
 
 describe('randomized sequences', () => {
-  it.each(Array.from({ length: 40 }, (_, seed) => seed + 1))(
-    'keeps every invariant for seed %i',
-    (seed) => {
-      const random = prng(seed);
-      const pick = (n: number) => Math.floor(random() * n);
-      let counter = 0;
-      const makeRow = (turnIndex: number): SimRow => {
-        counter += 1;
-        return {
-          key: `k${counter}`,
-          turnId: `k${counter}`,
-          turnIndex,
-          height: 20 + pick(400),
-          estimate: 20 + pick(200),
-        };
+  it.each(
+    [400, 800].flatMap((overscan) =>
+      Array.from({ length: 40 }, (_, seed) => ({ overscan, seed: seed + 1 }))
+    )
+  )('keeps every invariant for seed $seed with $overscan px overscan', ({ seed, overscan }) => {
+    const random = prng(seed);
+    const pick = (n: number) => Math.floor(random() * n);
+    let counter = 0;
+    const makeRow = (turnIndex: number): SimRow => {
+      counter += 1;
+      return {
+        key: `k${counter}`,
+        turnId: `k${counter}`,
+        turnIndex,
+        height: 20 + pick(400),
+        estimate: 20 + pick(200),
       };
-      let rows: SimRow[] = Array.from({ length: 30 + pick(120) }, (_, i) => makeRow(i));
-      const sim = new ScrollSim(rows, 300 + pick(700));
-      sim.render();
+    };
+    let rows: SimRow[] = Array.from({ length: 30 + pick(120) }, (_, i) => makeRow(i));
+    const sim = new ScrollSim(rows, 300 + pick(700), { overscanPx: overscan });
+    sim.render();
+    sim.settle();
+    expectHealthy(sim);
+
+    for (let step = 0; step < 60; step++) {
+      const action = pick(10);
+      const mode = sim.controller.mode;
+      // The stored reading anchor can be clamped to a shrunken row's end,
+      // putting its NEXT row at the viewport top. Growth must restore the
+      // stored offset (as the eviction/rehydration test above requires), not
+      // pin that next row. Check the intent's row, not the incidental top row.
+      const intent = sim.controller.currentIntent;
+      const anchorKey =
+        intent.kind === 'read' && intent.anchor.kind === 'turn' ? intent.anchor.rowKey : undefined;
+      const anchorHeight = rows.find((row) => row.key === anchorKey)?.height;
+      const anchorBefore = anchorKey ? sim.screenTop(anchorKey) : null;
+      // A clamped reading position has not resolved its anchor yet; it
+      // moves toward it once reachable, so I5 applies only to resolved ones.
+      const resolvedBefore = sim.readScrollTop() > 1 && sim.readScrollTop() < sim.maxTop() - 1;
+      let geometryOnly = false;
+      switch (action) {
+        case 0: // rows above/below grow or shrink
+          rows = rows.map((row) => (random() < 0.2 ? { ...row, height: 20 + pick(400) } : row));
+          geometryOnly = true;
+          break;
+        case 1: {
+          // a row expands into several (a placeholder hydrating)
+          const index = pick(rows.length);
+          const parts = 1 + pick(15);
+          const base = rows[index]!;
+          rows = [
+            ...rows.slice(0, index),
+            ...Array.from({ length: parts }, (_, part) => ({
+              ...makeRow(base.turnIndex),
+              turnId: base.turnId,
+              itemIndex: part,
+            })),
+            ...rows.slice(index + 1),
+          ];
+          geometryOnly = true;
+          break;
+        }
+        case 2: // rows appended (new output)
+          rows = [...rows, ...Array.from({ length: 1 + pick(3) }, () => makeRow(rows.length))];
+          break;
+        case 3: // a row far from the reader is removed
+          if (rows.length > 5) {
+            const index = pick(rows.length);
+            if (!anchorKey || rows[index]!.key !== anchorKey) {
+              rows = rows.filter((_, i) => i !== index);
+              geometryOnly = true;
+            }
+          }
+          break;
+        case 4:
+          sim.task(() => sim.controller.release('wheel-up'));
+          sim.nativeScroll(random() * sim.maxTop());
+          break;
+        case 5:
+          sim.resizeViewport(250 + pick(800));
+          break;
+        case 6:
+          sim.task(() => sim.controller.jumpToIndex(pick(rows.length)));
+          break;
+        case 7:
+          sim.task(() => sim.controller.scrollToBottom());
+          break;
+        case 8: // the reader scrolls down and the sequence comes to rest
+          sim.nativeScroll(sim.readScrollTop() + random() * sim.maxTop());
+          sim.settle();
+          sim.task(() => sim.controller.onScrollEnd());
+          break;
+        default:
+          break;
+      }
+      sim.render(rows);
       sim.settle();
       expectHealthy(sim);
-
-      for (let step = 0; step < 60; step++) {
-        const action = pick(10);
-        const mode = sim.controller.mode;
-        // The row under the viewport's top line is the reading anchor (I5).
-        const anchorKey =
-          mode === 'read'
-            ? [...sim.mounted.keys()].find((key) => {
-                const top = sim.screenTop(key);
-                const height = rows.find((row) => row.key === key)?.height ?? 0;
-                return top !== null && top <= 0 && top + height > 0;
-              })
-            : undefined;
-        const anchorHeight = rows.find((row) => row.key === anchorKey)?.height;
-        const anchorBefore = anchorKey ? sim.screenTop(anchorKey) : null;
-        // A clamped reading position has not resolved its anchor yet; it
-        // moves toward it once reachable, so I5 applies only to resolved ones.
-        const resolvedBefore = sim.readScrollTop() > 1 && sim.readScrollTop() < sim.maxTop() - 1;
-        let geometryOnly = false;
-        switch (action) {
-          case 0: // rows above/below grow or shrink
-            rows = rows.map((row) => (random() < 0.2 ? { ...row, height: 20 + pick(400) } : row));
-            geometryOnly = true;
-            break;
-          case 1: {
-            // a row expands into several (a placeholder hydrating)
-            const index = pick(rows.length);
-            const parts = 1 + pick(15);
-            const base = rows[index]!;
-            rows = [
-              ...rows.slice(0, index),
-              ...Array.from({ length: parts }, (_, part) => ({
-                ...makeRow(base.turnIndex),
-                turnId: base.turnId,
-                itemIndex: part,
-              })),
-              ...rows.slice(index + 1),
-            ];
-            geometryOnly = true;
-            break;
-          }
-          case 2: // rows appended (new output)
-            rows = [...rows, ...Array.from({ length: 1 + pick(3) }, () => makeRow(rows.length))];
-            break;
-          case 3: // a row far from the reader is removed
-            if (rows.length > 5) {
-              const index = pick(rows.length);
-              if (!anchorKey || rows[index]!.key !== anchorKey) {
-                rows = rows.filter((_, i) => i !== index);
-                geometryOnly = true;
-              }
-            }
-            break;
-          case 4:
-            sim.task(() => sim.controller.release('wheel-up'));
-            sim.nativeScroll(random() * sim.maxTop());
-            break;
-          case 5:
-            sim.resizeViewport(250 + pick(800));
-            break;
-          case 6:
-            sim.task(() => sim.controller.jumpToIndex(pick(rows.length)));
-            break;
-          case 7:
-            sim.task(() => sim.controller.scrollToBottom());
-            break;
-          case 8: // the reader scrolls down and the sequence comes to rest
-            sim.nativeScroll(sim.readScrollTop() + random() * sim.maxTop());
-            sim.settle();
-            sim.task(() => sim.controller.onScrollEnd());
-            break;
-          default:
-            break;
-        }
-        sim.render(rows);
-        sim.settle();
-        expectHealthy(sim);
-        // I5: a pure layout change keeps the reading row in place when it stays reachable.
-        if (
-          geometryOnly &&
-          mode === 'read' &&
-          sim.controller.mode === 'read' &&
-          anchorKey &&
-          anchorBefore !== null &&
-          resolvedBefore &&
-          rows.some((row) => row.key === anchorKey)
-        ) {
-          const after = sim.screenTop(anchorKey);
-          const reachable = sim.readScrollTop() > 1 && sim.readScrollTop() < sim.maxTop() - 1;
-          const sameHeight = rows.find((row) => row.key === anchorKey)?.height === anchorHeight;
-          if (after !== null && reachable && sameHeight) expect(after).toBeCloseTo(anchorBefore, 0);
-        }
+      // I5: a pure layout change keeps the reading row in place when it stays reachable.
+      if (
+        geometryOnly &&
+        mode === 'read' &&
+        sim.controller.mode === 'read' &&
+        anchorKey &&
+        anchorBefore !== null &&
+        resolvedBefore &&
+        rows.some((row) => row.key === anchorKey)
+      ) {
+        const after = sim.screenTop(anchorKey);
+        const reachable = sim.readScrollTop() > 1 && sim.readScrollTop() < sim.maxTop() - 1;
+        const sameHeight = rows.find((row) => row.key === anchorKey)?.height === anchorHeight;
+        if (after !== null && reachable && sameHeight) expect(after).toBeCloseTo(anchorBefore, 0);
       }
     }
-  );
+  });
 });

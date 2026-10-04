@@ -1,0 +1,3740 @@
+{
+  "date": "2026-10-04",
+  "baseRevision": "9bdac2851",
+  "runOrder": ["shared", "baseline"],
+  "platform": "26.5.1",
+  "scope": "One fresh isolated profile per variant; synthetic 3000-entry Session shared by all windows; production build unchanged since latency evaluation. No forced GC. No repeated independent memory trials.",
+  "counter": "Sum of macOS footprint auxiliary.phys_footprint bytes over Electron app.getAppMetrics process set. External CLI/daemon processes excluded; workingSetMiB is a different counter.",
+  "excludedAttempts": [
+    {
+      "artifactDirectory": "/tmp/lody-app-bench-42gP9S",
+      "reason": "Exploratory 10-second observations showed later natural reclamation; final sample aborted because a closing renderer exited between PID enumeration and footprint sampling. Final harness records exited PIDs explicitly."
+    }
+  ],
+  "limitations": [
+    "One sequential run per variant; bounded observations do not establish long-run residency or leak freedom.",
+    "Source-only and prepared-target were observed for 45 seconds; neutral-shell and visible auxiliaries for 10 seconds. Unequal process ages and natural GC prevent interpreting every stage difference as a pure allocation cost.",
+    "Prepared target is renewed with fresh production request IDs to exceed its ordinary 30-second TTL. No product limit changed.",
+    "All auxiliaries show the same Session while source stays open. Multiple distinct Session documents and their 10-minute store-cache grace period are unmeasured.",
+    "Runtime.getHeapUsage is collected after final OS samples without forced garbage collection; it describes only heap counters, not all native/WASM/graphics memory."
+  ],
+  "runs": [
+    {
+      "variant": "resident-shared",
+      "artifactDirectory": "/tmp/lody-app-bench-t4a4R8",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16",
+        "probeSha256": "c9de963bf50289cd2deae36d3faee8bc2ce6776dab427821bf88998539afa5a5",
+        "residentProbeSha256": "df1add99eb1438952085921eddd3e0e15ec3cc16548611d741c26f21445ebc3f"
+      },
+      "sharedSessionOwner": true,
+      "entries": 3000,
+      "unloadConfirmations": 0,
+      "residentMemory": {
+        "scope": "Electron app.getAppMetrics process set; external CLI/daemon processes excluded",
+        "metric": "Sum of macOS footprint auxiliary.phys_footprint bytes; working sets retained separately",
+        "forcedGC": false,
+        "stages": [
+          {
+            "name": "source-only",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 336352,
+                    "physFootprintBytes": 201295744
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 104976,
+                    "physFootprintBytes": 581092480
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 47904,
+                    "physFootprintBytes": 7832440
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 677424,
+                    "physFootprintBytes": 535513320
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 382224,
+                    "physFootprintBytes": 290571992
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1541.4294967651367,
+                "workingSetMiB": 1512.578125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 334064,
+                    "physFootprintBytes": 204801920
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 95968,
+                    "physFootprintBytes": 119571608
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48016,
+                    "physFootprintBytes": 7799672
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 794464,
+                    "physFootprintBytes": 641829192
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 379296,
+                    "physFootprintBytes": 283477744
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1199.2265090942383,
+                "workingSetMiB": 1613.09375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 30000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 266752,
+                    "physFootprintBytes": 134104960
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96000,
+                    "physFootprintBytes": 111314072
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48048,
+                    "physFootprintBytes": 7799672
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 554624,
+                    "physFootprintBytes": 387500360
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 240256,
+                    "physFootprintBytes": 137250520
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 741.9296112060547,
+                "workingSetMiB": 1177.421875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 45000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 267232,
+                    "physFootprintBytes": 134563712
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96000,
+                    "physFootprintBytes": 111314072
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48048,
+                    "physFootprintBytes": 7799672
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 554624,
+                    "physFootprintBytes": 387500360,
+                    "heap": {
+                      "backingStorageSize": 25002136,
+                      "embedderHeapUsedSize": 11113096,
+                      "totalSize": 87113728,
+                      "usedSize": 82400308
+                    }
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 240256,
+                    "physFootprintBytes": 137250520,
+                    "heap": {
+                      "backingStorageSize": 6992784,
+                      "embedderHeapUsedSize": 719520,
+                      "totalSize": 33882112,
+                      "usedSize": 31674928
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 742.3671112060547,
+                "workingSetMiB": 1177.890625,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "neutral-shell",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 270560,
+                    "physFootprintBytes": 137250688
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96544,
+                    "physFootprintBytes": 461358232
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48256,
+                    "physFootprintBytes": 7979896
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 556256,
+                    "physFootprintBytes": 387516744
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 242368,
+                    "physFootprintBytes": 137512664
+                  },
+                  {
+                    "pid": 46224,
+                    "role": "shell",
+                    "windowId": 3,
+                    "workingSetKiB": 312848,
+                    "physFootprintBytes": 166348648
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1237.8376693725586,
+                "workingSetMiB": 1491.046875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 270752,
+                    "physFootprintBytes": 137381760
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96384,
+                    "physFootprintBytes": 114787480
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48256,
+                    "physFootprintBytes": 7979896
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 556256,
+                    "physFootprintBytes": 387516744
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 242368,
+                    "physFootprintBytes": 137512664
+                  },
+                  {
+                    "pid": 46224,
+                    "role": "shell",
+                    "windowId": 3,
+                    "workingSetKiB": 315200,
+                    "physFootprintBytes": 166315880
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 907.4157943725586,
+                "workingSetMiB": 1493.375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 270912,
+                    "physFootprintBytes": 137529216
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96384,
+                    "physFootprintBytes": 114721944
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48256,
+                    "physFootprintBytes": 7979896
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 556256,
+                    "physFootprintBytes": 387516744
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 242368,
+                    "physFootprintBytes": 137512664
+                  },
+                  {
+                    "pid": 46224,
+                    "role": "shell",
+                    "windowId": 3,
+                    "workingSetKiB": 315200,
+                    "physFootprintBytes": 166315880
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 907.4939193725586,
+                "workingSetMiB": 1493.53125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 271488,
+                    "physFootprintBytes": 137856896
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96384,
+                    "physFootprintBytes": 114721944
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48336,
+                    "physFootprintBytes": 8061816
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 556256,
+                    "physFootprintBytes": 387516744,
+                    "heap": {
+                      "backingStorageSize": 25006367,
+                      "embedderHeapUsedSize": 11113096,
+                      "totalSize": 87113728,
+                      "usedSize": 82447460
+                    }
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 242368,
+                    "physFootprintBytes": 137512664,
+                    "heap": {
+                      "backingStorageSize": 6996801,
+                      "embedderHeapUsedSize": 719520,
+                      "totalSize": 34144256,
+                      "usedSize": 31723356
+                    }
+                  },
+                  {
+                    "pid": 46224,
+                    "role": "shell",
+                    "windowId": 3,
+                    "workingSetKiB": 317952,
+                    "physFootprintBytes": 184043536,
+                    "heap": {
+                      "backingStorageSize": 17459326,
+                      "embedderHeapUsedSize": 4624432,
+                      "totalSize": 82427904,
+                      "usedSize": 63936664
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 924.7909545898438,
+                "workingSetMiB": 1496.859375,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "prepared-target",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 275328,
+                    "physFootprintBytes": 140593072
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 101936,
+                    "physFootprintBytes": 574964888
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48336,
+                    "physFootprintBytes": 8061816
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 556256,
+                    "physFootprintBytes": 387516744
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 244848,
+                    "physFootprintBytes": 141952728
+                  },
+                  {
+                    "pid": 46224,
+                    "role": "prepared",
+                    "windowId": 3,
+                    "workingSetKiB": 421824,
+                    "physFootprintBytes": 274892840
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1457.1972732543945,
+                "workingSetMiB": 1609.890625,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 276976,
+                    "physFootprintBytes": 134858672
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97504,
+                    "physFootprintBytes": 150127768
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48368,
+                    "physFootprintBytes": 7881592
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 557776,
+                    "physFootprintBytes": 373606704
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 252992,
+                    "physFootprintBytes": 146966232
+                  },
+                  {
+                    "pid": 46224,
+                    "role": "prepared",
+                    "windowId": 3,
+                    "workingSetKiB": 583280,
+                    "physFootprintBytes": 429820064
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1185.666114807129,
+                "workingSetMiB": 1774.3125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 20000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 274688,
+                    "physFootprintBytes": 132515760
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97520,
+                    "physFootprintBytes": 143459480
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48368,
+                    "physFootprintBytes": 7881592
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 557776,
+                    "physFootprintBytes": 373606704
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 252992,
+                    "physFootprintBytes": 146966232
+                  },
+                  {
+                    "pid": 46224,
+                    "role": "prepared",
+                    "windowId": 3,
+                    "workingSetKiB": 501344,
+                    "physFootprintBytes": 277563552
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1031.869239807129,
+                "workingSetMiB": 1692.078125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 30000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 274720,
+                    "physFootprintBytes": 132548528
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97520,
+                    "physFootprintBytes": 143459480
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48368,
+                    "physFootprintBytes": 7881592
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 557776,
+                    "physFootprintBytes": 373606704
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 252992,
+                    "physFootprintBytes": 146966232
+                  },
+                  {
+                    "pid": 46224,
+                    "role": "prepared",
+                    "windowId": 3,
+                    "workingSetKiB": 380432,
+                    "physFootprintBytes": 210192544
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 967.6504898071289,
+                "workingSetMiB": 1574.03125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 45000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 272608,
+                    "physFootprintBytes": 132990896
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 94064,
+                    "physFootprintBytes": 143492248
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48240,
+                    "physFootprintBytes": 7881592
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 554880,
+                    "physFootprintBytes": 371575088,
+                    "heap": {
+                      "backingStorageSize": 25020482,
+                      "embedderHeapUsedSize": 11409864,
+                      "totalSize": 88162304,
+                      "usedSize": 83582212
+                    }
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 247104,
+                    "physFootprintBytes": 146966232,
+                    "heap": {
+                      "backingStorageSize": 7258477,
+                      "embedderHeapUsedSize": 4596512,
+                      "totalSize": 39124992,
+                      "usedSize": 34705264
+                    }
+                  },
+                  {
+                    "pid": 46224,
+                    "role": "prepared",
+                    "windowId": 3,
+                    "workingSetKiB": 240080,
+                    "physFootprintBytes": 213600416,
+                    "heap": {
+                      "backingStorageSize": 17463228,
+                      "embedderHeapUsedSize": 11002344,
+                      "totalSize": 83886080,
+                      "usedSize": 79824636
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 969.4161148071289,
+                "workingSetMiB": 1422.828125,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "after-preparation-disabled",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 273456,
+                    "physFootprintBytes": 132958128
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 94384,
+                    "physFootprintBytes": 110232728
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48400,
+                    "physFootprintBytes": 7799672
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 554896,
+                    "physFootprintBytes": 371591472
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 247184,
+                    "physFootprintBytes": 146982616
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 733.9140090942383,
+                "workingSetMiB": 1189.765625,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 273632,
+                    "physFootprintBytes": 133089200
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 94384,
+                    "physFootprintBytes": 110232728
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48400,
+                    "physFootprintBytes": 7799672
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 554896,
+                    "physFootprintBytes": 371591472
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 247184,
+                    "physFootprintBytes": 146982616
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 734.0390090942383,
+                "workingSetMiB": 1189.9375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 273872,
+                    "physFootprintBytes": 132794288
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 94384,
+                    "physFootprintBytes": 110232728
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48400,
+                    "physFootprintBytes": 7799672
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 554896,
+                    "physFootprintBytes": 371591472
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 247184,
+                    "physFootprintBytes": 146982616
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 733.7577590942383,
+                "workingSetMiB": 1190.171875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 273920,
+                    "physFootprintBytes": 132679600
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 94384,
+                    "physFootprintBytes": 110232728
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48400,
+                    "physFootprintBytes": 7799672
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 554896,
+                    "physFootprintBytes": 371591472,
+                    "heap": {
+                      "backingStorageSize": 25020533,
+                      "embedderHeapUsedSize": 11409864,
+                      "totalSize": 88162304,
+                      "usedSize": 83586288
+                    }
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 247184,
+                    "physFootprintBytes": 146982616,
+                    "heap": {
+                      "backingStorageSize": 7258477,
+                      "embedderHeapUsedSize": 4596512,
+                      "totalSize": 39124992,
+                      "usedSize": 34708436
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 733.6483840942383,
+                "workingSetMiB": 1190.21875,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "auxiliary-1",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 276288,
+                    "physFootprintBytes": 138725296
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 101536,
+                    "physFootprintBytes": 573785240
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48480,
+                    "physFootprintBytes": 7881592
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 554896,
+                    "physFootprintBytes": 371591472
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 248096,
+                    "physFootprintBytes": 147015384
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 424912,
+                    "physFootprintBytes": 276351016
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1445.150375366211,
+                "workingSetMiB": 1615.4375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 278288,
+                    "physFootprintBytes": 137103280
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 101408,
+                    "physFootprintBytes": 420447384
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48480,
+                    "physFootprintBytes": 7881592
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 554896,
+                    "physFootprintBytes": 371591472
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 255744,
+                    "physFootprintBytes": 147769048
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 535568,
+                    "physFootprintBytes": 380242056
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1397.1660919189453,
+                "workingSetMiB": 1732.796875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 278304,
+                    "physFootprintBytes": 136890288
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96816,
+                    "physFootprintBytes": 179881112
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48496,
+                    "physFootprintBytes": 7881592
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 554896,
+                    "physFootprintBytes": 371591472
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 255744,
+                    "physFootprintBytes": 147769048
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 535472,
+                    "physFootprintBytes": 380127344
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1167.4316940307617,
+                "workingSetMiB": 1728.25,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 278288,
+                    "physFootprintBytes": 136710064
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96880,
+                    "physFootprintBytes": 155403416
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48496,
+                    "physFootprintBytes": 7865208
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 555504,
+                    "physFootprintBytes": 368019760,
+                    "heap": {
+                      "backingStorageSize": 25020863,
+                      "embedderHeapUsedSize": 11686144,
+                      "totalSize": 87638016,
+                      "usedSize": 83925684
+                    }
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 255744,
+                    "physFootprintBytes": 147769048,
+                    "heap": {
+                      "backingStorageSize": 7199208,
+                      "embedderHeapUsedSize": 3826880,
+                      "totalSize": 42270720,
+                      "usedSize": 35245708
+                    }
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 536256,
+                    "physFootprintBytes": 380373104,
+                    "heap": {
+                      "backingStorageSize": 17472431,
+                      "embedderHeapUsedSize": 21165536,
+                      "totalSize": 244580352,
+                      "usedSize": 188289968
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1140.7285690307617,
+                "workingSetMiB": 1729.65625,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "auxiliary-3",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 283632,
+                    "physFootprintBytes": 146442184
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 105040,
+                    "physFootprintBytes": 669582488
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48752,
+                    "physFootprintBytes": 8110968
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 555584,
+                    "physFootprintBytes": 368118064
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 258144,
+                    "physFootprintBytes": 151520984
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 538144,
+                    "physFootprintBytes": 380635248
+                  },
+                  {
+                    "pid": 48934,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 496432,
+                    "physFootprintBytes": 340838368
+                  },
+                  {
+                    "pid": 48956,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 426288,
+                    "physFootprintBytes": 279201784
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2235.8418350219727,
+                "workingSetMiB": 2648.453125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 269792,
+                    "physFootprintBytes": 143869896
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 98032,
+                    "physFootprintBytes": 524780720
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48720,
+                    "physFootprintBytes": 8110968
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 363504,
+                    "physFootprintBytes": 371886384
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 215440,
+                    "physFootprintBytes": 153978584
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 538144,
+                    "physFootprintBytes": 380635248
+                  },
+                  {
+                    "pid": 48934,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 531936,
+                    "physFootprintBytes": 376948752
+                  },
+                  {
+                    "pid": 48956,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 534768,
+                    "physFootprintBytes": 388040792
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2239.466995239258,
+                "workingSetMiB": 2539.390625,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 187584,
+                    "physFootprintBytes": 145131464
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 80816,
+                    "physFootprintBytes": 275858608
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 41552,
+                    "physFootprintBytes": 8127352
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 192272,
+                    "physFootprintBytes": 372082992
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 185712,
+                    "physFootprintBytes": 153978584
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 538144,
+                    "physFootprintBytes": 380635248
+                  },
+                  {
+                    "pid": 48934,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 531712,
+                    "physFootprintBytes": 376702992
+                  },
+                  {
+                    "pid": 48956,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 534624,
+                    "physFootprintBytes": 387876952
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2003.0919952392578,
+                "workingSetMiB": 2238.6875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 187504,
+                    "physFootprintBytes": 144394184
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 80816,
+                    "physFootprintBytes": 217580720
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 41552,
+                    "physFootprintBytes": 8127352
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 192272,
+                    "physFootprintBytes": 372082992,
+                    "heap": {
+                      "backingStorageSize": 25021083,
+                      "embedderHeapUsedSize": 11686144,
+                      "totalSize": 87900160,
+                      "usedSize": 84146796
+                    }
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 185712,
+                    "physFootprintBytes": 153978584,
+                    "heap": {
+                      "backingStorageSize": 7237607,
+                      "embedderHeapUsedSize": 6527032,
+                      "totalSize": 44630016,
+                      "usedSize": 35295092
+                    }
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 538144,
+                    "physFootprintBytes": 380635248,
+                    "heap": {
+                      "backingStorageSize": 17476355,
+                      "embedderHeapUsedSize": 21166784,
+                      "totalSize": 244580352,
+                      "usedSize": 188548188
+                    }
+                  },
+                  {
+                    "pid": 48934,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 531744,
+                    "physFootprintBytes": 376735760,
+                    "heap": {
+                      "backingStorageSize": 17471529,
+                      "embedderHeapUsedSize": 20110440,
+                      "totalSize": 239861760,
+                      "usedSize": 185237000
+                    }
+                  },
+                  {
+                    "pid": 48956,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 534640,
+                    "physFootprintBytes": 381798488,
+                    "heap": {
+                      "backingStorageSize": 17471710,
+                      "embedderHeapUsedSize": 21208672,
+                      "totalSize": 240386048,
+                      "usedSize": 187840944
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1941.0451202392578,
+                "workingSetMiB": 2238.65625,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "auxiliary-5",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 195808,
+                    "physFootprintBytes": 153225184
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 89104,
+                    "physFootprintBytes": 740394232
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 41808,
+                    "physFootprintBytes": 8389496
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 192912,
+                    "physFootprintBytes": 372427056
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 186832,
+                    "physFootprintBytes": 155010776
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 538464,
+                    "physFootprintBytes": 380881008
+                  },
+                  {
+                    "pid": 48934,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 533520,
+                    "physFootprintBytes": 376850448
+                  },
+                  {
+                    "pid": 48956,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 536624,
+                    "physFootprintBytes": 382126168
+                  },
+                  {
+                    "pid": 49248,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 493424,
+                    "physFootprintBytes": 340789264
+                  },
+                  {
+                    "pid": 49249,
+                    "role": "auxiliary",
+                    "windowId": 8,
+                    "workingSetKiB": 428288,
+                    "physFootprintBytes": 280938584
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 3043.205467224121,
+                "workingSetMiB": 3160.921875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 196272,
+                    "physFootprintBytes": 149833696
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 89232,
+                    "physFootprintBytes": 588236024
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 41808,
+                    "physFootprintBytes": 8389496
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 192912,
+                    "physFootprintBytes": 372427056
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 185696,
+                    "physFootprintBytes": 151275224
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 538464,
+                    "physFootprintBytes": 380881008
+                  },
+                  {
+                    "pid": 48934,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 533520,
+                    "physFootprintBytes": 376850448
+                  },
+                  {
+                    "pid": 48956,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 536624,
+                    "physFootprintBytes": 382126168
+                  },
+                  {
+                    "pid": 49248,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 532992,
+                    "physFootprintBytes": 381601856
+                  },
+                  {
+                    "pid": 49249,
+                    "role": "auxiliary",
+                    "windowId": 8,
+                    "workingSetKiB": 532144,
+                    "physFootprintBytes": 385403040
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 3029.846206665039,
+                "workingSetMiB": 3300.453125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 196272,
+                    "physFootprintBytes": 149981152
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 84368,
+                    "physFootprintBytes": 343196896
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 41808,
+                    "physFootprintBytes": 8389496
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 192912,
+                    "physFootprintBytes": 372427056
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 185696,
+                    "physFootprintBytes": 151275224
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 538464,
+                    "physFootprintBytes": 380881008
+                  },
+                  {
+                    "pid": 48934,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 533520,
+                    "physFootprintBytes": 376850448
+                  },
+                  {
+                    "pid": 48956,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 536624,
+                    "physFootprintBytes": 382126168
+                  },
+                  {
+                    "pid": 49248,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 532768,
+                    "physFootprintBytes": 381372480
+                  },
+                  {
+                    "pid": 49249,
+                    "role": "auxiliary",
+                    "windowId": 8,
+                    "workingSetKiB": 532048,
+                    "physFootprintBytes": 385304736
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2795.9868087768555,
+                "workingSetMiB": 3295.390625,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 196080,
+                    "physFootprintBytes": 149506016
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 84368,
+                    "physFootprintBytes": 286016736
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 41808,
+                    "physFootprintBytes": 8389496
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 192912,
+                    "physFootprintBytes": 372427056,
+                    "heap": {
+                      "backingStorageSize": 25021303,
+                      "embedderHeapUsedSize": 11752240,
+                      "totalSize": 88162304,
+                      "usedSize": 84499844
+                    }
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 185696,
+                    "physFootprintBytes": 151275224,
+                    "heap": {
+                      "backingStorageSize": 7051825,
+                      "embedderHeapUsedSize": 1509456,
+                      "totalSize": 42270720,
+                      "usedSize": 36148392
+                    }
+                  },
+                  {
+                    "pid": 48735,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 375920,
+                    "physFootprintBytes": 210536560,
+                    "heap": {
+                      "backingStorageSize": 17471272,
+                      "embedderHeapUsedSize": 10660096,
+                      "totalSize": 84672512,
+                      "usedSize": 79615368
+                    }
+                  },
+                  {
+                    "pid": 48934,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 533520,
+                    "physFootprintBytes": 376850448,
+                    "heap": {
+                      "backingStorageSize": 17475451,
+                      "embedderHeapUsedSize": 20193152,
+                      "totalSize": 239861760,
+                      "usedSize": 185622516
+                    }
+                  },
+                  {
+                    "pid": 48956,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 536624,
+                    "physFootprintBytes": 382126168,
+                    "heap": {
+                      "backingStorageSize": 17475634,
+                      "embedderHeapUsedSize": 21208672,
+                      "totalSize": 240386048,
+                      "usedSize": 188263644
+                    }
+                  },
+                  {
+                    "pid": 49248,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 532784,
+                    "physFootprintBytes": 381388864,
+                    "heap": {
+                      "backingStorageSize": 17471709,
+                      "embedderHeapUsedSize": 20865320,
+                      "totalSize": 238813184,
+                      "usedSize": 194212056
+                    }
+                  },
+                  {
+                    "pid": 49249,
+                    "role": "auxiliary",
+                    "windowId": 8,
+                    "workingSetKiB": 532032,
+                    "physFootprintBytes": 380602528,
+                    "heap": {
+                      "backingStorageSize": 17471710,
+                      "embedderHeapUsedSize": 21168680,
+                      "totalSize": 238813184,
+                      "usedSize": 185760120
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2574.0805587768555,
+                "workingSetMiB": 3136.46875,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "after-all-closed",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 196032,
+                    "physFootprintBytes": 148408264
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 81104,
+                    "physFootprintBytes": 120079536
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 41520,
+                    "physFootprintBytes": 7996280
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 192912,
+                    "physFootprintBytes": 372427056
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 185696,
+                    "physFootprintBytes": 151275224
+                  }
+                ],
+                "exitedPids": [49249],
+                "physFootprintMiB": 763.1171798706055,
+                "workingSetMiB": 680.921875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 195728,
+                    "physFootprintBytes": 148359112
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 80448,
+                    "physFootprintBytes": 116704432
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 41440,
+                    "physFootprintBytes": 7996280
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 194352,
+                    "physFootprintBytes": 373705008
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 185696,
+                    "physFootprintBytes": 151275224
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 761.0703048706055,
+                "workingSetMiB": 681.3125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 195760,
+                    "physFootprintBytes": 146835400
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 80432,
+                    "physFootprintBytes": 113165488
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 41440,
+                    "physFootprintBytes": 7947128
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 194352,
+                    "physFootprintBytes": 373705008
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 185696,
+                    "physFootprintBytes": 151275224
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 756.1953048706055,
+                "workingSetMiB": 681.328125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 30000,
+                "processes": [
+                  {
+                    "pid": 45033,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 193584,
+                    "physFootprintBytes": 144459720
+                  },
+                  {
+                    "pid": 45039,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 80432,
+                    "physFootprintBytes": 113165488
+                  },
+                  {
+                    "pid": 45040,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 41440,
+                    "physFootprintBytes": 7947128
+                  },
+                  {
+                    "pid": 45041,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 194352,
+                    "physFootprintBytes": 373705008,
+                    "heap": {
+                      "backingStorageSize": 25021743,
+                      "embedderHeapUsedSize": 12005800,
+                      "totalSize": 87113728,
+                      "usedSize": 84498364
+                    }
+                  },
+                  {
+                    "pid": 45162,
+                    "role": "owner",
+                    "windowId": 2,
+                    "workingSetKiB": 185696,
+                    "physFootprintBytes": 151275224,
+                    "heap": {
+                      "backingStorageSize": 7051825,
+                      "embedderHeapUsedSize": 1624104,
+                      "totalSize": 42270720,
+                      "usedSize": 36154332
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 753.9296798706055,
+                "workingSetMiB": 679.203125,
+                "footprintWarnings": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "variant": "resident-baseline",
+      "artifactDirectory": "/tmp/lody-app-bench-eHCpyI",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "nativeMode": false,
+        "sharedSessionOwner": false,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "2412b25f1381e79c82deed60932b7cf5f14999aa45c232cd80c9d4de7a431e16",
+        "probeSha256": "c9de963bf50289cd2deae36d3faee8bc2ce6776dab427821bf88998539afa5a5",
+        "residentProbeSha256": "df1add99eb1438952085921eddd3e0e15ec3cc16548611d741c26f21445ebc3f"
+      },
+      "sharedSessionOwner": false,
+      "entries": 3000,
+      "unloadConfirmations": 0,
+      "residentMemory": {
+        "scope": "Electron app.getAppMetrics process set; external CLI/daemon processes excluded",
+        "metric": "Sum of macOS footprint auxiliary.phys_footprint bytes; working sets retained separately",
+        "forcedGC": false,
+        "stages": [
+          {
+            "name": "source-only",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 331760,
+                    "physFootprintBytes": 195725208
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 104640,
+                    "physFootprintBytes": 560038992
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 47760,
+                    "physFootprintBytes": 7668576
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 699824,
+                    "physFootprintBytes": 551815352
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1254.318359375,
+                "workingSetMiB": 1156.234375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 324064,
+                    "physFootprintBytes": 195987352
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96192,
+                    "physFootprintBytes": 119063656
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 47872,
+                    "physFootprintBytes": 7635808
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 802784,
+                    "physFootprintBytes": 653822208
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 931.2715759277344,
+                "workingSetMiB": 1241.125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 30000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 267344,
+                    "physFootprintBytes": 136202136
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96224,
+                    "physFootprintBytes": 111854696
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 47904,
+                    "physFootprintBytes": 7635808
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 557552,
+                    "physFootprintBytes": 394840320
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 620.3965759277344,
+                "workingSetMiB": 946.3125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 45000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 262624,
+                    "physFootprintBytes": 131745688
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96224,
+                    "physFootprintBytes": 111854696
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 47904,
+                    "physFootprintBytes": 7635808
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 557552,
+                    "physFootprintBytes": 394840320,
+                    "heap": {
+                      "backingStorageSize": 25316912,
+                      "embedderHeapUsedSize": 11305496,
+                      "totalSize": 85262336,
+                      "usedSize": 81676772
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 616.1465759277344,
+                "workingSetMiB": 941.703125,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "neutral-shell",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 266112,
+                    "physFootprintBytes": 132155288
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96832,
+                    "physFootprintBytes": 461948008
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48096,
+                    "physFootprintBytes": 7799648
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 559296,
+                    "physFootprintBytes": 394955008
+                  },
+                  {
+                    "pid": 52631,
+                    "role": "shell",
+                    "windowId": 2,
+                    "workingSetKiB": 315648,
+                    "physFootprintBytes": 166201120
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1109.1795654296875,
+                "workingSetMiB": 1255.84375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 266480,
+                    "physFootprintBytes": 132515736
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96672,
+                    "physFootprintBytes": 115377256
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48096,
+                    "physFootprintBytes": 7799648
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 559296,
+                    "physFootprintBytes": 394955008
+                  },
+                  {
+                    "pid": 52631,
+                    "role": "shell",
+                    "windowId": 2,
+                    "workingSetKiB": 315664,
+                    "physFootprintBytes": 166151968
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 778.9608154296875,
+                "workingSetMiB": 1256.0625,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 266640,
+                    "physFootprintBytes": 132663192
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96672,
+                    "physFootprintBytes": 115311720
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48096,
+                    "physFootprintBytes": 7799648
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 559296,
+                    "physFootprintBytes": 394955008
+                  },
+                  {
+                    "pid": 52631,
+                    "role": "shell",
+                    "windowId": 2,
+                    "workingSetKiB": 315632,
+                    "physFootprintBytes": 166119200
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 779.0076904296875,
+                "workingSetMiB": 1256.1875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 267232,
+                    "physFootprintBytes": 132974488
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 96672,
+                    "physFootprintBytes": 115311720
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48160,
+                    "physFootprintBytes": 7865184
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 559296,
+                    "physFootprintBytes": 394955008,
+                    "heap": {
+                      "backingStorageSize": 25321130,
+                      "embedderHeapUsedSize": 11331576,
+                      "totalSize": 85262336,
+                      "usedSize": 81728636
+                    }
+                  },
+                  {
+                    "pid": 52631,
+                    "role": "shell",
+                    "windowId": 2,
+                    "workingSetKiB": 332800,
+                    "physFootprintBytes": 184993760,
+                    "heap": {
+                      "backingStorageSize": 17459259,
+                      "embedderHeapUsedSize": 4624216,
+                      "totalSize": 82952192,
+                      "usedSize": 63933144
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 797.3672485351562,
+                "workingSetMiB": 1273.59375,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "prepared-target",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 269744,
+                    "physFootprintBytes": 134383512
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 101936,
+                    "physFootprintBytes": 561153128
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48160,
+                    "physFootprintBytes": 7865184
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 562144,
+                    "physFootprintBytes": 397871360
+                  },
+                  {
+                    "pid": 52631,
+                    "role": "prepared",
+                    "windowId": 2,
+                    "workingSetKiB": 452544,
+                    "physFootprintBytes": 315541448
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1351.1797256469727,
+                "workingSetMiB": 1400.90625,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 269376,
+                    "physFootprintBytes": 129042328
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97952,
+                    "physFootprintBytes": 151307368
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48192,
+                    "physFootprintBytes": 7717728
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 562112,
+                    "physFootprintBytes": 381683968
+                  },
+                  {
+                    "pid": 52631,
+                    "role": "prepared",
+                    "windowId": 2,
+                    "workingSetKiB": 623376,
+                    "physFootprintBytes": 468797480
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1085.804817199707,
+                "workingSetMiB": 1563.484375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 20000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 268784,
+                    "physFootprintBytes": 128649112
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97968,
+                    "physFootprintBytes": 144639080
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48192,
+                    "physFootprintBytes": 7717728
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 562112,
+                    "physFootprintBytes": 381683968
+                  },
+                  {
+                    "pid": 52631,
+                    "role": "prepared",
+                    "windowId": 2,
+                    "workingSetKiB": 515920,
+                    "physFootprintBytes": 240388136
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 861.242317199707,
+                "workingSetMiB": 1457.984375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 30000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 269264,
+                    "physFootprintBytes": 129107864
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97968,
+                    "physFootprintBytes": 144639080
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48192,
+                    "physFootprintBytes": 7717728
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 562112,
+                    "physFootprintBytes": 381683968
+                  },
+                  {
+                    "pid": 52631,
+                    "role": "prepared",
+                    "windowId": 2,
+                    "workingSetKiB": 405120,
+                    "physFootprintBytes": 240388136
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 861.679817199707,
+                "workingSetMiB": 1350.25,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 45000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 268928,
+                    "physFootprintBytes": 128911256
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97968,
+                    "physFootprintBytes": 144639080
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48192,
+                    "physFootprintBytes": 7717728
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 562608,
+                    "physFootprintBytes": 378603776,
+                    "heap": {
+                      "backingStorageSize": 25335212,
+                      "embedderHeapUsedSize": 11693952,
+                      "totalSize": 86573056,
+                      "usedSize": 82350092
+                    }
+                  },
+                  {
+                    "pid": 52631,
+                    "role": "prepared",
+                    "windowId": 2,
+                    "workingSetKiB": 405776,
+                    "physFootprintBytes": 241059880,
+                    "heap": {
+                      "backingStorageSize": 17775312,
+                      "embedderHeapUsedSize": 11149376,
+                      "totalSize": 83361792,
+                      "usedSize": 78827864
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 859.195442199707,
+                "workingSetMiB": 1351.046875,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "after-preparation-disabled",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 268880,
+                    "physFootprintBytes": 128927640
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97504,
+                    "physFootprintBytes": 111002728
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48272,
+                    "physFootprintBytes": 7635808
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 562608,
+                    "physFootprintBytes": 378603776
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 597.1622009277344,
+                "workingSetMiB": 954.359375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 269120,
+                    "physFootprintBytes": 128436120
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97520,
+                    "physFootprintBytes": 110969960
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48304,
+                    "physFootprintBytes": 7619424
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 562608,
+                    "physFootprintBytes": 378603776
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 596.6465759277344,
+                "workingSetMiB": 954.640625,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 269232,
+                    "physFootprintBytes": 128550808
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97520,
+                    "physFootprintBytes": 110969960
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48304,
+                    "physFootprintBytes": 7619424
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 562608,
+                    "physFootprintBytes": 378603776
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 596.7559509277344,
+                "workingSetMiB": 954.75,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 268624,
+                    "physFootprintBytes": 127911832
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 97520,
+                    "physFootprintBytes": 110969960
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48304,
+                    "physFootprintBytes": 7619424
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 562608,
+                    "physFootprintBytes": 378603776,
+                    "heap": {
+                      "backingStorageSize": 25335263,
+                      "embedderHeapUsedSize": 11693952,
+                      "totalSize": 86573056,
+                      "usedSize": 82354168
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 596.1465759277344,
+                "workingSetMiB": 954.15625,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "auxiliary-1",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 270304,
+                    "physFootprintBytes": 131401624
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 102800,
+                    "physFootprintBytes": 556303464
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48384,
+                    "physFootprintBytes": 7717728
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 565392,
+                    "physFootprintBytes": 381454592
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 453360,
+                    "physFootprintBytes": 306710592
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1319.4923400878906,
+                "workingSetMiB": 1406.484375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 270448,
+                    "physFootprintBytes": 130090904
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 103136,
+                    "physFootprintBytes": 571868264
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48384,
+                    "physFootprintBytes": 7717728
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 565392,
+                    "physFootprintBytes": 381454592
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 569600,
+                    "physFootprintBytes": 419432584
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1440.5861587524414,
+                "workingSetMiB": 1520.46875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 270592,
+                    "physFootprintBytes": 130631576
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 98560,
+                    "physFootprintBytes": 180356200
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48400,
+                    "physFootprintBytes": 7717728
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 565392,
+                    "physFootprintBytes": 381454592
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 569520,
+                    "physFootprintBytes": 419350664
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1067.6486587524414,
+                "workingSetMiB": 1516.078125,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 270800,
+                    "physFootprintBytes": 130336664
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 98592,
+                    "physFootprintBytes": 156779624
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48400,
+                    "physFootprintBytes": 7701344
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 563040,
+                    "physFootprintBytes": 376391936,
+                    "heap": {
+                      "backingStorageSize": 25335593,
+                      "embedderHeapUsedSize": 11809416,
+                      "totalSize": 86048768,
+                      "usedSize": 82791076
+                    }
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 570416,
+                    "physFootprintBytes": 419760264,
+                    "heap": {
+                      "backingStorageSize": 17882254,
+                      "embedderHeapUsedSize": 27592352,
+                      "totalSize": 249036800,
+                      "usedSize": 192156460
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1040.4299087524414,
+                "workingSetMiB": 1514.890625,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "auxiliary-3",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 276000,
+                    "physFootprintBytes": 137562032
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 105408,
+                    "physFootprintBytes": 656213120
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48592,
+                    "physFootprintBytes": 7897952
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 585392,
+                    "physFootprintBytes": 399280384
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 597232,
+                    "physFootprintBytes": 445565064
+                  },
+                  {
+                    "pid": 56138,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 515808,
+                    "physFootprintBytes": 368297880
+                  },
+                  {
+                    "pid": 56185,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 459728,
+                    "physFootprintBytes": 310790088
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2217.871208190918,
+                "workingSetMiB": 2527.5,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 276224,
+                    "physFootprintBytes": 136185776
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 106608,
+                    "physFootprintBytes": 518276272
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 48592,
+                    "physFootprintBytes": 7897952
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 585392,
+                    "physFootprintBytes": 399280384
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 597232,
+                    "physFootprintBytes": 445565064
+                  },
+                  {
+                    "pid": 56138,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 580784,
+                    "physFootprintBytes": 430933960
+                  },
+                  {
+                    "pid": 56185,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 582176,
+                    "physFootprintBytes": 432588840
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2260.9026412963867,
+                "workingSetMiB": 2711.921875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 149376,
+                    "physFootprintBytes": 138348464
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 71520,
+                    "physFootprintBytes": 277136512
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 38704,
+                    "physFootprintBytes": 7930720
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 321296,
+                    "physFootprintBytes": 403507456
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 126752,
+                    "physFootprintBytes": 445745288
+                  },
+                  {
+                    "pid": 56138,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 333024,
+                    "physFootprintBytes": 430802888
+                  },
+                  {
+                    "pid": 56185,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 420848,
+                    "physFootprintBytes": 432506920
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2037.0275955200195,
+                "workingSetMiB": 1427.265625,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 158960,
+                    "physFootprintBytes": 137529264
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 72368,
+                    "physFootprintBytes": 220365952
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 39424,
+                    "physFootprintBytes": 7930720
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 322800,
+                    "physFootprintBytes": 403507456,
+                    "heap": {
+                      "backingStorageSize": 39446978,
+                      "embedderHeapUsedSize": 11908880,
+                      "totalSize": 86048768,
+                      "usedSize": 82910572
+                    }
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 126768,
+                    "physFootprintBytes": 445745288,
+                    "heap": {
+                      "backingStorageSize": 31997347,
+                      "embedderHeapUsedSize": 27592352,
+                      "totalSize": 249036800,
+                      "usedSize": 192298764
+                    }
+                  },
+                  {
+                    "pid": 56138,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 336976,
+                    "physFootprintBytes": 430901192,
+                    "heap": {
+                      "backingStorageSize": 23533862,
+                      "embedderHeapUsedSize": 28121560,
+                      "totalSize": 244056064,
+                      "usedSize": 200002396
+                    }
+                  },
+                  {
+                    "pid": 56185,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 421136,
+                    "physFootprintBytes": 432523304,
+                    "heap": {
+                      "backingStorageSize": 17891126,
+                      "embedderHeapUsedSize": 29195504,
+                      "totalSize": 257163264,
+                      "usedSize": 195042296
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 1982.2150955200195,
+                "workingSetMiB": 1443.78125,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "auxiliary-5",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 182320,
+                    "physFootprintBytes": 144590816
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 83808,
+                    "physFootprintBytes": 725632200
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 40832,
+                    "physFootprintBytes": 8242016
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 413536,
+                    "physFootprintBytes": 424020248
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 176032,
+                    "physFootprintBytes": 491817144
+                  },
+                  {
+                    "pid": 56138,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 368624,
+                    "physFootprintBytes": 479037456
+                  },
+                  {
+                    "pid": 56185,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 450064,
+                    "physFootprintBytes": 481478768
+                  },
+                  {
+                    "pid": 56714,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 421968,
+                    "physFootprintBytes": 386107432
+                  },
+                  {
+                    "pid": 57222,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 414272,
+                    "physFootprintBytes": 333531152
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 3313.5006256103516,
+                "workingSetMiB": 2491.65625,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 181728,
+                    "physFootprintBytes": 142460896
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 80928,
+                    "physFootprintBytes": 739083488
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 40800,
+                    "physFootprintBytes": 8242016
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 391088,
+                    "physFootprintBytes": 424020248
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 153920,
+                    "physFootprintBytes": 491817144
+                  },
+                  {
+                    "pid": 56138,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 349216,
+                    "physFootprintBytes": 479037456
+                  },
+                  {
+                    "pid": 56185,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 430464,
+                    "physFootprintBytes": 481478768
+                  },
+                  {
+                    "pid": 56714,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 437184,
+                    "physFootprintBytes": 455460976
+                  },
+                  {
+                    "pid": 57222,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 576528,
+                    "physFootprintBytes": 504318160
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 3553.3134002685547,
+                "workingSetMiB": 2579.9375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 5000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 170528,
+                    "physFootprintBytes": 142084064
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 75744,
+                    "physFootprintBytes": 345769112
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 40656,
+                    "physFootprintBytes": 8242016
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 181568,
+                    "physFootprintBytes": 424020248
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 137392,
+                    "physFootprintBytes": 491817144
+                  },
+                  {
+                    "pid": 56138,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 124864,
+                    "physFootprintBytes": 479037456
+                  },
+                  {
+                    "pid": 56185,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 118272,
+                    "physFootprintBytes": 481478768
+                  },
+                  {
+                    "pid": 56714,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 415632,
+                    "physFootprintBytes": 455231600
+                  },
+                  {
+                    "pid": 57222,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 465184,
+                    "physFootprintBytes": 503138512
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 3176.516456604004,
+                "workingSetMiB": 1689.296875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 153744,
+                    "physFootprintBytes": 142034912
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 71760,
+                    "physFootprintBytes": 288556184
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 39424,
+                    "physFootprintBytes": 8242016
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 234704,
+                    "physFootprintBytes": 379816192,
+                    "heap": {
+                      "backingStorageSize": 25317922,
+                      "embedderHeapUsedSize": 10934440,
+                      "totalSize": 82903040,
+                      "usedSize": 81221688
+                    }
+                  },
+                  {
+                    "pid": 55390,
+                    "role": "auxiliary",
+                    "windowId": 3,
+                    "workingSetKiB": 240176,
+                    "physFootprintBytes": 289753224,
+                    "heap": {
+                      "backingStorageSize": 17783880,
+                      "embedderHeapUsedSize": 10730488,
+                      "totalSize": 82837504,
+                      "usedSize": 78688048
+                    }
+                  },
+                  {
+                    "pid": 56138,
+                    "role": "auxiliary",
+                    "windowId": 4,
+                    "workingSetKiB": 116304,
+                    "physFootprintBytes": 479037456,
+                    "heap": {
+                      "backingStorageSize": 48933978,
+                      "embedderHeapUsedSize": 28121560,
+                      "totalSize": 244056064,
+                      "usedSize": 200258840
+                    }
+                  },
+                  {
+                    "pid": 56185,
+                    "role": "auxiliary",
+                    "windowId": 5,
+                    "workingSetKiB": 116784,
+                    "physFootprintBytes": 481478768,
+                    "heap": {
+                      "backingStorageSize": 43295151,
+                      "embedderHeapUsedSize": 29195504,
+                      "totalSize": 257163264,
+                      "usedSize": 195328392
+                    }
+                  },
+                  {
+                    "pid": 56714,
+                    "role": "auxiliary",
+                    "windowId": 6,
+                    "workingSetKiB": 415840,
+                    "physFootprintBytes": 455264368,
+                    "heap": {
+                      "backingStorageSize": 29189625,
+                      "embedderHeapUsedSize": 30017344,
+                      "totalSize": 255066112,
+                      "usedSize": 211098536
+                    }
+                  },
+                  {
+                    "pid": 57222,
+                    "role": "auxiliary",
+                    "windowId": 7,
+                    "workingSetKiB": 461536,
+                    "physFootprintBytes": 503204048,
+                    "heap": {
+                      "backingStorageSize": 17892776,
+                      "embedderHeapUsedSize": 28896816,
+                      "totalSize": 322846720,
+                      "usedSize": 269236408
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 2887.141387939453,
+                "workingSetMiB": 1806.90625,
+                "footprintWarnings": []
+              }
+            ]
+          },
+          {
+            "name": "after-all-closed",
+            "samples": [
+              {
+                "offsetMs": 0,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 165104,
+                    "physFootprintBytes": 141133768
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 73776,
+                    "physFootprintBytes": 120521832
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 40608,
+                    "physFootprintBytes": 7832416
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 235264,
+                    "physFootprintBytes": 379816192
+                  }
+                ],
+                "exitedPids": [57222],
+                "physFootprintMiB": 619.2247467041016,
+                "workingSetMiB": 502.6875,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 2000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 165776,
+                    "physFootprintBytes": 141150152
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 73792,
+                    "physFootprintBytes": 117146728
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 40656,
+                    "physFootprintBytes": 7832416
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 247808,
+                    "physFootprintBytes": 376604928
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 612.9591217041016,
+                "workingSetMiB": 515.65625,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 10000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 167568,
+                    "physFootprintBytes": 139265992
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 73776,
+                    "physFootprintBytes": 113624168
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 40656,
+                    "physFootprintBytes": 7750496
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 247856,
+                    "physFootprintBytes": 376604928
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 607.7247467041016,
+                "workingSetMiB": 517.4375,
+                "footprintWarnings": []
+              },
+              {
+                "offsetMs": 30000,
+                "processes": [
+                  {
+                    "pid": 51120,
+                    "role": "Browser",
+                    "windowId": null,
+                    "workingSetKiB": 167088,
+                    "physFootprintBytes": 138397640
+                  },
+                  {
+                    "pid": 51121,
+                    "role": "GPU",
+                    "windowId": null,
+                    "workingSetKiB": 73792,
+                    "physFootprintBytes": 113624168
+                  },
+                  {
+                    "pid": 51122,
+                    "role": "Utility",
+                    "windowId": null,
+                    "workingSetKiB": 40688,
+                    "physFootprintBytes": 7750496
+                  },
+                  {
+                    "pid": 51123,
+                    "role": "source",
+                    "windowId": 1,
+                    "workingSetKiB": 247856,
+                    "physFootprintBytes": 376604928,
+                    "heap": {
+                      "backingStorageSize": 25318436,
+                      "embedderHeapUsedSize": 11178352,
+                      "totalSize": 83427328,
+                      "usedSize": 81812516
+                    }
+                  }
+                ],
+                "exitedPids": [],
+                "physFootprintMiB": 606.8966217041016,
+                "workingSetMiB": 517.015625,
+                "footprintWarnings": []
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

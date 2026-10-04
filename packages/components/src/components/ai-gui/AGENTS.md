@@ -1,19 +1,20 @@
 # components/ai-gui
 
-Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md).
+Edit `AGENTS.md`, not `CLAUDE.md` (symlink). [Ownership](README.md).
 
 ## Stream And Search
 
-- Search indexes prose only: user/assistant text, thinking, and proposed-plan
-  markdown, including folded prose; matches open their groups. Never index tools
-  (titles/JSON/output), terminals, diffs, plan checklists, goals, or worktree script
-  output. Never wire `searchBlockId` to tool, terminal, or diff renderers.
-- Window stream readiness must use the same hydration/initial-scroll conditions as
-  viewport visibility; hydrated history alone cannot reveal a native window.
-- `SessionChatStreamView` scrolls through `conversation-list/`'s
-  `ConversationListHandle` and [scroll engine](../../lib/conversation-scroll/AGENTS.md)
-  only. Keep row keys stable; map history indexes to rows. Collapsed activity is one
-  row; expanded details are siblings, never nested scrollers or fixed-height panels.
+- Search indexes only user/assistant prose, thinking and proposed-plan Markdown,
+  including folded prose; matches open groups. Exclude tools (titles/JSON/output),
+  terminals, diffs, plan checklists, goals and worktree-script output. Never wire
+  `searchBlockId` to tool, terminal or diff renderers.
+- Window readiness and viewport visibility share hydration/initial-scroll gates;
+  hydrated history alone cannot reveal a native window.
+- `SessionChatStreamView` scrolls only through `conversation-list/`'s
+  `ConversationListHandle` ([engine](../../lib/conversation-scroll/AGENTS.md)).
+  Stable row keys; map history indexes to rows. Build elements only for mounted or
+  selection-retained rows. Collapsed activity is one row; expanded details are
+  siblings, never nested scrollers or fixed-height panels.
 - Native selection retains its row corridor and history leases: hold prose/folding,
   keep actions live, release on clear. [Contract](README.md#native-text-selection).
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate

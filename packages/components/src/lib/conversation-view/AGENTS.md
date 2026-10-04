@@ -3,8 +3,9 @@
 `CLAUDE.md` is a symlink to this file. Parent guidelines apply.
 
 - The shipped implementation is `createConversationViewFromReader`. Its index
-  comes from shallow directory reads; bodies are acquired by window. Opening
-  still imports the document and reads an O(total) directory before the window.
+  comes from shallow directory reads; bodies are acquired by window. Local Electron
+  imports the document once in the data renderer; each view still builds an O(total)
+  directory. Other compositions retain in-process document ownership.
 - Outline summaries are lazy: opening builds the directory and retained tail only.
   Hover reads the selected question and replies; released/evicted previews refresh
   on demand after content edits. Business fact derivation is a separate consumer.

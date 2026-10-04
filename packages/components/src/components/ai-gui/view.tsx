@@ -2321,102 +2321,107 @@ export const SessionChatStreamView = forwardRef<
       );
     }
 
-    // Keyed rows in list order: the leading row, the conversation, the activity
-    // row, and the pending (not yet committed) messages.
-    const listRows = [
-      leadingContent == null ? null : (
-        <div key={LEADING_ROW_KEY} data-conversation-leading-content="">
-          {leadingContent}
-        </div>
-      ),
-      ...virtualRows.map((row, rowIndex) => {
-        if (row.type === 'placeholder') {
-          return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
-        }
-        if (row.type === 'standard') {
-          // Standard rows are only ever system or user messages
-          // (assistant turns are flattened into `assistant` rows below),
-          // so they carry no per-turn file diffs or last-assistant
-          // quick actions.
-          return (
-            <MessageSelectionRow
-              key={row.key}
-              id={row.item.type === 'message' ? row.item.message.id : undefined}
-              first
-            >
-              <ChatItem
-                item={row.item}
-                renderMessageRow={renderMessageRow}
-                noMessagesLabel={noMessagesLabel}
-                emptyState={emptyState}
-              />
-            </MessageSelectionRow>
-          );
-        }
-
-        const canForkAssistantMessage =
-          row.item.message.finished === true &&
-          (row.item.message.id === lastCompletedAssistantMessageId ||
-            Boolean(row.item.message.acpTurnId));
-        const fileDiffOverride =
-          messageFileDiffEntriesByTurn === undefined
-            ? undefined
-            : (messageFileDiffEntriesByTurn[row.item.message.id] ?? EMPTY_EDITED_FILE_ENTRIES);
+    // Construct React elements only for the engine's mounted window. The shallow
+    // metadata still covers the whole history for scroll geometry and outline jumps.
+    const renderListRow = (index: number): ReactElement | null => {
+      const fixed = engineRowMeta[index]?.fixed;
+      if (fixed === 'leading')
+        return (
+          <div key={LEADING_ROW_KEY} data-conversation-leading-content="">
+            {leadingContent}
+          </div>
+        );
+      if (fixed === 'agent-activity')
+        return agentActivityLabel ? (
+          <div
+            key={AGENT_ACTIVITY_ROW_KEY}
+            className="shrink-0 pt-1"
+            data-agent-activity-row-spacer=""
+          >
+            <AgentActivityRow
+              label={agentActivityLabel}
+              tone={agentActivityTone}
+              shimmer={agentActivityShimmer}
+              message={liveAgentActivityMessage}
+              conversationFontSize={conversationFontSize}
+            />
+          </div>
+        ) : null;
+      if (fixed === 'trailing')
+        return (
+          <div key={TRAILING_ROW_KEY} data-conversation-trailing-content="">
+            {trailingContent}
+          </div>
+        );
+      const rowIndex = index - leadingRowCount;
+      const row = virtualRows[rowIndex];
+      if (!row) return null;
+      if (row.type === 'placeholder') {
+        return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
+      }
+      if (row.type === 'standard') {
+        // Standard rows are only ever system or user messages
+        // (assistant turns are flattened into `assistant` rows below),
+        // so they carry no per-turn file diffs or last-assistant
+        // quick actions.
         return (
           <MessageSelectionRow
             key={row.key}
-            id={row.item.message.id}
-            first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
+            id={row.item.type === 'message' ? row.item.message.id : undefined}
+            first
           >
-            <AssistantChatItem
-              row={row}
-              fileDiffOverride={fileDiffOverride}
-              assistantActions={resolveAssistantMessageActions(
-                row.item.message.id,
-                assistantActionsMessageId,
-                assistantActions
-              )}
-              onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
-              forkWorktreeAvailability={forkWorktreeAvailability}
-              onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-              isForking={forkingAssistantMessageId === row.item.message.id}
-              onFileDiffClick={onFileDiffClick}
-              onFilePathClick={onFilePathClick}
-              onGroupExpandedChange={handleAssistantGroupExpandedChange}
-              onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
-              isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
-              onTurnHoverChange={handleAssistantTurnHoverChange}
-              conversationFontSize={conversationFontSize}
-              shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
-              liveStatus={row.key === liveStatusRowKey ? liveTurnStatus : null}
-              liveStatusFollowsSurface={
-                row.key === liveStatusRowKey && assistantRowPaintsSurface(virtualRows[rowIndex - 1])
-              }
+            <ChatItem
+              item={row.item}
+              renderMessageRow={renderMessageRow}
+              noMessagesLabel={noMessagesLabel}
+              emptyState={emptyState}
             />
           </MessageSelectionRow>
         );
-      }),
-      shouldShowAgentActivityRow && agentActivityLabel ? (
-        <div
-          key={AGENT_ACTIVITY_ROW_KEY}
-          className="shrink-0 pt-1"
-          data-agent-activity-row-spacer=""
+      }
+
+      const canForkAssistantMessage =
+        row.item.message.finished === true &&
+        (row.item.message.id === lastCompletedAssistantMessageId ||
+          Boolean(row.item.message.acpTurnId));
+      const fileDiffOverride =
+        messageFileDiffEntriesByTurn === undefined
+          ? undefined
+          : (messageFileDiffEntriesByTurn[row.item.message.id] ?? EMPTY_EDITED_FILE_ENTRIES);
+      return (
+        <MessageSelectionRow
+          key={row.key}
+          id={row.item.message.id}
+          first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
         >
-          <AgentActivityRow
-            label={agentActivityLabel}
-            tone={agentActivityTone}
-            shimmer={agentActivityShimmer}
-            message={liveAgentActivityMessage}
+          <AssistantChatItem
+            row={row}
+            fileDiffOverride={fileDiffOverride}
+            assistantActions={resolveAssistantMessageActions(
+              row.item.message.id,
+              assistantActionsMessageId,
+              assistantActions
+            )}
+            onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
+            forkWorktreeAvailability={forkWorktreeAvailability}
+            onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+            isForking={forkingAssistantMessageId === row.item.message.id}
+            onFileDiffClick={onFileDiffClick}
+            onFilePathClick={onFilePathClick}
+            onGroupExpandedChange={handleAssistantGroupExpandedChange}
+            onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
+            isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
+            onTurnHoverChange={handleAssistantTurnHoverChange}
             conversationFontSize={conversationFontSize}
+            shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
+            liveStatus={row.key === liveStatusRowKey ? liveTurnStatus : null}
+            liveStatusFollowsSurface={
+              row.key === liveStatusRowKey && assistantRowPaintsSurface(virtualRows[rowIndex - 1])
+            }
           />
-        </div>
-      ) : null,
-      trailingContent == null ? null : (
-        <div key={TRAILING_ROW_KEY} data-conversation-trailing-content="">
-          {trailingContent}
-        </div>
-      ),
-    ].filter((row): row is ReactElement => row != null);
+        </MessageSelectionRow>
+      );
+    };
 
     return (
       <SessionChatActionContext.Provider value={chatActionContextValue}>
@@ -2428,7 +2433,7 @@ export const SessionChatStreamView = forwardRef<
             <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
               <EngineConversationScroller
                 sessionId={sessionId}
-                rows={listRows}
+                renderRow={renderListRow}
                 rowMeta={engineRowMeta}
                 item={ConversationVirtualRow}
                 keepMounted={nativeTextSelection.keepMounted}

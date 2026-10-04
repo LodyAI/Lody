@@ -22,6 +22,7 @@ import { FocusScope } from '@/ui/focus-scope';
 import { WindowDragStrip } from '@/ui/window-drag-region';
 import { cn } from '@/lib/utils';
 import { CompactNavigationDialog } from './compact-navigation-dialog';
+import { isSessionWindow } from '@/lib/desktop-window';
 
 const DesktopSidebarContent = memo(function DesktopSidebarContent({
   pathname,
@@ -47,6 +48,9 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   // Effective on-screen visibility: compact may auto-suppress the sidebar even
   // while the persisted preference says open — see atoms/layout-state.ts.
   const sidebarVisible = useAtomValue(navigationSidebarVisibleAtom);
+  // A conversation-only window has no sidebar state to preserve until first use.
+  const sidebarMounted = useRef(sidebarVisible || !isSessionWindow());
+  if (sidebarVisible) sidebarMounted.current = true;
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const sidebarLastWidth = useAtomValue(sidebarLastWidthAtom);
   const shouldReduceMotion = useReducedMotion();
@@ -113,7 +117,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
             <LoroAppSidebar overlay className="h-full border-r border-sidebar-border shadow-xl" />
           </ErrorBoundary>
         </CompactNavigationDialog>
-      ) : (
+      ) : sidebarMounted.current ? (
         <div
           ref={sidebarRef}
           className="relative z-10 h-full shrink-0"
@@ -129,7 +133,7 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
         >
           <DesktopSidebarContent pathname={pathname} />
         </div>
-      )}
+      ) : null}
       <FocusScope
         ref={contentRef}
         id={WORKSPACE_FOCUS_SCOPES.content}

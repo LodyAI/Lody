@@ -102,3 +102,129 @@ it('revokes prepared readiness when its stream disappears, and stops after dispo
   await Promise.resolve();
   expect(ready).toBe(true);
 });
+
+// Data handoff runs after a concrete open request, before mounting the target route.
+describe('window target data handoff', () => {
+  it('uses the acquired store before routing and releases its temporary reference', async () => {
+    const { createWindowTargetNavigator } =
+      await import('../../../apps/electron/src/renderer/src/window-target-navigation');
+    vi.useFakeTimers();
+    let resolve!: (store: never) => void;
+    const loading = new Promise<never>((done) => {
+      resolve = done;
+    });
+    const borrowed = new Set<string>();
+    let route = '';
+    let ready = false;
+    const navigate = createWindowTargetNavigator({
+      getRuntime: () => ({
+        workspaceSlug: 'local',
+        acquireSessionStore: async (id) => {
+          const store = await loading;
+          borrowed.add(id);
+          return store;
+        },
+        releaseSessionStoreRef: (id) => {
+          borrowed.delete(id);
+        },
+      }),
+      applyRoute: async (target) => {
+        route = target.sessionId!;
+      },
+      reportError: (error) => {
+        throw error;
+      },
+    });
+    const pending = navigate({ workspace: 'local', sessionId: 'a' }, () => {
+      ready = true;
+    });
+    expect(route).toBe('');
+    resolve({} as never);
+    await pending;
+    expect(route).toBe('a');
+    expect(ready).toBe(true);
+    expect(borrowed.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('lets a slow open reach loading UI and releases a late store without changing the route', async () => {
+    const { createWindowTargetNavigator } =
+      await import('../../../apps/electron/src/renderer/src/window-target-navigation');
+    vi.useFakeTimers();
+    let resolve!: (store: never) => void;
+    const loading = new Promise<never>((done) => {
+      resolve = done;
+    });
+    const borrowed = new Set<string>();
+    let route = '';
+    const navigate = createWindowTargetNavigator({
+      getRuntime: () => ({
+        workspaceSlug: 'local',
+        acquireSessionStore: async (id) => {
+          const store = await loading;
+          borrowed.add(id);
+          return store;
+        },
+        releaseSessionStoreRef: (id) => {
+          borrowed.delete(id);
+        },
+      }),
+      applyRoute: async (target) => {
+        route = target.sessionId!;
+      },
+      reportError: (error) => {
+        throw error;
+      },
+    });
+    const pending = navigate({ workspace: 'local', sessionId: 'slow' }, () => {});
+    await vi.advanceTimersByTimeAsync(50);
+    await pending;
+    expect(route).toBe('slow');
+    resolve({} as never);
+    await loading;
+    await Promise.resolve();
+    expect(borrowed.size).toBe(0);
+    expect(route).toBe('slow');
+  });
+
+  it('fences an older acquisition when a later target wins, and routes failures to the normal UI', async () => {
+    const { createWindowTargetNavigator } =
+      await import('../../../apps/electron/src/renderer/src/window-target-navigation');
+    vi.useFakeTimers();
+    let resolve!: (store: never) => void;
+    const loading = new Promise<never>((done) => {
+      resolve = done;
+    });
+    let route = '';
+    const completed: string[] = [];
+    const errors: unknown[] = [];
+    const navigate = createWindowTargetNavigator({
+      getRuntime: () => ({
+        workspaceSlug: 'local',
+        acquireSessionStore: (id) =>
+          id === 'old' ? loading : Promise.reject(new Error('storage unavailable')),
+        releaseSessionStoreRef: () => {},
+      }),
+      applyRoute: async (target) => {
+        route = target.sessionId!;
+      },
+      reportError: (error) => {
+        errors.push(error);
+      },
+    });
+    const old = navigate({ workspace: 'local', sessionId: 'old' }, () => {
+      completed.push('old');
+    });
+    await navigate({ workspace: 'local', sessionId: 'new' }, () => {
+      completed.push('new');
+    });
+    resolve({} as never);
+    await old;
+    expect(route).toBe('new');
+    expect(completed).toEqual(['new']);
+    expect(errors).toHaveLength(1);
+    await navigate({ workspace: 'other', sessionId: 'elsewhere' }, () => {});
+    expect(route).toBe('elsewhere');
+    expect(errors).toHaveLength(1);
+  });
+});
