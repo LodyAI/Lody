@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import wasm from 'vite-plugin-wasm';
+import { interfaceFontsPlugin } from './vite-interface-fonts';
 import { loroCrdtBundlerAlias, loroCrdtWasmUrlWorkaround } from './vite-wasm-workarounds.ts';
 import {
   rendererBundleAliasPlugin,
@@ -23,6 +24,7 @@ const isStorybook =
 
 export default defineConfig(async () => {
   const plugins = [
+    interfaceFontsPlugin(),
     ...(isStorybook
       ? []
       : [

@@ -1,4 +1,5 @@
 /* UI and mono fonts are self-hosted for stable glyphs across WebViews. */
+@import './interface-fonts/generated/index.css';
 @import '@fontsource/inter/400.css';
 @import '@fontsource/inter/500.css';
 @import '@fontsource/inter/600.css';

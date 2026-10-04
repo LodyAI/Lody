@@ -34,7 +34,7 @@ import { Switch } from '@lody/ui/switch';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
-import { settingContainerClass } from '.';
+import { settingsSurface } from './surface';
 import { CompactRow, CompactSection } from './compact-layout';
 import { buildConversationFontSizeChoices } from './conversation-font-size-options';
 import { PreviewSelect, type PreviewSelectOption } from './preview-select';
@@ -322,7 +322,7 @@ export function AppearanceSettingsView({
     ) : null;
 
   return (
-    <div className={settingContainerClass}>
+    <div {...stylex.props(settingsSurface.container)}>
       <CompactSection>
         <CompactRow label={t('settings.theme.label')}>
           <div {...stylex.props(styles.picker)}>

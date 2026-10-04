@@ -27,14 +27,14 @@ publishes one baseline. `@lody/ui` owns the existing text roles and their leadin
 surfaces choose a role, not a second scale or a parent-relative size. Nested code,
 compact tool prose and portal content must not multiply the scale twice.
 
-| Role | Size / leading at Default | Typical content |
-| --- | --- | --- |
-| caption | 11 / 16px | Metadata, code language |
-| footnote | 12 / 16px | Groups, descriptions, tooltip |
-| subheadline | 13 / 18px | Controls, code, tool output |
-| body | 14 / 20px | Sidebar titles, prompt |
-| headline | 16 / 24px | Dialog heading |
-| title | 18 / 24px | Page or Markdown primary heading |
+| Role        | Size / leading at Default | Typical content                       |
+| ----------- | ------------------------- | ------------------------------------- |
+| caption     | 11 / 16px                 | Metadata, code language               |
+| footnote    | 12 / 16px                 | Groups, descriptions, tooltip         |
+| subheadline | 13 / 18px                 | Controls, code, tool output           |
+| body        | 14 / 20px                 | Sidebar titles, prompt, message prose |
+| headline    | 16 / 24px                 | Dialog heading                        |
+| title       | 18 / 24px                 | Page or Markdown primary heading      |
 
 Each size and leading is its Default value multiplied by the selected baseline
 divided by 14. Reading prose retains body size and uses the separately themeable
@@ -65,10 +65,28 @@ and dark palettes and a narrow desktop window.
 
 This does not resize brand artwork, icon geometry or third-party document/canvas
 contents. Intentional landing typography, diagrams, file viewers and editor
-zoom remain outside this ordinary-text migration. No new font family or global
-spacing scale is introduced.
+zoom remain outside this ordinary-text migration. No global spacing scale is introduced.
 Settings paragraphs may retain their existing proportional leading; they still
 derive their size and line height from the same baseline.
+
+## Default family and font delivery
+
+The default ordinary interface family is bundled Geist for Latin/numbers followed
+by bundled vivo Sans SC for mapped Chinese. Retain saved family overrides and
+all code/terminal mono stacks. This changes the family only, not text roles,
+weight, leading, tracking, optical sizing, component geometry or theme tokens.
+
+Common interface copy loads before optional long-tail font packages. Coverage
+must be requested by actual text rather than downloading the complete Chinese
+font after a delay. The dense mixed-language review scene must fit a 3 MiB,
+three-request first-screen font budget, reuse warm cached font bodies and keep
+initial CLS below 0.05. Delayed/failed loads and unsupported rare characters stay
+readable through native platform fallback; no runtime CDN or installed custom
+font is required. Distribute original licenses and display software attribution.
+
+vivo's no-adaptation clause does not explicitly settle transport conversion and
+coverage subsetting. That interpretation remains an unresolved review boundary,
+not manufacturer authorization or permission inferred from another font project.
 
 ## Evidence
 
@@ -77,3 +95,4 @@ derive their size and line height from the same baseline.
 - [Cross-surface browser regression](../packages/components/tests/e2e/interface-typography.spec.ts),
   [terminal behavior](../packages/components/tests/local-terminal-panel.test.tsx).
 - [Decision and verification limits](../.agents/notes/implemented/simplification/2026-10-03-interface-typography.md).
+- [Font delivery and licensing](../packages/components/src/tailwind/interface-fonts/README.md).

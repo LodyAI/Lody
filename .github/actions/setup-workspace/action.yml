@@ -31,6 +31,11 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
 
+    - name: Setup font build toolchain
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: false
+
     - name: Resolve pnpm store
       id: key
       shell: bash

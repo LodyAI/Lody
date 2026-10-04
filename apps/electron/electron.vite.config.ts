@@ -18,6 +18,7 @@ import {
 } from '../../packages/components/vite-renderer-bundle-aliases'
 import { stylexOptions } from '../../packages/ui/stylex-options'
 import { emojibaseAssetsPlugin } from '../../packages/components/vite-emojibase-assets'
+import { interfaceFontsPlugin } from '../../packages/components/vite-interface-fonts'
 import { bootShellPlugin } from '../../packages/components/vite-boot-shell'
 
 function getGitCommitHash(): string {
@@ -182,6 +183,7 @@ export default defineConfig(({ mode }) => {
       },
       // Tailwind via Vite plugin so @fontsource url() assets are emitted by Vite.
       plugins: [
+        interfaceFontsPlugin(),
         tailwindcss(),
         stylex.vite(stylexOptions),
         loroCrdtWasmUrlWorkaround(),

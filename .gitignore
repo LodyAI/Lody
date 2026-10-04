@@ -124,6 +124,7 @@ logs/
 /e2e/artifacts/
 # Local acceptance captures and experiment bundles; do not commit generated evidence.
 /artifacts/
+/packages/components/src/tailwind/interface-fonts/generated/
 
 # OS
 .DS_Store

@@ -3,7 +3,11 @@ import type { ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { ShieldCheck, Compass, GitBranch, PenLine, ShieldOff, Eye, Monitor } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
-import { AcpSessionSelect, OptionSelector, type AcpSessionSelectOption } from '@/components/shared';
+import {
+  AcpSessionSelect,
+  type AcpSessionSelectOption,
+} from '@/components/shared/acp-session-select';
+import { OptionSelector } from '@/components/shared/option-selector';
 import { composerSurface } from '@/components/shared/composer-surface';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import type {

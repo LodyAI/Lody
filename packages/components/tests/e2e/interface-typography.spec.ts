@@ -3,6 +3,107 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 const tiers = ['Smaller', 'Small', 'Default', 'Large', 'Larger'];
 const story = '/iframe.html?id=settings-interfacetypography--unified&viewMode=story';
 
+async function renderedFonts(page: Page, selector: string) {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send('DOM.enable');
+    await cdp.send('CSS.enable');
+    const { root } = await cdp.send('DOM.getDocument');
+    const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+    expect(nodeId).toBeGreaterThan(0);
+    const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId });
+    return fonts;
+  } finally {
+    await cdp.detach();
+  }
+}
+
+test('bundled Latin and CJK glyphs render offline, including a portal, without replacing mono', async ({
+  page,
+}) => {
+  await page.route('https://**/*', (route) => route.abort());
+  await page.goto(story);
+  await expect(page.getByTestId('typography-message').locator('p').first()).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  const prose = await renderedFonts(page, '[data-testid="typography-message"] p');
+  expect(
+    prose.some((font) => font.isCustomFont && /Geist/.test(font.familyName) && font.glyphCount > 0)
+  ).toBe(true);
+  expect(
+    prose.some((font) => font.isCustomFont && /vivo/.test(font.familyName) && font.glyphCount > 0)
+  ).toBe(true);
+  const code = await renderedFonts(page, '[data-testid="typography-message"] pre code');
+  expect(code.every((font) => !/Geist|vivo/.test(font.familyName))).toBe(true);
+  await page.getByRole('button', { name: 'Popover 弹层' }).click();
+  await expect(page.getByRole('heading', { name: '标题 Mixed English' })).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  const popup = await renderedFonts(page, '[role="dialog"] h2');
+  expect(popup.some((font) => font.isCustomFont && /Geist/.test(font.familyName))).toBe(true);
+  expect(popup.some((font) => font.isCustomFont && /vivo/.test(font.familyName))).toBe(true);
+});
+
+test('font-load failure leaves mixed text, draft and keyboard controls readable', async ({
+  page,
+}) => {
+  await page.route(/(?:Geist|vivo-).*\.woff2/, (route) => route.abort());
+  await page.route('https://**/*', (route) => route.abort());
+  await page.goto(story);
+  const prose = page.getByTestId('typography-message').locator('p').first();
+  await expect(prose).toContainText('正文 Mixed English 与中文');
+  await page.evaluate(() => document.fonts.ready);
+  const fonts = await renderedFonts(page, '[data-testid="typography-message"] p');
+  expect(fonts.length).toBeGreaterThan(0);
+  expect(fonts.every((font) => !font.isCustomFont)).toBe(true);
+  const draft = page.getByTestId('typography-composer').locator('textarea');
+  await expect(draft).toHaveValue(/Mixed English 中文/);
+  await draft.focus();
+  await expect(draft).toBeFocused();
+  await page.getByRole('button', { name: 'Popover 弹层' }).click();
+  await expect(page.getByRole('heading', { name: '标题 Mixed English' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Popover 弹层' })).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('swap keeps CJK readable before delayed subsets arrive without changing text roles', async ({
+  page,
+}) => {
+  let release!: () => void;
+  const arrival = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(/vivo-.*\.woff2/, async (route) => {
+    await arrival;
+    await route.continue();
+  });
+  await page.goto(story, { waitUntil: 'domcontentloaded' });
+  const prose = page.getByTestId('typography-message').locator('p').first();
+  try {
+    await expect(prose).toBeVisible();
+    await expect(prose).toContainText('中文');
+    const before = await prose.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return [style.fontSize, style.lineHeight, style.fontWeight, style.letterSpacing];
+    });
+    const fontsBefore = await renderedFonts(page, '[data-testid="typography-message"] p');
+    expect(fontsBefore.some((font) => !font.isCustomFont && font.glyphCount > 0)).toBe(true);
+    release();
+    await page.evaluate(() => document.fonts.ready);
+    expect(
+      (await renderedFonts(page, '[data-testid="typography-message"] p')).some(
+        (font) => font.isCustomFont && /vivo/.test(font.familyName)
+      )
+    ).toBe(true);
+    expect(
+      await prose.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return [style.fontSize, style.lineHeight, style.fontWeight, style.letterSpacing];
+      })
+    ).toEqual(before);
+  } finally {
+    release();
+  }
+});
 const rhythmStory =
   '/iframe.html?id=sessions-assistantturnalignment--conversation-rhythm&viewMode=story';
 
@@ -219,7 +320,6 @@ for (const mode of ['reading', 'reading-streaming']) {
     );
   });
 }
-
 async function metrics(element: Locator, font: number, leading?: number) {
   await expect(element).toBeVisible();
   await expect

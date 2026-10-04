@@ -18,6 +18,7 @@ export type OpenSourceAttributionEntry = {
   versions?: string[];
   assets?: string[];
   noticePath?: string;
+  licenseText?: string;
 };
 
 export type OpenSourceAttributionBundle = {
