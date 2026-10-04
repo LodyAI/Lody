@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1241](https://github.com/LodyAI/Lody/pull/1241)
 
 [English](2026-10-04-shared-desktop-session-owner.md)
 

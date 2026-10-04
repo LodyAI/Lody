@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: [#1241](https://github.com/LodyAI/Lody/pull/1241)
 
 [中文](2026-10-04-desktop-window-lifecycle-diagnostics.zh.md)
 
