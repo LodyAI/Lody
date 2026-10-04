@@ -10,11 +10,18 @@ import {
   findAdjacentMentionForHorizontalNavigation,
   findMentionBeforeCursorForDeletion,
   getMentionValuesFromMentions,
+  type DismissedTrigger,
   getTextDiff,
+  remapDismissedTrigger,
   removeMentionText,
 } from './mention-input-core';
 import { MentionHighlighter } from './mention-highlighter';
-import { findTriggerCandidates, isMentionNavigationPrefix } from './mention-trigger';
+import {
+  findTriggerCandidates,
+  isMentionNavigationPrefix,
+  isTriggerGluedToWord,
+  looksLikeEmailAddress,
+} from './mention-trigger';
 import { type Mention, useMentionContext } from './mention-root';
 
 const INPUT_NAME = 'MentionInput';
@@ -119,6 +126,7 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
 
   const pendingSelectionRef = React.useRef<PendingSelection | null>(null);
   const virtualAnchorSnapshotRef = React.useRef<VirtualAnchorSnapshot | null>(null);
+  const dismissedTriggerRef = React.useRef<DismissedTrigger | null>(null);
   // Simplified IME handling: only track if we're in composition, ignore all updates
   // during composition, and sync the final value after composition ends.
   const isComposingRef = React.useRef(false);
@@ -335,6 +343,10 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
       if (currentPosition === null) return false;
 
       const value = element.value;
+      const dismissed = dismissedTriggerRef.current
+        ? remapDismissedTrigger(dismissedTriggerRef.current, value)
+        : null;
+      dismissedTriggerRef.current = dismissed;
       const candidates = findTriggerCandidates(value, context.triggers, currentPosition);
 
       for (const { trigger, index: lastTriggerIndex } of candidates) {
@@ -349,13 +361,21 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           continue;
         }
 
+        // Escape on this trigger chose plain text: typing on after it must not
+        // reopen the menu until the trigger itself is edited away.
+        if (dismissed?.trigger === trigger && dismissed.index === lastTriggerIndex) {
+          continue;
+        }
+
         function isTriggerPartOfText() {
-          if (trigger === '#') return false;
-          const textBeforeTrigger = value.slice(0, lastTriggerIndex);
-          const hasTextBeforeTrigger = /\S/.test(textBeforeTrigger);
-          if (!hasTextBeforeTrigger) return false;
-          const lastCharBeforeTrigger = textBeforeTrigger.slice(-1);
-          return lastCharBeforeTrigger !== ' ' && lastCharBeforeTrigger !== '\n';
+          // `#` and `@` open anywhere, even mid-word: a mention typed
+          // mid-sentence in scripts without spaces (`我想@张三`) must not
+          // depend on what precedes the trigger. Committing still requires
+          // choosing a menu item, so an email address keeps typing as text.
+          // The remaining triggers (`$`, `/`, `、`) keep the word guard so
+          // identifiers and code (`price$100`, `${x}`) stay plain text.
+          if (trigger === '#' || trigger === '@') return false;
+          return isTriggerGluedToWord(value, lastTriggerIndex);
         }
 
         if (isTriggerPartOfText()) {
@@ -363,6 +383,11 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
         }
 
         const textAfterTrigger = value.slice(lastTriggerIndex + trigger.length, currentPosition);
+        // `user@example.com`: a finished email address is not a mention, so
+        // the menu gives up rather than matching its domain against items.
+        if (trigger === '@' && looksLikeEmailAddress(value, lastTriggerIndex, textAfterTrigger)) {
+          continue;
+        }
         const isValidMention = !/\s/.test(textAfterTrigger);
         const isCursorAfterTrigger = currentPosition > lastTriggerIndex;
         const isImmediatelyAfterTrigger = currentPosition === lastTriggerIndex + trigger.length;
@@ -808,6 +833,14 @@ const MentionInput = React.forwardRef<InputElement, MentionInputProps>((props, f
           break;
         }
         case 'Escape': {
+          const span = getTriggerSpan();
+          if (span) {
+            dismissedTriggerRef.current = {
+              trigger: context.trigger,
+              index: span.triggerIndex,
+              value: input.value,
+            };
+          }
           onMenuClose();
           event.stopPropagation();
           break;

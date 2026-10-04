@@ -198,6 +198,31 @@ export function areStringArraysEqual(current: string[] | undefined, next: string
   return true;
 }
 
+/** A trigger the user closed the menu on with Escape, and the text it was in. */
+export type DismissedTrigger = {
+  trigger: string;
+  index: number;
+  value: string;
+};
+
+/**
+ * Carry an Escape-dismissed trigger through the edits made since it was
+ * dismissed, by the same rule `applyTextEditToMentions` gives a mention range:
+ * an edit that touches the trigger revives it (null), and an edit wholly before
+ * it shifts it. Clearing or replacing the whole input therefore revives it too.
+ */
+export function remapDismissedTrigger(
+  dismissed: DismissedTrigger,
+  value: string
+): DismissedTrigger | null {
+  const diff = getTextDiff(dismissed.value, value);
+  if (!diff) return dismissed;
+  const end = dismissed.index + dismissed.trigger.length;
+  if (dismissed.index < diff.prevEnd && end > diff.start) return null;
+  const index = dismissed.index >= diff.prevEnd ? dismissed.index + diff.delta : dismissed.index;
+  return { ...dismissed, index, value };
+}
+
 export function applyTextEditToMentions(
   mentions: Mention[],
   start: number,
