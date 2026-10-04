@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1252](https://github.com/LodyAI/Lody/pull/1252)
 
 [中文](2026-10-04-conversation-progress-spacing.zh.md)
 
