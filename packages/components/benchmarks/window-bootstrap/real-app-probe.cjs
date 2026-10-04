@@ -17,6 +17,7 @@ const rounds = Number(process.env.PROBE_ROUNDS ?? 1500);
 const answer = 'Answer for round ' + (rounds - 1) + '.';
 const preparedMode = process.env.PROBE_PREPARED === '1';
 const productPreparedMode = process.env.PROBE_PRODUCT_PREPARED === '1';
+const directClickMode = process.env.PROBE_DIRECT_CLICK === '1';
 const checkInput = process.env.PROBE_INPUT === '1';
 const retargetMode = process.env.PROBE_RETARGET === '1';
 const returnAfterMs = Number(process.env.PROBE_RETURN_MS ?? 0);
@@ -68,7 +69,25 @@ ipcMain.handle = (channel, handler) =>
         sourceVisible: BrowserWindow.fromWebContents(event.sender)?.isVisible(),
         args,
       });
-    return handler(event, ...args);
+    const started = performance.now();
+    const result = handler(event, ...args);
+    if (directClickMode && channel === 'sessionOwner.request') {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      void Promise.resolve(result).then(
+        () => {
+          if (win?.__claim)
+            log({
+              kind: 'owner-request',
+              id: win.id,
+              method: args[0]?.method,
+              afterClaimMs: started - win.__claim,
+              durationMs: performance.now() - started,
+            });
+        },
+        () => {}
+      );
+    }
+    return result;
   });
 let running = null;
 app.on('browser-window-created', (_createdEvent, win) => {
@@ -178,6 +197,11 @@ app.on('browser-window-created', (_createdEvent, win) => {
         screenshot,
         input,
         preparationMs: win.__prepareMs ?? null,
+        openingTrace: directClickMode
+          ? await wc.executeJavaScript(
+              '({ stages: window.__openingStages, scroll: window.__lodyScrollEngineLog?.dump() })'
+            )
+          : undefined,
       };
       log(row);
       running?.resolve(row);
@@ -291,7 +315,30 @@ void app.whenReady().then(async () => {
         await spare.webContents.debugger.sendCommand('Profiler.enable');
         await spare.webContents.debugger.sendCommand('Profiler.start');
       }
-      if (productPreparedMode) {
+      if (directClickMode) {
+        source.focus();
+        if (spare.__preparing) throw new Error('Direct click must not prepare a target');
+        await spare.webContents.executeJavaScript(`(() => {
+          window.__openingStages = [];
+          const record = (stage) => window.__openingStages.push({ stage, at: performance.now() });
+          record('armed');
+          const pending = new Map([
+            ['session', '[data-window-session-ready]'],
+            ['stream', '[data-message-selection-scroll]'],
+            ['ready', '[data-window-session-stream-ready]'],
+            ['composer', 'textarea[data-lody-composer-input]'],
+          ]);
+          const observer = new MutationObserver(() => {
+            for (const [stage, selector] of pending) {
+              if (document.querySelector(selector)) { record(stage); pending.delete(stage); }
+            }
+            if (!pending.size) observer.disconnect();
+          });
+          observer.observe(document, { subtree: true, childList: true, attributes: true,
+            attributeFilter: ['data-window-session-ready', 'data-window-session-stream-ready'] });
+          window.ipc.on('app.windowTarget', () => record('target'));
+        })()`);
+      } else if (productPreparedMode) {
         source.focus();
         if (retargetMode) {
           await source.webContents.executeJavaScript(
@@ -380,11 +427,11 @@ void app.whenReady().then(async () => {
           spare.__preparing?.sessionId === 'session-conversation-view-fixture')
       );
       const started = performance.now();
-      if (productPreparedMode) spare.__claim = started;
+      if (productPreparedMode || directClickMode) spare.__claim = started;
       await source.webContents.executeJavaScript(
         preparedMode
           ? `window.ipc.invoke('app.benchmarkPresent')`
-          : productPreparedMode
+          : productPreparedMode || directClickMode
             ? `document.querySelector('[data-sidebar-session-id="session-conversation-view-fixture"]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true }))`
             : `window.ipc.invoke('app.openWindow',{workspace:'local',sessionId:'session-conversation-view-fixture'})`
       );
@@ -492,12 +539,14 @@ void app.whenReady().then(async () => {
           retainedWindows: retained.length,
           preparedMode,
           productPreparedMode,
+          directClickMode,
           nativeAnimationDisabled: !!nativeHost,
-          timingBoundary: productPreparedMode
-            ? 'source row Command-click dispatch'
-            : preparedMode
-              ? 'prepared host presentation IPC'
-              : 'target navigation IPC',
+          timingBoundary:
+            productPreparedMode || directClickMode
+              ? 'source row Command-click dispatch'
+              : preparedMode
+                ? 'prepared host presentation IPC'
+                : 'target navigation IPC',
           intentLeadMs,
           hitRate: productPreparedMode
             ? results.filter((r) => !r.warmup && r.readyAtClick).length / repeats

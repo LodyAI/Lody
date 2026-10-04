@@ -13,9 +13,11 @@ construct another history projection before it could display the conversation.
 One main-owned data renderer now retains Session documents and the UI writer;
 product windows consume indexed, windowed projections through IPC. This removes
 repeated document import while retaining writer validation and acknowledging writes
-only after document persistence. On a synthetic 3,000-entry conversation, the final
-ten-sample repeat reduced immediate-click show/input medians by about 24%. A dedicated
-renderer adds memory and first-open work; these costs remain explicit in the evaluation.
+only after document persistence. Bounding outline/message rendering and handing
+entry data to the route then reduced a strict no-hover, 3,000-entry comparison from
+367/422 ms to 227/287 ms show/input medians (ten samples per build). This remains
+above a sub-100 ms target. The dedicated renderer and prepared view have explicit
+memory and first-open costs in the evaluation.
 
 ## Decision and boundaries
 
@@ -26,9 +28,12 @@ and its ConversationView. The CLI remains the agent author; UI commands never be
 CLI write-intent commands. Cloud/web composition remains direct.
 
 The owner reuses SessionData/HistoryWriter for history and WorkspaceWriter for queue
-changes. The first response includes a cached shallow directory and at most 30 tail
-turns; subsequent body reads are batched. Each viewer still constructs an O(total)
-directory. Full export/fork reads remain explicit. The connection retains actual
+changes. The first response includes a cached shallow directory and the initial
+40-turn viewport, extended backward to the preceding user within a 50-turn bound.
+The client finishes this bounded tail before exposing its store; subsequent body
+reads are batched. Eager hydration can resolve readiness without an extra idle
+callback. The owner reads its authoritative directory directly rather than waiting
+for its own UI projection. Each viewer still constructs an O(total) directory. Full export/fork reads remain explicit. The connection retains actual
 writer-captured snapshot handles behind opaque IPC references; this lookup grants
 no independent copy provenance. Collection or connection close releases them.
 Rollback handles also hold their source store until release.
@@ -53,6 +58,40 @@ IndexedDB and Electron's renderer transport. Reusing it keeps one synchronizatio
 and writer implementation, at the cost of another Chromium renderer. Moving only
 the owner into a DOM-free worker requires extracting those runtime dependencies;
 this change does not claim that memory optimization.
+
+## Direct-click rendering
+
+Sharing the document did not remove target rendering after a click. Profiling the
+same 3,000-entry fixture found that the outline still mounted 1,500 ticks and the
+message view built React elements for the entire history before the scroll engine
+selected its mounted rows. The outline now mounts a viewport slice with overscan,
+preserving its full scroll extent and focus/hover anchors. The message view supplies
+a row factory to the engine, which constructs only the mounted plan, including
+selection-retained rows. These changes preserve initial-scroll and visible-stream
+readiness rather than revealing incomplete content sooner.
+
+An auxiliary conversation window defers its initially hidden sidebar until first
+expansion, then retains the mounted view on collapse. The primary window retains
+its existing behavior. Explicit target navigation begins a same-workspace store
+acquisition before route mounting, giving cached data up to 50 ms to arrive; slow
+or failed acquisition enters the ordinary loading/error route. A generation fences
+superseded targets, and the temporary store reference is released even after a
+timeout or retarget. This begins at a concrete target request, without hover lead.
+
+A separate native-animation experiment changed the exploratory show median only
+from 235.61 to 227.47 ms (three samples each). It does not justify shipping a native
+addon. The current product retains Electron presentation and its two-frame content
+gate. An earlier eager 90-turn prefill delayed mounting without a useful gain;
+the shipped response follows the actual entry viewport plus bounded user context.
+The directory, React provider/composer mount and native show still have costs. A
+sub-100 ms direct-open target remains unachieved; pre-rendered hits are not evidence
+for that target. The [direct-click evaluation](../../../../packages/components/benchmarks/window-bootstrap/README.md#direct-click-without-hover--2026-10-04)
+records matched builds, all samples and the remaining limits. All 48 latency
+content/input checks pass, including 15 excluded warmups. The final eight-stage
+resident probe adds 210–226 MiB for one prepared view and returns to 4.61 MiB above
+source-only footprint after closing five auxiliaries; no auxiliary renderer remains.
+This single run retains the existing 250–300 MiB planning budget, without claiming
+a matched memory improvement or coverage of distinct-session cache retention.
 
 ## Evaluation
 
@@ -109,9 +148,11 @@ owner replacement, uncertain tail-edit outcomes, later observers and connection/
 longer escape as unhandled rejections. Real desktop probes validate content and unique
 text insertion at first show; process-recovery evaluation checks an acknowledged write.
 
-The final targeted suites passed 64 tests, including 11 owner/client cases; Electron
-passed 199 tests. Type checks, production build, lint, i18n and platform/public/import
-boundaries passed. The broader `pnpm check` reached 4,773 passing components tests
+The current six focused suites passed 75 tests, including 12 owner/client cases;
+Electron passed 199 tests. New cases cover lazy row construction, outline keyboard
+navigation/preview retention, sidebar state, entry-tail readiness and target handoff
+timeouts/generation fencing. Type checks, production build, lint, i18n and platform/public/import
+boundaries passed. The broader `pnpm check` reached 4,783 passing components tests
 with one failure in unchanged `boot-shell.test.tsx` (storage-unavailable fallback);
 that case also fails alone in the Node 26 environment. CLI's 3,454 and shared's 1,271
 tests passed. Documentation validation has six existing broken links into absent

@@ -7,6 +7,7 @@ import {
 } from '@/components/ai-gui/build-chat-stream-items';
 import type { VisibleTurnRange } from '@/components/ai-gui/view';
 import type { ConversationView } from '@/lib/conversation-view';
+import { INITIAL_CONVERSATION_WINDOW_TURNS as INITIAL_WINDOW_TURNS } from '@/lib/conversation-view/types';
 import { LRUCache } from '@/lib/lru-cache';
 import { scrollDebug } from './scroll-debug-log';
 import { useConversationVersion, useTurnRange } from './use-conversation-view';
@@ -14,8 +15,6 @@ import { useConversationVersion, useTurnRange } from './use-conversation-view';
 /** Per-turn render items survive a tab switch; 20 sessions is the working set. */
 const chatStreamItemsCacheBySessionId = new LRUCache<SessionId, BuildChatStreamItemsCache>(20);
 
-/** Tail turns retained by the renderer, including before the first viewport report. */
-const INITIAL_WINDOW_TURNS = 40;
 /** A viewport shorter than this many turns still prefetches as if it held this many. */
 const MIN_SCREEN_TURNS = 8;
 /** Screens of turns hydrated on each side of the viewport. */

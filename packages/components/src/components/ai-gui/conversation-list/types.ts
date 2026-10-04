@@ -48,9 +48,9 @@ export interface ConversationScrollerState {
 
 export interface ConversationScrollerProps {
   sessionId: SessionId;
-  /** Keyed row elements in list order: leading row, conversation rows, activity row. */
-  rows: readonly ReactElement[];
-  /** What the engine knows about each row, aligned with `rows`. */
+  /** Materialize only rows selected by the engine; metadata defines their identities. */
+  renderRow: (index: number) => ReactElement | null | undefined;
+  /** What the engine knows about each row, in display order. */
   rowMeta: readonly EngineRow[];
   item: ConversationRowComponent;
   /** List indexes native selection needs mounted; must commit synchronously. */

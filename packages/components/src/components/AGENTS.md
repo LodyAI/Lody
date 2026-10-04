@@ -1,21 +1,22 @@
 # Product surfaces (`src/components`)
 
-Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink; edit `AGENTS.md` only.
-Child directories (`sessions/`, `mobile/`, …) own their own rules.
+Edit `AGENTS.md`, not its `CLAUDE.md` symlink.
+Child directories own scoped rules.
 
 ## Sidebar and session rows
 
-- Sidebar rows represent Sessions, never Tasks.
+- Sidebar rows are Sessions, never Tasks.
 - Desktop Workspace, Local Project, Updated and Pinned rows support mention drag
   and Mark as unread (hide on unread). Use `lib/session-mention-drag.ts` for
   conversation/landing drops; parent tabs use HTML5 drag, child tabs dnd-kit.
   `startSessionMentionDrag` / `armSessionMentionDrag` must light
   `ConversationDropOverlay` before `dragenter`. Navigation overlays use
   `draggable={false}`; rows own `draggable`.
-- Full-width sidebar stays mounted/inert with scroll; Cmd+B animates content width
-  (zero for reduced motion); pause hidden eager-sync/keyboard-nav. Compact/settings
-  remounts restore scroll. Compact nav is modal: inert content, restore focus,
-  nested Escape first. [Spec](../../../../specs/desktop-windows.md).
+- Full-width sidebars preserve mounted/inert state/scroll on collapse; auxiliary conversation
+  sidebars mount on first expansion. Cmd+B animates content width unless reduced motion.
+  Pause hidden eager-sync/keyboard-nav. Compact/settings remounts restore scroll;
+  compact nav is modal: inert content, restore focus, nested Escape first.
+  [Spec](../../../../specs/desktop-windows.md).
 - Every list uses `lib/session-opened-by-tree.ts`: `session-list.tsx` groups, local-project
   sections, Updated/Pinned in `sidebar-updated-session-list.tsx`, and
   `sidebar-navigation-model.ts` for matching keyboard navigation.

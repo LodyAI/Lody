@@ -125,6 +125,8 @@ try {
   const metadata = {
     cpu: cpus()[0]?.model,
     preparedMode,
+    directClickMode: process.env.PROBE_DIRECT_CLICK === '1',
+    cpuProfiling: process.env.PROBE_CPU_PROFILE === '1',
     nativeMode,
     sharedSessionOwner: process.env.LODY_SHARED_SESSION_OWNER !== '0',
     electron: require('electron/package.json').version,
@@ -156,6 +158,24 @@ try {
     .update(await readFile(join(appPath, 'src/main/prepared-window.ts')))
     .update(await readFile(join(appPath, 'src/main/window-warm-service.ts')))
     .digest('hex');
+  const openingHash = createHash('sha256');
+  for (const path of [
+    'src/components/ai-gui/view.tsx',
+    'src/components/ai-gui/conversation-outline-rail.tsx',
+    'src/components/ai-gui/conversation-list/engine-conversation-scroller.tsx',
+    'src/components/web-workspace-layout.tsx',
+    'src/lib/conversation-view/create-conversation-view-from-reader.ts',
+    '../../apps/electron/src/renderer/src/main.tsx',
+    '../../apps/electron/src/renderer/src/window-target-navigation.ts',
+  ]) {
+    openingHash.update(path).update(
+      await readFile(join(root, path)).catch((error) => {
+        if (error.code === 'ENOENT') return '<absent>';
+        throw error;
+      })
+    );
+  }
+  metadata.openingSourceSha256 = openingHash.digest('hex');
   metadata.memorySamplerSha256 = createHash('sha256')
     .update(await readFile(fileURLToPath(new URL('./macos-physical-footprint.c', import.meta.url))))
     .digest('hex');

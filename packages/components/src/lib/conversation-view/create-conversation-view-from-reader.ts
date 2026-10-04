@@ -758,10 +758,11 @@ export function createConversationViewFromReader(
       // Queue the background pass before the eager tail hydration, so a
       // scheduled-idle consumer can drain everything from one queue.
       scheduleIdlePass();
-      await ensureTailHydrated(hydrateItemBudget, false);
+      const deferred = await ensureTailHydrated(hydrateItemBudget, false);
       if (disposed) return;
       const queued = pendingChanges.splice(0);
       for (const change of queued) onDataChange(change);
+      if (!deferred) resolveReady();
     } catch {
       // The port's initial directory is synchronous snapshots today; keep the
       // contract resolvable rather than hanging consumers on a failed read.

@@ -1,0 +1,5631 @@
+{
+  "date": "2026-10-04",
+  "baselineCommit": "fc6e52e9e4d9f7d5d18a98b8c25c15da9d4e380c",
+  "productSourceDelta": [
+    "apps/electron/src/renderer/src/main.tsx",
+    "packages/components/src/components/ai-gui/conversation-list/engine-conversation-scroller.tsx",
+    "packages/components/src/components/ai-gui/conversation-list/types.ts",
+    "packages/components/src/components/ai-gui/conversation-outline-rail.tsx",
+    "packages/components/src/components/ai-gui/view.tsx",
+    "packages/components/src/components/web-workspace-layout.tsx",
+    "packages/components/src/hooks/use-conversation-stream-items.ts",
+    "packages/components/src/hooks/use-conversation-view.ts",
+    "packages/components/src/lib/conversation-view/create-conversation-view-from-reader.ts",
+    "packages/components/src/lib/conversation-view/types.ts",
+    "packages/components/src/providers/shared-session-client.ts",
+    "packages/components/src/providers/shared-session-owner.ts",
+    "apps/electron/src/renderer/src/window-target-navigation.ts"
+  ],
+  "protocol": {
+    "directClick": "No hover or preparation intent; Command-click dispatched to the actual source Session row. A target already preparing is rejected.",
+    "source": "Synthetic Session already open in source; optional neutral warm spare initialized for at least 1500 ms.",
+    "comparison": "Long: after then before, 10 samples each. Short: before then after, 5 each. Each run discards three warmups. Same CLI, dependencies and probe; no CPU profiling, native override, concurrent build or test.",
+    "input": "Unique webContents.insertText token retained after a frame; includes focus and verification IPC, excludes physical keyboard, IME and display scanout.",
+    "retarget": "Separate regression: neighbor deliberately prepared, then target requested with zero lead; not a strict neutral direct-click sample.",
+    "limits": "Small sequential synthetic samples, not population P95. Cold app, arbitrary uncached target, first hover hit rate and distinct-session long-run memory remain unmeasured."
+  },
+  "runs": [
+    {
+      "name": "direct-final-long",
+      "artifacts": "/tmp/lody-app-bench-2rJYHs",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "directClickMode": true,
+        "cpuProfiling": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "f2d2687e23c055d9539ad302844a429e41d09a0e6751f26ad606ec6bb110a5af",
+        "rendererIndexSha256": "5a813470aec4f8643d0b3d2cec1123c58e75cfd9f65eada145235f69de9a6e15",
+        "probeSha256": "6b1340fc0ac8d9c3025e3d596b6a48523cba00010515db7b429e4e9a0c6e9381",
+        "residentProbeSha256": "ef00d1b878620192762c1d6f13b6f9e03da0efacdaf56ab97d763933cf9a992f",
+        "preparationSha256": "cdd770655e877ec30f6229a6f543a5a7a796e72b3299b1234f56c7034d399779",
+        "openingSourceSha256": "cf977cbf89ca41342efadd9a9f71ff958aaab5c0ee3234c2ac9a753a46078a3a",
+        "memorySamplerSha256": "db8f6474d603e79f942de041eb23ad744e90fded32741f3e232e13e0a9817f90"
+      },
+      "entries": 3000,
+      "sourceConversationMs": 1442.5352500000001,
+      "unloadConfirmations": 0,
+      "directClickMode": true,
+      "timingBoundary": "source row Command-click dispatch",
+      "spareMinimumAgeMs": 1500,
+      "retargetMode": false,
+      "hitRate": null,
+      "samples": [
+        {
+          "id": 3,
+          "warmup": true,
+          "claimToShowMs": 250.53650000000016,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 320.08250000000044
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 166.29999999701977,
+            "stream": 166.29999999701977,
+            "ready": 166.29999999701977,
+            "composer": 166.3999999910593
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 3.1339160000006814,
+              "durationMs": 11.511208999999326
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 134.147833,
+              "durationMs": 0.2710000000006403
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 169.5015830000002,
+              "durationMs": 2.1499579999999696
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 200.9482910000006
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 201.17883299999994
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 235.58462500000041,
+              "durationMs": 2.076082999999926
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 250.53650000000016
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 290.60291600000073,
+              "durationMs": 2.1065419999995356
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 344.20466600000054,
+              "durationMs": 76.23774999999932
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "warmup": true,
+          "claimToShowMs": 236.2254579999999,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 307.02316599999995
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 163.3999999910593,
+            "stream": 163.3999999910593,
+            "ready": 163.3999999910593,
+            "composer": 163.3999999910593
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.409458000000086,
+              "durationMs": 11.262917000000016
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 129.14566600000035,
+              "durationMs": 0.2571250000000873
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 165.109958,
+              "durationMs": 2.2876249999999345
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 195.230458
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 195.4150410000002
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 236.2254579999999
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 236.8934159999999,
+              "durationMs": 25.94733400000041
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 306.91441600000053,
+              "durationMs": 22.1348339999995
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 386.72066600000016,
+              "durationMs": 1.9723340000000462
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "warmup": true,
+          "claimToShowMs": 235.75087499999972,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 295.8106250000001
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 155.3999999910593,
+            "stream": 155.3999999910593,
+            "ready": 155.3999999910593,
+            "composer": 155.3999999910593
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.4327080000002752,
+              "durationMs": 10.734667000000627
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 121.5044170000001,
+              "durationMs": 0.26924999999937427
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 156.83408299999974,
+              "durationMs": 2.083167000000685
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 186.31574999999975
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 186.44429200000013
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 235.75087499999972
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 267.3317499999994,
+              "durationMs": 2.1503330000014103
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 318.55412500000057,
+              "durationMs": 68.07541700000002
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "warmup": false,
+          "claimToShowMs": 247.65733399999954,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 289.27458399999887
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 161.40000000596046,
+            "stream": 161.40000000596046,
+            "ready": 161.40000000596046,
+            "composer": 161.40000000596046
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.6578339999996388,
+              "durationMs": 11.088874999999462
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 126.77174999999988,
+              "durationMs": 0.3640419999992446
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 163.203125,
+              "durationMs": 2.1217089999991003
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 192.55649999999878
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 192.83499999999913
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 232.24262499999895,
+              "durationMs": 3.068209000000934
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 247.65733399999954
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 286.61616700000013,
+              "durationMs": 2.373749999998836
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 396.7283749999988,
+              "durationMs": 2.6960420000013983
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "warmup": false,
+          "claimToShowMs": 234.84670799999913,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 319.7832079999989
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 157.3999999910593,
+            "stream": 157.3999999910593,
+            "ready": 157.3999999910593,
+            "composer": 157.3999999910593
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.5729999999985012,
+              "durationMs": 10.425917000000481
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 123.20787500000006,
+              "durationMs": 0.27149999999892316
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 159.04804199999853,
+              "durationMs": 2.2013330000008864
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 188.3415419999983
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 188.4982919999984
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 234.84670799999913
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 251.6727919999994,
+              "durationMs": 29.30358299999898
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 340.4619169999987,
+              "durationMs": 45.902916000000914
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "warmup": false,
+          "claimToShowMs": 221.8589580000007,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 266.4077500000003
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 155.0,
+            "stream": 155.0,
+            "ready": 155.0,
+            "composer": 155.0
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.8772919999992155,
+              "durationMs": 9.98595800000112
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 123.39495800000077,
+              "durationMs": 0.2586669999982405
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 156.79958299999998,
+              "durationMs": 2.028458999999202
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 185.93566699999974
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 186.1430419999997
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 221.8589580000007
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 222.5242500000004,
+              "durationMs": 18.21562499999891
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 288.8454579999998,
+              "durationMs": 2.0165840000008757
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "warmup": false,
+          "claimToShowMs": 222.41300000000047,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 297.8454579999998
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 156.19999998807907,
+            "stream": 156.19999998807907,
+            "ready": 156.19999998807907,
+            "composer": 156.19999998807907
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.6760420000009617,
+              "durationMs": 10.205457999998544
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 123.66491700000006,
+              "durationMs": 0.23087499999928696
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 157.8227079999997,
+              "durationMs": 2.041417000000365
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 188.18725000000086
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 188.42412499999955
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 222.41300000000047
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 269.2011249999996,
+              "durationMs": 2.4557500000009895
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 320.0095000000001,
+              "durationMs": 53.25287500000013
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "warmup": false,
+          "claimToShowMs": 220.88999999999942,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 287.83641700000226
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 156.0,
+            "stream": 156.0,
+            "ready": 156.0,
+            "composer": 156.0
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.538542000002053,
+              "durationMs": 10.389291999999841
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 122.36654199999975,
+              "durationMs": 0.2446250000029977
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 157.71683400000256,
+              "durationMs": 2.0940409999966505
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 186.6178749999999
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 186.8058340000025
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 220.88999999999942
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 237.89633400000093,
+              "durationMs": 22.129499999999098
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 309.29004200000054,
+              "durationMs": 75.42299999999886
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "warmup": false,
+          "claimToShowMs": 228.93958300000304,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-11",
+            "claimToInputObservedMs": 285.3507500000014
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 158.20000000298023,
+            "stream": 158.20000000298023,
+            "ready": 158.20000000298023,
+            "composer": 158.20000000298023
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 2.0495000000009895,
+              "durationMs": 11.04095800000141
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 126.57608299999993,
+              "durationMs": 0.3160420000021986
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 160.2693750000035,
+              "durationMs": 1.9428329999973357
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 190.63587499999994
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 190.84212500000285
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 228.93958300000304
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 249.2339580000007,
+              "durationMs": 11.026541999999608
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 306.84683300000324,
+              "durationMs": 74.41304200000013
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "warmup": false,
+          "claimToShowMs": 225.0971669999999,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-12",
+            "claimToInputObservedMs": 282.56979200000205
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 155.69999998807907,
+            "stream": 155.69999998807907,
+            "ready": 155.79999999701977,
+            "composer": 155.79999999701977
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.7427090000019234,
+              "durationMs": 10.140583000000333
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 123.88716700000077,
+              "durationMs": 0.2507079999995767
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 157.49633399999948,
+              "durationMs": 2.1536660000019765
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 187.5455839999995
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 187.73474999999962
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 225.0971669999999
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 238.37816699999894,
+              "durationMs": 18.76716700000179
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 304.7111670000013,
+              "durationMs": 3.2847919999985606
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "warmup": false,
+          "claimToShowMs": 221.25533300000097,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-13",
+            "claimToInputObservedMs": 279.39087500000096
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0,
+            "session": 152.59999999403954,
+            "stream": 152.59999999403954,
+            "ready": 152.59999999403954,
+            "composer": 152.59999999403954
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.9796249999999418,
+              "durationMs": 10.327916000002006
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 119.57283300000199,
+              "durationMs": 0.23666700000103447
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 154.44525000000067,
+              "durationMs": 1.8406250000007276
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 182.61537500000122
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 182.81654100000014
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 221.25533300000097
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 222.08820800000103,
+              "durationMs": 29.400375000001077
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 301.55554100000154,
+              "durationMs": 55.41833399999814
+            }
+          ]
+        },
+        {
+          "id": 14,
+          "warmup": false,
+          "claimToShowMs": 232.42324999999983,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-14",
+            "claimToInputObservedMs": 281.02241700000013
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0,
+            "session": 156.59999999403954,
+            "stream": 156.59999999403954,
+            "ready": 156.59999999403954,
+            "composer": 156.59999999403954
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.6225000000013097,
+              "durationMs": 11.405582999999751
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 122.92329199999949,
+              "durationMs": 0.31999999999970896
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 158.27987500000017,
+              "durationMs": 1.9330420000005688
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 187.58279200000106
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 187.77995799999917
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 232.42324999999983
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 232.76508300000205,
+              "durationMs": 20.710041999998793
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 302.6986250000009,
+              "durationMs": 76.90662499999962
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "warmup": false,
+          "claimToShowMs": 237.3192080000008,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-15",
+            "claimToInputObservedMs": 296.15729199999987
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 158.0,
+            "stream": 158.0,
+            "ready": 158.0,
+            "composer": 158.0
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.5515830000003916,
+              "durationMs": 10.14270899999974
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 124.85812500000247,
+              "durationMs": 0.2692079999978887
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 159.61891700000342,
+              "durationMs": 2.1643329999969865
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 188.83795800000007
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 189.04529200000252
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 237.3192080000008
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 268.5471670000006,
+              "durationMs": 2.2397909999999683
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 318.21720800000185,
+              "durationMs": 66.57512499999939
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "measuredSamples": 10,
+        "showMs": {
+          "median": 227.01837500000147,
+          "min": 220.88999999999942,
+          "max": 247.65733399999954
+        },
+        "inputMs": {
+          "median": 286.59358350000184,
+          "min": 266.4077500000003,
+          "max": 319.7832079999989
+        }
+      }
+    },
+    {
+      "name": "direct-before-long",
+      "artifacts": "/tmp/lody-app-bench-1Ydj20",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "directClickMode": true,
+        "cpuProfiling": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "b9f1888d814a5ff49d28c6e2087b1d2fdc670581a1dc5bc20662b4e529fd5887",
+        "probeSha256": "6b1340fc0ac8d9c3025e3d596b6a48523cba00010515db7b429e4e9a0c6e9381",
+        "residentProbeSha256": "ef00d1b878620192762c1d6f13b6f9e03da0efacdaf56ab97d763933cf9a992f",
+        "preparationSha256": "cdd770655e877ec30f6229a6f543a5a7a796e72b3299b1234f56c7034d399779",
+        "openingSourceSha256": "0fcc1fe19fc83febb9c8bfa3c75467718e5929e65366abc7f4d9ddba01ad2c63",
+        "memorySamplerSha256": "db8f6474d603e79f942de041eb23ad744e90fded32741f3e232e13e0a9817f90"
+      },
+      "entries": 3000,
+      "sourceConversationMs": 1959.1217920000004,
+      "unloadConfirmations": 0,
+      "directClickMode": true,
+      "timingBoundary": "source row Command-click dispatch",
+      "spareMinimumAgeMs": 1500,
+      "retargetMode": false,
+      "hitRate": null,
+      "samples": [
+        {
+          "id": 3,
+          "warmup": true,
+          "claimToShowMs": 417.4875830000001,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 492.8689999999997
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 99.70000000298023,
+            "session": 257.40000000596046,
+            "stream": 257.6000000089407,
+            "ready": 308.29999999701977
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 123.73820799999976,
+              "durationMs": 11.791041999999834
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 155.28783300000032,
+              "durationMs": 0.3299170000000231
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 156.69595800000025,
+              "durationMs": 1.6757920000000013
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 260.1695829999999,
+              "durationMs": 1.9945830000006026
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 326.4162500000002
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 326.65670800000044
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 417.4875830000001
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 434.4728329999998,
+              "durationMs": 28.444124999999985
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 516.3801249999997,
+              "durationMs": 62.31404100000054
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "warmup": true,
+          "claimToShowMs": 368.0114160000012,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 426.49775000000045
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0,
+            "composer": 94.40000000596046,
+            "session": 253,
+            "stream": 253.20000000298023,
+            "ready": 303.1000000089407
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 115.2134160000005,
+              "durationMs": 11.47924999999941
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 147.47708299999977,
+              "durationMs": 0.37150000000110595
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 149.86725000000115,
+              "durationMs": 1.67241599999943
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 255.338541000001,
+              "durationMs": 2.065166999998837
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 321.28566599999976
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 321.51858300000094
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 353.5201250000009,
+              "durationMs": 2.284165999999459
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 368.0114160000012
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 402.5697080000009,
+              "durationMs": 2.23949999999968
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 448.49554100000023,
+              "durationMs": 19.99695900000006
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "warmup": true,
+          "claimToShowMs": 374.1189999999988,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 443.13537499999984
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 94.6000000089407,
+            "session": 255.29999999701977,
+            "stream": 255.40000000596046,
+            "ready": 306.5
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 118.0305419999986,
+              "durationMs": 10.974207999999635
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 149.9529169999987,
+              "durationMs": 0.41579100000126346
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 151.2529999999988,
+              "durationMs": 1.7114999999994325
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 257.61662499999875,
+              "durationMs": 2.0187500000010914
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 325.643333
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 325.82216699999844
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 374.1189999999988
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 393.958208,
+              "durationMs": 20.58245899999929
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 465.18362499999967,
+              "durationMs": 70.41870799999924
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "warmup": false,
+          "claimToShowMs": 381.80770799999846,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 453.74575000000004
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 94.69999998807907,
+            "session": 244.8999999910593,
+            "stream": 245.09999999403954,
+            "ready": 299.19999998807907
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 119.99983299999985,
+              "durationMs": 11.236166999999114
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 145.1724579999991,
+              "durationMs": 0.3260840000002645
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 146.54020799999853,
+              "durationMs": 1.629917000000205
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 247.88383299999987,
+              "durationMs": 1.776624999998603
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 329.31929200000013
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 329.50283299999865
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 370.71258299999863,
+              "durationMs": 2.27612500000032
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 381.80770799999846
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 426.8961249999993,
+              "durationMs": 2.9915000000000873
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 475.6700000000001,
+              "durationMs": 75.02720799999952
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "warmup": false,
+          "claimToShowMs": 350.40529199999946,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 420.9412080000002
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 92.0,
+            "session": 240.09999999403954,
+            "stream": 240.29999999701977,
+            "ready": 290.40000000596046
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 112.60170800000014,
+              "durationMs": 10.840624999998909
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 142.54916699999922,
+              "durationMs": 0.3005410000005213
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 144.2808329999989,
+              "durationMs": 1.8405839999995806
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 242.57087499999943,
+              "durationMs": 1.889999999999418
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 307.94104199999856
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 308.1573329999992
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 334.84970799999974,
+              "durationMs": 2.319666999999754
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 350.40529199999946
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 392.5828329999986,
+              "durationMs": 2.661042000001544
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 443.158707999999,
+              "durationMs": 57.30550000000039
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "warmup": false,
+          "claimToShowMs": 377.6154999999999,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 448.29270799999904
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 92.40000000596046,
+            "session": 252.80000001192093,
+            "stream": 253.0,
+            "ready": 304.80000001192093
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 112.17229099999895,
+              "durationMs": 10.97662499999933
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 141.87529099999847,
+              "durationMs": 0.4604170000002341
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 143.5375409999997,
+              "durationMs": 1.848374999999578
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 254.9037499999995,
+              "durationMs": 1.9138750000001892
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 323.8106250000001
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 323.98008299999856
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 370.7580829999988,
+              "durationMs": 2.3235830000012356
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 377.6154999999999
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 425.11412500000006,
+              "durationMs": 3.6560409999983676
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 470.58045799999854,
+              "durationMs": 5.871708000000581
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "warmup": false,
+          "claimToShowMs": 366.68758399999933,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 485.3970420000005
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0,
+            "composer": 92.5,
+            "session": 245.6000000089407,
+            "stream": 245.80000001192093,
+            "ready": 296.40000000596046
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 113.51499999999942,
+              "durationMs": 11.009459000000788
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 141.76545899999837,
+              "durationMs": 0.4069159999999101
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 143.3032499999972,
+              "durationMs": 1.7278750000004948
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 247.9639169999973,
+              "durationMs": 1.8040000000000873
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 315.00174999999945
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 315.2084589999977
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 366.68758399999933
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 427.58008399999744,
+              "durationMs": 7.724207999999635
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 463.51900000000023,
+              "durationMs": 2.2336669999967853
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 507.3624170000003,
+              "durationMs": 37.84779199999684
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "warmup": false,
+          "claimToShowMs": 374.45137500000055,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 460.04129199999807
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 97.09999999403954,
+            "session": 238.20000000298023,
+            "stream": 238.29999999701977,
+            "ready": 298.5
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 118.20454199999949,
+              "durationMs": 10.803374999999505
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 142.78341699999874,
+              "durationMs": 0.3103750000009313
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 144.12120899999718,
+              "durationMs": 1.5680000000029395
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 240.458416999998,
+              "durationMs": 1.7193330000009155
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 324.3354589999981
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 324.54491699999926
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 374.45137500000055
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 406.99412499999744,
+              "durationMs": 33.51716700000179
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 482.3567919999987,
+              "durationMs": 20.72624999999971
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "warmup": false,
+          "claimToShowMs": 367.89858399999866,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-11",
+            "claimToInputObservedMs": 423.2282919999998
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 92.80000001192093,
+            "session": 243.90000000596046,
+            "stream": 244.1000000089407,
+            "ready": 294.40000000596046
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 114.54750000000058,
+              "durationMs": 10.80304199999955
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 143.58679199999824,
+              "durationMs": 0.35929200000100536
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 145.36095899999782,
+              "durationMs": 1.770875000001979
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 246.22374999999738,
+              "durationMs": 1.5721670000020822
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 313.0319589999999
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 313.1874590000007
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 367.89858399999866
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 391.1436250000006,
+              "durationMs": 4.38195899999846
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 445.2945839999993,
+              "durationMs": 94.52837499999805
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "warmup": false,
+          "claimToShowMs": 364.5152500000004,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-12",
+            "claimToInputObservedMs": 411.1018750000003
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 92.29999999701977,
+            "session": 242.40000000596046,
+            "stream": 242.5,
+            "ready": 292.29999999701977
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 112.6895829999994,
+              "durationMs": 10.892958000000363
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 141.55083300000115,
+              "durationMs": 0.34395799999765586
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 143.2913750000007,
+              "durationMs": 1.7185409999983676
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 244.5367499999993,
+              "durationMs": 1.9509160000015981
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 310.57383299999856
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 310.80162500000006
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 364.5152500000004
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 365.22316599999976,
+              "durationMs": 20.775291999998444
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 433.12041600000157,
+              "durationMs": 73.33374999999796
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "warmup": false,
+          "claimToShowMs": 337.2208750000027,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-13",
+            "claimToInputObservedMs": 410.4584160000013
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 91.79999999701977,
+            "session": 237.8999999910593,
+            "stream": 238.0,
+            "ready": 285.09999999403954
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 112.19404100000247,
+              "durationMs": 11.257708999997703
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 141.93458300000202,
+              "durationMs": 0.2905419999988226
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 143.11887500000012,
+              "durationMs": 1.5095409999994445
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 239.9551250000004,
+              "durationMs": 1.7585830000025453
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 302.4002500000024
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 302.5261250000003
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 322.25650000000314,
+              "durationMs": 3.9594579999975394
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 337.2208750000027
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 378.12833300000057,
+              "durationMs": 2.308000000000902
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 432.61683300000004,
+              "durationMs": 45.62354200000118
+            }
+          ]
+        },
+        {
+          "id": 14,
+          "warmup": false,
+          "claimToShowMs": 385.9277919999986,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-14",
+            "claimToInputObservedMs": 410.6080000000002
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 101.8999999910593,
+            "session": 263.59999999403954,
+            "stream": 263.59999999403954,
+            "ready": 317.5
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 128.41108299999905,
+              "durationMs": 13.162541999998211
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 156.76841699999932,
+              "durationMs": 0.3604159999995318
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 158.3737919999985,
+              "durationMs": 2.006416000000172
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 266.10354200000074,
+              "durationMs": 2.0800409999974363
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 335.7879580000008
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 335.9684579999994
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 377.1793749999997,
+              "durationMs": 2.3304580000003625
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 385.9277919999986
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 433.7950419999979,
+              "durationMs": 122.54433300000164
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "warmup": false,
+          "claimToShowMs": 334.8561249999984,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-15",
+            "claimToInputObservedMs": 386.68416699999943
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 85.80000001192093,
+            "session": 231.40000000596046,
+            "stream": 231.5,
+            "ready": 280.80000001192093
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 103.65466699999888,
+              "durationMs": 11.880832999999257
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 130.97291699999914,
+              "durationMs": 0.38995799999975134
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 132.34954199999993,
+              "durationMs": 1.4721659999995609
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 233.41916700000002,
+              "durationMs": 1.6032909999994445
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 299.27991699999984
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 299.4121249999989
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 334.8561249999984
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 335.6681669999998,
+              "durationMs": 23.11175000000003
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 408.48099999999977,
+              "durationMs": 76.79175000000032
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "measuredSamples": 10,
+        "showMs": {
+          "median": 367.293083999999,
+          "min": 334.8561249999984,
+          "max": 385.9277919999986
+        },
+        "inputMs": {
+          "median": 422.08475,
+          "min": 386.68416699999943,
+          "max": 485.3970420000005
+        }
+      }
+    },
+    {
+      "name": "direct-before-short",
+      "artifacts": "/tmp/lody-app-bench-sS1CXN",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "directClickMode": true,
+        "cpuProfiling": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "0b8ee43ca76057050adf930f80276abc5ccf48385e4c59d06081fc4c67dc2ae2",
+        "rendererIndexSha256": "b9f1888d814a5ff49d28c6e2087b1d2fdc670581a1dc5bc20662b4e529fd5887",
+        "probeSha256": "6b1340fc0ac8d9c3025e3d596b6a48523cba00010515db7b429e4e9a0c6e9381",
+        "residentProbeSha256": "ef00d1b878620192762c1d6f13b6f9e03da0efacdaf56ab97d763933cf9a992f",
+        "preparationSha256": "cdd770655e877ec30f6229a6f543a5a7a796e72b3299b1234f56c7034d399779",
+        "openingSourceSha256": "0fcc1fe19fc83febb9c8bfa3c75467718e5929e65366abc7f4d9ddba01ad2c63",
+        "memorySamplerSha256": "db8f6474d603e79f942de041eb23ad744e90fded32741f3e232e13e0a9817f90"
+      },
+      "entries": 100,
+      "sourceConversationMs": 936.6379999999999,
+      "unloadConfirmations": 0,
+      "directClickMode": true,
+      "timingBoundary": "source row Command-click dispatch",
+      "spareMinimumAgeMs": 1500,
+      "retargetMode": false,
+      "hitRate": null,
+      "samples": [
+        {
+          "id": 3,
+          "warmup": true,
+          "claimToShowMs": 249.20225000000028,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 291.30016700000033
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0,
+            "composer": 84.09999999403954,
+            "session": 155.79999999701977,
+            "stream": 155.79999999701977,
+            "ready": 179.09999999403954
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 102.12337500000012,
+              "durationMs": 2.6890830000002097
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 109.70083299999988,
+              "durationMs": 0.3081670000001395
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 110.34012499999972,
+              "durationMs": 1.567417000000205
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 158.1770830000005,
+              "durationMs": 1.6984999999995125
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 194.1123749999997
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 194.32979200000045
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 223.43704200000047,
+              "durationMs": 9.685207999999875
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 249.20225000000028
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 248.16962500000045,
+              "durationMs": 1.8909169999997175
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "warmup": true,
+          "claimToShowMs": 253.6170830000001,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 321.8668749999997
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 87.6000000089407,
+            "session": 164.30000001192093,
+            "stream": 164.40000000596046,
+            "ready": 186.20000000298023
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 107.6269169999996,
+              "durationMs": 2.9798749999999927
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 116.17687500000011,
+              "durationMs": 0.34441699999933917
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 116.82737499999985,
+              "durationMs": 1.757166999999754
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 166.63937499999975,
+              "durationMs": 1.8314579999996567
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 202.39941699999963,
+              "durationMs": 2.08337500000016
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 210.14037499999995
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 210.2958749999998
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 253.6170830000001
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 301.3966249999994,
+              "durationMs": 2.9107920000005834
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "warmup": true,
+          "claimToShowMs": 253.6166659999999,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 321.9940829999996
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 89.20000000298023,
+            "session": 171.1000000089407,
+            "stream": 171.1000000089407,
+            "ready": 190.1000000089407
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 110.78254099999867,
+              "durationMs": 2.244542000000365
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 117.61841599999934,
+              "durationMs": 0.3251249999993888
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 118.3234999999986,
+              "durationMs": 1.5514160000002448
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 172.94762499999888,
+              "durationMs": 1.5572080000001733
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 213.43983299999854
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 213.64670800000022
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 253.6166659999999
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 270.7004159999997,
+              "durationMs": 31.874374999999418
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 321.0466660000002,
+              "durationMs": 21.701499999999214
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "warmup": false,
+          "claimToShowMs": 252.4182920000003,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 305.3240829999995
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 88.6000000089407,
+            "session": 168.20000000298023,
+            "stream": 168.20000000298023,
+            "ready": 188.20000000298023
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 108.86275000000023,
+              "durationMs": 3.4310420000001614
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 117.20945799999936,
+              "durationMs": 0.43195899999955145
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 117.86483299999963,
+              "durationMs": 3.9450419999993755
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 170.38887500000055,
+              "durationMs": 1.633124999998472
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 208.0020829999994
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 208.9708329999994
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 252.4182920000003
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 237.01583299999947,
+              "durationMs": 49.68366700000115
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 326.06512499999917,
+              "durationMs": 11.069750000000568
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "warmup": false,
+          "claimToShowMs": 267.8283329999995,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 329.6031669999993
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 95.69999998807907,
+            "session": 175.19999998807907,
+            "stream": 175.19999998807907,
+            "ready": 192.59999999403954
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 115.91783299999952,
+              "durationMs": 2.939749999999549
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 123.75483299999905,
+              "durationMs": 0.3985000000011496
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 124.40641700000015,
+              "durationMs": 1.4619160000002012
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 177.44650000000001,
+              "durationMs": 2.009374999999636
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 214.43812500000058
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 214.5872500000005
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 267.8283329999995
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 283.2506250000006,
+              "durationMs": 26.989541999999346
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 350.07583299999897,
+              "durationMs": 3.5512500000004366
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "warmup": false,
+          "claimToShowMs": 238.23679099999936,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 280.40837499999907
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 83.5,
+            "session": 157.6000000089407,
+            "stream": 157.6000000089407,
+            "ready": 170.1000000089407
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 102.27704099999937,
+              "durationMs": 2.3979999999992287
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 110.48454099999981,
+              "durationMs": 0.3262089999989257
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 111.10195799999929,
+              "durationMs": 1.4116250000006403
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 159.84687499999927,
+              "durationMs": 1.4586250000011205
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 200.11158299999988
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 200.47616600000038
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 238.23679099999936
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 259.2051250000004,
+              "durationMs": 2.3779579999991256
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 301.28708299999926,
+              "durationMs": 84.12700000000041
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "warmup": false,
+          "claimToShowMs": 233.99674999999843,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 280.59320899999875
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 84.29999999701977,
+            "session": 157.40000000596046,
+            "stream": 157.40000000596046,
+            "ready": 173.20000000298023
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 103.09629199999836,
+              "durationMs": 1.9312920000011218
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 110.86737499999981,
+              "durationMs": 0.24279199999909906
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 111.50758399999904,
+              "durationMs": 1.2895829999997659
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 159.26599999999962,
+              "durationMs": 1.3978339999994205
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 191.57795899999837
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 191.83408399999826
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 224.2171249999992,
+              "durationMs": 2.728084000000308
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 233.99674999999843
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 257.9846669999988,
+              "durationMs": 1.6037080000005517
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "warmup": false,
+          "claimToShowMs": 220.9888749999991,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 277.2190410000003
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "composer": 84.59999999403954,
+            "session": 159.79999999701977,
+            "stream": 159.79999999701977,
+            "ready": 175.79999999701977
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 105.65420799999993,
+              "durationMs": 2.1073749999995925
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 113.59529099999781,
+              "durationMs": 0.3619590000016615
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 114.2779159999991,
+              "durationMs": 1.3093750000007276
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 162.046875,
+              "durationMs": 1.4390409999978147
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 194.89879099999962
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 195.3872909999991
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 220.9888749999991
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 264.9604999999974,
+              "durationMs": 2.351791000000958
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 297.79308299999684,
+              "durationMs": 72.77591700000266
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "measuredSamples": 5,
+        "showMs": {
+          "median": 238.23679099999936,
+          "min": 220.9888749999991,
+          "max": 267.8283329999995
+        },
+        "inputMs": {
+          "median": 280.59320899999875,
+          "min": 277.2190410000003,
+          "max": 329.6031669999993
+        }
+      }
+    },
+    {
+      "name": "direct-final-short",
+      "artifacts": "/tmp/lody-app-bench-ViygIs",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "directClickMode": true,
+        "cpuProfiling": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "f2d2687e23c055d9539ad302844a429e41d09a0e6751f26ad606ec6bb110a5af",
+        "rendererIndexSha256": "5a813470aec4f8643d0b3d2cec1123c58e75cfd9f65eada145235f69de9a6e15",
+        "probeSha256": "6b1340fc0ac8d9c3025e3d596b6a48523cba00010515db7b429e4e9a0c6e9381",
+        "residentProbeSha256": "ef00d1b878620192762c1d6f13b6f9e03da0efacdaf56ab97d763933cf9a992f",
+        "preparationSha256": "cdd770655e877ec30f6229a6f543a5a7a796e72b3299b1234f56c7034d399779",
+        "openingSourceSha256": "cf977cbf89ca41342efadd9a9f71ff958aaab5c0ee3234c2ac9a753a46078a3a",
+        "memorySamplerSha256": "db8f6474d603e79f942de041eb23ad744e90fded32741f3e232e13e0a9817f90"
+      },
+      "entries": 100,
+      "sourceConversationMs": 421.64275,
+      "unloadConfirmations": 0,
+      "directClickMode": true,
+      "timingBoundary": "source row Command-click dispatch",
+      "spareMinimumAgeMs": 1500,
+      "retargetMode": false,
+      "hitRate": null,
+      "samples": [
+        {
+          "id": 3,
+          "warmup": true,
+          "claimToShowMs": 213.66841699999986,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 299.2377919999999
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 127.8999999910593,
+            "stream": 127.8999999910593,
+            "ready": 127.8999999910593,
+            "composer": 127.8999999910593
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 2.1957919999995283,
+              "durationMs": 3.011416000000281
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 100.59770799999933,
+              "durationMs": 0.31154200000037235
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 130.39879199999996,
+              "durationMs": 2.8824159999994663
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 161.38687499999924
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 161.57579199999964
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 201.1550419999994,
+              "durationMs": 2.0799580000002607
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 213.66841699999986
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "warmup": true,
+          "claimToShowMs": 197.98924999999963,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 262.57483299999967
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 124.59999999403954,
+            "stream": 124.59999999403954,
+            "ready": 124.59999999403954,
+            "composer": 124.59999999403954
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.5371249999998327,
+              "durationMs": 3.0098330000000715
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 98.25733299999956,
+              "durationMs": 0.29191700000046694
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 126.3428329999997,
+              "durationMs": 2.299124999999549
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 153.4104159999997
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 153.59666599999946
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 197.98924999999963
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 198.53399999999965,
+              "durationMs": 29.35608299999967
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "warmup": true,
+          "claimToShowMs": 205.2671250000003,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 263.63758400000006
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 125.0,
+            "stream": 125.0,
+            "ready": 125.0,
+            "composer": 125.0
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.6126250000006621,
+              "durationMs": 2.8190420000000813
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 98.69800000000032,
+              "durationMs": 0.2898750000003929
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 126.73687500000051,
+              "durationMs": 2.0729590000000826
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 157.13575000000037
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 157.2750840000008
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 205.2671250000003
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 205.79975000000013,
+              "durationMs": 29.90058399999998
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "warmup": false,
+          "claimToShowMs": 235.08862500000032,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 296.8042910000004
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 137.0,
+            "stream": 137.0,
+            "ready": 137.0,
+            "composer": 137.0
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 2.1911249999993743,
+              "durationMs": 2.8408330000002024
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 108.8383329999997,
+              "durationMs": 0.3425829999996495
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 139.0979580000003,
+              "durationMs": 2.553124999998545
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 172.05633300000045
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 172.28516599999966
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 235.08862500000032
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 238.82737499999894,
+              "durationMs": 23.65154100000109
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "warmup": false,
+          "claimToShowMs": 200.0712080000012,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 256.1022919999996
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 127.5,
+            "stream": 127.59999999403954,
+            "ready": 127.59999999403954,
+            "composer": 127.59999999403954
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.5872500000004948,
+              "durationMs": 2.697082999999111
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 99.39395800000057,
+              "durationMs": 0.2461669999993319
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 129.1917080000003,
+              "durationMs": 2.060250000000451
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 159.36216700000114
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 159.54650000000038
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 200.0712080000012
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 200.5800419999996,
+              "durationMs": 24.44354100000055
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "warmup": false,
+          "claimToShowMs": 188.60916599999837,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 258.31674999999996
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0,
+            "session": 124.79999999701977,
+            "stream": 124.79999999701977,
+            "ready": 124.79999999701977,
+            "composer": 124.79999999701977
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.8184999999994034,
+              "durationMs": 2.4781659999989643
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 97.23491599999943,
+              "durationMs": 0.28645899999901303
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 126.62654099999963,
+              "durationMs": 1.8607499999998254
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 153.53720799999974
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 153.70987499999865
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 188.60916599999837
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 205.21474999999919,
+              "durationMs": 23.675916000000143
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "warmup": false,
+          "claimToShowMs": 201.83308299999953,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-9",
+            "claimToInputObservedMs": 258.16862500000025
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 126.0,
+            "stream": 126.0,
+            "ready": 126.0,
+            "composer": 126.0
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.4554580000003625,
+              "durationMs": 2.275374999999258
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 97.95587499999965,
+              "durationMs": 0.21533300000010058
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 127.63362499999857,
+              "durationMs": 1.9611250000016298
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 157.1404160000002
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 157.32345799999894
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 201.83308299999953
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 215.3663749999996,
+              "durationMs": 18.22662499999933
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "warmup": false,
+          "claimToShowMs": 203.28350000000137,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-10",
+            "claimToInputObservedMs": 263.0193340000005
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "rendererStagesAfterTargetMs": {
+            "target": 0.0,
+            "session": 123.5,
+            "stream": 123.5,
+            "ready": 123.6000000089407,
+            "composer": 123.6000000089407
+          },
+          "mainStages": [
+            {
+              "kind": "owner-request",
+              "method": "open",
+              "afterClaimMs": 1.6538340000006428,
+              "durationMs": 2.373374999999214
+            },
+            {
+              "kind": "owner-request",
+              "method": "setSync",
+              "afterClaimMs": 97.53316700000141,
+              "durationMs": 0.2919999999976426
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 125.28779199999917,
+              "durationMs": 1.8822500000023865
+            },
+            {
+              "kind": "content-ready",
+              "afterClaimMs": 154.39829200000167
+            },
+            {
+              "kind": "native-show-start",
+              "afterClaimMs": 154.6217089999991
+            },
+            {
+              "kind": "native-show-event",
+              "claimToShowMs": 203.28350000000137
+            },
+            {
+              "kind": "owner-request",
+              "method": "readTurns",
+              "afterClaimMs": 204.02687499999956,
+              "durationMs": 24.9945000000007
+            }
+          ]
+        }
+      ],
+      "summary": {
+        "measuredSamples": 5,
+        "showMs": {
+          "median": 201.83308299999953,
+          "min": 188.60916599999837,
+          "max": 235.08862500000032
+        },
+        "inputMs": {
+          "median": 258.31674999999996,
+          "min": 256.1022919999996,
+          "max": 296.8042910000004
+        }
+      }
+    },
+    {
+      "name": "direct-final-retarget",
+      "artifacts": "/tmp/lody-app-bench-Pckuxh",
+      "environment": {
+        "cpu": "Apple M4 Max",
+        "preparedMode": false,
+        "directClickMode": false,
+        "cpuProfiling": false,
+        "nativeMode": false,
+        "sharedSessionOwner": true,
+        "electron": "43.7.6",
+        "platform": "darwin",
+        "arch": "arm64",
+        "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+        "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+        "sessionOwnerSha256": "f2d2687e23c055d9539ad302844a429e41d09a0e6751f26ad606ec6bb110a5af",
+        "rendererIndexSha256": "5a813470aec4f8643d0b3d2cec1123c58e75cfd9f65eada145235f69de9a6e15",
+        "probeSha256": "6b1340fc0ac8d9c3025e3d596b6a48523cba00010515db7b429e4e9a0c6e9381",
+        "residentProbeSha256": "ef00d1b878620192762c1d6f13b6f9e03da0efacdaf56ab97d763933cf9a992f",
+        "preparationSha256": "cdd770655e877ec30f6229a6f543a5a7a796e72b3299b1234f56c7034d399779",
+        "openingSourceSha256": "cf977cbf89ca41342efadd9a9f71ff958aaab5c0ee3234c2ac9a753a46078a3a",
+        "memorySamplerSha256": "db8f6474d603e79f942de041eb23ad744e90fded32741f3e232e13e0a9817f90"
+      },
+      "entries": 3000,
+      "sourceConversationMs": 2038.1509580000002,
+      "unloadConfirmations": 0,
+      "directClickMode": false,
+      "timingBoundary": "source row Command-click dispatch",
+      "spareMinimumAgeMs": 1500,
+      "retargetMode": true,
+      "hitRate": 0,
+      "samples": [
+        {
+          "id": 3,
+          "warmup": true,
+          "claimToShowMs": 133.96079199999986,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-3",
+            "claimToInputObservedMs": 190.02833399999963
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          }
+        },
+        {
+          "id": 4,
+          "warmup": true,
+          "claimToShowMs": 154.77366600000005,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-4",
+            "claimToInputObservedMs": 227.7483749999992
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          }
+        },
+        {
+          "id": 5,
+          "warmup": true,
+          "claimToShowMs": 140.34279199999946,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-5",
+            "claimToInputObservedMs": 202.71279200000026
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          }
+        },
+        {
+          "id": 6,
+          "warmup": false,
+          "claimToShowMs": 166.06620799999837,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-6",
+            "claimToInputObservedMs": 244.1364999999987
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          }
+        },
+        {
+          "id": 7,
+          "warmup": false,
+          "claimToShowMs": 137.88966699999946,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-7",
+            "claimToInputObservedMs": 192.9605419999989
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          }
+        },
+        {
+          "id": 8,
+          "warmup": false,
+          "claimToShowMs": 157.5464580000007,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "input": {
+            "accepted": true,
+            "token": "prepared-window-probe-8",
+            "claimToInputObservedMs": 212.7057079999995
+          },
+          "readyAtClick": false,
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          }
+        }
+      ],
+      "summary": {
+        "measuredSamples": 3,
+        "showMs": {
+          "median": 157.5464580000007,
+          "min": 137.88966699999946,
+          "max": 166.06620799999837
+        },
+        "inputMs": {
+          "median": 212.7057079999995,
+          "min": 192.9605419999989,
+          "max": 244.1364999999987
+        }
+      }
+    }
+  ],
+  "exploratoryExclusions": [
+    {
+      "artifacts": "/tmp/lody-app-bench-debWuV",
+      "reason": "CPU profiling enabled; excluded from paired performance result."
+    },
+    {
+      "artifacts": "/tmp/lody-app-bench-N1cU0v",
+      "reason": "Intermediate eager acquisition; repeated mounts still blocked delivery; not final code."
+    },
+    {
+      "artifacts": "/tmp/lody-app-bench-WDfjqj",
+      "reason": "Unshipped eager 90-turn prefill; extra delay did not improve opening."
+    },
+    {
+      "artifacts": "/tmp/lody-app-bench-I92eLS",
+      "reason": "Intermediate outline-only bounded rendering."
+    },
+    {
+      "artifacts": "/tmp/lody-app-bench-eWPbma",
+      "reason": "Intermediate lazy message-row construction."
+    },
+    {
+      "artifacts": "/tmp/lody-app-bench-HoHAhg",
+      "reason": "CPU profiling enabled; intermediate entry-tail change."
+    },
+    {
+      "artifacts": "/tmp/lody-app-bench-kydr6z",
+      "reason": "Three-sample exploration superseded by final ten-sample measurement; show/input medians 235.61/300.51 ms."
+    },
+    {
+      "artifacts": "/tmp/lody-app-bench-tIIPgu",
+      "reason": "Probe-only native animation override; three-sample show/input medians 227.47/286.65 ms; not shipped."
+    }
+  ],
+  "residentMemory": {
+    "artifacts": "/tmp/lody-app-bench-CDMVto",
+    "environment": {
+      "cpu": "Apple M4 Max",
+      "preparedMode": false,
+      "directClickMode": false,
+      "cpuProfiling": false,
+      "nativeMode": false,
+      "sharedSessionOwner": true,
+      "electron": "43.7.6",
+      "platform": "darwin",
+      "arch": "arm64",
+      "cliEntrySha256": "4a48a455cdff1c6d1e22fdecf7c525313ed5fc0cf7e6a91d2a18eab61bf617e3",
+      "runtimeProviderSha256": "302bb755888be0dbc1f2c582f297a429a55165cf369980e4e467775ef0163f3c",
+      "sessionOwnerSha256": "f2d2687e23c055d9539ad302844a429e41d09a0e6751f26ad606ec6bb110a5af",
+      "rendererIndexSha256": "5a813470aec4f8643d0b3d2cec1123c58e75cfd9f65eada145235f69de9a6e15",
+      "probeSha256": "6b1340fc0ac8d9c3025e3d596b6a48523cba00010515db7b429e4e9a0c6e9381",
+      "residentProbeSha256": "ef00d1b878620192762c1d6f13b6f9e03da0efacdaf56ab97d763933cf9a992f",
+      "preparationSha256": "cdd770655e877ec30f6229a6f543a5a7a796e72b3299b1234f56c7034d399779",
+      "openingSourceSha256": "cf977cbf89ca41342efadd9a9f71ff958aaab5c0ee3234c2ac9a753a46078a3a",
+      "memorySamplerSha256": "db8f6474d603e79f942de041eb23ad744e90fded32741f3e232e13e0a9817f90"
+    },
+    "variant": "direct-final-resident",
+    "sharedSessionOwner": true,
+    "entries": 3000,
+    "unloadConfirmations": 0,
+    "residentMemory": {
+      "scope": "Electron app.getAppMetrics process set; external CLI/daemon processes excluded",
+      "metric": "Sum of macOS footprint auxiliary.phys_footprint bytes; working sets retained separately",
+      "forcedGC": false,
+      "stages": [
+        {
+          "name": "source-only",
+          "samples": [
+            {
+              "offsetMs": 0,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 350432,
+                  "physFootprintBytes": 214222744
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 107680,
+                  "physFootprintBytes": 632620160
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 47824,
+                  "physFootprintBytes": 7766928
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 684832,
+                  "physFootprintBytes": 608454912
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 382608,
+                  "physFootprintBytes": 292751040
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1674.476417541504,
+              "workingSetMiB": 1536.5,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 10000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 344992,
+                  "physFootprintBytes": 214828952
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 98336,
+                  "physFootprintBytes": 116982912
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 47936,
+                  "physFootprintBytes": 7717776
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 827328,
+                  "physFootprintBytes": 678332768
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 382160,
+                  "physFootprintBytes": 287524568
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1244.9140319824219,
+              "workingSetMiB": 1660.890625,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 30000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 271584,
+                  "physFootprintBytes": 138086320
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 98368,
+                  "physFootprintBytes": 108725376
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 47968,
+                  "physFootprintBytes": 7717776
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 555392,
+                  "physFootprintBytes": 390170976
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 242336,
+                  "physFootprintBytes": 140527320
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 748.8515548706055,
+              "workingSetMiB": 1187.15625,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 45000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 271984,
+                  "physFootprintBytes": 138495920
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 98368,
+                  "physFootprintBytes": 108725376
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 47968,
+                  "physFootprintBytes": 7717776
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 555408,
+                  "physFootprintBytes": 390187360,
+                  "heap": {
+                    "backingStorageSize": 28768549,
+                    "embedderHeapUsedSize": 6372440,
+                    "totalSize": 85540864,
+                    "usedSize": 80713412
+                  }
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 242336,
+                  "physFootprintBytes": 140527320,
+                  "heap": {
+                    "backingStorageSize": 6993043,
+                    "embedderHeapUsedSize": 720832,
+                    "totalSize": 33357824,
+                    "usedSize": 31683648
+                  }
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 749.2578048706055,
+              "workingSetMiB": 1187.5625,
+              "sampler": "proc_pid_rusage"
+            }
+          ]
+        },
+        {
+          "name": "neutral-shell",
+          "samples": [
+            {
+              "offsetMs": 0,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 275280,
+                  "physFootprintBytes": 138004424
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 98864,
+                  "physFootprintBytes": 458851456
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 48160,
+                  "physFootprintBytes": 7881616
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 557072,
+                  "physFootprintBytes": 390269280
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 244384,
+                  "physFootprintBytes": 140723928
+                },
+                {
+                  "pid": 79077,
+                  "role": "shell",
+                  "windowId": 3,
+                  "workingSetKiB": 313776,
+                  "physFootprintBytes": 165218176
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1240.6815338134766,
+              "workingSetMiB": 1501.5,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 2000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 275472,
+                  "physFootprintBytes": 138184648
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 98704,
+                  "physFootprintBytes": 112280704
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 48160,
+                  "physFootprintBytes": 7881616
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 557088,
+                  "physFootprintBytes": 390269280
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 244384,
+                  "physFootprintBytes": 140723928
+                },
+                {
+                  "pid": 79077,
+                  "role": "shell",
+                  "windowId": 3,
+                  "workingSetKiB": 316544,
+                  "physFootprintBytes": 167053184
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 912.0877838134766,
+              "workingSetMiB": 1504.25,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 5000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 264992,
+                  "physFootprintBytes": 138315720
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 96608,
+                  "physFootprintBytes": 112215168
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 48048,
+                  "physFootprintBytes": 7881616
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 543728,
+                  "physFootprintBytes": 391760224
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 226880,
+                  "physFootprintBytes": 140773080
+                },
+                {
+                  "pid": 79077,
+                  "role": "shell",
+                  "windowId": 3,
+                  "workingSetKiB": 316528,
+                  "physFootprintBytes": 167036800
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 913.6034088134766,
+              "workingSetMiB": 1461.703125,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 10000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 265424,
+                  "physFootprintBytes": 138577864
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 96048,
+                  "physFootprintBytes": 112215168
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 48144,
+                  "physFootprintBytes": 7979920
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 540224,
+                  "physFootprintBytes": 393316704,
+                  "heap": {
+                    "backingStorageSize": 28772780,
+                    "embedderHeapUsedSize": 6372440,
+                    "totalSize": 85540864,
+                    "usedSize": 80759812
+                  }
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 226768,
+                  "physFootprintBytes": 140773080,
+                  "heap": {
+                    "backingStorageSize": 6997060,
+                    "embedderHeapUsedSize": 720832,
+                    "totalSize": 33619968,
+                    "usedSize": 31732076
+                  }
+                },
+                {
+                  "pid": 79077,
+                  "role": "shell",
+                  "windowId": 3,
+                  "workingSetKiB": 333472,
+                  "physFootprintBytes": 184584232,
+                  "heap": {
+                    "backingStorageSize": 17461567,
+                    "embedderHeapUsedSize": 4623832,
+                    "totalSize": 82690048,
+                    "usedSize": 63912716
+                  }
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 932.1660690307617,
+              "workingSetMiB": 1474.6875,
+              "sampler": "proc_pid_rusage"
+            }
+          ]
+        },
+        {
+          "name": "prepared-target",
+          "samples": [
+            {
+              "offsetMs": 0,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 268992,
+                  "physFootprintBytes": 142329800
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 105136,
+                  "physFootprintBytes": 488293504
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 48144,
+                  "physFootprintBytes": 7979920
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 538448,
+                  "physFootprintBytes": 393333088
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 229392,
+                  "physFootprintBytes": 142034648
+                },
+                {
+                  "pid": 79077,
+                  "role": "prepared",
+                  "windowId": 3,
+                  "workingSetKiB": 394080,
+                  "physFootprintBytes": 253970496
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1361.7910919189453,
+              "workingSetMiB": 1547.0625,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 10000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 264320,
+                  "physFootprintBytes": 138463176
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 93440,
+                  "physFootprintBytes": 148374656
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 48096,
+                  "physFootprintBytes": 7750544
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 423936,
+                  "physFootprintBytes": 377899360
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 206576,
+                  "physFootprintBytes": 150783704
+                },
+                {
+                  "pid": 79077,
+                  "role": "prepared",
+                  "windowId": 3,
+                  "workingSetKiB": 609040,
+                  "physFootprintBytes": 532564200
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1293.0256271362305,
+              "workingSetMiB": 1606.84375,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 20000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 264336,
+                  "physFootprintBytes": 138610632
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 93488,
+                  "physFootprintBytes": 141575296
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 48048,
+                  "physFootprintBytes": 7750544
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 414736,
+                  "physFootprintBytes": 377915744
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 203936,
+                  "physFootprintBytes": 150783704
+                },
+                {
+                  "pid": 79077,
+                  "role": "prepared",
+                  "windowId": 3,
+                  "workingSetKiB": 301856,
+                  "physFootprintBytes": 202017000
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 971.4631271362305,
+              "workingSetMiB": 1295.3125,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 30000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 179520,
+                  "physFootprintBytes": 139544520
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 81456,
+                  "physFootprintBytes": 141575296
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41456,
+                  "physFootprintBytes": 7734160
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 236416,
+                  "physFootprintBytes": 378063200
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 187632,
+                  "physFootprintBytes": 150849240
+                },
+                {
+                  "pid": 79077,
+                  "role": "prepared",
+                  "windowId": 3,
+                  "workingSetKiB": 300576,
+                  "physFootprintBytes": 200575208
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 971.1662521362305,
+              "workingSetMiB": 1002.984375,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 45000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 179856,
+                  "physFootprintBytes": 139610056
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 78656,
+                  "physFootprintBytes": 141575296
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41456,
+                  "physFootprintBytes": 7734160
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 242176,
+                  "physFootprintBytes": 368232800,
+                  "heap": {
+                    "backingStorageSize": 28792530,
+                    "embedderHeapUsedSize": 6750928,
+                    "totalSize": 85016576,
+                    "usedSize": 81749056
+                  }
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 188528,
+                  "physFootprintBytes": 148293336,
+                  "heap": {
+                    "backingStorageSize": 7258740,
+                    "embedderHeapUsedSize": 4597800,
+                    "totalSize": 38862848,
+                    "usedSize": 34491344
+                  }
+                },
+                {
+                  "pid": 79077,
+                  "role": "prepared",
+                  "windowId": 3,
+                  "workingSetKiB": 300608,
+                  "physFootprintBytes": 200607976,
+                  "heap": {
+                    "backingStorageSize": 17461525,
+                    "embedderHeapUsedSize": 5362608,
+                    "totalSize": 79167488,
+                    "usedSize": 76836516
+                  }
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 959.4475021362305,
+              "workingSetMiB": 1007.109375,
+              "sampler": "proc_pid_rusage"
+            }
+          ]
+        },
+        {
+          "name": "after-preparation-disabled",
+          "samples": [
+            {
+              "offsetMs": 0,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 180608,
+                  "physFootprintBytes": 139528136
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 78272,
+                  "physFootprintBytes": 108528768
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41648,
+                  "physFootprintBytes": 7652240
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 242176,
+                  "physFootprintBytes": 368232800
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 188576,
+                  "physFootprintBytes": 148309720
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 736.4765777587891,
+              "workingSetMiB": 714.140625,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 2000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 180704,
+                  "physFootprintBytes": 139560904
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 78272,
+                  "physFootprintBytes": 108512384
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41648,
+                  "physFootprintBytes": 7652240
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 242176,
+                  "physFootprintBytes": 368232800
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 188576,
+                  "physFootprintBytes": 148309720
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 736.4922027587891,
+              "workingSetMiB": 714.234375,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 5000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 180736,
+                  "physFootprintBytes": 139020232
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 78272,
+                  "physFootprintBytes": 108512384
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41648,
+                  "physFootprintBytes": 7652240
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 242176,
+                  "physFootprintBytes": 368232800
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 188576,
+                  "physFootprintBytes": 148309720
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 735.9765777587891,
+              "workingSetMiB": 714.265625,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 10000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 178368,
+                  "physFootprintBytes": 136398792
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 78272,
+                  "physFootprintBytes": 108512384
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41648,
+                  "physFootprintBytes": 7652240
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 242176,
+                  "physFootprintBytes": 368232800,
+                  "heap": {
+                    "backingStorageSize": 28792581,
+                    "embedderHeapUsedSize": 6840680,
+                    "totalSize": 85016576,
+                    "usedSize": 81753132
+                  }
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 188576,
+                  "physFootprintBytes": 148309720,
+                  "heap": {
+                    "backingStorageSize": 7258740,
+                    "embedderHeapUsedSize": 4597800,
+                    "totalSize": 38862848,
+                    "usedSize": 34494516
+                  }
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 733.4765777587891,
+              "workingSetMiB": 711.953125,
+              "sampler": "proc_pid_rusage"
+            }
+          ]
+        },
+        {
+          "name": "auxiliary-1",
+          "samples": [
+            {
+              "offsetMs": 0,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 189648,
+                  "physFootprintBytes": 142411720
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 85008,
+                  "physFootprintBytes": 550683776
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41776,
+                  "physFootprintBytes": 7750544
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 242912,
+                  "physFootprintBytes": 368118112
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 189744,
+                  "physFootprintBytes": 146982616
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 403792,
+                  "physFootprintBytes": 250316792
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1398.3378982543945,
+              "workingSetMiB": 1125.859375,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 2000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 191840,
+                  "physFootprintBytes": 142215112
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 85520,
+                  "physFootprintBytes": 431113344
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41744,
+                  "physFootprintBytes": 7750544
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 242912,
+                  "physFootprintBytes": 368118112
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 205584,
+                  "physFootprintBytes": 149718744
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 494480,
+                  "physFootprintBytes": 340740136
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1372.9629440307617,
+              "workingSetMiB": 1232.5,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 5000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 188256,
+                  "physFootprintBytes": 141821896
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 80688,
+                  "physFootprintBytes": 189449344
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41680,
+                  "physFootprintBytes": 7750544
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 242112,
+                  "physFootprintBytes": 368118112
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 203488,
+                  "physFootprintBytes": 149718744
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 404832,
+                  "physFootprintBytes": 340625448
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1142.0098190307617,
+              "workingSetMiB": 1133.84375,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 10000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 188160,
+                  "physFootprintBytes": 141379528
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 81296,
+                  "physFootprintBytes": 153633920
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41680,
+                  "physFootprintBytes": 7717776
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245312,
+                  "physFootprintBytes": 369494368,
+                  "heap": {
+                    "backingStorageSize": 28787207,
+                    "embedderHeapUsedSize": 6973792,
+                    "totalSize": 85016576,
+                    "usedSize": 82189760
+                  }
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 203488,
+                  "physFootprintBytes": 149718744,
+                  "heap": {
+                    "backingStorageSize": 7178349,
+                    "embedderHeapUsedSize": 3441184,
+                    "totalSize": 41222144,
+                    "usedSize": 34382780
+                  }
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 405840,
+                  "physFootprintBytes": 340707368,
+                  "heap": {
+                    "backingStorageSize": 17471269,
+                    "embedderHeapUsedSize": 13071888,
+                    "totalSize": 209715200,
+                    "usedSize": 145881096
+                  }
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1108.7910690307617,
+              "workingSetMiB": 1138.453125,
+              "sampler": "proc_pid_rusage"
+            }
+          ]
+        },
+        {
+          "name": "auxiliary-3",
+          "samples": [
+            {
+              "offsetMs": 0,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 197680,
+                  "physFootprintBytes": 149964768
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 88864,
+                  "physFootprintBytes": 671515800
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41920,
+                  "physFootprintBytes": 7963536
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245680,
+                  "physFootprintBytes": 369805664
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 206112,
+                  "physFootprintBytes": 151750360
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 407872,
+                  "physFootprintBytes": 340969512
+                },
+                {
+                  "pid": 82105,
+                  "role": "auxiliary",
+                  "windowId": 5,
+                  "workingSetKiB": 478336,
+                  "physFootprintBytes": 326518824
+                },
+                {
+                  "pid": 82109,
+                  "role": "auxiliary",
+                  "windowId": 6,
+                  "workingSetKiB": 399536,
+                  "physFootprintBytes": 245843960
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 2159.435676574707,
+              "workingSetMiB": 2017.578125,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 2000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 198080,
+                  "physFootprintBytes": 147294176
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 90000,
+                  "physFootprintBytes": 552584344
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41920,
+                  "physFootprintBytes": 7963536
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245680,
+                  "physFootprintBytes": 369805664
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 207232,
+                  "physFootprintBytes": 152651480
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 407824,
+                  "physFootprintBytes": 340920360
+                },
+                {
+                  "pid": 82105,
+                  "role": "auxiliary",
+                  "windowId": 5,
+                  "workingSetKiB": 490304,
+                  "physFootprintBytes": 336201792
+                },
+                {
+                  "pid": 82109,
+                  "role": "auxiliary",
+                  "windowId": 6,
+                  "workingSetKiB": 497088,
+                  "physFootprintBytes": 342378560
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 2145.5763931274414,
+              "workingSetMiB": 2127.078125,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 5000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 198096,
+                  "physFootprintBytes": 147359712
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 85392,
+                  "physFootprintBytes": 298140800
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41920,
+                  "physFootprintBytes": 7963536
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245680,
+                  "physFootprintBytes": 369805664
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 206560,
+                  "physFootprintBytes": 152651480
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 401344,
+                  "physFootprintBytes": 340920360
+                },
+                {
+                  "pid": 82105,
+                  "role": "auxiliary",
+                  "windowId": 5,
+                  "workingSetKiB": 490096,
+                  "physFootprintBytes": 335988800
+                },
+                {
+                  "pid": 82109,
+                  "role": "auxiliary",
+                  "windowId": 6,
+                  "workingSetKiB": 496992,
+                  "physFootprintBytes": 342280256
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1902.6857452392578,
+              "workingSetMiB": 2115.3125,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 10000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 197952,
+                  "physFootprintBytes": 147032032
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 85376,
+                  "physFootprintBytes": 215368832
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41920,
+                  "physFootprintBytes": 7963536
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245680,
+                  "physFootprintBytes": 369805664,
+                  "heap": {
+                    "backingStorageSize": 28787207,
+                    "embedderHeapUsedSize": 7067528,
+                    "totalSize": 84492288,
+                    "usedSize": 81989776
+                  }
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 206560,
+                  "physFootprintBytes": 152651480,
+                  "heap": {
+                    "backingStorageSize": 7205769,
+                    "embedderHeapUsedSize": 5495968,
+                    "totalSize": 42008576,
+                    "usedSize": 33211468
+                  }
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 401344,
+                  "physFootprintBytes": 340920360,
+                  "heap": {
+                    "backingStorageSize": 17475203,
+                    "embedderHeapUsedSize": 13436504,
+                    "totalSize": 209715200,
+                    "usedSize": 146051044
+                  }
+                },
+                {
+                  "pid": 82105,
+                  "role": "auxiliary",
+                  "windowId": 5,
+                  "workingSetKiB": 490096,
+                  "physFootprintBytes": 335988800,
+                  "heap": {
+                    "backingStorageSize": 17470372,
+                    "embedderHeapUsedSize": 13078592,
+                    "totalSize": 207355904,
+                    "usedSize": 144518936
+                  }
+                },
+                {
+                  "pid": 82109,
+                  "role": "auxiliary",
+                  "windowId": 6,
+                  "workingSetKiB": 496992,
+                  "physFootprintBytes": 342280256,
+                  "heap": {
+                    "backingStorageSize": 17470368,
+                    "embedderHeapUsedSize": 12373648,
+                    "totalSize": 211812352,
+                    "usedSize": 143070544
+                  }
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1823.4357452392578,
+              "workingSetMiB": 2115.15625,
+              "sampler": "proc_pid_rusage"
+            }
+          ]
+        },
+        {
+          "name": "auxiliary-5",
+          "samples": [
+            {
+              "offsetMs": 0,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 217728,
+                  "physFootprintBytes": 157140984
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 93536,
+                  "physFootprintBytes": 763298992
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 42176,
+                  "physFootprintBytes": 8225680
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245920,
+                  "physFootprintBytes": 370051424
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 208032,
+                  "physFootprintBytes": 154535640
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 401536,
+                  "physFootprintBytes": 341067816
+                },
+                {
+                  "pid": 82105,
+                  "role": "auxiliary",
+                  "windowId": 5,
+                  "workingSetKiB": 491808,
+                  "physFootprintBytes": 336087104
+                },
+                {
+                  "pid": 82109,
+                  "role": "auxiliary",
+                  "windowId": 6,
+                  "workingSetKiB": 498944,
+                  "physFootprintBytes": 342591552
+                },
+                {
+                  "pid": 82664,
+                  "role": "auxiliary",
+                  "windowId": 7,
+                  "workingSetKiB": 478144,
+                  "physFootprintBytes": 324159576
+                },
+                {
+                  "pid": 82705,
+                  "role": "auxiliary",
+                  "windowId": 8,
+                  "workingSetKiB": 402272,
+                  "physFootprintBytes": 245942288
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 2902.1273193359375,
+              "workingSetMiB": 3007.90625,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 2000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 218304,
+                  "physFootprintBytes": 154322936
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 93792,
+                  "physFootprintBytes": 630031560
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 42176,
+                  "physFootprintBytes": 8225680
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245920,
+                  "physFootprintBytes": 370051424
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 209264,
+                  "physFootprintBytes": 154011352
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 401536,
+                  "physFootprintBytes": 341067816
+                },
+                {
+                  "pid": 82105,
+                  "role": "auxiliary",
+                  "windowId": 5,
+                  "workingSetKiB": 491808,
+                  "physFootprintBytes": 336087104
+                },
+                {
+                  "pid": 82109,
+                  "role": "auxiliary",
+                  "windowId": 6,
+                  "workingSetKiB": 498896,
+                  "physFootprintBytes": 342542400
+                },
+                {
+                  "pid": 82664,
+                  "role": "auxiliary",
+                  "windowId": 7,
+                  "workingSetKiB": 490080,
+                  "physFootprintBytes": 333744240
+                },
+                {
+                  "pid": 82705,
+                  "role": "auxiliary",
+                  "windowId": 8,
+                  "workingSetKiB": 491088,
+                  "physFootprintBytes": 334956608
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 2865.830535888672,
+              "workingSetMiB": 3108.265625,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 5000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 218304,
+                  "physFootprintBytes": 154339320
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 89104,
+                  "physFootprintBytes": 377799856
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 42176,
+                  "physFootprintBytes": 8225680
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245920,
+                  "physFootprintBytes": 370051424
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 209264,
+                  "physFootprintBytes": 154011352
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 401536,
+                  "physFootprintBytes": 341067816
+                },
+                {
+                  "pid": 82105,
+                  "role": "auxiliary",
+                  "windowId": 5,
+                  "workingSetKiB": 491808,
+                  "physFootprintBytes": 336087104
+                },
+                {
+                  "pid": 82109,
+                  "role": "auxiliary",
+                  "windowId": 6,
+                  "workingSetKiB": 498896,
+                  "physFootprintBytes": 342542400
+                },
+                {
+                  "pid": 82664,
+                  "role": "auxiliary",
+                  "windowId": 7,
+                  "workingSetKiB": 489888,
+                  "physFootprintBytes": 333547632
+                },
+                {
+                  "pid": 82705,
+                  "role": "auxiliary",
+                  "windowId": 8,
+                  "workingSetKiB": 490960,
+                  "physFootprintBytes": 334809152
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 2624.9711380004883,
+              "workingSetMiB": 3103.375,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 10000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 218080,
+                  "physFootprintBytes": 154159096
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 89072,
+                  "physFootprintBytes": 282494128
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 42176,
+                  "physFootprintBytes": 8225680
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245920,
+                  "physFootprintBytes": 370051424,
+                  "heap": {
+                    "backingStorageSize": 28787427,
+                    "embedderHeapUsedSize": 7067528,
+                    "totalSize": 84492288,
+                    "usedSize": 82155760
+                  }
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 209264,
+                  "physFootprintBytes": 154011352,
+                  "heap": {
+                    "backingStorageSize": 7068322,
+                    "embedderHeapUsedSize": 1769864,
+                    "totalSize": 43057152,
+                    "usedSize": 33950328
+                  }
+                },
+                {
+                  "pid": 81643,
+                  "role": "auxiliary",
+                  "windowId": 4,
+                  "workingSetKiB": 281648,
+                  "physFootprintBytes": 203589672,
+                  "heap": {
+                    "backingStorageSize": 17470205,
+                    "embedderHeapUsedSize": 5511480,
+                    "totalSize": 79691776,
+                    "usedSize": 75629252
+                  }
+                },
+                {
+                  "pid": 82105,
+                  "role": "auxiliary",
+                  "windowId": 5,
+                  "workingSetKiB": 491808,
+                  "physFootprintBytes": 336087104,
+                  "heap": {
+                    "backingStorageSize": 17474294,
+                    "embedderHeapUsedSize": 13340048,
+                    "totalSize": 207355904,
+                    "usedSize": 144715232
+                  }
+                },
+                {
+                  "pid": 82109,
+                  "role": "auxiliary",
+                  "windowId": 6,
+                  "workingSetKiB": 498896,
+                  "physFootprintBytes": 342542400,
+                  "heap": {
+                    "backingStorageSize": 17474302,
+                    "embedderHeapUsedSize": 12684552,
+                    "totalSize": 211812352,
+                    "usedSize": 143279916
+                  }
+                },
+                {
+                  "pid": 82664,
+                  "role": "auxiliary",
+                  "windowId": 7,
+                  "workingSetKiB": 489888,
+                  "physFootprintBytes": 333547632,
+                  "heap": {
+                    "backingStorageSize": 17470372,
+                    "embedderHeapUsedSize": 13271600,
+                    "totalSize": 205258752,
+                    "usedSize": 145570764
+                  }
+                },
+                {
+                  "pid": 82705,
+                  "role": "auxiliary",
+                  "windowId": 8,
+                  "workingSetKiB": 490960,
+                  "physFootprintBytes": 334809152,
+                  "heap": {
+                    "backingStorageSize": 17470365,
+                    "embedderHeapUsedSize": 13076312,
+                    "totalSize": 206045184,
+                    "usedSize": 151440248
+                  }
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 2402.7992630004883,
+              "workingSetMiB": 2986.046875,
+              "sampler": "proc_pid_rusage"
+            }
+          ]
+        },
+        {
+          "name": "after-all-closed",
+          "samples": [
+            {
+              "offsetMs": 0,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 217936,
+                  "physFootprintBytes": 153651168
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 87920,
+                  "physFootprintBytes": 473449600
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41872,
+                  "physFootprintBytes": 7832464
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245920,
+                  "physFootprintBytes": 370051424
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 209280,
+                  "physFootprintBytes": 154011352
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 1105.3047256469727,
+              "workingSetMiB": 784.109375,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 2000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 217888,
+                  "physFootprintBytes": 153602016
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 83760,
+                  "physFootprintBytes": 114852992
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41872,
+                  "physFootprintBytes": 7832464
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 245920,
+                  "physFootprintBytes": 370051424
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 209280,
+                  "physFootprintBytes": 154011352
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 763.2734756469727,
+              "workingSetMiB": 780,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 10000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 217680,
+                  "physFootprintBytes": 152111072
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 83776,
+                  "physFootprintBytes": 113804416
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41872,
+                  "physFootprintBytes": 7783312
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 246736,
+                  "physFootprintBytes": 370788704
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 209280,
+                  "physFootprintBytes": 154011352
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 761.5078506469727,
+              "workingSetMiB": 780.609375,
+              "sampler": "proc_pid_rusage"
+            },
+            {
+              "offsetMs": 30000,
+              "processes": [
+                {
+                  "pid": 77081,
+                  "role": "Browser",
+                  "windowId": null,
+                  "workingSetKiB": 217504,
+                  "physFootprintBytes": 147245024
+                },
+                {
+                  "pid": 77085,
+                  "role": "GPU",
+                  "windowId": null,
+                  "workingSetKiB": 83776,
+                  "physFootprintBytes": 110658688
+                },
+                {
+                  "pid": 77086,
+                  "role": "Utility",
+                  "windowId": null,
+                  "workingSetKiB": 41872,
+                  "physFootprintBytes": 7783312
+                },
+                {
+                  "pid": 77095,
+                  "role": "source",
+                  "windowId": 1,
+                  "workingSetKiB": 246736,
+                  "physFootprintBytes": 370788704,
+                  "heap": {
+                    "backingStorageSize": 28787647,
+                    "embedderHeapUsedSize": 7090208,
+                    "totalSize": 86589440,
+                    "usedSize": 82478372
+                  }
+                },
+                {
+                  "pid": 77296,
+                  "role": "owner",
+                  "windowId": 2,
+                  "workingSetKiB": 209280,
+                  "physFootprintBytes": 154011352,
+                  "heap": {
+                    "backingStorageSize": 7068322,
+                    "embedderHeapUsedSize": 1884512,
+                    "totalSize": 43057152,
+                    "usedSize": 33956268
+                  }
+                }
+              ],
+              "exitedPids": [],
+              "physFootprintMiB": 753.8672256469727,
+              "workingSetMiB": 780.4375,
+              "sampler": "proc_pid_rusage"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -21,7 +21,7 @@ afterEach(async () => {
   for (const stop of cleanup.splice(0).reverse()) await stop();
   vi.useRealTimers();
 });
-function fixture() {
+function fixture(rounds = 4) {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const stores = new Map<string, SessionDocStore>();
   const persisted = new Map<string, Uint8Array>();
@@ -43,7 +43,7 @@ function fixture() {
         acquisitions++;
         const doc = persisted.has(getSessionRoomId(id))
           ? new LoroDoc()
-          : buildSessionDoc(id === FIXTURE_SESSION_ID ? buildFixtureHistory(4) : []);
+          : buildSessionDoc(id === FIXTURE_SESSION_ID ? buildFixtureHistory(rounds) : []);
         if (persisted.has(getSessionRoomId(id))) {
           doc.import(persisted.get(getSessionRoomId(id))!);
         }
@@ -148,6 +148,20 @@ function fixture() {
 }
 
 describe('shared desktop session ownership', () => {
+  it('hands a new view its complete entry window and preceding user before mounting', async () => {
+    const f = fixture(50);
+    const store = await createSharedSessionClientStore(
+      f.connect('entry'),
+      'workspace-test',
+      FIXTURE_SESSION_ID
+    );
+    cleanup.push(() => store.dispose());
+    expect(store.history.turnCount).toBe(100);
+    for (let index = 58; index < 100; index++) expect(store.history.isHydrated(index)).toBe(true);
+    expect(store.history.turn(58)?.id).toBe('u-29');
+    expect(store.history.isHydrated(0)).toBe(false);
+  });
+
   it('keeps one document while independent views read and close', async () => {
     const f = fixture();
     const a = await f.open(f.connect('a'));

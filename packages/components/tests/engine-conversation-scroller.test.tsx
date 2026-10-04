@@ -48,6 +48,7 @@ type Ctx = {
   state: { current: ConversationScrollerState | null };
   /** Every offset the list reported through `onScroll`. */
   scrolls: number[];
+  materialized: Set<string>;
   setKeys: (keys: string[]) => void;
   viewport: () => HTMLElement;
   settle: () => Promise<void>;
@@ -144,6 +145,7 @@ function mount(
     }
   };
   const scrolls: number[] = [];
+  const materialized = new Set<string>();
   function List({ listKeys }: { listKeys: string[] }) {
     // Stands in for the view's position-derived state (hydration window,
     // outline): at offset 0 it changes the rows, which commits the list again.
@@ -153,11 +155,14 @@ function mount(
     return (
       <EngineConversationScroller
         sessionId={sessionId}
-        rows={shown.map((key): ReactElement => (
-          <div key={key} data-row-key={key}>
-            {key}
-          </div>
-        ))}
+        renderRow={(index): ReactElement => {
+          materialized.add(shown[index]!);
+          return (
+            <div key={shown[index]} data-row-key={shown[index]}>
+              {shown[index]}
+            </div>
+          );
+        }}
         rowMeta={shown.map((key, index) => meta(key, index))}
         item={Row}
         initialWindowReady
@@ -187,6 +192,7 @@ function mount(
     handle,
     state,
     scrolls,
+    materialized,
     viewport: () => host.firstElementChild as HTMLElement,
     setKeys(next) {
       keys = next;
@@ -515,6 +521,23 @@ it('a view that setStates on every onScroll does not nested-update-loop', async 
     expect(ctx.state.current?.revealed).toBe(true);
     expect(ctx.scrolls.length).toBeGreaterThan(0);
     expect(ctx.scrolls.length).toBeLessThan(20);
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('materializes only the mounted rows of a long conversation and creates jump targets on demand', async () => {
+  const ctx = mount('session-lazy-rows' as SessionId, rowKeys(3000));
+  try {
+    await ctx.settle();
+    expect(ctx.materialized.size).toBeLessThan(100);
+    expect(ctx.materialized.has('r0')).toBe(false);
+    expect(ctx.host.querySelector('[data-row-key="r2999"]')).not.toBeNull();
+    act(() => ctx.handle.current!.scrollRowToTop(0, { smooth: false, offset: 0 }));
+    await ctx.settle();
+    expect(ctx.materialized.has('r0')).toBe(true);
+    expect(ctx.host.querySelector('[data-row-key="r0"]')).not.toBeNull();
+    expect(ctx.handle.current!.scrollOffset).toBe(0);
   } finally {
     unmount(ctx);
   }

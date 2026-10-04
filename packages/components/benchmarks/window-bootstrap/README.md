@@ -1,5 +1,15 @@
 # Local window bootstrap benchmark
 
+The current direct-click comparison measures the real desktop path without hover.
+Earlier sections retain separate data-path, prepared-hit and memory experiments.
+
+| Mode | Entry | Measures |
+| --- | --- | --- |
+| Direct click | `PROBE_DIRECT_CLICK=1 node run-app.mjs` | Source row click through native show and composer input, no target intent lead |
+| Prepared target | `PROBE_PRODUCT_PREPARED=1 node run-app.mjs` | Explicitly controlled hover lead, readiness hit rate and retargeting |
+| Idle residency | `PROBE_RESIDENT_MEMORY=1 node run-app.mjs` | Electron physical footprint across eight window states |
+| Data / synthetic DOM | `run.mjs` | Bootstrap acquisition or isolated native presentation, excluding the product React tree |
+
 Run from `packages/components`:
 
 ```sh
@@ -38,6 +48,85 @@ DOM surface, signals readiness after two frames, and checks/captures the first
 native `show`. Its `claimToShowMs` begins at `presentWindowTarget`, not at a user
 click. The screenshot path is returned in JSON. This verifies hidden preparation
 and presentation ordering; it does not validate the full Lody React interface.
+
+## Direct click without hover — 2026-10-04
+
+[Recorded samples, stages and hashes](results-direct-click-2026-10-04.json) compare
+PR head `fc6e52e9e` with bounded rendering/data handoff, keeping shared Session
+ownership enabled in both builds. The same M4 Max, Electron 43.7.6, dependency tree,
+bundled CLI and probe are used. The long pair runs after then before; the short pair
+runs before then after, with fresh isolated profiles and no concurrent tests/builds.
+CPU profiling and the native animation override are disabled. Three warmups per run
+are retained in the artifact but excluded from the medians.
+
+| Synthetic entries | Samples per build | Before / after show median | Before / after input confirmation median |
+| --- | --- | --- | --- |
+| 3,000 | 10 | 367.29 / 227.02 ms | 422.08 / 286.59 ms |
+| 100 | 5 | 238.24 / 201.83 ms | 280.59 / 258.32 ms |
+
+For the long fixture, show improves 38.2% and input confirmation 32.1%. Final show
+ranges 220.89–247.66 ms; input ranges 266.41–319.78 ms. These results remain perceptible
+and do **not** meet a sub-100 ms direct-opening target. The short fixture's smaller
+15.3% show improvement also demonstrates the remaining per-window mount cost.
+
+This mode does not dispatch hover, modifier-hover or preparation intent. It rejects
+a target already being prepared and starts the timer immediately before dispatching
+Command-click to the real Session row. A neutral spare has booted for at least
+1.5 seconds, and the clicked Session is already open in the source. This measures
+an unpredicted target in an available shell, not cold application startup or the
+first acquisition of arbitrary uncached data. It cannot establish real-user P95.
+
+The product now constructs message elements only for the scroll engine's mounted
+plan and mounts only visible outline ticks plus retained interaction anchors. The
+initial owner response matches the 40-turn entry viewport and bounded preceding
+user context. A same-workspace acquisition gets up to 50 ms before route mounting;
+slow/failing storage still reaches the normal loading/error UI. An auxiliary
+conversation window mounts its collapsed sidebar on first expansion, then retains
+its state. Content hydration, initial scroll restoration and the two-frame native
+reveal gate remain required. The warm pool is still one runtime-only opt-in slot.
+
+In the final long run, the target renderer's DOM readiness median is 156.40 ms
+after target receipt; main receives content readiness at 187.89 ms after click,
+then native show occurs at 227.02 ms. Stage medians are diagnostic and must not be
+summed as if they came from one sample. Sharing document ownership alone cannot
+remove the remaining provider/composer rendering, layout and presentation work.
+
+A separate zero-lead retarget regression deliberately prepares a neighboring
+Session, then requests the clicked target in the same renderer: 157.55 ms show /
+212.71 ms input medians (three samples), 0/3 ready hits. The previous target's
+readiness never authorizes showing the next one. Across the four paired runs and
+this retarget run, all 48 first-show/content/input checks pass (15 discarded
+warmups), with no native unload confirmation. A [first-show capture](app-direct-click-first-show.png)
+was visually checked. Input uses a unique inserted token retained after a frame;
+it includes focus/verification IPC and excludes physical keyboard input, IME and
+screen scanout.
+
+Reproduce from components after building each product revision with the same
+staged CLI and dependencies:
+
+```sh
+PROBE_DIRECT_CLICK=1 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 10 direct-long 1500
+PROBE_DIRECT_CLICK=1 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 5 direct-short 50
+PROBE_PRODUCT_PREPARED=1 PROBE_RETARGET=1 PROBE_INTENT_LEAD_MS=0 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 3 retarget 1500
+```
+
+The final eight-stage resident probe completed 33 OS samples without forced GC or
+close confirmations. Electron physical footprint was 749.26 MiB source-only at
+45 seconds, 959.45 MiB with one prepared view at 45 seconds, and 733.48 MiB after
+destroying preparation at ten seconds. The prepared view therefore adds about
+210–226 MiB against those source-only observations; its renderer uses 191.31 MiB.
+After five auxiliaries close, the total is 753.87 MiB at 30 seconds, with no remaining
+auxiliary renderer. The existing 250–300 MiB planning budget remains appropriate
+for this fixture, not an enforced byte cap. This is one final-build run, not a new
+matched memory A/B or an hours-long leak test. All windows use the same Session,
+external CLI/daemon memory is excluded, and distinct-session cache retention remains
+unmeasured. Samples and accounting are in the same result artifact.
+
+The neutral-shell direct mode is the primary latency comparison. Historical hover
+hits below intentionally move work before the click and must not substitute for it.
+Intermediate profiling/prefill runs and a probe-only native-animation experiment
+are excluded from the paired result and retained as exploration references. The
+native experiment's small three-sample difference did not justify a product addon.
 
 ## Corrected measurement — 2026-09-23
 

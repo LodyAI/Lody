@@ -106,7 +106,7 @@ const EngineRowItem = memo(function EngineRowItem({
  */
 export function EngineConversationScroller({
   sessionId,
-  rows,
+  renderRow,
   rowMeta,
   item,
   keepMounted,
@@ -460,7 +460,7 @@ export function EngineConversationScroller({
         style={{ position: 'relative', width: '100%', overflowY: 'clip', overflowAnchor: 'none' }}
       >
         {plan.indices.map((index, position) => {
-          const element = rows[index];
+          const element = renderRow(index);
           if (!element) return null;
           return (
             <EngineRowItem

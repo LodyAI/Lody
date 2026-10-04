@@ -7,6 +7,10 @@ import type {
   SessionOwnerSnapshot,
 } from '@lody/shared/session-owner-protocol';
 import type { SessionDocStore, WorkspaceRuntime } from '../atoms/runtime';
+import {
+  INITIAL_CONVERSATION_WINDOW_TURNS,
+  precedingUserRangeStart,
+} from '../lib/conversation-view/types';
 
 const position = z.number().int().nonnegative();
 const identity = z.string().min(1).max(256);
@@ -103,7 +107,6 @@ export function createSharedSessionOwner(
         stopState();
         stopSync();
       };
-      await store.history.ready;
       return entry;
     });
     entries.set(sessionId, loading);
@@ -161,7 +164,10 @@ export function createSharedSessionOwner(
         );
         const directory = await entry.directory;
         const tail = await entry.store.sessionData.history.readRange(
-          Math.max(0, directory.length - 30),
+          precedingUserRangeStart(
+            directory.length - INITIAL_CONVERSATION_WINDOW_TURNS,
+            (index) => directory[index]?.scalars?.role
+          ),
           directory.length
         );
         return {

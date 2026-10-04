@@ -14,6 +14,10 @@ import type {
 import type { SessionDocState, SessionDocStore } from '../atoms/runtime';
 import type { RoomSyncState } from '../lib/room-sync-state';
 import { createConversationViewFromReader } from '../lib/conversation-view/create-conversation-view-from-reader';
+import {
+  INITIAL_CONVERSATION_WINDOW_TURNS,
+  precedingUserRangeStart,
+} from '../lib/conversation-view/types';
 
 export type SessionOwnerTransport = {
   request(request: SessionOwnerRequest): Promise<unknown>;
@@ -284,7 +288,15 @@ export async function createSharedSessionClientStore(
       },
     },
   };
-  const history = createConversationViewFromReader(reader, { sessionId });
+  const initialFrom = precedingUserRangeStart(
+    snapshot!.directory.length - INITIAL_CONVERSATION_WINDOW_TURNS,
+    (index) => snapshot!.directory[index]?.scalars?.role
+  );
+  const history = createConversationViewFromReader(reader, {
+    sessionId,
+    tailKeep: Math.max(INITIAL_CONVERSATION_WINDOW_TURNS, snapshot!.directory.length - initialFrom),
+  });
+  await history.ready;
   return {
     sessionId,
     roomId: getSessionRoomId(sessionId),
