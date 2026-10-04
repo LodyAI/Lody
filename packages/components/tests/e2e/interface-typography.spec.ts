@@ -6,6 +6,36 @@ const story = '/iframe.html?id=settings-interfacetypography--unified&viewMode=st
 const rhythmStory =
   '/iframe.html?id=sessions-assistantturnalignment--conversation-rhythm&viewMode=story';
 
+for (const theme of ['light', 'dark']) {
+  test(`subagent thought prose shares its activity summary and tool size: ${theme}`, async ({
+    page,
+  }) => {
+    await page.goto(
+      `/iframe.html?id=sessions-subagenttaskpanel--streamed-runs&viewMode=story&globals=theme:${theme}`
+    );
+    await page
+      .getByRole('button', { name: 'Explore · Map the ACP capability refresh path', exact: true })
+      .click();
+    const dialog = page.locator('[data-subagent-task-dialog]');
+    const summary = dialog.getByRole('button', {
+      name: 'Ran 1 command · Read 1 file',
+      exact: true,
+    });
+    const thought = dialog
+      .locator('.markdown-renderer p')
+      .filter({ hasText: 'Start from where the daemon reads capabilities.' });
+    const tool = dialog.getByRole('button', { name: 'Read acp-capabilities.ts', exact: true });
+    const summarySize = await summary
+      .locator('span')
+      .first()
+      .evaluate((node) => getComputedStyle(node).fontSize);
+    expect(summarySize).toBe('13px');
+    await expect(thought).toHaveCSS('font-size', summarySize);
+    await expect(thought).toHaveCSS('line-height', '18px');
+    await expect(tool).toHaveCSS('font-size', summarySize);
+  });
+}
+
 for (const [theme, width, size] of [
   ['dark', 1120, 14],
   ['light', 720, 16],

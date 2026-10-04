@@ -81,10 +81,10 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
 
 ## Content Contracts
 
-- Native child cancel requires subagentCancellation v1 and an exact parent turn;
-  never use durable whole-turn Stop or invent a terminal state in the panel.
-  A `run` task also needs subagentEvents v1 and `support.cancel`. Task rows and
-  their ONE dialog: [README.md](README.md#subagent-tasks).
+- Child cancel needs subagentCancellation v1 and an exact parent turn; never
+  Stop the parent or invent terminal state. Runs also need subagentEvents v1
+  and `support.cancel`. Dialogs share turn renderers/grouping and one scroller:
+  [task rows and dialog](README.md#subagent-tasks).
 
 - Text roles use `@lody/ui`; reading prose uses `conversation.readingLeading`.
   Compact prose/code use subheadline, never nested `em`. Message sizes use

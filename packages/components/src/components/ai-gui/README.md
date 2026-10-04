@@ -75,6 +75,8 @@ palette. `surface.ts` owns shared row and bubble styles; the Markdown renderer a
 code block own their element styles. A host can apply `createTheme(conversation, …)`
 to a subtree to change these values without descendant utility overrides.
 
+Activity thought prose uses compact Markdown at the same subheadline size and
+leading as its summary and tool rows, in the parent conversation and task dialog.
 Reading prose and user text use `readingLeading`, derived from the body role
 at 1.1 times its leading (22px at 14px). Compact tool prose and code retain their
 control leading. Explicit previews scale the reading token with their own size.
@@ -175,9 +177,20 @@ second line with its latest step, taken from the last `run.items` entry, then
 `run.progress`, then the legacy `summary`/`lastToolName`, so older tasks keep
 working. A row opens the panel's ONE dialog by task id (not a snapshot), so a
 streaming run keeps updating inside it and the view follows the end only while
-the reader is there. The dialog renders `run.items` through `view.tsx`'s turn
-renderers (`SubagentRunHistory`) and never passes a `searchBlockId`: search
-indexes the conversation, not a dialog.
+the reader is there. `subagent-run-history.tsx` groups `run.items` with the conversation's
+`buildAssistantTurnRenderBlocks`; `view.tsx` supplies the same activity headers,
+Markdown, plans and tool detail renderers used by the parent turn. Activity groups
+start open and can be folded without hiding the surrounding prose; their state
+survives streamed updates. File links use the parent session's file-open callback.
+No `searchBlockId` is passed: search indexes the conversation, not a dialog.
+
+`subagent-task-state.tsx` owns task aggregation and display-state helpers;
+`subagent-task-panel.tsx` owns rows and the selected task;
+`subagent-task-detail.tsx` owns the dialog body and cancellation. Panel, detail and
+run-history styles each live in their adjacent `.stylex.ts` file and use shared
+conversation spacing and UI text tokens. Background command briefs use the same
+`ToolCommandSection` and `ToolDetailSheet` as tool steps, including shell highlighting
+and conversation font sizing. The brief and activity share one vertical scroller.
 
 State comes from `run.snapshot.state` when present; the legacy `status` cannot
 say cancelled or unknown. `unknown` means Lody lost sight of the run, so the

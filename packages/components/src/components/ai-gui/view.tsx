@@ -177,6 +177,8 @@ import {
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './subagent-task-panel';
+import { SubagentRunMessageList } from './subagent-run-history';
+import { styles as subagentHistoryStyles } from './subagent-run-history.stylex';
 import { SessionReadonlyContext } from './session-readonly-context';
 import { UserMessageEditor } from './user-message-editor';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
@@ -4641,42 +4643,38 @@ const AssistantToolCallVirtualRow = memo(
     prev.fontSize === next.fontSize
 );
 
-/**
- * A subagent run's own steps, in its task dialog. They go through the turn
- * timeline's renderers, so a child's tool call reads exactly like the parent's.
- * Nothing here takes a `searchBlockId`: conversation search indexes the
- * conversation, and a dialog's content is not in it.
- */
-const SubagentRunHistory = ({
+/** Uses the parent conversation's content and activity renderers without search registration. */
+export const SubagentRunHistory = ({
   task,
   fontSize,
+  onFilePathClick,
 }: {
   task: SubagentTask;
   fontSize: ConversationFontSize;
+  onFilePathClick?: (filePath: string) => void;
 }) => {
   const { t } = useTranslation();
-  const run = task.run;
-  if (!run) return null;
-  const live = run.snapshot.state === 'running' || run.snapshot.state === 'pending';
-  const lastIndex = run.items.length - 1;
+  if (!task.run) return null;
   return (
-    <>
-      {run.items.map((item, index) => {
-        const streaming = live && index === lastIndex;
+    <SubagentRunMessageList
+      key={task.taskId}
+      task={task}
+      renderActivityHeader={(props) => <ActivityGroupHeader {...props} />}
+      renderItem={(item, streaming) => {
         switch (item.type) {
           case 'text':
             return (
               <MarkdownBlock
-                key={`text:${index}`}
                 text={item.text}
                 size={fontSize}
                 isStreaming={streaming}
+                onFilePathClick={onFilePathClick}
               />
             );
           case 'thought':
             return (
-              <ActivityProcessStep key={`thought:${index}`}>
-                <span className="sr-only">
+              <ActivityProcessStep>
+                <span {...stylex.props(subagentHistoryStyles.thoughtLabel)}>
                   {streaming
                     ? t('sessions.toolActivity.thinking', 'Thinking…')
                     : t('sessions.toolActivity.thought', 'Thought')}
@@ -4684,27 +4682,27 @@ const SubagentRunHistory = ({
                 <MarkdownRenderer
                   text={item.text}
                   size={fontSize}
+                  compact
                   className={ACTIVITY_STEP_BODY_CLASS}
                   isStreaming={streaming}
+                  onAgentFileLinkClick={onFilePathClick}
                 />
               </ActivityProcessStep>
             );
           case 'tool_call':
             return (
               <ToolCallCard
-                key={`tool:${item.toolCallId}`}
                 toolCall={item}
                 fontSize={fontSize}
                 inlineOutput
+                onFilePathClick={onFilePathClick}
               />
             );
           case 'plan':
-            return <PlanBlock key={`plan:${index}`} entries={item.entries} fontSize={fontSize} />;
-          default:
-            return null;
+            return <PlanBlock entries={item.entries} fontSize={fontSize} />;
         }
-      })}
-    </>
+      }}
+    />
   );
 };
 
@@ -4712,15 +4710,19 @@ const AssistantSubagentTasksRow = ({
   message,
   sessionId,
   fontSize,
+  onFilePathClick,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
   fontSize: ConversationFontSize;
+  onFilePathClick?: (filePath: string) => void;
 }) => {
   const tasks = useMemo(() => collectSubagentTasks(message.items), [message.items]);
   const renderHistory = useCallback(
-    (task: SubagentTask) => <SubagentRunHistory task={task} fontSize={fontSize} />,
-    [fontSize]
+    (task: SubagentTask) => (
+      <SubagentRunHistory task={task} fontSize={fontSize} onFilePathClick={onFilePathClick} />
+    ),
+    [fontSize, onFilePathClick]
   );
   const runtime = useAtomValue(runtimeAtom);
   const session = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
@@ -4745,6 +4747,7 @@ const AssistantSubagentTasksRow = ({
   return (
     <SubagentTaskPanel
       tasks={tasks}
+      fontSize={fontSize}
       onCancel={onCancel}
       runCancellation={machineSupportsSubagentEvents(machine)}
       renderHistory={renderHistory}
@@ -4831,6 +4834,7 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
       <MarkdownRenderer
         text={text}
         size={fontSize}
+        compact
         className={ACTIVITY_STEP_BODY_CLASS}
         isStreaming={isStreaming}
         searchBlockId={getThoughtSearchBlockId(messageId, itemIndex)}
@@ -5485,6 +5489,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
               message={message}
               sessionId={row.item.sessionId}
               fontSize={conversationFontSize}
+              onFilePathClick={onFilePathClick}
             />
           </>
         );

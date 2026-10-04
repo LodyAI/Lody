@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement, useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { SubagentTaskPanel, type SubagentTask } from '../src/components/ai-gui/subagent-task-panel';
+import { SubagentRunMessageList } from '../src/components/ai-gui/subagent-run-history';
+import { SubagentRunHistory } from '../src/components/ai-gui/view';
 import { initI18n } from '../src/i18n';
 
 (
@@ -149,7 +151,8 @@ describe('SubagentTaskPanel', () => {
     await act(async () => container.querySelectorAll<HTMLButtonElement>('button')[1]?.click());
 
     expect(peek()?.querySelector('pre')?.textContent).toBe(command);
-    expect(peek()?.querySelector('pre')?.getAttribute('aria-label')).toBe('Command');
+    expect(peek()?.querySelector('[aria-label="Command"] pre')?.textContent).toBe(command);
+    expect(peek()?.querySelector('[data-tool-detail-sheet] code')?.textContent).toBe(command);
     expect(peek()?.textContent).toContain('Completed');
   });
 
@@ -163,7 +166,9 @@ describe('SubagentTaskPanel', () => {
   });
 
   it('cancels a running subagent from its peek', async () => {
-    const onCancel = vi.fn(async () => undefined);
+    const onCancel = async (taskId: string) => {
+      throw new Error(`Cannot stop ${taskId}: disconnected`);
+    };
     render([task({ taskId: 'sub', taskKind: 'subagent', status: 'in_progress' })], onCancel);
 
     await act(async () => rowNamed('Claude task · find skills')?.click());
@@ -172,7 +177,10 @@ describe('SubagentTaskPanel', () => {
     );
     await act(async () => cancel?.click());
 
-    expect(onCancel).toHaveBeenCalledWith('sub');
+    expect(peek()?.querySelector('[role="alert"]')?.textContent).toBe(
+      'Cannot stop sub: disconnected'
+    );
+    expect(cancel?.disabled).toBe(false);
   });
 
   it("follows a streamed run's latest step on its row as steps arrive", () => {
@@ -357,5 +365,123 @@ describe('SubagentTaskPanel', () => {
 
     expect(peek()).not.toBeNull();
     expect(container.contains(peek())).toBe(false);
+  });
+
+  it('groups child activity like a conversation and keeps prose visible when folded', () => {
+    const subject = task({
+      taskId: 'grouped',
+      run: run('completed', [
+        { type: 'text', text: 'Checking the configuration.' },
+        { ...toolStep('read', 'Read config.ts'), kind: 'read', status: 'completed' },
+        { ...toolStep('command', 'Run pnpm test'), kind: 'execute', status: 'completed' },
+        { type: 'text', text: 'The configuration is valid.' },
+      ]),
+    });
+    act(() =>
+      root.render(
+        <SubagentRunMessageList
+          task={subject}
+          renderItem={(item) => (
+            <p>{item.type === 'tool_call' ? item.title : 'text' in item ? item.text : item.type}</p>
+          )}
+          renderActivityHeader={({ summary, expanded, onExpandedChange }) => (
+            <button aria-expanded={expanded} onClick={() => onExpandedChange(!expanded)}>
+              {summary.readFileCount} files · {summary.commandCount} commands
+            </button>
+          )}
+        />
+      )
+    );
+    expect(container.textContent).toContain('1 files · 1 commands');
+    expect(container.textContent).toContain('Run pnpm test');
+    act(() => container.querySelector<HTMLButtonElement>('button')?.click());
+    expect(container.textContent).not.toContain('Run pnpm test');
+    expect(container.textContent).toContain('Checking the configuration.');
+    expect(container.textContent).toContain('The configuration is valid.');
+    act(() => container.querySelector<HTMLButtonElement>('button')?.click());
+    expect(container.textContent).toContain('Read config.ts');
+  });
+
+  it('uses real conversation command/output rendering and opens the original file target', async () => {
+    const command = 'printf "$HOME"';
+    const filePath = '/worktrees/child/src/config.ts';
+    const subject = task({
+      taskId: 'real-renderers',
+      run: run('completed', [
+        {
+          type: 'tool_call',
+          toolCallId: 'shell',
+          title: 'Run printf',
+          kind: 'execute',
+          status: 'completed',
+          content: [
+            { type: 'terminal_command', command },
+            { type: 'content', content: { type: 'text', text: command } },
+            { type: 'terminal_output', output: '\u001b[32mready\u001b[0m' },
+          ],
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'file',
+          title: 'Read config.ts',
+          kind: 'read',
+          status: 'completed',
+          locations: [{ path: filePath }],
+        },
+      ]),
+    });
+    function History() {
+      const [openedPath, setOpenedPath] = useState('');
+      return (
+        <>
+          <SubagentRunHistory task={subject} fontSize={14} onFilePathClick={setOpenedPath} />
+          <output>{openedPath}</output>
+        </>
+      );
+    }
+    await act(async () => root.render(<History />));
+    const sheet = container.querySelector('[data-tool-detail-sheet]');
+    expect(sheet?.querySelector('code')?.textContent).toBe(command);
+    expect(
+      Array.from(sheet?.querySelectorAll('pre') ?? []).map((node) => node.textContent)
+    ).toEqual([command, 'ready']);
+    expect(container.querySelector('[data-search-block-id]')).toBeNull();
+    const file = Array.from(container.querySelectorAll('button')).find(
+      (button) =>
+        button.textContent?.startsWith('Read') && button.textContent?.includes('config.ts')
+    );
+    expect(file).toBeDefined();
+    act(() => file?.click());
+    expect(container.querySelector('output')?.textContent).toBe(filePath);
+  });
+
+  it('streams only the live tail and retains a folded activity group as output arrives', () => {
+    const first = { ...toolStep('command', 'Run pnpm test'), kind: 'execute' as const };
+    const draw = (items: RunItem[], state: Run['snapshot']['state'] = 'running') =>
+      act(() =>
+        root.render(
+          <SubagentRunMessageList
+            task={task({ taskId: 'live', run: run(state, items) })}
+            renderItem={(item, streaming) => (
+              <p data-streaming={streaming}>
+                {item.type === 'tool_call' ? item.title : 'text' in item ? item.text : item.type}
+              </p>
+            )}
+            renderActivityHeader={({ expanded, onExpandedChange }) => (
+              <button aria-expanded={expanded} onClick={() => onExpandedChange(!expanded)}>
+                Activity
+              </button>
+            )}
+          />
+        )
+      );
+    draw([first]);
+    expect(container.querySelector('[data-streaming="true"]')?.textContent).toBe('Run pnpm test');
+    act(() => container.querySelector<HTMLButtonElement>('button')?.click());
+    draw([first, { type: 'text', text: 'Done.' }]);
+    expect(container.textContent).not.toContain('Run pnpm test');
+    expect(container.querySelector('[data-streaming="true"]')?.textContent).toBe('Done.');
+    draw([first, { type: 'text', text: 'Done.' }], 'completed');
+    expect(container.querySelector('[data-streaming="true"]')).toBeNull();
   });
 });
