@@ -557,9 +557,9 @@ export function MobileAccountSettings({
                       <Menu.Content align="end">
                         <Menu.RadioGroup
                           value={member.role}
-                          onValueChange={(role) => {
-                            if (role === 'member' || role === 'admin') {
-                              void onUpdateRole(member, role);
+                          onValueChange={(nextRole) => {
+                            if (nextRole === 'member' || nextRole === 'admin') {
+                              void onUpdateRole(member, nextRole);
                             }
                           }}
                         >

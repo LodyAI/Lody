@@ -605,8 +605,8 @@ export function UnifiedProjectSelectorView({
             {filteredOptions.length > 0 ? (
               <Menu.RadioGroup
                 value={selectedValue ?? ''}
-                onValueChange={(value) => {
-                  const target = filteredOptions.find((option) => option.value === value);
+                onValueChange={(nextValue) => {
+                  const target = filteredOptions.find((option) => option.value === nextValue);
                   if (target) onChange(target.selection);
                 }}
               >
