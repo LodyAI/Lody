@@ -21,7 +21,7 @@ interface leading. Themes may override semantic tokens in a subtree. This adds
 no theme picker or persistence.
 
 Let `B` be interface body leading and `S` be subheadline leading, in pixels.
-Reading prose uses its own themeable leading `R = B × 1.1` (14px / 22px at Default).
+Reading prose uses its own themeable leading `R = B × 1.2` (14px / 24px at Default).
 User bubble text and ordinary Markdown use `R`; compact tool prose and code keep
 subheadline leading. Controls retain their interface roles. Message reserves follow
 `B` independently, so increasing reading leading does not automatically push rounds
@@ -29,17 +29,20 @@ farther apart.
 
 | Semantic distance | Rule | 12px text | 14px text | 16px text |
 | --- | --- | ---: | ---: | ---: |
-| Reading line height | `B × 1.1` | 18.9 | 22 | 25.1 |
+| Reading line height | `B × 1.2` | 20.6 | 24 | 27.4 |
 | Paragraph gap / bubble block padding | `max(12, B - 8)` | 12 | 12 | 14.9 |
 | Rich surface gap | `max(16, B - 4)` | 16 | 16 | 18.9 |
 | Activity minimum pitch | `max(24, S + 6)` | 24 | 24 | 26.6 |
-| Single-line list pitch | `max(24, R + 2)` | 24 | 24 | 27.1 |
+| Single-line list pitch | `max(24, R + 2)` | 24 | 26 | 29.4 |
 | User → response | `max(32, B × 1.8)` | 32 | 36 | 41.1 |
 | Answer → next user | `max(48, B × 2.8)` | 48 | 56 | 64 |
 
 Values in the table are rounded for reading; CSS retains fractional pixels.
 All five interface sizes (12–16px) follow these rules. Activity rows may grow
-for wrapped content; virtual wrappers add no process padding. Compact tool prose
+for wrapped content; individual tool-detail wrappers add no process padding.
+Progress prose and activity summaries use `proseGap = 6px` before
+each block, including inside expanded completed work. The first assistant row
+still adds no top gap. Tool details stay compact without compressing progress prose. Compact tool prose
 keeps its own tight paragraph/list rhythm.
 
 The user row owns `responseGap` below the bubble, including hover/focus actions.
@@ -68,3 +71,4 @@ only single-line lists or component-box distances.
 - [Synthetic stories](../packages/components/src/stories/AssistantTurnAlignment.stories.tsx),
   [browser coverage](../packages/components/tests/e2e/interface-typography.spec.ts).
 - [Decision and verification limits](../.agents/notes/implemented/simplification/2026-10-03-conversation-rhythm-stylex.md).
+- [Progress spacing correction](../.agents/notes/implemented/bug-fix/2026-10-04-conversation-progress-spacing.md).

@@ -64,10 +64,11 @@ for (const [theme, width, size] of [
       nodes.slice(0, 4).map((node) => node.getBoundingClientRect().height)
     );
     const bodyLeading = (20 * size) / 14;
-    const readingLeading = (22 * size) / 14;
+    const readingLeading = (24 * size) / 14;
     const activityPitch = Math.max(24, (18 * size) / 14 + 6);
-    for (const height of rows) {
-      expect(height).toBeCloseTo(activityPitch, 1);
+    for (const [index, height] of rows.entries()) {
+      const groupGap = index === 1 ? 6 : 0;
+      expect(height).toBeCloseTo(activityPitch + groupGap, 1);
     }
     const bubble = user.locator('[data-user-message-bubble]');
     const gap =
@@ -194,7 +195,7 @@ for (const mode of ['reading', 'reading-streaming']) {
     );
     const assistant = page.locator('[data-conversation-turn-id="rhythm-assistant-1"]');
     const paragraph = assistant.locator('.markdown-renderer p').first();
-    await metrics(paragraph, 14, 22);
+    await metrics(paragraph, 14, 24);
     await expect
       .poll(() =>
         paragraph.evaluate((node) => {
@@ -210,13 +211,46 @@ for (const mode of ['reading', 'reading-streaming']) {
       return Array.from(new Set(Array.from(range.getClientRects(), (rect) => rect.top)));
     });
     for (let index = 1; index < positions.length; index += 1) {
-      expect(positions[index] - positions[index - 1]).toBeCloseTo(22, 1);
+      expect(positions[index] - positions[index - 1]).toBeCloseTo(24, 1);
     }
     await metrics(assistant.locator('pre code'), 13, 18);
     await expect(assistant.locator('.markdown-renderer p').nth(1)).toHaveCSS(
       'margin-bottom',
       '12px'
     );
+  });
+}
+
+for (const mode of ['progress', 'progress-streaming']) {
+  test(`progress prose and tool summaries keep reading gaps in ${mode}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1120, height: 1500 });
+    await page.goto(
+      `${rhythmStory.replace('--conversation-rhythm', `--conversation-rhythm-${mode}`)}&globals=theme:dark`
+    );
+    const assistant = page.locator('[data-conversation-turn-id="rhythm-assistant-1"]');
+    if (mode === 'progress') {
+      await assistant.getByRole('button', { name: 'Finished working', exact: true }).click();
+    }
+    const paragraphs = assistant.locator('.markdown-renderer p');
+    const read = assistant.getByRole('button', { name: 'Read 1 file', exact: true });
+    const run = assistant.getByRole('button', { name: 'Ran 1 command', exact: true });
+    const blocks = [paragraphs.nth(0), read, paragraphs.nth(1), run, paragraphs.nth(2)];
+    for (const [index, block] of blocks.entries()) {
+      await expect(block).toBeVisible();
+      if (index === 0) continue;
+      const previous = (await blocks[index - 1]!.boundingBox())!;
+      const current = (await block.boundingBox())!;
+      expect(current.y - previous.y - previous.height).toBeCloseTo(6, 1);
+    }
+    await metrics(paragraphs.first(), 14, 24);
+    await read.click();
+    const step = assistant.getByRole('button', { name: 'Read search-index.ts', exact: true });
+    await expect(step).toBeVisible();
+    const headerBox = (await read.boundingBox())!;
+    expect((await step.boundingBox())!.y - headerBox.y - headerBox.height).toBeCloseTo(0, 1);
+    await read.click();
+    await expect(step).toHaveCount(0);
+    await expect(paragraphs.nth(1)).toBeVisible();
   });
 }
 
@@ -260,7 +294,7 @@ async function surfaces(page: Page, size: number) {
   await metrics(
     page.getByTestId('typography-message').locator('p').first(),
     size,
-    (22 * size) / 14
+    (24 * size) / 14
   );
   await metrics(
     page.getByTestId('typography-message').locator('h1'),
@@ -420,7 +454,7 @@ test('explicit message preview size is independent of the modern host scale', as
   ] as const) {
     await chooseSize(page, tier);
     const message = page.getByTestId('typography-message');
-    await metrics(message.locator('p').first(), 12, (22 * 12) / 14);
+    await metrics(message.locator('p').first(), 12, (24 * 12) / 14);
     await metrics(message.locator('h1'), (18 * 12) / 14, (24 * 12) / 14);
     for (const node of [message.locator('pre code'), message.locator('td').first()])
       await metrics(node, (13 * 12) / 14, (18 * 12) / 14);

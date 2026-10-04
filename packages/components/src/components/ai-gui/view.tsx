@@ -5528,18 +5528,13 @@ const AssistantChatItem = memo(function AssistantChatItem({
     }
   })();
 
-  /* Hierarchy (L1 worked → L2 step → L3 detail → L4 result).
-     Shared gap for process/answer siblings; footer sits tighter under the
-     answer so edited-files is not double-spaced by leading and row padding. */
+  // Progress prose keeps its reading gap even inside expanded work. Only
+  // individual activity details share the compact tool-row pitch.
   const turnSiblingGap = conversationSurface.proseRow;
-  const processSiblingGap = conversationSurface.processRow;
   /* Surfaces need more separation than prose, whose leading already supplies
      part of the visual gap. Keep both gaps in the conversation token group. */
   const cardSiblingGap = conversationSurface.surfaceRow;
   const verticalClass = (() => {
-    if (isWorkedDetail) {
-      return processSiblingGap;
-    }
     switch (content.kind) {
       case 'content':
         return isCardContentBlock(content.block) ? cardSiblingGap : turnSiblingGap;
@@ -5547,7 +5542,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return cardSiblingGap;
       case 'worked_group_header':
       case 'activity_group_header':
-        return processSiblingGap;
+        return turnSiblingGap;
       case 'subagent_tasks':
         return turnSiblingGap;
       case 'footer':

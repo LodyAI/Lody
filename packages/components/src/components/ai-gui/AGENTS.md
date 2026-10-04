@@ -70,8 +70,8 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   margin; footer bleed is trailing-only (`-mr-[7px]`).
   See `AssistantTurnAlignment.stories`.
 - Follow the StyleX [spacing contract](../../../../../specs/conversation-rhythm.md).
-  User rows own `responseGap`; last assistant rows own `roundGap`, including footer
-  and next-user metadata. Cache and memo comparison include boundary state.
+  User rows own `responseGap`; assistant tails own `roundGap` including footer/metadata.
+  Cache/memo include boundaries. Expanded work preserves prose and summary gaps.
 
 ## Conversation Outline
 
