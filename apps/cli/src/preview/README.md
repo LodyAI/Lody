@@ -1,4 +1,23 @@
-# Managed cloudflared lifecycle and distribution
+# Managed preview proxy and cloudflared
+
+## Embedded local authentication
+
+`local-preview-proxy.ts` exchanges a query capability for an HttpOnly, Secure,
+SameSite=None, Partitioned cookie on both local and remote endpoints. Chromium
+accepts Secure cookies on the literal loopback listener. SameSite=Lax cannot
+bootstrap cookies inside cross-site preview frames: first-level resources may
+authenticate through a token-bearing Referer, but nested module imports lack it.
+Local cookie names include the endpoint ID because cookies ignore TCP ports;
+opening another Session must not overwrite the first Session's credential.
+
+Every HTTP request and WebSocket upgrade still requires that endpoint's token.
+Matching Origin or a tokenless Referer cannot unlock the listener. Proxy cookies
+are stripped before forwarding to the development server. A 502 is a separate
+forwarding/upstream failure; inspect its response body instead of disabling
+authentication or the development server's origin checks.
+
+Evidence and browser-validation limits:
+[local module authentication](../../../../.agents/notes/implemented/bug-fix/2026-10-04-local-preview-module-auth.md).
 
 ## Process ownership
 

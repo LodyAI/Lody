@@ -69,6 +69,13 @@ type AcquireLocalPreviewEndpointOptions = {
 const LOCAL_PREVIEW_TOKEN_QUERY_PARAM = PREVIEW_ACCESS_TOKEN_QUERY_PARAM;
 const LOCAL_PREVIEW_TOKEN_COOKIE = PREVIEW_ACCESS_TOKEN_COOKIE;
 
+// Cookies ignore ports: each loopback listener needs its own name so opening
+// another Session cannot replace the credential for an existing module graph.
+const tokenCookieName = (record: LocalPreviewProxyRecord): string =>
+  record.remote
+    ? LOCAL_PREVIEW_TOKEN_COOKIE
+    : `${LOCAL_PREVIEW_TOKEN_COOKIE}_${record.endpoint.endpointId}`;
+
 const toUrlHost = (host: string): string => (host.includes(':') ? `[${host}]` : host);
 
 const buildLocalOrigin = (target: PreviewTarget): URL =>
@@ -577,9 +584,7 @@ export class LocalPreviewProxyManager {
     if (options?.queryOnly) {
       return false;
     }
-    if (
-      parseCookieHeader(request.headers.cookie).get(LOCAL_PREVIEW_TOKEN_COOKIE) === record.token
-    ) {
+    if (parseCookieHeader(request.headers.cookie).get(tokenCookieName(record)) === record.token) {
       return true;
     }
     if (this.isAuthorizedByTokenReferer(record, request)) {
@@ -624,9 +629,9 @@ export class LocalPreviewProxyManager {
     if (setTokenCookie) {
       sanitized.push([
         'set-cookie',
-        `${LOCAL_PREVIEW_TOKEN_COOKIE}=${encodeURIComponent(
+        `${tokenCookieName(record)}=${encodeURIComponent(
           record.token
-        )}; Path=/; HttpOnly; ${record.remote ? 'Secure; SameSite=None; Partitioned' : 'SameSite=Lax'}`,
+        )}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned`,
       ]);
     }
     // Fetch Headers already combined repeated names; upstream cookies were
