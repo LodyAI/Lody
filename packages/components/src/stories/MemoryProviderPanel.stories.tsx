@@ -32,6 +32,14 @@ export const Empty: Story = {
 };
 export const NotInstalled: Story = {
   args: { result: { type: 'machine/memory', status: 'not_installed', memories: [] } },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'Missing nmem stays on the settings page with an install action. It does not open a dialog.',
+      },
+    },
+  },
 };
 export const NotRunning: Story = {
   args: { result: { type: 'machine/memory', status: 'not_running', memories: [] } },

@@ -21,15 +21,19 @@ Daemon 负责检测安装与运行状态、列出和创建身份，以及将身�
 Provider 向界面提供名称、安装链接和支持的创建字段。调用方不能通过记忆 RPC 传入命令
 或任意环境变量字典。
 
-首个适配器为 Nowledge Mem。执行 `nmem status -j`；找不到可执行文件时提供
-`https://mem.nowledge.co/en`，状态不是 `ok` 时提示启动 Mem 后刷新。就绪后执行
+首个适配器为 Nowledge Mem。执行 `nmem status -j`；找不到可执行文件时，在该机器的
+记忆设置页（以及 Role 记忆选择区）内显示说明文案，并提供
+`https://mem.nowledge.co/en`；状态不是 `ok` 时提示启动 Mem 后刷新。进入记忆设置
+仍会自动探测当前机器。nmem 未安装或未运行不得弹出对话框。就绪后执行
 `nmem agents list -j`，读取 `agentProfiles`。创建执行 `nmem agents enroll <id> -j`，
-可选填写名称、描述、角色和默认 Space。Enrollment 只创建新身份，已有 ID 保持原档案，
-最终以 Provider 返回的列表为准。
+可选填写名称、描述、角色和默认 Space，表单复用现有设置编辑对话框。Enrollment
+只创建新身份，已有 ID 保持原档案，最终以 Provider 返回的列表为准。
 
-设置页的 Provider 区域默认展开，标题栏包含刷新和创建按钮，空状态也提供创建入口。
-纯本地平台不显示远程机器选择。离线机器以及未声明 `memoryProviders` v1 的 daemon
-不会收到记忆 RPC。请求沿用现有本地/远程机器路由，本地失败不回退到远程传输。
+设置页复用 Agents 的机器选择：桌面窗格在可见机器多于一台时使用 line tabs，窗格外
+使用 pills，纯本地平台不显示远程机器选择。当前机器的 Provider 是目录分组，标题栏
+包含刷新和创建按钮，空状态也提供创建入口。Role 编辑器的记忆区保持折叠，展开后使用
+同一套身份列表、状态文案和安装链接。离线机器以及未声明 `memoryProviders` v1 的
+daemon 不会收到记忆 RPC。请求沿用现有本地/远程机器路由，本地失败不回退到远程传输。
 
 ## 执行
 

@@ -1,14 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Check, Plus, RefreshCw } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { Dialog } from '@lody/ui/dialog';
 import { Input } from '@lody/ui/input';
 import { Spinner } from '@lody/ui/spinner';
-import { CompactRow, settingsRecordsCard } from './compact-layout';
-import { settingsSurface as surface } from './surface';
+import { Dialog } from '@/ui/dialog';
+import {
+  CompactRow,
+  CompactSection,
+  SettingsEmptyList,
+  settingsRecordsCard,
+} from './compact-layout';
+import {
+  SETTINGS_EDITOR_DIALOG_LAYOUT,
+  SETTINGS_EDITOR_DIALOG_WIDTH,
+  settingsCatalog as catalog,
+  settingsSurface as surface,
+} from './surface';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import {
   MEMORY_PROVIDERS,
@@ -16,31 +26,34 @@ import {
   machineSupportsMemoryProviders,
   type MachineId,
   type MemoryBinding,
+  type MemoryCreateInput,
   type MemoryIdentity,
   type MemoryProviderResponse,
 } from '@lody/shared';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
-import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
+import { useMachineOnlineStatus, useOnlineMachineIds } from '@/hooks/use-machine-online-status';
+import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import { useMemoryProvider } from '@/hooks/use-memory-provider';
 import { useAppCapability } from '@/lib/app-platform';
+import { withClassName } from '@/lib/stylex';
 import { openExternalUrl } from '@/lib/native-browser';
 import { MachinePills } from './machine-pills';
-import { CollapsibleSection, Field, FormMessage } from './form-primitives';
-import { SettingsPageLead } from './settings-page-header';
+import { Field, FormMessage, Section } from './form-primitives';
+import {
+  SettingsPageActions,
+  SettingsPageLead,
+  useInSettingsPane,
+  useSettingsPane,
+} from './settings-page-header';
+import { SettingsLineTabs } from './settings-line-tabs';
 
 const styles = stylex.create({
-  stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
-  row: { display: 'flex', alignItems: 'center', gap: space[2] },
-  empty: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: space[3],
-    padding: space[4],
-  },
-  identity: { display: 'flex', flexDirection: 'column', gap: space[1], overflowWrap: 'anywhere' },
+  page: { display: 'flex', flexDirection: 'column', gap: space[4], width: '100%', minWidth: 0 },
+  addGlyph: { width: '14px', height: '14px' },
 });
+
+type Provider = (typeof MEMORY_PROVIDERS)[number];
 
 export function MemoryIdentityList({
   memories,
@@ -52,44 +65,91 @@ export function MemoryIdentityList({
   onSelect?: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  if (memories.length === 0) {
+    return <SettingsEmptyList>{t('settings.memory.empty')}</SettingsEmptyList>;
+  }
   return (
     <div {...stylex.props(settingsRecordsCard)}>
       {memories.map((memory, index) => (
         <div key={memory.id} {...stylex.props(surface.line, index > 0 && surface.lineRuled)}>
-          <CompactRow
-            label={memory.name}
-            helper={
-              <span {...stylex.props(styles.identity)}>
-                <span>{memory.id}</span>
-                {memory.description ? <span>{memory.description}</span> : null}
-              </span>
-            }
-          >
-            {onSelect ? (
-              <Button
-                type="button"
-                size="small"
-                variant={selected === memory.id ? 'secondary' : 'ghost'}
-                aria-label={t('settings.memory.linkName', { name: memory.name })}
-                aria-pressed={selected === memory.id}
-                onClick={() => onSelect(memory.id)}
-              >
-                {selected === memory.id ? <Check size={14} /> : null}
-                {t(selected === memory.id ? 'settings.memory.linked' : 'settings.memory.link')}
-              </Button>
-            ) : null}
-          </CompactRow>
+          <MemoryIdentityRow memory={memory} selected={selected} onSelect={onSelect} />
         </div>
       ))}
     </div>
   );
 }
 
+function MemoryIdentityRow({
+  memory,
+  selected,
+  onSelect,
+}: {
+  memory: MemoryIdentity;
+  selected?: string;
+  onSelect?: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  const linked = selected === memory.id;
+  return (
+    <div {...stylex.props(catalog.row)}>
+      {onSelect ? (
+        <button
+          type="button"
+          onClick={() => onSelect(memory.id)}
+          aria-label={t('settings.memory.linkName', { name: memory.name })}
+          aria-pressed={linked}
+          {...stylex.props(catalog.rowMain, surface.pressableLine)}
+        >
+          <MemoryIdentityCopy memory={memory} />
+        </button>
+      ) : (
+        <div {...stylex.props(catalog.rowMain)}>
+          <MemoryIdentityCopy memory={memory} />
+        </div>
+      )}
+      {onSelect ? (
+        <div {...stylex.props(catalog.actions)}>
+          {linked ? (
+            <Button type="button" size="small" variant="secondary" aria-pressed="true">
+              <Check {...stylex.props(catalog.icon)} />
+              {t('settings.memory.linked')}
+            </Button>
+          ) : (
+            <Button type="button" size="small" variant="ghost" onClick={() => onSelect(memory.id)}>
+              {t('settings.memory.link')}
+            </Button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MemoryIdentityCopy({ memory }: { memory: MemoryIdentity }) {
+  return (
+    <span {...stylex.props(catalog.body)}>
+      <span {...stylex.props(catalog.titleLine)}>
+        <span {...stylex.props(catalog.name)}>{memory.name}</span>
+      </span>
+      <span {...stylex.props(catalog.meta)}>
+        <span {...stylex.props(catalog.truncate, catalog.mono)}>{memory.id}</span>
+      </span>
+      {memory.description != null && memory.description.length > 0 ? (
+        <span {...stylex.props(catalog.meta, catalog.metaHint)}>
+          <span {...stylex.props(catalog.truncate)}>{memory.description}</span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export function MemorySetting() {
   const { t } = useTranslation();
-  const { machines } = useVisibleMachineMetas();
+  const { machines, accessByMachineId } = useVisibleMachineMetas();
   const localId = useAtomValue(localMachineIdAtom);
+  const onlineMachineIds = useOnlineMachineIds();
   const remote = useAppCapability('remoteMachines');
+  const inSettingsPane = useInSettingsPane();
   const [selected, setSelected] = useState<MachineId | null>(null);
   const machineId = remote
     ? selected && machines.has(selected)
@@ -98,14 +158,52 @@ export function MemorySetting() {
         ? localId
         : (machines.keys().next().value ?? null)
     : localId;
+  const pills = useMemo(
+    () =>
+      [...machines.values()]
+        .map((machine) => ({
+          id: machine.id,
+          label: machine.name || machine.id,
+          online: onlineMachineIds.has(machine.id),
+          private: !(accessByMachineId.get(machine.id)?.sharedWithTeam ?? false),
+        }))
+        .sort((left, right) => {
+          if (left.online !== right.online) return left.online ? -1 : 1;
+          return left.label.localeCompare(right.label);
+        }) satisfies { id: MachineId; label: string; online: boolean; private: boolean }[],
+    [accessByMachineId, machines, onlineMachineIds]
+  );
+
   return (
-    <div {...stylex.props(styles.stack)}>
+    <div {...stylex.props(surface.container, styles.page)}>
       <SettingsPageLead>{t('settings.memory.description')}</SettingsPageLead>
-      {remote ? (
+      {remote && !inSettingsPane ? (
         <MachinePills
-          pills={Array.from(machines, ([id, machine]) => ({ id, label: machine.name }))}
+          pills={pills}
           selectedId={machineId}
           onSelect={(id) => setSelected(id as MachineId)}
+        />
+      ) : null}
+      {remote && inSettingsPane && pills.length > 1 && machineId ? (
+        <SettingsLineTabs
+          ruled
+          label={t('settings.agent.machineTabs.machine', 'Machine')}
+          current={machineId}
+          onChange={setSelected}
+          overflow={{
+            label: (count) => t('settings.agent.machineTabs.more', '{{count}} more', { count }),
+            searchPlaceholder: t('settings.agent.machineTabs.search', 'Search machines'),
+          }}
+          tabs={pills.map((pill) => ({
+            id: pill.id,
+            label: pill.label,
+            leading: (
+              <span
+                aria-hidden="true"
+                {...stylex.props(catalog.statusDot, pill.online && catalog.statusDotOnline)}
+              />
+            ),
+          }))}
         />
       ) : null}
       {machineId ? (
@@ -118,13 +216,12 @@ export function MemorySetting() {
           />
         ))
       ) : (
-        <p>{t('settings.memory.noMachine')}</p>
+        <SettingsEmptyList>{t('settings.memory.noMachine')}</SettingsEmptyList>
       )}
     </div>
   );
 }
 
-type Provider = (typeof MEMORY_PROVIDERS)[number];
 function MemoryProviderSection({
   machineId,
   provider,
@@ -135,6 +232,8 @@ function MemoryProviderSection({
   supported: boolean;
 }) {
   const { t } = useTranslation();
+  const settingsPane = useSettingsPane();
+  const inSettingsPane = useInSettingsPane();
   const online = useMachineOnlineStatus(machineId) === 'online';
   const { result, busy, refresh, create } = useMemoryProvider(
     machineId,
@@ -142,86 +241,75 @@ function MemoryProviderSection({
     online && supported
   );
   const [open, setOpen] = useState(false);
-  const [notice, setNotice] = useState<MemoryProviderResponse['status']>();
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [error, setError] = useState(false);
-  useEffect(() => {
-    if (result?.status === 'not_installed' || result?.status === 'not_running')
-      setNotice(result.status);
-  }, [result]);
-  const createMemory = async () => {
-    const parsed = MemoryCreateInputSchema.safeParse(values);
-    if (!parsed.success) {
-      setError(true);
+  const { shown, onOpenChangeComplete } = useDialogExitSnapshot(open ? provider : null);
+  const ready = result?.status === 'ready';
+  const canMutate = online && supported && !busy;
+  const openCreate = async () => {
+    if (ready) {
+      setOpen(true);
       return;
     }
-    const response = await create(parsed.data);
-    if (response?.status === 'ready') {
-      setOpen(false);
-      setValues({});
-      setError(false);
-    } else setError(true);
-  };
-  const check = async (creating: boolean) => {
     const response = await refresh();
-    if (response?.status === 'ready') {
-      if (creating) setOpen(true);
-    } else if (response) setNotice(response.status);
+    if (response?.status === 'ready') setOpen(true);
   };
+
   return (
     <>
+      {inSettingsPane ? (
+        <SettingsPageActions>
+          <Button
+            type="button"
+            size="small"
+            variant="ghost"
+            disabled={!canMutate}
+            aria-label={t('settings.memory.refresh')}
+            onClick={() => void refresh()}
+          >
+            <RefreshCw {...stylex.props(styles.addGlyph)} />
+            {t('settings.memory.refresh')}
+          </Button>
+          <Button
+            type="button"
+            size="small"
+            variant="secondary"
+            disabled={!canMutate || (result !== undefined && !ready)}
+            onClick={() => void openCreate()}
+          >
+            <Plus {...stylex.props(styles.addGlyph)} />
+            {t('settings.memory.create')}
+          </Button>
+        </SettingsPageActions>
+      ) : null}
       <MemoryProviderPanel
         provider={provider}
         online={online}
         supported={supported}
         busy={busy}
         result={result}
-        onRefresh={() => void check(false)}
-        onCreate={() => void check(true)}
+        onRefresh={() => void refresh()}
+        onCreate={() => void openCreate()}
       />
-      <Dialog.Root open={open} onOpenChange={setOpen}>
-        <Dialog.Content>
+      <Dialog.Root open={open} onOpenChange={setOpen} onOpenChangeComplete={onOpenChangeComplete}>
+        <Dialog.Content
+          width={SETTINGS_EDITOR_DIALOG_WIDTH}
+          centerOn={settingsPane}
+          className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        >
           <Dialog.Header>
             <Dialog.Title>{t('settings.memory.create')}</Dialog.Title>
             <Dialog.Description>{provider.name}</Dialog.Description>
           </Dialog.Header>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void createMemory();
-            }}
-            {...stylex.props(styles.stack)}
-          >
-            {provider.createFields.map((key) => (
-              <Field key={key} label={t(`settings.memory.fields.${key}`)}>
-                <Input
-                  aria-label={t(`settings.memory.fields.${key}`)}
-                  required={key === 'id'}
-                  value={values[key] ?? ''}
-                  onChange={(event) => setValues({ ...values, [key]: event.target.value })}
-                />
-              </Field>
-            ))}
-            {error ? (
-              <FormMessage tone="error">{t('settings.memory.createError')}</FormMessage>
-            ) : null}
-            <Button type="submit" disabled={busy}>
-              {t('settings.memory.create')}
-            </Button>
-          </form>
-        </Dialog.Content>
-      </Dialog.Root>
-      <Dialog.Root
-        open={notice !== undefined}
-        onOpenChange={(value) => {
-          if (!value) setNotice(undefined);
-        }}
-      >
-        <Dialog.Content>
-          <Dialog.Header>
-            <Dialog.Title>{provider.name}</Dialog.Title>
-          </Dialog.Header>
-          <MemoryStatus status={notice} installUrl={provider.installUrl} />
+          {shown ? (
+            <MemoryCreateForm
+              provider={shown}
+              busy={busy}
+              onCancel={() => setOpen(false)}
+              onCreated={() => {
+                setOpen(false);
+              }}
+              create={create}
+            />
+          ) : null}
         </Dialog.Content>
       </Dialog.Root>
     </>
@@ -247,61 +335,116 @@ export function MemoryProviderPanel({
 }) {
   const { t } = useTranslation();
   return (
-    <CollapsibleSection
+    <CompactSection
       title={provider.name}
-      defaultOpen
-      action={
-        <div {...stylex.props(styles.row)}>
-          <Button
-            type="button"
-            size="small"
-            variant="ghost"
-            icon
-            disabled={busy || !online || !supported}
-            aria-label={t('settings.memory.refresh')}
-            onClick={onRefresh}
-          >
-            <RefreshCw size={14} />
-          </Button>
-          <Button
-            type="button"
-            size="small"
-            variant="ghost"
-            icon
-            disabled={busy || !online || !supported}
-            aria-label={t('settings.memory.create')}
-            onClick={onCreate}
-          >
-            <Plus size={14} />
-          </Button>
-        </div>
-      }
+      boxed
+      actions={[
+        <Button
+          key="refresh"
+          type="button"
+          size="small"
+          variant="ghost"
+          icon
+          disabled={busy || !online || !supported}
+          aria-label={t('settings.memory.refresh')}
+          onClick={onRefresh}
+        >
+          <RefreshCw {...stylex.props(catalog.icon)} />
+        </Button>,
+        <Button
+          key="create"
+          type="button"
+          size="small"
+          variant="ghost"
+          icon
+          disabled={
+            busy || !online || !supported || (result !== undefined && result.status !== 'ready')
+          }
+          aria-label={t('settings.memory.create')}
+          onClick={onCreate}
+        >
+          <Plus {...stylex.props(catalog.icon)} />
+        </Button>,
+      ]}
     >
-      {!online ? (
-        <p>{t('settings.memory.offline')}</p>
-      ) : !supported ? (
-        <p>{t('settings.memory.unsupported')}</p>
-      ) : busy ? (
-        <Spinner />
-      ) : result?.status === 'ready' ? (
-        result.memories.length ? (
-          <MemoryIdentityList memories={result.memories} />
-        ) : (
-          <div {...stylex.props(styles.empty)}>
-            <p>{t('settings.memory.empty')}</p>
-            <Button type="button" onClick={onCreate}>
-              {t('settings.memory.create')}
-            </Button>
-          </div>
-        )
-      ) : (
-        <MemoryStatus status={result?.status} installUrl={provider.installUrl} />
-      )}
-    </CollapsibleSection>
+      {memoryProviderState(t, {
+        online,
+        supported,
+        busy,
+        result,
+        installUrl: provider.installUrl,
+        onCreate,
+      })}
+    </CompactSection>
   );
 }
 
-function MemoryStatus({
+function memoryProviderState(
+  t: ReturnType<typeof useTranslation>['t'],
+  {
+    online,
+    supported,
+    busy,
+    result,
+    installUrl,
+    onCreate,
+    selected,
+    onSelect,
+    emptyRole,
+  }: {
+    online: boolean;
+    supported: boolean;
+    busy: boolean;
+    result?: MemoryProviderResponse;
+    installUrl: string;
+    onCreate?: () => void;
+    selected?: string;
+    onSelect?: (id: string) => void;
+    emptyRole?: boolean;
+  }
+): ReactNode {
+  if (!online) {
+    return <MemoryCatalogNote>{t('settings.memory.offline')}</MemoryCatalogNote>;
+  }
+  if (!supported) {
+    return <MemoryCatalogNote>{t('settings.memory.unsupported')}</MemoryCatalogNote>;
+  }
+  if (busy && !result) {
+    return (
+      <MemoryCatalogNote>
+        <Spinner size="small" />
+      </MemoryCatalogNote>
+    );
+  }
+  if (result?.status === 'ready') {
+    if (result.memories.length) {
+      return result.memories.map((memory) => (
+        <MemoryIdentityRow
+          key={memory.id}
+          memory={memory}
+          selected={selected}
+          onSelect={onSelect}
+        />
+      ));
+    }
+    return (
+      <MemoryCatalogNote
+        action={
+          onCreate ? (
+            <Button type="button" size="small" variant="secondary" onClick={onCreate}>
+              {t('settings.memory.create')}
+            </Button>
+          ) : undefined
+        }
+      >
+        {t(emptyRole === true ? 'settings.memory.emptyRole' : 'settings.memory.empty')}
+      </MemoryCatalogNote>
+    );
+  }
+  return <MemoryStatus status={result?.status} installUrl={installUrl} />;
+}
+
+export function MemoryStatus({
   status,
   installUrl,
 }: {
@@ -310,14 +453,107 @@ function MemoryStatus({
 }) {
   const { t } = useTranslation();
   return (
-    <div {...stylex.props(styles.stack)}>
-      <p>{t(`settings.memory.status.${status ?? 'error'}`)}</p>
-      {status === 'not_installed' ? (
-        <Button type="button" onClick={() => void openExternalUrl(installUrl)}>
-          {t('settings.memory.install')}
-        </Button>
-      ) : null}
+    <MemoryCatalogNote
+      action={
+        status === 'not_installed' ? (
+          <Button
+            type="button"
+            size="small"
+            variant="secondary"
+            onClick={() => void openExternalUrl(installUrl)}
+          >
+            {t('settings.memory.install')}
+          </Button>
+        ) : undefined
+      }
+    >
+      {t(`settings.memory.status.${status ?? 'error'}`)}
+    </MemoryCatalogNote>
+  );
+}
+
+function MemoryCatalogNote({ children, action }: { children: ReactNode; action?: ReactNode }) {
+  return action != null ? (
+    <div {...stylex.props(surface.cardNote, surface.cardNoteWithAction)}>
+      <span>{children}</span>
+      {action}
     </div>
+  ) : (
+    <p {...stylex.props(surface.cardNote)}>{children}</p>
+  );
+}
+
+function MemoryCreateForm({
+  provider,
+  busy,
+  create,
+  onCreated,
+  onCancel,
+}: {
+  provider: Provider;
+  busy: boolean;
+  create: (input: MemoryCreateInput) => Promise<MemoryProviderResponse | undefined>;
+  onCreated: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const fieldId = useId();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [error, setError] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const parsed = MemoryCreateInputSchema.safeParse(
+      Object.fromEntries(
+        Object.entries(values)
+          .map(([key, value]) => [key, value.trim()] as const)
+          .filter(([key, value]) => key === 'id' || value.length > 0)
+      )
+    );
+    if (!parsed.success) {
+      setError(true);
+      return;
+    }
+    const response = await create(parsed.data);
+    if (response?.status === 'ready') {
+      setError(false);
+      onCreated();
+      return;
+    }
+    setError(true);
+  };
+  return (
+    <form {...stylex.props(catalog.editorForm)} onSubmit={(event) => void submit(event)}>
+      <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
+        <Section title={provider.name}>
+          {provider.createFields.map((key) => (
+            <Field
+              key={key}
+              htmlFor={`${fieldId}-${key}`}
+              label={t(`settings.memory.fields.${key}`)}
+            >
+              <Input
+                id={`${fieldId}-${key}`}
+                aria-label={t(`settings.memory.fields.${key}`)}
+                required={key === 'id'}
+                autoComplete="off"
+                value={values[key] ?? ''}
+                onChange={(event) => setValues({ ...values, [key]: event.target.value })}
+              />
+            </Field>
+          ))}
+        </Section>
+        {error ? <FormMessage tone="error">{t('settings.memory.createError')}</FormMessage> : null}
+      </div>
+      <Dialog.Footer>
+        <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>
+          {t('common.cancel')}
+        </Button>
+        <Button type="submit" disabled={busy}>
+          {busy ? <Spinner size="small" aria-hidden="true" /> : null}
+          {t('settings.memory.create')}
+        </Button>
+      </Dialog.Footer>
+    </form>
   );
 }
 
@@ -335,21 +571,18 @@ export function RoleMemoryPicker({
   const online = useMachineOnlineStatus(machineId) === 'online';
   const supported = machineSupportsMemoryProviders(machines.get(machineId));
   return (
-    <div {...stylex.props(styles.stack)}>
+    <div {...stylex.props(catalog.stack)}>
       {value ? (
-        <>
-          <span>
-            {value.providerId} / {value.memoryId}
-          </span>
-          <Button type="button" onClick={() => onChange(undefined)}>
+        <CompactRow label={`${value.providerId} / ${value.memoryId}`}>
+          <Button type="button" size="small" variant="ghost" onClick={() => onChange(undefined)}>
             {t('settings.memory.unlink')}
           </Button>
-        </>
+        </CompactRow>
       ) : null}
       {!online ? (
-        <p>{t('settings.memory.offline')}</p>
+        <SettingsEmptyList>{t('settings.memory.offline')}</SettingsEmptyList>
       ) : !supported ? (
-        <p>{t('settings.memory.unsupported')}</p>
+        <SettingsEmptyList>{t('settings.memory.unsupported')}</SettingsEmptyList>
       ) : (
         MEMORY_PROVIDERS.map((provider) => (
           <RoleProviderMemories
@@ -364,6 +597,7 @@ export function RoleMemoryPicker({
     </div>
   );
 }
+
 function RoleProviderMemories({
   machineId,
   provider,
@@ -378,27 +612,33 @@ function RoleProviderMemories({
   const { t } = useTranslation();
   const { result, busy, refresh } = useMemoryProvider(machineId, provider.id, true);
   return (
-    <div {...stylex.props(styles.stack)}>
-      <div {...stylex.props(styles.row)}>
-        <span>{provider.name}</span>
-        <Button type="button" disabled={busy} onClick={() => void refresh()}>
-          {t('settings.memory.refresh')}
+    <CompactSection
+      title={provider.name}
+      boxed
+      actions={
+        <Button
+          type="button"
+          size="small"
+          variant="ghost"
+          icon
+          disabled={busy}
+          aria-label={t('settings.memory.refresh')}
+          onClick={() => void refresh()}
+        >
+          <RefreshCw {...stylex.props(catalog.icon)} />
         </Button>
-      </div>
-      {busy ? (
-        <Spinner />
-      ) : result?.status === 'ready' ? (
-        <>
-          <MemoryIdentityList
-            memories={result.memories}
-            selected={value?.providerId === provider.id ? value.memoryId : undefined}
-            onSelect={(memoryId) => onChange({ providerId: provider.id, memoryId })}
-          />
-          {!result.memories.length ? <p>{t('settings.memory.emptyRole')}</p> : null}
-        </>
-      ) : (
-        <MemoryStatus status={result?.status} installUrl={provider.installUrl} />
-      )}
-    </div>
+      }
+    >
+      {memoryProviderState(t, {
+        online: true,
+        supported: true,
+        busy,
+        result,
+        installUrl: provider.installUrl,
+        emptyRole: true,
+        selected: value?.providerId === provider.id ? value.memoryId : undefined,
+        onSelect: (memoryId) => onChange({ providerId: provider.id, memoryId }),
+      })}
+    </CompactSection>
   );
 }

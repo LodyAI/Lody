@@ -40,6 +40,13 @@ Instead commands and environment mapping stay in daemon adapters; the UI consume
 common statuses, identity records and basic creation fields. It also preserves
 machine/runtime ownership so late replies cannot replace a newly selected machine.
 
+The Memory page reuses the Agents machine selector and catalog section so it does
+not invent a second settings visual. Auto-detect still runs on entry. Missing nmem
+is in-page copy plus `https://mem.nowledge.co/en`, because a blocking dialog would
+interrupt every visit after that probe. Create keeps the existing settings editor
+dialog. The Role editor Memory group stays collapsed until expanded, then uses the
+same list, status copy, and install link.
+
 ## Validation
 
 Adapter tests cover missing/inactive services, malformed responses, literal argv
@@ -50,7 +57,9 @@ manager coverage checks that retirement emits no old lifecycle events.
 
 Type checks, lint, i18n, platform/public boundaries and docs checks pass. Electron's
 199 tests pass. Storybook browser checks cover ready, empty, missing installation,
-inactive, offline and loading states, plus accordion interaction, without page errors.
+inactive, offline and loading states, plus catalog-section interaction, without page
+errors. Component tests cover the in-page missing-install path, create-dialog gating,
+local-only machine selector omission, and pane vs pill machine switching.
 
 `pnpm check` is not green: existing GitHub remote recognition fails in one
 `workspace-git-service.test.ts` case and three `shared/tests/local-project.test.ts`

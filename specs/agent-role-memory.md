@@ -26,17 +26,24 @@ name, installation URL and supported creation fields to the UI. No caller can
 supply a command or environment dictionary through the memory RPC.
 
 The initial adapter is Nowledge Mem. It executes `nmem status -j`; a missing
-executable offers `https://mem.nowledge.co/en`, and a status other than `ok` asks
-the user to start Mem and refresh. When ready, `nmem agents list -j` supplies
-`agentProfiles`. Creation uses `nmem agents enroll <id> -j` with optional name,
-description, role and default Space. Enrollment is create-only; an existing ID
-keeps its provider profile. The returned list remains authoritative.
+executable shows in-page copy with `https://mem.nowledge.co/en` on that machine's
+Memory page (and in the Role memory picker), and a status other than `ok` asks
+the user to start Mem and refresh. Opening Memory still probes the selected
+machine automatically. Missing or inactive nmem must not open a dialog. When
+ready, `nmem agents list -j` supplies `agentProfiles`. Creation uses
+`nmem agents enroll <id> -j` with optional name, description, role and default
+Space, in the existing settings editor dialog. Enrollment is create-only; an
+existing ID keeps its provider profile. The returned list remains authoritative.
 
-Settings shows a default-expanded provider section with Refresh and Create
-controls and an empty-state Create action. Local-only platforms omit the remote
-machine selector. Offline machines and daemons without `memoryProviders` v1 do
-not receive memory RPCs. Requests use the existing local/remote machine routing;
-a failed local request never falls back to a remote transport.
+Settings reuses the Agents machine selector: line tabs in the desktop pane when
+more than one machine is visible, pills outside the pane, and no remote selector
+on local-only platforms. The selected machine's provider is a catalog section
+with Refresh and Create controls and an empty-state Create action. The Role
+editor keeps Memory collapsed until expanded, then uses the same identity list,
+status copy, and install link. Offline machines and daemons without
+`memoryProviders` v1 do not receive memory RPCs. Requests use the existing
+local/remote machine routing; a failed local request never falls back to a
+remote transport.
 
 ## Execution
 

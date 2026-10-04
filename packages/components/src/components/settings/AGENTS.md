@@ -90,7 +90,9 @@ component details.
 - Before changing Role settings or dispatch, read the authoritative
   [shared Role contracts](../../../../shared/AGENTS.md#workspace-mcp-and-agent-roles).
   The editor clears its memory reference when the target machine changes;
-  discovery and creation use that exact machine's Provider RPC.
+  discovery and creation use that exact machine's Provider RPC. Memory settings
+  reuse Agents machine tabs/pills and catalog rows. A missing nmem install stays
+  on the page with the provider URL; it must not open a blocking dialog.
 
 ## Workspace ownership
 
