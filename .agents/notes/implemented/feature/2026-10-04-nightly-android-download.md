@@ -14,3 +14,5 @@ The Nightly page previously exposed only desktop installers. It now displays an 
 `site-docs/lib/nightly-downloads.ts` retains the configured HTTPS Nightly root and never trusts remote absolute URLs. Android is additive rather than mandatory so existing releases stay available; a partially advertised APK fails validation. The page renders the Android card only when a validated link exists and scopes desktop switching copy to desktop.
 
 This extends the download surface described in [desktop channel identity](../../proposed/architecture/2026-09-23-desktop-channel-identity.md) without changing desktop identities. The [draft contract](../../../../specs/desktop-channel-execution.md) records the additional behavior. Parser tests cover a valid APK, desktop-only rollout, missing entries and external/traversal URLs. The production website build and browser checks passed for English/Chinese pages with both desktop-only and desktop-plus-APK manifests. Native installation and release availability require publisher validation.
+
+PR: [LodyAI/Lody#1248](https://github.com/LodyAI/Lody/pull/1248)
