@@ -209,9 +209,12 @@ describe('MessageHandler machine registration', () => {
     await handler.cleanup();
   });
 
-  it('contains backend access registration failures after remote services activate', async () => {
+  it('retries failed backend access registration and stops retrying after success', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let attempts = 0;
     const registerMachineAccess = vi.fn(async () => {
-      throw new Error('registration unavailable');
+      attempts += 1;
+      if (attempts < 3) throw new Error('registration unavailable');
     });
     const machineId = 'machine-retry' as MachineId;
     const workspaceDocument = {
@@ -254,12 +257,23 @@ describe('MessageHandler machine registration', () => {
       }
     );
 
-    await expect(handler.registerMachine()).resolves.toBeUndefined();
-    expect(registerMachineAccess).not.toHaveBeenCalled();
+    try {
+      await expect(handler.registerMachine()).resolves.toBeUndefined();
+      expect(registerMachineAccess).not.toHaveBeenCalled();
 
-    await expect(handler.activateRemoteServices()).resolves.toBeUndefined();
-    expect(registerMachineAccess).toHaveBeenCalledTimes(1);
-
-    await handler.cleanup();
+      await expect(handler.activateRemoteServices()).resolves.toBeUndefined();
+      expect(registerMachineAccess).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(registerMachineAccess).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(registerMachineAccess).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(registerMachineAccess).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(registerMachineAccess).toHaveBeenCalledTimes(3);
+    } finally {
+      await handler.cleanup();
+      vi.useRealTimers();
+    }
   });
 });
