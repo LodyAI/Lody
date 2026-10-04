@@ -57,6 +57,10 @@ Performance comparisons must use the current full-Mirror baseline.
   marks sample the shared clock. Animate only `transform`/`opacity` from
   `startTime = 0`, never per-frame script or React state.
   [Decision](../../../.agents/notes/implemented/feature/2026-09-24-sidebar-working-grid.md).
+- Infinite decorative animations obey `lib/ambient-motion.ts`'s unfocused 30 fps budget:
+  CSS or Web Animations with a numeric duration (a multiple of 100 ms keeps speed exact),
+  and script-created ones passed to `adoptAmbientAnimations`. Never pause them on blur.
+  [Decision](../../../.agents/notes/implemented/bug-fix/2026-09-30-ambient-animation-frame-budget.md).
 
 ## Keyboard navigation
 
