@@ -94,9 +94,74 @@ for (const storyId of CODE_COLLAB_STORY_IDS) {
     await page.waitForLoadState('networkidle', { timeout: 20_000 });
 
     const fatal = collector.events.filter((event) => event.level !== 'warning').filter(notIgnored);
-    const summary = fatal
-      .map((event) => `[${event.level}] ${event.text}`)
-      .join('\n');
+    const summary = fatal.map((event) => `[${event.level}] ${event.text}`).join('\n');
     expect(fatal, `Story ${storyId} produced console error(s):\n${summary}`).toEqual([]);
   });
 }
+
+test('file line links reveal and highlight their range on first open and later navigation', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto('/iframe.html?id=sessions-codecollabmonacoeditor--line-anchors&viewMode=story');
+  const editor = page.locator('.monaco-editor');
+  await expect(editor).toHaveCount(0);
+
+  const expectHighlightedLine = async (line: number) => {
+    const row = editor.locator('.view-line').filter({ hasText: `// synthetic line ${line}:` });
+    await expect(row).toBeInViewport();
+    await expect
+      .poll(() =>
+        row.evaluate((element) => {
+          const target = element.getBoundingClientRect();
+          return Array.from(
+            element.closest('.monaco-editor')!.querySelectorAll('.rangeHighlight')
+          ).some((highlight) => {
+            const rect = highlight.getBoundingClientRect();
+            const color = getComputedStyle(highlight).backgroundColor;
+            return (
+              rect.top <= target.top + 1 &&
+              rect.bottom >= target.bottom - 1 &&
+              rect.width > 0 &&
+              color !== 'transparent' &&
+              color !== 'rgba(0, 0, 0, 0)'
+            );
+          });
+        })
+      )
+      .toBe(true);
+  };
+
+  const farLink = page.getByRole('link', { name: 'source.ts:6303-6305', exact: true });
+  await farLink.click();
+  await expect(page.getByLabel('Caret line', { exact: true })).toHaveText('6303');
+  await expectHighlightedLine(6303);
+  await expectHighlightedLine(6305);
+
+  await page.setViewportSize({ width: 920, height: 700 });
+  await expect
+    .poll(
+      async () => (await editor.locator('.monaco-scrollable-element').boundingBox())?.width ?? 0
+    )
+    .toBeGreaterThan(800);
+  await expectHighlightedLine(6303);
+
+  await page.getByRole('link', { name: 'source.ts:47-47', exact: true }).click();
+  await expectHighlightedLine(47);
+  await farLink.click();
+  await expectHighlightedLine(6303);
+
+  const isMac = await page.evaluate(() => /Mac/.test(navigator.platform));
+  await editor
+    .getByRole('textbox', { name: 'Code file preview', exact: true })
+    .press(isMac ? 'Meta+ArrowUp' : 'Control+Home');
+  await expect(
+    editor.locator('.view-line').filter({ hasText: '// synthetic line 1:' })
+  ).toBeInViewport();
+  await expect(
+    editor.locator('.view-line').filter({ hasText: '// synthetic line 6303:' })
+  ).toHaveCount(0);
+  await farLink.click();
+  await expectHighlightedLine(6303);
+  await expectHighlightedLine(6305);
+});

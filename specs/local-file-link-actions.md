@@ -9,6 +9,10 @@ When an assistant links to a local source file or build artifact, the user can
 open it in the session's right-side preview. The inline link uses blue text and
 a matching file-type icon, without a pill background or border. Hover and keyboard
 focus remain visible, and line references retain their existing navigation behavior.
+Clicking a link with a line reference opens the file and brings that line into view
+on the first click, with a visible line-range highlight. Initial content loading,
+language setup, and panel expansion must not require a second click. Clicking the
+same link again returns to its referenced line after the user has scrolled elsewhere.
 
 When Electron opens a conversation on its own machine, file links may preview any
 readable regular local file, including files outside the session workspace and in

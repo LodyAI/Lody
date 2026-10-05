@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Provider, createStore } from 'jotai';
+import { Button } from '@lody/ui/button';
 import {
   getMachineRoomId,
   getServerNow,
@@ -18,6 +19,8 @@ import {
   type SessionFileProviderEntry,
 } from '@/lib/session-file-provider';
 import { machineMetaCacheAtom } from '@/atoms/doc-meta';
+import { fileViewerWordWrapAtom } from '@/atoms/settings';
+import { SessionMonacoTextViewer } from '@/components/sessions/session-monaco-text-viewer';
 
 const meta: Meta = {
   title: 'Sessions/CodeCollabMonacoEditor',
@@ -287,4 +290,59 @@ export const RenamedOpenFile: Story = {
       </div>
     );
   },
+};
+
+const lineAnchorText = Array.from(
+  { length: 6500 },
+  (_, index) => `// synthetic line ${index + 1}: ${'wrapped source text '.repeat((index % 5) + 1)}`
+).join('\n');
+
+function LineAnchorsFrame() {
+  const store = useMemo(() => {
+    const next = createStore();
+    next.set(fileViewerWordWrapAtom, true);
+    return next;
+  }, []);
+  const [selectedLines, setSelectedLines] = useState<{ start: number; end: number } | null>(null);
+  const [caretLine, setCaretLine] = useState(1);
+  return (
+    <Provider store={store}>
+      {[
+        { start: 6303, end: 6305 },
+        { start: 47, end: 47 },
+      ].map((range) => (
+        <Button
+          key={range.start}
+          variant="link"
+          nativeButton={false}
+          role="link"
+          render={<a href={`source.ts:${range.start}-${range.end}`} />}
+          onClick={(event) => {
+            event.preventDefault();
+            setSelectedLines({ ...range });
+          }}
+        >
+          source.ts:{range.start}-{range.end}
+        </Button>
+      ))}
+      <output aria-label="Caret line">{caretLine}</output>
+      <div style={{ height: 520 }}>
+        {selectedLines && (
+          <SessionMonacoTextViewer
+            text={lineAnchorText}
+            language="typescript"
+            selectedLines={selectedLines}
+            resolvedTheme="light"
+            onSelectionChange={({ headOffset }) =>
+              setCaretLine(lineAnchorText.slice(0, headOffset).split('\n').length)
+            }
+          />
+        )}
+      </div>
+    </Provider>
+  );
+}
+
+export const LineAnchors: Story = {
+  render: () => <LineAnchorsFrame />,
 };
