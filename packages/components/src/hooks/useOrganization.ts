@@ -236,9 +236,10 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         : null,
     [activeOrganization]
   );
+  const activeOrganizationMatchesTarget = !targetSlug || activeOrganization?.slug === targetSlug;
   const activeOrganizationError =
     activeOrganizationQueryError ??
-    (!targetSlug || activeOrganization?.slug === targetSlug ? activeOrganizationDataError : null);
+    (activeOrganizationMatchesTarget ? activeOrganizationDataError : null);
 
   const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
   const setWorkspaceContextAtRevision = useSetAtom(setWorkspaceContextAtRevisionAtom);
@@ -391,7 +392,6 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
 
   // If the active org was deleted/left, or still points at a previous workspace while a target
   // route is opening, treat it as unavailable to avoid reusing a stale workspace.
-  const activeOrganizationMatchesTarget = !targetSlug || activeOrganization?.slug === targetSlug;
   const resolvedActiveOrganization =
     activeOrganizationInList && activeOrganizationMatchesTarget && !activeOrganizationDataError
       ? activeOrganization
@@ -513,7 +513,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         return;
       }
       if (activeOrganizationDataError && activeOrganization?.id === targetOrganization.id) return;
-      if (!resolvedActiveOrganization || resolvedActiveOrganization.id !== targetOrganization.id) {
+      if (resolvedActiveOrganization?.id !== targetOrganization.id) {
         void switchOrganization(targetOrganization.id);
       }
       return;
