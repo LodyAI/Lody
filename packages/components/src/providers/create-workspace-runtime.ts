@@ -154,6 +154,10 @@ import { createWorkspaceMachineRpcFacade } from './workspace-machine-rpc-facade'
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { createCodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { getIpcServices, onIpcEvent, sendLocalSessionControl } from '@/lib/electron-ipc-client';
+import {
+  createLocalRoostSessionDataFactory,
+  createRemoteRoostSessionDataFactory,
+} from '@/lib/roost-session-bridge';
 
 declare global {
   interface Window {
@@ -1808,6 +1812,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionDispatchTurn,
     requestSessionPrepare,
     requestSessionPrepareCancel,
+    requestSessionHistoryRead,
+    requestSessionHistoryWrite,
     requestFilePreview,
     requestLocalCodeCollabFileIndex,
     requestCodeCollabOpenText,
@@ -4077,15 +4083,57 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // session can be composed with the legacy Loro reader before its catalog
     // row becomes visible in this Repo instance.
     const sessionMeta = (await repo.getDocMeta(roomId))?.meta as
-      | { historyBackend?: SessionHistoryBackendKind }
+      | { historyBackend?: SessionHistoryBackendKind; machineId?: MachineId }
       | undefined;
 
+    const backendKind = resolveSessionHistoryBackendKind(sessionMeta);
+    let rendererSessionDataFactory = deps.createSessionData;
     let conversation: ReturnType<typeof createConversationSession>;
     try {
+      if (!rendererSessionDataFactory && backendKind === 'roost') {
+        const machineId = sessionMeta?.machineId;
+        if (!machineId) {
+          throw new Error(`Roost session ${sessionId} has no owning machine`);
+        }
+        const plane = await targetRouter.resolvePlaneForMachine(machineId, {
+          timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
+        });
+        if (plane === 'local') {
+          if (!getIpcServices()) {
+            throw new Error(
+              `Roost session ${sessionId} is local, but the Electron session-control bridge is unavailable`
+            );
+          }
+          rendererSessionDataFactory = createLocalRoostSessionDataFactory({
+            accountId: deps.accountId,
+            workspaceId,
+            machineId,
+          });
+        } else {
+          rendererSessionDataFactory = createRemoteRoostSessionDataFactory({
+            accountId: deps.accountId,
+            workspaceId,
+            machineId,
+            requestHistoryRead: async (targetMachineId, targetSessionId, query) =>
+              await requestSessionHistoryRead(targetMachineId, targetSessionId, query),
+            requestHistoryWrite: async ({
+              machineId: targetMachineId,
+              sessionId: targetSessionId,
+              operation,
+              payload,
+            }) =>
+              await requestSessionHistoryWrite(targetMachineId, {
+                sessionId: targetSessionId,
+                operation,
+                payload,
+              }),
+          });
+        }
+      }
       conversation = createConversationSession(sessionDoc, {
         sessionId,
-        backendKind: resolveSessionHistoryBackendKind(sessionMeta),
-        ...(deps.createSessionData ? { createSessionData: deps.createSessionData } : {}),
+        backendKind,
+        ...(rendererSessionDataFactory ? { createSessionData: rendererSessionDataFactory } : {}),
       });
     } catch (error) {
       // A Roost session without its renderer adapter fails closed. Release the

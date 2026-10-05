@@ -1,4 +1,4 @@
-# Roost 接入前的 Loro 优先对话投递生命周期边界
+# Roost 对话投递边界
 
 Status: proposed
 Type: architecture
@@ -8,11 +8,11 @@ Translation: current
 
 ## 摘要
 
-Lody 目前把 queue 提升、steer 和 ACP 输出处理直接绑定在 Loro 历史与会话本地生命周期上；在新会话改用 Roost、旧会话继续使用 Loro 之前，必须先把这条耦合边界显式化。本提案建立由 Lody 持有的 session backend 边界，并先把 queue promotion、steer reconcile、历史读取和主要 assistant 写入迁移到现有 Loro 路径。Loro 实现现在已经包含持久 queue receipt、steer operation identity 与投递证据、backend lifecycle ownership 以及 renderer composition seam。未来的 Roost backend 实现同一组契约而不改变 queue 或 steer 状态机；剩下未确定的只有 Roost 自身的存储与 projection 选择。
+Lody 现在通过自己的 session backend 边界同时承载 Loro 和 Roost 两种 history 实现。新会话选择 Roost，没有持久 discriminator 的旧会话继续固定在 Loro。queue promotion、steer reconcile、history 读取、assistant 写入、renderer composition 和 backend 生命周期都根据会话保存的选择解析；Roost 的存储与 projection 留在 adapter 内部，调用方只消费相同的逻辑 history 契约。完整 directory lease、按目标补页的阅读位置恢复及 renderer 持久读取副本现已覆盖发现的体验缺口。合成 benchmark 测得 10,000 条历史的最新窗口就绪约快 7.8 倍，但短历史启动和翻页成本更高；完整产品体验等价性仍未验收。
 
 ## 决策与范围
 
-眼下的目标是建立内部过渡边界，而不是迁移存储。已有会话继续使用 Loro。在 Roost 正式启用之前，新建会话也继续使用 Loro，并且所有创建入口都会显式写入 discriminator；启用之后，backend 在会话创建时一次性选择：新会话使用 Roost，已有会话继续使用 Loro。之后所有历史、queue、steer 和 assistant 输出操作都通过会话保存的选择解析 backend，调用方不再分别判断 Roost 或 Loro。
+产品边界已经启用，但不迁移历史。没有 discriminator 的已有会话继续使用 Loro；新会话在接受首条 turn 前写入 `historyBackend: 'roost'`。打开后的会话 backend 选择不可变，重启时从持久 metadata 重新解析。之后所有 history、queue、steer 和 assistant 输出操作都通过绑定的 backend 执行，调用方不分别判断 Roost 或 Loro。
 
 过渡必须保持现在的产品契约：
 
@@ -24,7 +24,7 @@ Lody 目前把 queue 提升、steer 和 ACP 输出处理直接绑定在 Loro 历
 
 本提案不迁移旧 Loro 历史、不修改 Loro 上游库、不修改 Roost Rust core，也不引入第二种用户可见的会话模型。范围覆盖 Lody CLI/session execution 路径及其客户端使用的共享会话 API。平台客户端使用同一组契约，不各自实现 queue 或 steer 协议。
 
-这条过渡边界现在同时覆盖会话两端：CLI 为每个打开的文档绑定一个 backend，并在文档销毁时释放；renderer 根据持久 discriminator 组合 `SessionData`，没有 renderer factory 时会拒绝 Roost 会话。CLI 选择 Roost 时只组合控制面，不创建 Loro history reader/writer，由 adapter 完全负责 history 存储。会话创建先写 metadata，再接受首个文档或 history 写入，因此 backend 选择不会从半成品会话中推断。
+产品边界现在同时覆盖会话两端：CLI 为每个打开的文档绑定一个 backend，并在文档销毁时释放；renderer 根据持久 discriminator 组合 `SessionData`。CLI 选择 Roost 时只组合控制面，不创建 Loro history reader/writer，由 adapter 负责 history 存储。会话创建先写 metadata，再接受首个文档或 history 写入，因此 backend 选择不会从半成品会话中推断。
 
 ## 四个过渡边界
 
@@ -85,7 +85,7 @@ Loro backend 暴露一个逻辑操作 `promoteQueuedTurn`。输入包含 queue r
 
 Loro command 必须保留现有 last-copy-wins lookup，不为了简化 promotion 删除历史 duplicate copy。no-op status write、settled terminal status、active execution owner 或已有 activation pointer 都可以独立证明 queue row 不再需要 promotion。
 
-### 未来 Roost 实现
+### Roost 实现
 
 Roost 不能假设一次事务同时覆盖 Roost history、Loro control-plane activation pointer 和 queue row。因此 Roost adapter 使用相同的 `operationId`，并在 delivery ledger 中推进可恢复的操作状态。持久阶段为 `prepared`、`history-accepted`、`activation-published` 和 `queue-consumed`；终态结果为 `applied` 或 `already-applied`。
 
@@ -133,7 +133,7 @@ Loro backend 继续保存现有 user history row 和 `steerTurnStatuses` metadat
 
 Loro 实现可以继续把 status mirror 放在 session metadata 中，因为这已经是持久 control plane；抽象边界保证调用方不依赖这种表示方式。
 
-### 未来 Roost 实现
+### Roost 实现
 
 Roost backend 必须持久化 steer identity、input、expected target、delivery kind 和 status，使进程重启后可以恢复。具体表示方式保持开放：Roost message metadata、dispatch-intent 扩展或 adapter 自有记录均可满足契约。本提案不要求新增顶层 Roost `steer_intent` message kind。
 
@@ -173,7 +173,7 @@ Loro backend 把 ACP 输出写入现有可变 assistant entry。finalization 通
 
 adapter 边界放在 `appendACPUpdatesToAssistantEntry`、`finish-assistant`、usage 持久化和 rich-content 持久化周围。MessageHandler 负责事件顺序和 target identity；backend 负责逻辑 target 的物理表示。
 
-### 未来 Roost 实现
+### Roost 实现
 
 Roost 把普通流式输出写入逻辑 assistant `businessId` 的 primary segment，并在 finalization 时 seal。seal 之后到达的输出写入同一 `businessId` 的后续 segment，使用新的 `segmentId`。`HistoryProjection` 把这些 segment 合并成一条逻辑 assistant entry，并保持事件顺序和 terminal metadata。
 
@@ -232,17 +232,13 @@ adapter 开始前的 Lody 侧准备已经完成：
 
 Phase 3 的 adapter fixture 可直接复用 queue 契约。这些 Lody 测试不能验证 Roost durable record 的存放方式或 branch projection。long-history 对比也必须等两种实现都存在：adapter 就绪后先测 Loro baseline，再以同一负载比较 Roost。
 
-### 阶段 3：不启用生产选择的 Roost adapter
+### 阶段 3：生产 Roost adapter
 
 - 在同一契约后实现 Roost history acceptance、持久 delivery operation record、assistant segment projection 和 recovery。
 - 验证 `businessId` 分组、sealed primary 加晚到 segment、每个 queue phase 的重启恢复以及 steer settlement 幂等。
-- 在 adapter 通过契约测试前，只通过测试或 session fixture selector 使用 Roost。
-
-### 阶段 4：新会话选择
-
-- 通过 session factory 只为新建会话启用 Roost。
-- 旧会话固定在 Loro，并且只在诊断信息中显示 backend 选择。
-- 观察 backend 无关的 metrics 和 recovery 结果后，再扩大选择范围。
+- 通过生产 factory 绑定 Node owner 和 renderer bridge。
+- 新会话使用 Roost；没有 discriminator 的旧会话继续固定在 Loro。
+- runtime artifact 缺失、owner 启动失败或 backend 操作不支持时明确失败；不存在按消息回退到 Loro。
 
 ## 验证计划
 
@@ -253,14 +249,357 @@ Phase 3 的 adapter fixture 可直接复用 queue 契约。这些 Lody 测试不
 3. 使用 fake ACP provider 的 MessageHandler 生命周期测试，覆盖 history sync 前输出、prompt 完成后输出、新 turn 期间输出、部分持久化后输出和 deletion 期间输出；断言逻辑 assistant ID 与内容顺序。
 4. 对 Loro 和 Roost adapter 运行相同的 backend contract test。Roost 用 crash injection 覆盖每个跨存储阶段；Loro 覆盖 receipt 阶段、定向重试读取、activation 修复和 queue 顺序保持。
 
-Roost adapter 存在并且 long-history benchmark 同时跑过两种 backend 前，不宣称性能对比结果。Roost adapter 在生产 Roost library 上实际运行前，不把任何 Roost-specific API 当作已确认事实。这些是验证边界，不是改变 Loro-first 方案的理由。
+性能数字仍属于独立验收。当前接入绑定 Roost 0.1.1 API；runtime artifact 与本地 owner 生命周期是构建和启动条件，不是另一个 backend。
 
 ## 仍需证据的事项
 
-真正仍未确认、且只属于 Roost 的事项只有以下几项：
+原先列出的 adapter 问题现在已经在下面的产品边界中归类。remote/web 组合的
+事实不需要重新改变桌面产品选择；桌面本地 owner 使用已绑定的 Roost 0.1.1
+契约。
 
-- Roost 哪个 persistence hook 和 metadata 形状适合承载 delivery ledger，既保证 operation recovery 持久化，又不强制新增顶层 message kind。
-- Roost 是否能提供高效的 active-branch projection hook，还是需要 Lody adapter 自己维护增量 business-ID index。
-- 长 streaming response 下的 segment/projection 和持久化实测成本，尤其是 finalization 后仍有晚到输出时的成本。
+## 产品 adapter 边界（2026-10-02）
 
-这些事项不会改变 Loro 实施计划；它们是启用 Roost 新生产会话前必须完成的 adapter 验证工作。
+### Roost 0.1.1 产品绑定（2026-10-03）
+
+Lody 产品 adapter 绑定 Roost 0.1.1 API。当前 workspace 因 registry 尚未完成
+发布而从旁边的 Roost checkout 解析 package；这只改变依赖来源，不改变产品
+契约。每次 Electron 构建都会把匹配目标平台的 Node client 与 owner binary
+放入产品 resources。选中的 Roost runtime 缺失时必须明确失败，不能回退到 Loro。
+
+### 产品 adapter 实现（2026-10-03）
+
+`packages/shared/src/session-data/roost.ts` 定义与存储无关的
+`RoostHistoryPort`，按 `businessId` 合并物理 segment，并实现现有
+`SessionHistoryReader` 形状。projection 保留显示顺序，把 successor segment
+的 list 字段追加到逻辑 turn，并只向 renderer 发送逻辑 change ID。role 或
+timestamp 损坏的行会在进入 conversation view 前拒绝。
+
+`apps/cli/src/session/roost-node-session.ts` 把 port 绑定到 Roost 0.1.1 的
+Node owner：恢复 pending batch，读取 active branch，接受和追加 streaming turn，
+seal segment，记录 permission response，通过 `forkAndActivate` 执行 Edit &
+Resend，并通过 Loro control document 发布 Roost event cursor。
+`RoostSessionBackend` 持有通用 Lody 契约，调用方不读取物理 segment ID。
+
+renderer 通过 local-control history bridge 使用同一个逻辑 reader。queue row、
+activation、steer record、runtime configuration 和 session metadata 仍由 Loro
+control plane 持有。两个存储通过 operation ID 和明确的 recovery phase 协调；
+history 写入成功绝不等于 control-plane queue row 已经消费。
+
+### SessionBackend adapter 边界（2026-10-03）
+
+`apps/cli/src/session/roost-session-backend.ts` 是生产 adapter。它把
+注入的 Roost `SessionData`、commands、snapshot 和 assistant writer 服务接到
+完整的 `SessionBackend` 契约；queue row、activation、steer ledger、runtime
+configuration 以及 control document 的同步仍由现有 `SessionDocument` 持有。
+queue promotion 沿用 Loro 的 durable phase 顺序，并且只有通过 backend 的
+operation identity 才能接受 Roost history 写入。
+
+adapter 暴露了 `createRoostSessionBackendFactory`，由 CLI host 在任何 session
+document 解析 backend 之前注册 Node owner。identity、数据库路径、history
+commands、writer callbacks、snapshot 语义和同步行为仍由 host 明确提供。
+
+### 本地 Node 与远程 renderer 接线（2026-10-03）
+
+`@loro-dev/roost@0.1.1` package 现在由
+`apps/cli/src/session/roost-node-session.ts` 接入。`Lody.create()` 会在任何
+session document 解析 backend 之前安装 factory。只有 metadata 明确写成
+`historyBackend: 'roost'` 的 session 才会打开共享的本地 `RoostNodeClient`
+owner；它会恢复 pending batch，把物理 message 投影为逻辑 turn，并通过
+adapter 处理普通 user/assistant、permission、plan 和 seen 写入。queue row、
+activation、steer ledger 与 runtime configuration 仍在 Loro control plane。
+
+owner seed 必须由 host 配置（`LODY_ROOST_SEED_HEX`），adapter 不会从用户秘密
+推导它。本地 Node client、owner binary 和数据库路径可以分别通过
+`LODY_ROOST_NODE_CLIENT`、`LODY_ROOST_NODE_OWNER`、`LODY_ROOST_DB_PATH` 覆盖。
+新 session 创建选择 Roost，没有 discriminator 的旧 session 继续使用 Loro。
+选中的 Roost runtime 无法启动时不会静默回退。
+
+桌面 renderer 通过 Electron local-control bridge 组合 Roost `SessionData`；浏览器
+持久化 owner 已接受历史的读取 projection，不创建第二个 Roost writer。
+Web 或远程机器上的 renderer 使用同一个逻辑 bridge，
+只是通过加密 Machine RPC 访问 owning CLI。两条路径都只返回逻辑 history row，
+并把 append、replace、permission、action、import 和 snapshot 命令路由回 CLI
+已经绑定的 `SessionBackend`。renderer 根据目标 machine 的真实 plane 选择
+transport，不使用 `window` 是否存在来猜测 Electron。Machine RPC 广告
+`sessionHistory: 1` capability，使用 owner-session envelope 加密 payload 和
+result，并校验 session metadata 确实属于当前 machine。
+
+产品路径支持 Node owner 提供的 active branch、streaming、permission、import、
+snapshot 和 edit/resend 操作。Electron 本机会话使用 session control；Web 与
+远程会话使用 Machine RPC。bridge 缺失、capability 缺失、响应损坏或操作不支持
+时都会 fail closed，不会创建第二套 history，也不会回退到 Loro。通用 renderer
+的 editable-tail 命令返回 `unsupported`，因为 backend 结果包含只能在进程内调用
+的 rollback closure；产品 Edit & Resend 路径使用可序列化的专用 session 操作和
+Roost `forkAndActivate`。
+
+### 现在就固定的所有权
+
+| 责任 | 所有者 |
+| --- | --- |
+| session metadata、backend discriminator、queue row、activation pointer、runtime configuration、session status、fork-operation control 和唤醒 | Lody control plane（现有 Loro session document 与 metadata） |
+| 逻辑消息历史、Roost 物理 segment、segment seal、branch view、history projection、permission response 和 history-local recovery | Roost history adapter |
+| 跨两个存储的 queue/steer operation identity 与 recovery phase | `SessionBackend` delivery ledger；必须持久化且由 backend 所有，不能放在 MessageHandler 内存 map |
+| provider 是否接受 steer | ACP/AgentClient；history 接受不能证明 provider 已投递 |
+| 对话窗口、MCP history 和 session orchestration | 现有 Lody reader/service，通过 `SessionBackend`/`SessionData` 访问，绝不检查 segment ID |
+
+账本由 adapter 持有，是因为 Loro 和 Roost 必须运行同一套 queue/steer
+状态机，但持久化方式可以不同。它的写入契约必须按 operation 独立且可恢复。
+当前 Loro metadata 中嵌套 map 的 lost-update 窗口尚未关闭，在修复前不能
+把同样的竞态复制到 Roost。
+
+### 产品使用的 port
+
+adapter 依赖内部定义的 `RoostHistoryPort`，不依赖 `Stream`、
+`IndexedDbStorage` 或 `NodeLodyHistory` 的实现细节。生产 Node owner 提供这个
+port，浏览器组合通过 backend bridge 使用它，并覆盖这些操作：
+
+- accept、append、seal、permission response 和幂等 history batch；
+- active-branch read 以及带 CAS 的 branch accept/fork-and-activate；
+- projected page、按 identity 查询、event cursor 和变更订阅；
+- pending batch 恢复、本地 flush、远端同步状态和 dispose；
+- 满足现有同 backend session fork 的 snapshot/export/import。
+
+Roost 0.1.1 package surface 是当前绑定的产品 API。不能因为某个实现分支上存在
+方法，就把它增加到 Lody 调用方契约里；所有调用方都通过 port 和逻辑 history
+契约工作。
+
+### 逻辑 history 契约
+
+adapter 对外提供虚拟的逻辑 history。`count`、`readAt`、`readRange`、
+`readDirectory`、`readTurn`、`readTurnOutput` 和 `observe` 都针对 active
+branch 中按显示顺序排列的逻辑 turn。Roost segment 不能成为这个契约中的
+一行。Loro 当前的一行一个 turn 只是兼容实现，调用方不能依赖 raw storage
+slot 或 container position。
+
+projection 将同一个 `businessId` 的所有 message segment 按事件顺序分组，
+合并 content 与 terminal fields。assistant 的 primary segment 在 streaming
+期间保持 open，在 finalization 时 seal。seal 之后到达的 callback 为同一
+`businessId` 创建确定性的 successor segment；它不会激活 branch，也不会在
+UI 中产生第二条消息。必须在 seal 后变化的字段使用 successor state segment
+或等价的 adapter-owned record。adapter 绝不原地编辑 sealed Turn。
+
+`observe` 必须提供现有 renderer 所需的无间隙 initial directory 与精确 changed
+ID。实现可以使用 Roost event cursor 和 message view，但不能因为每个 token
+batch 都重新构建全量对话。adapter 接入后，Lody contract tests 应
+把这条逻辑 position 规则写明确。
+
+### 跨存储操作
+
+Queue promotion 保留既有 durable phase：`prepared`、`history-accepted`、
+`activation-published`、`queue-consumed`。Roost history acceptance 与 Loro
+activation/queue 写入是两个 commit。重试使用原来的 `operationId` 和
+`userTurnId` 从记录的 phase 继续；不能把 Roost 写成功误当成 queue row
+已经消费。
+
+Steer 保持当前 identity 与 outcome 规则。带有 `userTurnId`/ACP target 的
+notification 必须穿过所有异步 flush。provider 返回 `unknown` 时继续保持
+unknown，Stop 不能被一次等待中的 backend write 绕过，late output 仍写回旧
+target。reconcile 根据 adapter 的精确 history evidence 与 delivery ledger
+工作，不能猜测性地绑定到最新 active turn。
+
+Edit & Resend 是唯一的逻辑 replacement。它使用带 revision/head CAS 的
+Roost `forkAndActivate`，然后通过可恢复 operation 完成 Lody control-plane
+更新。replacement 提交期间 queue 与 steer 遵守 rewrite lease 并返回
+`busy`。fork 只能在同一种 backend 内进行；Roost snapshot 不能导入 Loro
+session，反之亦然。
+
+### 生命周期与同步
+
+打开 Roost session 时只组合 Loro control mirror，不创建 Loro history list、
+history writer 或 `agentWrites`。renderer 通过 local-control bridge 获取完整的
+backend-neutral `SessionData`；CLI 则获取绑定 Node Roost owner 的对应
+`SessionBackend`。其余 raw `sessionDoc.sessionData` 访问必须留在 Loro 实现
+内部；auto-read、model-summary、all-history subscription 和 dispose 必须变
+成 backend-neutral capability，或者对 Roost 明确跳过。
+
+`flushLocalWrites` 表示两个 plane 的本地持久写入都已 commit。
+`waitUntilSynced` 是对选中的 history backend 与 Lody control plane 的有界
+确认 barrier；不能把 Roost 本地 commit 报告成服务器确认。adapter 可以为
+恢复和诊断分别记录 local 与 remote 状态，但现有调用方继续接收一个 boolean
+结果。
+
+### 产品运行边界
+
+1. 每个新产品 session 使用 Roost Node owner 保存消息 history，使用现有 Loro
+   document 保存 control-plane metadata 与 delivery state。桌面本机会话通过
+   Electron session control 访问 owner；Web 与远程会话通过加密 Machine RPC
+   访问 owner。
+2. Roost owner binary 与 client 是必须打包的产品资源；staging 和 `afterPack`
+   会在缺失时直接失败。
+3. `flushLocalWrites` 表示 Roost SQLite 与 Loro control 的本地写入已经持久化。
+   `waitUntilSynced` 还会等待 Loro control sync barrier，但它不表示 Roost
+   history 已获得远端 Roost 服务确认。远程 renderer 的读写是发往 owning CLI
+   的 Machine RPC，不会创建第二个浏览器 Roost store。
+4. 没有 `historyBackend` 的旧 session 继续使用 Loro，不做迁移，也不存在按消息
+   回退。
+
+当前代码让新 session 使用 Roost，让 legacy session 固定在 Loro。CLI caller 仍可
+通过 `session create --history-backend <kind>` 显式请求 backend；已经打开的 session
+以持久 discriminator 为准。
+
+### 已闭合的产品接入事实
+
+产品接入在 owning CLI 上使用本地 `@loro-dev/roost@0.1.1` checkout，包含
+active-branch page API；本文不声称已验证发布。浏览器不依赖
+Roost 的 Node 或 storage module，通过 Machine protocol `sessionHistory: 1`
+协商 history capability；旧 daemon 会在发送未知 RPC method 前明确报错。RPC
+请求内容和响应使用现有 owner-session AES-GCM envelope，machine 会验证 session
+metadata 的归属。
+
+运行与发布工作包括测量长 streaming projection 成本、late output 规模，以及检查
+所有支持平台上的 artifact packaging。下方的用户体验对齐工作同样属于本次接入范围，
+不随这些运行与发布检查省略。选定 Roost session 永不回退到 Loro 的规则保持不变。
+
+### 读取刷新与 observation 栅栏
+
+共享 Roost reader 为每次 projection 读取绑定一个失效代次。history 通知会推进
+代次；较早启动的读取可以在后台完成，但不能把旧 projection 写回缓存，等待它的
+调用方会针对当前代次重读，包括旧读取失败的情况。initial observation 也遵守同一
+规则，因此正在加载快照时发生失效，不会被旧快照覆盖缓存。
+
+renderer bridge 先注册 history listener，再读取 active branch 的最新 directory
+page。position 和 count 来自同一页；结构通知隔离并发读取，并在 bootstrap 期间保留。
+view 对读取失败保留 dirty change 并退避重试，包含首屏页失败和正文刷新失败。
+
+Node owner 通过 `readActiveBranchPage({ latest: true })` 初始化和刷新最近 40 条
+逻辑 turn。directory page 同时填充有界正文缓存，普通 `readDirectory`、`readRange`
+和 hydration 不再调用 `readActiveBranch()`。缓存未命中时逐页反向查找，只保留有界
+页正文。完整读取仍用于 export/snapshot、完整 turn-output 选择、import/edit 规划，
+以及确实需要解析旧消息 segment 的更新。新 identity 不存在时先定点查询，避免每次
+新消息都读取完整 branch。窗口外的 late successor 仍可能是物理 head；追加子节点前
+必须解析并封存它。
+
+### 反向分页接入与更正（2026-10-04）
+
+Roost commit `323fc8e` 早已提供 `latest`/`before` 反向 keyset 读取；隔离 Lody
+实现 `9d9abd01` 也已接入最新窗口、`loadOlder` 和保留旧页的 live refresh（历史验证
+8/8）。此前“缺少反向读取”的说法不正确。那条路径早于 active-branch 编辑
+（`767decc`）；通用 published page 保留被替换的 suffix，因此当前产品读取必须遵守
+active-branch ancestry。
+
+当前本地 Roost API 已把分支分页接到现有 SessionHistoryReader/ConversationView。
+未加载的绝对位置使用 sentinel，渲染、hydration 和事实查询跳过这些位置；旧前缀未
+加载前，事实覆盖仍不完整。`loadOlder` 由实际 viewport 边缘触发，与更大的正文预取
+范围分开。live append 保留最旧已加载前缀对应的 cursor。fork 或 cursor 失效后只重建
+已加载窗口；跨越结构变化的在途页不能覆盖新 membership。合并前验证页 metadata 和
+连续性；不足请求条数的最后一页严格止于 cursor。
+
+Roost cursor 只携带尚未读到 primary 的 successor 引用，不累积已消费的页 segment。
+append 后使用旧 cursor 会验证 ancestry，并合入期间新增的 late successor。逻辑 count
+只计算 primary identity，不按 successor segment 数量递增。新 Lody 历史通过线性
+branch metadata 有界读页；旧格式或非线性 ancestry 仍可能使用 Roost 的完整 directory
+兼容路径，因此不能声称任意导入历史都有恒定冷启动成本。
+
+当前验证包括下方的合成 backend benchmark 与静态检查。没有运行产品启动、打包、
+测试套件或发布流程；不把旧 overlay 的测试结果算成本次验收。
+
+### 用户体验对齐实现（2026-10-04）
+
+更正：仅接通存储与反向分页，并未保留原 LoroDoc 体验。源码核对发现了搜索、大纲、
+事实覆盖不完整，最新窗口以外的阅读位置恢复不可靠，以及 renderer 无持久历史的
+问题。这些属于必须完成的产品要求。
+
+当前实现已补上这些消费路径：
+
+- `ConversationView.acquireDirectory` 为完整索引、搜索与事实消费方提供可取消的
+  反向分页 lease。首屏保持有界，directory 补齐不再依赖手动滚动；事实逐块读取并
+  释放正文，搜索仅在打开期间持有原来的正文 lease。读取失败保留未完成状态，并在
+  消费方仍活跃时重试。
+- 阅读位置恢复先按保存的逻辑 turn 加载目标，再接受首个 viewport report。现有
+  scroll engine 继续独占 anchor 和滚动位置，不增加第二个滚动实现或隐藏 viewport。
+- `roost-history-cache.ts` 在 IndexedDB 中按账号、工作区、机器和会话隔离保存
+  owner 已接受的历史页，正文、directory 与 revision 在同一事务提交。首屏可以
+  先读取此快照，再通过现有 local-control/Machine-RPC 在后台刷新。完整缓存支持
+  离线重新打开、翻页、搜索与导出。
+- CLI 读取响应携带同一次本地持久 observation 的 revision 和所请求页的逻辑正文。
+  读取前后等待本地写入栅栏，revision 改变则重试。连续内容更新只刷新变更 turn，
+  已覆盖的结构 suffix 原子更新；revision 有缺口时在另一个缓存槽中逐页构建新快照，
+  完整之前保留上一份一致快照。晚到的旧读取不能覆盖更新的 checkpoint。
+- 读取缓存不接受命令、不重放 provider 投递、不回退到 Loro，随 SessionData 释放，
+  并纳入 Clear Cache。缓存失败不改变历史所有权；未同步的历史仍依赖 owner。
+  补齐缺口期间断线会保留上一份一致快照，不能把新旧 branch 混在一起。
+
+这些实现路径经过静态验证，backend/view 路径另有下方的 benchmark 证据。
+完整产品体验等价性、离线重连与帧时间尚未实测。
+
+### Benchmark 与验证（2026-10-04）
+
+后续用户明确要求运行 benchmark。复现入口为
+`apps/cli/benchmarks/roost-history.mts`：100/1,000/10,000 条线性合成历史，
+每条约 4 KiB 文本，使用 release SQLite owner、真实 Lody backend 和共享
+ConversationView。交替测量 Loro/Roost，分别记录快照导入、backend 打开、
+最新窗口加载、向前翻页与流式更新。使用隔离数据，不执行发布。运行环境为 Linux
+arm64、Node v26.8.2，OS 页缓存已预热，每个样本新建 backend/view。Loro 更新未
+计入磁盘 flush，Roost 写入包含 SQLite 持久化；结果与测量限制如下。
+
+实跑发现的阻断：Roost branch envelope 字段读取多了一层 `content`，40 条页的
+无界并发超过 Node client 的 32 请求上限；这两项在 Roost checkout 修正。
+Lody 的流式 batch 又复用了 before-image 中可变的 items 数组，共享 applier
+同时改变了比较的两边，导致 adapter 跳过持久化。修复为先复制工作数据，再应用、
+比较并写入；不能把仅收到调用返回视为流式文本已落盘或显示。
+
+优化后的完整运行（预热 2 轮、正式 7 轮）得到以下中位数，单位为毫秒。
+`Readable` 包含 Loro 快照导入和 Roost owner/backend 打开；Roost 使用真实 release
+SQLite owner，Loro 使用内存 Repo。`Older` 加载前一页 40 条逻辑 turn，`Stream`
+对可见的未封存 assistant 追加 10 次小更新。Roost 首屏每个规模都只读 1 个 40 条页，
+没有完整 branch read。
+
+| 逻辑 turn 数 | Loro 首屏 | Roost 首屏 | Loro 翻页 | Roost 翻页 | Loro 流式 | Roost 流式 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 8.20 | 43.47 | 0.29 | 31.18 | 0.19 | 3.90 |
+| 1,000 | 68.85 | 61.82 | 0.29 | 35.39 | 0.16 | 4.30 |
+| 10,000 | 795.21 | 101.53 | 0.36 | 41.96 | 0.16 | 4.50 |
+
+10,000 条时，有界 Roost 路径到达可读最新窗口约快 7.8 倍；只看 view hydration，
+Roost 为 3.01 ms，Loro 导入完成后为 74.26 ms。短历史仍会承担 owner/SQLite 启动
+成本，旧页读取也会比 Loro 慢，因为 Loro 已经把完整快照放在内存中。10,000 条
+Roost 首屏 P95 为 435.43 ms，owner 启动时间存在波动，因此这是 data-path 结果，
+不是产品冷启动或帧时间保证。没有测 renderer transport、IndexedDB、React 绘制、
+全量搜索、事实推导或离线刷新。
+
+首轮运行发现打开重复读四次最新页、每次流式内容更新重读 40 条窗口，以及流式
+applier 复用了可变 before-image。最终修改只按已确认物理 identity 刷新窗口内未封存
+primary，更新逻辑投影并隔离旧读取，再通过原持久 cursor 发布；结构变化继续使用
+active-branch 分页，新 observation 复用 owner 已持有的一致最新窗口。
+
+后续栅栏在安装局部刷新结果前同时检查 branch identity 与读取 generation。外部
+cursor 刷新加入本地写入队列，避免旧 branch 读取覆盖更新的 mutation；dispose
+也会拒绝在途刷新。benchmark 订阅先声明清理函数，再由回调引用。上表记录的是
+这些最终保护修改前已完成的 7 轮采样。
+保护修改后的 100 条单轮 smoke 完成了两种 backend 的打开、翻旧页和 10 次可见
+流式更新。CLI、benchmark 类型检查和范围内格式检查再次通过；单轮数据不替代
+上方预热后的测量。这次运行没有覆盖并发 branch rewrite。
+
+- Roost TypeScript build 与 Lody CLI `tsc --noEmit`：通过。
+- 本次分页/bridge 代码的 Oxfmt、两个仓库的 `git diff --check`：通过。
+- `node scripts/docs/main.mjs check`：通过；Node 分页说明放在模块 README，
+  scoped AGENTS 保持在大小限制内。
+- Components `tsc --noEmit`：仍受已有的 `papaparse`、`@extend-ai/react-docx`、
+  `@extend-ai/react-pptx`、`@extend-ai/react-xlsx`、`fflate` 依赖缺失阻塞，
+  包含由此产生的 implicit-any 错误；分页代码没有类型错误。
+- benchmark runner 使用 CLI tsconfig 的类型检查通过；最终运行参数为
+  `BENCH_SIZES=100,1000,10000`、预热 2 轮、采样 7 轮、4 KiB 合成正文和 release
+  owner。Roost `cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings`
+  及 TypeScript build 也通过。
+- 用户排除了测试与发布流程，本次未运行。本地提交记在下一检查点；没有 push。
+- 体验对齐改动通过 CLI TypeScript、范围内格式、文档及 public/platform 边界检查。
+  Components 类型检查仅报告上面的已有 Office/CSV 依赖错误；新缓存与消费路径
+  尚未进行运行时验收。
+
+## 2026-10-05 本地提交检查点
+
+用户授权在两个仓库各自的 `feat/roost-history-integration` 分支进行本地提交。
+Lody 基线为 `91c0bb14`；本地 `file:../../../roost/ts` 依赖对应 Roost commit
+`8b682ef`（`@loro-dev/roost` 0.1.1，Rust 包仍为 0.1.0）。本次集成提交包含
+CLI owner/backend、history transport、renderer 分页与缓存、Electron artifact
+打包、共享契约、benchmark runner 及已有的集成测试源码。
+
+提交前清理了未使用的类型导入、重名局部变量，并将已有异步循环的退出条件显式写出。
+CLI 类型检查、修改文件的 type-aware lint、格式、public/platform 边界、
+Code Collab import 和 i18n 检查通过。这些检查不替代上面的运行时验收边界；
+Components 类型检查仍被已有依赖缺失阻塞。
+
+锁文件已记录 Roost 本地目录及完整依赖子树。使用真实 package manifest 生成最小
+pnpm resolution，核对了 importer 与 package/snapshot 记录。全仓库离线重新解析
+停在无关的 `@openai/codex@^0.159.2` 缓存元数据；保留了其他依赖记录。
+测试套件与发布流程继续排除，两个仓库都没有 push。

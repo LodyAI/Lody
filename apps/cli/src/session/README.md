@@ -25,6 +25,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   authorized or executed. Its extensive header comment
   is the authoritative doc for edge cases (stale pointers, history/meta sync races).
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
+- `roost-node-session.ts` — owns Roost history reads/writes and its bounded active-branch
+  page cache; `roost-session-backend.ts` joins it to the existing Loro control plane.
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns. Created in
   message-handler's `beginConversationTurn`, stored/disposed via `SessionTransientStore` turn
   state; it creates the assistant entry when it opens.
@@ -266,3 +268,32 @@ Peek and claim are synchronous published-resource snapshots. A prepared resource
 open target-machine Flock to synchronously resolve launch config, but dispatch and claim
 rescan the current row. Durable creation claims the marker only when repo, source, and base
 branch target identity match, runs setup, then permits the first prompt.
+
+## Roost history paging
+
+Renderer read replies bind logical page bodies, count and history revision to
+one durable observation. The RPC waits for local writes before and after the
+read and retries a moving revision; neither barrier waits for remote sync.
+This lets the renderer persist bounded pages as a coherent offline read replica
+without exposing physical segments or introducing another history writer.
+
+Display bootstrap and ordinary directory/body reads use active-branch pages and
+a bounded body cache. Published-message pages cannot establish branch membership.
+Resolve an off-window physical head before sealing or appending; a late successor
+must not turn the next append into a new root. Full snapshots belong to explicit
+export/copy/edit operations, not renderer hydration or missing-new-ID lookup.
+
+The owner starts with 40 logical turns and keeps up to 500 page bodies for subsequent
+hydration. Reverse pages carry their own total count and absolute positions. Cursor
+rejection after a branch rewrite is recoverable by refreshing the loaded window;
+it never authorizes switching back to Loro or reading a superseded published suffix.
+
+ACP batch appliers can mutate item arrays. The Roost adapter applies them to a
+detached working copy, preserving the before-image used to decide what to persist.
+Refreshing an unsealed primary reads only its known physical turn and installs
+the result only while the branch identity and read generation still match.
+External cursor refreshes share the local write queue so an earlier branch read
+cannot overwrite a later mutation's projection; disposal rejects pending reads.
+The synthetic [history benchmark](../../benchmarks/roost-history.mts) exercises
+these production backends and the shared view; its timing excludes renderer
+transport, IndexedDB and paint.

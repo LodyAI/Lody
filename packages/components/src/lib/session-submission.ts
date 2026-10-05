@@ -52,9 +52,9 @@ function buildSessionCreateResult(payload: SessionToCreate): CreateSessionResult
     cliType: payload.cliType,
     agentType: payload.agentType,
     // Backend selection is a creation policy, not caller-provided turn data.
-    // Flip NEW_SESSION_HISTORY_BACKEND only when the corresponding adapter is
-    // registered on every client that can open the session.
-    historyBackend: NEW_SESSION_HISTORY_BACKEND,
+    // The backend identity is persisted at creation and remains immutable for
+    // the session lifetime. Existing sessions retain their stored backend.
+    historyBackend: payload.historyBackend ?? NEW_SESSION_HISTORY_BACKEND,
     agentConfigId: payload.agentConfigId,
     acpSessionId: undefined,
     diffStats: undefined,

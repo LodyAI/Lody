@@ -79,6 +79,7 @@ import {
   type ProjectRef,
   type SessionHistory,
   type SessionHistoryInput,
+  type SessionHistoryBackendKind,
   type SessionQuotaKind,
   type SessionTurnInputConfig,
   type SessionId,
@@ -139,6 +140,7 @@ import { createCloudBillingPort, createCloudStreamsTokenPort } from '@/lib/cloud
 import { getCliHttpFetch } from '@/utils/http-transport';
 import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
 import { createSessionBackend } from '@/session/session-backend';
+import { installRoostNodeSessionBackend } from '@/session/roost-node-session';
 
 type CommonOptions = CommonCommandOptions;
 
@@ -155,6 +157,13 @@ export const DEFAULT_SESSION_LIST_LIMIT = 50;
 export const MAX_MCP_SESSION_LIST_LIMIT = 200;
 export const DEFAULT_SESSION_HISTORY_LIMIT = 50;
 export const MAX_MCP_SESSION_HISTORY_LIMIT = 200;
+
+const parseSessionHistoryBackend = (value: string): SessionHistoryBackendKind => {
+  if (value !== 'loro' && value !== 'roost') {
+    throw new Error(`Unsupported session history backend: ${value}`);
+  }
+  return value;
+};
 
 type PromptOptions = {
   prompt?: string;
@@ -185,6 +194,8 @@ export type CreateOptions = CommonOptions &
     env?: string[];
     wait?: boolean;
     timeout?: number;
+    /** Explicit history backend selection for this session. */
+    historyBackend?: SessionHistoryBackendKind;
     /** Stable ids preallocated by durable orchestration recovery. */
     sessionId?: SessionId;
     userTurnId?: string;
@@ -841,6 +852,7 @@ async function withWorkspaceManager<T>(
   workspace: WorkspaceSummary,
   fn: (manager: LoroDocumentManager) => Promise<T>
 ): Promise<T> {
+  installRoostNodeSessionBackend();
   // One-shot commands need the remote Streams transport so their writes reach
   // the cloud (and the daemon) instead of stranding in the local SQLite store.
   if (!LODY_AUTH_URL) {
@@ -3193,7 +3205,7 @@ export async function prepareSessionInput(
     isArchived: false,
     cliType: agentConfig.cliType,
     agentType: agentConfig.agentType,
-    historyBackend: NEW_SESSION_HISTORY_BACKEND,
+    historyBackend: options.historyBackend ?? NEW_SESSION_HISTORY_BACKEND,
     agentConfigId: agentConfig.id,
     ...(title ? { title, titleSource: 'user' as const } : {}),
     ...(draftTitle ? { title: draftTitle, titleSource: 'draft' as const } : {}),
@@ -3978,6 +3990,11 @@ const sessionCreateCommand = new Command('create')
   .option('--jsonl', 'Print JSON Lines output')
   .option('--wait', 'Wait for the assistant turn to complete before exiting')
   .option('--timeout <seconds>', 'Wait timeout in seconds for --wait', parsePositiveIntOption)
+  .option(
+    '--history-backend <kind>',
+    'History backend for this session (default: roost)',
+    parseSessionHistoryBackend
+  )
   .option('--debug', 'Enable debug output')
   .argument('[prompt]', 'Prompt text')
   .action(async (promptArg: string | undefined, options: CreateOptions) => {

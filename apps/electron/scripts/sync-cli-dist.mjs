@@ -8,6 +8,7 @@ import {
   installEmbeddedSqliteBinding,
   stageCliRuntimePackages
 } from './cli-native-deps.mjs'
+import { stageRoostArtifact } from './roost-artifact.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -64,5 +65,6 @@ stageCliRuntimePackages()
 installEmbeddedSqliteBinding({ platform: process.platform, arch: process.arch })
 installEmbeddedNodePtyBinding({ platform: process.platform, arch: process.arch })
 installEmbeddedKeyringBinding({ platform: process.platform, arch: process.arch })
+stageRoostArtifact({ platform: process.platform, arch: process.arch })
 
 console.log(`Synced CLI dist to ${destDir}`)
