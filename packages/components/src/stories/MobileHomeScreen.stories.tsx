@@ -326,6 +326,32 @@ export const IOS: Story = {
   render: () => <MobileHomeScreenStory theme="ios" />,
 };
 
+/** A synthetic, non-square logo makes both the cover fit and circular crop visible. */
+export const WorkspaceLogo: Story = {
+  args: {
+    ...IOS.args,
+    theme: 'ios',
+    workspace: {
+      id: 'lody',
+      name: 'Lody',
+      avatarUrl: `data:image/svg+xml,${encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100"><rect width="160" height="100" fill="#f7c56c"/><path d="M0 0h40v100H0zM120 0h40v100h-40z" fill="#df7356"/><circle cx="80" cy="50" r="24" fill="#315e73"/></svg>'
+      )}`,
+    },
+    onWorkspaceMenuOpen: fn(),
+  },
+  render: (args) => (
+    <div style={{ width: 393, height: 852 }}>
+      <MobileHomeScreen {...args} />
+    </div>
+  ),
+};
+
+export const WorkspaceLogoWithoutSwitcher: Story = {
+  ...WorkspaceLogo,
+  args: { ...WorkspaceLogo.args, onWorkspaceMenuOpen: undefined },
+};
+
 export const Material: Story = {
   args: {
     workspace: { id: 'lody', name: 'Lody' },
