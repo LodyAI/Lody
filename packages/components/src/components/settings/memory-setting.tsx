@@ -3,6 +3,9 @@ import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import { Check, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Tooltip } from '@lody/ui/tooltip';
+import { Popover } from '@lody/ui/popover';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Textarea } from '@lody/ui/textarea';
@@ -14,6 +17,8 @@ import { space, text } from '@lody/ui/tokens/scales.stylex';
 import { Dialog } from '@/ui/dialog';
 import {
   MEMORY_PROVIDERS,
+  getAgentRoleEmoji,
+  type AgentRole,
   MemoryCreateInputSchema,
   MemoryAssociationSchema,
   isMemoryIdentityMissing,
@@ -68,6 +73,14 @@ const styles = stylex.create({
     width: '32px',
     height: '32px',
   },
+  assignedRoles: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: space[1],
+    maxWidth: '45%',
+  },
+  assignedLabel: { whiteSpace: 'nowrap' },
   unlinkRow: { display: 'flex', justifyContent: 'flex-end' },
   record: { position: 'relative' },
   actions: {
@@ -161,6 +174,26 @@ export function MemoryProviderLogo({ providerId }: { providerId: string }) {
   ) : null;
 }
 
+function MemoryRoleAvatar({ role }: { role: AgentRole }) {
+  const mobile = useIsMobile();
+  const trigger = (
+    <Button type="button" variant="ghost" size="small" icon aria-label={role.name}>
+      <span aria-hidden="true">{getAgentRoleEmoji(role)}</span>
+    </Button>
+  );
+  return mobile ? (
+    <Popover.Root>
+      <Popover.Trigger render={trigger} />
+      <Popover.Content>{role.name}</Popover.Content>
+    </Popover.Root>
+  ) : (
+    <Tooltip.Root>
+      <Tooltip.Trigger render={trigger} />
+      <Tooltip.Content>{role.name}</Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+
 /** The list is Lody's saved associations, never the complete external inventory. */
 export function MemoryAssociationList({
   entries,
@@ -170,10 +203,10 @@ export function MemoryAssociationList({
   onSelect,
   selected,
   onAssociateRole,
-  isAssigned,
+  getAssignedRoles,
 }: {
   onAssociateRole?: (entry: MemoryAssociation) => void;
-  isAssigned?: (entry: MemoryAssociation) => boolean;
+  getAssignedRoles?: (entry: MemoryAssociation) => readonly AgentRole[];
   entries: MemoryAssociation[];
   inventory?: MemoryProviderResponse;
   onEdit?: (entry: MemoryAssociation) => void;
@@ -187,6 +220,7 @@ export function MemoryAssociationList({
   return (
     <div {...stylex.props(settingsRecordsCard)}>
       {entries.map((entry, index) => {
+        const assignedRoles = getAssignedRoles?.(entry) ?? [];
         const Main = onSelect ? 'button' : 'div';
         const missing = isMemoryIdentityMissing(entry, inventory);
         const linked =
@@ -225,7 +259,16 @@ export function MemoryAssociationList({
                 ) : null}
               </div>
             </Main>
-            {onAssociateRole && !isAssigned?.(entry) ? (
+            {assignedRoles.length > 0 ? (
+              <div {...stylex.props(styles.assignedRoles)}>
+                <span {...stylex.props(catalog.meta, styles.assignedLabel)}>
+                  {t('settings.memory.assignedRoles')}
+                </span>
+                {assignedRoles.map((role) => (
+                  <MemoryRoleAvatar key={role.id} role={role} />
+                ))}
+              </div>
+            ) : onAssociateRole ? (
               <Button
                 type="button"
                 size="small"
@@ -407,8 +450,8 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
   const associations = useMemoryAssociations(machineId);
   const { roles, synced } = useWorkspaceAgentRoles();
   const { openSettings } = useOpenSettings();
-  const isAssigned = (entry: MemoryAssociation) =>
-    roles.some(
+  const getAssignedRoles = (entry: MemoryAssociation) =>
+    roles.filter(
       (role) =>
         role.machineId === machineId &&
         role.runConfig.memory?.providerId === entry.providerId &&
@@ -454,7 +497,7 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
           machineId={machineId}
           provider={provider}
           refreshToken={refreshToken}
-          isAssigned={isAssigned}
+          getAssignedRoles={getAssignedRoles}
           onAssociateRole={synced ? () => openSettings('agent-roles', { machineId }) : undefined}
           supported={supported}
           entries={associations.entries.filter((entry) => entry.providerId === provider.id)}
@@ -487,10 +530,10 @@ function ProviderRecords({
   setEditor,
   save,
   remove,
-  isAssigned,
+  getAssignedRoles,
   onAssociateRole,
 }: {
-  isAssigned: (entry: MemoryAssociation) => boolean;
+  getAssignedRoles: (entry: MemoryAssociation) => readonly AgentRole[];
   onAssociateRole?: (entry: MemoryAssociation) => void;
   machineId: MachineId;
   provider: ProviderDefinition;
@@ -518,7 +561,7 @@ function ProviderRecords({
       <MemoryAssociationList
         entries={entries}
         inventory={state.result}
-        isAssigned={isAssigned}
+        getAssignedRoles={getAssignedRoles}
         onAssociateRole={onAssociateRole}
         onEdit={(entry) => setEditor({ providerId: provider.id, entry })}
         onRemove={(entry) => void remove(entry)}

@@ -75,3 +75,7 @@ uses the shared accessible Role catalog and waits for its loaded state; navigati
 does not auto-bind or save. Role settings retain all machine groups without machine tabs or filtering; the
 shortcut scrolls to the target group and preselects the machine for creation. No tests were run for this UI
 follow-up at the user's request; component typechecking was used.
+
+Assigned rows now expose their accessible Role emojis and names through desktop
+tooltips or mobile tap popovers. This reuses the same exact-machine binding lookup
+as the unassigned shortcut, without revealing private inaccessible Roles.

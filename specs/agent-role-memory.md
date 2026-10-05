@@ -104,3 +104,7 @@ A memory with no binding in the accessible Role catalog shows a Link to a role
 action before edit/delete, once the catalog is loaded. It opens Agent Roles
 showing all machine groups and scrolls to the target group; new Roles preselect that machine. The action does
 not mutate a Role or auto-select an identity. The Role page has no machine tabs or machine filtering.
+
+Assigned memories show “Linked:” followed by the accessible bound Roles’ emoji avatars.
+Desktop hover/focus reveals the Role name; mobile tapping opens a name popover.
+Assignments match machine, provider and memory ID, and update with the Role catalog.
