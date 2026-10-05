@@ -27,6 +27,8 @@ actions on hover or keyboard focus. The page has top-right Add Memory and Refres
 actions. A successful provider inventory that omits a saved identity shows a
 warning; offline, inactive and failed probes do not prove deletion. Probes run on
 entry, focus and every 30 seconds while visible, skipping pending requests.
+Memory settings and the Role Memory tab keep saved cards visible during probing
+without a loading indicator; completed failures still show inline status.
 
 The Role editor has Configuration and Memory tabs sharing one draft and save
 action. The Memory tab lists saved associations on the Role's exact machine,

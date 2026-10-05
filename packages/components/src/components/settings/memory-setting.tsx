@@ -505,12 +505,12 @@ function ProviderRecords({
   const state = useMemoryProvider(machineId, provider.id, online && supported, refreshToken);
   return (
     <div {...stylex.props(styles.stack)}>
-      {state.busy || state.result?.status !== 'ready' || !online || !supported ? (
+      {!online || !supported || (state.result && state.result.status !== 'ready') ? (
         <MemoryProviderStatus
           provider={provider}
           online={online}
           supported={supported}
-          busy={state.busy}
+          busy={false}
           result={state.result}
         />
       ) : null}
@@ -940,12 +940,12 @@ function RoleProviderMemories({
   const state = useMemoryProvider(machineId, provider.id, online && supported);
   return (
     <>
-      {state.busy || state.result?.status !== 'ready' || !online || !supported ? (
+      {!online || !supported || (state.result && state.result.status !== 'ready') ? (
         <MemoryProviderStatus
           provider={provider}
           online={online}
           supported={supported}
-          busy={state.busy}
+          busy={false}
           result={state.result}
         />
       ) : null}
