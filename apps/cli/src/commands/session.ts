@@ -193,6 +193,14 @@ export type CreateOptions = CommonOptions &
     /** Agent Role provenance frozen when the create Operation is accepted. */
     agentRoleId?: string;
     agentRoleRevision?: number;
+    /**
+     * Prompt text the draft title is derived from when no explicit `title` is
+     * given. The MCP layer passes the user's own task text here for Role
+     * creates, because the prompt itself carries the Role's standing
+     * instruction as a prefix and the draft must name the task, not the
+     * instruction. `''` means no draft; undefined derives from the prompt.
+     */
+    draftTitle?: string;
     /** Durable batch Operations intentionally bypass cooperative session quotas. */
     bypassSessionQuota?: boolean;
     /**
@@ -3126,6 +3134,23 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
   };
 }
 
+/**
+ * The draft title a Session create stores when no explicit title is given:
+ * the first non-empty line of the prompt's 50 characters, as the composer
+ * derives it. A Role create passes the user's own task text as
+ * `draftTitlePrompt`, because its composed prompt opens with the Role's
+ * standing instruction and the draft must name the task, not the instruction.
+ * `''` means the caller froze "nothing draftable": no draft at all.
+ */
+export const deriveSessionCreateDraftTitle = (
+  explicitTitle: string | undefined,
+  draftTitlePrompt: string | undefined,
+  prompt: string
+): string | undefined =>
+  explicitTitle
+    ? undefined
+    : deriveDraftSessionTitle(draftTitlePrompt === undefined ? prompt : draftTitlePrompt);
+
 export function buildSessionArchiveMetaPatch(): Partial<SessionMeta> {
   return {
     isArchived: true,
@@ -3211,7 +3236,7 @@ export async function prepareSessionInput(
   // locally generated title. Otherwise a replaceable draft covers the gap until
   // the generated title lands, which for ACP-owned titles is after the first turn.
   const title = normalizeCliValue(options.title);
-  const draftTitle = title ? undefined : deriveDraftSessionTitle(prompt);
+  const draftTitle = deriveSessionCreateDraftTitle(title, options.draftTitle, prompt);
   const meta = {
     id: sessionId,
     machineId: targetMachine.id,

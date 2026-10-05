@@ -27,6 +27,7 @@ import type { MachineAccessCheckResult } from '@/lib/workspace';
 import {
   type MachineAccessReaders,
   applyAgentRunConfigSelection,
+  deriveSessionCreateDraftTitle,
   runSessionOperationWithSyncedMetadata,
   assertSupportedParentDepth,
   confirmDispatchSyncedBestEffort,
@@ -172,6 +173,21 @@ describe('session command helpers', () => {
   it('normalizes blank CLI values to undefined', () => {
     expect(normalizeCliValue('   ')).toBeUndefined();
     expect(normalizeCliValue(' value ')).toBe('value');
+  });
+
+  it('derives the create draft title from the user task text when a Role prompt is composed', () => {
+    const composed = '你是实现角色，只处理明确范围内的代码和测试。\n\nFix the login flow';
+    const task = 'Fix the login flow';
+    // A Role create freezes the user's own text for the draft, so it names
+    // the task instead of the Role's standing instruction.
+    expect(deriveSessionCreateDraftTitle(undefined, task, composed)).toBe('Fix the login flow');
+    expect(deriveSessionCreateDraftTitle(undefined, '', composed)).toBeUndefined();
+    // Without the override the prompt itself is the draft source, as before.
+    expect(deriveSessionCreateDraftTitle(undefined, undefined, composed)).toBe(
+      '你是实现角色，只处理明确范围内的代码和测试。'
+    );
+    // An explicit title is final and leaves no draft to replace.
+    expect(deriveSessionCreateDraftTitle('Named by caller', task, composed)).toBeUndefined();
   });
 
   it('records both the root Session and exact child Tab that opened a Session', () => {
