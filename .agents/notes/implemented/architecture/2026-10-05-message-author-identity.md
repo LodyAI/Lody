@@ -29,6 +29,10 @@ This extends [human sender presentation](../feature/2026-09-08-chat-sender-ident
 
 ## Verification and limits
 
+Regression correction after user testing: the chat-stream projection omitted `author`, so real rows fell back to human identity even though storage and isolated row tests passed. The projection now carries author metadata and invalidates cached rows when it changes. The UI regression test now feeds persisted history through ConversationView and buildChatStreamItems before rendering; the projection test covers both user/assistant authors and late metadata replacement. Both tests failed before the fix.
+
 Behavioral coverage exercises real local MCP A→B→A attribution with distinct source/target models, target Role deletion, durable operation retry/reopen, history storage/reopen/copy, metadata validation, human edit/resend, queued Role snapshots and visible Role identity/details. The browser Storybook fixture was also inspected. Root typechecking, lint, internationalization and platform/public boundary checks pass.
 
 The root check reaches CLI tests: 3475 pass, four skip, and the existing recursive native SSH Git credential fixture fails with `context_unreadable`; the same failure reproduces with the unchanged HEAD modules in an isolated fixture. Follow-up package tests pass, including 4765 component tests, 1272 shared tests and 199 Electron tests; docs validation reports no errors. No real-provider packaged end-to-end run or frame-time/storage benchmark was performed.
+
+Follow-up validation: 24 projection/sender tests and component typecheck pass. Root typecheck/lint pass; the latest root test run stops at the unchanged workspace-git-service local synchronization case (3475 CLI tests pass, four skip, one fails). Docs validation passes.

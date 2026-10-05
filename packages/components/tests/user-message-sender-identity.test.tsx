@@ -4,8 +4,10 @@ import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider as JotaiProvider } from 'jotai';
-import type { SessionHistoryParsed, SessionId } from '@lody/shared';
+import type { SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
 
+import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
+import { createConversationViewFromHistory } from '../src/lib/conversation-view';
 import { MessageRowView } from '../src/components/ai-gui/view';
 import { ForceDesktopLayoutProvider } from '../src/hooks/use-mobile';
 import { initI18n } from '../src/i18n';
@@ -99,6 +101,18 @@ describe('user message sender identity', () => {
       role: { id: 'reviewer', revision: 1, name: 'Reviewer', emoji: '🔎' },
       model: { id: 'model-a', source: 'runtime' as const },
     };
+    const history = [
+      { ...message, author, inputConfig: { modelId: 'model-b' } },
+    ] as unknown as SessionHistory[];
+    const projected = buildChatStreamItems(
+      createConversationViewFromHistory({
+        sessionId,
+        getHistory: () => history,
+        subscribe: () => () => {},
+      }),
+      sessionId
+    ).items[0];
+    if (projected?.type !== 'message') throw new Error('Expected hydrated message');
     await act(async () =>
       root?.render(
         createElement(
@@ -108,7 +122,7 @@ describe('user message sender identity', () => {
             ForceDesktopLayoutProvider,
             null,
             createElement(MessageRowView, {
-              message: { ...message, author, inputConfig: { modelId: 'model-b' } },
+              message: projected.message,
               sessionId,
               user,
               showSenderIdentity: false,
