@@ -72,6 +72,6 @@ existing draft and save boundary. Memory uses the same selectable catalog cards;
 switching the Role's machine still clears the binding. Unassigned imports offer
 a machine-scoped Role-settings shortcut before edit/delete. Assignment detection
 uses the shared accessible Role catalog and waits for its loaded state; navigation
-does not auto-bind or save. Role settings can filter by machine while validation
-continues to see the full accessible catalog. No tests were run for this UI
+does not auto-bind or save. Role settings retain all machine groups without machine tabs or filtering; the
+shortcut scrolls to the target group and preselects the machine for creation. No tests were run for this UI
 follow-up at the user's request; component typechecking was used.

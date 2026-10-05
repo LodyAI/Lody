@@ -102,6 +102,5 @@ claim a successful local metadata save.
 
 A memory with no binding in the accessible Role catalog shows a Link to a role
 action before edit/delete, once the catalog is loaded. It opens Agent Roles
-filtered to the exact machine; new Roles preselect that machine. The action does
-not mutate a Role or auto-select an identity. Machine filters do not narrow the
-full accessible catalog used for validation.
+showing all machine groups and scrolls to the target group; new Roles preselect that machine. The action does
+not mutate a Role or auto-select an identity. The Role page has no machine tabs or machine filtering.

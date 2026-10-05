@@ -4822,6 +4822,5 @@
   "settings.memory.import": "Import",
   "settings.memory.imported": "Imported",
   "settings.memory.associateRole": "Link to a role",
-  "settings.agentRoles.configurationTab": "Configuration",
-  "settings.agentRoles.allMachines": "All machines"
+  "settings.agentRoles.configurationTab": "Configuration"
 }

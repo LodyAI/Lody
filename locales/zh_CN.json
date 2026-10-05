@@ -4822,6 +4822,5 @@
   "settings.memory.import": "导入",
   "settings.memory.imported": "已导入",
   "settings.memory.associateRole": "去关联角色",
-  "settings.agentRoles.configurationTab": "配置",
-  "settings.agentRoles.allMachines": "全部机器"
+  "settings.agentRoles.configurationTab": "配置"
 }

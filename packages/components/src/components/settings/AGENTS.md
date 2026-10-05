@@ -94,8 +94,8 @@ component details.
   reuse Agents machine tabs/pills and catalog rows. A missing nmem install stays
   on the page with the provider URL; it must not open a blocking dialog.
   The Role Memory tab lists saved machine-Flock associations and shares the
-  Configuration tab's draft/save boundary; machine-filtered views retain the full
-  accessible Role catalog for validation. Only a ready Provider
+  Configuration tab's draft/save boundary. Role settings retain all machine groups;
+  memory shortcuts locate a group without adding machine tabs or filtering. Only a ready Provider
   inventory can mark an identity missing; deleting a link never deletes provider data.
 
 ## Workspace ownership
