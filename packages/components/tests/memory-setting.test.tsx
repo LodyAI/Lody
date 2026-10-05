@@ -41,6 +41,12 @@ const mocks = vi.hoisted(() => ({
   openExternalUrl: vi.fn(async () => true),
 }));
 
+vi.mock('../src/hooks/use-open-settings', () => ({
+  useOpenSettings: () => ({ openSettings: vi.fn() }),
+}));
+vi.mock('../src/hooks/use-workspace-agent-roles', () => ({
+  useWorkspaceAgentRoles: () => ({ roles: [], synced: true }),
+}));
 vi.mock('../src/lib/app-platform', () => ({
   useAppCapability: () => mocks.remote,
 }));

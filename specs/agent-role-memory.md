@@ -28,8 +28,11 @@ actions. A successful provider inventory that omits a saved identity shows a
 warning; offline, inactive and failed probes do not prove deletion. Probes run on
 entry, focus and every 30 seconds while visible, skipping pending requests.
 
-The collapsed Role memory picker lists saved associations on the Role's exact
-machine. Role run configuration and turn input still store only
+The Role editor has Configuration and Memory tabs sharing one draft and save
+action. The Memory tab lists saved associations on the Role's exact machine,
+using the same logo/name/description cards as Memory settings. Clicking a card
+selects it; unlinking remains available. There is no inline Memory section in
+the Configuration tab. Role run configuration and turn input still store only
 `{ providerId, memoryId }`; changing the Role's machine clears its reference.
 Removing a catalog association does not rewrite existing Roles or accepted turns.
 Unlinking a Role affects future turns; accepted turns and Operations keep their
@@ -55,8 +58,7 @@ existing ID keeps its provider profile. The returned list remains authoritative.
 Settings reuses the Agents machine selector: line tabs in the desktop pane when
 more than one machine is visible, pills outside the pane, and no remote selector
 on local-only platforms. The selected machine's saved associations use the same catalog
-rows as Agents. The Role editor keeps Memory collapsed until expanded and reuses
-the association cards, status copy and install link. Offline machines and daemons without
+rows as Agents. The Role editor Memory tab reuses the association cards, status copy and install link. Offline machines and daemons without
 `memoryProviders` v1 do not receive memory RPCs. Requests use the existing
 local/remote machine routing; a failed local request never falls back to a
 remote transport.
@@ -95,3 +97,9 @@ edit form mirrors creation with a read-only ID and editable name, description an
 role. It calls nmem agents set; blank editable fields are explicitly cleared, while
 hidden Space and provenance fields are preserved. Failed provider updates never
 claim a successful local metadata save.
+
+A memory with no binding in the accessible Role catalog shows a Link to a role
+action before edit/delete, once the catalog is loaded. It opens Agent Roles
+filtered to the exact machine; new Roles preselect that machine. The action does
+not mutate a Role or auto-select an identity. Machine filters do not narrow the
+full accessible catalog used for validation.

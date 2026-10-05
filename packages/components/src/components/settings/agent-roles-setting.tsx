@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { useAtomValue } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
 import { Plus, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -12,7 +12,7 @@ import {
   type AgentRoleAvailability,
   type MachineId,
 } from '@lody/shared';
-import { userAtom } from '@/atoms';
+import { userAtom, settingsSelectedMachineIdAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
@@ -27,6 +27,7 @@ import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
 import { AlertDialog } from '@/ui/dialog';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
+import { SettingsLineTabs } from './settings-line-tabs';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
 import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
@@ -52,6 +53,12 @@ export function AgentRolesSetting() {
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const { machines } = useVisibleMachineMetas();
   const { roles, synced } = useWorkspaceAgentRoles();
+  const [selectedMachineId, setSelectedMachineId] = useAtom(settingsSelectedMachineIdAtom);
+  const machineFilter =
+    selectedMachineId &&
+    (machines.has(selectedMachineId) || roles.some((role) => role.machineId === selectedMachineId))
+      ? selectedMachineId
+      : null;
   const { resolve } = useAgentRoleAvailability(roles);
   const { remove } = useWorkspaceAgentRoleActions();
 
@@ -64,6 +71,7 @@ export function AgentRolesSetting() {
   const roleGroups = useMemo(() => {
     const byMachine = new Map<MachineId, AgentRole[]>();
     for (const role of roles) {
+      if (machineFilter && role.machineId !== machineFilter) continue;
       const existing = byMachine.get(role.machineId);
       if (existing) existing.push(role);
       else byMachine.set(role.machineId, [role]);
@@ -75,9 +83,12 @@ export function AgentRolesSetting() {
         roles: machineRoles,
       }))
       .sort((left, right) => left.machineLabel.localeCompare(right.machineLabel));
-  }, [machines, roles, t]);
+  }, [machines, roles, t, machineFilter]);
 
-  const openAdd = () => setEditor(openAgentRoleEditorForCreate({ ...EMPTY_AGENT_ROLE_FORM_VALUE }));
+  const openAdd = () =>
+    setEditor(
+      openAgentRoleEditorForCreate({ ...EMPTY_AGENT_ROLE_FORM_VALUE, machineId: machineFilter })
+    );
   const openEdit = (role: AgentRole) => setEditor(openAgentRoleEditorForEdit(role));
 
   const confirmRemoval = async () => {
@@ -112,7 +123,19 @@ export function AgentRolesSetting() {
         </Button>
       </SettingsPageActions>
 
-      {roles.length === 0 ? (
+      <SettingsLineTabs
+        tabs={[
+          { id: '', label: t('settings.agentRoles.allMachines') },
+          ...[...machines.values()].map((machine) => ({
+            id: machine.id as string,
+            label: machine.name || machine.id,
+          })),
+        ]}
+        current={machineFilter ?? ''}
+        onChange={(id) => setSelectedMachineId(id ? (id as MachineId) : null)}
+        label={t('settings.agentRoles.form.machine')}
+      />
+      {roleGroups.length === 0 ? (
         <SettingsEmptyList>{t('settings.agentRoles.empty')}</SettingsEmptyList>
       ) : (
         <div {...stylex.props(catalog.groups)}>

@@ -64,3 +64,14 @@ after selection; they do not broaden persisted association metadata.
 Follow-up feedback makes Name mandatory (trimmed, non-empty) and removes the
 expanded profile view. Selection now keeps only name and description; the unused
 profile-detail RPC payload and adapter parsing are removed.
+
+## Role association navigation
+
+The Role editor now separates Configuration and Memory into tabs sharing its
+existing draft and save boundary. Memory uses the same selectable catalog cards;
+switching the Role's machine still clears the binding. Unassigned imports offer
+a machine-scoped Role-settings shortcut before edit/delete. Assignment detection
+uses the shared accessible Role catalog and waits for its loaded state; navigation
+does not auto-bind or save. Role settings can filter by machine while validation
+continues to see the full accessible catalog. No tests were run for this UI
+follow-up at the user's request; component typechecking was used.

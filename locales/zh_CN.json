@@ -4820,5 +4820,8 @@
   "settings.memory.createdSaveError": "已在 Provider 中创建，但 Lody 未能保存导入记录。请重试导入，不会重复创建身份。",
   "settings.memory.name": "名称",
   "settings.memory.import": "导入",
-  "settings.memory.imported": "已导入"
+  "settings.memory.imported": "已导入",
+  "settings.memory.associateRole": "去关联角色",
+  "settings.agentRoles.configurationTab": "配置",
+  "settings.agentRoles.allMachines": "全部机器"
 }

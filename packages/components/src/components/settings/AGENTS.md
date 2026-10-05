@@ -93,7 +93,9 @@ component details.
   discovery and creation use that exact machine's Provider RPC. Memory settings
   reuse Agents machine tabs/pills and catalog rows. A missing nmem install stays
   on the page with the provider URL; it must not open a blocking dialog.
-  Role pickers list saved machine-Flock memory associations. Only a ready Provider
+  The Role Memory tab lists saved machine-Flock associations and shares the
+  Configuration tab's draft/save boundary; machine-filtered views retain the full
+  accessible Role catalog for validation. Only a ready Provider
   inventory can mark an identity missing; deleting a link never deletes provider data.
 
 ## Workspace ownership

@@ -30,6 +30,8 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useMachineOnlineStatus, useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import { useMemoryProvider } from '@/hooks/use-memory-provider';
+import { useOpenSettings } from '@/hooks/use-open-settings';
+import { useWorkspaceAgentRoles } from '@/hooks/use-workspace-agent-roles';
 import { useMemoryAssociations } from '@/hooks/use-memory-associations';
 import { useAppCapability } from '@/lib/app-platform';
 import { openExternalUrl } from '@/lib/native-browser';
@@ -166,7 +168,11 @@ export function MemoryAssociationList({
   onRemove,
   onSelect,
   selected,
+  onAssociateRole,
+  isAssigned,
 }: {
+  onAssociateRole?: (entry: MemoryAssociation) => void;
+  isAssigned?: (entry: MemoryAssociation) => boolean;
   entries: MemoryAssociation[];
   inventory?: MemoryProviderResponse;
   onEdit?: (entry: MemoryAssociation) => void;
@@ -180,6 +186,7 @@ export function MemoryAssociationList({
   return (
     <div {...stylex.props(settingsRecordsCard)}>
       {entries.map((entry, index) => {
+        const Main = onSelect ? 'button' : 'div';
         const missing = isMemoryIdentityMissing(entry, inventory);
         const linked =
           selected?.providerId === entry.providerId && selected.memoryId === entry.memoryId;
@@ -191,10 +198,17 @@ export function MemoryAssociationList({
               catalog.row,
               styles.record,
               surface.line,
+              linked && surface.listRowSelected,
               index > 0 && surface.lineRuled
             )}
           >
-            <div {...stylex.props(catalog.rowMain)}>
+            <Main
+              type={onSelect ? 'button' : undefined}
+              disabled={onSelect ? missing : undefined}
+              onClick={onSelect ? () => onSelect(entry) : undefined}
+              aria-pressed={onSelect ? linked : undefined}
+              {...stylex.props(catalog.rowMain)}
+            >
               <span {...stylex.props(styles.recordLogo)}>
                 <MemoryProviderLogo providerId={entry.providerId} />
               </span>
@@ -209,7 +223,17 @@ export function MemoryAssociationList({
                   <FormMessage tone="warning">{t('settings.memory.missing')}</FormMessage>
                 ) : null}
               </div>
-            </div>
+            </Main>
+            {onAssociateRole && !isAssigned?.(entry) ? (
+              <Button
+                type="button"
+                size="small"
+                variant="secondary"
+                onClick={() => onAssociateRole(entry)}
+              >
+                {t('settings.memory.associateRole')}
+              </Button>
+            ) : null}
             <div {...stylex.props(catalog.actions, !onSelect && styles.actions)}>
               {onSelect ? (
                 <Button
@@ -380,6 +404,16 @@ type Editor = { providerId: string; entry?: MemoryAssociation };
 function MachineMemories({ machineId, supported }: { machineId: MachineId; supported: boolean }) {
   const { t } = useTranslation();
   const associations = useMemoryAssociations(machineId);
+  const { roles, synced } = useWorkspaceAgentRoles();
+  const { openSettings } = useOpenSettings();
+  const isAssigned = (entry: MemoryAssociation) =>
+    roles.some(
+      (role) =>
+        role.machineId === machineId &&
+        role.runConfig.memory?.providerId === entry.providerId &&
+        role.runConfig.memory.memoryId === entry.memoryId
+    );
+
   const [editor, setEditor] = useState<Editor | null>(null);
   const [error, setError] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -419,6 +453,8 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
           machineId={machineId}
           provider={provider}
           refreshToken={refreshToken}
+          isAssigned={isAssigned}
+          onAssociateRole={synced ? () => openSettings('agent-roles', { machineId }) : undefined}
           supported={supported}
           entries={associations.entries.filter((entry) => entry.providerId === provider.id)}
           editor={editor?.providerId === provider.id ? editor : null}
@@ -450,7 +486,11 @@ function ProviderRecords({
   setEditor,
   save,
   remove,
+  isAssigned,
+  onAssociateRole,
 }: {
+  isAssigned: (entry: MemoryAssociation) => boolean;
+  onAssociateRole?: (entry: MemoryAssociation) => void;
   machineId: MachineId;
   provider: ProviderDefinition;
   supported: boolean;
@@ -477,6 +517,8 @@ function ProviderRecords({
       <MemoryAssociationList
         entries={entries}
         inventory={state.result}
+        isAssigned={isAssigned}
+        onAssociateRole={onAssociateRole}
         onEdit={(entry) => setEditor({ providerId: provider.id, entry })}
         onRemove={(entry) => void remove(entry)}
       />
@@ -898,13 +940,15 @@ function RoleProviderMemories({
   const state = useMemoryProvider(machineId, provider.id, online && supported);
   return (
     <>
-      <MemoryProviderStatus
-        provider={provider}
-        online={online}
-        supported={supported}
-        busy={state.busy}
-        result={state.result}
-      />
+      {state.busy || state.result?.status !== 'ready' || !online || !supported ? (
+        <MemoryProviderStatus
+          provider={provider}
+          online={online}
+          supported={supported}
+          busy={state.busy}
+          result={state.result}
+        />
+      ) : null}
       <MemoryAssociationList
         entries={entries}
         inventory={state.result}
