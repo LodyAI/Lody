@@ -1563,6 +1563,7 @@ export class LodyOperationCoordinator {
       return {
         id: delivery.systemTurnId,
         role: 'system',
+        author: { v: 1, kind: 'system' },
         userId: operation.requesterUserId,
         timestamp: new Date(this.now()).toISOString(),
         items: [item],

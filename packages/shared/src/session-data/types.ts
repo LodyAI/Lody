@@ -36,6 +36,7 @@ export const clearField = <T>(): SessionFieldChange<T> => ({ kind: 'clear' });
  */
 export type OpenAssistantTurnInput = {
   readonly turnId: string;
+  readonly author?: SessionTurn['author'];
   /** Attached only when the stored turn has none (never overwrites a value). */
   readonly userTurnId?: string;
   /** Applied only when provided. */

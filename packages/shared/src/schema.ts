@@ -586,6 +586,7 @@ const acpSessionConfigSchema = schema
       /** Agent Role selected for this Turn; null is explicit None. */
       agentRoleId: agentRoleIdSchema,
       agentRoleRevision: schema.Number({ required: false }),
+      agentRoleSnapshot: schema.Any({ required: false }),
       chainDepth: schema.Number({ required: false }),
     },
     { required: false }
@@ -691,6 +692,7 @@ export const sessionHistorySchema = schema.LoroMap({
    */
   read: schema.Boolean({ required: false }),
   userId: schema.String({ required: false }),
+  author: schema.Any({ required: false }),
   modelInfo: schema.Any({ required: false }),
   // Assistant turns: tokens this turn consumed, summed from adapter usage deltas.
   // A primitive JSON value (`SessionTurnTokenUsage`), replaced whole on each write.

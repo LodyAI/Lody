@@ -4778,5 +4778,14 @@
   "sessions.iosSimulator.screenshot.noComposer": "请先打开会话聊天，再附加截屏。",
   "sessions.iosSimulator.screenshot.timeout": "模拟器截屏超时。",
   "sessions.iosSimulator.screenshot.tooLarge": "截屏太大，无法传输。",
-  "sessions.iosSimulator.screenshot.unavailable": "屏幕显示后才能截屏。"
+  "sessions.iosSimulator.screenshot.unavailable": "屏幕显示后才能截屏。",
+  "sessions.messageAuthor.details": "查看发送者：{{name}}",
+  "sessions.messageAuthor.model": "模型：{{model}}",
+  "sessions.messageAuthor.configuredModel": "配置模型：{{model}}",
+  "sessions.messageAuthor.reasoning": "推理强度：{{value}}",
+  "sessions.messageAuthor.fast": "快速模式：{{value}}",
+  "sessions.messageAuthor.plan": "规划模式：{{value}}",
+  "sessions.messageAuthor.source": "打开来源会话",
+  "sessions.messageAuthor.on": "开启",
+  "sessions.messageAuthor.off": "关闭"
 }

@@ -1,3 +1,4 @@
+import { snapshotAgentRole } from '@lody/shared';
 import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import {
   forwardRef,
@@ -541,6 +542,7 @@ export const DraftSessionChatInterface = memo(
               mcpServerIds: mcpSelection.selectedIds,
               agentRoleId: activeAgentRole?.id ?? null,
               agentRoleRevision: activeAgentRole?.revision,
+              agentRoleSnapshot: activeAgentRole ? snapshotAgentRole(activeAgentRole) : undefined,
             }),
           };
         },

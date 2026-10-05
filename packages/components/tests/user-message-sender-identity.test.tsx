@@ -89,6 +89,47 @@ describe('user message sender identity', () => {
     expect(document.body.textContent).toContain('maya.chen@example.com');
   });
 
+  it('shows a Role author in a solo workspace without the human profile and exposes source model details', async () => {
+    const author = {
+      v: 1 as const,
+      kind: 'agent' as const,
+      sessionId: 'source-session',
+      turnId: 'source-turn',
+      name: 'Agent A',
+      role: { id: 'reviewer', revision: 1, name: 'Reviewer', emoji: '🔎' },
+      model: { id: 'model-a', source: 'runtime' as const },
+    };
+    await act(async () =>
+      root?.render(
+        createElement(
+          JotaiProvider,
+          null,
+          createElement(
+            ForceDesktopLayoutProvider,
+            null,
+            createElement(MessageRowView, {
+              message: { ...message, author, inputConfig: { modelId: 'model-b' } },
+              sessionId,
+              user,
+              showSenderIdentity: false,
+            })
+          )
+        )
+      )
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Reviewer');
+    expect(container?.textContent).toContain('🔎');
+    expect(container?.querySelector('button[aria-label="View profile for Maya Chen"]')).toBeNull();
+    const trigger = container?.querySelector('button[aria-label="View sender: Reviewer"]');
+    expect(trigger).toBeTruthy();
+    await click(trigger!);
+    expect(document.body.textContent).toContain('Model: model-a');
+    expect(document.body.textContent).not.toContain('maya.chen@example.com');
+    expect(document.body.textContent).not.toContain('Model: model-b');
+  });
+
   it('keeps sender identity hidden when the workspace has one member', async () => {
     await act(async () => {
       root?.render(

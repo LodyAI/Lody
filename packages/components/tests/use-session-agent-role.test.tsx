@@ -264,6 +264,7 @@ describe('useSessionAgentRole', () => {
     expect(control?.turnSelection).toEqual({
       agentRoleId: 'role-special',
       agentRoleRevision: 1,
+      agentRoleSnapshot: { id: 'role-special', revision: 1, name: 'role-special', emoji: '🤖' },
     });
   });
 

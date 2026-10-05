@@ -1,3 +1,5 @@
+import { resolveSessionConversationConfig } from '@lody/shared';
+import type { MessageAuthor, AgentMessageAuthor } from '@lody/shared';
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
   getDeclaredModelControls,
@@ -144,6 +146,7 @@ type CommonOptions = CommonCommandOptions;
 
 export type DelegatedSessionRequester = {
   userId: string;
+  author?: AgentMessageAuthor;
 };
 
 type ResolvedSessionRequester = {
@@ -193,6 +196,7 @@ export type CreateOptions = CommonOptions &
     /** Agent Role provenance frozen when the create Operation is accepted. */
     agentRoleId?: string;
     agentRoleRevision?: number;
+    agentRoleSnapshot?: import('@lody/shared').AgentRoleSnapshot;
     /** Durable batch Operations intentionally bypass cooperative session quotas. */
     bypassSessionQuota?: boolean;
     /**
@@ -292,6 +296,7 @@ export type SessionTranscriptEntry = {
   index: number;
   id: string;
   role: SessionTranscriptRole;
+  author?: MessageAuthor;
   timestamp: string;
   text: string;
 };
@@ -553,6 +558,7 @@ export function toSessionTranscriptEntry(
     index,
     id: entry.id,
     role: entry.role,
+    ...(entry.author ? { author: entry.author } : {}),
     timestamp: entry.timestamp,
     text,
   };
@@ -1290,6 +1296,7 @@ async function appendUserPromptHistory(args: {
   prompt: string;
   userId: string;
   inputConfig?: SessionHistoryInput['inputConfig'];
+  author?: MessageAuthor;
   preallocatedId?: string;
   /** History the caller already read, so the idempotency check can skip a re-read. */
   knownHistory?: readonly SessionHistory[];
@@ -1321,6 +1328,7 @@ async function appendUserPromptHistory(args: {
   const entry: SessionHistoryInput = {
     id: historyId,
     role: 'user',
+    author: args.author ?? { v: 1, kind: 'human', userId },
     timestamp,
     status: 'pending',
     read: false,
@@ -3251,16 +3259,26 @@ export async function prepareSessionInput(
         : 'pending',
     read: !!ownerTarget || machineSupportsPreparedSessionInputProtocol(targetMachine),
     userId: requesterUserId,
+    author: options.delegatedRequester?.author ?? { v: 1, kind: 'human', userId: requesterUserId },
     items: [{ type: 'text', text: prompt }],
-    inputConfig: buildCliHistoryInputConfig({
-      prompt: buildAgentPrompt(prompt, agentConfig.prompt ?? ''),
-      cliType: agentConfig.cliType,
-      agentType: agentConfig.agentType,
-      modeId: effectiveDispatchConfig.modeId ?? undefined,
-      modelId: effectiveDispatchConfig.modelId ?? undefined,
-      configOptionValues: effectiveDispatchConfig.configOptionValues,
-      chainDepth: options.chainDepth,
-    }),
+    inputConfig: {
+      ...(options.agentRoleId
+        ? {
+            agentRoleId: options.agentRoleId as AgentRoleId,
+            agentRoleRevision: options.agentRoleRevision,
+            agentRoleSnapshot: options.agentRoleSnapshot,
+          }
+        : {}),
+      ...buildCliHistoryInputConfig({
+        prompt: buildAgentPrompt(prompt, agentConfig.prompt ?? ''),
+        cliType: agentConfig.cliType,
+        agentType: agentConfig.agentType,
+        modeId: effectiveDispatchConfig.modeId ?? undefined,
+        modelId: effectiveDispatchConfig.modelId ?? undefined,
+        configOptionValues: effectiveDispatchConfig.configOptionValues,
+        chainDepth: options.chainDepth,
+      }),
+    },
     fileDiff: [],
     finished: true,
   };
@@ -3512,20 +3530,35 @@ export async function sendSessionChatResult(
     target: session,
     capability,
   });
+  // An unconfigured follow-up retains the target's selected Role, never the sender's.
+  // Explicit execution changes clear it rather than claiming an unchanged preset.
+  const roleSelection =
+    !dispatchConfig.modeId &&
+    !dispatchConfig.modelId &&
+    !dispatchConfig.configOptionValues &&
+    !dispatchConfig.runConfig
+      ? resolveSessionConversationConfig(historyForDefaults)
+      : undefined;
   const userTurn = await appendUserPromptHistory({
     sessionDoc,
     prompt,
     userId: requesterUserId,
-    inputConfig: buildCliHistoryInputConfig({
-      prompt,
-      cliType: session.cliType,
-      agentType: session.agentType,
-      modeId: effectiveDispatchConfig.modeId,
-      modelId: effectiveDispatchConfig.modelId,
-      configOptionValues: effectiveDispatchConfig.configOptionValues,
-      resume: session.acpSessionId ?? undefined,
-      chainDepth: orchestration?.chainDepth,
-    }),
+    author: delegatedRequester?.author,
+    inputConfig: {
+      agentRoleId: roleSelection?.agentRoleId ?? null,
+      agentRoleRevision: roleSelection?.agentRoleRevision,
+      agentRoleSnapshot: roleSelection?.agentRoleSnapshot,
+      ...buildCliHistoryInputConfig({
+        prompt,
+        cliType: session.cliType,
+        agentType: session.agentType,
+        modeId: effectiveDispatchConfig.modeId,
+        modelId: effectiveDispatchConfig.modelId,
+        configOptionValues: effectiveDispatchConfig.configOptionValues,
+        resume: session.acpSessionId ?? undefined,
+        chainDepth: orchestration?.chainDepth,
+      }),
+    },
     preallocatedId: orchestration?.userTurnId,
     knownHistory: quotaHistory,
   });

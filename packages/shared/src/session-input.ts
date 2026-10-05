@@ -46,6 +46,7 @@ export type SessionInputHistoryItem =
 export type PendingUserHistoryEntry = {
   userId: string;
   role: 'user';
+  author: { v: 1; kind: 'human'; userId: string };
   items: NonNullable<SessionHistoryInput['items']>;
   timestamp: string;
   status: 'pending' | 'pending_apply';
@@ -64,6 +65,7 @@ export type SessionConversationConfig = {
   /** Null is an explicit None; undefined means the selected Turn predates this field. */
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
+  agentRoleSnapshot?: import('./message-author').AgentRoleSnapshot;
 };
 
 type SessionConversationSource = {
@@ -168,6 +170,9 @@ export const resolveSessionConversationConfig = (
       ...(inputConfig.configOptionValues && Object.keys(inputConfig.configOptionValues).length > 0
         ? { configOptionValues: inputConfig.configOptionValues }
         : {}),
+      ...(inputConfig.agentRoleSnapshot
+        ? { agentRoleSnapshot: inputConfig.agentRoleSnapshot }
+        : {}),
       ...(inputConfig.mcpServerIds ? { mcpServerIds: inputConfig.mcpServerIds } : {}),
       ...(inputConfig.agentRoleId !== undefined ? { agentRoleId: inputConfig.agentRoleId } : {}),
       ...(typeof inputConfig.agentRoleId === 'string' && inputConfig.agentRoleRevision !== undefined
@@ -192,6 +197,7 @@ export const resolveSessionConversationConfig = (
     return {
       ...resolved,
       agentRoleId: older.agentRoleId,
+      ...(older.agentRoleSnapshot ? { agentRoleSnapshot: older.agentRoleSnapshot } : {}),
       ...(older.agentRoleId !== null && older.agentRoleRevision !== undefined
         ? { agentRoleRevision: older.agentRoleRevision }
         : {}),
@@ -626,6 +632,7 @@ export const buildSessionTurnInputConfig = (args: {
   mcpServerIds?: readonly McpServerId[] | null;
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
+  agentRoleSnapshot?: import('./message-author').AgentRoleSnapshot;
   issuePRMentions?: IssuePRMention[];
   resume?: ACPSessionConfig['resume'];
   prompt?: string;
@@ -647,6 +654,10 @@ export const buildSessionTurnInputConfig = (args: {
     ...(args.agentRoleId !== undefined ? { agentRoleId: args.agentRoleId } : {}),
     ...(typeof args.agentRoleId === 'string' && args.agentRoleRevision !== undefined
       ? { agentRoleRevision: args.agentRoleRevision }
+      : {}),
+    ...(args.agentRoleSnapshot?.id === args.agentRoleId &&
+    args.agentRoleSnapshot?.revision === args.agentRoleRevision
+      ? { agentRoleSnapshot: args.agentRoleSnapshot }
       : {}),
     issuePRMentions: args.issuePRMentions,
     resume: args.resume,
@@ -694,6 +705,7 @@ export const buildPendingUserHistoryEntry = (args: {
   return {
     userId,
     role: 'user',
+    author: { v: 1, kind: 'human', userId },
     items,
     timestamp: args.timestamp,
     status: args.status ?? 'pending',

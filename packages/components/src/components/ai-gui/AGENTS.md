@@ -1,6 +1,6 @@
 # components/ai-gui
 
-Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md).
+Ownership: [README.md](README.md).
 
 ## Stream And Search
 
@@ -50,7 +50,7 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   body type, a hover-only trailing chevron, no fill. Only builtin DeepSeek Harness retains thought rows in expandable
   activity groups; pure thoughts default open unless explicitly collapsed. Other providers
   keep thoughts hidden.
-  Turns are avatar-free and full-width; run config lives in the footer.
+  Full-width assistant bodies keep author/config in the footer.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only
   the command is highlighted, via the Shiki worker; output stays ANSI text. Drop
@@ -115,8 +115,8 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   dialog resends the same content as a new ordinary message, then marks the old
   entry `canceled` while retaining the marker as a tombstone. Never automatically
   dispatch or revive the old turn.
-- User rows show names right of time; desktop avatars open accessible name/email
-  cards, mobile avatars do not.
+- Frozen Agent/Role names/icons never use human profiles or live catalogs. Human names
+  sit right of time; only desktop avatars open accessible name/email cards.
 - Attachment layout, preview continuity, and mobile previews follow
   [session-files-rendering.md](session-files-rendering.md).
 - Markdown images remember each source's natural size or failure for the page's

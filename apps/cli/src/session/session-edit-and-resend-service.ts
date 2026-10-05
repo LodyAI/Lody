@@ -309,7 +309,7 @@ export class SessionEditAndResendService {
           inputConfig.prompt ?? ''
         );
         const pending = buildPendingUserHistoryEntry({
-          userId: commitEditable.turn.userId ?? spec.requestedByUserId,
+          userId: spec.requestedByUserId,
           inputBlocks,
           timestamp: spec.timestamp,
           inputConfig,

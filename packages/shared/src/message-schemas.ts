@@ -1,3 +1,4 @@
+import { AgentRoleSnapshotSchema } from './message-author';
 import { z } from 'zod';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
 import {
@@ -382,6 +383,7 @@ export const ACPTurnConfigSchema = z
     mcpServerIds: z.array(z.string()).optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
     agentRoleRevision: z.number().int().nonnegative().optional(),
+    agentRoleSnapshot: AgentRoleSnapshotSchema.optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -495,6 +497,15 @@ export const normalizeSessionTurnInputConfig = (
   );
   if (agentRoleRevision !== undefined) {
     normalized.agentRoleRevision = agentRoleRevision;
+  }
+
+  const roleSnapshot = maybeParseField(AgentRoleSnapshotSchema, record.agentRoleSnapshot);
+  if (
+    roleSnapshot &&
+    roleSnapshot.id === normalized.agentRoleId &&
+    roleSnapshot.revision === normalized.agentRoleRevision
+  ) {
+    normalized.agentRoleSnapshot = roleSnapshot;
   }
 
   const issuePRMentions = maybeParseField(z.array(IssuePRMentionSchema), record.issuePRMentions);

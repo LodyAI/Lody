@@ -4778,5 +4778,14 @@
   "sessions.iosSimulator.screenshot.noComposer": "Open the session chat to attach a screenshot.",
   "sessions.iosSimulator.screenshot.timeout": "The simulator took too long to take a screenshot.",
   "sessions.iosSimulator.screenshot.tooLarge": "The screenshot is too large to bring over.",
-  "sessions.iosSimulator.screenshot.unavailable": "Screenshots aren’t available until the screen is showing."
+  "sessions.iosSimulator.screenshot.unavailable": "Screenshots aren’t available until the screen is showing.",
+  "sessions.messageAuthor.details": "View sender: {{name}}",
+  "sessions.messageAuthor.model": "Model: {{model}}",
+  "sessions.messageAuthor.configuredModel": "Configured model: {{model}}",
+  "sessions.messageAuthor.reasoning": "Reasoning: {{value}}",
+  "sessions.messageAuthor.fast": "Fast mode: {{value}}",
+  "sessions.messageAuthor.plan": "Plan mode: {{value}}",
+  "sessions.messageAuthor.source": "Open source conversation",
+  "sessions.messageAuthor.on": "On",
+  "sessions.messageAuthor.off": "Off"
 }

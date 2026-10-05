@@ -1,3 +1,4 @@
+import { snapshotAgentRole } from '@lody/shared';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -235,6 +236,7 @@ export function useSessionAgentRole({
       ? {
           agentRoleId: selectedRoleId,
           agentRoleRevision: pickedItem.role.revision,
+          agentRoleSnapshot: snapshotAgentRole(pickedItem.role),
         }
       : pickedRoleId === null
         ? null

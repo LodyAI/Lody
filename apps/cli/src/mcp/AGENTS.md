@@ -39,7 +39,7 @@ Parent instructions apply. Background: [README.md](README.md).
 - Derive orchestration identity only from the active execution runtime's dispatch payload;
   reject absent runtime/userId, never infer from daemon credential, Session owner or history.
   Freeze `requesterUserId` and `sourceTurnId` at Operation acceptance; requester Session id
-  already identifies the Session, so add no duplicate actor tag. Recovery uses the Operation
+  already identifies the Session. Author snapshots are presentation only. Recovery uses the Operation
   owner Machine and current authorization, not a frozen daemon account.
 - Direct Role creation stays on the ordinary `lody_session_create` and
   `lody_session_create_many` tools. When `agentRoleId` is present, tolerate manual Machine, Agent,

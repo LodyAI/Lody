@@ -1754,6 +1754,12 @@ describe('SessionDispatchWatcher', () => {
           agentType: 'codex',
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
         },
       },
     ];
@@ -1846,6 +1852,12 @@ describe('SessionDispatchWatcher', () => {
         inputConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
         }),
       })
     );
@@ -1859,6 +1871,12 @@ describe('SessionDispatchWatcher', () => {
         acpSessionConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
         }),
       }),
       { dispatchSource: 'queue' }

@@ -238,3 +238,11 @@ Session data and action controls continue updating. This is independent of
 
 The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
 records lifecycle, alternatives, and platform verification limits.
+
+## Message authors
+
+`message-author-identity.tsx` renders frozen Agent/Role identity in input avatars and
+assistant footers. It reads no catalogs or source documents. Human profiles remain
+in `view.tsx`; execution controls continue to describe the receiving turn. The
+[identity contract](../../../../../specs/message-author-identity.md) defines capture,
+recovery and legacy behavior.

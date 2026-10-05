@@ -4,6 +4,7 @@ import {
   buildMissingEmail,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
+  normalizeSessionTurnInputConfig,
   getSessionRoomId,
   type ChatFailedReason,
   isLoroRepoDocDeleted,
@@ -2006,6 +2007,7 @@ export class SessionDispatchWatcher {
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
+        agentRoleSnapshot: entry.inputConfig?.agentRoleSnapshot,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
         resume: entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta),
       },
@@ -2049,6 +2051,7 @@ export class SessionDispatchWatcher {
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
+        agentRoleSnapshot: entry.inputConfig?.agentRoleSnapshot,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
         resume: entry.inputConfig?.resume,
       },
@@ -2108,6 +2111,8 @@ export class SessionDispatchWatcher {
       mcpServerIds: normalizeMcpServerIdSelection(queuedItem.acpSessionConfig?.mcpServerIds) ?? [],
       agentRoleId: queuedItem.acpSessionConfig?.agentRoleId,
       agentRoleRevision: queuedItem.acpSessionConfig?.agentRoleRevision,
+      agentRoleSnapshot: normalizeSessionTurnInputConfig(queuedItem.acpSessionConfig)
+        ?.agentRoleSnapshot,
       issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,
       resume: resolveResumableAcpSessionId(meta),
     });

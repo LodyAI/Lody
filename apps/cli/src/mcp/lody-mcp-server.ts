@@ -1,3 +1,5 @@
+import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
+import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { spawn } from 'child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
@@ -1379,6 +1381,7 @@ const bindAgentRoleCreateOptions = (options: CreateOptions, role: AgentRole | un
   if (!role) return;
   options.agentRoleId = role.id;
   options.agentRoleRevision = role.revision;
+  options.agentRoleSnapshot = snapshotAgentRole(role);
 };
 
 const buildMcpCreateOptions = (
@@ -2111,11 +2114,13 @@ const bindMcpCreateContext = (
 
 type InvocationIdentity = {
   userId: string;
+  author?: AgentMessageAuthor;
   sourceTurnId: string;
 };
 
 const toDelegatedSessionRequester = (identity: InvocationIdentity): DelegatedSessionRequester => ({
   userId: identity.userId,
+  ...(identity.author ? { author: identity.author } : {}),
 });
 
 type InvokingTurnContext = {
@@ -2169,6 +2174,31 @@ const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
     userId: active.requesterUserId,
     inputConfig,
   };
+};
+
+const freezeInvokingAuthor = async (
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  invoking: InvokingTurnContext
+): Promise<void> => {
+  const doc = await manager.getOrCreateSessionDoc(session.id);
+  const backend = await createSessionBackend(doc);
+  const turn = await backend.history.readTurn(`assistant:${invoking.identity.sourceTurnId}`);
+  const storedAuthor = turn.state === 'ready' ? readMessageAuthor(turn.turn.author) : undefined;
+  const author =
+    storedAuthor?.kind === 'agent' &&
+    storedAuthor.sessionId === session.id &&
+    storedAuthor.turnId === invoking.identity.sourceTurnId
+      ? storedAuthor
+      : await resolveSessionMessageAuthor(
+          manager,
+          session,
+          invoking.identity.sourceTurnId,
+          invoking.frozenInputConfig,
+          undefined,
+          getMcpWorkspaceId(getSessionContext()) as WorkspaceId
+        );
+  invoking.identity.author = author;
 };
 
 const resolveInvokingTurnContext = async (session: SessionMeta): Promise<InvokingTurnContext> => {
@@ -2621,6 +2651,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     }
     const preallocatedSessionId = randomUUID() as SessionId;
     const preallocatedUserTurnId = randomUUID();
+    await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
     const accepted = await withOperationStore((store) =>
@@ -2630,8 +2661,10 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
           requesterUserId: invoking.identity.userId,
+          author: invoking.identity.author,
           operationId: args.operationId!,
           kind: 'session_create',
+          targetRoleSnapshots: [resolved.role ? snapshotAgentRole(resolved.role) : null],
           canonicalCommand,
           frozenContinuationConfig: {
             ...(currentSession.agentConfigId
@@ -2656,6 +2689,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       throw new Error('Single create Operation is missing its active target item.');
     }
     if (!pendingItem.inputDurable && accepted.claimedItemIndexes.includes(0)) {
+      createOptions.delegatedRequester = toDelegatedSessionRequester(invoking.identity);
       createOptions.sessionId = pendingItem.target.sessionId;
       createOptions.userTurnId = pendingItem.target.userTurnId;
       createOptions.chainDepth = invoking.chainDepth + 1;
@@ -2774,6 +2808,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       throw new LodyOperationStoreError('COMMAND_REJECTED', formatMcpErrorMessage(error), false);
     }
     const preallocatedUserTurnId = randomUUID();
+    await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
     const accepted = await withOperationStore((store) =>
@@ -2783,6 +2818,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
           requesterUserId: invoking.identity.userId,
+          author: invoking.identity.author,
           operationId: args.operationId!,
           kind: 'session_chat',
           canonicalCommand,
@@ -3165,6 +3201,7 @@ const startSessionCreateManyOperation = async (
     );
     const initialItems = validatedItems.map((item) => item.operationItem);
     const targetDispatchConfigs = validatedItems.map((item) => item.dispatchConfig);
+    await freezeInvokingAuthor(manager, requester, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
     const accepted = await withOperationStore((store) =>
@@ -3174,8 +3211,12 @@ const startSessionCreateManyOperation = async (
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
           requesterUserId: invoking.identity.userId,
+          author: invoking.identity.author,
           operationId: args.operationId,
           kind: 'session_create_many',
+          targetRoleSnapshots: resolvedItems.map((item) =>
+            item.resolved?.role ? snapshotAgentRole(item.resolved.role) : null
+          ),
           canonicalCommand,
           frozenContinuationConfig: {
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
@@ -3368,6 +3409,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
         return activeOperationItem(target.id, randomUUID(), item.label);
       }
     );
+    await freezeInvokingAuthor(manager, requester, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
     const accepted = await withOperationStore((store) =>
@@ -3377,6 +3419,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
           requesterUserId: invoking.identity.userId,
+          author: invoking.identity.author,
           operationId: args.operationId,
           kind: 'session_chat_many',
           canonicalCommand,
@@ -3981,6 +4024,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
             currentSession,
             args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined
           );
+          await freezeInvokingAuthor(manager, currentSession, invoking);
           const options = buildMcpCreateOptions(resolved.input, ctx);
           bindMcpCreateContext(options, invoking.identity, currentSession);
           bindAgentRoleCreateOptions(options, resolved.role);
@@ -4065,6 +4109,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           }
           assertDifferentMcpSession(currentSession, targetSession);
           const invoking = await resolveInvokingTurnContext(currentSession);
+          await freezeInvokingAuthor(manager, currentSession, invoking);
           const result = await sendSessionChatResult(
             auth,
             workspace,

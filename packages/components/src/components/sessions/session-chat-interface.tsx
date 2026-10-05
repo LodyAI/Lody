@@ -4229,6 +4229,7 @@ export const SessionChatInterface = memo(
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
+            agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
             resume: session.acpSessionId ?? undefined,
           });
 
@@ -4378,6 +4379,7 @@ export const SessionChatInterface = memo(
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
+            agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
             resume: session.acpSessionId ?? undefined,
           });
           const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
@@ -4392,6 +4394,7 @@ export const SessionChatInterface = memo(
             mcpServerIds: [...mcpSelection.selectedIds],
             agentRoleId: inputConfig.agentRoleId,
             agentRoleRevision: inputConfig.agentRoleRevision,
+            agentRoleSnapshot: inputConfig.agentRoleSnapshot,
             resume: inputConfig.resume ?? undefined,
             chainDepth: 0,
           };

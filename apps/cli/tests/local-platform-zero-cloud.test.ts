@@ -1,3 +1,4 @@
+import { resolveSessionMessageAuthor } from '../src/session/message-author';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
@@ -12,6 +13,7 @@ import {
   getSessionRoomId,
   getWorkspaceFlockDocId,
   writeWorkspaceAgentRoleToFlock,
+  deleteWorkspaceAgentRoleFromFlock,
   type AgentRoleId,
   type MachineId,
   type SessionId,
@@ -136,7 +138,14 @@ describe('local platform zero-cloud integration', () => {
             sessionId: id,
             requesterUserId: userId,
             sourceTurnId: 'source-turn',
-            inputConfig: { cliType: 'custom', agentType: 'claude' },
+            inputConfig: {
+              cliType: 'custom',
+              agentType: 'claude',
+              modelId: 'source-model',
+              agentRoleId: 'planner' as AgentRoleId,
+              agentRoleRevision: 1,
+              agentRoleSnapshot: { id: 'planner', revision: 1, name: 'Planner', emoji: '🧭' },
+            },
           }),
           readLiveStatus: async (id) => ({
             sessionId: id,
@@ -249,6 +258,18 @@ describe('local platform zero-cloud integration', () => {
       const doc = await manager.getOrCreateSessionDoc(targetId);
       const history = await doc.sessionData.history.readAll();
       expect(history).toHaveLength(1);
+      expect(history[0]).toMatchObject({
+        userId,
+        author: {
+          kind: 'agent',
+          sessionId,
+          turnId: 'source-turn',
+          name: 'Synthetic',
+          model: { id: 'source-model' },
+          role: { id: 'planner', name: 'Planner', emoji: '🧭' },
+        },
+      });
+      expect(history[0]?.inputConfig?.modelId).not.toBe('source-model');
       expect(history[0]?.items).toEqual([
         { type: 'text', text: 'Review carefully.\n\nCheck the change.' },
       ]);
@@ -268,6 +289,61 @@ describe('local platform zero-cloud integration', () => {
       } finally {
         store.close();
       }
+      const targetMeta = target?.meta as import('@lody/shared').SessionMeta;
+      const targetInput = history[0];
+      if (!targetInput) throw new Error('Missing target input');
+      deleteWorkspaceAgentRoleFromFlock(catalog.flock, 'reviewer' as AgentRoleId);
+      const targetAuthor = await resolveSessionMessageAuthor(
+        manager,
+        targetMeta,
+        targetInput.id,
+        targetInput.inputConfig,
+        undefined,
+        workspaceId
+      );
+      await doc.sessionData.commands.appendTurn({
+        id: `assistant:${targetInput.id}`,
+        role: 'assistant',
+        timestamp: targetInput.timestamp,
+        userTurnId: targetInput.id,
+        author: targetAuthor,
+        items: [{ type: 'text', text: 'Synthetic response' }],
+        finished: true,
+        fileDiff: [],
+      });
+      const fromTarget = {
+        ...environment,
+        host: {
+          ...environment.host,
+          readInvocation: (id: SessionId) => ({
+            type: 'session/active-invocation-context' as const,
+            active: true as const,
+            sessionId: id,
+            requesterUserId: userId,
+            sourceTurnId: targetInput.id,
+            inputConfig: targetInput.inputConfig ?? {},
+          }),
+        },
+      };
+      const chat = await runWithSessionCommandEnvironment(fromTarget, () =>
+        executeDaemonSessionTool({ ...context, sessionId: targetId }, 'lody_session_chat', {
+          operationId: 'reply-to-source',
+          sessionId,
+          prompt: 'Review completed.',
+        })
+      );
+      expect(chat.isError, JSON.stringify(chat)).not.toBe(true);
+      const sourceDoc = await manager.getOrCreateSessionDoc(sessionId);
+      const reply = (await sourceDoc.sessionData.history.readAll()).at(-1);
+      expect(reply).toMatchObject({
+        userId,
+        author: {
+          sessionId: targetId,
+          turnId: targetInput.id,
+          role: { id: 'reviewer', name: 'Reviewer' },
+        },
+      });
+
       const denied = await environment.checkMachineAccess({
         workspaceId,
         machineId: 'remote' as MachineId,
