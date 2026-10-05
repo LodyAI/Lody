@@ -111,7 +111,6 @@ const styles = stylex.create({
     width: '24px',
     height: '24px',
   },
-  railCheck: { flexShrink: 0, width: '12px', height: '12px', color: colors.accent },
   detail: {
     display: 'flex',
     flexDirection: 'column',
@@ -632,9 +631,6 @@ export function MemoryEditor({
                     <MemoryProviderLogo providerId={item.id} />
                   </span>
                   <span {...stylex.props(surface.listRowLabel)}>{item.name}</span>
-                  {item.id === provider.id ? (
-                    <Check aria-hidden="true" {...stylex.props(styles.railCheck)} />
-                  ) : null}
                 </button>
               ))}
             </div>
