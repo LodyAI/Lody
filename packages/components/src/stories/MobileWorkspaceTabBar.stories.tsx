@@ -75,7 +75,7 @@ function ShellShared<T extends string>({
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-stone-200 p-0 sm:p-6">
-      <div className="relative translate-z-0 h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[852px] sm:w-[393px] sm:rounded-[34px]">
+      <div className="relative translate-z-0 h-dvh w-full overflow-hidden bg-background shadow-2xl sm:h-[min(852px,calc(100dvh-3rem))] sm:w-[393px] sm:rounded-[34px]">
         <div
           ref={scrollRef}
           data-testid="dock-scroll"
