@@ -25,12 +25,8 @@ Decision record:
 
 ## Workspace dock
 
-The shared workspace dock reads either the visible list's scroll position or the
-active imperative editor signal. Downward travel minimizes it, upward travel
-expands it, and switching sources resets the baseline. Its width observer watches
-a stable slot; the new-chat button has a fixed slot so resizing it cannot feed back
-into navigation width. Keyed tab icons stay mounted while one spring coordinates
-actual dimensions and fades. See the [dock Spec](../../specs/mobile-workspace-dock.md)
+The shared dock uses one spring and stable measurement slots to preserve icon geometry.
+List and editor scrolling share directional behavior; see the [dock Spec](../../specs/mobile-workspace-dock.md)
 and [decision](../notes/implemented/bug-fix/2026-10-05-mobile-workspace-dock-motion.md).
 
 ## Two families of swipe-back

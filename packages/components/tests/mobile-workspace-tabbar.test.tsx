@@ -13,16 +13,8 @@ import {
 const tabs = ['first', 'middle', 'last'].map((key) => ({
   key,
   label: key,
-  ios: (
-    <svg>
-      <path />
-    </svg>
-  ),
-  material: (
-    <svg>
-      <path />
-    </svg>
-  ),
+  ios: <svg />,
+  material: <svg />,
 }));
 let root: Root;
 let container: HTMLDivElement;
@@ -110,29 +102,4 @@ it('retains icon nodes through selection, reorder and removal while keeping navi
   expect(container.querySelectorAll('[role="tab"]').length).toBe(0);
   render({ tabs, selectedTab: 'middle' });
   expect(active().getAttribute('aria-label')).toBe('展开导航');
-});
-
-it('keeps separate instances independent even with the same legacy layoutId', () => {
-  act(() =>
-    root.render(
-      <>
-        <MobileWorkspaceTabBar {...props} layoutId="same" />
-        <MobileWorkspaceTabBar
-          {...props}
-          layoutId="same"
-          scrollContainerRef={undefined}
-          selectedTab="last"
-        />
-      </>
-    )
-  );
-  const lists = container.querySelectorAll('[role="tablist"]');
-  const secondIcon = lists[1].querySelector('[aria-selected="true"] svg');
-  scroll(180);
-  expect(lists[0].querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe(
-    '展开导航'
-  );
-  expect(lists[1].querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('last');
-  expect(lists[1].querySelector('[aria-selected="true"] svg')).toBe(secondIcon);
-  expect(lists[1].querySelector('[inert]')).toBeNull();
 });

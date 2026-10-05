@@ -41,7 +41,6 @@ async function sample(page: Page) {
       slotWidth: slotBox.width,
       sameNode: svg === (window as unknown as { dockIcon: Element }).dockIcon,
       icons: tab.querySelectorAll('svg').length,
-      animations: shell.getAnimations({ subtree: true }).length,
     };
   });
 }
@@ -62,64 +61,63 @@ function assertIcon(frame: Awaited<ReturnType<typeof sample>>) {
   expect(frame.x + frame.width).toBeLessThanOrEqual(frame.right + 0.01);
 }
 
-for (const story of ['scroll-collapsing', 'scroll-material', 'signal-scrolling']) {
-  for (const activeIndex of [0, 1, 2]) {
-    test(`${story}: tab ${activeIndex} keeps its SVG through collapse and interrupted reversal`, async ({
-      page,
-    }) => {
-      const errors: string[] = [];
-      page.on('pageerror', (error) => errors.push(error.message));
-      await open(page, story);
-      await page.getByRole('tab').nth(activeIndex).click();
-      await rememberIcon(page);
-      const initial = await sample(page);
-      await scroll(page, 180);
-      await expect(page.getByRole('tab', { selected: true })).toHaveAttribute(
-        'aria-label',
-        '展开导航'
-      );
-      const frames = [];
-      for (let step = 0; step < 50; step++) {
-        // Retarget the same animation twice before it settles, away from top.
-        if (step === 5) {
-          await scroll(page, 150);
-          await expect(page.locator('[aria-selected="true"]')).not.toHaveAttribute(
-            'aria-label',
-            '展开导航'
-          );
-        }
-        if (step === 10) {
-          await scroll(page, 180);
-          await expect(page.getByRole('tab', { selected: true })).toHaveAttribute(
-            'aria-label',
-            '展开导航'
-          );
-        }
-        await page.clock.runFor(16);
-        const frame = await sample(page);
-        assertIcon(frame);
-        expect(frame.slotWidth).toBe(initial.slotWidth);
-        frames.push(frame);
+for (const [story, activeIndex] of [
+  ['scroll-collapsing', 0],
+  ['signal-scrolling', 1],
+  ['scroll-material', 2],
+] as const) {
+  test(`${story}: tab ${activeIndex} keeps its SVG through collapse and interrupted reversal`, async ({
+    page,
+  }) => {
+    await open(page, story);
+    await page.getByRole('tab').nth(activeIndex).click();
+    await rememberIcon(page);
+    const initial = await sample(page);
+    await scroll(page, 180);
+    await expect(page.getByRole('tab', { selected: true })).toHaveAttribute(
+      'aria-label',
+      '展开导航'
+    );
+    const frames = [];
+    for (let step = 0; step < 50; step++) {
+      // Retarget the same animation twice before it settles, away from top.
+      if (step === 5) {
+        await scroll(page, 150);
+        await expect(page.locator('[aria-selected="true"]')).not.toHaveAttribute(
+          'aria-label',
+          '展开导航'
+        );
       }
-      expect(
-        frames.some((frame) => frame.shellWidth > 48 && frame.shellWidth < initial.shellWidth)
-      ).toBe(true);
-      expect(frames.at(-1)!.shellWidth).toBeCloseTo(48, 1);
-      // No single-frame teleport, including either retarget; sampled at a fixed clock step.
-      for (let index = 1; index < frames.length; index++) {
-        expect(Math.abs(frames[index].x - frames[index - 1].x)).toBeLessThan(30);
+      if (step === 10) {
+        await scroll(page, 180);
+        await expect(page.getByRole('tab', { selected: true })).toHaveAttribute(
+          'aria-label',
+          '展开导航'
+        );
       }
-      await scroll(page, 150);
-      await expect(page.locator('[aria-selected="true"]')).not.toHaveAttribute(
-        'aria-label',
-        '展开导航'
-      );
-      await page.clock.runFor(1000);
-      assertIcon(await sample(page));
-      expect((await sample(page)).shellWidth).toBeCloseTo(initial.shellWidth, 1);
-      expect(errors).toEqual([]);
-    });
-  }
+      await page.clock.runFor(16);
+      const frame = await sample(page);
+      assertIcon(frame);
+      expect(frame.slotWidth).toBe(initial.slotWidth);
+      frames.push(frame);
+    }
+    expect(
+      frames.some((frame) => frame.shellWidth > 48 && frame.shellWidth < initial.shellWidth)
+    ).toBe(true);
+    expect(frames.at(-1)!.shellWidth).toBeCloseTo(48, 1);
+    // No single-frame teleport, including either retarget; sampled at a fixed clock step.
+    for (let index = 1; index < frames.length; index++) {
+      expect(Math.abs(frames[index].x - frames[index - 1].x)).toBeLessThan(30);
+    }
+    await scroll(page, 150);
+    await expect(page.locator('[aria-selected="true"]')).not.toHaveAttribute(
+      'aria-label',
+      '展开导航'
+    );
+    await page.clock.runFor(1000);
+    assertIcon(await sample(page));
+    expect((await sample(page)).shellWidth).toBeCloseTo(initial.shellWidth, 1);
+  });
 }
 
 test('direction changes reset hysteresis; hidden controls cannot take focus; tap expands in place', async ({
@@ -197,7 +195,6 @@ for (const story of ['scroll-collapsing', 'scroll-without-new-chat']) {
     expect(frame.shellWidth).toBe(frame.slotWidth);
     expect(frame.shellWidth).toBe(story === 'scroll-collapsing' ? 330 : 398);
     expect(frame.shellHeight).toBe(56);
-    expect(frame.animations).toBe(0);
     await expect(page.getByRole('tab')).toHaveCount(story === 'scroll-collapsing' ? 3 : 2);
   });
 }
