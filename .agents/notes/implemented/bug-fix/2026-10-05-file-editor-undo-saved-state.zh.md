@@ -5,6 +5,8 @@ Translation: current
 
 [English](./2026-10-05-file-editor-undo-saved-state.md)
 
+Review: [Draft PR](https://github.com/LodyAI/Lody/pull/1256)
+
 ## 摘要
 
 文件编辑器将每次已接受的文本事件都视为未保存修改，即使撤销已经恢复已保存文本。保存 hook 现在维护完整文本基线，编辑器回到该基线时清除待保存缓冲区。工具栏、文件标签状态和离开保护共同使用同一保存状态。保存进行中、保存失败及未解决冲突仍保护草稿；验证使用合成存储与真实 Chromium/Monaco，不等同于打包桌面的验收。

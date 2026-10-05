@@ -5,6 +5,8 @@ Translation: current
 
 [中文](./2026-10-05-file-editor-undo-saved-state.zh.md)
 
+Review: [Draft PR](https://github.com/LodyAI/Lody/pull/1256)
+
 ## Abstract
 
 The file editor treated every accepted content event as an unsaved edit, even when undo restored the saved text. The save hook now owns a complete-text baseline and removes the pending buffer when the editor returns to it. The toolbar, tab state and leave guard follow that same save state. Writes in flight, failed saves and unresolved conflicts continue to protect drafts; verification uses synthetic storage and real Chromium/Monaco, rather than a packaged desktop acceptance run.
