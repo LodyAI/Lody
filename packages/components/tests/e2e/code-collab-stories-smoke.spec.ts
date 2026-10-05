@@ -94,9 +94,76 @@ for (const storyId of CODE_COLLAB_STORY_IDS) {
     await page.waitForLoadState('networkidle', { timeout: 20_000 });
 
     const fatal = collector.events.filter((event) => event.level !== 'warning').filter(notIgnored);
-    const summary = fatal
-      .map((event) => `[${event.level}] ${event.text}`)
-      .join('\n');
+    const summary = fatal.map((event) => `[${event.level}] ${event.text}`).join('\n');
     expect(fatal, `Story ${storyId} produced console error(s):\n${summary}`).toEqual([]);
   });
 }
+
+// Storage is synthetic; the editor, undo stack, save hook and toolbar are real.
+test('undo to saved text clears dirty state, redo restores it, and Save advances the baseline', async ({
+  page,
+}) => {
+  await page.goto(
+    '/iframe.html?id=sessions-codecollabmonacoeditor--undo-to-saved-text&viewMode=story'
+  );
+  const original = 'QA_STARTED_20261004';
+  const draft = `${original}_UNSAVED_QA`;
+  const editorText = page.locator('.view-lines');
+  const editor = page.getByRole('textbox', { name: 'Code file editor' });
+  const save = page.getByRole('button', { name: 'Save', exact: true });
+  const refresh = page.getByRole('button', { name: 'Refresh', exact: true });
+  const modifier = await page.evaluate(() =>
+    navigator.platform.includes('Mac') ? 'Meta' : 'Control'
+  );
+  const protectedFromUnload = () =>
+    page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })));
+  await expect(editorText).toHaveText(original);
+  await expect(save).toBeDisabled();
+  await expect(refresh).toBeEnabled();
+  // Monaco uses EditContext on current Chromium; click its visible line rather
+  // than its hidden IME textarea before sending real keyboard events.
+  await page.locator('.view-line').click();
+  await editor.press(modifier === 'Meta' ? 'Meta+ArrowRight' : 'End');
+  await page.keyboard.insertText('_UNSAVED_QA');
+  await expect(editorText).toHaveText(draft);
+  await expect(save).toBeEnabled();
+  expect(await protectedFromUnload()).toBe(true);
+  const closeCanceled = new Promise<void>((resolve, reject) => {
+    page.once('dialog', async (dialog) => {
+      try {
+        expect(dialog.type()).toBe('beforeunload');
+        await dialog.dismiss();
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+  await page.close({ runBeforeUnload: true });
+  await closeCanceled;
+  await expect(editorText).toHaveText(draft);
+  await editor.press(`${modifier}+z`);
+  await expect(editorText).toHaveText(original);
+  await expect(page.getByText('Unsaved', { exact: true })).toHaveCount(0);
+  await expect(save).toBeDisabled();
+  await expect(refresh).toBeEnabled();
+  expect(await protectedFromUnload()).toBe(false);
+  await editor.press(modifier === 'Meta' ? 'Meta+Shift+z' : 'Control+y');
+  await expect(editorText).toHaveText(draft);
+  await expect(save).toBeEnabled();
+  await expect(refresh).toBeDisabled();
+  expect(await protectedFromUnload()).toBe(true);
+  await save.click();
+  await expect(save).toBeDisabled();
+  await expect(refresh).toBeEnabled();
+  expect(await protectedFromUnload()).toBe(false);
+  await editor.press(`${modifier}+z`);
+  await expect(editorText).toHaveText(original);
+  await expect(save).toBeEnabled();
+  await editor.press(modifier === 'Meta' ? 'Meta+Shift+z' : 'Control+y');
+  await expect(editorText).toHaveText(draft);
+  await expect(save).toBeDisabled();
+  await expect(refresh).toBeEnabled();
+  await refresh.click();
+  await expect(editorText).toHaveText(draft);
+});

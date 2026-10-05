@@ -30,6 +30,13 @@ this page is the full text of the rules summarised there.
   the default container of every modal.
 - Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
   `session-file-content-view.tsx`.
+  The save hook compares the complete editor text with the accepted open/refresh
+  snapshot or successful save result. Undo to that baseline clears Unsaved, disables
+  Save, enables Refresh and releases leave protection; redo restores pending edits.
+  A write in flight keeps protection until it settles, and conflicts invalidate the
+  old baseline. File switches and accepted external replacements fence late results;
+  provider rebuilds alone preserve the baseline and draft. See the
+  [saved-text decision](../notes/implemented/bug-fix/2026-10-05-file-editor-undo-saved-state.md).
 - **What a client may DO with a session file is one model, `hooks/use-session-file-actions.ts`,
   and three surfaces render it**: the Files tree's right-click menu, the side
   panel's ⋯ button (left of `+`, and absent unless the active tab is a file),

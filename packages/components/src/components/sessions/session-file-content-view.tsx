@@ -997,7 +997,8 @@ function SessionFileContentViewImpl({
   useEffect(() => {
     if (openedLiveSnapshot === undefined) return;
     latestEditorTextRef.current = openedLiveSnapshot.text;
-  }, [liveFileId, openedLiveSnapshot]);
+    handleExternalTextAppliedToSaveState(openedLiveSnapshot.text);
+  }, [handleExternalTextAppliedToSaveState, liveFileId, openedLiveSnapshot]);
 
   const liveTextUpdate = useCodeCollabLiveText(
     shouldUseProviderFileContent ? fileProvider : null,
@@ -1082,10 +1083,13 @@ function SessionFileContentViewImpl({
         }
         if (preservePendingOnNextExternalTextAppliedRef.current) {
           preservePendingOnNextExternalTextAppliedRef.current = false;
+          if (externalTextUpdate) handleEditorContentChange(externalTextUpdate.text);
           return;
         }
         providerEditorDirtyRef.current = false;
-        handleExternalTextAppliedToSaveState();
+        if (externalTextUpdate) {
+          handleExternalTextAppliedToSaveState(externalTextUpdate.text);
+        }
         return;
       }
       if (result === 'no-op') {
@@ -1098,10 +1102,19 @@ function SessionFileContentViewImpl({
             };
           }
         }
+        if (preservePendingOnNextExternalTextAppliedRef.current) {
+          preservePendingOnNextExternalTextAppliedRef.current = false;
+          if (externalTextUpdate) handleEditorContentChange(externalTextUpdate.text);
+          return;
+        }
+        if (externalTextUpdate) {
+          providerEditorDirtyRef.current = false;
+          handleExternalTextAppliedToSaveState(externalTextUpdate.text);
+        }
         return;
       }
     },
-    [data, externalTextUpdate, handleExternalTextAppliedToSaveState]
+    [data, externalTextUpdate, handleEditorContentChange, handleExternalTextAppliedToSaveState]
   );
 
   const handleSaveConflictResolve = useCallback(
@@ -1207,10 +1220,8 @@ function SessionFileContentViewImpl({
   };
   markProviderConflictPendingRef.current = markProviderConflictPending;
   useEffect(() => {
-    if (saveStatus.kind === 'saved') {
-      providerEditorDirtyRef.current = false;
-    }
-  }, [saveStatus.kind]);
+    providerEditorDirtyRef.current = isProviderEditorDirty;
+  }, [isProviderEditorDirty]);
   const canSaveProviderEditor =
     isProviderFileEditable &&
     (saveStatus.kind === 'pending' ||

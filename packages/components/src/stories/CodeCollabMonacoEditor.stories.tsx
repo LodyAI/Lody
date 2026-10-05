@@ -116,21 +116,25 @@ const recreatedProviderEntry: SessionFileProviderEntry = {
 function StatusBarFrame({
   machineOnline = true,
   width = 900,
+  text = sampleText,
+  entry = liveProviderEntry,
 }: {
   readonly machineOnline?: boolean;
   readonly width?: number;
+  readonly text?: string;
+  readonly entry?: SessionFileProviderEntry;
 }) {
   const store = useMemo(() => createStoryMachineStore(machineOnline), [machineOnline]);
   const provider = useMemo(
     () =>
       createFakeSessionFileProvider({
         sourceState: 'live-collaborative',
-        files: [liveProviderEntry],
+        files: [entry],
         snapshots: {
-          [liveProviderEntry.path]: { kind: 'text', text: sampleText },
+          [entry.path]: { kind: 'text', text },
         },
       }),
-    []
+    [entry, text]
   );
   return (
     <Provider store={store}>
@@ -141,8 +145,8 @@ function StatusBarFrame({
         <SessionFileContentView
           sessionId={storySession.id}
           session={storySession}
-          filePath={liveProviderEntry.path}
-          fileId={liveProviderEntry.fileId}
+          filePath={entry.path}
+          fileId={entry.fileId}
           fileProvider={provider}
           fileProviderPending={false}
           fileProviderRole="host"
@@ -179,6 +183,16 @@ function StaticConflictStatusFrame() {
 export const RealtimeStatusBarOnline: Story = {
   name: 'Realtime status bar - machine online',
   render: () => <StatusBarFrame />,
+};
+
+const qaEntry: SessionFileProviderEntry = {
+  ...liveProviderEntry,
+  path: 'qa-marker.txt',
+};
+
+// Real Monaco and save controller; only file storage is synthetic.
+export const UndoToSavedText: Story = {
+  render: () => <StatusBarFrame text="QA_STARTED_20261004" entry={qaEntry} />,
 };
 
 export const RealtimeStatusBarOffline: Story = {
