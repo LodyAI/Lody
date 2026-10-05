@@ -75,3 +75,11 @@ bypasses unrelated `beforeunload` guards such as unsaved editors.
   `downloadedFile` is set, `recordError` keeps `phase: 'downloaded'`; dropping
   to `error` hides the sidebar banner and the About install button, which are
   the only ways to retry.
+
+## Session data renderer
+
+`session-owner-service.ts` owns one hidden local data renderer independently of the
+warm pool. Only registered product main frames request leases; only the exact data
+renderer may publish or reply. Shutdown drains accepted writes before destroying
+relays. Crash rejects pending outcomes, fences the old sender, and restores reads
+through new leases; commands are never retried automatically.

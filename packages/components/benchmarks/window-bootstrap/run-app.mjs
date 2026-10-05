@@ -37,6 +37,21 @@ const cache = join(root, 'node_modules/.cache');
 await mkdir(cache, { recursive: true });
 const buildDir = await mkdtemp(join(cache, 'app-bench-'));
 try {
+  let memorySampler;
+  if (process.env.PROBE_RESIDENT_MEMORY === '1') {
+    if (process.platform !== 'darwin') throw new Error('Resident memory probe requires macOS');
+    memorySampler = join(buildDir, 'physical-footprint');
+    execFileSync('xcrun', [
+      'clang',
+      '-Wall',
+      '-Wextra',
+      '-Werror',
+      '-O2',
+      fileURLToPath(new URL('./macos-physical-footprint.c', import.meta.url)),
+      '-o',
+      memorySampler,
+    ]);
+  }
   let nativeAddon;
   if (nativeMode) {
     const version = require('electron/package.json').version;
@@ -102,6 +117,7 @@ try {
     PROBE_REPEATS: String(repeats),
     PROBE_ROUNDS: String(rounds),
     ...(nativeAddon ? { PROBE_NATIVE_ADDON: nativeAddon } : {}),
+    ...(memorySampler ? { PROBE_MEMORY_SAMPLER: memorySampler } : {}),
   };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.LODY_E2E;
@@ -109,17 +125,65 @@ try {
   const metadata = {
     cpu: cpus()[0]?.model,
     preparedMode,
+    directClickMode: process.env.PROBE_DIRECT_CLICK === '1',
+    cpuProfiling: process.env.PROBE_CPU_PROFILE === '1',
     nativeMode,
+    sharedSessionOwner: process.env.LODY_SHARED_SESSION_OWNER !== '0',
+    electron: require('electron/package.json').version,
     platform: process.platform,
     arch: process.arch,
     cliEntrySha256: cliHash,
     runtimeProviderSha256: createHash('sha256')
       .update(await readFile(join(root, 'src/providers/runtime-provider.tsx')))
       .digest('hex'),
+    sessionOwnerSha256: createHash('sha256')
+      .update(await readFile(join(root, 'src/providers/shared-session-owner.ts')))
+      .update(await readFile(join(root, 'src/providers/shared-session-client.ts')))
+      .update(await readFile(join(appPath, 'src/main/services/session-owner-service.ts')))
+      .digest('hex'),
     rendererIndexSha256: createHash('sha256')
       .update(await readFile(join(appPath, 'out/renderer/index.html')))
       .digest('hex'),
+    probeSha256: createHash('sha256')
+      .update(await readFile(fileURLToPath(new URL('./real-app-probe.cjs', import.meta.url))))
+      .digest('hex'),
+    residentProbeSha256: createHash('sha256')
+      .update(
+        await readFile(fileURLToPath(new URL('./resident-memory-probe.cjs', import.meta.url)))
+      )
+      .digest('hex'),
   };
+  metadata.preparationSha256 = createHash('sha256')
+    .update(await readFile(join(root, 'src/lib/window-preparation-intent.ts')))
+    .update(await readFile(join(appPath, 'src/main/prepared-window.ts')))
+    .update(await readFile(join(appPath, 'src/main/window-warm-service.ts')))
+    .digest('hex');
+  const openingHash = createHash('sha256');
+  for (const path of [
+    'src/components/ai-gui/view.tsx',
+    'src/components/ai-gui/conversation-outline-rail.tsx',
+    'src/components/ai-gui/conversation-list/engine-conversation-scroller.tsx',
+    'src/components/web-workspace-layout.tsx',
+    'src/hooks/use-conversation-text-selection.ts',
+    'src/lib/conversation-scroll/controller.ts',
+    'src/routes/__root.tsx',
+    'src/routes/$workspaceName/_auth.tsx',
+    'src/components/sessions/session-chat-input-area.tsx',
+    'src/lib/conversation-view/create-conversation-view-from-reader.ts',
+    '../../apps/electron/src/renderer/src/main.tsx',
+    '../../apps/electron/src/renderer/src/window-target-navigation.ts',
+  ]) {
+    openingHash.update(path).update(
+      await readFile(join(root, path)).catch((error) => {
+        if (error.code === 'ENOENT') return '<absent>';
+        throw error;
+      })
+    );
+  }
+  metadata.openingSourceSha256 = openingHash.digest('hex');
+  metadata.memorySamplerSha256 = createHash('sha256')
+    .update(await readFile(fileURLToPath(new URL('./macos-physical-footprint.c', import.meta.url))))
+    .digest('hex');
   await writeFile(join(artifacts, 'environment.json'), JSON.stringify(metadata, null, 2));
   const entry = fileURLToPath(new URL('./real-app-probe.cjs', import.meta.url));
   const exitCode = await new Promise((resolveExit, reject) => {
@@ -133,7 +197,9 @@ try {
   const failure = await readFile(join(artifacts, 'result.failure.json'), 'utf8').catch(() => null);
   if (failure) throw new Error('Application probe failed: ' + JSON.parse(failure).error);
   const result = JSON.parse(await readFile(join(artifacts, 'result.json'), 'utf8'));
-  if (result.results.length !== repeats + 3) throw new Error('Incomplete application probe');
+  if (process.env.PROBE_RESIDENT_MEMORY === '1') {
+    if (result.residentMemory.stages.length !== 8) throw new Error('Incomplete memory probe');
+  } else if (result.results.length !== repeats + 3) throw new Error('Incomplete application probe');
 } finally {
   await rm(buildDir, { recursive: true, force: true });
 }

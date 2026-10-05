@@ -318,7 +318,7 @@ describe('macOS prepared targets', () => {
     handlePreparedWindowState(spare.id, { ...target, ...binding, ready: true });
     prepareWindow(source.native, target, 'second');
     cancelPreparedWindow(source.id, 'first');
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(8000);
     expect(spare.destroyed).toBe(false);
     expect(claimWarmWindow(target)).toBe(spare.native);
     expect(spare.visible && spare.focused).toBe(true);
@@ -354,13 +354,51 @@ describe('macOS prepared targets', () => {
     expect(spare.destroyed).toBe(false);
     cancelPreparedWindow(source.id, 'first');
     await vi.advanceTimersByTimeAsync(2000);
+    expect(spare.destroyed).toBe(false);
+    await vi.advanceTimersByTimeAsync(6000);
     expect(spare.destroyed).toBe(true);
     expect(spare.visible).toBe(false);
   });
 
-  it('drops a different target and never uses its late readiness', async () => {
+  it('retargets a mismatched claim in the same renderer and rejects previous readiness', async () => {
     const { spare, binding } = await fixture();
-    expect(claimWarmWindow({ workspace: 'local', sessionId: 'different' })).toBeNull();
+    handlePreparedWindowState(spare.id, { ...binding, ready: true });
+    const target = { workspace: 'local', sessionId: 'different' };
+    expect(claimWarmWindow(target)).toBe(spare.native);
+    const next = spare.target as { preparationId: string };
+    expect(next.preparationId).not.toBe(binding.preparationId);
+    handlePreparedWindowState(spare.id, { ...binding, ready: true });
+    expect(spare.destroyed).toBe(false);
+    expect(spare.visible).toBe(false);
+    handlePreparedWindowState(spare.id, { ...next, ready: true });
+    expect(spare.visible).toBe(true);
+    requestRendererReload(spare.native);
+    expect(spare.loaded).toEqual({
+      filePath: '/synthetic/index.html',
+      hash: getWindowTargetPath(target),
+    });
+  });
+
+  it('retargets source intent in one slot and ignores cancellation of its previous target', async () => {
+    const { source, spare, binding } = await fixture();
+    const target = { workspace: 'local', sessionId: 'next' };
+    prepareWindow(source.native, target, 'next-request');
+    const next = spare.target as { preparationId: string };
+    expect(next.preparationId).not.toBe(binding.preparationId);
+    cancelPreparedWindow(source.id, 'first');
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(nativeState.windows.size).toBe(2);
+    expect(spare.destroyed).toBe(false);
+    expect(claimWarmWindow(target)).toBe(spare.native);
+    handlePreparedWindowState(spare.id, { ...binding, ready: true });
+    expect(spare.visible).toBe(false);
+    handlePreparedWindowState(spare.id, { ...next, ready: true });
+    expect(spare.visible).toBe(true);
+  });
+
+  it('never reuses another workspace or accepts its stale readiness', async () => {
+    const { spare, binding } = await fixture();
+    expect(claimWarmWindow({ workspace: 'other', sessionId: 'different' })).toBeNull();
     handlePreparedWindowState(spare.id, { ...binding, ready: true });
     expect(spare.destroyed).toBe(true);
     expect(spare.visible).toBe(false);
@@ -405,7 +443,7 @@ describe('macOS prepared targets', () => {
   it('replenishes a neutral spare after cancelled preparation', async () => {
     const { source, spare } = await fixture();
     cancelPreparedWindow(source.id, 'first');
-    await vi.advanceTimersByTimeAsync(2001);
+    await vi.advanceTimersByTimeAsync(8001);
     const replacement = [...nativeState.windows.values()].find((w) => w !== source) as NativeWindow;
     expect(replacement).toBeDefined();
     expect(replacement).not.toBe(spare);

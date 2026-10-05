@@ -1,3 +1,7 @@
+import {
+  createSharedSessionClientStore,
+  type SessionOwnerTransport,
+} from './shared-session-client';
 import { createWorkspacePendingSends } from './workspace-pending-sends';
 import { migrateLegacySessionSends } from '../lib/legacy-session-send-migration';
 import { createSessionSendResources } from '@/lib/session-send-resources';
@@ -190,6 +194,8 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 }
 
 type RuntimeDeps = {
+  sessionOwner?: SessionOwnerTransport;
+  cacheWindowId?: string;
   accountId?: string | null;
   /**
    * Used for caching the (slug, id) mapping in localStorage.
@@ -433,7 +439,10 @@ function createPendingResponseRegistry<T>(defaultTimeoutMs: number) {
 }
 
 export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<WorkspaceRuntime> {
-  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(deps.workspaceId, desktopWindowId());
+  const cacheIdentity = resolveWorkspaceRuntimeCacheIdentity(
+    deps.workspaceId,
+    deps.cacheWindowId ?? desktopWindowId()
+  );
   const createDeferred = <T>() => {
     let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
     let reject: ((reason?: unknown) => void) | undefined;
@@ -4053,6 +4062,19 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   });
 
   const createSessionStore = async (sessionId: SessionId): Promise<SessionDocStore> => {
+    if (deps.sessionOwner) {
+      const legacy = await repoStorage.loadDoc(getSessionRoomId(sessionId));
+      try {
+        return await createSharedSessionClientStore(
+          deps.sessionOwner,
+          workspaceId,
+          sessionId,
+          legacy?.export({ mode: 'snapshot' })
+        );
+      } finally {
+        legacy?.free();
+      }
+    }
     const roomId = getSessionRoomId(sessionId);
     // Backend selection is part of the persisted session identity, so resolve it
     // before composing the reader even when this runtime has no injected factory.
@@ -4291,7 +4313,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // The cache is the doc's sole application-layer owner: hard release = stop
     // sync + Mirror.dispose (store.dispose) + repo.unloadDoc, serialized per key
     // by the cache so a concurrent acquire waits for the unload, then recreates.
-    unload: (sessionId) => repo.unloadDoc(getSessionRoomId(sessionId)),
+    unload: (sessionId) =>
+      deps.sessionOwner ? Promise.resolve() : repo.unloadDoc(getSessionRoomId(sessionId)),
   });
 
   const createPreviewVisualCommentStore = async (
@@ -5004,7 +5027,18 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       }
     },
     releaseSessionStore: sessionStoreCache.release,
-    acquireSessionStore: sessionStoreCache.acquire,
+    acquireSessionStore: async (sessionId, bootstrapSnapshot) => {
+      if (bootstrapSnapshot) {
+        if (deps.sessionOwner) throw new Error('Only the Session owner may import bootstrap state');
+        const roomId = getSessionRoomId(sessionId);
+        const handle = await openSessionWithSnapshot(repo, roomId, async () => bootstrapSnapshot);
+        // The cache helper is best-effort; legacy unsent edits require an explicit
+        // validated merge and durable acknowledgement even when its seed failed.
+        handle.doc.import(bootstrapSnapshot);
+        await repo.persistDocNow(roomId, handle.doc as LoroDoc);
+      }
+      return sessionStoreCache.acquire(sessionId);
+    },
     peekSessionStore: sessionStoreCache.peek,
     releaseSessionStoreRef: sessionStoreCache.releaseRef,
     withPreviewVisualCommentStore: async <T>(

@@ -10,7 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type FocusEvent as ReactFocusEvent,
 } from 'react';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
@@ -70,8 +70,10 @@ import {
  *  2. Magnification DOES flow through props, because it changes every tick at
  *     once. That is affordable where reader position is not: it is driven by
  *     pointer entry (a handful of events as the cursor crosses ticks), not by
- *     scrolling at frame rate. Each tick is memoized on its own width, so a
- *     pointer move only re-renders the few ticks inside the bell.
+ *     scrolling at frame rate. Each tick is memoized on its own width. Only the
+ *     visible slice plus overscan is mounted; keyboard focus and the hover-card
+ *     anchor retain their nodes outside that slice. Scroll changes the slice,
+ *     not the per-tick active state.
  */
 
 /**
@@ -170,7 +172,8 @@ function useActiveTickSync(
   containerRef: React.RefObject<HTMLOListElement | null>,
   activeIndex: number,
   /** The tick list's own input — re-run whenever a commit re-created the buttons. */
-  entries: readonly ConversationOutlineEntry[]
+  entries: readonly ConversationOutlineEntry[],
+  windowKey: string
 ): void {
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -180,7 +183,7 @@ function useActiveTickSync(
     if (activeIndex < 0) return;
     const next = container.querySelector(`[${OUTLINE_INDEX_ATTRIBUTE}="${activeIndex}"]`);
     next?.setAttribute('aria-current', 'true');
-  }, [activeIndex, containerRef, entries]);
+  }, [activeIndex, containerRef, entries, windowKey]);
 }
 
 /**
@@ -193,14 +196,20 @@ const OutlineTick = memo(function OutlineTick({
   width,
   tabbable,
   label,
+  count,
 }: {
   index: number;
   width: number;
   tabbable: boolean;
   label: string;
+  count: number;
 }) {
   return (
-    <li className="contents">
+    <li
+      aria-posinset={index + 1}
+      aria-setsize={count}
+      style={{ position: 'absolute', top: index * TICK_PITCH, width: '100%', height: TICK_PITCH }}
+    >
       <button
         type="button"
         {...{ [OUTLINE_INDEX_ATTRIBUTE]: index }}
@@ -239,22 +248,37 @@ const OutlineTickList = memo(function OutlineTickList({
   tabbableIndex,
   magnifiedIndex,
   jumpLabel,
+  from,
+  to,
+  retainedIndex,
 }: {
   entries: readonly ConversationOutlineEntry[];
   tabbableIndex: number;
   /** Tick under the pointer, or -1 when the pointer is off the rail. */
   magnifiedIndex: number;
   jumpLabel: (entry: ConversationOutlineEntry) => string;
+  from: number;
+  to: number;
+  retainedIndex: number;
 }) {
+  const indices = Array.from({ length: Math.max(0, to - from) }, (_, offset) => from + offset);
+  for (const index of [tabbableIndex, magnifiedIndex, retainedIndex])
+    if (index >= 0 && index < entries.length && !indices.includes(index)) indices.push(index);
+  indices.sort((a, b) => a - b);
   return (
     <>
-      {entries.map((entry, index) => (
+      {indices.map((index) => (
         <OutlineTick
-          key={entry.key}
+          key={entries[index]!.key}
           index={index}
-          width={outlineTickWidthAt(outlineTickRestingWidth(entry.weight), index, magnifiedIndex)}
+          count={entries.length}
+          width={outlineTickWidthAt(
+            outlineTickRestingWidth(entries[index]!.weight),
+            index,
+            magnifiedIndex
+          )}
           tabbable={index === tabbableIndex}
-          label={jumpLabel(entry)}
+          label={jumpLabel(entries[index]!)}
         />
       ))}
     </>
@@ -291,6 +315,23 @@ export function ConversationOutlineRail({
   const onPreviewRoundRef = useLatestRef(onPreviewRound);
   const arrivalIntentDetectorRef = useRef<ArrivalIntentDetector | null>(null);
   const tickCount = entries.length;
+  const [tickWindow, setTickWindow] = useState({ from: 0, to: Math.min(tickCount, 128) });
+  const tabStop = Math.max(0, Math.min(tickCount - 1, tabbableIndex));
+  const syncTickWindow = useCallback(() => {
+    const strip = scrollRef.current;
+    if (!strip) return;
+    const from = Math.min(
+      tickCount,
+      Math.max(0, Math.floor((strip.scrollTop - RAIL_SCROLL_PADDING) / TICK_PITCH) - 12)
+    );
+    const to = Math.min(
+      tickCount,
+      Math.ceil((strip.scrollTop + strip.clientHeight) / TICK_PITCH) + 12
+    );
+    setTickWindow((previous) =>
+      previous.from === from && previous.to === to ? previous : { from, to }
+    );
+  }, [tickCount]);
   const postHog = usePostHog();
 
   const jumpLabel = useCallback(
@@ -299,7 +340,12 @@ export function ConversationOutlineRail({
     [t]
   );
 
-  useActiveTickSync(listRef, activeIndex, entries);
+  useActiveTickSync(
+    listRef,
+    activeIndex,
+    entries,
+    `${tickWindow.from}:${tickWindow.to}:${tabStop}:${pointerIndex}:${hoverCard?.index}`
+  );
 
   useEffect(() => {
     if (!enableArrivalIntent) {
@@ -379,7 +425,8 @@ export function ConversationOutlineRail({
     if (Math.abs(strip.scrollTop - clamped) > 1) {
       strip.scrollTop = clamped;
     }
-  }, [activeIndex]);
+    syncTickWindow();
+  }, [activeIndex, syncTickWindow]);
 
   // Which edges have ticks beyond them, so the strip can fade there. Assigning
   // `scrollTop` above fires a scroll event, so the handler below covers the
@@ -388,9 +435,10 @@ export function ConversationOutlineRail({
   const syncEdgeFade = useCallback(() => {
     const strip = scrollRef.current;
     if (!strip) return;
+    syncTickWindow();
     const next = readScrollEdgeOverflow(strip);
     setEdgeOverflow((current) => (scrollEdgeOverflowEquals(current, next) ? current : next));
-  }, []);
+  }, [syncTickWindow]);
 
   // Only the tick COUNT can change which edges overflow, and `entries` takes a
   // new identity for every delta that grows a preview — so keying this on the
@@ -537,6 +585,8 @@ export function ConversationOutlineRail({
   const focusTick = useCallback((index: number) => {
     const container = listRef.current;
     if (!container) return;
+    // Mount an offscreen keyboard destination before handing focus to the browser.
+    flushSync(() => setTabbableIndex(index));
     const tick = container.querySelector<HTMLElement>(`[${OUTLINE_INDEX_ATTRIBUTE}="${index}"]`);
     tick?.focus();
   }, []);
@@ -647,13 +697,13 @@ export function ConversationOutlineRail({
         {/* The track is wide enough for a fully magnified tick. It has to be:
             `overflow-y: auto` makes the x axis `auto` too, so a tick wider than
             this would scroll the rail sideways instead of just extending.
-            The list also stays IN FLOW — an absolutely-positioned list would
-            leave this box with nothing to size from, collapsing every tick to
-            zero width. Only the active bar is taken out of flow. */}
+            The fixed-height track preserves scroll geometry while only the
+            visible ticks and retained interaction anchors are mounted. */}
         <div className="relative" style={{ width: RAIL_TRACK_WIDTH, height: contentHeight }}>
           <ol
             ref={listRef}
             className="m-0 flex list-none flex-col p-0"
+            style={{ position: 'relative', height: contentHeight }}
             onPointerOver={handlePointerOver}
             onPointerLeave={handlePointerLeave}
             onClick={handleClick}
@@ -662,9 +712,12 @@ export function ConversationOutlineRail({
           >
             <OutlineTickList
               entries={entries}
-              tabbableIndex={tabbableIndex}
+              tabbableIndex={tabStop}
               magnifiedIndex={pointerIndex}
               jumpLabel={jumpLabel}
+              from={Math.min(tickCount, tickWindow.from)}
+              to={Math.min(tickCount, tickWindow.to)}
+              retainedIndex={hoverCard?.index ?? -1}
             />
           </ol>
           {activeIndex < 0 ? null : (

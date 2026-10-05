@@ -3,8 +3,8 @@ import type { SessionHistory } from '@lody/shared';
 import {
   collectHydratedRange,
   acquireConversationDerivation,
-  findLastIndex,
   resolveTailStart,
+  precedingUserRangeStart,
   subscribeOnFrame,
   type ConversationDerivation,
   type ConversationView,
@@ -107,13 +107,9 @@ export function useTurnRange(
 }
 
 function resolveRangeStart(view: ConversationView, from: number, extend: boolean): number {
-  let start = Math.max(0, from);
-  if (extend && start > 0) {
-    const scan = { turnCount: start, index: (i: number) => view.index(i) };
-    const user = findLastIndex(scan, (row) => row.role === 'user', { limit: 50 });
-    if (user >= 0) start = user;
-  }
-  return start;
+  return extend
+    ? precedingUserRangeStart(from, (index) => view.index(index)?.role)
+    : Math.max(0, from);
 }
 
 function isRangeHydrated(view: ConversationView, from: number, to: number): boolean {

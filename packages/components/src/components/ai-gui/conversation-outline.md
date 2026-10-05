@@ -12,8 +12,10 @@ full because the topic outgrew that index.
   reach `OUTLINE_MIN_USER_ROUNDS`. Reader position is the last round
   anchored above the viewport top, resolved from the list's offsets; it never
   enters tick-list props. Paint one arithmetic active bar; sync `aria-current`
-  imperatively. Pointer magnification may update memoized ticks; scrolling may
-  not. `buildConversationOutline` runs at token rate, so memoize per message
+  imperatively. Mount a viewport slice with overscan and retain keyboard-focus,
+  pointer and hover-card anchors outside it. Preserve the full fixed-pitch scroll
+  extent and accessible set positions. Scrolling updates the slice only; pointer
+  magnification updates memoized widths. `buildConversationOutline` runs at token rate, so memoize per message
   and clean only a bounded markdown prefix.
 - The rail is a page-level absolute portal outside the shrinking message area,
   not a Virtua row or viewport child. It stays page-centred as the composer

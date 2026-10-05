@@ -84,12 +84,13 @@ export function SessionPendingSendsHost({ runtime }: { runtime: WorkspaceRuntime
   useEffect(() => {
     if (!hasPending) return undefined;
     const confirmLeave = (event: BeforeUnloadEvent) => {
+      console.warn('[unload-blocked] pending session sends', { count: sends.length });
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', confirmLeave);
     return () => window.removeEventListener('beforeunload', confirmLeave);
-  }, [hasPending]);
+  }, [hasPending, sends.length]);
 
   return null;
 }
