@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseNightlyRelease, resolveNightlyDownloadBase } from './nightly-downloads.ts';
+import {
+  parseNightlyAndroidRelease,
+  parseNightlyRelease,
+  resolveNightlyDownloadBase,
+} from './nightly-downloads.ts';
 
 const base = 'https://downloads.example.test/production/nightly';
 const version = '0.89.4-nightly.42';
@@ -120,4 +124,36 @@ void test('Android appears only with a matching immutable APK in both manifest l
     { ...mobile, downloads: { ...mobile.downloads, [apk]: '../app.apk' } },
   ])
     assert.throws(() => parseNightlyRelease(invalid, base));
+});
+
+void test('Android uses its own version and does not require desktop metadata', () => {
+  const androidVersion = '0.104.0-nightly.0';
+  const apk = `Lody-${androidVersion}-android.apk`;
+  const android = {
+    schema: 1,
+    channel: 'nightly',
+    target: 'android',
+    version: androidVersion,
+    files: [apk],
+    downloads: { [apk]: apk },
+  };
+  assert.deepEqual(parseNightlyAndroidRelease(android, base), {
+    version: androidVersion,
+    downloads: [{ platform: 'android', label: 'APK', href: `${base}/${apk}` }],
+  });
+  for (const changed of [
+    { schema: 2 },
+    { channel: 'stable' },
+    { target: 'mac' },
+    { version: '0.104.0' },
+    { version: '0.104.0-nightly.00' },
+    { files: [] },
+    { downloads: {} },
+    { downloads: { [apk]: '../app.apk' } },
+    { downloads: { [apk]: 'https://elsewhere.test/app.apk' } },
+    { version: '0.104.0-nightly.1' },
+  ])
+    assert.throws(() => parseNightlyAndroidRelease({ ...android, ...changed }, base));
+  assert.throws(() => parseNightlyAndroidRelease(android, 'http://example.test/nightly'));
+  assert.throws(() => parseNightlyAndroidRelease(manifest, base));
 });
