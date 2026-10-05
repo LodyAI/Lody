@@ -15,7 +15,7 @@ Translation: current
 
 DOM 与命令式滚动共用方向累计；切换来源重置基准，有效的命令式信号优先。在应用 inert 前转移焦点，否则 Chromium 可能清除焦点。显式设置 `transition-property: none`，避免全局减少动态效果 CSS 对弹簧跳转再次插值。[Spec 草案](../../../../specs/mobile-workspace-dock.zh.md)负责行为约定。
 
-交互参考 Apple 的[滚动收起标签栏](https://developer.apple.com/videos/play/wwdc2025/284/?time=151)与[可中断弹簧](https://developer.apple.com/videos/play/wwdc2023/10158/)，实现采用 Web 几何变化，不是原生 Liquid Glass。跟踪：[#1257](https://github.com/LodyAI/Lody/issues/1257)。
+交互参考 Apple 的[滚动收起标签栏](https://developer.apple.com/videos/play/wwdc2025/284/?time=151)与[可中断弹簧](https://developer.apple.com/videos/play/wwdc2023/10158/)，实现采用 Web 几何变化，不是原生 Liquid Glass。跟踪：[#1257](https://github.com/LodyAI/Lody/issues/1257) · [PR #1258](https://github.com/LodyAI/Lody/pull/1258)。
 
 ## 证据与边界
 

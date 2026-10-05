@@ -15,7 +15,7 @@ Keep the selected icon opaque at 24×24; reject duplicated-icon and whole-panel 
 
 DOM and imperative scrolling share directional accumulation; switching sources resets the baseline, and an active imperative signal takes precedence. Move focus before applying inert because Chromium may otherwise clear it. Explicit `transition-property: none` prevents global reduced-motion CSS from interpolating spring jumps. The [draft Spec](../../../../specs/mobile-workspace-dock.md) owns behavior.
 
-Apple's [scroll-minimizing tabs](https://developer.apple.com/videos/play/wwdc2025/284/?time=151) and [interruptible springs](https://developer.apple.com/videos/play/wwdc2023/10158/) inform the interaction; this uses web geometry, not native Liquid Glass. Tracking: [#1257](https://github.com/LodyAI/Lody/issues/1257).
+Apple's [scroll-minimizing tabs](https://developer.apple.com/videos/play/wwdc2025/284/?time=151) and [interruptible springs](https://developer.apple.com/videos/play/wwdc2023/10158/) inform the interaction; this uses web geometry, not native Liquid Glass. Tracking: [#1257](https://github.com/LodyAI/Lody/issues/1257) · [PR #1258](https://github.com/LodyAI/Lody/pull/1258).
 
 ## Evidence and limits
 
