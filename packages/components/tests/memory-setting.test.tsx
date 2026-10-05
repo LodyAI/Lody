@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
     } as MemoryProviderResponse,
     busy: false,
     refresh: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
+    update: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
     create: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
   },
   openExternalUrl: vi.fn(async () => true),
@@ -304,10 +305,14 @@ it('creates in nmem then retries only the Lody association if saving fails', asy
   expect(container.textContent).toContain('Writing lessons');
 });
 
-it('edits and removes the Lody association while preserving the provider identity', async () => {
+it('updates the provider profile and Lody metadata, then removes only the import', async () => {
   ready();
   mocks.entries = [saved];
   await renderSetting();
+  mocks.provider.update.mockImplementation(async (input) => {
+    mocks.provider.result = { type: 'machine/memory', status: 'ready', memories: [{ ...input }] };
+    return mocks.provider.result;
+  });
   await click('Edit Reviewer');
   await fill('Name', 'My reviewer');
   await fill('Description (optional)', 'Local description');
@@ -315,10 +320,10 @@ it('edits and removes the Lody association while preserving the provider identit
   expect(mocks.entries).toEqual([
     { ...saved, name: 'My reviewer', description: 'Local description' },
   ]);
-  expect(mocks.provider.result.memories[0]?.name).toBe('Reviewer');
+  expect(mocks.provider.result.memories[0]?.name).toBe('My reviewer');
   await click('Remove My reviewer from Lody');
   await renderSetting();
-  expect(container.textContent).toContain('No memories linked yet');
+  expect(container.textContent).toContain('No memories imported yet');
   expect(mocks.provider.result.memories.map((value) => value.id)).toContain('reviewer');
 });
 

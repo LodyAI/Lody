@@ -41,6 +41,7 @@ export interface MemoryProvider {
   probe(): Promise<MemoryProviderResponse['status']>;
   list(): Promise<MemoryIdentity[]>;
   create(input: MemoryCreateInput): Promise<void>;
+  update(input: MemoryCreateInput): Promise<void>;
   environment(memoryId: string): Record<string, string>;
 }
 
@@ -71,6 +72,7 @@ export function createNowledgeMemoryProvider(run: MemoryCommandRunner = runNmem)
               id: z.string().min(1),
               displayName: z.string().optional(),
               description: z.string().optional(),
+              role: z.string().optional(),
             })
           ),
         })
@@ -79,6 +81,7 @@ export function createNowledgeMemoryProvider(run: MemoryCommandRunner = runNmem)
         id: profile.id,
         name: profile.displayName || profile.id,
         description: profile.description,
+        role: profile.role,
       }));
     },
     async create(input) {
@@ -90,6 +93,18 @@ export function createNowledgeMemoryProvider(run: MemoryCommandRunner = runNmem)
         ['defaultSpace', '--default-space'],
       ] as const) {
         if (input[key]) args.push(flag, input[key]);
+      }
+      await json(args);
+    },
+    async update(input) {
+      const args = ['agents', 'set', input.id, '-j'];
+      for (const [key, flag] of [
+        ['name', '--name'],
+        ['description', '--description'],
+        ['role', '--role'],
+      ] as const) {
+        // Empty strings explicitly clear editable fields. Hidden fields remain unchanged.
+        if (input[key] !== undefined) args.push(flag, input[key]);
       }
       await json(args);
     },
@@ -117,6 +132,7 @@ export async function handleMemoryProviderRequest(
     const status = await provider.probe();
     if (status !== 'ready') return { type: 'machine/memory', status, memories: [] };
     if (request.action === 'create') await provider.create(request.input);
+    if (request.action === 'update') await provider.update(request.input);
     return { type: 'machine/memory', status: 'ready', memories: await provider.list() };
   } catch {
     return {

@@ -17,12 +17,12 @@ Providers own memory data. Lody stores association metadata in the selected
 machine's Loro/Flock document at `['memory', providerId, memoryId]`, with machine
 ID, name and optional description. Writes use the existing workspace writer;
 local durability completes the action and remote upload is best-effort. Stable
-keys make linking idempotent without overwriting customized metadata. Editing
-changes Lody metadata; deleting removes only this association, never provider data.
+keys make linking idempotent without overwriting customized metadata. Editing updates the provider profile via its adapter and synchronizes the returned
+name/description into Lody; deleting removes only this association, never provider data.
 A failed local save after enrollment can retry linking without enrolling again.
 Existing provider identities are not automatically imported.
 
-Cards show the name, grayscale provider logo and description, with edit/delete
+Cards show a vertically centered grayscale provider logo before the name and description, with edit/delete
 actions on hover or keyboard focus. The page has top-right Add Memory and Refresh
 actions. A successful provider inventory that omits a saved identity shows a
 warning; offline, inactive and failed probes do not prove deletion. Probes run on
@@ -88,3 +88,9 @@ profile details are requested or displayed.
 The provider rail uses the same flat selected list rows as Agent Config, including
 when only one provider exists. Import is the settings label for saving an association;
 Role binding continues to use Link.
+
+Machine tabs show online status dots and default to the local machine. The Nowledge
+edit form mirrors creation with a read-only ID and editable name, description and
+role. It calls nmem agents set; blank editable fields are explicitly cleared, while
+hidden Space and provenance fields are preserved. Failed provider updates never
+claim a successful local metadata save.

@@ -4815,7 +4815,7 @@
   "settings.memory.linkTab": "Import",
   "settings.memory.createAndLink": "Create and import",
   "settings.memory.editorHint": "Choose a provider, then create a memory or import an existing identity on this machine.",
-  "settings.memory.editHint": "Name and description are saved in Lody. Removing this entry only removes its import record; provider data is kept.",
+  "settings.memory.editHint": "Changes to name, description and role are saved to the provider. Agent ID cannot be changed. Removing this entry only removes its import from Lody.",
   "settings.memory.saveError": "Could not save this memory. Check the fields and connection, then try again.",
   "settings.memory.createdSaveError": "Created in the provider, but Lody could not save the import. Retry importing; the identity will not be created again.",
   "settings.memory.name": "Name",

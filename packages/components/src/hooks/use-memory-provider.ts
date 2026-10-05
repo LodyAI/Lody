@@ -21,7 +21,7 @@ export function useMemoryProvider(
     busy: boolean;
   }>();
   const request = useCallback(
-    async (input?: MemoryCreateInput) => {
+    async (input?: MemoryCreateInput, action: 'create' | 'update' = 'create') => {
       if (!runtime || !machineId || !enabled) return undefined;
       const current = ++generation.current;
       setState((previous) => ({
@@ -41,7 +41,7 @@ export function useMemoryProvider(
       try {
         result = await runtime.requestMemoryProvider(
           machineId,
-          input ? { action: 'create', providerId, input } : { action: 'list', providerId }
+          input ? { action, providerId, input } : { action: 'list', providerId }
         );
       } catch {
         result = { type: 'machine/memory', status: 'error', memories: [] };
@@ -83,5 +83,6 @@ export function useMemoryProvider(
     busy: current ? state.busy : false,
     refresh: () => request(),
     create: request,
+    update: (input: MemoryCreateInput) => request(input, 'update'),
   };
 }

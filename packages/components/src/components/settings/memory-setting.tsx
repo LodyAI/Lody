@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -49,6 +49,23 @@ type ProviderDefinition = {
 const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[4], minWidth: 0 },
   row: { display: 'flex', alignItems: 'center', gap: space[2] },
+  machineDot: {
+    flexShrink: 0,
+    width: '6px',
+    height: '6px',
+    borderRadius: '999px',
+    backgroundColor: colors.tertiaryLabel,
+  },
+  machineDotOnline: { backgroundColor: colors.success },
+  recordLogo: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    flexShrink: 0,
+    width: '32px',
+    height: '32px',
+  },
   record: { position: 'relative' },
   actions: {
     opacity: {
@@ -178,10 +195,12 @@ export function MemoryAssociationList({
             )}
           >
             <div {...stylex.props(catalog.rowMain)}>
+              <span {...stylex.props(styles.recordLogo)}>
+                <MemoryProviderLogo providerId={entry.providerId} />
+              </span>
               <div {...stylex.props(catalog.body)}>
                 <div {...stylex.props(catalog.titleLine)}>
                   <span {...stylex.props(catalog.name)}>{entry.name}</span>
-                  <MemoryProviderLogo providerId={entry.providerId} />
                 </div>
                 {entry.description ? (
                   <span {...stylex.props(styles.description)}>{entry.description}</span>
@@ -297,7 +316,7 @@ export function MemorySetting() {
   const machineId = remote
     ? selected && machines.has(selected)
       ? selected
-      : localId && machines.has(localId)
+      : localId
         ? localId
         : (machines.keys().next().value ?? null)
     : localId;
@@ -310,8 +329,13 @@ export function MemorySetting() {
           online: onlineIds.has(machine.id),
           private: !(accessByMachineId.get(machine.id)?.sharedWithTeam ?? false),
         }))
-        .sort((a, b) => Number(b.online) - Number(a.online) || a.label.localeCompare(b.label)),
-    [machines, onlineIds, accessByMachineId]
+        .sort(
+          (a, b) =>
+            Number(b.id === localId) - Number(a.id === localId) ||
+            Number(b.online) - Number(a.online) ||
+            a.label.localeCompare(b.label)
+        ),
+    [machines, onlineIds, accessByMachineId, localId]
   );
   return (
     <div {...stylex.props(surface.container, styles.stack)}>
@@ -325,7 +349,15 @@ export function MemorySetting() {
       ) : null}
       {remote && inPane && pills.length > 1 ? (
         <SettingsLineTabs
-          tabs={pills}
+          tabs={pills.map((pill) => ({
+            ...pill,
+            leading: (
+              <span
+                aria-hidden="true"
+                {...stylex.props(styles.machineDot, pill.online && styles.machineDotOnline)}
+              />
+            ),
+          }))}
           current={machineId ?? ''}
           onChange={(id) => setSelected(id as MachineId)}
           label={t('settings.agent.machineTabs.machine', 'Machine')}
@@ -530,10 +562,27 @@ export function MemoryEditor({
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState('create');
+  const identity = entry
+    ? state.result?.memories.find((memory) => memory.id === entry.memoryId)
+    : undefined;
+  const hydrated = useRef(false);
   const [values, setValues] = useState<Record<string, string>>({
-    name: entry?.name ?? '',
-    description: entry?.description ?? '',
+    id: entry?.memoryId ?? '',
+    role: identity?.role ?? '',
+    name: identity?.name ?? entry?.name ?? '',
+    description: identity?.description ?? entry?.description ?? '',
   });
+  useEffect(() => {
+    if (identity && !hydrated.current) {
+      hydrated.current = true;
+      setValues({
+        id: identity.id,
+        name: identity.name,
+        description: identity.description ?? '',
+        role: identity.role ?? '',
+      });
+    }
+  }, [identity]);
   const [selected, setSelected] = useState<string>();
   const [idEdited, setIdEdited] = useState(false);
   const [created, setCreated] = useState<MemoryIdentity>();
@@ -551,11 +600,19 @@ export function MemoryEditor({
     setSaving(true);
     try {
       if (entry) {
+        const result = await state.update(
+          MemoryCreateInputSchema.parse({ ...values, id: entry.memoryId })
+        );
+        const updated =
+          result?.status === 'ready'
+            ? result.memories.find((memory) => memory.id === entry.memoryId)
+            : undefined;
+        if (!updated) throw new Error('Memory update failed');
         await save(
           MemoryAssociationSchema.parse({
             ...entry,
-            name: values.name,
-            description: values.description,
+            name: updated.name,
+            description: updated.description,
           }),
           true
         );
@@ -670,7 +727,7 @@ export function MemoryEditor({
               }}
             >
               <div {...stylex.props(styles.scroll)}>
-                {!entry ? (
+                {!entry || !available ? (
                   <MemoryProviderStatus
                     provider={provider}
                     online={online}
@@ -681,55 +738,54 @@ export function MemoryEditor({
                 ) : null}
                 {entry || (available && tab === 'create') ? (
                   <div {...stylex.props(styles.fields)}>
-                    {(entry ? (['name', 'description'] as const) : provider.createFields).map(
-                      (key) => (
-                        <div
-                          key={key}
-                          {...stylex.props(key !== 'name' && key !== 'id' && styles.fullField)}
+                    {provider.createFields.map((key) => (
+                      <div
+                        key={key}
+                        {...stylex.props(key !== 'name' && key !== 'id' && styles.fullField)}
+                      >
+                        <Field
+                          label={t(
+                            key === 'name'
+                              ? 'settings.memory.name'
+                              : `settings.memory.fields.${key}`
+                          )}
                         >
-                          <Field
-                            label={t(
-                              key === 'name'
-                                ? 'settings.memory.name'
-                                : `settings.memory.fields.${key}`
-                            )}
-                          >
-                            {key === 'description' ? (
-                              <Textarea
-                                aria-label={t(`settings.memory.fields.${key}`)}
-                                value={values[key] ?? ''}
-                                disabled={saving || !!created}
-                                onChange={(event) =>
-                                  setValues({ ...values, [key]: event.target.value })
-                                }
-                              />
-                            ) : (
-                              <Input
-                                aria-label={t(
-                                  key === 'name'
-                                    ? 'settings.memory.name'
-                                    : `settings.memory.fields.${key}`
-                                )}
-                                required={key === 'id' || key === 'name'}
-                                value={values[key] ?? ''}
-                                disabled={saving || !!created}
-                                onChange={(event) => {
-                                  const value = event.target.value;
-                                  if (key === 'id') setIdEdited(value !== '');
-                                  setValues((previous) => ({
-                                    ...previous,
-                                    [key]: value,
-                                    ...(key === 'name' && !idEdited && !entry
-                                      ? { id: value.toLowerCase() }
-                                      : {}),
-                                  }));
-                                }}
-                              />
-                            )}
-                          </Field>
-                        </div>
-                      )
-                    )}
+                          {key === 'description' ? (
+                            <Textarea
+                              aria-label={t(`settings.memory.fields.${key}`)}
+                              value={values[key] ?? ''}
+                              disabled={saving || !!created || (!!entry && !identity)}
+                              onChange={(event) =>
+                                setValues({ ...values, [key]: event.target.value })
+                              }
+                            />
+                          ) : (
+                            <Input
+                              aria-label={t(
+                                key === 'name'
+                                  ? 'settings.memory.name'
+                                  : `settings.memory.fields.${key}`
+                              )}
+                              required={key === 'id' || key === 'name'}
+                              readOnly={!!entry && key === 'id'}
+                              value={values[key] ?? ''}
+                              disabled={saving || !!created || (!!entry && !identity)}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                if (key === 'id') setIdEdited(value !== '');
+                                setValues((previous) => ({
+                                  ...previous,
+                                  [key]: value,
+                                  ...(key === 'name' && !idEdited && !entry
+                                    ? { id: value.toLowerCase() }
+                                    : {}),
+                                }));
+                              }}
+                            />
+                          )}
+                        </Field>
+                      </div>
+                    ))}
                   </div>
                 ) : null}
                 {!entry && available && tab === 'link' ? (
@@ -754,6 +810,7 @@ export function MemoryEditor({
                   type="submit"
                   disabled={
                     busy ||
+                    (!!entry && (!available || !identity)) ||
                     (!entry &&
                       (!available ||
                         (tab === 'link' && !candidates.some((memory) => memory.id === selected))))

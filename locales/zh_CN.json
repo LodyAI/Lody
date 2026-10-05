@@ -4815,7 +4815,7 @@
   "settings.memory.linkTab": "导入",
   "settings.memory.createAndLink": "创建并导入",
   "settings.memory.editorHint": "选择 Provider，然后创建记忆体或导入此设备上已有的身份。",
-  "settings.memory.editHint": "名称和描述保存在 Lody 中。删除此条目仅移除导入记录，Provider 中的数据会保留。",
+  "settings.memory.editHint": "名称、描述和角色会同步修改到 Provider。Agent ID 不可更改。删除此条目仅从 Lody 移除导入记录。",
   "settings.memory.saveError": "无法保存记忆体。请检查填写内容和连接后重试。",
   "settings.memory.createdSaveError": "已在 Provider 中创建，但 Lody 未能保存导入记录。请重试导入，不会重复创建身份。",
   "settings.memory.name": "名称",

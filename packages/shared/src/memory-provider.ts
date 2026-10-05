@@ -23,7 +23,7 @@ export const MemoryProviderRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('list'), providerId: z.string().min(1).max(100) }).strict(),
   z
     .object({
-      action: z.literal('create'),
+      action: z.enum(['create', 'update']),
       providerId: z.string().min(1).max(100),
       input: MemoryCreateInputSchema,
     })
@@ -34,6 +34,7 @@ export const MemoryIdentitySchema = z.object({
   id: z.string().min(1),
   name: z.string(),
   description: z.string().optional(),
+  role: z.string().optional(),
 });
 export type MemoryIdentity = z.infer<typeof MemoryIdentitySchema>;
 export const MemoryProviderResponseSchema = z
