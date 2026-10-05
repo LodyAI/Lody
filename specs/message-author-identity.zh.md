@@ -47,4 +47,4 @@ B 向 C 发送消息也署名 B；原始人类用户始终是授权主体。
 - [运行时捕获](../apps/cli/src/session/message-author.ts)
 - [展示组件](../packages/components/src/components/ai-gui/message-author-identity.tsx)
 
-Role 未设置 emoji 时保留名称并使用来源 provider logo，不生成机器人 emoji。缺少 provider 信息时显示 Agent 名称首字，不猜测 provider；明确设置的 Role emoji 保持优先。
+存在 Role 时使用共享 getAgentRoleEmoji 规则，包括未自定义 emoji 时的目录默认头像。只有没有 Role 的作者才回退到来源 provider logo。缺少 provider 信息时显示 Agent 名称首字，不猜测 provider。

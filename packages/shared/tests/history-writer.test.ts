@@ -1,3 +1,4 @@
+import { getAgentRoleEmoji } from '../src/agent-role';
 import { buildAgentMessageAuthor, snapshotAgentRole } from '../src/message-author';
 import { describe, expect, it, vi } from 'vitest';
 import { Loro, LoroList, LoroMap, LoroText } from 'loro-crdt';
@@ -25,7 +26,7 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
-  it('preserves an absent Role emoji so presentation can use the provider logo', () => {
+  it('freezes the same default emoji displayed by the Role catalog', () => {
     const role = snapshotAgentRole({ id: 'reviewer' as never, revision: 1, name: 'Reviewer' });
     const author = buildAgentMessageAuthor({
       sessionId: 'source',
@@ -34,8 +35,8 @@ describe('single history writer', () => {
       agentType: 'codex',
       role,
     });
-    expect(role.emoji).toBe('');
-    expect(author.role?.emoji).toBe('');
+    expect(role.emoji).toBe(getAgentRoleEmoji({}));
+    expect(author.role?.emoji).toBe(getAgentRoleEmoji({}));
     expect(author.agentType).toBe('codex');
   });
   it('retains frozen Agent authors through streaming, snapshots and invalid writes', () => {

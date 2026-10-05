@@ -4,6 +4,7 @@ import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider as JotaiProvider } from 'jotai';
+import { getAgentRoleEmoji } from '@lody/shared';
 import type { SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
 
 import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
@@ -146,7 +147,7 @@ describe('user message sender identity', () => {
     expect(document.body.textContent).not.toContain('Model: model-b');
   });
 
-  it('uses the provider logo when a Role has no emoji and preserves an explicitly chosen emoji', async () => {
+  it('uses the Role catalog emoji whenever a Role exists and provider logo only without a Role', async () => {
     const author = {
       v: 1 as const,
       kind: 'agent' as const,
@@ -162,17 +163,26 @@ describe('user message sender identity', () => {
         createElement(
           'div',
           null,
-          createElement(MessageAuthorIdentity, { author, compact: true }),
+          createElement(MessageAuthorIdentity, {
+            author: { ...author, role: undefined },
+            compact: true,
+          }),
           createElement('div', { 'data-testid': 'expected-provider' }, createElement(OpenAIIcon))
         )
       )
     );
-    const trigger = container!.querySelector('button[aria-label="View sender: reviewer"]')!;
-    expect(trigger.textContent).toContain('reviewer');
+    const trigger = container!.querySelector('button[aria-label="View sender: Codex"]')!;
+    expect(trigger.textContent).toContain('Codex');
     expect(trigger.textContent).not.toContain('🤖');
     expect(trigger.querySelector('svg')?.innerHTML).toBe(
       container!.querySelector('[data-testid="expected-provider"] svg')?.innerHTML
     );
+    await act(async () =>
+      root?.render(createElement(MessageAuthorIdentity, { author, compact: true }))
+    );
+    expect(container!.textContent).toContain(getAgentRoleEmoji({}));
+    expect(container!.textContent).toContain('reviewer');
+    expect(container!.querySelector('svg')).toBeNull();
     await act(async () =>
       root?.render(
         createElement(MessageAuthorIdentity, {

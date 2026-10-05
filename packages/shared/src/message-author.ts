@@ -5,7 +5,7 @@ import {
   ACP_CONFIG_OPTION_OFF_VALUE,
 } from './acp-run-config';
 import { AGENT_BRAND_IDS, type AgentBrandId } from './agent-brand';
-import type { AgentRole } from './agent-role';
+import { getAgentRoleEmoji, type AgentRole } from './agent-role';
 import type { AgentConfigCliType, ModelInfo, SessionTurnInputConfig } from './ai';
 
 const id = z.string().trim().min(1).max(256);
@@ -25,7 +25,7 @@ export const snapshotAgentRole = (
     id: role.id,
     revision: role.revision,
     name: role.name,
-    emoji: role.emoji?.trim() ?? '',
+    emoji: getAgentRoleEmoji(role),
   });
 
 /** Presentation/provenance only. Never an authorization principal or dispatch config. */
@@ -111,7 +111,7 @@ export function buildAgentMessageAuthor(input: {
             id: input.role.id,
             revision: input.role.revision,
             name: short(input.role.name),
-            emoji: input.role.emoji?.trim() ?? '',
+            emoji: getAgentRoleEmoji(input.role),
           },
         }
       : {}),

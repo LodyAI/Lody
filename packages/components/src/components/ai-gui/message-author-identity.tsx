@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
-import type { AgentMessageAuthor, SessionId } from '@lody/shared';
+import { getAgentRoleEmoji, type AgentMessageAuthor, type SessionId } from '@lody/shared';
 import { Popover } from '@/ui/armed-overlays';
 import { AgentIcon, AGENT_BRAND_ICONS } from '@/components/icons/agent-icon';
 import { useSessionLinkNavigator } from './session-link-context';
@@ -37,8 +37,8 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
   const name = author.role?.name ?? author.name;
   const BrandIcon = author.brandId ? AGENT_BRAND_ICONS[author.brandId] : undefined;
   const unknownIcon = <span>{Array.from(author.name)[0] ?? '?'}</span>;
-  const icon = author.role?.emoji?.trim() ? (
-    author.role.emoji
+  const icon = author.role ? (
+    getAgentRoleEmoji(author.role)
   ) : BrandIcon ? (
     <BrandIcon className={stylex.props(styles.glyph).className} />
   ) : author.cliType && author.agentType ? (

@@ -63,4 +63,4 @@ frame-time and large-history memory performance have not been benchmarked.
 - [Runtime capture](../apps/cli/src/session/message-author.ts)
 - [Presentation](../packages/components/src/components/ai-gui/message-author-identity.tsx)
 
-When a Role has no emoji, keep its name and use the source provider logo. Do not synthesize a robot emoji. If provider metadata is unavailable, use the Agent name initial; do not guess a provider. Explicit Role emoji remain authoritative.
+When a Role exists, use the shared getAgentRoleEmoji contract, including its catalog default when no custom emoji is set. Only authors without a Role fall back to the source provider logo. If provider metadata is unavailable, use the Agent name initial; do not guess a provider.
