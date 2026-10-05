@@ -38,3 +38,7 @@ MCP 在请求验证后、操作接受前，从准确的活动轮次获取作者�
 后续验证：24 项投影/发送者测试和组件类型检查通过。全仓类型/静态检查通过；最新全仓测试停在未改动的 workspace-git-service 本地同步用例（CLI 3475 项通过、4 项跳过、1 项失败）。文档校验通过。
 
 Role 头像修正：此前空 emoji 回退 provider 的规则与 Role 目录不一致；目录使用 getAgentRoleEmoji，默认头像为 🪼。现在存在 Role 时，快照生成和展示均使用这一共享规则。仅无 Role 时才使用 provider logo，未知 provider 使用名称首字。旧的空 emoji Role 快照也显示统一默认头像，已有明确 emoji（包括 🤖）不重写。测试将显示结果与共享 Role 默认值比较，并单独验证无 Role 时的 provider 回退。
+
+验证修正：切换目录默认头像后，composer hook 测试仍期待旧的 🤖。现在断言 DEFAULT_AGENT_ROLE_EMOJI，同时保留原有水合/配置行为断言。
+
+测试环境修复后的最终验证：`pnpm test`、`pnpm typecheck`、`pnpm check` 全部通过。组件 4767 项、共享层 1273 项通过；CLI 3476 项通过、4 项跳过。上述旧 Git 环境失败已由[测试隔离补充修正](../testing/2026-10-04-cli-transport-fixture-isolation.zh.md)解决。

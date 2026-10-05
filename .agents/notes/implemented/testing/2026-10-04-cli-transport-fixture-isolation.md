@@ -38,3 +38,21 @@ Both targeted suites passed (22 tests). These checks exercise local WebSockets a
 native Git, not production GitHub access or a real simulator. Related owners:
 [GitHub fallback](../architecture/2026-10-03-github-identity-fallback.md) and
 [simulator gestures](../feature/2026-10-03-ios-simulator-two-finger.md).
+
+## Workspace Git fixture follow-up
+
+The WorkspaceGitService fixture also inherited the agent host's `GIT_CONFIG_COUNT`
+URL rewrites: its configured `git@github.com:owner/repo.git` resolved to
+`lody-github::owner/repo.git`, so the native GitHub identity assertion failed.
+Both its suite and the shared local-project helper suite now clear inherited
+Git/SSH/LODY_GIT variables, disable system/global
+configuration for fixtures, and restore the environment after each test.
+This applies equally to fixture setup and service subprocesses; production Git
+configuration is untouched. The existing real-repository tests still verify
+branch changes, local project identity, and remote discovery. The missing
+`ProjectRef` type import in the fixture is also explicit.
+
+All six WorkspaceGitService tests pass under the originally failing environment.
+The root typecheck command is `pnpm typecheck`; there is no `checktype` script.
+
+Final verification: both affected Git suites pass (43 tests), and full `pnpm test`, `pnpm typecheck`, `pnpm check`, formatting and docs validation pass.

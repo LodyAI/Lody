@@ -38,3 +38,7 @@ The root check reaches CLI tests: 3475 pass, four skip, and the existing recursi
 Follow-up validation: 24 projection/sender tests and component typecheck pass. Root typecheck/lint pass; the latest root test run stops at the unchanged workspace-git-service local synchronization case (3475 CLI tests pass, four skip, one fails). Docs validation passes.
 
 Role avatar correction: the earlier empty-emoji provider fallback was inconsistent with the Role catalog, which uses getAgentRoleEmoji and a default 🪼. Both snapshot creation and presentation now use that shared contract whenever a Role exists. Provider logos apply only without a Role; unknown providers use a name initial. Legacy empty Role snapshots render the canonical default. Existing explicit emoji (including 🤖) are not rewritten. Tests compare the rendered avatar with the shared Role default and separately verify provider fallback without a Role.
+
+Validation correction: the composer hook fixture still expected the former 🤖 fallback after the catalog-default change. It now asserts DEFAULT_AGENT_ROLE_EMOJI while retaining its hydration/configuration behavior assertions.
+
+Final validation after fixture repairs: `pnpm test`, `pnpm typecheck`, and `pnpm check` all pass. Component tests: 4767; shared tests: 1273; CLI tests: 3476 passed, four skipped. The earlier Git environment failures above are resolved by the [fixture isolation follow-up](../testing/2026-10-04-cli-transport-fixture-isolation.md).
