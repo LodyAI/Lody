@@ -48,7 +48,7 @@ Memory page (and in the Role memory picker), and a status other than `ok` asks
 the user to start Mem and refresh. Opening Memory still probes the selected
 machine automatically. Missing or inactive nmem must not open a dialog. When
 ready, `nmem agents list -j` supplies `agentProfiles`. Creation uses
-`nmem agents enroll <id> -j` with optional name, description, role and default
+`nmem agents enroll <id> -j` with a required name and optional description, role and default
 Space, in the existing settings editor dialog. Enrollment is create-only; an
 existing ID keeps its provider profile. The returned list remains authoritative.
 
@@ -80,8 +80,7 @@ installation/configuration of agent-side Mem plugins are outside this change.
 - [Process boundary](../apps/cli/src/session/session.ts)
 
 The memory editor uses the same window-centered desktop dimensions as Agent Config.
-Creation places Name and Agent ID on one row, in that order. Until manually edited,
+Creation requires a non-blank Name and places Name and Agent ID on one row, in that order. Until manually edited,
 the ID follows the lowercase name. Space is hidden and omitted by default. Nowledge
-enrollment fixes source-app to lody.ai. Link rows show only name and description;
-selecting a row reveals read-only provider profile fields without storing them in
-the association document.
+enrollment fixes source-app to lody.ai. Link rows show only name and description, including after selection. No expanded
+profile details are requested or displayed.

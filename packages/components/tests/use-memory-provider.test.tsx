@@ -40,7 +40,7 @@ it('discards a late reply after switching machines and refreshes the selected ma
   expect(snapshot?.result?.memories.map((value) => value.id)).toEqual(['current']);
   let creation: Promise<MemoryProviderResponse | undefined> | undefined;
   await act(async () => {
-    creation = snapshot?.create({ id: 'created' });
+    creation = snapshot?.create({ id: 'created', name: 'Created' });
   });
   await act(async () => {
     pending.get('b')?.(result('created'));
@@ -78,7 +78,7 @@ it('automatically detects removed identities and does not interrupt enrollment w
     expect(snapshot!.result?.memories).toEqual([]);
     let pending: Promise<MemoryProviderResponse | undefined>;
     await act(async () => {
-      pending = snapshot!.create({ id: 'new' });
+      pending = snapshot!.create({ id: 'new', name: 'New' });
     });
     await act(async () => vi.advanceTimersByTimeAsync(30_000));
     await act(async () =>

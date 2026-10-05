@@ -121,13 +121,6 @@ const styles = stylex.create({
   },
   fields: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[4] },
   fullField: { gridColumn: '1 / -1' },
-  details: {
-    display: 'grid',
-    gridTemplateColumns: 'max-content minmax(0, 1fr)',
-    gap: space[2],
-    margin: 0,
-  },
-  detailValue: { margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
   radio: { display: 'flex', flexDirection: 'column', gap: space[2] },
 });
 
@@ -274,22 +267,6 @@ export function MemoryIdentityList({
             </span>
             {memory.description ? (
               <span {...stylex.props(styles.description)}>{memory.description}</span>
-            ) : null}
-            {selected === memory.id ? (
-              <dl {...stylex.props(styles.details)}>
-                {Object.entries(
-                  memory.details ?? {
-                    id: memory.id,
-                    name: memory.name,
-                    description: memory.description ?? '',
-                  }
-                ).map(([key, value]) => (
-                  <div key={key} {...stylex.props(styles.fullField)}>
-                    <dt {...stylex.props(catalog.meta)}>{key}</dt>
-                    <dd {...stylex.props(styles.detailValue)}>{value || '—'}</dd>
-                  </div>
-                ))}
-              </dl>
             ) : null}
           </div>
         </label>
@@ -689,7 +666,7 @@ export function MemoryEditor({
                         >
                           <Field
                             label={t(
-                              entry && key === 'name'
+                              key === 'name'
                                 ? 'settings.memory.name'
                                 : `settings.memory.fields.${key}`
                             )}
@@ -706,11 +683,11 @@ export function MemoryEditor({
                             ) : (
                               <Input
                                 aria-label={t(
-                                  entry && key === 'name'
+                                  key === 'name'
                                     ? 'settings.memory.name'
                                     : `settings.memory.fields.${key}`
                                 )}
-                                required={key === 'id' || (!!entry && key === 'name')}
+                                required={key === 'id' || key === 'name'}
                                 value={values[key] ?? ''}
                                 disabled={saving || !!created}
                                 onChange={(event) => {

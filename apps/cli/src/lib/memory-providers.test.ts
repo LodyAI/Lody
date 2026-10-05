@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MemoryCreateInputSchema } from '@lody/shared';
 import {
   createNowledgeMemoryProvider,
   handleMemoryProviderRequest,
@@ -59,18 +60,21 @@ describe('Nowledge memory provider', () => {
           id: 'reviewer',
           name: 'Review $(literal); name',
           description: undefined,
-          details: {
-            id: 'reviewer',
-            displayName: 'Review $(literal); name',
-            sourceApp: 'lody.ai',
-            defaultSpaceId: '',
-          },
         },
       ],
     });
+    expect(profiles[0]).toMatchObject({ sourceApp: 'lody.ai', defaultSpaceId: '' });
     expect(memoryEnvironment({ providerId: provider.id, memoryId: 'reviewer' })).toEqual({
       NMEM_AGENT_ID: 'reviewer',
     });
+  });
+  it('requires a non-blank name and normalizes surrounding whitespace', () => {
+    for (const name of [undefined, '', '   ']) {
+      expect(MemoryCreateInputSchema.safeParse({ id: 'reviewer', name }).success).toBe(false);
+    }
+    expect(MemoryCreateInputSchema.parse({ id: 'reviewer', name: ' Reviewer ' }).name).toBe(
+      'Reviewer'
+    );
   });
   it('does not present failed or malformed catalogs as an empty success', async () => {
     const provider = createNowledgeMemoryProvider(async (args) =>

@@ -12,7 +12,7 @@ export type MemoryBinding = z.infer<typeof MemoryBindingSchema>;
 export const MemoryCreateInputSchema = z
   .object({
     id: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/),
-    name: z.string().max(200).optional(),
+    name: z.string().trim().min(1).max(200),
     description: z.string().max(2000).optional(),
     role: z.string().max(200).optional(),
     defaultSpace: z.string().max(200).optional(),
@@ -34,7 +34,6 @@ export const MemoryIdentitySchema = z.object({
   id: z.string().min(1),
   name: z.string(),
   description: z.string().optional(),
-  details: z.record(z.string(), z.string()).optional(),
 });
 export type MemoryIdentity = z.infer<typeof MemoryIdentitySchema>;
 export const MemoryProviderResponseSchema = z

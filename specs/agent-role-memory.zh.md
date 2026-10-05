@@ -39,7 +39,7 @@ Provider 向界面提供名称、安装链接和支持的创建字段。调用�
 `https://mem.nowledge.co/en`；状态不是 `ok` 时提示启动 Mem 后刷新。进入记忆设置
 仍会自动探测当前机器。nmem 未安装或未运行不得弹出对话框。就绪后执行
 `nmem agents list -j`，读取 `agentProfiles`。创建执行 `nmem agents enroll <id> -j`，
-可选填写名称、描述、角色和默认 Space，表单复用现有设置编辑对话框。Enrollment
+名称必填，描述、角色和默认 Space 可选，表单复用现有设置编辑对话框。Enrollment
 只创建新身份，已有 ID 保持原档案，最终以 Provider 返回的列表为准。
 
 设置页复用 Agents 的机器选择：桌面窗格在可见机器多于一台时使用 line tabs，窗格外
@@ -63,6 +63,6 @@ Fork 和恢复读取冻结的历史配置，不重新查询可变 Role。未知 
 - [进程边界](../apps/cli/src/session/session.ts)
 
 记忆编辑器采用 Agent Config 相同的桌面尺寸，并在整个窗口居中。
-创建表单将名称和 Agent ID 按顺序放在同一行，未手动修改 ID 时随名称转为全小写。
+创建表单要求名称非空，并将名称和 Agent ID 按顺序放在同一行，未手动修改 ID 时随名称转为全小写。
 Space 暂时隐藏，默认不传值；Nowledge 登记固定传 source-app 为 lody.ai。
-关联列表只显示名称和描述，选中后展开只读 Provider 档案字段，这些详情不写入关联文档。
+关联列表始终只显示名称和描述，选中后不展开详情，也不再请求额外的 Provider 档案字段。

@@ -60,3 +60,7 @@ Name precedes ID on one row, with lowercase automatic ID until a manual override
 Space stays hidden; enrollment explicitly attributes source-app to lody.ai.
 Provider profile details travel only in the inventory response and appear read-only
 after selection; they do not broaden persisted association metadata.
+
+Follow-up feedback makes Name mandatory (trimmed, non-empty) and removes the
+expanded profile view. Selection now keeps only name and description; the unused
+profile-detail RPC payload and adapter parsing are removed.

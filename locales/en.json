@@ -4796,7 +4796,7 @@
   "settings.memory.status.error": "Could not read the memory provider. Check its CLI and refresh.",
   "settings.memory.status.ready": "Ready",
   "settings.memory.fields.id": "Agent ID",
-  "settings.memory.fields.name": "Name (optional)",
+  "settings.memory.fields.name": "Name",
   "settings.memory.fields.description": "Description (optional)",
   "settings.memory.fields.role": "Role (optional)",
   "settings.memory.fields.defaultSpace": "Default Space (optional)",

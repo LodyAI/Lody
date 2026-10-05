@@ -4796,7 +4796,7 @@
   "settings.memory.status.error": "无法读取记忆 Provider，请检查 CLI 后刷新。",
   "settings.memory.status.ready": "已就绪",
   "settings.memory.fields.id": "Agent ID",
-  "settings.memory.fields.name": "名称（可选）",
+  "settings.memory.fields.name": "名称",
   "settings.memory.fields.description": "描述（可选）",
   "settings.memory.fields.role": "角色（可选）",
   "settings.memory.fields.defaultSpace": "默认 Space（可选）",
