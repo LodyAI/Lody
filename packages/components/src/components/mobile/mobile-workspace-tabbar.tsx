@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -190,20 +191,12 @@ function DockTab<TabKey extends string>({
   const opacity = useTransform(progress, [0, 0.45], [1, 0]);
   const labelOpacity = useTransform(progress, [0, 0.4], [1, 0]);
   const labelY = useTransform(progress, [0, 1], [0, -5]);
-  // Remain inert on expansion until the faded controls have become visible.
-  // This subscription only renders at the visibility boundary, not each frame.
-  const [visible, setVisible] = useState(progress.get() < 0.4);
-  const visibleRef = useRef(visible);
-  useEffect(
-    () =>
-      progress.on('change', (value) => {
-        const next = value < 0.4;
-        if (next !== visibleRef.current) {
-          visibleRef.current = next;
-          setVisible(next);
-        }
-      }),
-    [progress]
+  // Only crossing the visibility boundary changes the React snapshot.
+  const subscribe = useCallback((notify: () => void) => progress.on('change', notify), [progress]);
+  const visible = useSyncExternalStore(
+    subscribe,
+    () => progress.get() < 0.4,
+    () => true
   );
   const hidden = !active && (collapsed || !visible);
 
