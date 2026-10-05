@@ -50,7 +50,7 @@ Ownership: [README.md](README.md).
   body type, a hover-only trailing chevron, no fill. Only builtin DeepSeek Harness retains thought rows in expandable
   activity groups; pure thoughts default open unless explicitly collapsed. Other providers
   keep thoughts hidden.
-  Full-width assistant bodies keep author/config in the footer.
+  Assistant footers show config, not author identity.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only
   the command is highlighted, via the Shiki worker; output stays ANSI text. Drop

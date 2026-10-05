@@ -39,7 +39,7 @@ B, while the original human remains the authorization principal throughout.
   A's identity never becomes B's assistant identity. Operation completion
   envelopes retain system identity rather than impersonating a batch member.
 - Role names appear even in solo workspaces. Agent inputs use Agent/Role avatars;
-  assistant bodies remain full-width with identity in the footer. Detail popovers
+  assistant bodies remain full-width without an author identity entry or popover. Input author detail popovers
   expose source model settings and an existing source-conversation navigator,
   never a human contact card. Rendering performs no catalog/source-document reads.
 - Human editing/resending creates a new human-authored input. Stored copy/fork and

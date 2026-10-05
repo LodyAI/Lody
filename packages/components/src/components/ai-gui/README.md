@@ -241,8 +241,8 @@ records lifecycle, alternatives, and platform verification limits.
 
 ## Message authors
 
-`message-author-identity.tsx` renders frozen Agent/Role identity in input avatars and
-assistant footers. It reads no catalogs or source documents. Human profiles remain
+`message-author-identity.tsx` renders frozen Agent/Role identity in input avatars.
+Assistant replies do not show an author identity entry or its popover. It reads no catalogs or source documents. Human profiles remain
 in `view.tsx`; execution controls continue to describe the receiving turn. The
 [identity contract](../../../../../specs/message-author-identity.md) defines capture,
 recovery and legacy behavior.

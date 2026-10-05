@@ -19,7 +19,7 @@ MCP captures the exact active source turn after request validation and before op
 
 The local operation database uses a separate `operation_authors` extension table with cascading deletion. Adding columns to legacy `SELECT *` operation rows or fields to strict frozen-config readers would break mixed-version decoding. The extension stores both source authors and target Role snapshots without altering those formats.
 
-The UI uses a shared snapshot-only presentation component. Role emoji/name takes priority, including solo workspaces. Its popover shows the source Agent/model summary and source conversation link. Assistant identity lives in the footer, retaining the avatar-free full-width body. Legacy history without author metadata keeps existing rendering; no guessing or history rewrite is performed.
+The UI uses a shared snapshot-only presentation component. Role emoji/name takes priority, including solo workspaces. Its popover shows the source Agent/model summary and source conversation link. Following user feedback, assistant replies omit the author identity entry and its popover; the avatar-free full-width body and existing configuration controls remain. Stored assistant author snapshots still support delegation provenance. Legacy history without author metadata keeps existing rendering; no guessing or history rewrite is performed.
 
 ## Alternatives and trade-offs
 

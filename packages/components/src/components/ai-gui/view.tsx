@@ -978,7 +978,6 @@ const assistantGroupHasActiveSearch = (
 };
 
 const hasAssistantTurnConfigInfo = (message: SessionHistoryParsed): boolean =>
-  message.author?.kind === 'agent' ||
   readSessionTurnTokenUsage(message.tokenUsage) !== undefined ||
   Boolean(message.modelInfo?.name) ||
   Boolean(message.inputConfig?.modeId) ||
@@ -5047,7 +5046,7 @@ export const AssistantTurnFooter = ({
     : formatConversationTimestamp(message.endedAt, {
         locale: toIntlLocale(i18n.resolvedLanguage ?? i18n.language),
       });
-  const hasTurnConfigInfo = message.author?.kind === 'agent' || hasAssistantTurnConfigInfo(message);
+  const hasTurnConfigInfo = hasAssistantTurnConfigInfo(message);
   /* Mobile shows the duration here for EVERY finished turn, ignoring
      `showDuration`: `WorkedGroupHeader` drops it on mobile (it would otherwise
      print the identical `resolveSessionHistoryDurationMs` value twice per turn),
@@ -5105,7 +5104,6 @@ export const AssistantTurnFooter = ({
             ),
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
             !isMobile &&
-              message.author?.kind !== 'agent' &&
               'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
             !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100'
           )}
@@ -5195,9 +5193,6 @@ export const AssistantTurnFooter = ({
               ) : null}
               {/* The turn config lives below the output on every layout, and is
                   known from the moment the turn opens: no need to wait for it to end. */}
-              {message.author?.kind === 'agent' ? (
-                <MessageAuthorIdentity author={message.author} compact />
-              ) : null}
               {hasTurnConfigInfo ? (
                 <AssistantTurnConfigInfoButton
                   message={message}
