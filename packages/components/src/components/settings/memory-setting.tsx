@@ -656,9 +656,9 @@ export function MemoryEditor({
     >
       <Dialog.Content
         style={{
-          width: 'min(1040px, 96dvw)',
+          width: 'min(900px, 96dvw)',
           maxWidth: 'none',
-          height: 'min(680px, 92dvh)',
+          height: 'min(600px, 92dvh)',
           padding: 0,
           gap: 0,
           overflow: 'hidden',

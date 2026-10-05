@@ -79,7 +79,8 @@ installation/configuration of agent-side Mem plugins are outside this change.
 - [Settings](../packages/components/src/components/settings/memory-setting.tsx)
 - [Process boundary](../apps/cli/src/session/session.ts)
 
-The memory editor uses the same window-centered desktop dimensions as Agent Config.
+The memory editor is window-centered, with a compact 900 × 600 px desktop size
+clamped to 96dvw × 92dvh.
 Creation requires a non-blank Name and places Name and Agent ID on one row, in that order. Until manually edited,
 the ID follows the lowercase name. Space is hidden and omitted by default. Nowledge
 enrollment fixes source-app to lody.ai. Link rows show only name and description, including after selection. No expanded

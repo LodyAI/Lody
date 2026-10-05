@@ -62,7 +62,7 @@ Fork 和恢复读取冻结的历史配置，不重新查询可变 Role。未知 
 - [设置界面](../packages/components/src/components/settings/memory-setting.tsx)
 - [进程边界](../apps/cli/src/session/session.ts)
 
-记忆编辑器采用 Agent Config 相同的桌面尺寸，并在整个窗口居中。
+记忆编辑器在整个窗口居中，桌面尺寸为紧凑的 900 × 600 px，并限制在 96dvw × 92dvh 内。
 创建表单要求名称非空，并将名称和 Agent ID 按顺序放在同一行，未手动修改 ID 时随名称转为全小写。
 Space 暂时隐藏，默认不传值；Nowledge 登记固定传 source-app 为 lody.ai。
 关联列表始终只显示名称和描述，选中后不展开详情，也不再请求额外的 Provider 档案字段。
