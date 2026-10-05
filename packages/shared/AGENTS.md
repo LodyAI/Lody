@@ -1,10 +1,10 @@
 # Shared contracts
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+`CLAUDE.md` symlinks here. Edit `AGENTS.md` only.
 
-Discover archive/restore/delete targets from one ready Repo snapshot, never UI caches.
+Discover archive/restore/delete from one ready Repo snapshot, never UI caches.
 Archive uses `collectSessionArchiveTargets`; restore/delete keep direct containment.
-Exact deletion bypasses discovery. See [relations](../../specs/session-relations.md).
+Exact deletion bypasses discovery: [relations](../../specs/session-relations.md).
 
 ## Session history
 
@@ -92,7 +92,7 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
   provider name check. A goal turn carries no run configuration, so resuming cannot
   change model or mode. Behavior: [goal control Spec](../../specs/session-goal-control.md).
 
-## Workspace MCP and Agent Roles
+## Workspace MCP / Roles
 
 - Workspace MCP has exactly two durable layers: catalog entries in the workspace Flock
   document and selected ids in each user turn input config. Do not add machine bindings.
@@ -112,7 +112,9 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
 - Roles bind exact `machineId + agentConfigId` without fallback. Unavailable
   machine/config/model/mode stays listed with reasons but cannot be mentioned.
   MCP freezes the current Role's Prompt, target, revision and dispatch config
-  before Operation acceptance; edits/deletion cannot change retries/recovery.
-  `SessionMeta.agentRoleId`/`agentRoleRevision` are display-only provenance.
-- Memory stores provider/id references, frozen per turn. Commands and environment
-  mapping are daemon-owned; follow the [memory contract](../../specs/agent-role-memory.md).
+  before acceptance; edits/deletion cannot change retries/recovery.
+  Session Role metadata is creation provenance only.
+- Memory stores provider/id references, frozen per turn. Daemon commands and env
+  mapping follow the [memory contract](../../specs/agent-role-memory.md).
+- Keep `author`, human `userId`, and recipient execution config separate.
+  [Contract](../../specs/message-author-identity.md).

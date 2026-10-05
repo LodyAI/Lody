@@ -20,3 +20,11 @@ current history so a preflight snapshot cannot overwrite an intervening update.
 
 The real-Mirror regression is in
 [operation-progress-feedback.test.ts](../../tests/operation-progress-feedback.test.ts).
+
+## Message-author snapshots
+
+`operation_authors` stores source identity and per-target Role display snapshots in
+the Operation acceptance transaction, with cascading cleanup. Separate storage
+keeps strict legacy `SELECT *` and frozen-config readers compatible. Missing rows
+mean legacy provenance, not permission to reconstruct historical identities from
+current catalogs. See the [contract](../../../../specs/message-author-identity.md).

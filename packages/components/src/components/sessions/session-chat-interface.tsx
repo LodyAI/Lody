@@ -4233,6 +4233,7 @@ export const SessionChatInterface = memo(
               options?.agentRole === undefined
                 ? sessionConversationConfig.memory
                 : options.agentRole?.memory,
+            agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
             resume: session.acpSessionId ?? undefined,
           });
 
@@ -4387,6 +4388,7 @@ export const SessionChatInterface = memo(
               options?.agentRole === undefined
                 ? sessionConversationConfig.memory
                 : options.agentRole?.memory,
+            agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
             resume: session.acpSessionId ?? undefined,
           });
           const queuedInputConfig: MessageQueueItemInput['acpSessionConfig'] = {
@@ -4402,6 +4404,7 @@ export const SessionChatInterface = memo(
             agentRoleId: inputConfig.agentRoleId,
             agentRoleRevision: inputConfig.agentRoleRevision,
             memory: inputConfig.memory,
+            agentRoleSnapshot: inputConfig.agentRoleSnapshot,
             resume: inputConfig.resume ?? undefined,
             chainDepth: 0,
           };

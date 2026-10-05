@@ -99,3 +99,25 @@ void test('Nightly download configuration must select a dedicated HTTPS path', (
     assert.throws(() => parseNightlyRelease(manifest, String(invalid)));
   }
 });
+
+void test('Android appears only with a matching immutable APK in both manifest lists', () => {
+  const apk = `Lody-${version}-android.apk`;
+  const mobile = {
+    ...manifest,
+    files: [...files, apk],
+    downloads: { ...manifest.downloads, [apk]: apk },
+  };
+  assert.deepEqual(parseNightlyRelease(mobile, base).downloads.at(-1), {
+    platform: 'android',
+    label: 'APK',
+    href: `${base}/${apk}`,
+  });
+  assert.equal(parseNightlyRelease(manifest, base).downloads.length, 6);
+  for (const invalid of [
+    { ...mobile, files },
+    { ...mobile, downloads: manifest.downloads },
+    { ...mobile, downloads: { ...mobile.downloads, [apk]: 'https://elsewhere.test/app.apk' } },
+    { ...mobile, downloads: { ...mobile.downloads, [apk]: '../app.apk' } },
+  ])
+    assert.throws(() => parseNightlyRelease(invalid, base));
+});

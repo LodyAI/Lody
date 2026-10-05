@@ -1,4 +1,8 @@
-import { MemoryBindingSchema } from '@lody/shared';
+import {
+  MemoryBindingSchema,
+  AgentMessageAuthorSchema,
+  AgentRoleSnapshotSchema,
+} from '@lody/shared';
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
@@ -410,6 +414,18 @@ export class LodyOperationStore {
     const fingerprint = fingerprintLodyCommand(input.kind, canonical);
     const frozenConfig = FrozenConfigSchema.parse(input.frozenContinuationConfig);
     const items = z.array(OperationItemSchema).parse(input.items);
+    const targetRoles = input.targetRoleSnapshots
+      ? z.array(AgentRoleSnapshotSchema.nullable()).max(20).parse(input.targetRoleSnapshots)
+      : undefined;
+    if (targetRoles && targetRoles.length !== items.length)
+      throw new Error('Target Role snapshots must match Operation items.');
+    const author = input.author ? AgentMessageAuthorSchema.parse(input.author) : undefined;
+    if (
+      author &&
+      (author.sessionId !== input.requesterSessionId || author.turnId !== frozenConfig.sourceTurnId)
+    ) {
+      throw new Error('Operation author does not match its source turn.');
+    }
     const transaction = this.db.transaction(
       (): { created: boolean; operation: StoredLodyOperation; claimedItemIndexes: number[] } => {
         const existing = this.getStored(input.requesterSessionId, input.operationId);
@@ -448,6 +464,18 @@ export class LodyOperationStore {
             input.deadlineAt,
             JSON.stringify(items)
           );
+        if (inserted.changes === 1 && (author || targetRoles)) {
+          this.db
+            .prepare(
+              `INSERT INTO operation_authors (requester_session_id, operation_id, author_json, target_roles_json) VALUES (?, ?, ?, ?)`
+            )
+            .run(
+              input.requesterSessionId,
+              input.operationId,
+              author ? JSON.stringify(author) : null,
+              targetRoles ? JSON.stringify(targetRoles) : null
+            );
+        }
         const operation = this.getStored(input.requesterSessionId, input.operationId);
         if (!operation) throw new Error('Accepted Operation was not readable after insert.');
         const claimedItemIndexes: number[] = [];
@@ -1282,7 +1310,27 @@ export class LodyOperationStore {
           'Operation completion'
         ) as LodyOperationCompletion)
       : undefined;
+    const authorRow = this.db
+      .prepare(
+        'SELECT author_json, target_roles_json FROM operation_authors WHERE requester_session_id = ? AND operation_id = ?'
+      )
+      .get(parsed.requester_session_id, parsed.operation_id) as
+      | { author_json: string | null; target_roles_json: string | null }
+      | undefined;
+    const author = authorRow?.author_json
+      ? parseJson(authorRow.author_json, AgentMessageAuthorSchema, 'Operation author')
+      : undefined;
     return {
+      ...(author ? { author } : {}),
+      ...(authorRow?.target_roles_json
+        ? {
+            targetRoleSnapshots: parseJson(
+              authorRow.target_roles_json,
+              z.array(AgentRoleSnapshotSchema.nullable()),
+              'target Role snapshots'
+            ),
+          }
+        : {}),
       workspaceId: parsed.workspace_id as WorkspaceId,
       ownerMachineId: parsed.owner_machine_id as MachineId,
       requesterSessionId: parsed.requester_session_id as SessionId,
@@ -1497,6 +1545,15 @@ export class LodyOperationStore {
           REFERENCES operations (requester_session_id, operation_id) ON DELETE CASCADE
       );
 
+      CREATE TABLE IF NOT EXISTS operation_authors (
+        requester_session_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        author_json TEXT,
+        target_roles_json TEXT,
+        PRIMARY KEY (requester_session_id, operation_id),
+        FOREIGN KEY (requester_session_id, operation_id)
+          REFERENCES operations(requester_session_id, operation_id) ON DELETE CASCADE
+      );
       CREATE TABLE IF NOT EXISTS orchestration_meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -1544,6 +1601,7 @@ export class LodyOperationStore {
       'table:operation_item_materializations',
       'table:operation_progress_settlements',
       'table:orchestration_meta',
+      'table:operation_authors',
     ]);
     const existingObjects = this.db
       .prepare(

@@ -4824,5 +4824,14 @@
   "settings.memory.associateRole": "Link to a role",
   "settings.agentRoles.configurationTab": "Configuration",
   "settings.memory.assignedRoles": "Linked:",
-  "settings.agentRoles.teamTab": "Team"
+  "settings.agentRoles.teamTab": "Team",
+  "sessions.messageAuthor.details": "View sender: {{name}}",
+  "sessions.messageAuthor.model": "Model: {{model}}",
+  "sessions.messageAuthor.configuredModel": "Configured model: {{model}}",
+  "sessions.messageAuthor.reasoning": "Reasoning: {{value}}",
+  "sessions.messageAuthor.fast": "Fast mode: {{value}}",
+  "sessions.messageAuthor.plan": "Plan mode: {{value}}",
+  "sessions.messageAuthor.source": "Open source conversation",
+  "sessions.messageAuthor.on": "On",
+  "sessions.messageAuthor.off": "Off"
 }

@@ -4824,5 +4824,14 @@
   "settings.memory.associateRole": "去关联角色",
   "settings.agentRoles.configurationTab": "配置",
   "settings.memory.assignedRoles": "已关联：",
-  "settings.agentRoles.teamTab": "团队"
+  "settings.agentRoles.teamTab": "团队",
+  "sessions.messageAuthor.details": "查看发送者：{{name}}",
+  "sessions.messageAuthor.model": "模型：{{model}}",
+  "sessions.messageAuthor.configuredModel": "配置模型：{{model}}",
+  "sessions.messageAuthor.reasoning": "推理强度：{{value}}",
+  "sessions.messageAuthor.fast": "快速模式：{{value}}",
+  "sessions.messageAuthor.plan": "规划模式：{{value}}",
+  "sessions.messageAuthor.source": "打开来源会话",
+  "sessions.messageAuthor.on": "开启",
+  "sessions.messageAuthor.off": "关闭"
 }

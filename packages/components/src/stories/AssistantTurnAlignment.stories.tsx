@@ -217,6 +217,47 @@ export const ConversationRhythmReading: Story = {
   render: () => <ConversationRhythmScene items={rhythmReadingItems} />,
 };
 
+const rhythmProgressItems = rhythmReadingItems.map((item) =>
+  item.type === 'message' && item.message.id === 'rhythm-assistant-1'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          items: [
+            {
+              type: 'text' as const,
+              text: '先检查搜索索引与草稿保存之间的关系，确认文件改名后列表能够及时刷新。接下来会分别检查正常更新和失败恢复，保留用户正在编辑的内容，并记录每一步的验证结果。',
+            },
+            item.message.items[0]!,
+            {
+              type: 'text' as const,
+              text: '已经找到索引更新的入口。现在检查重复修改和失败重试是否会覆盖草稿，并验证较长的文件名在列表中仍然清晰可读。The next check covers the error path and preserves the current selection.',
+            },
+            ...item.message.items.slice(1),
+          ],
+        },
+      }
+    : item
+);
+
+export const ConversationRhythmProgress: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmProgressItems} />,
+};
+
+export const ConversationRhythmProgressStreaming: Story = {
+  ...ConversationRhythm,
+  render: () => (
+    <ConversationRhythmScene
+      items={rhythmProgressItems.map((item) =>
+        item.type === 'message' && item.message.id === 'rhythm-assistant-1'
+          ? { ...item, message: { ...item.message, finished: false } }
+          : item
+      )}
+    />
+  ),
+};
+
 export const ConversationRhythmReadingStreaming: Story = {
   ...ConversationRhythm,
   render: () => (

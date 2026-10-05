@@ -2,7 +2,7 @@ import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 
-const readingLeading = `calc(${text.bodyLeading} * 1.1)`;
+const readingLeading = `calc(${text.bodyLeading} * 1.2)`;
 
 /** Conversation anatomy; hosts can override this group with createTheme. */
 export const conversation = stylex.defineVars({
@@ -20,7 +20,7 @@ export const conversation = stylex.defineVars({
   activityPitch: `max(${space[6]}, calc(${text.subheadlineLeading} + ${space[1.5]}))`,
   activityPadding: `calc(${space[1]} / 2)`,
   activityHoverFill: 'hsl(var(--hover) / 0.4)',
-  proseGap: space[1],
+  proseGap: space[1.5],
   surfaceGap: `max(${space[4]}, calc(${text.bodyLeading} - ${space[1]}))`,
   paragraphGap: `max(${space[3]}, calc(${text.bodyLeading} - ${space[2]}))`,
   listItemGap: `max(2px, calc(${space[6]} - ${readingLeading}))`,

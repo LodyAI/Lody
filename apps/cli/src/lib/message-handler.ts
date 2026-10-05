@@ -1,4 +1,6 @@
 import { handleMemoryProviderRequest } from './memory-providers';
+import { readMessageAuthor } from '@lody/shared';
+import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
 import { listMcpTools } from '@/mcp/list-mcp-tools';
 import { TurnTokenUsageLedger, turnTokenUsageFromUpdate } from './usage/turn-token-usage';
@@ -1004,8 +1006,26 @@ export class MessageHandler {
       // (assistant entry id reuse) and packages/components/src/components/ai-gui/AGENTS.md
       // ("Worked for …").
       const backend = await this.getSessionBackend(sessionDoc);
+      const existing = await backend.history.readTurn(turnId);
+      let author = existing.state === 'ready' ? readMessageAuthor(existing.turn.author) : undefined;
+      if (!author && userTurnId) {
+        const input = await backend.history.readTurn(userTurnId);
+        const meta = await sessionDoc.getMetaState();
+        if (meta)
+          author = await resolveSessionMessageAuthor(
+            this.workspaceDocument,
+            { ...meta, id: sessionId },
+            userTurnId,
+            input.state === 'ready'
+              ? normalizeSessionTurnInputConfig(input.turn.inputConfig)
+              : undefined,
+            modelInfo,
+            this.workspaceId
+          );
+      }
       await backend.openAssistantTurn({
         turnId,
+        ...(author ? { author } : {}),
         ...(userTurnId !== undefined ? { userTurnId } : {}),
         ...(modelInfo !== undefined ? { modelInfo } : {}),
         timestamp: new Date(getServerNow()).toISOString(),
@@ -2810,7 +2830,7 @@ export class MessageHandler {
     }
     const requester = requesterRecord.meta as SessionMeta;
     const delegatedRequester = operation.frozenContinuationConfig.sourceTurnId
-      ? ({ userId: operation.requesterUserId } as const)
+      ? ({ userId: operation.requesterUserId, author: operation.author } as const)
       : undefined;
 
     if (operation.kind === 'session_create' || operation.kind === 'session_create_many') {
@@ -2845,6 +2865,7 @@ export class MessageHandler {
         defaultMachineId: requester.machineId,
         sessionId: item.target.sessionId,
         userTurnId: item.target.userTurnId,
+        agentRoleSnapshot: operation.targetRoleSnapshots?.[index] ?? undefined,
         chainDepth: operation.initiatorChainDepth + 1,
         bypassSessionQuota: shouldBypassSessionQuota(operation.kind),
       };

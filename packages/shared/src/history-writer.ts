@@ -80,9 +80,13 @@ function preserveUnknown(
     // A different union variant is a new value, not a carrier for the old one's extensions.
     if (
       record(old) &&
-      typeof old.type === 'string' &&
-      typeof parsed.type === 'string' &&
-      old.type !== parsed.type
+      Object.entries(schema.shape).some(
+        ([key, field]) =>
+          field instanceof z.ZodLiteral &&
+          record(old) &&
+          Object.hasOwn(old, key) &&
+          old[key] !== parsed[key]
+      )
     )
       old = undefined;
     const result: Record<string, unknown> = Object.create(null);

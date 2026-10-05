@@ -78,10 +78,12 @@ to a subtree to change these values without descendant utility overrides.
 Activity thought prose uses compact Markdown at the same subheadline size and
 leading as its summary and tool rows, in the parent conversation and task dialog.
 Reading prose and user text use `readingLeading`, derived from the body role
-at 1.1 times its leading (22px at 14px). Compact tool prose and code retain their
+at 1.2 times its leading (24px at 14px). Compact tool prose and code retain their
 control leading. Explicit previews scale the reading token with their own size.
 Spacing follows the active interface leading through semantic `responseGap`,
-`roundGap`, `activityPitch`, `paragraphGap`, `surfaceGap` and `listItemGap` tokens.
+`roundGap`, `activityPitch`, `proseGap`, `paragraphGap`, `surfaceGap` and `listItemGap` tokens.
+Progress prose and activity summaries keep the prose gap inside expanded work;
+individual tool details keep their compact pitch.
 The user row reserves the response gap for its actions. The first assistant row
 adds no top gap; its last row reserves the next-round boundary only before a user
 turn. Footer actions and the next user's metadata share that reserve; larger
@@ -101,6 +103,8 @@ for scope and retained exceptions.
 `ConversationRhythmTheme` applies a scoped StyleX theme to the same components.
 `ConversationRhythmReading` and its streaming variant add continuous mixed-script
 paragraphs to verify real wrapped-line pitch and compare reading density.
+`ConversationRhythmProgress` and its streaming variant interleave long progress
+paragraphs with tool summaries to check separation inside and outside folded work.
 The no-footer and edited-files variants exercise boundary reserves without a
 footer and with taller footer content. The typography browser suite checks all
 five interface sizes, measured activity/turn spacing, preserved
@@ -234,3 +238,11 @@ Session data and action controls continue updating. This is independent of
 
 The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
 records lifecycle, alternatives, and platform verification limits.
+
+## Message authors
+
+`message-author-identity.tsx` renders frozen Agent/Role identity in input avatars.
+Assistant replies do not show an author identity entry or its popover. It reads no catalogs or source documents. Human profiles remain
+in `view.tsx`; execution controls continue to describe the receiving turn. The
+[identity contract](../../../../../specs/message-author-identity.md) defines capture,
+recovery and legacy behavior.

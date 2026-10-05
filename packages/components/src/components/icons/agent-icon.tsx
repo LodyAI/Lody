@@ -69,9 +69,12 @@ export function AgentIcon({
   brandId,
   env,
   className,
+  fallback,
 }: {
   cliType: AgentConfigCliType;
   agentType: string;
+  /** Override the generic icon when the provider cannot be identified. */
+  fallback?: ReactNode;
   /** Provider brand persisted on the agent config (preset-created agents). */
   brandId?: AgentBrandId;
   /** Agent/session env; used to infer the brand for configs created before `brandId` existed. */
@@ -127,7 +130,7 @@ export function AgentIcon({
       />
     );
   }
-  return <Bot className={cls} />;
+  return fallback !== undefined ? fallback : <Bot className={cls} />;
 }
 
 export { DeepSeekIcon };

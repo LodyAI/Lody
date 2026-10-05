@@ -39,6 +39,7 @@ export type SessionTurnAgentRoleSelection =
       agentRoleId: AgentRoleId;
       memory?: import('@lody/shared').MemoryBinding;
       agentRoleRevision: number;
+      agentRoleSnapshot?: import('@lody/shared').AgentRoleSnapshot;
     }
   | null
   | undefined;

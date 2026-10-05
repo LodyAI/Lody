@@ -55,6 +55,11 @@ desktop's channel, version and both source revisions when injected by its distri
 composition. Build metadata MUST remain distinct from a remote machine's logs and
 MUST NOT expand into ambient environment, account or filesystem collection.
 
+The page MAY also display Android APK downloads when both manifest lists name the
+same immutable APK for that Nightly version. Desktop-only manifests remain valid
+during rollout; the page MUST NOT guess an Android URL or substitute Stable.
+Desktop process-switching guidance MUST be labeled as desktop-only.
+
 ## Evidence and limits
 
 `desktop-bootstrap.ts`, `index.ts`, and `application.ts` separate pre-ready setup,

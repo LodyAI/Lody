@@ -280,7 +280,8 @@ describe('SessionEditAndResendService', () => {
       });
     });
     expect(harness.sessionData.history.readAll().at(-1)).toMatchObject({
-      userId: 'original-author',
+      userId: spec.requestedByUserId,
+      author: { v: 1, kind: 'human', userId: spec.requestedByUserId },
       status: 'seen',
       read: true,
       inputConfig: {

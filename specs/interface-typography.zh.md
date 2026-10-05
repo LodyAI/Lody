@@ -33,7 +33,7 @@ Appearance 中的字号选择应同步缩放普通界面文字，而不抹平层
 | title | 18 / 24px | 页面或 Markdown 主标题 |
 
 字号和行高均为 Default 值乘所选基准再除以 14。阅读正文保留 body 字号，使用独立、
-可主题化的[会话阅读行高](conversation-rhythm.zh.md#间距合约)，默认 22px；界面 body
+可主题化的[会话阅读行高](conversation-rhythm.zh.md#间距合约)，默认 24px；界面 body
 仍为 20px，紧凑正文与代码保留 subheadline 行高。独立消息预览显式传入的字号
 不受宿主文档基准影响。
 

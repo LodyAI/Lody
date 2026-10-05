@@ -713,6 +713,7 @@ describe('session-input helpers', () => {
     ).toEqual({
       userId: 'user-1',
       role: 'user',
+      author: { v: 1, kind: 'human', userId: 'user-1' },
       items: [
         { type: 'text', text: 'hello' },
         {

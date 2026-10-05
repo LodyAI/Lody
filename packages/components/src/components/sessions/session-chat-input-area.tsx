@@ -1,3 +1,4 @@
+import { snapshotAgentRole } from '@lody/shared';
 import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -1913,6 +1914,9 @@ export const SessionChatInputArea = memo(
                 agentRoleId: selectedAgentRoleItemId,
                 agentRoleRevision: selectedAgentRoleItemRevision,
                 memory: selectedAgentRoleItem?.role.runConfig.memory,
+                agentRoleSnapshot: selectedAgentRoleItem
+                  ? snapshotAgentRole(selectedAgentRoleItem.role)
+                  : undefined,
               }
             : null
           : sessionAgentRole.turnSelection,
@@ -1920,7 +1924,7 @@ export const SessionChatInputArea = memo(
         agentRoleControl,
         selectedAgentRoleItemId,
         selectedAgentRoleItemRevision,
-        selectedAgentRoleItem?.role.runConfig.memory,
+        selectedAgentRoleItem,
         sessionAgentRole.turnSelection,
       ]
     );

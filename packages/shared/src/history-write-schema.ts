@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MessageAuthorSchema } from './message-author';
 import {
   SessionHistoryInputConfigSchema,
   MessageContentSchema,
@@ -37,6 +38,7 @@ export const HistoryEntryWriteSchema = z.object({
     .optional(),
   read: z.boolean().optional(),
   userId: z.string().optional(),
+  author: MessageAuthorSchema.optional(),
   modelInfo: z
     .object({
       modelId: z.string(),

@@ -38,7 +38,7 @@ compact tool prose and portal content must not multiply the scale twice.
 
 Each size and leading is its Default value multiplied by the selected baseline
 divided by 14. Reading prose retains body size and uses the separately themeable
-[conversation reading leading](conversation-rhythm.md#spacing-contract), 22px at
+[conversation reading leading](conversation-rhythm.md#spacing-contract), 24px at
 Default; interface body remains 20px. Compact prose and code retain subheadline
 leading. A standalone message preview with an explicit size retains that
 size independently of the host document's baseline.

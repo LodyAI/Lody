@@ -1908,6 +1908,7 @@ export type ACPTurnConfig = {
   agentRoleId?: AgentRoleId | null;
   /** Catalog revision whose values were frozen into this Turn. */
   agentRoleRevision?: number;
+  agentRoleSnapshot?: import('./message-author').AgentRoleSnapshot;
   issuePRMentions?: IssuePRMention[];
   // continue to chat
   resume?: ACPSessionId;
