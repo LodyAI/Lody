@@ -89,10 +89,11 @@ const styles = stylex.create({
     flexDirection: 'column',
     gap: space[2],
     flexShrink: 0,
-    width: '240px',
-    padding: space[4],
+    width: '292px',
+    paddingBlock: space[4],
+    paddingInline: space[2],
     boxSizing: 'border-box',
-    backgroundColor: colors.secondaryBackground,
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
     borderInlineEnd: `1px solid ${colors.separator}`,
     '@media (max-width: 600px)': {
       width: '100%',
@@ -100,6 +101,17 @@ const styles = stylex.create({
       borderBottom: `1px solid ${colors.separator}`,
     },
   },
+  railTitle: { paddingInline: space[2] },
+  railItem: { gap: '10px', fontSize: '13px' },
+  railIcon: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '24px',
+    height: '24px',
+  },
+  railCheck: { flexShrink: 0, width: '12px', height: '12px', color: colors.accent },
   detail: {
     display: 'flex',
     flexDirection: 'column',
@@ -263,7 +275,7 @@ export function MemoryIdentityList({
           <div {...stylex.props(catalog.body)}>
             <span {...stylex.props(catalog.name)}>
               {memory.name}
-              {linkedIds.includes(memory.id) ? ` · ${t('settings.memory.linked')}` : null}
+              {linkedIds.includes(memory.id) ? ` · ${t('settings.memory.imported')}` : null}
             </span>
             {memory.description ? (
               <span {...stylex.props(styles.description)}>{memory.description}</span>
@@ -597,20 +609,34 @@ export function MemoryEditor({
       >
         <div {...stylex.props(styles.layout)}>
           <aside {...stylex.props(styles.rail)} aria-label={t('settings.memory.providers')}>
-            <span {...stylex.props(catalog.meta)}>{t('settings.memory.providers')}</span>
-            {MEMORY_PROVIDERS.map((item) => (
-              <Button
-                key={item.id}
-                type="button"
-                variant={item.id === provider.id ? 'secondary' : 'ghost'}
-                disabled={!!entry || busy}
-                aria-pressed={item.id === provider.id}
-                onClick={() => onProvider(item.id)}
-              >
-                <MemoryProviderLogo providerId={item.id} />
-                {item.name}
-              </Button>
-            ))}
+            <span {...stylex.props(catalog.meta, styles.railTitle)}>
+              {t('settings.memory.providers')}
+            </span>
+            <div role="listbox" aria-label={t('settings.memory.providers')}>
+              {MEMORY_PROVIDERS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="option"
+                  aria-selected={item.id === provider.id}
+                  disabled={(!!entry || busy) && item.id !== provider.id}
+                  onClick={() => onProvider(item.id)}
+                  {...stylex.props(
+                    surface.listRow,
+                    item.id === provider.id && surface.listRowSelected,
+                    styles.railItem
+                  )}
+                >
+                  <span {...stylex.props(styles.railIcon)}>
+                    <MemoryProviderLogo providerId={item.id} />
+                  </span>
+                  <span {...stylex.props(surface.listRowLabel)}>{item.name}</span>
+                  {item.id === provider.id ? (
+                    <Check aria-hidden="true" {...stylex.props(styles.railCheck)} />
+                  ) : null}
+                </button>
+              ))}
+            </div>
           </aside>
           <section {...stylex.props(styles.detail)}>
             <Dialog.Header>
@@ -742,7 +768,7 @@ export function MemoryEditor({
                       ? 'common.save'
                       : tab === 'create' && !created
                         ? 'settings.memory.createAndLink'
-                        : 'settings.memory.link'
+                        : 'settings.memory.import'
                   )}
                 </Button>
               </Dialog.Footer>

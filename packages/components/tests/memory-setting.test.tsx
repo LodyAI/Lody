@@ -229,7 +229,7 @@ it('keeps Add available for provider selection but disables creation when nmem i
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
     'Nowledge Mem CLI is not installed'
   );
-  expect(button('Create and link').disabled).toBe(true);
+  expect(button('Create and import').disabled).toBe(true);
   expect(mocks.entries).toEqual([]);
 });
 
@@ -238,7 +238,7 @@ it('shows only saved associations and links exactly one external identity using 
   await renderSetting();
   expect(container.textContent).not.toContain('Review lessons');
   await click('Add memory');
-  await click('Link existing');
+  await click('Import');
   expect(document.querySelector('[role="dialog"] dl')).toBeNull();
   await act(async () =>
     document.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Designer"]')!.click()
@@ -252,12 +252,12 @@ it('shows only saved associations and links exactly one external identity using 
   expect(container.textContent).toContain('Design lessons');
   expect(container.textContent).not.toContain('Review lessons');
   await click('Add memory');
-  await click('Link existing');
+  await click('Import');
   const linked = document.querySelector<HTMLButtonElement>(
     '[role="radio"][aria-label="Designer"]'
   )!;
   expect(linked.disabled).toBe(true);
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Designer · Linked');
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Designer · Imported');
 });
 
 it('creates in nmem then retries only the Lody association if saving fails', async () => {

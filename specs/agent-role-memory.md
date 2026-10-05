@@ -9,7 +9,7 @@ Translation: current
 
 A user chooses a machine in Settings → Memory and manages Lody's saved memory
 associations. Add Memory opens an Agent Config-style editor with a provider rail
-and Create / Link tabs. Create enrolls an identity and immediately links it; Link
+and Create / Import tabs. Create enrolls an identity and immediately imports it; Import
 lists the device's identities with single selection and copies its name and
 description. Already-linked identities remain visible but cannot be linked again.
 
@@ -84,3 +84,7 @@ Creation requires a non-blank Name and places Name and Agent ID on one row, in t
 the ID follows the lowercase name. Space is hidden and omitted by default. Nowledge
 enrollment fixes source-app to lody.ai. Link rows show only name and description, including after selection. No expanded
 profile details are requested or displayed.
+
+The provider rail uses the same flat selected list rows as Agent Config, including
+when only one provider exists. Import is the settings label for saving an association;
+Role binding continues to use Link.

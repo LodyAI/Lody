@@ -8,8 +8,8 @@ Translation: current
 ## 场景与职责
 
 用户在设置 → 记忆中选择机器，管理 Lody 保存的记忆关联。“添加记忆体”打开与
-Agent Config 一致的双栏编辑器，左侧选择 Provider，右侧提供创建和关联两个 Tab。
-创建会在 Provider 中登记身份并自动关联；关联页展示设备上的身份，单选后复制名称和
+Agent Config 一致的双栏编辑器，左侧选择 Provider，右侧提供创建和导入两个 Tab。
+创建会在 Provider 中登记身份并自动关联；导入页展示设备上的身份，单选后复制名称和
 描述。已经关联的身份仍显示，但不能重复选择。
 
 记忆内容由 Provider 管理。Lody 在所选机器的 Loro/Flock 文档中以
@@ -66,3 +66,6 @@ Fork 和恢复读取冻结的历史配置，不重新查询可变 Role。未知 
 创建表单要求名称非空，并将名称和 Agent ID 按顺序放在同一行，未手动修改 ID 时随名称转为全小写。
 Space 暂时隐藏，默认不传值；Nowledge 登记固定传 source-app 为 lody.ai。
 关联列表始终只显示名称和描述，选中后不展开详情，也不再请求额外的 Provider 档案字段。
+
+Provider 侧栏使用与 Agent Config 一致的平面选中列表行，只有一个 Provider 时也相同。
+设置中保存关联记录的文案为“导入”，Role 绑定记忆体仍称“关联”。
