@@ -1,13 +1,12 @@
 import { memo } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import { Bot } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space, text } from '@lody/ui/tokens/scales.stylex';
 import type { AgentMessageAuthor, SessionId } from '@lody/shared';
 import { Popover } from '@/ui/armed-overlays';
-import { AgentIcon } from '@/components/icons/agent-icon';
+import { AgentIcon, AGENT_BRAND_ICONS } from '@/components/icons/agent-icon';
 import { useSessionLinkNavigator } from './session-link-context';
 
 const styles = stylex.create({
@@ -36,17 +35,22 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
   const { t } = useTranslation();
   const navigate = useSessionLinkNavigator();
   const name = author.role?.name ?? author.name;
-  const icon = author.role ? (
+  const BrandIcon = author.brandId ? AGENT_BRAND_ICONS[author.brandId] : undefined;
+  const unknownIcon = <span>{Array.from(author.name)[0] ?? '?'}</span>;
+  const icon = author.role?.emoji?.trim() ? (
     author.role.emoji
+  ) : BrandIcon ? (
+    <BrandIcon className={stylex.props(styles.glyph).className} />
   ) : author.cliType && author.agentType ? (
     <AgentIcon
       cliType={author.cliType}
       agentType={author.agentType}
       brandId={author.brandId}
+      fallback={unknownIcon}
       className={stylex.props(styles.glyph).className}
     />
   ) : (
-    <Bot {...stylex.props(styles.glyph)} />
+    unknownIcon
   );
   return (
     <Popover.Root>

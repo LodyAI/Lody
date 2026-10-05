@@ -62,3 +62,5 @@ frame-time and large-history memory performance have not been benchmarked.
 - [Operation extension storage](../apps/cli/src/orchestration/operation-store.ts)
 - [Runtime capture](../apps/cli/src/session/message-author.ts)
 - [Presentation](../packages/components/src/components/ai-gui/message-author-identity.tsx)
+
+When a Role has no emoji, keep its name and use the source provider logo. Do not synthesize a robot emoji. If provider metadata is unavailable, use the Agent name initial; do not guess a provider. Explicit Role emoji remain authoritative.

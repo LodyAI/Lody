@@ -8,6 +8,8 @@ import type { SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shar
 
 import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
 import { createConversationViewFromHistory } from '../src/lib/conversation-view';
+import { MessageAuthorIdentity } from '../src/components/ai-gui/message-author-identity';
+import { OpenAIIcon } from '../src/components/icons/openai-icon';
 import { MessageRowView } from '../src/components/ai-gui/view';
 import { ForceDesktopLayoutProvider } from '../src/hooks/use-mobile';
 import { initI18n } from '../src/i18n';
@@ -142,6 +144,45 @@ describe('user message sender identity', () => {
     expect(document.body.textContent).toContain('Model: model-a');
     expect(document.body.textContent).not.toContain('maya.chen@example.com');
     expect(document.body.textContent).not.toContain('Model: model-b');
+  });
+
+  it('uses the provider logo when a Role has no emoji and preserves an explicitly chosen emoji', async () => {
+    const author = {
+      v: 1 as const,
+      kind: 'agent' as const,
+      sessionId: 'source',
+      turnId: 'turn',
+      name: 'Codex',
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      role: { id: 'reviewer', revision: 1, name: 'reviewer', emoji: '' },
+    };
+    await act(async () =>
+      root?.render(
+        createElement(
+          'div',
+          null,
+          createElement(MessageAuthorIdentity, { author, compact: true }),
+          createElement('div', { 'data-testid': 'expected-provider' }, createElement(OpenAIIcon))
+        )
+      )
+    );
+    const trigger = container!.querySelector('button[aria-label="View sender: reviewer"]')!;
+    expect(trigger.textContent).toContain('reviewer');
+    expect(trigger.textContent).not.toContain('🤖');
+    expect(trigger.querySelector('svg')?.innerHTML).toBe(
+      container!.querySelector('[data-testid="expected-provider"] svg')?.innerHTML
+    );
+    await act(async () =>
+      root?.render(
+        createElement(MessageAuthorIdentity, {
+          author: { ...author, role: { ...author.role, emoji: '🔎' } },
+          compact: true,
+        })
+      )
+    );
+    expect(container!.textContent).toContain('🔎');
+    expect(container!.querySelector('svg')).toBeNull();
   });
 
   it('keeps sender identity hidden when the workspace has one member', async () => {

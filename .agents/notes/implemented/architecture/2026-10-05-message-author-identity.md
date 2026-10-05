@@ -36,3 +36,5 @@ Behavioral coverage exercises real local MCP A→B→A attribution with distinct
 The root check reaches CLI tests: 3475 pass, four skip, and the existing recursive native SSH Git credential fixture fails with `context_unreadable`; the same failure reproduces with the unchanged HEAD modules in an isolated fixture. Follow-up package tests pass, including 4765 component tests, 1272 shared tests and 199 Electron tests; docs validation reports no errors. No real-provider packaged end-to-end run or frame-time/storage benchmark was performed.
 
 Follow-up validation: 24 projection/sender tests and component typecheck pass. Root typecheck/lint pass; the latest root test run stops at the unchanged workspace-git-service local synchronization case (3475 CLI tests pass, four skip, one fails). Docs validation passes.
+
+Provider fallback correction: empty Role emoji are preserved instead of being replaced with 🤖. The UI prefers explicit Role emoji, then provider brand/runtime logo, and a name initial for unknown providers. Older snapshots containing 🤖 cannot distinguish a generated default from an explicit choice and are not rewritten.

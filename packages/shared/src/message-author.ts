@@ -25,7 +25,7 @@ export const snapshotAgentRole = (
     id: role.id,
     revision: role.revision,
     name: role.name,
-    emoji: role.emoji || '🤖',
+    emoji: role.emoji?.trim() ?? '',
   });
 
 /** Presentation/provenance only. Never an authorization principal or dispatch config. */
@@ -111,7 +111,7 @@ export function buildAgentMessageAuthor(input: {
             id: input.role.id,
             revision: input.role.revision,
             name: short(input.role.name),
-            emoji: input.role.emoji || '🤖',
+            emoji: input.role.emoji?.trim() ?? '',
           },
         }
       : {}),
