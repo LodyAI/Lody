@@ -226,6 +226,7 @@ export function AgentRoleEditorDialog({
         width={SETTINGS_EDITOR_DIALOG_WIDTH}
         centerOn={settingsPane}
         className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        style={{ height: 'min(680px, 88dvh)' }}
       >
         <Dialog.Header>
           <Dialog.Title>
