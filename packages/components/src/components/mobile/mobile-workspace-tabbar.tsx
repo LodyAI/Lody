@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
@@ -178,6 +179,7 @@ function DockTab<TabKey extends string>({
   collapsed,
   theme,
   expandAriaLabel,
+  buttonRef,
   onClick,
 }: {
   tab: MobileBottomTabBarTabSpec<TabKey>;
@@ -189,6 +191,7 @@ function DockTab<TabKey extends string>({
   collapsed: boolean;
   theme: 'ios' | 'material';
   expandAriaLabel: string;
+  buttonRef?: RefObject<HTMLElement | null>;
   onClick: () => void;
 }) {
   const x = useTransform(() => (8 + (index * (width.get() - 16)) / count) * (1 - progress.get()));
@@ -209,9 +212,12 @@ function DockTab<TabKey extends string>({
     () => true
   );
   const hidden = !active && (collapsed || !visible);
+  const localButtonRef = useRef<HTMLElement>(null);
+  useImperativeHandle(buttonRef, () => localButtonRef.current, []);
 
   return (
     <Button
+      ref={localButtonRef}
       variant="ghost"
       shape="pill"
       className={stylex.props(!active && styles.tabHover).className}
@@ -288,6 +294,7 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
   const collapsed = minimized && hasSelection;
   const slot = useRef<HTMLDivElement>(null);
   const shell = useRef<HTMLDivElement>(null);
+  const selectedTabRef = useRef<HTMLElement>(null);
   const width = useMotionValue(48);
   const reduce = useReducedMotion();
   const progress = useSpring(0, DOCK_SPRING);
@@ -326,10 +333,15 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
       if (cumulativeScrollRef.current >= SCROLL_THRESHOLD) {
         // Move focus before React applies inert: browsers may blur an inert
         // control before a layout effect can discover the previous focus.
-        if (direction > 0 && shell.current?.contains(document.activeElement)) {
-          shell.current
-            .querySelector<HTMLElement>('[aria-selected="true"]')
-            ?.focus({ preventScroll: true });
+        const selectedButton = selectedTabRef.current;
+        const focusedElement = document.activeElement;
+        if (
+          direction > 0 &&
+          selectedButton &&
+          focusedElement !== selectedButton &&
+          shell.current?.contains(focusedElement)
+        ) {
+          selectedButton.focus({ preventScroll: true });
         }
         setMinimized(direction > 0);
       }
@@ -381,6 +393,7 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
               width={width}
               progress={progress}
               active={tab.key === selectedTab}
+              buttonRef={tab.key === selectedTab ? selectedTabRef : undefined}
               collapsed={collapsed}
               theme={resolvedTheme}
               expandAriaLabel={expandAriaLabel ?? '展开导航'}
