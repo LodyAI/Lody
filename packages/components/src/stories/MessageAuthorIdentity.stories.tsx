@@ -5,7 +5,6 @@ const meta = {
   title: 'Sessions/MessageAuthorIdentity',
   component: MessageAuthorIdentity,
   args: {
-    compact: true,
     author: {
       v: 1,
       kind: 'agent',
@@ -30,7 +29,6 @@ export const Role: Story = {
     },
   },
 };
-export const Avatar: Story = { args: { ...Role.args, compact: false } };
 export const DeletedRoleSnapshot: Story = {
   args: {
     author: {

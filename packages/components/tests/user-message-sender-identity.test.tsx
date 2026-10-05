@@ -165,29 +165,27 @@ describe('user message sender identity', () => {
           null,
           createElement(MessageAuthorIdentity, {
             author: { ...author, role: undefined },
-            compact: true,
           }),
           createElement('div', { 'data-testid': 'expected-provider' }, createElement(OpenAIIcon))
         )
       )
     );
     const trigger = container!.querySelector('button[aria-label="View sender: Codex"]')!;
-    expect(trigger.textContent).toContain('Codex');
+    expect(trigger.getAttribute('aria-label')).toBe('View sender: Codex');
     expect(trigger.textContent).not.toContain('🤖');
     expect(trigger.querySelector('svg')?.innerHTML).toBe(
       container!.querySelector('[data-testid="expected-provider"] svg')?.innerHTML
     );
-    await act(async () =>
-      root?.render(createElement(MessageAuthorIdentity, { author, compact: true }))
-    );
+    await act(async () => root?.render(createElement(MessageAuthorIdentity, { author })));
     expect(container!.textContent).toContain(getAgentRoleEmoji({}));
-    expect(container!.textContent).toContain('reviewer');
+    expect(container!.querySelector('button')?.getAttribute('aria-label')).toBe(
+      'View sender: reviewer'
+    );
     expect(container!.querySelector('svg')).toBeNull();
     await act(async () =>
       root?.render(
         createElement(MessageAuthorIdentity, {
           author: { ...author, role: { ...author.role, emoji: '🔎' } },
-          compact: true,
         })
       )
     );

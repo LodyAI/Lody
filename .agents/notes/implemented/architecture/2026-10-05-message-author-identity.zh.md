@@ -42,3 +42,9 @@ Role 头像修正：此前空 emoji 回退 provider 的规则与 Role 目录不�
 验证修正：切换目录默认头像后，composer hook 测试仍期待旧的 🤖。现在断言 DEFAULT_AGENT_ROLE_EMOJI，同时保留原有水合/配置行为断言。
 
 测试环境修复后的最终验证：`pnpm test`、`pnpm typecheck`、`pnpm check` 全部通过。组件 4767 项、共享层 1273 项通过；CLI 3476 项通过、4 项跳过。上述旧 Git 环境失败已由[测试隔离补充修正](../testing/2026-10-04-cli-transport-fixture-isolation.zh.md)解决。
+
+## 消融审查
+
+以当前 PR 为范围，基线的 25 项发送者/投影测试全部通过。移除聊天流投影中的 `author` 后，两项行为测试失败（持久作者传递、可见 Role 身份），该实验已恢复。移除未使用的 `compact` 发送者触发器模式后，同样的 25 项测试通过。助手页脚身份移除后，只有测试和 Story 使用该模式，因此删除模式、名称样式和重复的 Avatar Story。测试改为使用生产环境的头像触发器并断言无障碍名称；真实消息行测试仍断言可见的 Role 名称。同时删除重复传递的 `brandId`：前置品牌图标分支已处理所有已知品牌。Role 默认头像、provider 回退、冻结快照和兼容路径仍是必要契约，不属于冗余展示数据。
+
+消融后，`pnpm check`（类型、静态、CI 测试和边界检查）、`pnpm format`、`pnpm run docs check` 均通过。

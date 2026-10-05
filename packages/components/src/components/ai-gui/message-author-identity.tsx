@@ -19,7 +19,6 @@ const styles = stylex.create({
     fontSize: text.titleSize,
   },
   glyph: { width: '1em', height: '1em' },
-  name: { maxWidth: '12em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   details: {
     display: 'grid',
     gap: space[1],
@@ -35,10 +34,8 @@ const styles = stylex.create({
 /** Snapshot-only leaf: no Session, Provider or Role catalog subscriptions. */
 export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
   author,
-  compact = false,
 }: {
   author: AgentMessageAuthor;
-  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const navigate = useSessionLinkNavigator();
@@ -53,7 +50,6 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
     <AgentIcon
       cliType={author.cliType}
       agentType={author.agentType}
-      brandId={author.brandId}
       fallback={unknownIcon}
       className={stylex.props(styles.glyph).className}
     />
@@ -67,13 +63,12 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
           <Button
             variant="ghost"
             size="small"
-            icon={!compact}
+            icon
             aria-label={t('sessions.messageAuthor.details', 'View sender: {{name}}', { name })}
           >
             <span {...stylex.props(styles.icon)} aria-hidden="true">
               {icon}
             </span>
-            {compact ? <span {...stylex.props(styles.name)}>{name}</span> : null}
           </Button>
         }
       />

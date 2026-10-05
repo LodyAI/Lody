@@ -42,3 +42,9 @@ Role avatar correction: the earlier empty-emoji provider fallback was inconsiste
 Validation correction: the composer hook fixture still expected the former 🤖 fallback after the catalog-default change. It now asserts DEFAULT_AGENT_ROLE_EMOJI while retaining its hydration/configuration behavior assertions.
 
 Final validation after fixture repairs: `pnpm test`, `pnpm typecheck`, and `pnpm check` all pass. Component tests: 4767; shared tests: 1273; CLI tests: 3476 passed, four skipped. The earlier Git environment failures above are resolved by the [fixture isolation follow-up](../testing/2026-10-04-cli-transport-fixture-isolation.md).
+
+## Ablation review
+
+The PR-scoped baseline passes all 25 sender/projection tests. Removing `author` from the chat-stream projection makes two behavioral tests fail (persisted author propagation and visible Role identity); that experiment was reverted. Removing the unused `compact` sender trigger mode passes the same 25 tests. Its only remaining consumers were fixtures after assistant footer identity was removed, so the mode, its name styling and the duplicate Avatar story were deleted. Fixtures now exercise the production avatar trigger and assert its accessible name; the real message-row test still asserts the visible Role name. Redundant `brandId` forwarding was also removed: the preceding brand-icon branch already handles every known brand. Role defaults, provider fallback, frozen snapshots and compatibility paths remain necessary contracts, not redundant presentation data.
+
+After ablation, `pnpm check` (typechecking, lint, CI tests and boundary checks), `pnpm format`, and `pnpm run docs check` pass.
