@@ -20,7 +20,15 @@ const styles = stylex.create({
   },
   glyph: { width: '1em', height: '1em' },
   name: { maxWidth: '12em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  details: { display: 'grid', gap: space[2], maxWidth: '20em', overflowWrap: 'anywhere' },
+  details: {
+    display: 'grid',
+    gap: space[1],
+    maxWidth: '20em',
+    overflowWrap: 'anywhere',
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+  },
+  title: { fontSize: text.subheadlineSize, lineHeight: text.subheadlineLeading, fontWeight: 600 },
   muted: { color: colors.secondaryLabel, fontSize: text.captionSize },
 });
 
@@ -71,7 +79,7 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
       />
       <Popover.Content>
         <div {...stylex.props(styles.details)}>
-          <strong>{name}</strong>
+          <strong {...stylex.props(styles.title)}>{name}</strong>
           {author.role ? <span {...stylex.props(styles.muted)}>{author.name}</span> : null}
           {author.model ? (
             <span>
@@ -116,7 +124,7 @@ export const MessageAuthorIdentity = memo(function MessageAuthorIdentity({
           {navigate ? (
             <Button
               variant="link"
-              size="small"
+              size="mini"
               onClick={() => navigate({ sessionId: author.sessionId as SessionId })}
             >
               {t('sessions.messageAuthor.source', 'Open source conversation')}
