@@ -117,6 +117,16 @@ const styles = stylex.create({
     pointerEvents: 'auto',
   },
   activeContent: { color: colors.accent },
+  tabHover: {
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      inset: '6px 2px',
+      borderRadius: radius.full,
+      pointerEvents: 'none',
+      backgroundColor: { default: 'transparent', ':hover': colors.hoverFill },
+    },
+  },
   highlight: {
     transitionProperty: 'none',
     position: 'absolute',
@@ -204,6 +214,7 @@ function DockTab<TabKey extends string>({
     <Button
       variant="ghost"
       shape="pill"
+      className={stylex.props(!active && styles.tabHover).className}
       render={
         <motion.button
           style={{
@@ -217,6 +228,7 @@ function DockTab<TabKey extends string>({
             opacity: active ? 1 : opacity,
             zIndex: active ? 2 : 1,
             transition: 'none',
+            backgroundColor: collapsed ? undefined : 'transparent',
           }}
         />
       }
