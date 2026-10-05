@@ -374,6 +374,7 @@ function MachineMemories({ machineId, supported }: { machineId: MachineId; suppo
         <Button
           type="button"
           size="small"
+          variant="secondary"
           onClick={() => setEditor({ providerId: MEMORY_PROVIDERS[0].id })}
         >
           <Plus size={14} />
