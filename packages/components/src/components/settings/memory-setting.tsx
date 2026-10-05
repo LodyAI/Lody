@@ -68,6 +68,7 @@ const styles = stylex.create({
     width: '32px',
     height: '32px',
   },
+  unlinkRow: { display: 'flex', justifyContent: 'flex-end' },
   record: { position: 'relative' },
   actions: {
     opacity: {
@@ -892,12 +893,7 @@ export function RoleMemoryPicker({
   return (
     <div {...stylex.props(styles.stack)}>
       {value ? (
-        <div {...stylex.props(styles.row)}>
-          <span {...stylex.props(catalog.meta)}>
-            {entries.find(
-              (entry) => entry.providerId === value.providerId && entry.memoryId === value.memoryId
-            )?.name ?? value.memoryId}
-          </span>
+        <div {...stylex.props(styles.unlinkRow)}>
           <Button type="button" size="small" variant="ghost" onClick={() => onChange(undefined)}>
             {t('settings.memory.unlink')}
           </Button>
