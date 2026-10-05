@@ -59,6 +59,7 @@ miss a stall-profile deadline. These failures are outside this fix's scope.
 ## Related ownership
 
 - [Bug report](https://github.com/LodyAI/Lody/issues/1253)
+- [Pull request](https://github.com/LodyAI/Lody/pull/1254)
 - [File-link intent](../../../../specs/local-file-link-actions.md)
 - [File-surface implementation](../../../docs/sessions-file-surfaces.md)
 - [Earlier file-link context-menu decision](../feature/2026-09-17-markdown-file-link-context-menu.md)

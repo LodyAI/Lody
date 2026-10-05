@@ -46,6 +46,7 @@ CLI 和组件测试超时或未在截止时间内生成卡顿采样。这些失�
 ## 相关归属
 
 - [缺陷报告](https://github.com/LodyAI/Lody/issues/1253)
+- [拉取请求](https://github.com/LodyAI/Lody/pull/1254)
 - [文件链接意图](../../../../specs/local-file-link-actions.zh.md)
 - [文件界面实现](../../../docs/sessions-file-surfaces.md)
 - [此前的文件链接右键菜单决策](../feature/2026-09-17-markdown-file-link-context-menu.zh.md)
