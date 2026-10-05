@@ -47,6 +47,7 @@ export function SiteFooter({ locale }: { locale: SiteFooterLocale }) {
             <>
               <SiteAnchor href="/coding-agent-gui/">Agent GUI</SiteAnchor>
               <SiteAnchor href="/coding-agent-remote-control/">Remote control</SiteAnchor>
+              <SiteAnchor href="/coding-agent-scheduler/">Scheduled tasks</SiteAnchor>
             </>
           )}
           <SiteAnchor href={t.supportHref}>{t.support}</SiteAnchor>

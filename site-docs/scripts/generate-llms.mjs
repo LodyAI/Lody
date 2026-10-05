@@ -173,6 +173,7 @@ For the complete English documentation in one file, read [llms-full.txt](${absol
 ## Product
 
 - [Home](${absoluteSiteUrl('/')}) - Product overview and supported workflows.
+- [Coding Agent Scheduler](${absoluteSiteUrl('/coding-agent-scheduler')}) - Recurring coding tasks across supported Agent Configs on your machine.
 - [Download](${absoluteSiteUrl('/download')}) - Desktop, mobile, and browser clients.
 - [Pricing](${absoluteSiteUrl('/price')}) - Free, Plus, and Enterprise plans.
 - [Changelog](${absoluteSiteUrl('/changelog')}) - Product updates and fixes.

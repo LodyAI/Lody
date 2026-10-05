@@ -5,7 +5,7 @@ import {
 } from '@site/components/coding-agent-pages';
 import { brandTitle, pageHead } from '@site/lib/metadata';
 
-export function codingAgentHead(kind: CodingAgentPageKind) {
+export function codingAgentHead(kind: Exclude<CodingAgentPageKind, 'scheduler'>) {
   return pageHead({
     title: brandTitle(
       kind === 'gui' ? 'One GUI for Your Coding Agents' : 'Remote Control for Your Coding Agents'

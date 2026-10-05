@@ -5,7 +5,7 @@ import { SiteAnchor } from './site-anchor';
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
 
-export type CodingAgentPageKind = 'gui' | 'remote';
+export type CodingAgentPageKind = 'gui' | 'remote' | 'scheduler';
 
 const agents = [
   {
@@ -86,7 +86,7 @@ function Actions({ remote = false }: { remote?: boolean }) {
   );
 }
 
-function PageShell({ kind, children }: { kind: CodingAgentPageKind; children: ReactNode }) {
+export function PageShell({ kind, children }: { kind: CodingAgentPageKind; children: ReactNode }) {
   return (
     <div className="landing-page-root marketing-shell agent-page">
       <a className="agent-page__skip" href="#main-content">
@@ -104,6 +104,12 @@ function PageShell({ kind, children }: { kind: CodingAgentPageKind; children: Re
           >
             Remote control
           </SiteAnchor>
+          <SiteAnchor
+            href="/coding-agent-scheduler/"
+            aria-current={kind === 'scheduler' ? 'page' : undefined}
+          >
+            Scheduled tasks
+          </SiteAnchor>
         </nav>
         {children}
       </main>
@@ -112,7 +118,7 @@ function PageShell({ kind, children }: { kind: CodingAgentPageKind; children: Re
   );
 }
 
-function AgentSupport({ kind }: { kind: CodingAgentPageKind }) {
+function AgentSupport({ kind }: { kind: Exclude<CodingAgentPageKind, 'scheduler'> }) {
   return (
     <section className="agent-page__section" aria-labelledby="agent-support">
       <div className="agent-page__section-heading">
@@ -150,7 +156,7 @@ function AgentSupport({ kind }: { kind: CodingAgentPageKind }) {
   );
 }
 
-function Faq({ items }: { items: { question: string; answer: ReactNode }[] }) {
+export function Faq({ items }: { items: { question: string; answer: ReactNode }[] }) {
   return (
     <section className="agent-page__section agent-page__faq" aria-labelledby="questions">
       <div className="agent-page__section-heading">

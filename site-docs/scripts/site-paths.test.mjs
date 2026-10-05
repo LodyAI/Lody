@@ -14,6 +14,7 @@ await test('prerender paths include the 404 documents', () => {
   assert.ok(paths.includes('/docs'));
   assert.ok(paths.includes('/coding-agent-gui'));
   assert.ok(paths.includes('/coding-agent-remote-control'));
+  assert.ok(paths.includes('/coding-agent-scheduler'));
   assert.ok(paths.includes('/download/nightly'));
   assert.ok(paths.includes('/zh/download/nightly'));
 });
@@ -34,6 +35,7 @@ await test('site links preserve query, fragment, files and off-site/app destinat
     ['/docs/cli#daemon-mode', '/docs/cli/#daemon-mode'],
     ['/zh/docs/cli?from=docs#daemon-模式', '/zh/docs/cli/?from=docs#daemon-模式'],
     ['/coding-agent-gui', '/coding-agent-gui/'],
+    ['/coding-agent-scheduler#examples', '/coding-agent-scheduler/#examples'],
     ['/coding-agent-remote-control#codex-remote', '/coding-agent-remote-control/#codex-remote'],
     ['/zh', '/zh/'],
     ['/zh/docs/quickstart/', '/zh/docs/quickstart/'],
