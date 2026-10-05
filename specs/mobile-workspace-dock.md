@@ -5,14 +5,12 @@ Translation: current
 
 [中文](mobile-workspace-dock.zh.md)
 
-When reading a workspace or project list, scroll down to minimize navigation and up to reveal it. DOM and imperative editor scrolling share a directional 14px threshold, reset on reversal; reaching the top within 4px always expands. Tapping the minimized tab expands in place and resets the threshold.
+Scroll down to minimize navigation and up to reveal it. Lists and imperative editor signals share a 14px directional threshold, reset on reversal; reaching the top within 4px always expands. Tapping the minimized tab expands without scrolling and resets the threshold.
 
-The selected icon remains the same visible 24×24 element. Resizing never stretches content; interrupted reversals preserve position and velocity. Labels, selection fill and other tabs fade together. Reduced motion jumps to the target. Hidden controls cannot receive pointer or keyboard input; focus moves from a disappearing tab to the selected tab.
+The selected icon remains the same visible 24×24 element. Labels, selection fill and other tabs fade together. Reversals preserve position and velocity; reduced motion jumps to the target. Hidden tabs cannot receive input, and focus moves to the selected tab before another tab disappears.
 
-The shared component owns motion and scroll interpretation. Callers own keyed tabs, theme icons, translated labels, selection and the optional new-chat action. Both themes behave alike. Unmatched selection keeps navigation expanded; tab changes never select another tab implicitly. Instances stay independent, including matching legacy `layoutId` values. Resize and optional-action changes preserve available-width and safe-area layout.
+Both themes follow this behavior. Unmatched selection keeps navigation expanded; changing tabs never selects one implicitly. Instances remain independent, including matching legacy `layoutId` values. Resizing or omitting the new-chat action preserves available-width and safe-area layout.
 
 ## Evidence
 
 [Component](../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx) · [Decision and validation limits](../.agents/notes/implemented/bug-fix/2026-10-05-mobile-workspace-dock-motion.md)
-
-This draft records the accepted direction, not linked human approval of this revision. Browser tests do not establish Android device performance.

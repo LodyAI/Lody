@@ -23,12 +23,6 @@ never to a second global breakpoint read.
 Decision record:
 [compact desktop layout](../notes/implemented/feature/2026-09-25-compact-desktop-layout.md).
 
-## Workspace dock
-
-The shared dock uses one spring and stable measurement slots to preserve icon geometry.
-List and editor scrolling share directional behavior; see the [dock Spec](../../specs/mobile-workspace-dock.md)
-and [decision](../notes/implemented/bug-fix/2026-10-05-mobile-workspace-dock-motion.md).
-
 ## Two families of swipe-back
 
 Mobile surfaces animate in two different ways, and the back gesture follows the

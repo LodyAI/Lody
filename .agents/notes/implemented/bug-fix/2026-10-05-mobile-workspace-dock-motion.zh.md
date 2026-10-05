@@ -7,20 +7,16 @@ Translation: current
 
 ## 摘要
 
-导航外壳与子元素的布局动画叠加，拉伸了选中图标。已接受的原型 D 保持带键标签挂载，用一个弹簧驱动实际几何和淡化。向下滚动收起，向上滚动展开。代价是布局与绘制工作，Android 真机性能仍未验证。
+父子布局动画叠加导致选中图标拉伸。已接受的原型 D 保持图标身份，用一个可重新设定目标的弹簧驱动实际几何。代价是布局与绘制工作；Android 真机性能仍未验证。
 
 ## 决策
 
-选中图标保持不透明且为 24×24；拒绝复制图标和整个面板交叉淡化的原型 B/C。[组件](../../../../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx)采用可重新设定目标的单一弹簧（刚度 420、阻尼 40、质量 1、静止阈值 0.001）、派生 MotionValue、通过共享帧调度 resize helper 观察的稳定宽度槽以及可选操作的固定 56px 槽。不使用布局投影或共享标识；旧 `layoutId` 参数保留但不使用。
+复制图标和整个面板交叉淡化均未达到所需的连续性。保持标签挂载，测量稳定宽度槽；可选操作预留固定空间，避免其动画反过来影响导航宽度。行为见 [Spec](../../../../specs/mobile-workspace-dock.zh.md)。
 
-DOM 与命令式滚动共用方向累计；切换来源重置基准，有效的命令式信号优先。通过 `useSyncExternalStore` 直接读取弹簧的可见性，仅跨越阈值时快照改变。在应用 inert 前转移焦点，否则 Chromium 可能清除焦点。显式设置 `transition-property: none`，避免全局减少动态效果 CSS 对弹簧跳转再次插值。[Spec 草案](../../../../specs/mobile-workspace-dock.zh.md)负责行为约定。
-
-交互参考 Apple 的[滚动收起标签栏](https://developer.apple.com/videos/play/wwdc2025/284/?time=151)与[可中断弹簧](https://developer.apple.com/videos/play/wwdc2023/10158/)，实现采用 Web 几何变化，不是原生 Liquid Glass。跟踪：[#1257](https://github.com/LodyAI/Lody/issues/1257) · [PR #1258](https://github.com/LodyAI/Lody/pull/1258)。
+两个浏览器细节需要保留：应用 inert 前转移焦点，否则焦点可能被清除；动画驱动的元素禁用 CSS 过渡，否则全局减少动态效果 CSS 会对弹簧跳转再次插值。
 
 ## 证据与边界
 
-探索性受控时钟浏览器检查验证了中途反向时 SVG 身份、边界、透明度与可见范围，以及焦点、方向阈值、减少动态效果、尺寸变化和缺少选择／FAB。原组件测得图标宽度为 80.25px，而非 24px。按作者要求删除了这些导航专用浏览器与组件测试；它们属于历史验证，不再提供持续回归覆盖。
+探索性浏览器检查发现原本 24px 的图标宽度达到 80.25px，并验证修复后中途反向仍保持固定几何。这些检查未作为回归测试保留。正常／4 倍 CPU 限速的无头 Storybook 采样未观察到 50ms 以上长任务，但连续命令式信号比 DOM 滚动产生更多 React 工作。生产 Android／WebView 与 GPU 合成仍未验证。
 
-探索性 Chromium 145 无头 Storybook 性能采样（393×852、DPR 1、正常／4 倍 CPU 限速；空闲、反向、连续滚动各采样 240 帧）未观察到 50ms 以上长任务。回调间隔 p95 为 9.4–10.3ms，不等于实际呈现帧率。4 倍限速下，layout／paint 事件 p95 最大值为 0.79／0.671ms。连续信号输入产生 343–351 次 React 根提交，DOM 滚动为 6 次，包含 story 状态；真机如仍有开销，应调查此路径。
-
-Android 真机／WebView、GPU 合成与生产构建性能未验证。全量检查遇到 ACP SDK 和 viewer／Electron 依赖缺失；文档检查遇到指向缺失 ACP 子模块的断链。这些环境失败不能证明全局正确性。
+[#1257](https://github.com/LodyAI/Lody/issues/1257) · [PR #1258](https://github.com/LodyAI/Lody/pull/1258)

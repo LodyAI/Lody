@@ -19,10 +19,7 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
   scroll region.
 - `mobile-project-screen.tsx`, `mobile-chat-landing-screen.tsx`,
   `mobile-archive-screen.tsx` — the other top-level screens.
-- `mobile-workspace-tabbar.tsx` — persistent-icon dock; one spring coordinates
-  actual geometry, list/editor scroll direction and the optional action. See the
-  [dock contract](../../../../../specs/mobile-workspace-dock.md).
-- `mobile-workspace-layout.tsx`,
+- `mobile-workspace-layout.tsx`, [`mobile-workspace-tabbar.tsx`](../../../../../specs/mobile-workspace-dock.md),
   `mobile-workspace-stack.tsx` (SessionDetail layered over the always-mounted
   home/chat landing), `mobile-sidebar-drawer.tsx` (swipe-to-open code retained but
   disabled), `mobile-connection-status.tsx`.
