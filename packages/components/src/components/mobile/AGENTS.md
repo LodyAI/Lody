@@ -2,8 +2,8 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-The Capacitor app is outside this repository; keep native-only behavior behind
-explicit platform capabilities. File ownership: [README.md](README.md).
+The Capacitor app is external; gate native behavior by platform capabilities.
+Index: [README.md](README.md).
 Background: [ui-mobile.md](../../../../../.agents/docs/ui-mobile.md) — read
 before touching gestures.
 
@@ -13,9 +13,9 @@ before touching gestures.
   left-edge zone through `VaulDrawerBody`, which marks content no-drag and
   mounts the only drag-start zone. Drill pages instead mount
   `MobileEdgeBackSwipeZone` in a body-only `position: relative` region.
-- Neither zone may overlap a header back button: pass `topInset` = chrome above
-  the body (drawer header inset; `SESSION_DRAWER_BODY_TOP_INSET` for the
-  session). Zones are native-only; web mounts none, content still no-drag.
+- Zones never overlap header back buttons: `topInset` = chrome above the body
+  (drawer header inset; `SESSION_DRAWER_BODY_TOP_INSET` for sessions). Mount
+  zones only on native; web content remains no-drag.
 - Browser must be a NESTED Vaul drawer, never a sibling
   `createPortal(document.body)` panel; its managed preview iframes survive
   remount through `managed-preview-frame-cache.ts`. While the session drawer
@@ -37,6 +37,9 @@ before touching gestures.
 
 ## Home and chat lists
 
+- Dock icons retain identity and size; one spring owns geometry.
+  Contract: [mobile dock](../../../../../specs/mobile-workspace-dock.md).
+
 - Inbox renders only on `showInboxTab`. Keep the chat/projects group
   mounted so pull-to-refresh and scroll position survive tab round-trips.
   `../chat/chat-landing.tsx` owns the default home tab; the workspace stack only
@@ -53,8 +56,7 @@ before touching gestures.
   archived multi-select. Preview state joins the `AnimatePresence` key,
   collapsing scrolls the toggle in from a LAYOUT effect, and its leading 16px
   slot stays EMPTY.
-- The list is deliberately NOT virtualized: the home screen owns the scroll
-  element, so never hand it to `VList`.
+- Home owns list scrolling; never hand its scroll element to `VList`.
 - `MobileChatListCard` renders the sidebar's opened-by tree
   (`lib/session-opened-by-tree.ts`, the same two unmerged fields and the shared
   `sidebarCollapsedOpenedBySessionsAtom`; `../AGENTS.md`) over EACH bucket. Its
