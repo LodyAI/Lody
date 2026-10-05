@@ -96,7 +96,7 @@ export function AgentRoleEditorDialog({
   // panel fades out with its form rather than emptying first.
   const { shown: editor, onOpenChangeComplete } = useDialogExitSnapshot(openEditor);
 
-  const [tab, setTab] = useState<'configuration' | 'memory'>('configuration');
+  const [tab, setTab] = useState<'configuration' | 'memory' | 'team'>('configuration');
   const editorId = openEditor?.mode === 'edit' ? openEditor.role.id : openEditor?.roleId;
   useEffect(() => {
     setTab('configuration');
@@ -238,11 +238,12 @@ export function AgentRoleEditorDialog({
         </Dialog.Header>
         <Tabs.Root
           value={tab}
-          onValueChange={(value) => setTab(value as 'configuration' | 'memory')}
+          onValueChange={(value) => setTab(value as 'configuration' | 'memory' | 'team')}
         >
           <Tabs.List>
             <Tabs.Tab value="configuration">{t('settings.agentRoles.configurationTab')}</Tabs.Tab>
             <Tabs.Tab value="memory">{t('settings.agentRoles.form.memory')}</Tabs.Tab>
+            <Tabs.Tab value="team">{t('settings.agentRoles.teamTab')}</Tabs.Tab>
           </Tabs.List>
         </Tabs.Root>
         {editor && editorValue ? (

@@ -4823,5 +4823,6 @@
   "settings.memory.imported": "已导入",
   "settings.memory.associateRole": "去关联角色",
   "settings.agentRoles.configurationTab": "配置",
-  "settings.memory.assignedRoles": "已关联："
+  "settings.memory.assignedRoles": "已关联：",
+  "settings.agentRoles.teamTab": "团队"
 }

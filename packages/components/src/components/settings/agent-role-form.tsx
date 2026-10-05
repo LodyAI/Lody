@@ -79,7 +79,7 @@ export type AgentRoleFormProps = {
   onCancel: () => void;
   className?: string;
   memoryPicker?: ReactNode;
-  tab?: 'configuration' | 'memory';
+  tab?: 'configuration' | 'memory' | 'team';
 };
 
 /**
@@ -344,25 +344,23 @@ export function AgentRoleForm({
                 ) : null}
               </Section>
             ) : null}
-
-            <div {...stylex.props(surface.formBlock, catalog.blockRow)}>
-              <div {...stylex.props(catalog.blockText)}>
-                <UiField.Label htmlFor={`${fieldId}-share`}>
-                  {t('settings.agentRoles.form.share')}
-                </UiField.Label>
-                <p {...stylex.props(catalog.blockHint)}>
-                  {t('settings.agentRoles.form.shareHint')}
-                </p>
-              </div>
-              <Switch
-                id={`${fieldId}-share`}
-                checked={value.shareWithWorkspace}
-                onCheckedChange={(shareWithWorkspace) => update({ shareWithWorkspace })}
-              />
-            </div>
           </>
-        ) : (
+        ) : tab === 'memory' ? (
           (memoryPicker ?? <p>{t('settings.memory.noMachine')}</p>)
+        ) : (
+          <div {...stylex.props(surface.formBlock, catalog.blockRow)}>
+            <div {...stylex.props(catalog.blockText)}>
+              <UiField.Label htmlFor={`${fieldId}-share`}>
+                {t('settings.agentRoles.form.share')}
+              </UiField.Label>
+              <p {...stylex.props(catalog.blockHint)}>{t('settings.agentRoles.form.shareHint')}</p>
+            </div>
+            <Switch
+              id={`${fieldId}-share`}
+              checked={value.shareWithWorkspace}
+              onCheckedChange={(shareWithWorkspace) => update({ shareWithWorkspace })}
+            />
+          </div>
         )}
         {error ? <FormMessage tone="error">{error}</FormMessage> : null}
       </div>

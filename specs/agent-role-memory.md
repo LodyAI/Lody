@@ -30,11 +30,11 @@ entry, focus and every 30 seconds while visible, skipping pending requests.
 Memory settings and the Role Memory tab keep saved cards visible during probing
 without a loading indicator; completed failures still show inline status.
 
-The Role editor has Configuration and Memory tabs sharing one draft and save
+The Role editor has Configuration, Memory and Team tabs sharing one draft and save
 action. The Memory tab lists saved associations on the Role's exact machine,
 using the same logo/name/description cards as Memory settings. Clicking a card
 selects it; unlinking remains available. There is no inline Memory section in
-the Configuration tab. Role run configuration and turn input still store only
+the Configuration tab. Workspace sharing is shown only in the Team tab. Role run configuration and turn input still store only
 `{ providerId, memoryId }`; changing the Role's machine clears its reference.
 Removing a catalog association does not rewrite existing Roles or accepted turns.
 Unlinking a Role affects future turns; accepted turns and Operations keep their

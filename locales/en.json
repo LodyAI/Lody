@@ -4823,5 +4823,6 @@
   "settings.memory.imported": "Imported",
   "settings.memory.associateRole": "Link to a role",
   "settings.agentRoles.configurationTab": "Configuration",
-  "settings.memory.assignedRoles": "Linked:"
+  "settings.memory.assignedRoles": "Linked:",
+  "settings.agentRoles.teamTab": "Team"
 }
