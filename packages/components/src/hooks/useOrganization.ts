@@ -224,8 +224,21 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
     data: activeOrganization,
     isPending: activeOrganizationIsPending,
     refetch: refetchActiveOrganization,
-    error: activeOrganizationError,
+    error: activeOrganizationQueryError,
   } = authClient.useActiveOrganization();
+
+  // A partial response is not a full organization. Keep membership-dependent
+  // consumers gated and expose a retryable error instead of inventing an empty roster.
+  const activeOrganizationDataError = useMemo(
+    () =>
+      activeOrganization && !Array.isArray(activeOrganization.members)
+        ? new Error('Incomplete organization response: members are missing')
+        : null,
+    [activeOrganization]
+  );
+  const activeOrganizationError =
+    activeOrganizationQueryError ??
+    (!targetSlug || activeOrganization?.slug === targetSlug ? activeOrganizationDataError : null);
 
   const setWorkspaceContext = useSetAtom(setWorkspaceContextAtom);
   const setWorkspaceContextAtRevision = useSetAtom(setWorkspaceContextAtRevisionAtom);
@@ -380,7 +393,9 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
   // route is opening, treat it as unavailable to avoid reusing a stale workspace.
   const activeOrganizationMatchesTarget = !targetSlug || activeOrganization?.slug === targetSlug;
   const resolvedActiveOrganization =
-    activeOrganizationInList && activeOrganizationMatchesTarget ? activeOrganization : null;
+    activeOrganizationInList && activeOrganizationMatchesTarget && !activeOrganizationDataError
+      ? activeOrganization
+      : null;
 
   const role = useMemo(() => {
     return resolvedActiveOrganization?.members.find((member) => member.userId === user?.id)?.role;
@@ -497,19 +512,22 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       if (!targetOrganization) {
         return;
       }
+      if (activeOrganizationDataError && activeOrganization?.id === targetOrganization.id) return;
       if (!resolvedActiveOrganization || resolvedActiveOrganization.id !== targetOrganization.id) {
         void switchOrganization(targetOrganization.id);
       }
       return;
     }
 
-    if (!resolvedActiveOrganization) {
+    if (!resolvedActiveOrganization && !activeOrganizationDataError) {
       const first = organizations[0];
       if (first) {
         void switchOrganization(first.id);
       }
     }
   }, [
+    activeOrganization?.id,
+    activeOrganizationDataError,
     activeOrganizationIsPending,
     organizations,
     resolvedActiveOrganization,
