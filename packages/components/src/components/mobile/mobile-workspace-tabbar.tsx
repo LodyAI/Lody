@@ -21,6 +21,7 @@ import { colors, shadow } from '@lody/ui/tokens/colors.stylex';
 import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { PencilLine } from 'lucide-react';
 import { isIOSRuntimeEnvironment } from '@/lib/native-platform';
+import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 
 export type MobileBottomTabBarTabSpec<TabKey extends string = string> = {
   key: TabKey;
@@ -291,11 +292,9 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
 
   useLayoutEffect(() => {
     const element = slot.current;
-    if (!element) return;
+    if (!element) return undefined;
     width.set(element.getBoundingClientRect().width);
-    const observer = new ResizeObserver(([entry]) => width.set(entry.contentRect.width));
-    observer.observe(element);
-    return () => observer.disconnect();
+    return observeResizeOnAnimationFrame(element, ([entry]) => width.set(entry.contentRect.width));
   }, [width]);
 
   useLayoutEffect(() => {
@@ -339,9 +338,9 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
     cumulativeScrollRef.current = 0;
     directionRef.current = 0;
     lastScrollTopRef.current = null;
-    if (hasScrollSignal) return;
+    if (hasScrollSignal) return undefined;
     const element = scrollContainerRef?.current;
-    if (!element) return;
+    if (!element) return undefined;
     applyScrollTop(element.scrollTop);
     const handleScroll = () => applyScrollTop(element.scrollTop);
     element.addEventListener('scroll', handleScroll, { passive: true });

@@ -11,7 +11,7 @@ Translation: current
 
 ## 决策
 
-选中图标保持不透明且为 24×24；拒绝复制图标和整个面板交叉淡化的原型 B/C。[组件](../../../../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx)采用可重新设定目标的单一弹簧（刚度 420、阻尼 40、质量 1、静止阈值 0.001）、派生 MotionValue、稳定宽度观察槽以及可选操作的固定 56px 槽。不使用布局投影或共享标识；旧 `layoutId` 参数保留但不使用。
+选中图标保持不透明且为 24×24；拒绝复制图标和整个面板交叉淡化的原型 B/C。[组件](../../../../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx)采用可重新设定目标的单一弹簧（刚度 420、阻尼 40、质量 1、静止阈值 0.001）、派生 MotionValue、通过共享帧调度 resize helper 观察的稳定宽度槽以及可选操作的固定 56px 槽。不使用布局投影或共享标识；旧 `layoutId` 参数保留但不使用。
 
 DOM 与命令式滚动共用方向累计；切换来源重置基准，有效的命令式信号优先。在应用 inert 前转移焦点，否则 Chromium 可能清除焦点。显式设置 `transition-property: none`，避免全局减少动态效果 CSS 对弹簧跳转再次插值。[Spec 草案](../../../../specs/mobile-workspace-dock.zh.md)负责行为约定。
 

@@ -11,7 +11,7 @@ Overlapping dock and child layout animations stretched the selected icon. Accept
 
 ## Decision
 
-Keep the selected icon opaque at 24×24; reject duplicated-icon and whole-panel crossfades (prototypes B/C). The [component](../../../../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx) uses one retargetable spring (420 stiffness, 40 damping, mass 1, rest thresholds 0.001), derived MotionValues, an observed stable width slot, and a fixed 56px optional action slot. No layout projection or shared identity participates; legacy `layoutId` remains accepted but unused.
+Keep the selected icon opaque at 24×24; reject duplicated-icon and whole-panel crossfades (prototypes B/C). The [component](../../../../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx) uses one retargetable spring (420 stiffness, 40 damping, mass 1, rest thresholds 0.001), derived MotionValues, a stable width slot observed through the shared frame-scheduled resize helper, and a fixed 56px optional action slot. No layout projection or shared identity participates; legacy `layoutId` remains accepted but unused.
 
 DOM and imperative scrolling share directional accumulation; switching sources resets the baseline, and an active imperative signal takes precedence. Move focus before applying inert because Chromium may otherwise clear it. Explicit `transition-property: none` prevents global reduced-motion CSS from interpolating spring jumps. The [draft Spec](../../../../specs/mobile-workspace-dock.md) owns behavior.
 

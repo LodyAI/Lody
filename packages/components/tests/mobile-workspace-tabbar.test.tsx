@@ -94,7 +94,9 @@ it('retains icon nodes through selection, reorder and removal while keeping navi
   expect(active().hasAttribute('inert')).toBe(false);
   expect(active().getAttribute('aria-label')).toBe('展开导航');
   render({ selectedTab: null });
-  act(() => vi.advanceTimersByTime(1000));
+  act(() => {
+    vi.advanceTimersByTime(1000);
+  });
   expect(container.querySelector('[aria-selected="true"]')).toBeNull();
   expect(container.querySelectorAll('[role="tab"]').length).toBe(2);
   expect(container.querySelector('[aria-label="last"] svg')).toBe(lastIcon);
