@@ -20,13 +20,25 @@ describe('Nowledge memory provider', () => {
     }
   });
   it('enrolls a literal identity and returns the updated provider catalog', async () => {
-    const profiles: { id: string; displayName: string }[] = [];
+    const profiles: {
+      id: string;
+      displayName: string;
+      sourceApp: string;
+      defaultSpaceId: string;
+    }[] = [];
     const provider = createNowledgeMemoryProvider(async (args) => {
       if (args[0] === 'status') return { stdout: '{"status":"ok"}' };
       if (args[1] === 'enroll') {
         // Model the CLI argv boundary: metacharacters must remain one literal value.
         const name = args[args.indexOf('--name') + 1];
-        profiles.push({ id: args[2] ?? '', displayName: name ?? '' });
+        profiles.push({
+          id: args[2] ?? '',
+          displayName: name ?? '',
+          sourceApp: args[args.indexOf('--source-app') + 1] ?? '',
+          defaultSpaceId: args.includes('--default-space')
+            ? (args[args.indexOf('--default-space') + 1] ?? '')
+            : '',
+        });
         return { stdout: '{}' };
       }
       return { stdout: JSON.stringify({ agentProfiles: profiles }) };
@@ -42,7 +54,19 @@ describe('Nowledge memory provider', () => {
     expect(result).toEqual({
       type: 'machine/memory',
       status: 'ready',
-      memories: [{ id: 'reviewer', name: 'Review $(literal); name', description: undefined }],
+      memories: [
+        {
+          id: 'reviewer',
+          name: 'Review $(literal); name',
+          description: undefined,
+          details: {
+            id: 'reviewer',
+            displayName: 'Review $(literal); name',
+            sourceApp: 'lody.ai',
+            defaultSpaceId: '',
+          },
+        },
+      ],
     });
     expect(memoryEnvironment({ providerId: provider.id, memoryId: 'reviewer' })).toEqual({
       NMEM_AGENT_ID: 'reviewer',

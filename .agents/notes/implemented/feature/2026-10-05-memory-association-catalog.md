@@ -51,3 +51,12 @@ the two-pane editor and association cards. No personal provider identity was
 created for validation; the full Electron settings window was not exercised.
 
 Implementation: [PR #1246](https://github.com/LodyAI/Lody/pull/1246).
+
+## Editor refinement
+
+User feedback identified pane-relative centering as the cause of the offset dialog.
+The editor now matches Agent Config's window centering and desktop dimensions.
+Name precedes ID on one row, with lowercase automatic ID until a manual override.
+Space stays hidden; enrollment explicitly attributes source-app to lody.ai.
+Provider profile details travel only in the inventory response and appear read-only
+after selection; they do not broaden persisted association metadata.

@@ -34,6 +34,7 @@ export const MemoryIdentitySchema = z.object({
   id: z.string().min(1),
   name: z.string(),
   description: z.string().optional(),
+  details: z.record(z.string(), z.string()).optional(),
 });
 export type MemoryIdentity = z.infer<typeof MemoryIdentitySchema>;
 export const MemoryProviderResponseSchema = z
@@ -52,7 +53,7 @@ export const MEMORY_PROVIDERS = [
     id: 'nowledge-mem',
     name: 'Nowledge Mem',
     installUrl: 'https://mem.nowledge.co/en',
-    createFields: ['id', 'name', 'description', 'role', 'defaultSpace'],
+    createFields: ['name', 'id', 'description', 'role'],
   },
 ] as const;
 

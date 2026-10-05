@@ -239,9 +239,12 @@ it('shows only saved associations and links exactly one external identity using 
   expect(container.textContent).not.toContain('Review lessons');
   await click('Add memory');
   await click('Link existing');
+  expect(document.querySelector('[role="dialog"] dl')).toBeNull();
   await act(async () =>
     document.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Designer"]')!.click()
   );
+  expect(document.querySelector('[role="dialog"] dl')?.textContent).toContain('designer');
+  expect(document.querySelector('[role="dialog"] dl input')).toBeNull();
   await submit();
   expect(mocks.entries).toEqual([
     { ...saved, memoryId: 'designer', name: 'Designer', description: 'Design lessons' },
@@ -272,6 +275,16 @@ it('creates in nmem then retries only the Lody association if saving fails', asy
   });
   await renderSetting();
   await click('Add memory');
+  await fill('Name (optional)', 'Writer');
+  expect(document.querySelector<HTMLInputElement>('input[aria-label="Agent ID"]')?.value).toBe(
+    'writer'
+  );
+  expect(document.querySelector('[aria-label="Default Space (optional)"]')).toBeNull();
+  await fill('Agent ID', 'custom');
+  await fill('Name (optional)', 'Writer Updated');
+  expect(document.querySelector<HTMLInputElement>('input[aria-label="Agent ID"]')?.value).toBe(
+    'custom'
+  );
   await fill('Agent ID', 'writer');
   await fill('Name (optional)', 'Writer');
   await fill('Description (optional)', 'Writing lessons');

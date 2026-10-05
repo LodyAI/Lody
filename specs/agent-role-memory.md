@@ -78,3 +78,10 @@ installation/configuration of agent-side Mem plugins are outside this change.
 - [Daemon adapter](../apps/cli/src/lib/memory-providers.ts)
 - [Settings](../packages/components/src/components/settings/memory-setting.tsx)
 - [Process boundary](../apps/cli/src/session/session.ts)
+
+The memory editor uses the same window-centered desktop dimensions as Agent Config.
+Creation places Name and Agent ID on one row, in that order. Until manually edited,
+the ID follows the lowercase name. Space is hidden and omitted by default. Nowledge
+enrollment fixes source-app to lody.ai. Link rows show only name and description;
+selecting a row reveals read-only provider profile fields without storing them in
+the association document.

@@ -38,12 +38,7 @@ import { Field, FormMessage } from './form-primitives';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
 import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { SettingsLineTabs } from './settings-line-tabs';
-import {
-  SettingsPageActions,
-  SettingsPageLead,
-  useInSettingsPane,
-  useSettingsPane,
-} from './settings-page-header';
+import { SettingsPageActions, SettingsPageLead, useInSettingsPane } from './settings-page-header';
 
 type ProviderDefinition = {
   id: string;
@@ -124,6 +119,15 @@ const styles = stylex.create({
     minHeight: 0,
     padding: space[1],
   },
+  fields: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[4] },
+  fullField: { gridColumn: '1 / -1' },
+  details: {
+    display: 'grid',
+    gridTemplateColumns: 'max-content minmax(0, 1fr)',
+    gap: space[2],
+    margin: 0,
+  },
+  detailValue: { margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
   radio: { display: 'flex', flexDirection: 'column', gap: space[2] },
 });
 
@@ -258,14 +262,36 @@ export function MemoryIdentityList({
             styles.note
           )}
         >
-          <Radio value={memory.id} aria-label={memory.name} disabled={linkedIds.includes(memory.id)} />
-          <span {...stylex.props(catalog.body)}>
-            <span {...stylex.props(catalog.name)}>{memory.name}{linkedIds.includes(memory.id) ? ` · ${t('settings.memory.linked')}` : null}</span>
+          <Radio
+            value={memory.id}
+            aria-label={memory.name}
+            disabled={linkedIds.includes(memory.id)}
+          />
+          <div {...stylex.props(catalog.body)}>
+            <span {...stylex.props(catalog.name)}>
+              {memory.name}
+              {linkedIds.includes(memory.id) ? ` · ${t('settings.memory.linked')}` : null}
+            </span>
             {memory.description ? (
               <span {...stylex.props(styles.description)}>{memory.description}</span>
             ) : null}
-            <span {...stylex.props(catalog.meta, catalog.mono)}>{memory.id}</span>
-          </span>
+            {selected === memory.id ? (
+              <dl {...stylex.props(styles.details)}>
+                {Object.entries(
+                  memory.details ?? {
+                    id: memory.id,
+                    name: memory.name,
+                    description: memory.description ?? '',
+                  }
+                ).map(([key, value]) => (
+                  <div key={key} {...stylex.props(styles.fullField)}>
+                    <dt {...stylex.props(catalog.meta)}>{key}</dt>
+                    <dd {...stylex.props(styles.detailValue)}>{value || '—'}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+          </div>
         </label>
       ))}
     </RadioGroup>
@@ -514,13 +540,13 @@ export function MemoryEditor({
   save: (entry: MemoryAssociation, edit: boolean) => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const pane = useSettingsPane();
   const [tab, setTab] = useState('create');
   const [values, setValues] = useState<Record<string, string>>({
     name: entry?.name ?? '',
     description: entry?.description ?? '',
   });
   const [selected, setSelected] = useState<string>();
+  const [idEdited, setIdEdited] = useState(false);
   const [created, setCreated] = useState<MemoryIdentity>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
@@ -583,7 +609,6 @@ export function MemoryEditor({
       }}
     >
       <Dialog.Content
-        centerOn={pane}
         style={{
           width: 'min(1040px, 96dvw)',
           maxWidth: 'none',
@@ -654,45 +679,59 @@ export function MemoryEditor({
                     result={state.result}
                   />
                 ) : null}
-                {entry || (available && tab === 'create')
-                  ? (entry ? (['name', 'description'] as const) : provider.createFields).map(
+                {entry || (available && tab === 'create') ? (
+                  <div {...stylex.props(styles.fields)}>
+                    {(entry ? (['name', 'description'] as const) : provider.createFields).map(
                       (key) => (
-                        <Field
+                        <div
                           key={key}
-                          label={t(
-                            entry && key === 'name'
-                              ? 'settings.memory.name'
-                              : `settings.memory.fields.${key}`
-                          )}
+                          {...stylex.props(key !== 'name' && key !== 'id' && styles.fullField)}
                         >
-                          {key === 'description' ? (
-                            <Textarea
-                              aria-label={t(`settings.memory.fields.${key}`)}
-                              value={values[key] ?? ''}
-                              disabled={saving || !!created}
-                              onChange={(event) =>
-                                setValues({ ...values, [key]: event.target.value })
-                              }
-                            />
-                          ) : (
-                            <Input
-                              aria-label={t(
-                                entry && key === 'name'
-                                  ? 'settings.memory.name'
-                                  : `settings.memory.fields.${key}`
-                              )}
-                              required={key === 'id' || (!!entry && key === 'name')}
-                              value={values[key] ?? ''}
-                              disabled={saving || !!created}
-                              onChange={(event) =>
-                                setValues({ ...values, [key]: event.target.value })
-                              }
-                            />
-                          )}
-                        </Field>
+                          <Field
+                            label={t(
+                              entry && key === 'name'
+                                ? 'settings.memory.name'
+                                : `settings.memory.fields.${key}`
+                            )}
+                          >
+                            {key === 'description' ? (
+                              <Textarea
+                                aria-label={t(`settings.memory.fields.${key}`)}
+                                value={values[key] ?? ''}
+                                disabled={saving || !!created}
+                                onChange={(event) =>
+                                  setValues({ ...values, [key]: event.target.value })
+                                }
+                              />
+                            ) : (
+                              <Input
+                                aria-label={t(
+                                  entry && key === 'name'
+                                    ? 'settings.memory.name'
+                                    : `settings.memory.fields.${key}`
+                                )}
+                                required={key === 'id' || (!!entry && key === 'name')}
+                                value={values[key] ?? ''}
+                                disabled={saving || !!created}
+                                onChange={(event) => {
+                                  const value = event.target.value;
+                                  if (key === 'id') setIdEdited(value !== '');
+                                  setValues((previous) => ({
+                                    ...previous,
+                                    [key]: value,
+                                    ...(key === 'name' && !idEdited && !entry
+                                      ? { id: value.toLowerCase() }
+                                      : {}),
+                                  }));
+                                }}
+                              />
+                            )}
+                          </Field>
+                        </div>
                       )
-                    )
-                  : null}
+                    )}
+                  </div>
+                ) : null}
                 {!entry && available && tab === 'link' ? (
                   <MemoryIdentityList
                     memories={state.result?.memories ?? []}

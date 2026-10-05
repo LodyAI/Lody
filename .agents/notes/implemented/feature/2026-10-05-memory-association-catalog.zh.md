@@ -41,3 +41,10 @@ Storybook 双栏编辑器和关联卡片。验证没有创建个人 Provider 身
 Electron 设置窗口。
 
 实现：[PR #1246](https://github.com/LodyAI/Lody/pull/1246)。
+
+## 编辑器调整
+
+用户反馈指出弹窗偏移，原因是相对设置内容区居中。编辑器现改为与 Agent Config
+一致的窗口居中方式和桌面尺寸。名称与 ID 同行，名称在前，手动覆盖前自动生成小写 ID。
+Space 保持隐藏，登记明确将 source-app 设为 lody.ai。Provider 档案详情只通过库存
+响应传递，选中后只读展示，不扩大关联记录的持久化字段范围。

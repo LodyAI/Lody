@@ -71,18 +71,32 @@ export function createNowledgeMemoryProvider(run: MemoryCommandRunner = runNmem)
               id: z.string().min(1),
               displayName: z.string().optional(),
               description: z.string().optional(),
+              role: z.string().optional(),
+              instructions: z.string().optional(),
+              defaultSpaceId: z.string().optional(),
+              sourceApp: z.string().optional(),
+              hostAgentId: z.string().optional(),
+              tags: z.array(z.string()).optional(),
+              origin: z.string().optional(),
+              voice: z.record(z.string(), z.unknown()).optional(),
             })
           ),
         })
         .parse(await json(['agents', 'list', '-j']));
-      return data.agentProfiles.map(({ id, displayName, description }) => ({
-        id,
-        name: displayName || id,
-        description,
+      return data.agentProfiles.map((profile) => ({
+        id: profile.id,
+        name: profile.displayName || profile.id,
+        description: profile.description,
+        details: Object.fromEntries(
+          Object.entries(profile).map(([key, value]) => [
+            key,
+            typeof value === 'string' ? value : (JSON.stringify(value) ?? ''),
+          ])
+        ),
       }));
     },
     async create(input) {
-      const args = ['agents', 'enroll', input.id, '-j'];
+      const args = ['agents', 'enroll', input.id, '-j', '--source-app', 'lody.ai'];
       for (const [key, flag] of [
         ['name', '--name'],
         ['description', '--description'],

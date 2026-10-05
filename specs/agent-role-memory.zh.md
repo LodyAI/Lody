@@ -61,3 +61,8 @@ Fork 和恢复读取冻结的历史配置，不重新查询可变 Role。未知 
 - [Daemon 适配器](../apps/cli/src/lib/memory-providers.ts)
 - [设置界面](../packages/components/src/components/settings/memory-setting.tsx)
 - [进程边界](../apps/cli/src/session/session.ts)
+
+记忆编辑器采用 Agent Config 相同的桌面尺寸，并在整个窗口居中。
+创建表单将名称和 Agent ID 按顺序放在同一行，未手动修改 ID 时随名称转为全小写。
+Space 暂时隐藏，默认不传值；Nowledge 登记固定传 source-app 为 lody.ai。
+关联列表只显示名称和描述，选中后展开只读 Provider 档案字段，这些详情不写入关联文档。
