@@ -30,6 +30,11 @@ this page is the full text of the rules summarised there.
   the default container of every modal.
 - Editor window (Monaco): `session-monaco-text-viewer.tsx` inside
   `session-file-content-view.tsx`.
+  File-link line anchors move Monaco's cursor as well as its viewport, using an
+  immediate reveal so initial language setup and wrapped-line layout cannot leave
+  the cursor at line 1 and cancel navigation. The line decoration uses Monaco's
+  themed `rangeHighlight` class. See the
+  [first-click navigation fix](../notes/implemented/bug-fix/2026-10-05-file-link-line-navigation.md).
 - **What a client may DO with a session file is one model, `hooks/use-session-file-actions.ts`,
   and three surfaces render it**: the Files tree's right-click menu, the side
   panel's ⋯ button (left of `+`, and absent unless the active tab is a file),
