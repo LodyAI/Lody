@@ -8,6 +8,7 @@ const STATIC_PATHS = [
   '/home',
   '/coding-agent-gui',
   '/coding-agent-remote-control',
+  '/coding-agent-scheduler',
   '/zh',
   '/zh/home',
   '/docs',

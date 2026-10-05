@@ -3,7 +3,7 @@ export const SITE_URL = 'https://lody.ai';
 // These are site-owned page routes. App routes and static file namespaces are
 // intentionally excluded: public-site URL rules must never rewrite those URLs.
 const PAGE_PATH =
-  /^\/(?:zh(?:\/|$))?(?:(?:docs|blog|changelog)(?:\/|$)|(?:home|price|download(?:\/nightly)?|privacy|terms|support|account-deletion)\/?$)|^\/coding-agent-(?:gui|remote-control)\/?$/u;
+  /^\/(?:zh(?:\/|$))?(?:(?:docs|blog|changelog)(?:\/|$)|(?:home|price|download(?:\/nightly)?|privacy|terms|support|account-deletion)\/?$)|^\/coding-agent-(?:gui|remote-control|scheduler)\/?$/u;
 const FILE_EXTENSION =
   /\.(?:avif|css|csv|gif|html?|ico|jpe?g|js|json|map|mdx?|mp[34]|pdf|png|svg|tar|tgz|txt|wasm|webm|webp|woff2?|xml|zip)$/iu;
 

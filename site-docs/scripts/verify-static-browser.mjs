@@ -597,6 +597,7 @@ async function agentPages() {
             for (const [slug, heading] of [
               ['coding-agent-gui', 'One GUI for Your Coding Agents'],
               ['coding-agent-remote-control', 'Remote Control for Your Coding Agents'],
+              ['coding-agent-scheduler', 'Schedule Your Coding Agents'],
             ]) {
               await page.goto(`${origin}/${slug}/`);
               if (js) await settled(page);
@@ -647,7 +648,7 @@ async function agentPages() {
               '/coding-agent-gui'
             );
             await page.goBack();
-            await page.waitForURL(`${origin}/coding-agent-remote-control/`);
+            await page.waitForURL(`${origin}/coding-agent-scheduler/`);
             await page.goForward();
             await page.waitForURL(`${origin}/coding-agent-gui/`);
             await clickTo(

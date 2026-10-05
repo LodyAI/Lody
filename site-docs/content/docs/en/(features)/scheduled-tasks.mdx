@@ -1,6 +1,6 @@
 ---
 title: Scheduled tasks
-description: Have your machine start a chat with a chosen Agent on a schedule or on demand — or let an Agent propose one from the conversation.
+description: Schedule Codex, Claude Code, Kimi Code, GLM over Claude Code, DeepSeek Harness, or Pi on your machine. Learn triggers, time zones, missed runs, and proposal confirmation.
 ---
 
 # Scheduled tasks
@@ -9,22 +9,39 @@ A **scheduled task** sends a prompt at the times you choose, with the Agent, mod
 
 Typical uses: summarize yesterday's merged commits every morning, check dependency advisories every weekday, draft the weekly report on Friday — or keep a manual task you run with one click when you need it.
 
+For an overview of recurring coding workflows, see [Coding Agent Scheduler](/coding-agent-scheduler/).
+
 ## Where it runs
 
 Scheduled tasks do not run in the cloud. **One of your own machines** owns each one:
 
 - That machine runs the [Lody CLI](/docs/cli) (the desktop app starts it for you), on a version with schedule support.
-- Times are read on **that machine's local time zone**; there is no zone picker. "Every day at 9:00" means 9:00 on that machine.
+- The editor reads times on **that machine's local time zone**; there is no zone picker. "Every day at 9:00" means 9:00 on that machine. If an older machine has not reported its time zone, the editor falls back to your viewing device's zone. Check **Next runs** before saving.
 - If the machine is off, asleep, or the CLI is not running, nothing runs at that time. See [missed runs](#missed-runs) for what happens afterwards.
 
 You can view and manage scheduled tasks on the web, desktop and phone, but only the owning machine executes them.
+
+Calendar rules save an explicit time zone. A **Once** rule saves an absolute instant: changing the selected machine redisplays that same instant on its clock. Existing advanced cron rules retain their saved zone.
+
+## Choose a coding agent
+
+Schedules create ordinary Sessions with the selected [Agent Config](/docs/agents/). The setup routes include:
+
+- **Codex** — select a configured Codex Agent on the execution machine
+- **Claude Code** — select its Agent Config and available model and permission controls
+- **Kimi Code** — use the managed Kimi Code provider and complete its sign-in
+- **GLM over Claude Code** — use the GLM provider preset with its matching endpoint and credentials; this runs through Claude Code
+- **DeepSeek Harness** — use the built-in Harness provider; this is separate from DeepSeek over Claude Code
+- **Pi** — use the managed Pi provider on a supported machine; providers without a permission selector use their own execution policy
+
+Credentials, model access, tools and dependencies must be ready on the owning machine. These are integration routes, not a claim that every model or permission setting has been tested with scheduled execution. Run a small manual task with your chosen configuration first. See the [Agent Config guide](/docs/agents/) for provider-specific requirements and limitations.
 
 ## Create a scheduled task
 
 Open **Schedules** in the sidebar and choose **New schedule** (or search "New Schedule" in the command palette). The editor is shaped like the composer:
 
 1. **Name and prompt** — what the Agent should do on each run.
-2. **Agent, model and permission** — the same controls as the bottom of the composer. A new task starts with the machine and Agent you last used on the chat landing, and that Agent's remembered settings. The displayed defaults are ready to use; no extra permission selection is required. Providers such as Pi that have no permission selector use their own execution policy.
+2. **Agent, model and permission** — the same controls as the bottom of the composer. A new task starts with the machine and Agent you last used on the chat landing, and that Agent's remembered settings. No extra permission selection is required just to save a task, but remembered settings still need to pass runtime validation. Providers such as Pi that have no permission selector use their own execution policy.
 3. **Machine, project, worktree** — the project is optional; without one, each run is a plain chat with the Agent and no repository is checked out.
 4. **Send to** and **Trigger** — see below.
 
@@ -39,6 +56,34 @@ Anything missing is marked with an exclamation mark next to the control that fix
 - **Manual** — never runs by itself; it runs only when you press **Run now**. Handy for a prompt you reuse.
 
 The editor lists the **Next runs** so you can check the rule. Times and dates are typed in.
+
+## Prompts to try
+
+Select the project these prompts should inspect. They are example instructions to adapt, not reports of completed runs.
+
+### Check the configuration with a manual task
+
+Choose **Manual**, **New chat each run**, and your Agent Config. Save this prompt, then press **Run now**:
+
+> Read this project's README and package or build manifest. Return the project name, the documented test command, and any missing setup information. Do not edit files, install dependencies, or run the tests.
+
+Open **Last run** and check that a chat started on the intended machine with the intended Agent. This checks that configuration for this task; it does not verify every future tool or permission request.
+
+### Summarize recent repository work each morning
+
+Choose **Every day at 9:00** and **New chat each run**:
+
+> Inspect this project's local Git history for the last 24 hours. Summarize up to ten changes with commit hashes, group related changes, and list follow-up questions separately. If there are no commits in that period, say so. Report the branch inspected. Do not fetch, edit files, or publish anything.
+
+This reads the checkout's available history. It does not promise that a local branch contains every newly merged remote commit.
+
+### Review dependency advisories on weekdays
+
+Choose **Every weekday at 10:00**:
+
+> Read this project's dependency manifests and lockfiles. Check available official security advisories for the installed versions. Report the package, installed version, advisory link, and affected range for each match. If network access or a source is unavailable, say what you could not verify. Do not update dependencies or open a pull request.
+
+The Agent needs the relevant files, network access and tools for that check. Review the first run before relying on it as a recurring report.
 
 ## Where runs go
 
@@ -64,11 +109,11 @@ Tell the Agent something like "check for dependency updates every weekday at 9am
 - **Edit** lets you change the name, prompt and time rule right on the card.
 - **Create** creates it; **Ignore** drops it. Once created the card can no longer be edited — change the task from the Schedules page.
 
-An Agent can only propose a scheduled task; it can never create or change one itself.
+A proposal stays pending until you press **Create**. The built-in schedule tools also let an Agent list, inspect and pause existing tasks. They do not let it directly create, edit or resume a task; use the schedule controls for those actions.
 
 ## Missed runs
 
-If the machine was offline at the scheduled time, it runs **once** when it comes back, for the most recent missed time — not once per missed slot.
+With the editor's default missed-run policy, a task catches up **once** after the machine wakes or the CLI starts again, for the most recent missed time. It does not replay every missed slot. The run may still wait for the Agent or configuration to become available.
 
 If the previous run is still going when the next one is due, the new run waits and starts once the previous one finishes; at most one run waits.
 
@@ -85,3 +130,9 @@ Scheduled tasks run only on your own machines with a CLI that supports them. Upd
 ### Will my computer wake up to run a task?
 
 No. The CLI checks and runs tasks while the machine is awake; it does not wake a sleeping computer. After waking it catches up once, as described in [missed runs](#missed-runs).
+
+### Why did a saved task fail before starting a chat?
+
+One known case is tracked in [issue #1247](https://github.com/LodyAI/Lody/issues/1247#issuecomment-5986803074). A schedule with a saved `fast: "false"` option can fail before creating a Session when the capability probe used a model without a Fast option. The value can come from remembered chat settings even if you did not touch Fast in the schedule editor.
+
+The creation path rejects that saved option, but the scheduler labels the failure `DISPATCH_UNAVAILABLE` and retries. The validation gap was still present in [source checked on October 5, 2026](https://github.com/LodyAI/Lody/blob/cd3f5b3ca969be5fa2e327744d449ffd802efe7b/apps/cli/src/commands/session.ts#L3099-L3105); this symptom does not mean the Agent itself is unavailable. Follow the issue for fix status. When reporting it, include the CLI version, selected Agent and model, and displayed error, without credentials or private prompts.
