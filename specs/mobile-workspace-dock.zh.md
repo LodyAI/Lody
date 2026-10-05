@@ -13,6 +13,6 @@ Translation: current
 
 ## 证据
 
-[组件](../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx) · [浏览器测试](../packages/components/tests/e2e/mobile-workspace-tabbar.spec.ts) · [决策与验证边界](../.agents/notes/implemented/bug-fix/2026-10-05-mobile-workspace-dock-motion.zh.md)
+[组件](../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx) · [决策与验证边界](../.agents/notes/implemented/bug-fix/2026-10-05-mobile-workspace-dock-motion.zh.md)
 
 本草案记录已接受的方向，不表示本修订获得附链接的人类批准。浏览器测试不能证明 Android 真机性能。

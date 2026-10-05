@@ -19,7 +19,7 @@ Apple's [scroll-minimizing tabs](https://developer.apple.com/videos/play/wwdc202
 
 ## Evidence and limits
 
-Controlled-clock browser coverage samples actual SVG identity, bounds, opacity and containment through reversals, plus focus, directional thresholds, reduced motion, resize and absent selection/FAB. Three representative geometry cases cover both themes, both scroll paths and first/middle/last selection without a Cartesian matrix. Component tests retain source-switching and tab-mutation coverage; the removed jsdom instance test could not detect layout projection. The original component fails the geometry regression at 80.25px icon width instead of 24px.
+Exploratory controlled-clock browser checks verified SVG identity, bounds, opacity and containment through reversals, along with focus, directional thresholds, reduced motion, resize and absent selection/FAB. The original component measured 80.25px icon width instead of 24px. These dock-specific browser and component tests were removed at the author’s request; they are historical verification, not retained regression coverage.
 
 Exploratory Chromium 145 headless Storybook profiling (393×852, DPR 1, normal/4× CPU; 240 frames per idle, reversal and continuous-scroll sample) observed no 50ms+ long tasks. Callback interval p95 was 9.4–10.3ms, not presented-frame FPS. At 4×, layout/paint event p95 maxima were 0.79/0.671ms. Continuous signal input produced 343–351 React root commits versus 6 for DOM scrolling, including story state; investigate that path if device profiling shows remaining cost.
 

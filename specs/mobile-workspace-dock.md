@@ -13,6 +13,6 @@ The shared component owns motion and scroll interpretation. Callers own keyed ta
 
 ## Evidence
 
-[Component](../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx) · [Browser tests](../packages/components/tests/e2e/mobile-workspace-tabbar.spec.ts) · [Decision and validation limits](../.agents/notes/implemented/bug-fix/2026-10-05-mobile-workspace-dock-motion.md)
+[Component](../packages/components/src/components/mobile/mobile-workspace-tabbar.tsx) · [Decision and validation limits](../.agents/notes/implemented/bug-fix/2026-10-05-mobile-workspace-dock-motion.md)
 
 This draft records the accepted direction, not linked human approval of this revision. Browser tests do not establish Android device performance.
