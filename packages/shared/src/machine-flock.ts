@@ -1,3 +1,4 @@
+import { MemoryAssociationSchema, type MemoryAssociation } from './memory-provider';
 import type { RateLimit } from 'acp-extension-core';
 import { CodexAuthProfileSchema, assertManagedCodexProfileConfig } from './codex-auth-profile';
 import {
@@ -177,6 +178,7 @@ export type MachineFlockDeleteLocalProjectCommandKey = [
   LocalProjectId,
 ];
 export type MachineFlockLocalProjectKey = ['localProject', LocalProjectId];
+export type MachineFlockMemoryKey = ['memory', string, string];
 export type MachineFlockAgentConfigKey = ['agentConfig', AgentConfigId];
 export type MachineFlockProviderSetupKey = ['providerSetup', AgentConfigId];
 export type MachineFlockProviderSetupCancellationKey = ['providerSetupCancellation', AgentConfigId];
@@ -186,12 +188,7 @@ export type MachineFlockAcpCapabilityKey = ['acpCapability', AgentConfigId];
 export type MachineFlockAcpModelCapabilityKey = ['acpModelCapability', AgentConfigId];
 /** @deprecated Compatibility read for rate limits written before provider-scoped quotas. */
 export type MachineFlockLegacyRateLimitKey = ['rateLimit', CliType, string];
-export type MachineFlockProviderRateLimitKey = [
-  'rateLimit',
-  AgentConfigId,
-  CliType,
-  string,
-];
+export type MachineFlockProviderRateLimitKey = ['rateLimit', AgentConfigId, CliType, string];
 export type MachineFlockRateLimitKey =
   | MachineFlockLegacyRateLimitKey
   | MachineFlockProviderRateLimitKey;
@@ -200,6 +197,7 @@ export type MachineFlockBuiltinAgentOptOutKey = ['builtinAgentOptOut', ManagedBu
 export type MachineFlockSessionLaunchConfigKey = ['sessionLaunchConfig', SessionId];
 
 export type MachineFlockKey =
+  | MachineFlockMemoryKey
   | MachineFlockDotlodyPathKey
   | MachineFlockArchiveSessionCommandKey
   | MachineFlockDeleteSessionCommandKey
@@ -216,6 +214,7 @@ export type MachineFlockKey =
   | MachineFlockSessionLaunchConfigKey;
 
 export type ParsedMachineFlockKey =
+  | { kind: 'memory'; key: MachineFlockMemoryKey; providerId: string; memoryId: string }
   | { kind: 'dotlodyPath'; key: MachineFlockDotlodyPathKey }
   | {
       kind: 'archiveSessionCommand';
@@ -278,6 +277,11 @@ export type ParsedMachineFlockKey =
     };
 
 export const machineFlockKeys = {
+  memory: (providerId: string, memoryId: string): MachineFlockMemoryKey => [
+    'memory',
+    providerId,
+    memoryId,
+  ],
   dotlodyPath: (): MachineFlockDotlodyPathKey => ['dotlodyPath'],
   archiveSessionCommand: (sessionId: SessionId): MachineFlockArchiveSessionCommandKey => [
     'cmd',
@@ -323,12 +327,7 @@ export const machineFlockKeys = {
     agentConfigId: AgentConfigId,
     cliType: CliType,
     limitId: string
-  ): MachineFlockProviderRateLimitKey => [
-    'rateLimit',
-    agentConfigId,
-    cliType,
-    limitId,
-  ],
+  ): MachineFlockProviderRateLimitKey => ['rateLimit', agentConfigId, cliType, limitId],
   /** @deprecated Compatibility helper for rows written before provider-scoped quotas. */
   legacyRateLimit: (cliType: CliType, limitId: string): MachineFlockLegacyRateLimitKey => [
     'rateLimit',
@@ -401,6 +400,20 @@ export const parseMachineFlockKey = (
       kind: 'localProject',
       key: machineFlockKeys.localProject(localProjectId),
       localProjectId,
+    };
+  }
+
+  if (
+    key.length === 3 &&
+    key[0] === 'memory' &&
+    isNonEmptyString(key[1]) &&
+    isNonEmptyString(key[2])
+  ) {
+    return {
+      kind: 'memory',
+      key: machineFlockKeys.memory(key[1], key[2]),
+      providerId: key[1],
+      memoryId: key[2],
     };
   }
 
@@ -511,6 +524,7 @@ export const parseMachineFlockKey = (
 };
 
 export type MachineFlockRow =
+  | { key: MachineFlockMemoryKey; value: MemoryAssociation }
   | { key: MachineFlockDotlodyPathKey; value: string }
   | { key: MachineFlockArchiveSessionCommandKey; value: MachineArchiveSessionCommand }
   | { key: MachineFlockDeleteSessionCommandKey; value: MachineDeleteSessionCommand }
@@ -560,6 +574,7 @@ export const serializeMachineFlockKey = (key: MachineFlockKey): MachineFlockRowI
   JSON.stringify(key) as MachineFlockRowId;
 
 export type MachineFlockRowFamily =
+  | 'memory'
   | 'dotlodyPath'
   | 'archiveSessionCommand'
   | 'deleteSessionCommand'
@@ -576,6 +591,7 @@ export type MachineFlockRowFamily =
   | 'sessionLaunchConfig';
 
 const MACHINE_FLOCK_ROW_FAMILY_PREFIXES: Record<MachineFlockRowFamily, readonly unknown[]> = {
+  memory: ['memory'],
   dotlodyPath: ['dotlodyPath'],
   archiveSessionCommand: ['cmd', 'archiveSession'],
   deleteSessionCommand: ['cmd', 'deleteSession'],
@@ -1188,6 +1204,14 @@ export function parseMachineFlockRow(
   }
 
   switch (parsedKey.kind) {
+    case 'memory': {
+      const result = MemoryAssociationSchema.safeParse(value);
+      return result.success &&
+        result.data.providerId === parsedKey.providerId &&
+        result.data.memoryId === parsedKey.memoryId
+        ? { key: parsedKey.key, value: result.data }
+        : undefined;
+    }
     case 'dotlodyPath':
       return typeof value === 'string' && value.trim() ? { key: parsedKey.key, value } : undefined;
     case 'archiveSessionCommand': {
@@ -1738,3 +1762,14 @@ const isAcpCapabilityCacheEntry = (value: unknown): value is AcpCapabilityCacheE
   Array.isArray(value.models) &&
   typeof value.fetchedAt === 'number';
 import { encodeCodexProfileConfig, CODEX_PROFILE_LEGACY_LAUNCH_GUARD } from './codex-auth-profile';
+
+export function getMachineFlockMemories(
+  rows: MachineFlockRowMap,
+  machineId: MachineId
+): MemoryAssociation[] {
+  return Object.values(rows).flatMap((row) => {
+    if (row.key[0] !== 'memory') return [];
+    const parsed = MemoryAssociationSchema.safeParse(row.value);
+    return parsed.success && parsed.data.machineId === machineId ? [parsed.data] : [];
+  });
+}

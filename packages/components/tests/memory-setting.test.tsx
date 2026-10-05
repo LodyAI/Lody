@@ -3,7 +3,12 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { MachineId, MachineViewMeta, MemoryProviderResponse } from '@lody/shared';
+import type {
+  MachineId,
+  MachineViewMeta,
+  MemoryProviderResponse,
+  MemoryAssociation,
+} from '@lody/shared';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { MemorySetting, RoleMemoryPicker } from '../src/components/settings/memory-setting';
 import { initI18n } from '../src/i18n';
@@ -11,6 +16,8 @@ import { initI18n } from '../src/i18n';
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const mocks = vi.hoisted(() => ({
+  entries: [] as MemoryAssociation[],
+  failSave: false,
   remote: true,
   inPane: false,
   online: 'online' as 'online' | 'offline' | 'unknown',
@@ -49,6 +56,24 @@ vi.mock('../src/hooks/use-machine-online-status', () => ({
 vi.mock('../src/hooks/use-memory-provider', () => ({
   useMemoryProvider: () => mocks.provider,
 }));
+vi.mock('../src/hooks/use-memory-associations', () => ({
+  useMemoryAssociations: (machineId: string) => ({
+    entries: mocks.entries.filter((entry) => entry.machineId === machineId),
+    link: async (entry: MemoryAssociation) => {
+      if (mocks.failSave) throw new Error('storage unavailable');
+      mocks.entries = [...mocks.entries, entry];
+    },
+    edit: async (entry: MemoryAssociation) => {
+      mocks.entries = mocks.entries.map((value) =>
+        value.machineId === entry.machineId && value.memoryId === entry.memoryId ? entry : value
+      );
+    },
+    remove: async (entry: MemoryAssociation) => {
+      mocks.entries = mocks.entries.filter((value) => value !== entry);
+    },
+  }),
+}));
+
 vi.mock('../src/lib/native-browser', () => ({
   openExternalUrl: (url: string) => mocks.openExternalUrl(url),
 }));
@@ -93,6 +118,8 @@ let root: Root;
 
 beforeEach(async () => {
   await initI18n('en');
+  mocks.entries = [];
+  mocks.failSave = false;
   mocks.remote = true;
   mocks.inPane = false;
   mocks.online = 'online';
@@ -139,8 +166,8 @@ it('keeps missing nmem on the page with an install link and does not open a dial
   await renderSetting();
   expect(container.textContent).toContain('Nowledge Mem CLI is not installed');
   expect(document.querySelector('[role="dialog"]')).toBeNull();
-  const install = [...container.querySelectorAll('button')].find((button) =>
-    button.textContent?.includes('Get Nowledge Mem')
+  const install = [...container.querySelectorAll('button')].find((candidate) =>
+    candidate.textContent?.includes('Get Nowledge Mem')
   );
   if (!install) throw new Error('Missing install action');
   await act(async () => install.click());
@@ -148,82 +175,182 @@ it('keeps missing nmem on the page with an install link and does not open a dial
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 });
 
-it('does not open the create dialog while nmem is missing', async () => {
-  await renderSetting();
-  const create = [...container.querySelectorAll('button')].find(
-    (button) => button.getAttribute('aria-label') === 'Create memory'
+function button(label: string) {
+  const found = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (node) => node.textContent?.trim() === label || node.getAttribute('aria-label') === label
   );
-  if (!create) throw new Error('Missing create control');
-  expect(create).toHaveProperty('disabled', true);
-  await act(async () => create.click());
-  expect(document.querySelector('[role="dialog"]')).toBeNull();
-});
-
-it('opens the create form dialog when the provider is ready', async () => {
+  if (!found) throw new Error(`Missing button ${label}`);
+  return found;
+}
+async function click(label: string) {
+  await act(async () => button(label).click());
+}
+async function fill(label: string, value: string) {
+  const node = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+    `[aria-label="${label}"]`
+  );
+  if (!node) throw new Error(`Missing field ${label}`);
+  await act(async () => {
+    const prototype =
+      node.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(node, value);
+    node.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+async function submit() {
+  await act(async () =>
+    document
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+  );
+}
+function ready() {
   mocks.provider.result = {
     type: 'machine/memory',
     status: 'ready',
-    memories: [{ id: 'reviewer', name: 'Reviewer' }],
+    memories: [
+      { id: 'reviewer', name: 'Reviewer', description: 'Review lessons' },
+      { id: 'designer', name: 'Designer', description: 'Design lessons' },
+    ],
   };
+}
+const saved = {
+  machineId: 'local',
+  providerId: 'nowledge-mem',
+  memoryId: 'reviewer',
+  name: 'Reviewer',
+  description: 'Review lessons',
+};
+
+it('keeps Add available for provider selection but disables creation when nmem is missing', async () => {
   await renderSetting();
-  expect(container.textContent).toContain('Reviewer');
-  const create = [...container.querySelectorAll('button')].find(
-    (button) => button.getAttribute('aria-label') === 'Create memory'
+  await click('Add memory');
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Memory providers');
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+    'Nowledge Mem CLI is not installed'
   );
-  if (!create) throw new Error('Missing create control');
-  await act(async () => create.click());
-  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Agent ID');
+  expect(button('Create and link').disabled).toBe(true);
+  expect(mocks.entries).toEqual([]);
 });
 
-it('omits the machine selector on local-only platforms', async () => {
-  mocks.remote = false;
+it('shows only saved associations and links exactly one external identity using its name and description', async () => {
+  ready();
   await renderSetting();
-  expect(container.textContent).toContain('Nowledge Mem');
-  expect(
-    [...container.querySelectorAll('button')].some((button) =>
-      button.textContent?.includes('Build box')
-    )
-  ).toBe(false);
+  expect(container.textContent).not.toContain('Review lessons');
+  await click('Add memory');
+  await click('Link existing');
+  await act(async () =>
+    document.querySelector<HTMLButtonElement>('[role="radio"][aria-label="Designer"]')!.click()
+  );
+  await submit();
+  expect(mocks.entries).toEqual([
+    { ...saved, memoryId: 'designer', name: 'Designer', description: 'Design lessons' },
+  ]);
+  expect(container.textContent).toContain('Design lessons');
+  expect(container.textContent).not.toContain('Review lessons');
+  await click('Add memory');
+  await click('Link existing');
+  const linked = document.querySelector<HTMLButtonElement>(
+    '[role="radio"][aria-label="Designer"]'
+  )!;
+  expect(linked.disabled).toBe(true);
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Designer · Linked');
 });
 
-it('uses machine pills outside the settings pane and line tabs inside it', async () => {
+it('creates in nmem then retries only the Lody association if saving fails', async () => {
+  ready();
+  mocks.failSave = true;
+  let enrolled = false;
+  mocks.provider.create.mockImplementation(async (input) => {
+    if (enrolled) throw new Error('duplicate enrollment');
+    enrolled = true;
+    return {
+      type: 'machine/memory',
+      status: 'ready',
+      memories: [{ id: input.id, name: input.name, description: input.description }],
+    };
+  });
   await renderSetting();
-  expect(
-    [...container.querySelectorAll('button')].some((button) =>
-      button.textContent?.includes('This Mac')
-    )
-  ).toBe(true);
-  mocks.inPane = true;
-  await renderSetting();
-  expect(container.querySelector('[role="tablist"]')).not.toBeNull();
-  expect(
-    [...container.querySelectorAll('button')].some(
-      (button) => button.textContent?.trim() === 'Refresh'
-    )
-  ).toBe(false);
-  expect(
-    [...container.querySelectorAll('button')].some(
-      (button) => button.textContent?.trim() === 'Create memory'
-    )
-  ).toBe(false);
+  await click('Add memory');
+  await fill('Agent ID', 'writer');
+  await fill('Name (optional)', 'Writer');
+  await fill('Description (optional)', 'Writing lessons');
+  await submit();
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+    'Created in the provider'
+  );
+  expect(mocks.entries).toEqual([]);
+  mocks.failSave = false;
+  await submit();
+  expect(mocks.entries).toEqual([
+    { ...saved, memoryId: 'writer', name: 'Writer', description: 'Writing lessons' },
+  ]);
+  expect(container.textContent).toContain('Writing lessons');
 });
 
-it('shows the same in-page missing-install copy in the Role picker', async () => {
+it('edits and removes the Lody association while preserving the provider identity', async () => {
+  ready();
+  mocks.entries = [saved];
+  await renderSetting();
+  await click('Edit Reviewer');
+  await fill('Name', 'My reviewer');
+  await fill('Description (optional)', 'Local description');
+  await submit();
+  expect(mocks.entries).toEqual([
+    { ...saved, name: 'My reviewer', description: 'Local description' },
+  ]);
+  expect(mocks.provider.result.memories[0]?.name).toBe('Reviewer');
+  await click('Remove My reviewer from Lody');
+  await renderSetting();
+  expect(container.textContent).toContain('No memories linked yet');
+  expect(mocks.provider.result.memories.map((value) => value.id)).toContain('reviewer');
+});
+
+it('warns after a successful missing-identity probe but not after a transport failure', async () => {
+  ready();
+  mocks.entries = [saved];
+  await renderSetting();
+  expect(container.textContent).not.toContain('no longer exists');
+  mocks.provider.result = { type: 'machine/memory', status: 'ready', memories: [] };
+  await renderSetting();
+  expect(container.textContent).toContain('no longer exists');
+  mocks.provider.result = { type: 'machine/memory', status: 'error', memories: [] };
+  await renderSetting();
+  expect(container.textContent).not.toContain('no longer exists');
+  expect(container.textContent).toContain('Review lessons');
+});
+
+it('uses only associated identities in the Role picker and prevents selecting a deleted provider identity', async () => {
+  ready();
+  mocks.entries = [saved];
+  mocks.provider.result.memories = [];
   const store = createStore();
   await act(async () =>
     root.render(
       <Provider store={store}>
-        <RoleMemoryPicker machineId={localId} onChange={() => undefined} />
+        <RoleMemoryPicker
+          machineId={localId}
+          onChange={() => {
+            throw new Error('Cannot select missing identity');
+          }}
+        />
       </Provider>
     )
   );
-  expect(container.textContent).toContain('Nowledge Mem CLI is not installed');
-  expect(document.querySelector('[role="dialog"]')).toBeNull();
-  const install = [...container.querySelectorAll('button')].find((button) =>
-    button.textContent?.includes('Get Nowledge Mem')
-  );
-  if (!install) throw new Error('Missing Role picker install action');
-  await act(async () => install.click());
-  expect(mocks.openExternalUrl).toHaveBeenCalledWith('https://mem.nowledge.co/en');
+  expect(container.textContent).toContain('Review lessons');
+  expect(button('Link').disabled).toBe(true);
+});
+
+it('uses the Agents machine pills and pane tabs and omits both on local-only platforms', async () => {
+  await renderSetting();
+  expect(
+    [...container.querySelectorAll('button')].some((node) => node.textContent?.includes('This Mac'))
+  ).toBe(true);
+  mocks.inPane = true;
+  await renderSetting();
+  expect(container.querySelector('[role="tablist"]')).not.toBeNull();
+  mocks.remote = false;
+  await renderSetting();
+  expect(container.querySelector('[role="tablist"]')).toBeNull();
+  expect(container.textContent).not.toContain('Build box');
 });

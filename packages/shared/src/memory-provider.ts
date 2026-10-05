@@ -55,3 +55,22 @@ export const MEMORY_PROVIDERS = [
     createFields: ['id', 'name', 'description', 'role', 'defaultSpace'],
   },
 ] as const;
+
+/** Lody's machine-scoped association; the provider continues to own memory contents. */
+export const MemoryAssociationSchema = MemoryBindingSchema.extend({
+  machineId: z.string().min(1),
+  name: z.string().trim().min(1).max(200),
+  description: z.string().max(2000).optional(),
+}).strict();
+export type MemoryAssociation = z.infer<typeof MemoryAssociationSchema>;
+
+/** Only a successful authoritative inventory can establish that an identity was deleted. */
+export function isMemoryIdentityMissing(
+  binding: MemoryBinding,
+  inventory: MemoryProviderResponse | undefined
+): boolean {
+  return (
+    inventory?.status === 'ready' &&
+    !inventory.memories.some((entry) => entry.id === binding.memoryId)
+  );
+}

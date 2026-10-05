@@ -1,45 +1,22 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { MEMORY_PROVIDERS } from '@lody/shared';
-import { MemoryProviderPanel } from '@/components/settings/memory-setting';
+import { MemoryProviderStatus } from '@/components/settings/memory-setting';
 const meta = {
-  title: 'Settings/MemoryProviderPanel',
-  component: MemoryProviderPanel,
+  title: 'Settings/MemoryProviderStatus',
+  component: MemoryProviderStatus,
   args: {
     provider: MEMORY_PROVIDERS[0],
     online: true,
     supported: true,
     busy: false,
-    onRefresh: () => {},
-    onCreate: () => {},
-    result: {
-      type: 'machine/memory',
-      status: 'ready',
-      memories: [
-        {
-          id: 'reviewer',
-          name: 'Code Reviewer',
-          description: 'Architecture and code review decisions.',
-        },
-      ],
-    },
+    result: { type: 'machine/memory', status: 'ready', memories: [] },
   },
-} satisfies Meta<typeof MemoryProviderPanel>;
+} satisfies Meta<typeof MemoryProviderStatus>;
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Ready: Story = {};
-export const Empty: Story = {
-  args: { result: { type: 'machine/memory', status: 'ready', memories: [] } },
-};
 export const NotInstalled: Story = {
   args: { result: { type: 'machine/memory', status: 'not_installed', memories: [] } },
-  parameters: {
-    docs: {
-      description: {
-        story:
-          'Missing nmem stays on the settings page with an install action. It does not open a dialog.',
-      },
-    },
-  },
 };
 export const NotRunning: Story = {
   args: { result: { type: 'machine/memory', status: 'not_running', memories: [] } },

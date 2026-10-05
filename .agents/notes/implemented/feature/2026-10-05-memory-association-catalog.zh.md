@@ -1,0 +1,43 @@
+# 机器记忆关联目录
+
+Status: implemented
+Translation: current
+
+[English](2026-10-05-memory-association-catalog.md)
+
+## 摘要
+
+设置直接展示全部外部记忆身份，无法区分 Provider 库存与 Lody 配置。现在 Lody 在现有
+Loro/Flock 文档中保存明确的机器级关联，界面复用 Agent Config 的目录和编辑布局。
+用户可以创建并关联，也可以选择已有身份；编辑和删除仅影响 Lody 元数据。
+Provider 身份消失时显示警告，不删除关联，也不改写冻结的执行输入。
+
+## 决策与边界
+
+此决策为[初始 Provider 集成](2026-10-04-agent-role-memory.zh.md)增加独立关联目录，
+替代直接使用 Provider 库存的选择器。[Spec](../../../../specs/agent-role-memory.zh.md)
+仍为 draft。关联行使用稳定的 Provider/身份键，校验机器范围，并经过现有 workspace
+writer 写入。本地持久化决定成功，上传失败不回滚。重复关联不会覆盖自定义名称，
+编辑也不能重新创建并发删除的关联。
+
+继续直接展示所有 Provider 身份，无法表达用户明确选择纳入 Lody 的身份，因此不再
+采用。不会批量迁移导入身份。删除目录关联仍保留 Role 的 Provider/身份引用，避免
+维护目录时静默改变执行。编辑关联不调用 Provider 侧重命名或删除命令。
+
+本地保存失败时，编辑器保留已登记身份，重试只执行关联。后台刷新保持表单状态，
+跳过尚未结束的请求，并通过机器/Provider 请求代次隔离。只有成功取得的权威列表
+可以证明身份缺失，传输失败不能。进入页面、重新聚焦和页面可见期间定时刷新列表。
+
+## 界面与证据
+
+Provider 侧栏、创建/关联 Tab、设置布局和机器选择复用现有 UI 组件。卡片在悬停或
+键盘聚焦时显示编辑和删除，名称后显示灰度 logo，第二行显示描述。用户提供的
+[Nowledge logo](https://github.com/user-attachments/assets/249e8b3e-54a2-49eb-b28a-07c2cfaf2236)
+保存在本地，通过灰度滤镜显示。
+
+行为测试覆盖登记/关联重试、元数据编辑与解除关联、Role 选择、身份缺失与无法连接
+的区别、原生 Flock 写入与机器隔离，以及登记进行中时的刷新。通过 Chrome 检查了
+Storybook 双栏编辑器和关联卡片。验证没有创建个人 Provider 身份，也未运行完整
+Electron 设置窗口。
+
+实现：[PR #1246](https://github.com/LodyAI/Lody/pull/1246)。

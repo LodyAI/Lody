@@ -7,16 +7,33 @@ Translation: current
 
 ## Scenario and ownership
 
-A user chooses a machine in Settings → Memory, inspects its memory identities,
-and creates one when needed. They expand Memory in a Role editor and select an
-identity on that Role's exact target machine. Unlinking changes future turns;
-already accepted turns and Operations retain their frozen configuration.
+A user chooses a machine in Settings → Memory and manages Lody's saved memory
+associations. Add Memory opens an Agent Config-style editor with a provider rail
+and Create / Link tabs. Create enrolls an identity and immediately links it; Link
+lists the device's identities with single selection and copies its name and
+description. Already-linked identities remain visible but cannot be linked again.
 
-Providers own their memory data. Lody stores only `{ providerId, memoryId }` in
-Role run configuration and turn input, with the Role's existing machine binding.
-The reference is not a credential. Workspace visibility does not make memory
-contents part of the workspace catalog. Changing the Role's machine clears its
-memory reference in the editor.
+Providers own memory data. Lody stores association metadata in the selected
+machine's Loro/Flock document at `['memory', providerId, memoryId]`, with machine
+ID, name and optional description. Writes use the existing workspace writer;
+local durability completes the action and remote upload is best-effort. Stable
+keys make linking idempotent without overwriting customized metadata. Editing
+changes Lody metadata; deleting removes only this association, never provider data.
+A failed local save after enrollment can retry linking without enrolling again.
+Existing provider identities are not automatically imported.
+
+Cards show the name, grayscale provider logo and description, with edit/delete
+actions on hover or keyboard focus. The page has top-right Add Memory and Refresh
+actions. A successful provider inventory that omits a saved identity shows a
+warning; offline, inactive and failed probes do not prove deletion. Probes run on
+entry, focus and every 30 seconds while visible, skipping pending requests.
+
+The collapsed Role memory picker lists saved associations on the Role's exact
+machine. Role run configuration and turn input still store only
+`{ providerId, memoryId }`; changing the Role's machine clears its reference.
+Removing a catalog association does not rewrite existing Roles or accepted turns.
+Unlinking a Role affects future turns; accepted turns and Operations keep their
+frozen configuration. Neither memory contents nor credentials enter the catalog.
 
 ## Provider boundary
 
@@ -37,10 +54,9 @@ existing ID keeps its provider profile. The returned list remains authoritative.
 
 Settings reuses the Agents machine selector: line tabs in the desktop pane when
 more than one machine is visible, pills outside the pane, and no remote selector
-on local-only platforms. The selected machine's provider is a catalog section
-with Refresh and Create controls and an empty-state Create action. The Role
-editor keeps Memory collapsed until expanded, then uses the same identity list,
-status copy, and install link. Offline machines and daemons without
+on local-only platforms. The selected machine's saved associations use the same catalog
+rows as Agents. The Role editor keeps Memory collapsed until expanded and reuses
+the association cards, status copy and install link. Offline machines and daemons without
 `memoryProviders` v1 do not receive memory RPCs. Requests use the existing
 local/remote machine routing; a failed local request never falls back to a
 remote transport.
