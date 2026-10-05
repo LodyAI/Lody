@@ -659,25 +659,25 @@ export function MemoryEditor({
           true
         );
       } else {
-        let identity = created;
-        if (tab === 'link') identity = candidates.find((memory) => memory.id === selected);
-        else if (!identity) {
+        let createdIdentity = created;
+        if (tab === 'link') createdIdentity = candidates.find((memory) => memory.id === selected);
+        else if (!createdIdentity) {
           const input = MemoryCreateInputSchema.parse(values);
           const result = await state.create(input);
-          identity =
+          createdIdentity =
             result?.status === 'ready'
               ? result.memories.find((memory) => memory.id === input.id)
               : undefined;
-          if (identity) setCreated(identity);
+          if (createdIdentity) setCreated(createdIdentity);
         }
-        if (!identity) throw new Error('Memory identity unavailable');
+        if (!createdIdentity) throw new Error('Memory identity unavailable');
         await save(
           {
             machineId,
             providerId: provider.id,
-            memoryId: identity.id,
-            name: identity.name,
-            description: identity.description,
+            memoryId: createdIdentity.id,
+            name: createdIdentity.name,
+            description: createdIdentity.description,
           },
           false
         );
