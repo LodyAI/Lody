@@ -74,6 +74,11 @@ group, derived from `@lody/ui` space, radius and colour tokens or the active VS 
 palette. `surface.ts` owns shared row and bubble styles; the Markdown renderer and
 code block own their element styles. A host can apply `createTheme(conversation, …)`
 to a subtree to change these values without descendant utility overrides.
+`scopedConversationTheme` rebinds the defaults on a host that pins its own CSS
+palette, such as a share card. CSS aliases resolve where they are declared;
+inheriting the root aliases would retain the app's colours even after that host
+changes the underlying theme variables. Share cards also bind the product colour
+theme locally. Code-block dark styling respects `.light-scope` and `.dark-scope`.
 
 Activity thought prose uses compact Markdown at the same subheadline size and
 leading as its summary and tool rows, in the parent conversation and task dialog.

@@ -6,6 +6,57 @@ const story = '/iframe.html?id=settings-interfacetypography--unified&viewMode=st
 const rhythmStory =
   '/iframe.html?id=sessions-assistantturnalignment--conversation-rhythm&viewMode=story';
 
+for (const appTheme of ['light', 'dark'] as const) {
+  for (const cardTheme of ['light', 'dark'] as const) {
+    test(`share Markdown uses the card palette: ${cardTheme} card in ${appTheme} app`, async ({
+      page,
+    }) => {
+      await page.route('https://**/*', (route) => route.abort());
+      await page.emulateMedia({ colorScheme: appTheme === 'light' ? 'dark' : 'light' });
+      await page.goto(
+        `/iframe.html?id=sessions-chatsharecard--markdown-palette&viewMode=story&globals=theme:${appTheme}&args=theme:${cardTheme}`
+      );
+      await expect(page.locator('html')).toHaveClass(new RegExp(appTheme));
+      const card = page.locator(`.${cardTheme}-scope`);
+      const light = cardTheme === 'light';
+      const reading = light ? 'rgb(29, 29, 32)' : 'rgb(228, 229, 231)';
+      const strong = light ? 'rgb(26, 27, 30)' : 'rgb(240, 241, 242)';
+      await expect(card.locator('.markdown-renderer')).toHaveCSS('color', reading);
+      await expect(card.locator('strong')).toHaveCSS('color', strong);
+      await expect(card.locator('h2')).toHaveCSS('color', strong);
+      await expect(card.locator('blockquote')).toHaveCSS(
+        'color',
+        light ? 'rgb(107, 114, 128)' : 'rgb(156, 159, 163)'
+      );
+      await expect(card.locator('td').first()).toHaveCSS('color', reading);
+      const code = card.locator('[data-streamdown="code-block"]');
+      await expect(code).toHaveCSS('color', light ? 'rgb(26, 27, 30)' : 'rgb(215, 216, 217)');
+      await expect(code).toHaveCSS(
+        'background-color',
+        light ? 'rgb(239, 239, 241)' : 'color(srgb 0.112915 0.120345 0.131685)'
+      );
+      await expect(code.locator('pre')).toHaveCSS('white-space', 'pre-wrap');
+      await expect(code.getByRole('button', { name: 'Copy code' })).toBeHidden();
+    });
+  }
+
+  test(`share palette switches keep the ${appTheme} app theme`, async ({ page }) => {
+    await page.route('https://**/*', (route) => route.abort());
+    await page.goto(
+      `/iframe.html?id=sessions-chatshareimagedialog--default&viewMode=story&globals=theme:${appTheme}`
+    );
+    for (const [label, scope, color] of [
+      ['Light', 'light-scope', 'rgb(29, 29, 32)'],
+      ['Dark', 'dark-scope', 'rgb(228, 229, 231)'],
+      ['Light', 'light-scope', 'rgb(29, 29, 32)'],
+    ]) {
+      await page.getByRole('radio', { name: label, exact: true }).click();
+      await expect(page.locator(`.${scope} .markdown-renderer`).first()).toHaveCSS('color', color);
+      await expect(page.locator('html')).toHaveClass(new RegExp(appTheme));
+    }
+  });
+}
+
 for (const theme of ['light', 'dark']) {
   test(`subagent thought prose shares its activity summary and tool size: ${theme}`, async ({
     page,

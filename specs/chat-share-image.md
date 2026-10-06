@@ -1,7 +1,9 @@
 # Chat image selection and export
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](chat-share-image.zh.md)
 
 A user can select messages directly in a session conversation and preview them
 as one image card, then save it as PNG. Selection belongs to the chat surface;
@@ -36,6 +38,10 @@ type scale are the same on every card, and the preview offers four choices, none
 of which can change any of that: the card's size, how much ground shows around
 it, which ground, and which palette. The palette opens on whichever appearance
 the app is currently wearing.
+
+The selected palette applies to the whole card, including Markdown prose,
+emphasis, quotes, tables and code, independently of the app and system appearance.
+Preview and PNG export use that same palette.
 
 The card's size is a content decision, because it sets the measure: how much
 prose fits on a line, and whether a line of code survives without wrapping. It is
@@ -141,3 +147,7 @@ and [card stories](../packages/components/src/stories/ChatShareCard.stories.tsx)
 covering both forms in both palettes. The redesign is recorded in
 [its note](../.agents/notes/implemented/feature/2026-09-14-chat-share-card-fixed-template.md).
 This draft does not claim visual acceptance.
+
+Palette isolation is covered by the [typography browser suite](../packages/components/tests/e2e/interface-typography.spec.ts);
+the [fix note](../.agents/notes/implemented/bug-fix/2026-10-06-chat-share-palette-isolation.md)
+records browser reproduction and PNG verification.
