@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1281](https://github.com/LodyAI/Lody/pull/1281)
 
 [中文](2026-10-06-chat-share-palette-isolation.zh.md)
 
@@ -62,7 +63,9 @@ pass all 26 tests. Changed-file lint passes. The component typecheck reports the
 same 27 errors with the original and changed production files: missing viewer
 dependencies and incompatible reused dependency APIs. It is not a passing
 typecheck. The required `pnpm check` stops during the documentation site's
-pre-typecheck because `fumadocs-mdx` is unavailable; `pnpm format` passes.
+pre-typecheck because `fumadocs-mdx` is unavailable; `pnpm format`, platform and
+Code Collab import guards, and the i18n key check pass. The public-boundary check
+cannot resolve the four other uninitialized adapter workspace packages.
 An extended typography run
 passed the six share cases but stalled on the existing conversation fixture and
 was stopped. Docs check reports links into other uninitialized ACP submodules;

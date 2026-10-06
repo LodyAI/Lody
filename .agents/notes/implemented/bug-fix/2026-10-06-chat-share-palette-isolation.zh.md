@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1281](https://github.com/LodyAI/Lody/pull/1281)
 
 [English](2026-10-06-chat-share-palette-isolation.md)
 
@@ -50,7 +51,9 @@ Playwright 对真实卡片和分享对话框拍摄了修复前后截图。实际
 单元测试全部 26 项通过，改动文件 lint 通过。组件类型检查在原生产文件和修改后的
 文件上均报告相同的 27 个错误，原因是缺失预览器依赖和复用依赖的 API 不兼容。
 类型检查未通过。要求执行的 `pnpm check` 因缺少 `fumadocs-mdx`，在文档站类型
-检查前的生成步骤停止；`pnpm format` 通过。扩大范围的字体测试通过了六项分享用例，
+检查前的生成步骤停止；`pnpm format`、平台边界、Code Collab 导入和 i18n 键检查
+通过。公开仓库边界检查无法解析另外四个未初始化的适配器 workspace 包。
+扩大范围的字体测试通过了六项分享用例，
 但在现有对话 fixture 上停滞，因此已停止。文档检查报告了其他未初始化 ACP 子模块的
 链接缺失，没有错误涉及本次修改的文档。本次未验收 Electron 原生保存与剪贴板，
 也未验收 Mermaid 图表配色。
