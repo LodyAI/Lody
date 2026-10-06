@@ -60,9 +60,10 @@ Add one test that asserts the status and version fields. Do not change other rou
 Lody creates the session and streams the agent's work. A **round** is one agent turn plus the file
 changes it produced. While a round is running you can:
 
-- send a follow-up to **steer** the active task instead of waiting for it to finish;
-- ask a question in a **Side Chat** without interrupting the main task, when the agent supports
-  native forking;
+- send a follow-up to [**steer**](/docs/claude-codex-capabilities#steer-a-running-task) the active
+  task instead of waiting for it to finish;
+- ask a question in a [**Side Chat**](/docs/session#right-sidebar-browser-and-side-chat) without
+  interrupting the main task, when the agent supports native forking;
 - stop the turn if the agent is heading in the wrong direction.
 
 </Step>
@@ -73,9 +74,6 @@ changes it produced. While a round is running you can:
 When the round ends, the reply shows the changed files and their added and removed line counts.
 Click any file to open it in a [diff tab](/docs/diff-viewer), or use the **Files** and **Changes**
 sidebar to browse the whole conversation.
-
-Read the diff before asking for more. This is where you catch a wrong assumption while it is still
-cheap to fix — much cheaper than after a pull request.
 
 </Step>
 <Step>
@@ -111,32 +109,6 @@ When the change looks right, you have a few options:
 
 </Step>
 </Steps>
-
-## Two example first sessions
-
-<Tabs items={['Small feature', 'Bug fix']}>
-<Tab value="Small feature">
-
-```text
-Add a --json flag to the status command. When set, print the same fields as the
-human-readable output, as JSON on one line, and add a test for the flag.
-```
-
-Why it works: one behavior, a clear success check, and the agent can run the test itself.
-
-</Tab>
-<Tab value="Bug fix">
-
-```text
-The parser throws on an empty file. Reproduce it in a test first, then fix the
-parser so an empty file returns an empty list. Keep the existing error for
-malformed input.
-```
-
-Why it works: the failure is concrete, and the test pins down what "fixed" means.
-
-</Tab>
-</Tabs>
 
 ## Common first-session mistakes
 
