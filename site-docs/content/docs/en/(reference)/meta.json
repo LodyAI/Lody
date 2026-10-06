@@ -1,9 +1,4 @@
 {
-  "title": "Reference",
-  "pages": [
-    "(conversation)",
-    "(agents-and-runtimes)",
-    "(team-and-usage)",
-    "(settings-and-cli)"
-  ]
+  "title": "Feature List",
+  "pages": ["(conversation)", "(agents-and-runtimes)", "(team-and-usage)", "(settings-and-cli)"]
 }

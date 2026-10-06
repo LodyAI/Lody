@@ -34,9 +34,10 @@ builds to `site-docs/out/client`. Binding rules live in
   data as props and import nothing from the app; `scripts/app-boundary.mjs` checks
   that in `test`.
 - `components/docs-replica/` — display-only previews embedded in docs pages
-  (currently the sidebar session list). They reuse the landing replica's primitives
-  and `.lody-app-preview` token scope, take synthetic mock data plus a locale, and
-  never import the app or real user content.
+  (currently the sidebar session list and the home composer's repo/branch
+  pickers). They reuse the landing replica's primitives and `.lody-app-preview`
+  token scope, take synthetic mock data plus a locale, and never import the app or
+  real user content.
 - `components/landing-preview-data.ts` — demo copy, session rows, the scripted
   conversations, and the mock diff.
 - `components/marketing-atmosphere.tsx` — the shared marketing ambient field,

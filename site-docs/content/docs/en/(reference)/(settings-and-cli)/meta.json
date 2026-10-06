@@ -1,4 +1,4 @@
 {
   "title": "Settings & CLI",
-  "pages": ["cli", "keyboard-shortcuts", "vscode-themes", "notification", "terminal"]
+  "pages": ["cli", "keyboard-shortcuts", "notification", "terminal"]
 }

@@ -9,7 +9,7 @@ Language: [中文](2026-10-01-docs-information-architecture.zh.md)
 The public docs had grown into one flat 30-item "Features" list ordered by release history, so new
 readers had no ramp and experienced Codex or Claude Code users had no migration entry. This proposal
 groups the tree by reader path (Getting Started, Core Concepts, Guides, Coming from another agent,
-Reference), adds a first-session tutorial, a concepts and glossary page, and a migration page, and
+Feature List), adds a first-session tutorial, a concepts and glossary page, and a migration page, and
 keeps every existing docs URL stable because only parenthesized virtual groups moved. The branch is
 merged with `origin/main`, including the upstream revert of the two unintended coding-agent workflow
 pages. The restructure is written into content, the path-dependent tests are updated, and a
@@ -53,8 +53,8 @@ tree; they add no new failures.
 ## Verification and limits
 
 - Verified in the authoring worktree after an offline install (`pnpm --filter @lody/site-docs
-  install --offline --frozen-lockfile`): `generate`, `tsc --noEmit`, and `pnpm --filter
-  @lody/site-docs test` pass, and a full `pnpm build` prerenders 257 HTML pages. The nested
+install --offline --frozen-lockfile`): `generate`, `tsc --noEmit`, and `pnpm --filter
+@lody/site-docs test` pass, and a full `pnpm build` prerenders 257 HTML pages. The nested
   `(reference)/(...)` groups and all four subgroups render in both locales, and each new and moved
   page appears at its published URL. A filtered install cannot build site-docs until a full
   workspace install supplies the hoisted `tw-animate-css` that `app/global.css` imports.

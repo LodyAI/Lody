@@ -8,7 +8,7 @@ Language: [English](2026-10-01-docs-information-architecture.md)
 
 公开文档此前是一份按上线历史追加的、包含 30 个条目的扁平 `Features` 列表：新用户没有上手坡道，
 Codex / Claude Code 老用户也没有迁移入口。本提案按读者路径重组目录（快速开始、核心概念、实战指南、
-从其他 Agent 迁移、参考），新增第一次会话教程、概念与术语表、迁移页，并且因为只移动了带括号的虚拟
+从其他 Agent 迁移、功能列表），新增第一次会话教程、概念与术语表、迁移页，并且因为只移动了带括号的虚拟
 分组，所有既有文档 URL 保持不变。分支已合并最新 `main`，包含上游对两个误入的 coding-agent
 工作流页面的撤回。重组已经落到内容里，依赖路径的测试也已同步更新；生产构建、类型检查、包测试和
 静态浏览器测试都已针对合并后的树运行，没有新增失败。
@@ -31,7 +31,7 @@ Codex / Claude Code 老用户也没有迁移入口。本提案按读者路径重
 - 新增三个入口页：`(getting-started)/first-session`、`(core-concepts)/concepts`、
   `(migrating)/from-codex-claude-code`，中英文同步。
 - 把 `index.mdx` 改写成面向人群的地图，并把 `workflow` 从快速开始移入实战指南。
-- 把 `Features` 拆成面向任务的 `(guides)` 和面向能力的 `(reference)`（参考下再分四个子组）。
+- 把 `Features` 拆成面向任务的 `(guides)` 和面向能力的 `(reference)`（功能列表下再分四个子组）。
 - 在 `session-orchestration` 和 `agent-collaboration` 名词簇顶部增加「我该看哪一页？」提示，并让
   快速开始的下一步指向新入口页。
 
@@ -44,7 +44,7 @@ Codex / Claude Code 老用户也没有迁移入口。本提案按读者路径重
 ## 验证与限制
 
 - 已在创作 worktree 中完成离线安装（`pnpm --filter @lody/site-docs install --offline
-  --frozen-lockfile`）并验证：`generate`、`tsc --noEmit` 和 `pnpm --filter @lody/site-docs test`
+--frozen-lockfile`）并验证：`generate`、`tsc --noEmit` 和 `pnpm --filter @lody/site-docs test`
   通过，完整 `pnpm build` 预渲染 257 个 HTML 页面。嵌套的 `(reference)/(...)` 分组和四个子组
   在中英文侧边栏均正常渲染，每个新增和移动的页面都出现在其已发布 URL 上。过滤安装无法构建
   site-docs，直到完整工作区安装提供 `app/global.css` 所引用的、被提升的 `tw-animate-css`。

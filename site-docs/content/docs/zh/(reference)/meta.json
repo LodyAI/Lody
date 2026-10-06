@@ -1,9 +1,4 @@
 {
-  "title": "参考",
-  "pages": [
-    "(conversation)",
-    "(agents-and-runtimes)",
-    "(team-and-usage)",
-    "(settings-and-cli)"
-  ]
+  "title": "功能列表",
+  "pages": ["(conversation)", "(agents-and-runtimes)", "(team-and-usage)", "(settings-and-cli)"]
 }

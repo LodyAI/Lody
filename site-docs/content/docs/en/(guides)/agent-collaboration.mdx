@@ -1,18 +1,18 @@
 ---
-title: Multi-Agent Collaboration with Claude Code
-description: Use Claude Code to coordinate Codex, Kimi, and Grok in Lody. Delegate PRs and issues, share context with @ mentions, and review fixes across repos and machines.
+title: Multi-Agent Collaboration with a Primary Agent
+description: Use a primary agent to coordinate Codex, Kimi, and Grok in Lody. Delegate PRs and issues, share context with @ mentions, and review fixes across repos and machines.
 ---
 
-You have a queue of issues, several open PRs, and a bug that might involve three repositories. You want Claude Code to work through the queue, delegate fixes to Kimi, ask Codex to review them, and bring the results back.
+You have a queue of issues, several open PRs, and a bug that might involve three repositories. You want a primary agent to work through the queue, delegate fixes to Kimi, ask Codex to review them, and bring the results back.
 
 In Lody, you can organize that work from one conversation. A coding agent can create other sessions, send them instructions, read their progress, and follow up. Agents can also message each other: a reviewer can send findings to the agent writing the fix, which can ask for another review when the patch is ready.
 
-This guide shows how to use **Claude Code as an orchestrator** for that workflow. The examples are illustrative prompts you can adapt to your repositories; they are not results from a benchmark or a recorded production run.
+This guide shows how to use **a primary agent as an orchestrator** for that workflow. The examples are illustrative prompts you can adapt to your repositories; they are not results from a benchmark or a recorded production run.
 
 <Callout title="Which page do I need?">
-This guide is the walkthrough for one orchestrating agent. For the underlying tools, see
-[Agent Session Control](/docs/session-orchestration); to start tasks yourself, see
-[Parallel Coding Agents](/docs/parallel-agents).
+  This guide is the walkthrough for one orchestrating agent. For the underlying tools, see [Agent
+  Session Control](/docs/session-orchestration); to start tasks yourself, see [Parallel Coding
+  Agents](/docs/parallel-agents).
 </Callout>
 
 ## What the orchestrator does
@@ -21,28 +21,28 @@ The orchestrator keeps track of the overall task: what needs attention, which ch
 
 Here is one possible division of work:
 
-| Conversation | Assignment | What it returns |
-| --- | --- | --- |
-| Claude Code | Inspect the issue and PR queue, assign work, follow up | Current status, dependencies, and unresolved decisions |
-| Kimi | Implement a scoped fix | Patch, commit, and verification results |
-| Codex | Review that patch | Findings tied to the reviewed commit |
-| Grok | Investigate another affected repository | Findings and proposed interface changes |
+| Conversation  | Assignment                                             | What it returns                                        |
+| ------------- | ------------------------------------------------------ | ------------------------------------------------------ |
+| Primary agent | Inspect the issue and PR queue, assign work, follow up | Current status, dependencies, and unresolved decisions |
+| Kimi          | Implement a scoped fix                                 | Patch, commit, and verification results                |
+| Codex         | Review that patch                                      | Findings tied to the reviewed commit                   |
+| Grok          | Investigate another affected repository                | Findings and proposed interface changes                |
 
 Those roles are choices for this task. You can switch them, use several instances of the same agent, or bring another compatible agent into the workspace. Grok can also implement a fix,
 review a patch, or coordinate other sessions when selected for that assignment.
 
-Lody provides the [cross-session tools](/docs/session-orchestration/) used to organize this work. This guide uses those tools across Claude Code, Kimi, Codex, and Grok sessions; it does not configure Claude Code's native Agent Teams feature.
+Lody provides the [cross-session tools](/docs/session-orchestration/) used to organize this work. This guide uses those tools across a primary agent, Kimi, Codex, and Grok sessions; it does not depend on an agent's native team feature.
 
 ## Set up the workspace
 
 [Connect a machine to Lody](/docs/quickstart/) and make sure the [agent configurations](/docs/agents/) you want to use are available there. The target machines need to be online, and the agents need access to the repositories and any GitHub tools required for their assignments.
 
-The examples below use Claude Code for coordination and Kimi, Codex, or Grok for focused work.
-Start a Claude Code session for coordination. Tell it which repositories, PRs, or issues to inspect. Give editing tasks their own [Git worktrees](/docs/worktrees/) so parallel agents have separate working directories. A new worktree fork starts from committed `HEAD`; uncommitted changes in another directory will not appear there automatically.
+The examples below use a primary agent for coordination and Kimi, Codex, or Grok for focused work.
+Start a primary-agent session for coordination. Tell it which repositories, PRs, or issues to inspect. Give editing tasks their own [Git worktrees](/docs/worktrees/) so parallel agents have separate working directories. A new worktree fork starts from committed `HEAD`; uncommitted changes in another directory will not appear there automatically.
 
 The first useful assignment is to understand the queue before changing code.
 
-## 1. Have Claude Code triage PRs and issues
+## 1. Have the primary agent triage PRs and issues
 
 A queue often contains overlapping work. An issue may already have a PR, two PRs may solve the same problem, or an SDK change may need to land before a client update. Ask the coordinator to identify those relationships first.
 
@@ -141,15 +141,15 @@ context through messages and available session history while keeping their own c
 
 ## Collaborate across machines and agents
 
-The participating sessions can run on different machines connected to Lody. For example, Claude
-Code on your laptop can coordinate a Kimi session working on the SDK on a workstation and a Codex
+The participating sessions can run on different machines connected to Lody. For example, a primary
+agent on your laptop can coordinate a Kimi session working on the SDK on a workstation and a Codex
 session investigating the server on a remote development machine.
 
-| Machine | Agent | Work |
-| --- | --- | --- |
-| Laptop | Claude Code | Coordinate the investigation and collect results |
-| Workstation | Kimi | Investigate and fix the SDK |
-| Remote development machine | Codex | Investigate the server and review the shared contract |
+| Machine                    | Agent         | Work                                                  |
+| -------------------------- | ------------- | ----------------------------------------------------- |
+| Laptop                     | Primary agent | Coordinate the investigation and collect results      |
+| Workstation                | Kimi          | Investigate and fix the SDK                           |
+| Remote development machine | Codex         | Investigate the server and review the shared contract |
 
 Use session mentions and messages to connect their work just as you would for sessions on one
 machine. Each agent uses the repository checkout, tools, and runtime available on its execution
@@ -172,7 +172,7 @@ These handoffs make the workflow easier for people to follow too. In Lody, you c
 
 ## Start with one issue and two agents
 
-Choose an issue you understand. Have Claude Code inspect it and delegate a focused fix to Kimi or Codex. Add a separate review session, ask the two agents to exchange findings, and inspect the resulting patch yourself.
+Choose an issue you understand. Have the primary agent inspect it and delegate a focused fix to Kimi or Codex. Add a separate review session, ask the two agents to exchange findings, and inspect the resulting patch yourself.
 
 Once that workflow is useful, expand it to a queue or a bug spanning multiple repositories. The same operations—create a session, send a message, inspect progress, and follow up—support each case.
 

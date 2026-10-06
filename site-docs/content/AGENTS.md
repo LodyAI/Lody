@@ -18,9 +18,10 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   wired in `components/mdx.tsx`; content needs no import for them.
 - When a surface has a registered docs preview in `components/docs-replica/`,
   render that component instead of a screenshot so old UI cannot ship and the
-  preview follows the reader's light/dark theme. `SessionListPreview` is the
-  current example (pass the page `locale`); its mock data must stay synthetic.
-  Surfaces without a preview keep the `<img>` rule above.
+  preview follows the reader's light/dark theme. `SessionListPreview` and
+  `GithubRepoPickerPreview` are the current examples (pass the page `locale`);
+  their mock data must stay synthetic. Surfaces without a preview keep the `<img>`
+  rule above.
 - MDX links are resolved by the site's client router, so a link to a path this
   site does not own renders the 404 page. Web-app paths such as `/login` work only
   because `components/site-root-provider.tsx` lists them in `APP_OWNED_PATHS`; add

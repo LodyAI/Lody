@@ -14,13 +14,13 @@ existing pages remain the content; this contract governs where they live and how
 
 Top-level docs groups under `content/docs/{en,zh}` express the reader's path:
 
-| Group | Reader question |
-| --- | --- |
-| Getting Started | How do I install Lody and finish one session? |
-| Core Concepts | What are the objects every screen assumes? |
-| Guides | How do I complete a real workflow end to end? |
+| Group                     | Reader question                                   |
+| ------------------------- | ------------------------------------------------- |
+| Getting Started           | How do I install Lody and finish one session?     |
+| Core Concepts             | What are the objects every screen assumes?        |
+| Guides                    | How do I complete a real workflow end to end?     |
 | Coming from another agent | I already use Codex or Claude Code; what changes? |
-| Reference | What does this one capability do? |
+| Feature List              | What does this one capability do?                 |
 
 Parenthesized folder names are virtual groups: they change sidebar hierarchy without changing
 published URLs. The English and Chinese trees keep the same group names, page slugs, and
@@ -29,7 +29,7 @@ the same change.
 
 Pages that describe a repeatable, end-to-end task belong under `(guides)`. Pages that describe one
 capability belong under `(reference)`, grouped by surface. The concept group holds only the small
-mental model; it does not hold setup or feature reference.
+mental model; it does not hold setup or feature pages.
 
 ## Page contract
 

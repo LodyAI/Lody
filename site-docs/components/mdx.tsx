@@ -8,6 +8,7 @@ import * as TypeTableComponents from 'fumadocs-ui/components/type-table';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
 import type { MDXComponents } from 'mdx/types';
 import type { ComponentProps } from 'react';
+import { GithubRepoPickerPreview } from './docs-replica/github-repo-picker-preview';
 import { SessionListPreview } from './docs-replica/session-list-preview';
 
 type StaticImageLike = {
@@ -56,6 +57,7 @@ export function getMDXComponents(components?: MDXComponents) {
     // Site-owned product previews rendered from mock data; see
     // `components/docs-replica/`. Long-form docs pass a `locale` so the mock
     // copy follows the page language.
+    GithubRepoPickerPreview,
     SessionListPreview,
     // Page shells already render the document title as H1.
     h1: () => null,

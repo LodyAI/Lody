@@ -7,21 +7,22 @@ Language: [中文](2026-10-06-docs-embedded-product-previews.zh.md)
 ## Abstract
 
 Docs screenshots age faster than the UI they describe: the Sessions page still
-showed the old multi-line session list with inline branch and diff metadata long
-after the app moved that metadata into a hover card. This change adds a
-site-owned, display-only preview under `components/docs-replica/`, renders it
-from synthetic mock data in both locales and themes, registers it as
-`SessionListPreview`, and replaces the stale session-list screenshot; the archive
-and delete screenshots stay because they still match. The replica is copied
-markup, not the app components, so it can still drift and must be re-copied when
-the app's look changes materially.
+showed the old multi-line session list, and the GitHub page showed an old home
+composer, long after both surfaces changed. This change adds site-owned,
+display-only previews under `components/docs-replica/`, renders them from
+synthetic mock data in both locales and themes, registers `SessionListPreview`
+and `GithubRepoPickerPreview` in the docs MDX components, and replaces the stale
+screenshots; the archive and delete screenshots stay because they still match.
+The replicas copy app markup rather than import app components, so they can still
+drift and must be re-copied when the app's look changes materially.
 
 ## Problem
 
 - Docs images are static and dated. The session-list screenshot had already
   become wrong: it showed multi-line rows with branch and diff inline, while the
   app renders one-line rows and moves that metadata into the session info hover
-  card.
+  card. The GitHub page still showed an old home composer with the pre-update
+  heading.
 - A screenshot cannot follow the reader's light/dark theme, so a dark image can
   sit inside a light docs page.
 - Every UI change needs a fresh capture committed as a raster asset, and a miss
@@ -32,49 +33,53 @@ the app's look changes materially.
 
 ## Decision
 
-- Add `components/docs-replica/session-list-preview.tsx`, a display-only replica
-  copied from the app's current `session-list.tsx` markup and classes. It takes
-  only `locale`, builds synthetic rows, and imports no app code.
-- Render it inside the existing `.lody-app-preview` token scope so it follows the
-  site's light/dark theme.
-- Register it in `components/mdx.tsx` as `SessionListPreview`, replace the
-  `<img src="/_docs-assets/session-list.png" />` usages in the English and Chinese
-  Sessions pages, and delete the now-unused asset.
-- Model the current one-line session row and show the session info card as an
-  in-place panel beside the list, because a static docs page cannot reproduce the
-  app's hover behavior. The card carries the repository, worktree branch,
-  machine, PR state, CI verdict, and ±line totals the surrounding copy promises.
+- Add `components/docs-replica/session-list-preview.tsx` and
+  `components/docs-replica/github-repo-picker-preview.tsx`, display-only replicas
+  copied from the app's current session-list and composer-selector markup. Each
+  takes only `locale`, builds synthetic mock content, and imports no app code.
+- Render them inside the existing `.lody-app-preview` token scope so they follow
+  the site's light/dark theme.
+- Register them in `components/mdx.tsx` as `SessionListPreview` and
+  `GithubRepoPickerPreview`, replace the `<img>` usages on the English and Chinese
+  Sessions and GitHub pages, and delete the two now-unused assets.
+- Model only the states a static page can hold: the current one-line session row
+  with the session info card beside it, and the current repository and branch
+  pickers above a composer box. The session card carries repository, worktree
+  branch, machine, PR state, CI verdict, and ±line totals; the composer preview
+  carries a repository, branch, prompt placeholder, run configuration, and
+  permission scope.
 - Keep the archive and delete screenshots; they still match and are out of scope.
 
 ## Alternatives considered
 
-1. Keep the screenshot and re-capture it. Rejected: the same drift and theme
+1. Keep the screenshots and re-capture them. Rejected: the same drift and theme
    mismatch return on the next UI change.
 2. Import the real app components with shims, as the landing once did. Rejected:
    that is the coupling the standalone replica note removed;
    `scripts/app-boundary.mjs` fails the build for it, and app hooks or providers
    would blank the docs surface.
-3. Render an interactive replica with hover behavior. Rejected for now: a static
-   illustration keeps the prerendered HTML deterministic and the accessibility
-   surface small. A later docs page can add interaction if it needs it.
-4. Build a generic preview framework before the second use. Rejected: one
-   component plus the shared token scope proves the pattern; extract shared
-   machinery only when a second preview exists.
+3. Render interactive replicas with hover cards and open menus. Rejected for now:
+   a static illustration keeps the prerendered HTML deterministic and the
+   accessibility surface small. A later docs page can add interaction if it needs
+   it.
+4. Build a generic preview framework before the second use. Rejected: the second
+   preview reuses the same token scope and landing-replica primitives without new
+   machinery; extract shared docs-preview scaffolding only at a third surface.
 
 ## Verification and limits
 
-- `pnpm --filter @lody/site-docs generate`, `typecheck`, and `test` pass (28
-  tests), including `scripts/app-boundary.mjs`.
-- A production build prerenders 257 HTML pages. The preview markup is present in
-  the prerendered English and Chinese Sessions pages, and the removed paragraph
-  text and asset are gone.
-- The preview was checked visually in English and Chinese, light and dark, at
+- `pnpm --filter @lody/site-docs generate`, `typecheck`, and `test` pass,
+  including `scripts/app-boundary.mjs`.
+- A production build prerenders every published page. The preview markup is
+  present in the prerendered English and Chinese Sessions and GitHub pages, and
+  both removed screenshot assets are gone.
+- Both previews were checked visually in English and Chinese, light and dark, at
   desktop and mobile widths.
-- The full static browser suite reports 309 passing cases and the same two
-  baseline mobile `no-js navigation` timeouts before and after the change.
-- The replica copies markup at a point in time; it does not follow app changes.
-  Re-copy it when the session list changes materially, and update the docs copy
+- The full static browser suite reports 307 passing cases (309 before the two
+  removed VS Code themes pages) and the same two baseline mobile
+  `no-js navigation` timeouts before and after the change.
+- The replicas copy markup at a point in time; they do not follow app changes.
+  Re-copy each one when its surface changes materially, and update the docs copy
   with it.
-- Only the session-list image was replaced. Other docs screenshots (archive,
-  delete, agent config, diff, and so on) remain and can be converted one surface
-  at a time.
+- Two surfaces were converted. Other docs screenshots (archive, delete, agent
+  config, diff, and so on) remain and can be converted one surface at a time.
