@@ -223,6 +223,8 @@ export type FrozenOperationContinuationConfig = {
     modeId?: string;
     modelId?: string;
     configOptionValues?: Record<string, string | boolean>;
+    /** Option ids checked against the selected model at acceptance. */
+    validatedConfigIds?: string[];
     inheritSessionDefaults?: false;
   } | null>;
 };

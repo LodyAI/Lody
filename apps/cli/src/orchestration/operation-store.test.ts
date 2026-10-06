@@ -153,6 +153,32 @@ describe('LodyOperationStore', () => {
     }
   });
 
+  it('retains a materialization failure across a store reopen', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-failure-'));
+    roots.add(root);
+    const dbPath = path.join(root, 'operations.sqlite3');
+    const writer = new LodyOperationStore(dbPath);
+    writer.accept(baseInput(), { materializationClaimToken: 'acceptor' });
+    writer.recordItemMaterializationFailure(
+      'requester-1' as SessionId,
+      'review-round-1',
+      0,
+      'acceptor',
+      'initial-target-input-write',
+      'Flock document sync timed out'
+    );
+    writer.close();
+
+    const recovered = new LodyOperationStore(dbPath);
+    try {
+      expect(
+        recovered.getItemMaterializationFailure('requester-1' as SessionId, 'review-round-1', 0)
+      ).toEqual({ phase: 'initial-target-input-write', message: 'Flock document sync timed out' });
+    } finally {
+      recovered.close();
+    }
+  });
+
   it('restricts the store directory and database to the local account', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'lody-operation-store-permissions-'));
     roots.add(root);
@@ -367,6 +393,7 @@ describe('LodyOperationStore', () => {
               modeId: 'default',
               modelId: 'gpt-5',
               configOptionValues: { fast: true },
+              validatedConfigIds: ['reasoning_effort'],
               inheritSessionDefaults: false as const,
             },
           ],
@@ -379,6 +406,7 @@ describe('LodyOperationStore', () => {
           modeId: 'default',
           modelId: 'gpt-5',
           configOptionValues: { fast: true },
+          validatedConfigIds: ['reasoning_effort'],
           inheritSessionDefaults: false,
         },
       ]);
@@ -935,6 +963,17 @@ describe('LodyOperationStore', () => {
     try {
       const accepted = store.accept(baseInput(), { materializationClaimToken: 'acceptor' });
       expect(accepted.claimedItemIndexes).toEqual([0]);
+      store.recordItemMaterializationFailure(
+        'requester-1' as SessionId,
+        'review-round-1',
+        0,
+        'acceptor',
+        'initial-target-input-write',
+        'Flock document sync timed out'
+      );
+      expect(
+        store.getItemMaterializationFailure('requester-1' as SessionId, 'review-round-1', 0)
+      ).toEqual({ phase: 'initial-target-input-write', message: 'Flock document sync timed out' });
       expect(
         store.claimItemMaterialization(
           'requester-1' as SessionId,
@@ -953,6 +992,17 @@ describe('LodyOperationStore', () => {
           'lease-owner'
         )
       ).toEqual({ claimed: true });
+      store.recordItemMaterializationFailure(
+        'requester-1' as SessionId,
+        'review-round-1',
+        0,
+        'acceptor',
+        'stale-write',
+        'stale failure'
+      );
+      expect(
+        store.getItemMaterializationFailure('requester-1' as SessionId, 'review-round-1', 0)
+      ).toMatchObject({ phase: 'initial-target-input-write' });
       expect(
         store.markItemInputDurable('requester-1' as SessionId, 'review-round-1', 0, 'acceptor')
           .items[0]
@@ -961,6 +1011,9 @@ describe('LodyOperationStore', () => {
         store.markItemInputDurable('requester-1' as SessionId, 'review-round-1', 0, 'lease-owner')
           .items[0]
       ).toMatchObject({ inputDurable: true });
+      expect(
+        store.getItemMaterializationFailure('requester-1' as SessionId, 'review-round-1', 0)
+      ).toBeUndefined();
     } finally {
       store.close();
     }

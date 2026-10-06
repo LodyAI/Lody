@@ -22,6 +22,14 @@ Machine-side review automation runs outside this MCP delegation chain. It keeps
 its own round, token, and authority budgets while reacting to external review and
 CI state.
 
+## Frozen create configuration
+
+For an accepted Session create, each target's frozen dispatch config retains the
+option ids already validated against its selected model. Recovery reuses those
+ids when checking a capability snapshot taken with another model. A rejected
+selector is a terminal `COMMAND_REJECTED` item failure; transport and remote
+durability uncertainty remain retryable.
+
 ## Session creation configuration
 
 An orchestrator can select the target Agent's advertised configuration on

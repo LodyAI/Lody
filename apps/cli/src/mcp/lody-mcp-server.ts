@@ -2703,10 +2703,24 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
           createOptions,
           effectiveDispatchConfig
         );
-      } catch {
+      } catch (error) {
         // The durable Operation already owns fixed target ids. A transport
         // failure is ambiguous, so leave it active for level-checked replay
         // instead of making the caller resend the prompt.
+        try {
+          await withOperationStore((store) =>
+            store.recordItemMaterializationFailure(
+              ctx.sessionId as SessionId,
+              args.operationId!,
+              0,
+              materializationClaimToken,
+              'initial-target-input-write',
+              error instanceof Error ? error.message : String(error)
+            )
+          );
+        } catch {
+          // Diagnostic persistence must not replace the accepted result.
+        }
         return snapshotOperation(ctx.sessionId as SessionId, args.operationId);
       }
       if (
@@ -3293,11 +3307,25 @@ const startSessionCreateManyOperation = async (
             { distinctId: auth.machineId }
           );
           return markOperationItemInputDurable(storedItem);
-        } catch {
+        } catch (error) {
           // Acceptance already committed the fixed target ids. A write failure
           // here is ambiguous (the remote Loro write may have won) and an
           // offline transition after acceptance must not become an item error.
           // Keep the item active so the lease owner level-checks/replays it.
+          try {
+            await withOperationStore((store) =>
+              store.recordItemMaterializationFailure(
+                ctx.sessionId as SessionId,
+                args.operationId,
+                index,
+                materializationClaimToken,
+                'initial-target-input-write',
+                error instanceof Error ? error.message : String(error)
+              )
+            );
+          } catch {
+            // Diagnostic persistence must not replace the accepted result.
+          }
           return storedItem;
         }
       }
