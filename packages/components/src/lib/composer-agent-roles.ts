@@ -38,6 +38,7 @@ export type SessionTurnAgentRoleSelection =
   | {
       agentRoleId: AgentRoleId;
       agentRoleRevision: number;
+      agentRoleSnapshot?: import('@lody/shared').AgentRoleSnapshot;
     }
   | null
   | undefined;

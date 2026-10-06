@@ -50,15 +50,20 @@ agent's answer and the agent's own warning about it.
 
 ## Copying failures
 
-Every `chat_failed` banner has an always-visible Copy error button below its
-text, including title-only failures. It copies the existing plain-text error
-report (title, reason/code, session/agent/machine identifiers, remediation and
-full raw message). The shared clipboard helper supplies the browser fallback;
-show success only after the write succeeds, and show a failure toast otherwise.
+Every `chat_failed` banner has an always-visible Copy error button, including
+title-only failures. It copies the existing plain-text error report (title,
+reason/code, session/agent/machine identifiers, remediation and full raw
+message). The shared clipboard helper supplies the browser fallback; show
+success only after the write succeeds, and show a failure toast otherwise.
 The report starts with `Error details:`: the space prevents clipboard consumers
 from interpreting the entire report as an `error:` URL and percent-encoding it.
-The footer keeps copying reachable on narrow touch screens without competing
-with the capacity retry action in the header.
+
+At phone widths, when copy is the only trailing control, the button rides the
+header row's trailing edge and the detail takes its own full-width line beneath
+it, so copying costs no separate control row. When a capacity retry action is
+present the header is already occupied, so copy keeps its footer row rather than
+squeezing the title between two controls. Above the mobile breakpoint the footer
+keeps that row in both cases.
 
 ## Capacity retry
 

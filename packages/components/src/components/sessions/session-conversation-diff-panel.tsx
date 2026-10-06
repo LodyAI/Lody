@@ -1,5 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import {
   githubCreatePRReviewComment,
   githubFetchPullRequestHeadSha,
@@ -29,7 +31,7 @@ import {
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Skeleton } from '@lody/ui/skeleton';
-import { cn } from '@/lib/utils';
+import { withClassName } from '@/lib/stylex';
 import { observeDiffPerfLongTasks } from '@/lib/diff-perf';
 import { FileIcon } from '@/components/icons/file-icons';
 import { EMPTY_COMMENT_REFERENCE_KEYS } from '@/components/chat/comment-reference-state';
@@ -56,6 +58,89 @@ import type { SessionFileProvider } from '@/lib/session-file-provider';
 
 const DIFF_LOAD_SCROLL_PAUSE_MS = 500;
 const EMPTY_GITHUB_THREADS: GitHubReviewThread[] = [];
+const styles = stylex.create({
+  diffCard: {
+    width: '100%',
+    overflow: 'hidden',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'hsl(var(--background))',
+    boxShadow: '0 1px 2px hsl(0 0% 0% / 0.04)',
+    borderColor: {
+      default: 'hsl(var(--foreground) / 0.12)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'hsl(var(--border))',
+    },
+  },
+  diffCardHeader: {
+    display: 'flex',
+    height: '32px',
+    alignItems: 'center',
+    gap: space[2],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: {
+      default: 'hsl(var(--foreground) / 0.08)',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'hsl(var(--border))',
+    },
+    backgroundColor: 'hsl(var(--background))',
+    paddingInlineStart: space[1],
+    paddingInlineEnd: space[4],
+  },
+  fileIcon: { width: '16px', height: '16px', flexShrink: 0 },
+  filePathRow: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    alignItems: 'center',
+    gap: space[1],
+  },
+  filePath: {
+    minWidth: 0,
+    overflow: 'hidden',
+    color: 'hsl(var(--foreground) / 0.9)',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '14px',
+    lineHeight: '20px',
+  },
+  skeletonBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[1.5],
+    paddingBlock: space[3],
+    paddingInline: space[4],
+  },
+  errorMessage: { color: 'hsl(var(--muted-foreground))', fontSize: '12px', lineHeight: '16px' },
+  emptyMessage: {
+    padding: space[3],
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '14px',
+    lineHeight: '20px',
+  },
+  root: { display: 'flex', height: '100%', minHeight: 0, flexDirection: 'column' },
+  fileBlock: { width: '100%' },
+  panelContent: {
+    display: 'flex',
+    width: '100%',
+    flexDirection: 'column',
+    gap: space[4],
+    paddingBlock: space[2],
+  },
+  baseScrollFrame: { minHeight: 0, flex: '1 1 0%', paddingInlineEnd: space[1] },
+  baseScrollArea: { height: '100%', overflow: 'hidden' },
+  baseScrollContent: { paddingInline: space[3] },
+  conversationScroll: {
+    minHeight: 0,
+    flex: '1 1 0%',
+    overflow: 'auto',
+    paddingInline: space[3],
+    scrollbarWidth: 'thin',
+    scrollbarColor: 'hsl(var(--scrollbar-thumb) / 0.5) transparent',
+  },
+});
 
 function FileDiffSkeleton({
   filePath,
@@ -65,17 +150,17 @@ function FileDiffSkeleton({
   onOpenFile?: (path: string) => void;
 }) {
   return (
-    <div className="w-full overflow-hidden rounded-xl border border-foreground/[0.12] bg-background shadow-[0_1px_2px_hsl(0_0%_0%/0.04)] dark:border-border">
-      <div className="flex h-8 items-center gap-2 border-b border-foreground/[0.08] bg-background pl-1 pr-4 dark:border-border">
-        <FileIcon filePath={filePath} className="h-4 w-4 shrink-0" />
-        <div className="flex min-w-0 flex-1 items-center gap-1">
-          <span className="min-w-0 truncate text-sm text-foreground/90" title={filePath}>
+    <div {...stylex.props(styles.diffCard)}>
+      <div {...stylex.props(styles.diffCardHeader)}>
+        <FileIcon filePath={filePath} className={stylex.props(styles.fileIcon).className} />
+        <div {...stylex.props(styles.filePathRow)}>
+          <span {...stylex.props(styles.filePath)} title={filePath}>
             {filePath}
           </span>
           <DiffFileHeaderActions path={filePath} onOpenFile={onOpenFile} />
         </div>
       </div>
-      <div className="space-y-1.5 px-4 py-3">
+      <div {...stylex.props(styles.skeletonBody)}>
         <Skeleton width="100%" height={12} />
         <Skeleton width="91%" height={12} />
         <Skeleton width="80%" height={12} />
@@ -236,7 +321,7 @@ const DiffFileBlock = memo(function DiffFileBlock({
   }
 
   if (data.status === 'error') {
-    return <div className="text-xs text-muted-foreground">{data.message}</div>;
+    return <div {...stylex.props(styles.errorMessage)}>{data.message}</div>;
   }
 
   if (data.status === 'ready-parsed') {
@@ -671,7 +756,7 @@ function SessionConversationDiffPanelImpl({
 
   if (normalizedPaths.length === 0) {
     return (
-      <div className={cn('p-3 text-sm text-muted-foreground', className)}>
+      <div {...withClassName(stylex.props(styles.emptyMessage), className)}>
         {t('sessions.fileDiff.selectFile', 'Select a file to view its diff.')}
       </div>
     );
@@ -679,14 +764,18 @@ function SessionConversationDiffPanelImpl({
 
   if (isDiffUnavailable) {
     return (
-      <div className={cn('p-3 text-sm text-muted-foreground', className)}>
+      <div {...withClassName(stylex.props(styles.emptyMessage), className)}>
         {t('sessions.fileDiff.unavailable', 'Diff unavailable')}
       </div>
     );
   }
 
   const renderFileBlock = (filePath: string) => (
-    <div key={filePath} ref={(node) => registerPathBlock(filePath, node)} className="w-full">
+    <div
+      key={filePath}
+      ref={(node) => registerPathBlock(filePath, node)}
+      {...stylex.props(styles.fileBlock)}
+    >
       <DiffFileBlock
         filePath={filePath}
         data={resolvedByPath[filePath]}
@@ -707,7 +796,7 @@ function SessionConversationDiffPanelImpl({
   );
 
   const panelContent = (
-    <div className="w-full space-y-4 py-2">
+    <div {...stylex.props(styles.panelContent)}>
       {githubReviewComments.error && (
         <GitHubReviewErrorNotice
           message={githubReviewComments.error.message}
@@ -719,17 +808,21 @@ function SessionConversationDiffPanelImpl({
   );
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col', className)}>
+    <div {...withClassName(stylex.props(styles.root), className)}>
       {mode === 'base' ? (
-        <div className="min-h-0 flex-1 pr-1">
-          <ScrollArea ref={setScrollAreaRoot} className="h-full overflow-hidden" type="auto">
-            <div className="px-3">{panelContent}</div>
+        <div {...stylex.props(styles.baseScrollFrame)}>
+          <ScrollArea
+            ref={setScrollAreaRoot}
+            className={stylex.props(styles.baseScrollArea).className}
+            type="auto"
+          >
+            <div {...stylex.props(styles.baseScrollContent)}>{panelContent}</div>
           </ScrollArea>
         </div>
       ) : (
         <div
           ref={scrollContainerRef}
-          className="scrollbar-pro min-h-0 flex-1 overflow-auto px-3"
+          {...withClassName(stylex.props(styles.conversationScroll), 'scrollbar-pro')}
           onScroll={handleDiffScroll}
         >
           {panelContent}

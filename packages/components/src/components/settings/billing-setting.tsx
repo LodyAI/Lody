@@ -27,6 +27,12 @@ import {
   writeBillingOverviewCache,
 } from './billing-overview-cache';
 import {
+  clearBillingCheckoutReturn,
+  isBillingActivationSettled,
+  markBillingCheckoutReturn,
+  readBillingCheckoutReturn,
+} from './billing-checkout-return';
+import {
   BillingSettingsView,
   formatDate,
   formatUsd,
@@ -61,6 +67,10 @@ const BILLING_ERROR_TOAST_KEYS: Record<string, string> = {
   // A live gift redemption blocks starting a checkout (and vice versa).
   redemption_in_progress: 'billing.redeemInProgress',
 };
+
+/** How long a just-finished checkout may keep polling Stripe for confirmation. */
+const CHECKOUT_CONFIRMATION_WINDOW_MS = 2 * 60 * 1000;
+const CHECKOUT_CONFIRMATION_INTERVAL_MS = 3_000;
 
 export function BillingSettingsComponent() {
   // Registry-level gating already hides the billing tab without the 'billing'
@@ -132,6 +142,10 @@ function CloudBillingSettings() {
   const reconcileWorkspaceCheckout = useCloudAction(
     cloudOperations.billing.reconcileWorkspaceCheckout
   );
+  // `useCloudAction` can hand back a new function identity every render; the
+  // confirmation loop must survive those renders instead of restarting.
+  const reconcileWorkspaceCheckoutRef = useRef(reconcileWorkspaceCheckout);
+  reconcileWorkspaceCheckoutRef.current = reconcileWorkspaceCheckout;
   const redeemCode = useCloudAction(cloudOperations.billing.redeemStripePromotionCode);
   const listBillingInvoices = useCloudAction(cloudOperations.billing.listBillingInvoices);
   const setSubscriptionCancelAtPeriodEnd = useCloudAction(
@@ -157,8 +171,12 @@ function CloudBillingSettings() {
   const [invoicesError, setInvoicesError] = useState(false);
   const [invoicesReloadKey, setInvoicesReloadKey] = useState(0);
   const [checkoutSuccessReturn, setCheckoutSuccessReturn] = useState(false);
-  const [reconciling, setReconciling] = useState(false);
-  const reconcileStartedRef = useRef(false);
+  // Anchor the confirmation window to when the return was first seen, so a
+  // reload inside an already-slow confirmation does not restart the wait.
+  const checkoutReturnStartedAtRef = useRef<number | null>(null);
+  // Persisted/preloaded data can describe the state before Checkout. Only the
+  // live query may prove that the returned payment or gift setup has landed.
+  const activationSettled = isBillingActivationSettled(fetchedOverview);
   // Desktop: checkout/portal opened in the system browser; poll until Stripe
   // confirms so the app updates even if the user never clicks "back to Lody".
   const [externalCheckoutPending, setExternalCheckoutPending] = useState(false);
@@ -203,41 +221,97 @@ function CloudBillingSettings() {
 
   // Stripe sends the user back to this route with ?checkout=success|canceled
   // (+ session_id on success). Capture the success return, then strip the
-  // params so a refresh doesn't re-trigger the flow.
+  // params so a refresh doesn't re-trigger the flow. The marker can also arrive
+  // without the query (desktop deep-link hand-off, reload after the first
+  // parse), so a per-tab intent is what actually drives the confirmation below.
   useEffect(() => {
+    if (!workspaceId || typeof window === 'undefined') return;
+    const clearReturn = () => {
+      clearBillingCheckoutReturn(workspaceId);
+      checkoutReturnStartedAtRef.current = null;
+      setCheckoutSuccessReturn(false);
+    };
     const url = new URL(window.location.href);
     const checkout = url.searchParams.get('checkout');
-    if (!checkout) return;
-    if (checkout === 'success') setCheckoutSuccessReturn(true);
-    url.searchParams.delete('checkout');
-    url.searchParams.delete('session_id');
-    window.history.replaceState(window.history.state, '', url);
-  }, []);
+    if (checkout === 'success') {
+      const now = Date.now();
+      markBillingCheckoutReturn(workspaceId, now);
+      checkoutReturnStartedAtRef.current = now;
+      setCheckoutSuccessReturn(true);
+    } else if (checkout === 'canceled') {
+      clearReturn();
+    } else if (checkout === null) {
+      // No marker: this is a reload, remount, or desktop hand-off after the
+      // first parse, so the per-tab intent is the remaining signal.
+      const pendingSince = readBillingCheckoutReturn(workspaceId);
+      if (pendingSince !== null) {
+        checkoutReturnStartedAtRef.current = pendingSince;
+        setCheckoutSuccessReturn(true);
+      }
+    } else {
+      // Unknown marker value: never trust a stale intent.
+      clearReturn();
+    }
+    if (checkout !== null) {
+      url.searchParams.delete('checkout');
+      url.searchParams.delete('session_id');
+      window.history.replaceState(window.history.state, '', url);
+    }
+  }, [workspaceId]);
 
-  // Webhooks can lag behind the checkout redirect. Reconcile the in-flight
-  // checkout session against Stripe once when we return from checkout (or see
-  // a pending checkout), so the reactive overview query flips to paid without
-  // waiting for the webhook. Ref-guarded to run at most once per mount.
+  // An ordinary pending checkout gets one background check and keeps its payment
+  // entry available. Only a successful return retries transient misses while
+  // waiting for the webhook/reconcile write to reach the live overview.
   const shouldReconcile =
     checkoutSuccessReturn ||
     overview?.checkoutPending === true ||
     overview?.subscriptionSetupPending === true;
   useEffect(() => {
-    if (!workspaceId || !shouldReconcile || reconcileStartedRef.current) return;
-    reconcileStartedRef.current = true;
-    setReconciling(true);
-    reconcileWorkspaceCheckout({ workspaceId })
-      .then((result) => {
-        // The checkout didn't go through after all; drop the processing banner.
-        if (result.status === 'expired' || result.status === 'none') {
-          setCheckoutSuccessReturn(false);
+    if (!workspaceId || !shouldReconcile || activationSettled) return undefined;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline =
+      (checkoutReturnStartedAtRef.current ?? Date.now()) + CHECKOUT_CONFIRMATION_WINDOW_MS;
+    const finish = () => {
+      clearBillingCheckoutReturn(workspaceId);
+      checkoutReturnStartedAtRef.current = null;
+      setCheckoutSuccessReturn(false);
+    };
+    const tick = async () => {
+      try {
+        const result = await reconcileWorkspaceCheckoutRef.current({ workspaceId });
+        if (cancelled) return;
+        if (result.status === 'expired') {
+          finish();
+          return;
         }
-      })
-      .catch((error) => {
+        if (result.status === 'paid') {
+          // Keep the return marker and activation banner until the live overview
+          // lands, including across a reload between the write and query update.
+          if (!checkoutSuccessReturn) {
+            const startedAt = Date.now();
+            markBillingCheckoutReturn(workspaceId, startedAt);
+            checkoutReturnStartedAtRef.current = startedAt;
+            setCheckoutSuccessReturn(true);
+          }
+          return;
+        }
+      } catch (error) {
         console.error('Failed to reconcile Stripe checkout:', error);
-      })
-      .finally(() => setReconciling(false));
-  }, [workspaceId, shouldReconcile, reconcileWorkspaceCheckout]);
+      }
+      if (cancelled || !checkoutSuccessReturn) return;
+      if (Date.now() >= deadline) {
+        finish();
+        return;
+      }
+      timer = setTimeout(() => void tick(), CHECKOUT_CONFIRMATION_INTERVAL_MS);
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [workspaceId, shouldReconcile, checkoutSuccessReturn, activationSettled]);
 
   // bfcache: navigating to Stripe and back can restore this page from the
   // back/forward cache with the pending spinner still set. Reset it.
@@ -296,7 +370,21 @@ function CloudBillingSettings() {
     if (externalCheckoutPending && completed) {
       setExternalCheckoutPending(false);
     }
-  }, [externalCheckoutKind, externalCheckoutPending, overview]);
+    // Drop the per-tab return intent once the entitlement lands, so a later
+    // remount does not reconcile an already-consumed checkout session.
+    if (checkoutSuccessReturn && activationSettled) {
+      checkoutReturnStartedAtRef.current = null;
+      setCheckoutSuccessReturn(false);
+      if (workspaceId) clearBillingCheckoutReturn(workspaceId);
+    }
+  }, [
+    activationSettled,
+    checkoutSuccessReturn,
+    externalCheckoutKind,
+    externalCheckoutPending,
+    overview,
+    workspaceId,
+  ]);
 
   const returnUrl = (() => {
     if (typeof window === 'undefined') return undefined;
@@ -506,13 +594,8 @@ function CloudBillingSettings() {
     }
   };
 
-  // "Payment received, activating" banner: reconcile in flight, or we came
-  // back from a successful checkout but the reactive overview still reports
-  // the free tier (webhook/reconcile hasn't landed yet).
-  const paymentProcessing =
-    (reconciling || checkoutSuccessReturn) &&
-    overview != null &&
-    (overview.effectivePlanTier === 'free' || overview.subscriptionSetupPending);
+  // Checking an unpaid checkout does not imply that payment was received.
+  const paymentProcessing = checkoutSuccessReturn && !activationSettled && overview != null;
 
   return (
     <>
@@ -667,7 +750,8 @@ function CloudBillingSettings() {
           </AlertDialog.Header>
           <AlertDialog.Footer>
             <AlertDialog.Cancel>{t('billing.cancelDialogKeep')}</AlertDialog.Cancel>
-            <AlertDialog.Action variant="destructive"
+            <AlertDialog.Action
+              variant="destructive"
               onClick={() => void handleSetCancelAtPeriodEnd(true)}
             >
               {t('billing.cancelDialogConfirm')}

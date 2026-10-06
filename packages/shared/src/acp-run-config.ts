@@ -79,6 +79,9 @@ export type AgentRunConfigSelection = {
 
 /** What the target agent supports, for callers that must pick a valid value. */
 export type AgentRunConfigCapabilities = {
+  modes: Array<{ id: string; name: string; description?: string }>;
+  /** Advertised selector metadata only; never expose current configuration values. */
+  configOptions: Array<Omit<AcpConfigOptionSummary, 'currentValue'>>;
   /**
    * `reasoningEffortValues` is per model when the agent publishes that
    * breakdown; otherwise it is absent and only the snapshot below applies.
@@ -275,6 +278,48 @@ export const summarizeAgentRunConfigCapabilities = (
 ): AgentRunConfigCapabilities => {
   const measuredForModelId = findCurrentModelId(capability);
   return {
+    modes: Array.from(
+      new Map([
+        ...(capability?.modes ?? []).map(
+          (mode) =>
+            [
+              mode.id,
+              {
+                id: mode.id,
+                name: mode.name,
+                ...(mode.description ? { description: mode.description } : {}),
+              },
+            ] as const
+        ),
+        ...(capability?.configOptions ?? [])
+          .filter((option) => option.category === 'mode' && option.type === 'select')
+          .flatMap((option) =>
+            option.options.map(
+              (choice) =>
+                [
+                  choice.value,
+                  {
+                    id: choice.value,
+                    name: choice.name,
+                    ...(choice.description ? { description: choice.description } : {}),
+                  },
+                ] as const
+            )
+          ),
+      ]).values()
+    ),
+    configOptions: (capability?.configOptions ?? []).map((option) => ({
+      id: option.id,
+      name: option.name,
+      ...(option.description ? { description: option.description } : {}),
+      ...(option.category ? { category: option.category } : {}),
+      type: option.type,
+      options: option.options.map((choice) => ({
+        value: choice.value,
+        name: choice.name,
+        ...(choice.description ? { description: choice.description } : {}),
+      })),
+    })),
     models: listModels(capability).map((model) => {
       const efforts = getModelEffortChoices(capability, model.id);
       return { ...model, ...(efforts ? { reasoningEffortValues: efforts } : {}) };

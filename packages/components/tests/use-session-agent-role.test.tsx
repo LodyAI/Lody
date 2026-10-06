@@ -3,6 +3,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_AGENT_ROLE_EMOJI } from '@lody/shared';
 import type {
   AgentConfigId,
   AgentConfigMeta,
@@ -264,6 +265,12 @@ describe('useSessionAgentRole', () => {
     expect(control?.turnSelection).toEqual({
       agentRoleId: 'role-special',
       agentRoleRevision: 1,
+      agentRoleSnapshot: {
+        id: 'role-special',
+        revision: 1,
+        name: 'role-special',
+        emoji: DEFAULT_AGENT_ROLE_EMOJI,
+      },
     });
   });
 

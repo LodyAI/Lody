@@ -175,7 +175,7 @@ export function ScheduleRecurrenceEditor({
             type="button"
             disabled={disabled}
             className="shrink-0 text-[0.9em] text-primary underline-offset-2 hover:underline disabled:opacity-50"
-            onClick={() => onChange(changeScheduleRecurrenceKind(value, 'daily', now))}
+            onClick={() => onChange(changeScheduleRecurrenceKind(value, 'daily', now, timeZone))}
           >
             {t('schedules.repeat.replace', 'Replace')}
           </button>
@@ -203,7 +203,8 @@ export function ScheduleRecurrenceEditor({
                 changeScheduleRecurrenceKind(
                   value,
                   kind as Exclude<ScheduleRecurrenceKind, 'unsupported'>,
-                  now
+                  now,
+                  timeZone
                 )
               );
           }}

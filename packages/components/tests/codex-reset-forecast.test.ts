@@ -90,6 +90,47 @@ describe('sanitizeExternalUrl', () => {
 });
 
 describe('parseCodexResetStatusResponse', () => {
+  it.each([undefined, null])('accepts an absent scheduled reset (%j)', (scheduled_reset) => {
+    expect(
+      parseCodexResetStatusResponse({ data: { active_watch: null, scheduled_reset } })
+        ?.scheduledReset
+    ).toBeNull();
+  });
+
+  it.each(['2026-10-02T17:00:00Z', null, 'invalid'])(
+    'normalizes a scheduled reset independently of a watch (%j)',
+    (scheduled_for) => {
+      const status = parseCodexResetStatusResponse({
+        data: {
+          active_watch: null,
+          latest_reset: {
+            announced_at: OBSERVED_AT,
+            text: 'Earlier reset.',
+            source: { type: 'observed' },
+          },
+          scheduled_reset: {
+            status: 'scheduled',
+            announced_at: OBSERVED_AT,
+            scheduled_for,
+            text: 'A reset is scheduled.',
+            source: { author: 'example', url: 'https://example.com/reset' },
+          },
+        },
+      });
+      expect(status?.watch).toBeNull();
+      expect(status?.latestReset?.text).toBe('Earlier reset.');
+      expect(status?.scheduledReset).toEqual({
+        announcedAtIso: OBSERVED_AT,
+        announcedAtMs: OBSERVED_MS,
+        scheduledForIso:
+          scheduled_for === '2026-10-02T17:00:00Z' ? '2026-10-02T17:00:00.000Z' : null,
+        scheduledForMs: scheduled_for === '2026-10-02T17:00:00Z' ? Date.parse(scheduled_for) : null,
+        text: 'A reset is scheduled.',
+        source: { author: 'example', url: 'https://example.com/reset' },
+      });
+    }
+  );
+
   it('normalizes an active watch', () => {
     const status = parseCodexResetStatusResponse(watchResponse());
 
@@ -218,7 +259,9 @@ describe('selectActiveCodexResetWatch', () => {
 
   it('reports neither active nor expired without a watch', () => {
     expect(selectActiveCodexResetWatch(null, EXPIRES_MS)).toBeNull();
-    expect(isCodexResetWatchExpired({ watch: null, latestReset: null }, EXPIRES_MS)).toBe(false);
+    expect(
+      isCodexResetWatchExpired({ watch: null, scheduledReset: null, latestReset: null }, EXPIRES_MS)
+    ).toBe(false);
   });
 });
 

@@ -1,7 +1,9 @@
-import { Download, Laptop, MonitorDown } from 'lucide-react';
+import { Download, Laptop, MonitorDown, Smartphone } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import {
   parseNightlyRelease,
+  parseNightlyAndroidRelease,
+  type NightlyAndroidRelease,
   resolveNightlyDownloadBase,
   type NightlyRelease,
 } from '../lib/nightly-downloads';
@@ -9,7 +11,7 @@ import {
 const copy = {
   en: {
     switching:
-      'Quit Lody before opening Nightly, and quit Nightly before switching back. Changes synced to your account also appear in Stable.',
+      'On desktop, quit Lody before opening Nightly, and quit Nightly before switching back. Changes synced to your account also appear in Stable.',
     loading: 'Checking Nightly downloads…',
     unavailable: 'Nightly downloads are not available right now.',
     retry: 'Try again',
@@ -17,7 +19,7 @@ const copy = {
   },
   zh: {
     switching:
-      '打开 Nightly 前请先退出 Lody，切回正式版前请先退出 Nightly。同步到账号的数据修改也会出现在正式版中。',
+      '桌面端打开 Nightly 前请先退出 Lody，切回正式版前请先退出 Nightly。同步到账号的数据修改也会出现在正式版中。',
     loading: '正在获取 Nightly 下载…',
     unavailable: '当前暂无可用的 Nightly 下载。',
     retry: '重试',
@@ -26,9 +28,24 @@ const copy = {
 };
 
 export function NightlyDownloads({ locale }: { locale: 'en' | 'zh' }) {
+  return (
+    <div id="nightly">
+      <NightlyDownloadsForPlatform locale={locale} platform="desktop" />
+      <NightlyDownloadsForPlatform locale={locale} platform="android" />
+    </div>
+  );
+}
+
+function NightlyDownloadsForPlatform({
+  locale,
+  platform,
+}: {
+  locale: 'en' | 'zh';
+  platform: 'desktop' | 'android';
+}) {
   const t = copy[locale];
   const base = resolveNightlyDownloadBase(import.meta.env.VITE_NIGHTLY_UPDATE_URL);
-  const [release, setRelease] = useState<NightlyRelease | null>(null);
+  const [release, setRelease] = useState<NightlyRelease | NightlyAndroidRelease | null>(null);
   const [loading, setLoading] = useState(base !== null);
   const [attempt, setAttempt] = useState(0);
 
@@ -41,14 +58,20 @@ export function NightlyDownloads({ locale }: { locale: 'en' | 'zh' }) {
     setRelease(null);
     void (async () => {
       try {
-        const response = await fetch(`${base}/version.json`, {
-          signal: controller.signal,
-          cache: 'no-store',
-        });
+        const response = await fetch(
+          `${base}/${platform === 'android' ? 'android-version.json' : 'version.json'}`,
+          {
+            signal: controller.signal,
+            cache: 'no-store',
+          }
+        );
         if (!response.ok) throw new Error('Nightly metadata unavailable');
         const text = await response.text();
         if (text.length > 1024 * 1024) throw new Error('Nightly metadata too large');
-        const parsed = parseNightlyRelease(JSON.parse(text), base);
+        const parsed =
+          platform === 'android'
+            ? parseNightlyAndroidRelease(JSON.parse(text), base)
+            : parseNightlyRelease(JSON.parse(text), base);
         if (!disposed) setRelease(parsed);
       } catch {
         if (!disposed) setRelease(null);
@@ -62,47 +85,68 @@ export function NightlyDownloads({ locale }: { locale: 'en' | 'zh' }) {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [base, attempt]);
+  }, [base, attempt, platform]);
 
   return (
-    <div className="download-group download-nightly" id="nightly">
-      <noscript>{t.noScript}</noscript>
+    <div className="download-group download-nightly">
+      {platform === 'desktop' && <noscript>{t.noScript}</noscript>}
       {release ? (
         <>
-          <p className="download-nightly__version">v{release.version}</p>
-          <p className="download-nightly__description">
-            {locale === 'zh'
-              ? `如已安装正式版，请先更新到 ${release.minimumStableVersion} 或更高版本，以支持两款应用互斥运行。`
-              : `If Stable is installed, update it to ${release.minimumStableVersion} or later so the two apps can prevent concurrent use.`}
+          <p className="download-nightly__version">
+            {platform === 'android' ? 'Android · ' : ''}v{release.version}
           </p>
+          {'minimumStableVersion' in release && (
+            <p className="download-nightly__description">
+              {locale === 'zh'
+                ? `如已安装桌面正式版，请先更新到 ${release.minimumStableVersion} 或更高版本，以支持两款应用互斥运行。`
+                : `If desktop Stable is installed, update it to ${release.minimumStableVersion} or later so the two apps can prevent concurrent use.`}
+            </p>
+          )}
           <div className="download-grid">
-            {(['mac', 'win', 'linux'] as const).map((platform) => (
-              <article className="download-card" key={platform}>
-                <div className="download-card__header">
-                  {platform === 'win' ? (
-                    <MonitorDown aria-hidden="true" />
-                  ) : (
-                    <Laptop aria-hidden="true" />
-                  )}
-                  <h3>{platform === 'mac' ? 'macOS' : platform === 'win' ? 'Windows' : 'Linux'}</h3>
-                </div>
-                <div className="download-card__actions">
-                  {release.downloads
-                    .filter((item) => item.platform === platform)
-                    .map((item) => (
-                      <a className="download-card__action" href={item.href} key={item.href}>
-                        <span>{item.label}</span>
-                        <Download aria-hidden="true" />
-                      </a>
-                    ))}
-                </div>
-              </article>
-            ))}
+            {(platform === 'android' ? (['android'] as const) : (['mac', 'win', 'linux'] as const))
+              .filter((downloadPlatform) =>
+                release.downloads.some((item) => item.platform === downloadPlatform)
+              )
+              .map((downloadPlatform) => (
+                <article className="download-card" key={downloadPlatform}>
+                  <div className="download-card__header">
+                    {downloadPlatform === 'android' ? (
+                      <Smartphone aria-hidden="true" />
+                    ) : downloadPlatform === 'win' ? (
+                      <MonitorDown aria-hidden="true" />
+                    ) : (
+                      <Laptop aria-hidden="true" />
+                    )}
+                    <h3>
+                      {downloadPlatform === 'mac'
+                        ? 'macOS'
+                        : downloadPlatform === 'win'
+                          ? 'Windows'
+                          : downloadPlatform === 'android'
+                            ? 'Android'
+                            : 'Linux'}
+                    </h3>
+                  </div>
+                  <div className="download-card__actions">
+                    {release.downloads
+                      .filter((item) => item.platform === downloadPlatform)
+                      .map((item) => (
+                        <a className="download-card__action" href={item.href} key={item.href}>
+                          <span>{item.label}</span>
+                          <Download aria-hidden="true" />
+                        </a>
+                      ))}
+                  </div>
+                </article>
+              ))}
           </div>
         </>
       ) : (
         <div className="download-nightly__status">
-          <p role="status">{loading ? t.loading : t.unavailable}</p>
+          <p role="status">
+            {platform === 'android' ? 'Android: ' : locale === 'zh' ? '桌面端：' : 'Desktop: '}
+            {loading ? t.loading : t.unavailable}
+          </p>
           {!loading && base !== null && (
             <button
               type="button"
@@ -114,7 +158,7 @@ export function NightlyDownloads({ locale }: { locale: 'en' | 'zh' }) {
           )}
         </div>
       )}
-      <p className="download-nightly__switching">{t.switching}</p>
+      {platform === 'desktop' && <p className="download-nightly__switching">{t.switching}</p>}
     </div>
   );
 }

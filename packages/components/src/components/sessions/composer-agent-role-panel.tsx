@@ -183,7 +183,7 @@ export function ComposerAgentRolePanel({
               if (!compact) setPreviewRoleId(null);
             }}
             onClick={() => onSelect(null)}
-            icon={<Ban {...stylex.props(surface.glyph16)} aria-hidden="true" />}
+            icon={Ban}
             endContent={
               selectedRoleId === null ? (
                 <Check {...stylex.props(surface.glyph14)} aria-hidden="true" />

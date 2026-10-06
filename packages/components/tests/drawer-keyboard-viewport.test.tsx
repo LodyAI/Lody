@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, useState } from 'react';
+import { Menu } from '@lody/ui/menu';
+import { Drawer as UiDrawer } from '@lody/ui/drawer';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Drawer, DrawerContent, DrawerTitle } from '../src/ui/drawer';
+import { SessionMobileDiffDrawerContent } from '../src/components/sessions/session-mobile-diff-drawer-content';
 
 const runtime = vi.hoisted(() => ({ native: true, ios: false }));
 vi.mock('../src/lib/native-platform', () => ({
@@ -149,4 +152,108 @@ describe('native side-drawer keyboard layout', () => {
     const drawer = renderDrawer(mode !== 'disabled');
     expect(drawer.style.bottom).toBe('');
   });
+});
+
+function DrawerMenu({ initiallyOpen }: { initiallyOpen: boolean }) {
+  const [selection, setSelection] = useState('Unchanged');
+  return (
+    <Drawer direction="right" open repositionInputs={false}>
+      <DrawerContent aria-describedby={undefined}>
+        <DrawerTitle>Simulator</DrawerTitle>
+        <output>{selection}</output>
+        <Menu.Root defaultOpen={initiallyOpen}>
+          <Menu.Trigger>More controls</Menu.Trigger>
+          <Menu.Content>
+            <Menu.Item onClick={() => setSelection('Rotated')}>Rotate left</Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+describe('drawer floating controls', () => {
+  it.each([false, true])(
+    'keeps the mobile diff in the session modal scope (initially open: %s)',
+    async (initiallyOpen) => {
+      function SessionDiff() {
+        const [open, setOpen] = useState(initiallyOpen);
+        const [selection, setSelection] = useState('Unchanged');
+        return (
+          <Drawer direction="right" open repositionInputs={false}>
+            <DrawerContent aria-describedby={undefined}>
+              <DrawerTitle>Conversation</DrawerTitle>
+              <button onClick={() => setOpen(true)}>Open changes</button>
+              <output>{selection}</output>
+              <UiDrawer.Root side="bottom" open={open} onOpenChange={setOpen}>
+                <SessionMobileDiffDrawerContent side="bottom" aria-describedby={undefined}>
+                  <UiDrawer.Title>Changes</UiDrawer.Title>
+                  <button onClick={() => setSelection('Selected line')}>Select line</button>
+                </SessionMobileDiffDrawerContent>
+              </UiDrawer.Root>
+            </DrawerContent>
+          </Drawer>
+        );
+      }
+      await act(async () => root.render(<SessionDiff />));
+      const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+      if (!initiallyOpen) {
+        await act(async () => drawer.querySelector<HTMLButtonElement>('button')!.click());
+      }
+      const diff = drawer.querySelector<HTMLElement>('[data-side="bottom"]');
+      expect(diff).not.toBeNull();
+      expect(diff!.closest('[data-vaul-no-drag]')).not.toBeNull();
+      expect(getComputedStyle(document.body).pointerEvents).toBe('none');
+      expect(getComputedStyle(diff!).pointerEvents).not.toBe('none');
+      const select = diff!.querySelector<HTMLButtonElement>('button:not([aria-label])')!;
+      await act(async () => {
+        select.focus();
+        await vi.advanceTimersByTimeAsync(32);
+      });
+      expect(document.activeElement).toBe(select);
+      await act(async () => select.click());
+      expect(drawer.querySelector('output')?.textContent).toBe('Selected line');
+      await act(async () =>
+        diff!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click()
+      );
+      expect(drawer.querySelector('[data-side="bottom"]')).toBeNull();
+      expect(drawer.getAttribute('data-state')).toBe('open');
+    }
+  );
+
+  it.each([false, true])(
+    'keeps a menu interactive in the modal scope (initially open: %s)',
+    async (initiallyOpen) => {
+      await act(async () => {
+        root.render(<DrawerMenu initiallyOpen={initiallyOpen} />);
+      });
+      if (!initiallyOpen) {
+        await act(async () => {
+          document
+            .querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!
+            .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+          await vi.advanceTimersByTimeAsync(32);
+        });
+      }
+      const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+      const item = document.querySelector<HTMLElement>('[role="menuitem"]')!;
+      expect(drawer.contains(item)).toBe(true);
+      expect(item.closest('[data-vaul-no-drag]')).not.toBeNull();
+      // A body portal inherits the modal pointer lock, so its clicks hit the iframe below.
+      expect(getComputedStyle(document.body).pointerEvents).toBe('none');
+      expect(getComputedStyle(item).pointerEvents).not.toBe('none');
+      await act(async () => {
+        item.focus();
+        await vi.advanceTimersByTimeAsync(32);
+      });
+      expect(document.activeElement).toBe(item);
+      await act(async () => {
+        item.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(32);
+      });
+      expect(drawer.querySelector('output')?.textContent).toBe('Rotated');
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+      expect(drawer.getAttribute('data-state')).toBe('open');
+    }
+  );
 });

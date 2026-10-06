@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Spinner } from '@lody/ui/spinner';
@@ -11,7 +12,6 @@ import { corner, duration, ease, focus, radius, space } from '@lody/ui/tokens/sc
 import { withClassName } from '@/lib/stylex';
 import { Button } from '@lody/ui/button';
 import { Dialog } from '@/ui/dialog';
-import { settingsType as type } from './type.stylex';
 
 export interface LinkedAccountInfo {
   id: string;
@@ -37,7 +37,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   /**

@@ -29,6 +29,7 @@ import type {
   SessionTurnInputConfig,
   SessionId,
   SessionMeta,
+  SessionHistoryBackendKind,
   SessionOperation,
   MachineId,
   AgentConfigId,
@@ -105,6 +106,8 @@ export type SessionDocUpdater =
 export type SessionDocStore = {
   readonly sessionId: SessionId;
   readonly roomId: string;
+  /** Immutable history ownership selected from the session catalog. */
+  readonly historyBackend: SessionHistoryBackendKind;
   readonly doc: LoroDoc;
   readonly firstSynced: Promise<void>;
   acquireSync: () => () => void;
@@ -513,6 +516,18 @@ export type WorkspaceRuntime = {
     machineId: MachineId,
     options?: { configId?: AgentConfigId }
   ) => Promise<MachinePiExtensionsResponse>;
+  /**
+   * The one `ios-simulator/control` Machine RPC. Local machines are reached
+   * directly; remote ones with a preview-control proof for the exact command.
+   * Transport failures resolve as `{ success: false, error: 'failed' }`.
+   */
+  requestIosSimulatorControl: (request: {
+    machineId: MachineId;
+    sessionId: SessionId;
+    requestedByUserId: string;
+    command: import('@lody/shared').IosSimulatorCommand;
+    timeoutMs?: number;
+  }) => Promise<import('@lody/shared').IosSimulatorResponse>;
   dispose: () => Promise<void>;
 };
 

@@ -19,8 +19,7 @@ import {
  * - A trigger in the composer toolbar is **ghost**: no fill and no edge at
  *   rest, `hoverFill` under the pointer and while its popup is up. It is what a
  *   ghost `Button` is, restated here because a composer trigger follows the
- *   font-size tier (`0.9em` of `--ui-font-size`) and folds to a square when the
- *   face slot is narrow, neither of which a `Button` prop can say.
+ *   control text role and folds to a square when the face slot is narrow.
  * - A trigger used as a form value is the **field**: the one recessed well.
  * - What they open is the floating rung, and its rows mirror `@lody/ui`'s popup
  *   rows (`popup` tokens are internal to the package, so they are restated from
@@ -63,10 +62,10 @@ export const composerSurface = stylex.create({
     boxShadow: { default: 'none', ':focus-visible': RING },
     outlineStyle: 'none',
     fontFamily: 'inherit',
-    fontSize: '0.9em',
+    fontSize: text.subheadlineSize,
     fontWeight: 500,
     letterSpacing: text.controlTracking,
-    lineHeight: 1.25,
+    lineHeight: text.subheadlineLeading,
     whiteSpace: 'nowrap',
     textAlign: 'start',
     userSelect: 'none',
@@ -240,7 +239,7 @@ export const composerSurface = stylex.create({
     fontSize: text.subheadlineSize,
     fontWeight: 500,
     letterSpacing: text.controlTracking,
-    lineHeight: 1.25,
+    lineHeight: text.subheadlineLeading,
     whiteSpace: 'nowrap',
     textAlign: 'start',
     userSelect: 'none',

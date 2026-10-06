@@ -9,8 +9,9 @@ Language: [English](2026-10-01-docs-information-architecture.md)
 公开文档此前是一份按上线历史追加的、包含 30 个条目的扁平 `Features` 列表：新用户没有上手坡道，
 Codex / Claude Code 老用户也没有迁移入口。本提案按读者路径重组目录（快速开始、核心概念、实战指南、
 从其他 Agent 迁移、参考），新增第一次会话教程、概念与术语表、迁移页，并且因为只移动了带括号的虚拟
-分组，所有既有 URL 保持不变。重组已经落到内容里，依赖路径的测试也已同步更新；生产构建、类型检查、
-单元测试和静态浏览器测试都已运行，相对 `HEAD` 没有新增失败。
+分组，所有既有文档 URL 保持不变。分支已合并最新 `main`，包含上游对两个误入的 coding-agent
+工作流页面的撤回。重组已经落到内容里，依赖路径的测试也已同步更新；生产构建、类型检查、包测试和
+静态浏览器测试都已针对合并后的树运行，没有新增失败。
 
 ## 问题
 
@@ -43,15 +44,18 @@ Codex / Claude Code 老用户也没有迁移入口。本提案按读者路径重
 ## 验证与限制
 
 - 已在创作 worktree 中完成离线安装（`pnpm --filter @lody/site-docs install --offline
-  --frozen-lockfile`）并验证：`generate`、`tsc --noEmit` 和包测试（54 项）通过，完整
-  `pnpm build` 预渲染 259 个 HTML 页面。嵌套的 `(reference)/(...)` 分组和四个子组在中英文
-  侧边栏均正常渲染，每个新增和移动的页面都出现在其已发布 URL 上。过滤安装无法构建
+  --frozen-lockfile`）并验证：`generate`、`tsc --noEmit` 和 `pnpm --filter @lody/site-docs test`
+  通过，完整 `pnpm build` 预渲染 257 个 HTML 页面。嵌套的 `(reference)/(...)` 分组和四个子组
+  在中英文侧边栏均正常渲染，每个新增和移动的页面都出现在其已发布 URL 上。过滤安装无法构建
   site-docs，直到完整工作区安装提供 `app/global.css` 所引用的、被提升的 `tw-animate-css`。
-- URL 稳定性由构建产物确认，而不只依赖约定：改动前的所有 slug 仍存在于 `out/client`，
-  `scripts/site-paths.mjs` 报告每种语言 0 丢失、3 新增。
-- 静态浏览器测试仍有三个与 `HEAD` 完全相同的失败：`repaired Chinese CLI link and anchor`
-  的锚点在片段后多出斜杠，以及两个移动端 `no-js navigation` 超时。基线运行还有另外两个失败；
-  本次改动没有新增失败。
+- 分支已合并 `origin/main`，包含上游对误入的 `/coding-agent-gui` 和
+  `/coding-agent-remote-control` 页面的撤回。相关路由、页脚/导航链接和文档链接均已移除；
+  文档首页保留了一个 `Daemon Mode` 锚点链接，使上游的 query/fragment 浏览器检查继续通过。
+- URL 稳定性由合并后的构建产物确认，而不只依赖约定：改动前的所有文档 slug 仍存在于
+  `out/client`，三个新增文档页在中英文两棵树中也都存在。唯一删除的站点路径是上游撤回的两个
+  营销页面。
+- 合并后的静态浏览器测试报告 309 项通过、2 项失败：`/` 和 `/zh` 的移动端
+  `no-js navigation` 超时。这两项在本次文档改动之前就已失败；本次没有新增失败。
 - `quota` 仍然保留为独立的参考页，没有合并或删除，因为删除 slug 需要先做重定向决策；它与
   `usage-and-quota` 的重叠仍待处理。
 - 中英文是同时写的，但都没有经过母语者审阅。

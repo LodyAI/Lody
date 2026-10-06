@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -5,9 +6,17 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { duration, ease, space } from '@lody/ui/tokens/scales.stylex';
 import { UserAvatar } from '@/components/user-avatar';
 import { settingsSurface as surface } from './surface';
-import { settingsType as type } from './type.stylex';
+
+// The desktop settings panel's icon-rail breakpoint; kept literal so StyleX resolves it.
+const NAV_RAIL = '@container desktop-settings (max-width: 720px)';
 
 const styles = stylex.create({
+  /**
+   * In the desktop panel's narrow band the entry is its avatar alone, centred
+   * in the icon column like every other rail row.
+   */
+  railRow: { justifyContent: { default: null, [NAV_RAIL]: 'center' } },
+  railLabel: { display: { default: null, [NAV_RAIL]: 'none' } },
   /**
    * On mobile the entry is a card of its own above the settings list, and the
    * whole card is the row a person opens. It restates the card's fill under
@@ -53,7 +62,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   chevron: { flexShrink: 0, width: '16px', height: '16px', color: colors.tertiaryLabel },
@@ -108,12 +117,12 @@ export function SettingsAccountEntry({
       onClick={onSelect}
       aria-pressed={active}
       aria-label={t('settings.account.open', 'Open account settings')}
-      {...stylex.props(surface.listRow, active && surface.listRowSelected)}
+      {...stylex.props(surface.listRow, styles.railRow, active && surface.listRowSelected)}
     >
       <span {...stylex.props(surface.listRowAvatar)}>
         <UserAvatar user={user} size="medium" />
       </span>
-      <span {...stylex.props(surface.listRowLabel)}>{name}</span>
+      <span {...stylex.props(surface.listRowLabel, styles.railLabel)}>{name}</span>
     </button>
   );
 }

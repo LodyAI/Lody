@@ -1,6 +1,12 @@
 import { type ReactElement, type ReactNode, useId, useState } from 'react';
 import { Check, Clock, Eye, Folder, UserRound, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { text } from '@lody/ui/tokens/scales.stylex';
+
+const typography = stylex.create({
+  option: { fontSize: text.subheadlineSize, lineHeight: text.subheadlineLeading },
+});
 
 import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust';
 import { cn } from '@/lib/utils';
@@ -84,7 +90,8 @@ function MenuOption({ label, icon: Icon, selected, onSelect }: MenuOptionProps) 
       role="menuitemradio"
       aria-checked={selected}
       className={cn(
-        'flex min-h-7 w-full select-none items-center gap-2 rounded-md px-2 py-1 text-left text-[0.9em] leading-tight text-popover-foreground',
+        'flex min-h-7 w-full select-none items-center gap-2 rounded-md px-2 py-1 text-left text-popover-foreground',
+        stylex.props(typography.option).className,
         'hover:bg-foreground/[0.05] hover:text-foreground',
         'focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-hidden',
         'dark:hover:bg-white/[0.10] dark:focus-visible:bg-white/[0.10]'
@@ -110,12 +117,7 @@ function MenuOption({ label, icon: Icon, selected, onSelect }: MenuOptionProps) 
 // (6px above, 2px below) instead of taking a whole 28px row of its own.
 function SectionHeading({ children }: { children: ReactNode }) {
   return (
-    <div
-      className={cn(
-        menuGroupLabelClassName,
-        'min-h-0 pb-0.5 pt-1.5 text-[0.75em] font-normal leading-tight'
-      )}
-    >
+    <div className={cn(menuGroupLabelClassName, 'min-h-0 pb-0.5 pt-1.5 font-normal')}>
       {children}
     </div>
   );
@@ -257,7 +259,8 @@ export function SidebarFilterPopover({
                   <label
                     htmlFor={projectNamesAvailable ? sourceLabelsSwitchId : undefined}
                     className={cn(
-                      'min-w-0 flex-1 select-none truncate text-[0.9em] leading-tight',
+                      'min-w-0 flex-1 select-none truncate',
+                      stylex.props(typography.option).className,
                       projectNamesAvailable ? 'cursor-pointer' : 'cursor-default'
                     )}
                   >

@@ -1,3 +1,4 @@
+import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
 import type { PreviewControlOperation } from '@lody/shared';
 import { mintPreviewControlProof } from '@/lib/preview-control-api';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
@@ -16,7 +17,11 @@ import {
   machineSupportsLocalFileResourcesProtocol,
   machineSupportsPiExtensions,
   machineSupportsSubagentCancellation,
+  machineSupportsIosSimulatorProtocol,
   machineSupportsPreviewControlProtocol,
+  IosSimulatorResponseSchema,
+  type IosSimulatorCommand,
+  type IosSimulatorResponse,
   type MachineProtocolCapabilities,
   type AgentConfigId,
   type CodeCollabV2Error,
@@ -1130,6 +1135,86 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const iosSimulatorFailure = (
+    sessionId: SessionId,
+    error: NonNullable<IosSimulatorResponse['error']>,
+    message: string
+  ): IosSimulatorResponse => ({
+    type: 'ios-simulator/control_response',
+    sessionId,
+    success: false,
+    error,
+    message,
+  });
+
+  /**
+   * One authenticated Machine RPC for every simulator command. The local plane
+   * goes straight to this machine's daemon and never touches the cloud; the
+   * remote plane signs the exact command with the preview-control proof.
+   */
+  const requestIosSimulatorControl = async ({
+    machineId,
+    sessionId,
+    requestedByUserId,
+    command,
+    timeoutMs = 15_000,
+  }: {
+    machineId: MachineId;
+    sessionId: SessionId;
+    requestedByUserId: string;
+    command: IosSimulatorCommand;
+    timeoutMs?: number;
+  }): Promise<IosSimulatorResponse> => {
+    try {
+      await waitForMachineRoute(machineId);
+      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+        const response = await getLocalMachineRpcSender()?.({
+          method: 'ios-simulator/control',
+          machineId,
+          workspaceId,
+          params: { sessionId, requestedByUserId, command },
+          timeoutMs,
+        });
+        if (!response) throw new Error('Local simulator control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return IosSimulatorResponseSchema.parse(response.result);
+      }
+      if (
+        !machineSupportsIosSimulatorProtocol({
+          protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId),
+        })
+      ) {
+        return iosSimulatorFailure(
+          sessionId,
+          'unsupported',
+          'Update Lody on this machine to preview simulators.'
+        );
+      }
+      const responseRecipient = await createRpcSecretRecipient();
+      const response = await (
+        await getMachineRpcClient(machineId)
+      ).requestIosSimulatorControl({
+        sessionId,
+        requestedByUserId,
+        command,
+        responseRecipient,
+        proof: await previewProof(machineId, sessionId, requestedByUserId, {
+          action: 'ios-simulator',
+          command,
+          responseKey: responseRecipient.publicKey,
+        }),
+        timeoutMs,
+      });
+      return response ?? iosSimulatorFailure(sessionId, 'failed', 'The machine did not answer.');
+    } catch (error) {
+      return iosSimulatorFailure(
+        sessionId,
+        'failed',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  };
+
   const requestSessionPreviewRevoke = async (
     machineId: MachineId,
     sessionId: SessionId,
@@ -1384,6 +1469,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionPreviewEndpointRelease,
     requestSessionPreviewRevoke,
     requestSessionPreviewStatus,
+    requestIosSimulatorControl,
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,

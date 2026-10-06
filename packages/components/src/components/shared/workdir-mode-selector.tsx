@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Folder, GitBranch } from 'lucide-react';
+import { ChevronDown, Folder, GitBranch } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -86,10 +86,6 @@ const styles = stylex.create({
     fontWeight: 500,
   },
   chevron: { width: '14px', height: '14px', flexShrink: 0, opacity: 0.7 },
-  optionRow: { display: 'flex', minWidth: 0, alignItems: 'center', gap: space[2] },
-  optionIcon: { width: '14px', height: '14px', flexShrink: 0, opacity: 0.8 },
-  optionLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  checkIcon: { width: '12px', height: '12px', opacity: 0.7 },
 });
 
 export type WorkdirMode = 'local' | 'worktree';
@@ -256,32 +252,36 @@ export function WorkdirModeSelector({
     <Menu.Root modal={modal}>
       <Menu.Trigger render={trigger}>{trigger}</Menu.Trigger>
       <Menu.Content align="end" width="compact">
-        {options.map((option) => {
-          const Icon = modeIcon[option.value];
-          const item = (
-            <Menu.Item
-              key={option.value}
-              disabled={option.disabled}
-              onClick={() => onModeChange(option.value)}
-            >
-              <span {...stylex.props(styles.optionRow)}>
-                <Icon {...stylex.props(styles.optionIcon)} />
-                <span {...stylex.props(styles.optionLabel)}>{option.label}</span>
-              </span>
-              {option.value === selectedMode ? <Check {...stylex.props(styles.checkIcon)} /> : null}
-            </Menu.Item>
-          );
-
-          if (option.description) {
-            return (
-              <Tooltip.Root key={option.value}>
-                <Tooltip.Trigger delay={500} render={item} />
-                <Tooltip.Content side="left">{option.description}</Tooltip.Content>
-              </Tooltip.Root>
+        <Menu.RadioGroup
+          value={selectedMode}
+          onValueChange={(next) => onModeChange(next as WorkdirMode)}
+        >
+          {options.map((option) => {
+            const Icon = modeIcon[option.value];
+            const item = (
+              <Menu.RadioItem
+                key={option.value}
+                value={option.value}
+                disabled={option.disabled}
+                icon={Icon}
+                indicator="check"
+                indicatorSide="end"
+              >
+                {option.label}
+              </Menu.RadioItem>
             );
-          }
-          return item;
-        })}
+
+            if (option.description) {
+              return (
+                <Tooltip.Root key={option.value}>
+                  <Tooltip.Trigger delay={500} render={item} />
+                  <Tooltip.Content side="left">{option.description}</Tooltip.Content>
+                </Tooltip.Root>
+              );
+            }
+            return item;
+          })}
+        </Menu.RadioGroup>
       </Menu.Content>
     </Menu.Root>
   );

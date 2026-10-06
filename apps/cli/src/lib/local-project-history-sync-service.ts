@@ -1,4 +1,3 @@
-import { readSessionHistory } from '@lody/shared/session-data';
 import {
   hashText,
   hashHistoryEntryV2,
@@ -51,11 +50,13 @@ import {
   isSessionHistoryPendingForDispatch,
   sanitizeLodyInternalInstructions,
   SessionStatusFactory,
+  NEW_SESSION_HISTORY_BACKEND,
   type ProjectRef,
   type SessionId,
 } from '@lody/shared';
 
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
+import { createSessionBackend, type SessionBackend } from '@/session/session-backend';
 import {
   readMachineLocalProjects,
   upsertMachineLocalProject,
@@ -144,15 +145,15 @@ export function materializeReplay(args: {
 
 /** The document rejects the imported runtime selection once a Lody turn is newer. */
 async function applyBoundHistoryImport(
-  sessionDoc: SessionDocument,
+  backend: Pick<SessionBackend, 'applyHistoryImport' | 'applyAcpRuntimeConfigPatch'>,
   input: HistoryImportInput & { replay: MaterializedReplay }
 ): Promise<number> {
-  const result = await sessionDoc.sessionData.commands.applyHistoryImport(input);
+  const result = await backend.applyHistoryImport(input);
   if (result.status === 'accepted') {
     const { history, runtimeConfig } = input.replay;
     const lastUserTurn = [...history].reverse().find((entry) => entry.role === 'user');
     if (runtimeConfig && lastUserTurn) {
-      sessionDoc.applyAcpRuntimeConfigPatch(lastUserTurn.id, runtimeConfig);
+      await backend.applyAcpRuntimeConfigPatch(lastUserTurn.id, runtimeConfig);
     }
     return result.appended;
   }
@@ -694,7 +695,8 @@ export class LocalProjectHistorySyncService {
     }
 
     const sessionDoc = await this.manager.getOrCreateSessionDoc(args.sessionId);
-    const currentHistoryBeforeReplay = readSessionHistory(sessionDoc.sessionData.history);
+    const backend = await createSessionBackend(sessionDoc, meta);
+    const currentHistoryBeforeReplay = await backend.readHistory();
     if (hasPendingDispatchHistory(currentHistoryBeforeReplay)) {
       throw new Error(
         'Cannot replace history while the imported session has a pending local turn.'
@@ -754,7 +756,7 @@ export class LocalProjectHistorySyncService {
       importedTurnHashVersion: latestImportedTurnHashVersion,
     } = await readSessionImportedTurnHashes(sessionDoc, latestExternalHistory);
     const latestCursor = await sessionDoc.getExternalHistoryCursor();
-    const latestHistory = readSessionHistory(sessionDoc.sessionData.history);
+    const latestHistory = await backend.readHistory();
     const decision = decideHistoryConflictResolution({
       externalHistory: latestExternalHistory,
       importedTurnHashes: latestImportedTurnHashes,
@@ -782,7 +784,7 @@ export class LocalProjectHistorySyncService {
     });
     const lastMessageAt = resolveSourceUpdatedAtMs(info, getServerNow());
 
-    await applyBoundHistoryImport(sessionDoc, {
+    await applyBoundHistoryImport(backend, {
       mode: 'resolve-conflict',
       replay: materialized,
       externalHistory: latestExternalHistory,
@@ -793,7 +795,7 @@ export class LocalProjectHistorySyncService {
       externalHistory: nextExternalHistory,
     } satisfies Partial<SessionMeta>);
 
-    const synced = await sessionDoc.waitUntilSynced();
+    const synced = await backend.waitUntilSynced();
     if (!synced) {
       throw new Error(
         `Replaced history for ${args.sessionId} did not confirm sync before timeout.`
@@ -972,6 +974,7 @@ export class LocalProjectHistorySyncService {
       origin: 'external-acp',
       cliType: this.provider.cliType,
       agentType: this.provider.agentType,
+      historyBackend: NEW_SESSION_HISTORY_BACKEND,
       ...(agentConfig ? { agentConfigId: agentConfig.id } : {}),
       project: args.project,
       title: resolveSessionTitle(args.info, this.provider),
@@ -988,10 +991,29 @@ export class LocalProjectHistorySyncService {
     };
 
     try {
-      const sessionDoc = await this.manager.getOrCreateSessionDoc(sessionId);
-      await applyBoundHistoryImport(sessionDoc, { mode: 'initialize', replay: args.materialized });
+      // Persist the backend discriminator before opening the document or
+      // accepting imported history. A crash between those operations must not
+      // leave a history-bearing session whose next opener defaults to Loro.
+      await this.manager.repo.upsertDocMeta(roomId, {
+        ...meta,
+        status: SessionStatusFactory.initializing(),
+        // The shell is discoverable for retry, but must not look like a
+        // completed import if the process dies before history is committed.
+        externalHistory: {
+          ...meta.externalHistory!,
+          status: 'metadata_only',
+        },
+      });
+      const sessionDoc = await this.manager.getOrCreateSessionDoc(sessionId, {
+        historyBackend: meta.historyBackend,
+      });
+      const backend = await createSessionBackend(sessionDoc, meta);
+      await applyBoundHistoryImport(backend, {
+        mode: 'initialize',
+        replay: args.materialized,
+      });
       await this.manager.repo.upsertDocMeta(roomId, meta);
-      const synced = await sessionDoc.waitUntilSynced();
+      const synced = await backend.waitUntilSynced();
       if (!synced) {
         this.logger.warn(
           `[${this.providerKey}-history-sync] Imported history for ${sessionId} did not ` +
@@ -1049,9 +1071,10 @@ export class LocalProjectHistorySyncService {
       await this.sessionAgentConfig(args.existing.meta)
     );
     const sessionDoc = await this.manager.getOrCreateSessionDoc(args.existing.sessionId);
+    const backend = await createSessionBackend(sessionDoc, args.existing.meta);
     let appended = 0;
     try {
-      appended = await applyBoundHistoryImport(sessionDoc, {
+      appended = await applyBoundHistoryImport(backend, {
         mode: 'refresh',
         replay: materialized,
         externalHistory,
@@ -1063,7 +1086,7 @@ export class LocalProjectHistorySyncService {
       // handle. If we unload too early, the conflict state can remain
       // local-cache only and the user sees an "imported" session while other
       // clients keep seeing the stale state.
-      const synced = await sessionDoc.waitUntilSynced();
+      const synced = await backend.waitUntilSynced();
       if (!synced) {
         this.logger.debug(
           `[${this.providerKey}-history-sync] Conflict marker for ${
@@ -1089,7 +1112,7 @@ export class LocalProjectHistorySyncService {
     // unloading. Otherwise the new turns may live only in this process's local
     // cache, and a refresh from another client will see the prior cursor and
     // think the import never happened.
-    const synced = await sessionDoc.waitUntilSynced();
+    const synced = await backend.waitUntilSynced();
     if (!synced) {
       this.logger.debug(
         `[${this.providerKey}-history-sync] Appended history for ${

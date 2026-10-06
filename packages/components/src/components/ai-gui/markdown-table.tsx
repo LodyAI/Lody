@@ -4,6 +4,15 @@ import { useTranslation } from 'react-i18next';
 import type { ExtraProps } from 'react-markdown';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
+
+const typography = stylex.create({
+  table: {
+    fontSize: `var(--markdown-code-font-size, ${textScale.subheadlineSize})`,
+    lineHeight: `var(--markdown-code-line-height, ${textScale.subheadlineLeading})`,
+  },
+});
 
 const COPIED_FEEDBACK_MS = 1500;
 
@@ -200,6 +209,7 @@ export function MarkdownTable({ node, children, ...props }: MarkdownTableProps) 
           data-break-anywhere-columns={columns.breakAnywhere.join(' ')}
           data-wide-columns={columns.wide.join(' ')}
           {...props}
+          className={cn(stylex.props(typography.table).className, props.className)}
         >
           {columns.widthsEm.length > 0 ? (
             <colgroup>

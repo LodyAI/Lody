@@ -1,9 +1,12 @@
-import { useCallback, useId, useMemo, useState, type CSSProperties } from 'react';
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
+import { useCallback, useId, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Bug, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
+import { Tabs } from '@lody/ui/tabs';
+import { Tooltip } from '@lody/ui/tooltip';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useSetAtom } from 'jotai';
 import {
@@ -61,7 +64,12 @@ const PANEL_STYLE: CSSProperties = {
   padding: 0,
   gap: 0,
   overflow: 'hidden',
+  containerType: 'inline-size',
+  containerName: 'desktop-settings',
 };
+
+// Below this the nav column answers as its icon rail; the panel is narrower than the window.
+const NARROW = '@container desktop-settings (max-width: 720px)';
 
 /** The close button's inset, equal from the top and the end of the right pane. */
 const CLOSE_INSET = space[2];
@@ -80,16 +88,22 @@ const styles = stylex.create({
   },
   body: {
     display: 'flex',
+    flexDirection: 'row',
     flexGrow: 1,
     minHeight: 0,
     overflow: 'hidden',
   },
-  /** The nav: its fill (`surface.nav`) is what splits it from the page. */
+  /**
+   * The nav stays the nav at every width — the rail keeps its fill
+   * (`surface.nav`), its grouping and its selection. What collapses is its
+   * width: below the panel's narrow breakpoint it is the rows' icon column
+   * only, the same sidebar answering with less room.
+   */
   nav: {
     display: 'flex',
     flexDirection: 'column',
     flexShrink: 0,
-    width: '240px',
+    width: { default: '240px', [NARROW]: '48px' },
   },
   navScroll: {
     display: 'flex',
@@ -99,18 +113,28 @@ const styles = stylex.create({
     minHeight: 0,
     overflowY: 'auto',
     padding: space[3],
+    paddingInline: { default: space[3], [NARROW]: space[1.5] },
   },
   navGroupHeading: {
+    display: { default: 'block', [NARROW]: 'none' },
     margin: 0,
     paddingInline: space[2],
     paddingBottom: space[1],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontWeight: 400,
     lineHeight: type.leading,
     color: colors.tertiaryLabel,
   },
   navGroupRows: { display: 'flex', flexDirection: 'column', gap: '2px' },
-  navFooter: { marginTop: 'auto', padding: space[3] },
+  /** On the rail a row is its icon, centred in the icon column. */
+  navRowRail: { justifyContent: { default: null, [NARROW]: 'center' } },
+  /** A rail row's words leave the rail; its name still reaches the a11y tree. */
+  navRowLabelRail: { display: { default: null, [NARROW]: 'none' } },
+  navFooter: {
+    marginTop: 'auto',
+    padding: space[3],
+    paddingInline: { default: space[3], [NARROW]: space[1.5] },
+  },
   content: {
     position: 'relative',
     display: 'flex',
@@ -135,19 +159,27 @@ const styles = stylex.create({
     paddingTop: '20px',
   },
   header: { flexShrink: 0 },
-  /** The page's name and its actions, on one line. */
+  /** Page actions wrap below the title when the pane cannot fit both. */
   headerRow: {
     display: 'flex',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: space[3],
     minHeight: '40px',
   },
-  headerActions: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
+  headerTitle: { minWidth: 0, overflowWrap: 'anywhere' },
+  headerActions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: space[2],
+  },
   /** The page's lead, under its name; empty on a page without one. */
   headerLead: {
     margin: 0,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: type.leading,
     color: colors.secondaryLabel,
     ':empty': { display: 'none' },
@@ -162,7 +194,7 @@ const styles = stylex.create({
     width: '100%',
     maxWidth: '760px',
     marginInline: 'auto',
-    paddingInline: space[4],
+    paddingInline: { default: space[4], [NARROW]: 0 },
   },
   paneBody: { flexGrow: 1, minHeight: 0 },
   fill: { height: '100%' },
@@ -172,7 +204,7 @@ const styles = stylex.create({
    * stays flush with the pane edge.
    */
   paneInset: {
-    paddingInlineStart: space[6],
+    paddingInlineStart: { default: space[6], [NARROW]: space[4] },
     paddingInlineEnd: '40px',
     paddingBottom: space[6],
   },
@@ -253,6 +285,41 @@ function SettingsModalBody() {
     onItemFocus: handleNavigationItemFocus,
     scopeId: navigationScopeId,
   });
+  const [navScroller, setNavScroller] = useState<HTMLElement | null>(null);
+  /** Below the rail threshold the nav answers with icons; labels hide in CSS. */
+  const [navIsRail, setNavIsRail] = useState(false);
+  useLayoutEffect(() => {
+    if (!navScroller) return undefined;
+    const updateRail = () => {
+      const rail = navScroller.parentElement;
+      const next = rail ? rail.getBoundingClientRect().width <= 56 : false;
+      setNavIsRail((previous) => (previous === next ? previous : next));
+    };
+    const revealSelected = () => {
+      const selected = navScroller.querySelector<HTMLElement>('[aria-current="page"]');
+      if (!selected || navScroller.clientHeight === 0) return;
+      const railBox = navScroller.getBoundingClientRect();
+      const selectedBox = selected.getBoundingClientRect();
+      if (selectedBox.top >= railBox.top && selectedBox.bottom <= railBox.bottom) return;
+      // Scroll only this column: scrollIntoView can also move the dialog's page.
+      navScroller.scrollTo({
+        top:
+          navScroller.scrollTop +
+          selectedBox.top -
+          railBox.top -
+          (railBox.height - selectedBox.height) / 2,
+      });
+    };
+    const observe = () => {
+      updateRail();
+      revealSelected();
+    };
+    const observer = new ResizeObserver(observe);
+    observer.observe(navScroller);
+    if (navScroller.parentElement) observer.observe(navScroller.parentElement);
+    observe();
+    return () => observer.disconnect();
+  }, [navScroller, resolvedActiveTab]);
   const groupedSections: Array<{
     id: Exclude<SettingsSectionId, 'account'>;
     label: string;
@@ -276,145 +343,200 @@ function SettingsModalBody() {
       <Dialog.Description {...stylex.props(styles.srOnly)}>
         {t('settings.title')}
       </Dialog.Description>
-      <div {...stylex.props(styles.body)}>
-        <FocusScope
-          id={navigationScopeId}
-          role="navigation"
-          aria-label={t('settings.title')}
-          {...stylex.props(styles.nav, surface.nav)}
-        >
-          <nav {...stylex.props(styles.navScroll)}>
-            {groupedSections.map((section) => {
-              const tabs = navigationTabs.filter((tab) => tab.section === section.id);
-              const showsAccountEntry = section.id === 'personal' && accountTab;
-              if (tabs.length === 0 && !showsAccountEntry) return null;
-              return (
-                <section key={section.id} aria-label={section.label}>
-                  <h2 {...stylex.props(styles.navGroupHeading)}>{section.label}</h2>
-                  <div {...stylex.props(styles.navGroupRows)}>
-                    {showsAccountEntry ? (
-                      <div
-                        data-id="settings:account"
-                        data-scope-item="row"
-                        data-settings-tab-id="account"
-                      >
-                        <SettingsAccountEntry
-                          user={session?.user}
-                          active={resolvedActiveTab === 'account'}
-                          onSelect={() => selectTab('account')}
-                        />
-                      </div>
-                    ) : null}
-                    {tabs.map((tab) => {
-                      const Icon = tab.icon;
-                      const active = resolvedActiveTab === tab.id;
-                      return (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          aria-current={active ? 'page' : undefined}
-                          data-id={`settings:${tab.id}`}
-                          data-scope-item="row"
-                          data-settings-tab-id={tab.id}
-                          {...stylex.props(surface.listRow, active && surface.listRowSelected)}
-                          onClick={() => selectTab(tab.id)}
-                        >
-                          <Icon
-                            {...stylex.props(
-                              surface.listRowIcon,
-                              active && surface.listRowIconSelected
-                            )}
-                            strokeWidth={1.75}
-                            aria-hidden="true"
-                          />
-                          <span {...stylex.props(surface.listRowLabel)}>{t(tab.labelKey)}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-              );
-            })}
-          </nav>
-          {canReportBug && (
-            <div {...stylex.props(styles.navFooter)}>
-              <button
-                type="button"
-                data-id="settings:report-bug"
-                data-scope-item="row"
-                {...stylex.props(surface.listRow)}
-                onClick={handleReportBug}
+      <Tabs.Root
+        value={resolvedActiveTab}
+        onValueChange={(value) => {
+          if (value !== null) selectTab(value as SettingsTabId);
+        }}
+        render={<div style={{ display: 'contents' }} />}
+      >
+        <div {...stylex.props(styles.body)}>
+          <FocusScope
+            id={navigationScopeId}
+            role="navigation"
+            aria-label={t('settings.title')}
+            {...stylex.props(styles.nav, surface.nav)}
+          >
+            <Tooltip.Provider delay={250}>
+              <nav
+                ref={setNavScroller}
+                data-settings-nav-viewport=""
+                {...stylex.props(styles.navScroll)}
               >
-                <Bug {...stylex.props(surface.listRowIcon)} strokeWidth={1.75} />
-                <span {...stylex.props(surface.listRowLabel)}>
-                  {t('bugReport.title', 'Report a bug')}
-                </span>
-              </button>
-            </div>
-          )}
-        </FocusScope>
-
-        <FocusScope id={contentScopeId} role="main" {...stylex.props(styles.content)}>
-          <Dialog.Close
-            render={
-              <Button
-                variant="ghost"
-                size="mini"
-                icon
-                aria-label={t('common.close', 'Close')}
-                {...stylex.props(styles.close)}
-              />
-            }
-          >
-            <X {...stylex.props(styles.closeGlyph)} aria-hidden="true" />
-          </Dialog.Close>
-          <div
-            ref={setPane}
-            {...stylex.props(
-              // Declared again here so the tokens resolve against the pane's own
-              // `--card` (white in light mode); see `lody-ui-palette.stylex.ts`.
-              resolvedTheme === 'dark' ? productDarkPalette : productLightPalette,
-              settingsFlat,
-              styles.surface,
-              surface.canvas
-            )}
-            data-settings-surface=""
-          >
-            <header {...stylex.props(styles.header, styles.paneInset, styles.headerFlush)}>
-              <div {...stylex.props(styles.headerColumn)}>
-                <div {...stylex.props(styles.headerRow)}>
-                  {/* The dialog's title style would tie with this one on the same
-                    element; the page title's size lives on its own box. */}
-                  <Dialog.Title>
-                    <span {...stylex.props(surface.pageTitle)}>{t(activeTabConfig.labelKey)}</span>
-                  </Dialog.Title>
-                  <div ref={setActionsSlot} {...stylex.props(styles.headerActions)} />
-                </div>
-                <p ref={setLeadSlot} {...stylex.props(styles.headerLead)} />
-              </div>
-            </header>
-            <SettingsPaneHeaderProvider value={headerSlots}>
-              <div {...stylex.props(styles.paneBody)}>
-                {usesInternalScrolling ? (
-                  <div {...stylex.props(styles.fill, styles.paneInset)}>
-                    <div {...stylex.props(styles.fill, styles.paneColumn)}>
-                      <SettingsTabContent tabId={resolvedActiveTab} />
-                    </div>
-                  </div>
-                ) : (
-                  <ScrollArea {...stylex.props(styles.fill)}>
-                    <div {...stylex.props(styles.paneInset)}>
-                      <div {...stylex.props(styles.paneColumn)}>
-                        <SettingsTabContent tabId={resolvedActiveTab} />
+                {groupedSections.map((section) => {
+                  const tabs = navigationTabs.filter((tab) => tab.section === section.id);
+                  const showsAccountEntry = section.id === 'personal' && accountTab;
+                  if (tabs.length === 0 && !showsAccountEntry) return null;
+                  return (
+                    <section key={section.id} aria-label={section.label}>
+                      <h2 {...stylex.props(styles.navGroupHeading)}>{section.label}</h2>
+                      <div {...stylex.props(styles.navGroupRows)}>
+                        {showsAccountEntry ? (
+                          <div
+                            data-id="settings:account"
+                            data-scope-item="row"
+                            data-settings-tab-id="account"
+                          >
+                            <SettingsAccountEntry
+                              user={session?.user}
+                              active={resolvedActiveTab === 'account'}
+                              onSelect={() => selectTab('account')}
+                            />
+                          </div>
+                        ) : null}
+                        {tabs.map((tab) => {
+                          const Icon = tab.icon;
+                          const active = resolvedActiveTab === tab.id;
+                          const label = t(tab.labelKey);
+                          return (
+                            <Tooltip.Root key={tab.id}>
+                              <Tooltip.Trigger
+                                render={
+                                  <button
+                                    type="button"
+                                    aria-label={label}
+                                    aria-current={active ? 'page' : undefined}
+                                    data-id={`settings:${tab.id}`}
+                                    data-scope-item="row"
+                                    data-settings-tab-id={tab.id}
+                                    {...stylex.props(
+                                      surface.listRow,
+                                      styles.navRowRail,
+                                      active && surface.listRowSelected
+                                    )}
+                                    onClick={() => selectTab(tab.id)}
+                                  >
+                                    <Icon
+                                      {...stylex.props(
+                                        surface.listRowIcon,
+                                        active && surface.listRowIconSelected
+                                      )}
+                                      strokeWidth={1.75}
+                                      aria-hidden="true"
+                                    />
+                                    <span
+                                      {...stylex.props(
+                                        surface.listRowLabel,
+                                        styles.navRowLabelRail
+                                      )}
+                                    >
+                                      {label}
+                                    </span>
+                                  </button>
+                                }
+                              />
+                              {navIsRail ? (
+                                <Tooltip.Content side="right">{label}</Tooltip.Content>
+                              ) : null}
+                            </Tooltip.Root>
+                          );
+                        })}
                       </div>
-                    </div>
-                  </ScrollArea>
+                    </section>
+                  );
+                })}
+              </nav>
+              {canReportBug && (
+                <div {...stylex.props(styles.navFooter)}>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger
+                      render={
+                        <button
+                          type="button"
+                          aria-label={t('bugReport.title', 'Report a bug')}
+                          data-id="settings:report-bug"
+                          data-scope-item="row"
+                          {...stylex.props(surface.listRow, styles.navRowRail)}
+                          onClick={handleReportBug}
+                        >
+                          <Bug {...stylex.props(surface.listRowIcon)} strokeWidth={1.75} />
+                          <span {...stylex.props(surface.listRowLabel, styles.navRowLabelRail)}>
+                            {t('bugReport.title', 'Report a bug')}
+                          </span>
+                        </button>
+                      }
+                    />
+                    {navIsRail ? (
+                      <Tooltip.Content side="right">
+                        {t('bugReport.title', 'Report a bug')}
+                      </Tooltip.Content>
+                    ) : null}
+                  </Tooltip.Root>
+                </div>
+              )}
+            </Tooltip.Provider>
+          </FocusScope>
+
+          {/* Tabs.Panel owns its DOM id; FocusScope consumes id as a keyboard-scope key. */}
+          <Tabs.Panel
+            value={resolvedActiveTab}
+            keepMounted
+            render={<div {...stylex.props(styles.content)} />}
+          >
+            <FocusScope id={contentScopeId} {...stylex.props(styles.content)}>
+              <Dialog.Close
+                render={
+                  <Button
+                    variant="ghost"
+                    size="mini"
+                    icon
+                    aria-label={t('common.close', 'Close')}
+                    {...stylex.props(styles.close)}
+                  />
+                }
+              >
+                <X {...stylex.props(styles.closeGlyph)} aria-hidden="true" />
+              </Dialog.Close>
+              <div
+                ref={setPane}
+                {...stylex.props(
+                  // Declared again here so the tokens resolve against the pane's own
+                  // `--card` (white in light mode); see `lody-ui-palette.stylex.ts`.
+                  resolvedTheme === 'dark' ? productDarkPalette : productLightPalette,
+                  settingsFlat,
+                  styles.surface,
+                  surface.canvas
                 )}
+                data-settings-surface=""
+              >
+                <header {...stylex.props(styles.header, styles.paneInset, styles.headerFlush)}>
+                  <div {...stylex.props(styles.headerColumn)}>
+                    <div {...stylex.props(styles.headerRow)}>
+                      {/* The inner box keeps page-title sizing from competing with dialog styles. */}
+                      <Dialog.Title {...stylex.props(styles.headerTitle)}>
+                        <span {...stylex.props(surface.pageTitle)}>
+                          {t(activeTabConfig.labelKey)}
+                        </span>
+                      </Dialog.Title>
+                      <div ref={setActionsSlot} {...stylex.props(styles.headerActions)} />
+                    </div>
+                    <p ref={setLeadSlot} {...stylex.props(styles.headerLead)} />
+                  </div>
+                </header>
+                <SettingsPaneHeaderProvider value={headerSlots}>
+                  <div {...stylex.props(styles.paneBody)}>
+                    {usesInternalScrolling ? (
+                      <div {...stylex.props(styles.fill, styles.paneInset)}>
+                        <div {...stylex.props(styles.fill, styles.paneColumn)}>
+                          <SettingsTabContent tabId={resolvedActiveTab} />
+                        </div>
+                      </div>
+                    ) : (
+                      <ScrollArea {...stylex.props(styles.fill)}>
+                        <div {...stylex.props(styles.paneInset)}>
+                          <div {...stylex.props(styles.paneColumn)}>
+                            <SettingsTabContent tabId={resolvedActiveTab} />
+                          </div>
+                        </div>
+                      </ScrollArea>
+                    )}
+                  </div>
+                </SettingsPaneHeaderProvider>
               </div>
-            </SettingsPaneHeaderProvider>
-          </div>
-        </FocusScope>
-      </div>
+            </FocusScope>
+          </Tabs.Panel>
+        </div>
+      </Tabs.Root>
     </SettingsDataCacheProvider>
   );
 }

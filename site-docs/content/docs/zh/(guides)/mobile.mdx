@@ -7,22 +7,6 @@ description: 安装 Lody 原生移动端应用，接收 Agent 通知、监控进
 
 Lody 提供 iOS 与 Android 原生应用，让你随时随地都能继续编码。
 
-手机控制的是连接机器上的 Agent，并不在手机上执行编程运行时。工作流和官方替代方案概览见
-[Remote Control for Your Coding Agents（英文）](/coding-agent-remote-control/)。
-
-## 连接执行机器
-
-1. 在实际运行 Agent 的工作站或服务器上完成[快速开始](/zh/docs/quickstart/)。桌面应用会启动本地
-   CLI daemon，也可以在目标机器执行 `npx lody daemon start` 并完成登录。
-2. 保持机器唤醒、联网且 Lody CLI 持续运行。休眠、断网或停止 CLI 后，实时远程工作将不可用。
-3. 在该机器上添加项目并[配置 Agent](/zh/docs/agents/)，准备所需的运行时认证和依赖。
-4. 在移动端登录同一个 Lody 工作区，选择项目、执行机器和 Agent Config，开始或继续对话。
-
-统一工作流支持已配置的 Codex、Claude Code、Kimi Code、GLM over Claude Code、DeepSeek Harness
-和 Pi 集成。GLM 是 Claude Code 的模型服务预设，DeepSeek Harness 则是独立的内置 ACP Provider。
-模型、模式、权限控件与扩展仍取决于运行时；这不代表六种运行时与所有移动设备的组合均完成端到端验证。
-配置边界见[集成指南](/zh/docs/agents/#选择集成方式)。
-
 ## 安装应用
 
 ### iOS

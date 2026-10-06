@@ -338,6 +338,20 @@ describe('useGitHubPrDetails target isolation', () => {
     expect(currentResult?.error).toBeNull();
   });
 
+  it('rejects a comment instead of silently dropping it while identity is unverified', async () => {
+    identityMocks.versions = { identityPending: true };
+    await renderHook({
+      workspaceId: 'identity-ws',
+      sessionId: 'old-session',
+      repoFullName: 'org/repo',
+      prNumber: 7,
+    });
+    expect(currentResult?.state).toBe('error');
+
+    await expect(currentResult?.postComment('typed but never posted')).rejects.toThrow('not ready');
+    expect(githubMocks.githubCreatePRIssueComment).not.toHaveBeenCalled();
+  });
+
   it('does not fall back to a session name when its identity query returns null', async () => {
     await renderHook({
       workspaceId: 'ws-null',

@@ -17,7 +17,10 @@ import {
 } from '@/components/settings/settings-data-cache';
 import { UsageCalendarVisualization } from '@/components/settings/usage-calendar-visualization';
 import { UsageCalendarSkeleton } from '@/components/settings/usage-calendar-skeleton';
-import { formatUsageTimelineBucketLabel } from '@/components/settings/usage-timeline-bucket-label';
+import {
+  createUsageTimelineFormatter,
+  formatUsageTimelineBucketLabel,
+} from '@/components/settings/usage-timeline-bucket-label';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 
@@ -58,15 +61,7 @@ export function MobileStatsSettings() {
   const { workspaceId, usageTimelineByRange, usageCalendar } = useSettingsDataCache();
   const [selectedUsageDayMs, setSelectedUsageDayMs] = useState<number | null>(null);
   const { day: usageDay, loading: usageDayLoading } = useSettingsUsageDay(selectedUsageDayMs);
-  const dayTimeFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }),
-    [locale]
-  );
+  const dayTimeFormatter = useMemo(() => createUsageTimelineFormatter(locale), [locale]);
   const formatTokensCompact = useMemo(
     () => (value: number) => formatCompactNumber(value, locale),
     [locale]
@@ -167,6 +162,7 @@ export function MobileStatsSettings() {
             {usageCalendar ? (
               <UsageCalendarVisualization
                 calendar={usageCalendar}
+                timeline={usageTimeline}
                 workspaceName={activeOrganization?.name}
                 dayDetail={usageDay}
                 dayDetailLoading={usageDayLoading}

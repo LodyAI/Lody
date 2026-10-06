@@ -102,10 +102,10 @@ describe('cloudflared process ownership', () => {
     expect(handle.origin).toBe('https://fixture-quick.trycloudflare.com');
     expect(handle.diagnostic()).toContain('connection=not registered');
     child.stderr.write(
-      `${JSON.stringify({ message: 'Registered tunnel connection', protocol: 'quic' })}\n`
+      `${JSON.stringify({ message: 'Registered tunnel connection', protocol: 'http2' })}\n`
     );
     await expect(handle.registered).resolves.toBeUndefined();
-    expect(handle.diagnostic()).toContain('connection=registered (quic)');
+    expect(handle.diagnostic()).toContain('connection=registered (http2)');
     child.log(
       'Unable to reach edge https://example.test/?token=secret',
       'error',

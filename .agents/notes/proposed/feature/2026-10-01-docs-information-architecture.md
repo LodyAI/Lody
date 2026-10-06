@@ -10,9 +10,11 @@ The public docs had grown into one flat 30-item "Features" list ordered by relea
 readers had no ramp and experienced Codex or Claude Code users had no migration entry. This proposal
 groups the tree by reader path (Getting Started, Core Concepts, Guides, Coming from another agent,
 Reference), adds a first-session tutorial, a concepts and glossary page, and a migration page, and
-keeps every existing URL stable because only parenthesized virtual groups moved. The restructure is
-written into content, the path-dependent tests are updated, and a production build, typecheck, unit
-tests, and the static browser suite have now run; they add no new failures versus `HEAD`.
+keeps every existing docs URL stable because only parenthesized virtual groups moved. The branch is
+merged with `origin/main`, including the upstream revert of the two unintended coding-agent workflow
+pages. The restructure is written into content, the path-dependent tests are updated, and a
+production build, typecheck, package tests, and the static browser suite have run against the merged
+tree; they add no new failures.
 
 ## Problem
 
@@ -51,18 +53,21 @@ tests, and the static browser suite have now run; they add no new failures versu
 ## Verification and limits
 
 - Verified in the authoring worktree after an offline install (`pnpm --filter @lody/site-docs
-  install --offline --frozen-lockfile`): `generate`, `tsc --noEmit`, and the package test suite
-  (54 tests) pass, and a full `pnpm build` prerenders 259 HTML pages. The nested `(reference)/(...)`
-  groups and all four subgroups render in both locales, and each new and moved page appears at its
-  published URL. A filtered install cannot build site-docs until a full workspace install supplies
-  the hoisted `tw-animate-css` that `app/global.css` imports.
-- URL stability is confirmed against the build output, not only by convention: every pre-change slug
-  still exists under `out/client`, and `scripts/site-paths.mjs` reports 0 lost and 3 added paths per
-  locale.
-- The static browser suite still reports three failures that are identical at `HEAD`: the
-  `repaired Chinese CLI link and anchor` anchor gains a trailing slash after the fragment, and the
-  two mobile `no-js navigation` cases time out. The baseline run had those plus two more; this change
-  adds no new failures.
+  install --offline --frozen-lockfile`): `generate`, `tsc --noEmit`, and `pnpm --filter
+  @lody/site-docs test` pass, and a full `pnpm build` prerenders 257 HTML pages. The nested
+  `(reference)/(...)` groups and all four subgroups render in both locales, and each new and moved
+  page appears at its published URL. A filtered install cannot build site-docs until a full
+  workspace install supplies the hoisted `tw-animate-css` that `app/global.css` imports.
+- The branch is merged with `origin/main` through the upstream revert of the unintended
+  `/coding-agent-gui` and `/coding-agent-remote-control` pages. Those routes, footer/nav links, and
+  docs links are gone; the docs index keeps one `Daemon Mode` anchor link so the upstream
+  query/fragment browser checks still pass.
+- URL stability is confirmed against the merged build output, not only by convention: every
+  pre-change docs slug still exists under `out/client`, and the three new docs pages are present in
+  both locales. The only removed site paths are the two upstream-reverted marketing pages.
+- The merged static browser suite reports 309 passing cases and two failures: the mobile
+  `no-js navigation` cases for `/` and `/zh` time out. Those two were already failing before this
+  branch's docs changes; the branch adds no new failures.
 - `quota` remains a separate reference page rather than being merged or removed, because removing a
   slug needs a redirect decision. The overlap with `usage-and-quota` is still open.
 - English and Chinese were written together, but neither was reviewed by a native speaker.

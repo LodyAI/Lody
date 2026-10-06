@@ -57,7 +57,7 @@ describes the shared parsing and persistence boundary.
 | `session-goal-banner.tsx`, `session-goal-control.ts`                          | Goal actions reused by the goal chip                             |
 | `session-plan-bar.tsx`, `session-tasklist-mapping.ts`                         | Plan/tasklist presentation                                       |
 | `scheduled-tasks-panel.tsx`                                                   | Scheduled task list reused by the schedule chip                  |
-| `session-usage-popover.tsx`                                                   | Usage/context popover                                            |
+| `session-usage-popover.tsx`                                                   | Context and subscription usage ([display contract](../../../../../specs/session-usage-indicator.md)) |
 | `pull-request-badge.tsx`, `pr-merge-button.tsx`, `pr-merge-method.ts`         | PR identity and merge split-button                               |
 | `pr-tab-container.tsx`, `pr-tab-view.tsx`                                     | PR side-panel tab                                                |
 | `create-pr-prompt.ts`, `session-pr-prompts.ts`, `session-pr-agent-action.ts`  | Agent prompts behind Create PR / Fix CI / Resolve Conflicts      |

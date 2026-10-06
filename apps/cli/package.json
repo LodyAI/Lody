@@ -107,6 +107,7 @@
     "vite-plugin-top-level-await": "catalog:",
     "vite-plugin-wasm": "catalog:",
     "vitest": "^3.2.4",
+    "werift": "0.24.4",
     "winston": "^3.18.3",
     "winston-daily-rotate-file": "^5.0.0",
     "winston-transport": "^4.7.1",

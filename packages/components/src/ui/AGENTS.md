@@ -4,6 +4,12 @@ Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
 `AGENTS.md` only. Prefer extending a primitive here over a private replacement in a
 feature directory.
 
+## Drawer popups
+
+- `DrawerContent` provides an internal boxless no-drag popup host via state.
+  Keep portals inside that modal and outside scrolling children: body portals
+  inherit Vaul's pointer lock and clicks pass through to the underlying content.
+
 ## Emoji picker
 
 `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its two copy

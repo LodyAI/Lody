@@ -150,13 +150,14 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const ActiveForecast: Story = {
-  args: { state: readyState({ watch, latestReset: null }) },
+  args: { state: readyState({ watch, scheduledReset: null, latestReset: null }) },
 };
 
 export const WithoutProbability: Story = {
   args: {
     state: readyState({
       watch: { ...watch, chancePercent: null, level: 'elevated' },
+      scheduledReset: null,
       latestReset: null,
     }),
   },
@@ -167,5 +168,22 @@ export const WithoutProbability: Story = {
  * row keeps its always-present entry into the dialog.
  */
 export const NoActiveWatch: Story = {
-  args: { state: readyState({ watch: null, latestReset: null }) },
+  args: { state: readyState({ watch: null, scheduledReset: null, latestReset: null }) },
+};
+
+export const ScheduledReset: Story = {
+  args: {
+    state: readyState({
+      watch: null,
+      latestReset: null,
+      scheduledReset: {
+        announcedAtIso: watch.observedAtIso,
+        announcedAtMs: watch.observedAtMs,
+        scheduledForIso: watch.expiresAtIso,
+        scheduledForMs: watch.expiresAtMs,
+        text: 'A reset is scheduled for later today.',
+        source: watch.source,
+      },
+    }),
+  },
 };

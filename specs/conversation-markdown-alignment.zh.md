@@ -9,5 +9,5 @@ Translation: current
 
 ## 证据
 
-- 实现：[Markdown 渲染器](../packages/components/src/components/ai-gui/markdown-renderer.tsx)和[会话 Markdown 样式](../packages/components/src/tailwind/index.css)。
+- 实现：[Markdown 渲染器](../packages/components/src/components/ai-gui/markdown-renderer.tsx)。
 - 决策：[移除 CJK 段落两端对齐](../.agents/notes/implemented/simplification/2026-09-29-remove-cjk-markdown-justification.zh.md)。

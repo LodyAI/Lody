@@ -202,6 +202,35 @@ describe('editing an existing schedule', () => {
 });
 
 describe('switching between kinds', () => {
+  it('carries a Once wall time and calendar defaults on the selected machine clock', () => {
+    const once: ScheduleRecurrence = { kind: 'once', at: '2026-10-01T09:21:00Z' };
+    const now = Date.parse('2026-10-01T00:30:00Z');
+    expect(changeScheduleRecurrenceKind(once, 'daily', now, 'America/Los_Angeles')).toEqual({
+      kind: 'daily',
+      hour: 2,
+      minute: 21,
+      timeZone: 'America/Los_Angeles',
+    });
+    expect(changeScheduleRecurrenceKind(once, 'daily', now, 'Asia/Singapore')).toEqual({
+      kind: 'daily',
+      hour: 17,
+      minute: 21,
+      timeZone: 'Asia/Singapore',
+    });
+    expect(changeScheduleRecurrenceKind(once, 'weekly', now, 'America/Los_Angeles')).toMatchObject({
+      weekdays: [3],
+      hour: 2,
+      minute: 21,
+    });
+    expect(changeScheduleRecurrenceKind(once, 'monthly', now, 'America/Los_Angeles')).toMatchObject(
+      {
+        days: [30],
+      }
+    );
+    const daily = changeScheduleRecurrenceKind(once, 'daily', now, 'America/Los_Angeles');
+    const back = changeScheduleRecurrenceKind(daily, 'once', now, 'America/Los_Angeles');
+    expect(back).toEqual({ kind: 'once', at: '2026-10-01T01:30:00.000Z' });
+  });
   it('carries the time of day across kinds that have one', () => {
     const start: ScheduleRecurrence = { kind: 'daily', hour: 7, minute: 30, timeZone: ZONE };
     expect(changeScheduleRecurrenceKind(start, 'weekly', NOW)).toEqual({

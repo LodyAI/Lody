@@ -1,11 +1,12 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import * as React from 'react';
+import GithubSlugger from 'github-slugger';
 import * as stylex from '@stylexjs/stylex';
 import { colors } from '@lody/ui/tokens/colors.stylex';
 import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
-import { settingsType as type } from './type.stylex';
 
 /**
- * A tiny, dependency-free Markdown renderer for the skill detail view.
+ * A small Markdown renderer for the skill detail view, independent of highlighting.
  *
  * It is used as the resilient fallback when the app's full `MarkdownRenderer`
  * (Streamdown) fails to render — e.g. its lazy code-highlighter chunk can't be
@@ -38,7 +39,7 @@ const styles = stylex.create({
     backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 6%)`,
     color: colors.label,
     fontFamily: MONO,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
   },
   strong: { fontWeight: 400, color: colors.label },
   italic: { fontStyle: 'italic' },
@@ -59,7 +60,7 @@ const styles = stylex.create({
     backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
     color: colors.label,
     fontFamily: MONO,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.625,
   },
   heading: {
@@ -71,8 +72,8 @@ const styles = stylex.create({
   headingMinor: { marginTop: { default: space[3], ':first-child': 0 } },
   h1: { fontSize: '1.125em', lineHeight: 1.55 },
   h2: { fontSize: '1em', lineHeight: 1.5 },
-  h3: { fontSize: type.caption, lineHeight: 1.43 },
-  h4: { fontSize: type.caption, lineHeight: 1.43, color: colors.secondaryLabel },
+  h3: { fontSize: uiText.footnoteSize, lineHeight: 1.43 },
+  h4: { fontSize: uiText.footnoteSize, lineHeight: 1.43, color: colors.secondaryLabel },
   rule: {
     height: '1px',
     marginBlock: space[3],
@@ -86,14 +87,14 @@ const styles = stylex.create({
     marginInline: 0,
     paddingInlineStart: space[3],
     boxShadow: `inset 2px 0 0 ${colors.separator}`,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   list: {
     marginTop: space[2],
     marginBottom: 0,
     paddingInlineStart: '20px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.label,
   },
   bullets: { listStyleType: 'disc' },
@@ -102,7 +103,7 @@ const styles = stylex.create({
   paragraph: {
     marginTop: { default: space[2], ':first-child': 0 },
     marginBottom: 0,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.625,
     color: colors.label,
   },
@@ -165,7 +166,7 @@ export function renderInlineMarkdown(text: string, keyPrefix: string): React.Rea
           <a
             key={key}
             href={href}
-            target="_blank"
+            target={href.startsWith('#') ? undefined : '_blank'}
             rel="noreferrer noopener"
             {...stylex.props(styles.link)}
           >
@@ -193,8 +194,22 @@ const HEADING_STYLE = { 1: styles.h1, 2: styles.h2, 3: styles.h3, 4: styles.h4 }
 
 const SPECIAL_LINE = /^(#{1,6}\s|```|>|[-*]\s|\d+\.\s)|^(-{3,}|\*{3,}|_{3,})\s*$/;
 
-/** Render the SKILL.md Markdown subset as React elements (no external deps). */
+/** Extract rendered inline text so formatting does not become part of a heading id. */
+function inlineText(nodes: React.ReactNode): string {
+  return React.Children.toArray(nodes)
+    .map((node): string =>
+      React.isValidElement<{ children?: React.ReactNode }>(node)
+        ? inlineText(node.props.children)
+        : String(node)
+    )
+    .join('');
+}
+
 export function SkillMarkdownFallback({ content }: { content: string }) {
+  return renderSkillMarkdown(content, new GithubSlugger());
+}
+
+function renderSkillMarkdown(content: string, slugger: GithubSlugger) {
   const lines = content.replace(/\r\n/g, '\n').split('\n');
   const blocks: React.ReactNode[] = [];
   let index = 0;
@@ -223,14 +238,21 @@ export function SkillMarkdownFallback({ content }: { content: string }) {
     // Heading.
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
-      const level = Math.min(heading[1]!.length, 4) as 1 | 2 | 3 | 4;
-      const Tag = `h${level}` as 'h1' | 'h2' | 'h3' | 'h4';
+      const level = heading[1]!.length as 1 | 2 | 3 | 4 | 5 | 6;
+      const Tag = `h${level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
+      const children = renderInlineMarkdown((heading[2] ?? '').replace(/\s+#+\s*$/, ''), `h${key}`);
       blocks.push(
         <Tag
           key={key++}
-          {...stylex.props(styles.heading, level > 2 && styles.headingMinor, HEADING_STYLE[level])}
+          id={slugger.slug(inlineText(children))}
+          tabIndex={-1}
+          {...stylex.props(
+            styles.heading,
+            level > 2 && styles.headingMinor,
+            HEADING_STYLE[Math.min(level, 4) as 1 | 2 | 3 | 4]
+          )}
         >
-          {renderInlineMarkdown(heading[2] ?? '', `h${key}`)}
+          {children}
         </Tag>
       );
       index += 1;
@@ -253,7 +275,7 @@ export function SkillMarkdownFallback({ content }: { content: string }) {
       }
       blocks.push(
         <blockquote key={key++} {...stylex.props(styles.quote)}>
-          {renderInlineMarkdown(quoted.join(' '), `q${key}`)}
+          {renderSkillMarkdown(quoted.join('\n'), slugger)}
         </blockquote>
       );
       continue;

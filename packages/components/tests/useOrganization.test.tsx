@@ -44,7 +44,7 @@ type TestOrganization = {
   slug: string;
   name: string;
   logo: null;
-  members: Array<{ userId: string; role: string }>;
+  members?: Array<{ userId: string; role: string }> | null;
 };
 
 function createOrganization(id: string, slug: string, name: string): TestOrganization {
@@ -182,6 +182,51 @@ describe('useOrganization setActive dedupe', () => {
       await Promise.resolve();
     });
   }
+
+  it.each([undefined, null])(
+    'gates incomplete membership (%s) and recovers after refetch',
+    async (members) => {
+      await render('old-workspace', 0);
+      expect(latestOrganizationState!.hasAdminPermission).toBe(true);
+
+      activeOrganization = { ...activeOrganization, members };
+      await render('old-workspace', 1);
+
+      expect(latestOrganizationState!.activeOrganization).toBeNull();
+      expect(latestOrganizationState!.role).toBeUndefined();
+      expect(latestOrganizationState!.hasAdminPermission).toBe(false);
+      expect(latestOrganizationState!.error?.message).toContain('Incomplete organization response');
+      expect(organizationMocks.setActive).not.toHaveBeenCalled();
+
+      organizationMocks.refetchActiveOrganization.mockImplementationOnce(() => {
+        activeOrganization = createOrganization('workspace-old', 'old-workspace', 'Old Workspace');
+      });
+      await act(async () => {
+        await latestOrganizationState!.refetchActiveOrganization();
+      });
+      await render('old-workspace', 2);
+
+      expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
+      expect(latestOrganizationState!.role).toBe('owner');
+      expect(latestOrganizationState!.hasAdminPermission).toBe(true);
+      expect(latestOrganizationState!.error).toBeNull();
+    }
+  );
+
+  it('can switch away from a previous organization with incomplete membership', async () => {
+    activeOrganization = { ...activeOrganization, members: undefined };
+    await render('workspace-new', 0);
+
+    expect(latestOrganizationState!.activeOrganization).toBeNull();
+    expect(latestOrganizationState!.hasAdminPermission).toBe(false);
+    expect(latestOrganizationState!.error).toBeNull();
+    expect(organizationMocks.setActive).toHaveBeenCalledWith({ organizationId: 'workspace-new' });
+
+    activeOrganization = createOrganization('workspace-new', 'workspace-new', 'New Workspace');
+    await render('workspace-new', 1);
+    expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-new');
+    expect(latestOrganizationState!.role).toBe('owner');
+  });
 
   it('sends one setActive request for duplicate target workspace switchers', async () => {
     await render('target-workspace', 0);

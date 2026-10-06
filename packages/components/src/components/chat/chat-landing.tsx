@@ -1,3 +1,4 @@
+import { snapshotAgentRole } from '@lody/shared';
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
@@ -3096,6 +3097,7 @@ function WorkspaceChatLanding({
         mcpServerIds: mcpSelection.selectedIds,
         agentRoleId: activeAgentRole?.id ?? null,
         agentRoleRevision: activeAgentRole?.revision,
+        agentRoleSnapshot: activeAgentRole ? snapshotAgentRole(activeAgentRole) : undefined,
       });
       const pendingHistoryEntry = buildDraftUserHistoryEntry(
         {

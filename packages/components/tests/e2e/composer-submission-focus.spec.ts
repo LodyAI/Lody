@@ -469,9 +469,12 @@ test.describe('attachment upload submission', () => {
 
 test.describe('composer selector leading column', () => {
   /* A selector's popup is spatially a child of its trigger: its painted edge
-     stays on the trigger's edge, and the rows' leading icon column continues
-     the trigger's leading glyph on the same X, rather than establishing a
-     second grid inside the popup's own inset. */
+     stays on the trigger's edge, while its rows keep the shared popup inset —
+     their leading icons sit on the menu's own column (inset + item pad), not
+     on the trigger's mark. The trigger seats its glyph on its own geometry:
+     centred on the icon-only square, one item pad in on a labeled trigger.
+     An earlier lead margin that chased the row column left the icon-only
+     glyph visibly off-centre once the rows kept the inset. */
   const cases = [
     // The machine selector is deliberately exempt: it keeps the popup's own
     // inset grid by owner decision, so only the run-config family is pinned.
@@ -480,17 +483,19 @@ test.describe('composer selector leading column', () => {
       story: 'sessions-desktoprunconfigmenu--locked-agent',
       trigger: 'Run configuration',
       leadingRows: ['Plan', 'Fast'],
+      iconOnly: false,
     },
     {
       name: 'permission',
       story: 'sessions-desktoprunconfigmenu--locked-agent',
       trigger: /^Permission:/,
       leadingRows: ['Read-only', 'Agent', 'Full access'],
+      iconOnly: true,
     },
   ];
 
-  for (const { name, story, trigger, leadingRows } of cases) {
-    test(`${name} menu's icon column continues the trigger's`, async ({ page }) => {
+  for (const { name, story, trigger, leadingRows, iconOnly } of cases) {
+    test(`${name} menu keeps the popup inset column`, async ({ page }) => {
       await page.goto(`/iframe.html?id=${story}&viewMode=story`);
       const triggerButton = page.getByRole('button', {
         name: trigger,
@@ -506,13 +511,15 @@ test.describe('composer selector leading column', () => {
         );
       });
       // The surface must stay parented: its painted edge sits ON the
-      // trigger's edge — sliding the popup to reach the column is a
-      // regression, the rows reach back instead.
-      const [triggerLeft, popupLeft] = await Promise.all([
-        triggerButton.evaluate((el) => el.getBoundingClientRect().left),
+      // trigger's edge — sliding the popup to reach a column is a regression.
+      const [triggerBox, popupLeft] = await Promise.all([
+        triggerButton.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          return { left: r.left, center: r.left + r.width / 2 };
+        }),
         menu.evaluate((el) => el.getBoundingClientRect().left),
       ]);
-      expect(Math.abs(popupLeft - triggerLeft)).toBeLessThanOrEqual(0.75);
+      expect(Math.abs(popupLeft - triggerBox.left)).toBeLessThanOrEqual(0.75);
       const triggerCenter = await triggerButton
         .locator('svg')
         .first()
@@ -520,6 +527,10 @@ test.describe('composer selector leading column', () => {
           const r = el.getBoundingClientRect();
           return r.left + r.width / 2;
         });
+      // The icon-only square centres its glyph; a labeled trigger's leading
+      // glyph sits one item pad (8px) in, the centre of its 16px box.
+      const expectedTriggerCenter = iconOnly ? triggerBox.center : triggerBox.left + 16;
+      expect(Math.abs(triggerCenter - expectedTriggerCenter)).toBeLessThanOrEqual(0.75);
       const leadingCenters = await page.evaluate(() => {
         const items = [
           ...document.querySelectorAll<HTMLElement>(
@@ -546,11 +557,12 @@ test.describe('composer selector leading column', () => {
       for (const label of leadingRows) {
         const row = leadingCenters.find((r) => r.text.startsWith(label));
         expect(row, `leading icon of row "${label}"`).toBeTruthy();
-        expect(Math.abs(row!.center - triggerCenter)).toBeLessThanOrEqual(0.75);
       }
-      // And the column is a column: every leading icon sits on one X.
+      // The rows keep the shared inset: every leading icon sits on the
+      // menu's own column — popup edge + 4px inset + 8px item pad + half
+      // the 16px icon box.
       for (const row of leadingCenters) {
-        expect(Math.abs(row.center - triggerCenter)).toBeLessThanOrEqual(0.75);
+        expect(Math.abs(row.center - (popupLeft + 20))).toBeLessThanOrEqual(0.75);
       }
     });
   }

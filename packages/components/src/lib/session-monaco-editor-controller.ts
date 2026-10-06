@@ -298,9 +298,9 @@ export class SessionMonacoEditorController {
   }
 
   setLanguage(language: string): void {
-    if (this.model.getLanguageId() !== language) {
-      monaco.editor.setModelLanguage(this.model, language);
-    }
+    // Reapply even when the id is unchanged: an optional contribution may
+    // have registered after the model was created with that language id.
+    monaco.editor.setModelLanguage(this.model, language);
   }
 
   setTheme(themeName: string): void {

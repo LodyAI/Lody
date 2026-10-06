@@ -586,6 +586,7 @@ const acpSessionConfigSchema = schema
       /** Agent Role selected for this Turn; null is explicit None. */
       agentRoleId: agentRoleIdSchema,
       agentRoleRevision: schema.Number({ required: false }),
+      agentRoleSnapshot: schema.Any({ required: false }),
       chainDepth: schema.Number({ required: false }),
     },
     { required: false }
@@ -691,6 +692,7 @@ export const sessionHistorySchema = schema.LoroMap({
    */
   read: schema.Boolean({ required: false }),
   userId: schema.String({ required: false }),
+  author: schema.Any({ required: false }),
   modelInfo: schema.Any({ required: false }),
   // Assistant turns: tokens this turn consumed, summed from adapter usage deltas.
   // A primitive JSON value (`SessionTurnTokenUsage`), replaced whole on each write.
@@ -928,6 +930,49 @@ export type PendingScheduledTask = {
   timeZone?: string;
 };
 
+export type SessionHistoryBackendKind = 'loro' | 'roost';
+
+/** Backend selected for newly created sessions. Flip only after its adapter is ready. */
+export const NEW_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+
+/** Missing discriminator means a legacy session and must remain pinned to Loro. */
+export const LEGACY_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+
+/**
+ * Resolve the immutable history backend choice for an opened session.
+ *
+ * Keep this policy in the shared package so the CLI and renderer cannot
+ * accidentally assign different meanings to a missing discriminator while a
+ * document is still being bootstrapped.
+ */
+export const resolveSessionHistoryBackendKind = (
+  meta?: Pick<{ historyBackend?: SessionHistoryBackendKind }, 'historyBackend'> | null
+): SessionHistoryBackendKind => meta?.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND;
+
+export type SessionQueuePromotionState =
+  | 'prepared'
+  | 'history_accepted'
+  | 'activation_published'
+  | 'queue_consumed';
+
+export type SessionQueuePromotionRecord = {
+  queueCid: string;
+  userTurnId: string;
+  state: SessionQueuePromotionState;
+  updatedAt: number;
+};
+
+export type SessionSteerOperationRecord = {
+  operationId: string;
+  userTurnId: string;
+  expectedTurnId: string;
+  cancellationPolicy: 'promote' | 'preserve';
+  phase: 'prepared' | 'submitted' | 'settled';
+  delivery: 'not_submitted' | 'applied' | 'not_applied' | 'unknown';
+  status: 'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown';
+  updatedAt: number;
+};
+
 export type SessionMeta = {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
@@ -957,6 +1002,8 @@ export type SessionMeta = {
   isPinned?: boolean;
   cliType: AgentConfigCliType;
   agentType: AgentType;
+  /** Backend selected when this session was created. Missing means legacy Loro. */
+  historyBackend?: SessionHistoryBackendKind;
   agentConfigId?: AgentConfigId;
   /**
    * Agent Role this session was created from, and the Role revision that was
@@ -1009,6 +1056,10 @@ export type SessionMeta = {
     string,
     'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown'
   >;
+  /** Durable provider-delivery evidence, keyed by stable steer operation id. */
+  steerOperationLedger?: Record<string, SessionSteerOperationRecord>;
+  /** Recoverable queue promotion receipts, keyed by the stable operation id. */
+  queuePromotionLedger?: Record<string, SessionQueuePromotionRecord>;
   /** Assistant turn id the client wants to stop; cancel is ignored unless it matches the machine's in-memory active turn. */
   lastCanceledTurn?: string;
   /** Latest user history entry id that the machine has fully handled. */
@@ -1055,6 +1106,8 @@ export type SessionMeta = {
   pinnedHistoryId?: string;
   /** Preview candidate summary for list/header UI; full state lives in session doc `preview`. */
   previewCandidate?: SessionPreviewCandidateMeta;
+  /** Last agent-started simulator operation (UUID only); UI discovery hint, never live state or authority. */
+  iosSimulatorPreviewRequestId?: string;
   /** Preview connection summary for list/header UI; full state lives in session doc `preview`. */
   previewConnection?: SessionPreviewConnectionMeta;
   /** External native history projection cursor for imported sessions. */
@@ -1164,6 +1217,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   project: schema.Any({ required: false }),
   userId: schema.String(),
   userTurnId: schema.String({ required: false }),
+  /** Stable queue promotion identity; legacy rows derive it from userTurnId/$cid. */
+  operationId: schema.String({ required: false }),
   timestamp: schema.String(),
   isEditing: schema.Boolean({ required: false }),
   // Calibrated server time (`getServerNow()`) when the current editor entered the row.

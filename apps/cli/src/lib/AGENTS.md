@@ -11,11 +11,10 @@ end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
 
 ## Composition and transports
 
-- GitHub command auth lives in `github-credential-runtime.ts`: explicit personal
-  preference first, owner-only local credentials next, repo-scoped App last.
-  `github-git-transport.ts` also intercepts HTTPS headers and SSH remotes. Never
-  inject a startup-repo token globally, persist managed tokens through helpers,
-  or replay an uncertain write. Each helper captures one session context token.
+- GitHub auth: conversation-owner personal → matching-owner machine → repo App,
+  once per source. Failures advance without a policy RPC; local context grants
+  machine eligibility. Never persist managed tokens or replay uncertain writes.
+  Checkout/LFS share the pinned helper context. Contract: [identity fallback](../../../../specs/github-identity-fallback.md).
 
 - `cloud-cli-port.ts` is the sole official-build composition root for cloud clients and
   endpoint-derived adapters. Daemon runtime modules must not construct cloud SDK

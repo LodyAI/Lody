@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
@@ -34,6 +35,7 @@ import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Tabs } from '@lody/ui/tabs';
 import { Textarea } from '@lody/ui/textarea';
+import { settingsCard } from '@/components/settings/compact-layout';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { describeDestination, describeRecurrence } from './schedule-format';
 import {
@@ -44,6 +46,135 @@ import {
 import { PropertyRow, scheduleCardProps } from './schedule-property-row';
 import { ScheduleRecurrenceEditor } from './schedule-recurrence-editor';
 import { collectScheduleSaveBlockers } from './schedule-save-blockers';
+
+const DARK =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+const COLOR_MIX = '@supports (color: color-mix(in lab, red, red))';
+
+const styles = stylex.create({
+  receipt: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderColor: { default: 'hsl(var(--border) / 1)', [DARK]: 'transparent' },
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: {
+      default: 'hsl(var(--card) / 1)',
+      [DARK]: {
+        default: 'hsl(var(--foreground) / 1)',
+        [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--foreground) / 1) 4%, transparent)',
+      },
+    },
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: '0.9em',
+    color: 'hsl(var(--muted-foreground) / 1)',
+    boxShadow: {
+      default:
+        'var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), 0 0.5px 1px 1px var(--tw-shadow-color, rgba(0, 0, 0, 0.03))',
+      [DARK]:
+        'var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), 0 0 #0000',
+    },
+  },
+  receiptTitle: {
+    minWidth: 0,
+    flex: '1',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'hsl(var(--foreground) / 1)',
+  },
+  dismissed: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'hsl(var(--border) / 1)',
+      [DARK]: {
+        default: 'hsl(var(--foreground) / 1)',
+        [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      },
+    },
+    borderRadius: 'var(--radius-lg)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: '0.9em',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  dismissedTitle: {
+    minWidth: 0,
+    flex: '1',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    textDecorationLine: 'line-through',
+  },
+  proposalCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 2.5)',
+    overflow: 'hidden',
+    padding: 'calc(var(--spacing) * 3)',
+  },
+  proposalHeading: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    fontSize: '0.8em',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  proposedBy: {
+    marginLeft: 'auto',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  proposalTitle: { margin: 0, fontSize: '1em', fontWeight: 400 },
+  promptPreview: {
+    maxHeight: 'calc(var(--spacing) * 40)',
+    overflowY: 'auto',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--foreground) / 1) 3%, transparent)',
+      [DARK]: {
+        default: 'color-mix(in srgb, #fff 4%, transparent)',
+        [COLOR_MIX]: 'color-mix(in oklab, var(--color-white) 4%, transparent)',
+      },
+    },
+    paddingInline: 'calc(var(--spacing) * 2.5)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+  },
+  proposalRows: {
+    display: 'grid',
+    gridTemplateColumns: 'auto minmax(0, 1fr)',
+    columnGap: 'calc(var(--spacing) * 3)',
+    rowGap: 'calc(var(--spacing) * 1)',
+    fontSize: '0.9em',
+  },
+  proposalLabel: { color: 'hsl(var(--muted-foreground) / 1)' },
+  proposalValue: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  contents: { display: 'contents' },
+  reasons: {
+    margin: 0,
+    padding: 0,
+    listStyleType: 'none',
+    fontSize: '0.9em',
+    color: 'hsl(var(--status-warning) / 1)',
+  },
+  reason: { marginBlockEnd: { default: 'calc(var(--spacing) * 0.5)', ':last-child': 0 } },
+  actions: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  icon: { width: 'calc(var(--spacing) * 3.5)', height: 'calc(var(--spacing) * 3.5)' },
+});
 
 export type ScheduleProposalNoticeProps = {
   meta: ScheduleProposalMeta;
@@ -337,13 +468,10 @@ export function ScheduleProposalNotice({
 
   if (meta.outcome === 'created') {
     return (
-      <div
-        data-settings-surface=""
-        className="flex items-center gap-2 rounded-lg border-[0.5px] border-border bg-card px-3 py-2 text-[0.9em] text-muted-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.03)] dark:border-transparent dark:bg-foreground/[0.04] dark:shadow-none"
-      >
-        <CalendarClock className="size-3.5" />
+      <div data-settings-surface="" {...stylex.props(styles.receipt)}>
+        <CalendarClock {...stylex.props(styles.icon)} />
         <span>{t('schedules.proposal.created', 'Scheduled task created')}</span>
-        <span className="min-w-0 flex-1 truncate text-foreground">{meta.title}</span>
+        <span {...stylex.props(styles.receiptTitle)}>{meta.title}</span>
         {meta.scheduleId ? (
           <Button size="small" variant="ghost" onClick={() => openSchedule(meta.scheduleId!)}>
             {t('schedules.proposal.open', 'Open')}
@@ -354,10 +482,10 @@ export function ScheduleProposalNotice({
   }
   if (meta.outcome === 'dismissed') {
     return (
-      <div className="flex items-center gap-2 rounded-lg border-[0.5px] border-border px-3 py-2 text-[0.9em] text-muted-foreground dark:border-foreground/10">
-        <CalendarClock className="size-3.5" />
+      <div {...stylex.props(styles.dismissed)}>
+        <CalendarClock {...stylex.props(styles.icon)} />
         <span>{t('schedules.proposal.dismissed', 'Proposal ignored')}</span>
-        <span className="min-w-0 flex-1 truncate line-through">{meta.title}</span>
+        <span {...stylex.props(styles.dismissedTitle)}>{meta.title}</span>
       </div>
     );
   }
@@ -380,7 +508,7 @@ export function ScheduleProposalNotice({
           [
             t('schedules.trigger.label', 'Trigger'),
             recurrence
-              ? describeRecurrence(recurrence, t, i18n.language)
+              ? describeRecurrence(recurrence, t, i18n.language, machineTimeZone)
               : t('schedules.trigger.manual', 'Manual'),
           ] as [string, string],
         ]),
@@ -417,12 +545,12 @@ export function ScheduleProposalNotice({
   ];
 
   return (
-    <div data-settings-surface="" {...scheduleCardProps('flex flex-col gap-2.5 divide-y-0 p-3')}>
-      <div className="flex items-center gap-2 text-[0.8em] text-muted-foreground">
-        <CalendarClock className="size-3.5" />
+    <div data-settings-surface="" {...stylex.props(settingsCard, styles.proposalCard)}>
+      <div {...stylex.props(styles.proposalHeading)}>
+        <CalendarClock {...stylex.props(styles.icon)} />
         <span>{t('schedules.proposal.title', 'Schedule this task?')}</span>
         {meta.proposedBy?.name ? (
-          <span className="ml-auto truncate">
+          <span {...stylex.props(styles.proposedBy)}>
             {t('schedules.proposal.by', 'Proposed by {{name}}', { name: meta.proposedBy.name })}
           </span>
         ) : null}
@@ -468,28 +596,30 @@ export function ScheduleProposalNotice({
         </>
       ) : (
         <>
-          <p className="text-[1em] font-normal">{title}</p>
-          <div className="max-h-40 overflow-y-auto rounded-md bg-foreground/[0.03] px-2.5 py-2 dark:bg-white/[0.04]">
+          <p {...stylex.props(styles.proposalTitle)}>{title}</p>
+          <div {...stylex.props(styles.promptPreview)}>
             <MarkdownRenderer text={prompt} size="sm" />
           </div>
         </>
       )}
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[0.9em]">
+      <dl {...stylex.props(styles.proposalRows)}>
         {rows.map(([label, value]) => (
-          <div key={label} className="contents">
-            <dt className="text-muted-foreground">{label}</dt>
-            <dd className="truncate">{value}</dd>
+          <div key={label} {...stylex.props(styles.contents)}>
+            <dt {...stylex.props(styles.proposalLabel)}>{label}</dt>
+            <dd {...stylex.props(styles.proposalValue)}>{value}</dd>
           </div>
         ))}
       </dl>
       {reasons.length ? (
-        <ul className="space-y-0.5 text-[0.9em] text-status-warning" aria-live="polite">
+        <ul {...stylex.props(styles.reasons)} aria-live="polite">
           {reasons.map((reason) => (
-            <li key={reason}>{reason}</li>
+            <li key={reason} {...stylex.props(styles.reason)}>
+              {reason}
+            </li>
           ))}
         </ul>
       ) : null}
-      <div className="flex items-center justify-end gap-2">
+      <div {...stylex.props(styles.actions)}>
         <Button size="small" variant="ghost" disabled={busy} onClick={dismiss}>
           {t('schedules.proposal.dismiss', 'Ignore')}
         </Button>

@@ -1,3 +1,4 @@
+import type { MessageAuthor } from '../message-author';
 import type { MessageContent, ModelInfo, SessionTurnInputConfig } from '../ai';
 import type { PlanEntry } from '@agentclientprotocol/sdk';
 import type { SessionTurnTokenUsage } from './token-usage';
@@ -42,6 +43,7 @@ export type SessionTurn = {
   readonly plan?: readonly unknown[];
   readonly read?: boolean;
   readonly userId?: string;
+  readonly author?: MessageAuthor;
   readonly modelInfo?: ModelInfo;
   readonly tokenUsage?: SessionTurnTokenUsage;
   readonly fileDiff?: readonly unknown[];
@@ -66,6 +68,7 @@ export interface SessionTurnWritableValues {
   role: SessionTurnRole;
   read: boolean | undefined;
   userId: string | undefined;
+  author: MessageAuthor | undefined;
   modelInfo: ModelInfo | undefined;
   tokenUsage: SessionTurnTokenUsage | undefined;
   fileDiff: readonly unknown[] | undefined;
@@ -136,6 +139,7 @@ export type SessionDirectoryScalars = {
 export const SESSION_DIRECTORY_INPUT_CONFIG_KEYS = [
   'agentRoleId',
   'agentRoleRevision',
+  'agentRoleSnapshot',
   'modeId',
   'modelId',
   'cliType',

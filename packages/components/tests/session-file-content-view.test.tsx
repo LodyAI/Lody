@@ -510,10 +510,10 @@ describe('SessionFileContentView', () => {
       machineOnline: false,
     });
     const statusBar = view.querySelector('[data-testid="session-file-realtime-status-bar"]');
-    const offlineIcon = statusBar?.querySelector('svg');
+    const offlineStatus = statusBar?.querySelector('[title="Machine is offline"]');
 
-    expect(offlineIcon).not.toBeNull();
-    expect(offlineIcon?.className.baseVal).toContain('text-muted-foreground');
+    expect(offlineStatus?.textContent).toBe('Offline');
+    expect(offlineStatus?.previousElementSibling?.getAttribute('aria-hidden')).toBe('true');
     expect(view.textContent).not.toContain('Host offline');
     // Freshly opened: the offline icon shows, but no misleading "Saved".
     expect(view.textContent).not.toContain('Saved');
@@ -536,6 +536,40 @@ describe('SessionFileContentView', () => {
     expect(view.textContent).toContain('Unsaved');
     expect(view.textContent).not.toContain('Syncing live');
     expect(provider.updateLiveText).not.toHaveBeenCalled();
+  });
+
+  it('clears the toolbar and tab dirty state on undo and retains redo protection', async () => {
+    const provider = createEditableProvider();
+    const states: SessionFileSaveViewState[] = [];
+    const view = await render(
+      createElement(SessionFileContentView, {
+        sessionId: session.id,
+        session,
+        filePath: 'src/live.ts',
+        fileId: 't:live',
+        fileProvider: provider,
+        fileProviderPending: false,
+        fileProviderRole: 'write',
+        onSaveStateChange: (state) => states.push(state),
+      })
+    );
+    const save = view.querySelector('button[aria-label="Save"]') as HTMLButtonElement;
+    const refresh = view.querySelector('button[aria-label="Refresh"]') as HTMLButtonElement;
+    await act(async () => monacoMockState.onContentChange?.('let value = 2;'));
+    expect(states.at(-1)).toMatchObject({ dirty: true, canSave: true });
+    await act(async () => monacoMockState.onContentChange?.('let value = 1;'));
+    expect(view.textContent).not.toContain('Unsaved');
+    expect(save.disabled).toBe(true);
+    expect(refresh.disabled).toBe(false);
+    expect(states.at(-1)).toMatchObject({ dirty: false, canSave: false });
+    await act(async () => monacoMockState.onContentChange?.('let value = 2;'));
+    expect(view.textContent).toContain('Unsaved');
+    expect(save.disabled).toBe(false);
+    expect(refresh.disabled).toBe(true);
+    expect(states.at(-1)).toMatchObject({ dirty: true, canSave: true });
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it('reports save state changes for the parent tab shell', async () => {
@@ -1692,6 +1726,16 @@ describe('independent preview remount investigation', () => {
     await click('Hide preview');
     expect(textarea()?.value).toBe('# Updated elsewhere');
     expect(states.at(-1)).toMatchObject({ dirty: false, canSave: false });
+    for (const text of ['# Local draft', '# Updated elsewhere']) {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(
+          textarea(),
+          text
+        );
+        textarea()?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(states.at(-1)).toMatchObject({ dirty: text !== '# Updated elsewhere' });
+    }
   });
 
   it('drops a stale live ack when a later open advances the snapshot', async () => {

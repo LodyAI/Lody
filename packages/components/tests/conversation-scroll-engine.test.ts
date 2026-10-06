@@ -136,7 +136,17 @@ describe('following', () => {
     sim.settle();
     expect(sim.controller.mode).toBe('follow');
     expectHealthy(sim);
-    sim.render([...turns, ...turnRows(1, () => 140, () => 88, 'sent'), activity, trailing(0)]);
+    sim.render([
+      ...turns,
+      ...turnRows(
+        1,
+        () => 140,
+        () => 88,
+        'sent'
+      ),
+      activity,
+      trailing(0),
+    ]);
     sim.settle();
     expect(sim.controller.mode).toBe('follow');
     expectHealthy(sim);
@@ -237,9 +247,17 @@ describe('reading', () => {
   // Ten 100px turns, the placeholder of turn t10 (60px, keyed by its turn id,
   // like the product's), then ten more turns.
   const aroundPlaceholder = (): SimRow[] => [
-    ...turnRows(10, () => 100, () => 100),
+    ...turnRows(
+      10,
+      () => 100,
+      () => 100
+    ),
     { key: 't10', turnId: 't10', turnIndex: 10, placeholder: true, height: 60, estimate: 60 },
-    ...turnRows(10, () => 100, () => 100).map((row, i) => ({
+    ...turnRows(
+      10,
+      () => 100,
+      () => 100
+    ).map((row, i) => ({
       ...row,
       key: `t${i + 11}`,
       turnId: `t${i + 11}`,
@@ -317,7 +335,14 @@ describe('reading', () => {
     // estimates, so rows are measured (and compensated) as they come into view.
     const rows: SimRow[] = Array.from({ length: 120 }, (_, i) =>
       i % 3 === 1
-        ? { key: `t${i}`, turnId: `t${i}`, turnIndex: i, placeholder: true, height: 88, estimate: 88 }
+        ? {
+            key: `t${i}`,
+            turnId: `t${i}`,
+            turnIndex: i,
+            placeholder: true,
+            height: 88,
+            estimate: 88,
+          }
         : {
             key: `t${i}`,
             turnId: `t${i}`,
@@ -333,9 +358,7 @@ describe('reading', () => {
     const step = 173;
     for (let i = 0; i < 60 && sim.readScrollTop() > step; i++) {
       const y = sim.readScrollTop();
-      const [key, top] = [...sim.mounted].findLast(
-        ([, rowTop]) => rowTop <= y - sim.contentTop
-      )!;
+      const [key, top] = [...sim.mounted].findLast(([, rowTop]) => rowTop <= y - sim.contentTop)!;
       const before = sim.contentTop + top - y;
       sim.nativeScroll(y - step);
       sim.settle();
@@ -547,6 +570,26 @@ describe('commands', () => {
     // The last glide frame lands within a pixel.
     expect(sim.screenTop('sent0')).toBeCloseTo(sim.contentTop, 0);
     expectHealthy(sim);
+  });
+});
+
+describe('onScroll must not re-enter a cycle (React #185)', () => {
+  it('a consumer that re-commits from onScroll settles instead of looping', () => {
+    const rows = turnRows(40, () => 100);
+    const sim = new ScrollSim(rows, V);
+    let reports = 0;
+    sim.controller.setCallbacks({
+      onScroll: () => {
+        reports += 1;
+        if (reports > 50) throw new Error('onScroll nested-update loop');
+        sim.render();
+      },
+    });
+    sim.render();
+    sim.settle();
+    expectHealthy(sim);
+    expect(reports).toBeGreaterThan(0);
+    expect(reports).toBeLessThanOrEqual(COMMIT_BOUND);
   });
 });
 

@@ -24,7 +24,7 @@ import {
 } from '@/components/mentions/mention-hydration';
 
 /**
- * Skill mentions, reachable directly through `$` and through the `@` category
+ * Skill mentions, reachable directly through `$` / `￥` and through the `@` category
  * menu (phase 2 of docs/project-skills.md).
  *
  * Reuses the same discovery/SWR core as the Skills display tab via
@@ -39,6 +39,7 @@ import {
  * the provider-filtered skill path while the composer stays compact.
  */
 export const SKILL_MENTION_TRIGGER = '$';
+export const SKILL_MENTION_TRIGGER_ALIAS = '￥';
 const SKILL_MENTION_PROMPT_PREFIX = '/';
 /** Label of the expanded `[Skill Path](...)` markdown link. The writer and the
    already-expanded detector both derive from this so they cannot drift. */
