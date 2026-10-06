@@ -79,3 +79,22 @@ follow-up at the user's request; component typechecking was used.
 Assigned rows now expose their accessible Role emojis and names through desktop
 tooltips or mobile tap popovers. This reuses the same exact-machine binding lookup
 as the unassigned shortcut, without revealing private inaccessible Roles.
+
+## Redundancy ablation (2026-10-06)
+
+The cleanup keeps the existing provider and persistence contracts. Remove the
+unused hook refresh method (the page uses its refresh token), an unused style,
+and the duplicate editor association-save branch. Create, import and edit now
+converge on one save; schema validation remains at the association writer boundary.
+Enrollment results still survive a local-save failure so retry does not enroll again.
+A byte-identical 61-line Flock test copy was also removed; its original remains.
+
+Baseline: 10 UI/refresh tests and 12 writer tests passed. Removing the unused API
+and style preserved the 10 tests and component typechecking. Consolidating the
+save path preserved all 22 tests. Removing the duplicate left 11 writer tests
+passing. As a negative control, temporarily removing the pending-request guard
+made the background-refresh enrollment test fail: creation returned undefined
+instead of its new identity. The guard was restored, not included in the cleanup.
+The final retained changes passed 21 scoped tests, root typecheck, check:quick,
+format and docs check. These are deterministic behavioral checks, not an Electron
+visual or performance benchmark. The cleanup does not claim that all remaining code is indispensable.

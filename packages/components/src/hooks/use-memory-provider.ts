@@ -81,7 +81,6 @@ export function useMemoryProvider(
   return {
     result: current ? state.result : undefined,
     busy: current ? state.busy : false,
-    refresh: () => request(),
     create: request,
     update: (input: MemoryCreateInput) => request(input, 'update'),
   };

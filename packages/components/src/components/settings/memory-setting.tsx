@@ -20,7 +20,6 @@ import {
   getAgentRoleEmoji,
   type AgentRole,
   MemoryCreateInputSchema,
-  MemoryAssociationSchema,
   isMemoryIdentityMissing,
   machineSupportsMemoryProviders,
   type MachineId,
@@ -165,7 +164,6 @@ const styles = stylex.create({
   },
   fields: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: space[4] },
   fullField: { gridColumn: '1 / -1' },
-  radio: { display: 'flex', flexDirection: 'column', gap: space[2] },
 });
 
 export function MemoryProviderLogo({ providerId }: { providerId: string }) {
@@ -685,47 +683,40 @@ export function MemoryEditor({
     setError(false);
     setSaving(true);
     try {
+      let savedIdentity: MemoryIdentity | undefined;
       if (entry) {
         const result = await state.update(
           MemoryCreateInputSchema.parse({ ...values, id: entry.memoryId })
         );
-        const updated =
+        savedIdentity =
           result?.status === 'ready'
             ? result.memories.find((memory) => memory.id === entry.memoryId)
             : undefined;
-        if (!updated) throw new Error('Memory update failed');
-        await save(
-          MemoryAssociationSchema.parse({
-            ...entry,
-            name: updated.name,
-            description: updated.description,
-          }),
-          true
-        );
+      } else if (tab === 'link') {
+        savedIdentity = candidates.find((memory) => memory.id === selected);
       } else {
-        let createdIdentity = created;
-        if (tab === 'link') createdIdentity = candidates.find((memory) => memory.id === selected);
-        else if (!createdIdentity) {
+        savedIdentity = created;
+        if (!savedIdentity) {
           const input = MemoryCreateInputSchema.parse(values);
           const result = await state.create(input);
-          createdIdentity =
+          savedIdentity =
             result?.status === 'ready'
               ? result.memories.find((memory) => memory.id === input.id)
               : undefined;
-          if (createdIdentity) setCreated(createdIdentity);
+          if (savedIdentity) setCreated(savedIdentity);
         }
-        if (!createdIdentity) throw new Error('Memory identity unavailable');
-        await save(
-          {
-            machineId,
-            providerId: provider.id,
-            memoryId: createdIdentity.id,
-            name: createdIdentity.name,
-            description: createdIdentity.description,
-          },
-          false
-        );
       }
+      if (!savedIdentity) throw new Error('Memory identity unavailable');
+      await save(
+        {
+          machineId,
+          providerId: provider.id,
+          memoryId: savedIdentity.id,
+          name: savedIdentity.name,
+          description: savedIdentity.description,
+        },
+        !!entry
+      );
       onClose();
     } catch {
       setError(true);

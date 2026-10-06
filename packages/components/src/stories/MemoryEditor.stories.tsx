@@ -29,7 +29,6 @@ const meta = {
     state: {
       result,
       busy: false,
-      refresh: async () => result,
       create: async () => result,
       update: async () => result,
     },

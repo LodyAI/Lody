@@ -34,7 +34,6 @@ const mocks = vi.hoisted(() => ({
       memories: [],
     } as MemoryProviderResponse,
     busy: false,
-    refresh: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
     update: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
     create: vi.fn(async () => undefined as MemoryProviderResponse | undefined),
   },
@@ -142,7 +141,6 @@ beforeEach(async () => {
     memories: [],
   };
   mocks.provider.busy = false;
-  mocks.provider.refresh.mockReset().mockResolvedValue(mocks.provider.result);
   mocks.provider.create.mockReset();
   mocks.openExternalUrl.mockClear();
   stubResizeObserver();
