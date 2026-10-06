@@ -16,7 +16,6 @@ import {
   type CloudBillingPort,
   type CloudPort,
   type CloudSessionSharingPort,
-  type CloudPrAssociationInput,
   type CloudStreamsTokenPort,
   type CloudUsageUpdateInput,
   type WorkspaceSummary,
@@ -33,6 +32,7 @@ import { NotificationService } from './notifications';
 import { UsageTrackingService, type RecordSessionUsageInput } from './usage/usage-tracking-service';
 import { GitHubTokenManager } from './github-token-manager';
 import { submitBugReportFromMachine } from './bug-report';
+import { createCloudPrAssociationPort } from './cloud-pr-association';
 
 type WorkspaceListResult =
   | { valid: false; userId: null; workspaces: WorkspaceSummary[] }
@@ -248,24 +248,7 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
             }),
         }),
     },
-    prAssociation: {
-      associatePullRequest: async (input: CloudPrAssociationInput) => {
-        const { ownerSessionId, ...association } = input;
-        const response = await fetch(new URL('/api/action', authSiteUrl), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            path: 'github:associatePullRequestForCli',
-            args: {
-              ...association,
-              sessionId: ownerSessionId,
-              cliToken: options.token,
-            },
-          }),
-        });
-        return response.ok;
-      },
-    },
+    prAssociation: createCloudPrAssociationPort({ token: options.token, authSiteUrl }),
     attachmentUpload: { serverBaseUrl },
     remotePreview: {
       simulatorIceServers: async (input) => {

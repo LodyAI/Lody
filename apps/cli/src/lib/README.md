@@ -39,6 +39,8 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   endpoint-derived adapters, and their lifecycle. `start.ts` validates
   identity/deployment configuration once and injects the resulting `CloudPort` through
   Fleet → Lody → MachineRuntime → MessageHandler/Loro/session services.
+- `cloud-pr-association.ts` — hosted PR association HTTP requests and shared failure
+  cooldowns; independent of GitHub observation and publication.
 - `local-loro-data-plane-server.ts` — Electron renderer ↔ CLI local Loro data plane
   (protocol v7). Design:
   [`.agents/docs/cli-lib-local-loro-data-plane.md`](../../../../.agents/docs/cli-lib-local-loro-data-plane.md).

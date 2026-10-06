@@ -30,6 +30,12 @@ metadata in both local and hosted workspaces. Hosted webhook association is a
 separate effect: rejection or transport failure must not hide a verified PR or
 leave Create PR available. Retry association under the existing polling gates;
 only successful association and publication commit a discovery success stamp.
+The hosted client additionally cools down failed association requests per workspace
+and repository across callers. Permission rejection waits 15 minutes; transient
+failures back off from one minute up to 15 minutes. This gate neither blocks GitHub
+observation/publication nor confirms a skipped association. A later eligible call
+rechecks access; no timer replays an old request. Cooldowns are bounded runtime
+state and reset when that client is recreated.
 An older discovery fingerprint must not suppress this retry after a terminal PR
 is published. Successful associations are remembered for the workspace runtime;
 after restart, eligible discoveries can idempotently re-establish them.
