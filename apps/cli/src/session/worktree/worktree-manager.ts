@@ -12,6 +12,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { mapGitSpawnError } from './git-process-error';
 import { resolveAvailableBranchName } from './branch-name-allocation';
+import { branchNameFromSessionTitle } from './worktree-title-branch';
 
 const SAFE_SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const LODY_LOCAL_BRANCH_PREFIX = 'lody/';
@@ -1791,6 +1792,92 @@ export class WorktreeManager {
         headSha,
         isClean,
       };
+    });
+  }
+
+  /** Rename only an untouched, unpublished initial branch. A failed check leaves it alone. */
+  async renameInitialBranchFromTitle(options: {
+    sessionId: SessionId;
+    title: string;
+    initialBranch: string;
+    initialHead: string;
+    hasPullRequest: boolean;
+    brokerAuth?: GitCredentialBrokerAuth;
+    beforeRename?: (target: string) => Promise<void>;
+  }): Promise<string | null> {
+    return withRepoLock(this.repoId, async () => {
+      const { sessionId, initialBranch, initialHead } = options;
+      assertSafeSessionId(sessionId);
+      const worktreePath = this.getWorktreeHostPath(sessionId);
+      if (!fs.existsSync(worktreePath) || options.hasPullRequest) return null;
+
+      const desired = branchNameFromSessionTitle(options.title, sessionId);
+      if (!desired) return null;
+      const currentBranch = await this.getCurrentBranchName(sessionId);
+      if (currentBranch !== initialBranch) return null;
+      const currentHead = await this.runGit(['rev-parse', 'HEAD'], worktreePath);
+      if (currentHead !== initialHead) return null;
+
+      // Refuse to rename when publication cannot be ruled out. The local upstream
+      // and remote-tracking refs catch ordinary pushes; ls-remote catches pushes
+      // that occurred since the last fetch. No network/auth means no rename.
+      const upstream = await this.runGit(
+        ['for-each-ref', '--format=%(upstream)', `refs/heads/${initialBranch}`],
+        this.getGitAdminCwd()
+      );
+      if (upstream.trim()) return null;
+      const remotes = (await this.runGit(['remote'], this.getGitAdminCwd()))
+        .split('\n')
+        .map((remote) => remote.trim())
+        .filter(Boolean);
+      const remoteNames = (
+        await this.runGit(
+          ['for-each-ref', '--format=%(refname:lstrip=3)', 'refs/remotes'],
+          this.getGitAdminCwd()
+        )
+      )
+        .split('\n')
+        .map((ref) => ref.trim())
+        .filter(Boolean);
+      if (remoteNames.includes(initialBranch)) return null;
+      for (const remote of remotes) {
+        let publishedRefs: string;
+        try {
+          publishedRefs = await this.runGit(
+            ['ls-remote', '--heads', remote, `refs/heads/${initialBranch}`, 'refs/heads/lody/*'],
+            this.getGitAdminCwd(),
+            buildBrokerAuthEnv(options.brokerAuth)
+          );
+        } catch {
+          return null;
+        }
+        for (const line of publishedRefs.split('\n')) {
+          const ref = line.split('\t')[1]?.trim();
+          if (!ref?.startsWith('refs/heads/')) continue;
+          const branch = ref.slice('refs/heads/'.length);
+          if (branch === initialBranch) return null;
+          remoteNames.push(branch);
+        }
+      }
+
+      const refs = await this.runGit(
+        ['for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads'],
+        this.getGitAdminCwd()
+      );
+      const target = resolveAvailableBranchName(
+        desired,
+        [
+          ...refs
+            .split('\n')
+            .map((ref) => ref.trim())
+            .filter(Boolean),
+          ...remoteNames,
+        ],
+        { maxLength: 64 }
+      );
+      await options.beforeRename?.(target);
+      await this.runGit(['branch', '-m', initialBranch, target], worktreePath);
+      return target;
     });
   }
 

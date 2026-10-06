@@ -341,6 +341,7 @@ export interface LoroDocumentManagerOptions {
 
 export type LoroRepoPersistReason =
   | 'session-local-base-ref'
+  | 'session-title-branch-rename-intent'
   | 'session-fork-prepare'
   | 'session-fork-commit'
   | 'session-fork-rollback'

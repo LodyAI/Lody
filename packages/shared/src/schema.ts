@@ -1036,6 +1036,13 @@ export type SessionMeta = {
   baseBranch?: string;
   /** Runtime working branch for the session (changes as session runs). */
   branchName?: string;
+  /** One-time rename eligibility for newly created worktree Sessions. */
+  titleBranchRename?: {
+    initialBranch: string;
+    initialHead: string;
+    state: 'pending' | 'attempted' | 'finished';
+    targetBranch?: string;
+  };
   /** True if this session runs inside a git worktree (local or GitHub). */
   isWorktree?: boolean;
   pullRequests?: SessionPullRequestMeta[];

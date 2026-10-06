@@ -74,6 +74,7 @@ const createTestCloudPort = () =>
   createLocalCloudPort({ identity: { userId: 'user-1' }, workspaces: [] });
 
 type FakeSessionDoc = {
+  roomId: string;
   getMetaState: ReturnType<typeof vi.fn<() => Promise<SessionMeta | undefined>>>;
   setRepoFullName: ReturnType<typeof vi.fn<(repoFullName: string) => Promise<void>>>;
   setBaseBranch: ReturnType<typeof vi.fn<(baseBranch: string) => Promise<void>>>;
@@ -82,6 +83,7 @@ type FakeSessionDoc = {
 };
 
 const createSessionDoc = (meta?: SessionMeta): FakeSessionDoc => ({
+  roomId: 'session-test-room',
   getMetaState: vi.fn(async () => meta),
   setRepoFullName: vi.fn(async () => undefined),
   setBaseBranch: vi.fn(async () => undefined),
@@ -761,12 +763,13 @@ describe('SessionManager worktree setup', () => {
     const repoId = deriveRepoIdFromLocalProjectPath(originalRootPath);
     const logger = createLogger();
     const docs = new Map<SessionId, FakeSessionDoc>();
+    const workspaceDocument = createWorkspaceDocument(docs);
     const manager = new SessionManager(
       logger,
       'token',
       'machine-1' as MachineId,
       'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(docs),
+      workspaceDocument,
       {
         sessionSandboxFactory: async () => createNoopSessionSandbox(),
         cloudPort: createTestCloudPort(),
@@ -818,8 +821,80 @@ describe('SessionManager worktree setup', () => {
 
     expect(session.getWorkdir()).toBe(preparedWorktree.info.hostPath);
     expect(runWorktreeSetup).toHaveBeenCalledTimes(1);
+    expect(workspaceDocument.repo.upsertDocMeta).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        titleBranchRename: expect.objectContaining({
+          initialBranch: preparedWorktree.info.branch,
+          initialHead: preparedWorktree.info.headSha,
+          state: 'pending',
+        }),
+      })
+    );
     await preparedWorktree.dispose();
     expect(existsSync(preparedWorktree.info.hostPath)).toBe(true);
+  });
+
+  it('reconciles a Git rename interrupted before branch metadata was published', async () => {
+    const sourceDir = createLocalRepo(tempHome);
+    const originalRootPath = normalizeLocalProjectRootPath(sourceDir);
+    const sessionId = 'recover-title-branch' as SessionId;
+    const repoId = deriveRepoIdFromLocalProjectPath(originalRootPath);
+    const logger = createLogger();
+    const worktreeManager = getWorktreeManager({
+      repoId,
+      source: { kind: 'local-shared', originalRootPath },
+      logger,
+    });
+    await worktreeManager.ensureRepo();
+    const worktree = await worktreeManager.createWorktree(sessionId, 'main');
+    const renamedBranch = 'lody/recovered-title-recovert';
+    runGit(worktree.hostPath, ['branch', '-m', worktree.branch, renamedBranch]);
+
+    let meta = {
+      branchName: worktree.branch,
+      titleBranchRename: {
+        initialBranch: worktree.branch,
+        initialHead: worktree.headSha!,
+        state: 'attempted',
+        targetBranch: renamedBranch,
+      },
+    } as SessionMeta;
+    const doc = createSessionDoc();
+    doc.getMetaState.mockImplementation(async () => meta);
+    doc.setBranchName.mockImplementation(async (branchName) => {
+      meta = { ...meta, branchName };
+    });
+    const docs = new Map([[sessionId, doc]]);
+    const workspaceDocument = createWorkspaceDocument(docs);
+    const upsert = workspaceDocument.repo.upsertDocMeta as ReturnType<typeof vi.fn>;
+    upsert.mockImplementation(async (_roomId: unknown, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
+    const manager = new SessionManager(
+      logger,
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      workspaceDocument,
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+    const config = createSessionConfig({ sessionId, workdir: sourceDir });
+    (
+      manager as unknown as { titleWorktreeManagers: Map<SessionId, unknown> }
+    ).titleWorktreeManagers.set(sessionId, {
+      manager: worktreeManager,
+      source: { kind: 'local-shared', originalRootPath },
+      config,
+    });
+
+    await manager.maybeRenameWorktreeAfterTitle(sessionId, 'Recovered title');
+    expect(meta.branchName).toBe(renamedBranch);
+    expect(meta.titleBranchRename?.state).toBe('finished');
+    expect(runGit(worktree.hostPath, ['branch', '--show-current'])).toBe(renamedBranch);
   });
 
   it('retries setup after a durable create fails with a prepared worktree', async () => {

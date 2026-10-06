@@ -83,6 +83,7 @@ const createHandler = async (
     hasSession: vi.fn(),
     initialize: vi.fn(),
     createSession: vi.fn(),
+    maybeRenameWorktreeAfterTitle: vi.fn(async () => undefined),
   };
 
   const handler = new MessageHandler(
@@ -100,7 +101,7 @@ const createHandler = async (
     }
   );
 
-  return { handler, sessionDoc, workspaceDocument };
+  return { handler, sessionDoc, workspaceDocument, sessionManager };
 };
 
 describe('MessageHandler title generation', () => {
@@ -129,7 +130,7 @@ describe('MessageHandler title generation', () => {
   });
 
   it('runs isolated generation for Kimi when title is missing', async () => {
-    const { handler, sessionDoc } = await createHandler(undefined);
+    const { handler, sessionDoc, sessionManager } = await createHandler(undefined);
 
     const titleHost = handler as unknown as {
       maybeGenerateAndStoreSessionTitle: (
@@ -150,6 +151,10 @@ describe('MessageHandler title generation', () => {
     expect(sessionDoc.setTitleIfSourceIn).toHaveBeenCalledWith('Generated Title', 'generated', [
       'draft',
     ]);
+    expect(sessionManager.maybeRenameWorktreeAfterTitle).toHaveBeenCalledWith(
+      's-2',
+      'Generated Title'
+    );
   });
 
   it('shares one in-flight generation across duplicate title requests', async () => {
@@ -328,7 +333,7 @@ describe('MessageHandler title generation', () => {
   );
 
   it('filters Lody internal prompt instructions before storing an ACP title', async () => {
-    const { handler, sessionDoc } = await createHandler(undefined);
+    const { handler, sessionDoc, sessionManager } = await createHandler(undefined);
     const titleHost = handler as unknown as {
       maybeStoreAgentSessionTitle: (sessionId: SessionId, title: string) => Promise<void>;
     };
@@ -343,6 +348,10 @@ describe('MessageHandler title generation', () => {
       'draft',
       'generated',
     ]);
+    expect(sessionManager.maybeRenameWorktreeAfterTitle).toHaveBeenCalledWith(
+      's-9',
+      'Fix flaky login'
+    );
   });
 
   it('does not store an ACP title containing only Lody internal instructions', async () => {

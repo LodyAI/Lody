@@ -67,6 +67,9 @@ and file responsibilities: [../README.md](../README.md).
 - A fresh local/GitHub worktree always owns a newly allocated branch from its selected base
   ref; suffix collisions instead of attaching to an existing ref. Reattaching an existing
   branch is reserved for an explicit `restoreBranchName` from the same Session.
+- Title-derived branch renaming applies only to a new Session with a recorded one-time intent;
+  verify the original Git branch and HEAD and absence of remote publication or a PR before
+  renaming, then reconcile the real branch into Session metadata before restore uses it.
 - Worktree setup scripts are per worktree-directory lifetime: session runtime restore after
   idle GC must skip setup when the session's worktree directory already exists, but setup still
   runs when a missing worktree directory is materialized again.
