@@ -37,7 +37,6 @@ const presenceInternals = (handler: MessageHandler) =>
       phase: 'thinking' | 'image_generation' | 'finalizing'
     ) => void;
     sessionActivePresence: { getStatus: (id: SessionId) => SessionStatus | null };
-    store: { get: (id: SessionId) => { imageGenerationActivityStatusChain: Promise<void> } };
   };
 
 /**
@@ -171,8 +170,6 @@ describe('MessageHandler image upload flow', () => {
       }
     );
 
-    await presenceInternals(harness.handler).store.get(sessionId)
-      .imageGenerationActivityStatusChain;
     expect(presenceInternals(harness.handler).sessionActivePresence.getStatus(sessionId)).toEqual({
       type: 'running',
       activity: 'image_generation',
@@ -188,12 +185,38 @@ describe('MessageHandler image upload flow', () => {
       }
     );
 
-    await presenceInternals(harness.handler).store.get(sessionId)
-      .imageGenerationActivityStatusChain;
     expect(presenceInternals(harness.handler).sessionActivePresence.getStatus(sessionId)).toEqual({
       type: 'running',
     });
     expect(harness.sessionDoc.setStatus).not.toHaveBeenCalled();
+  });
+
+  it('contains an activity failure and updates presence on the next image event', () => {
+    const harness = createHarness();
+    handlers.push(harness.handler);
+    const sessionId = 'session-image-activity-error' as SessionId;
+    const host = presenceInternals(harness.handler);
+    injectActivePresence(harness.handler, sessionId);
+    vi.spyOn(host.sessionActivePresence, 'getStatus').mockImplementationOnce(() => {
+      throw new Error('Presence unavailable');
+    });
+
+    expect(() =>
+      harness.host.handleImageGenerationBegin(sessionId, {
+        acpSessionId: 'acp-1',
+        callId: 'ig-error',
+      })
+    ).not.toThrow();
+    expect(host.sessionActivePresence.getStatus(sessionId)).toEqual({ type: 'running' });
+
+    harness.host.handleImageGenerationBegin(sessionId, {
+      acpSessionId: 'acp-1',
+      callId: 'ig-next',
+    });
+    expect(host.sessionActivePresence.getStatus(sessionId)).toEqual({
+      type: 'running',
+      activity: 'image_generation',
+    });
   });
 
   it('does not retarget image activity after the turn has started finalizing', async () => {
@@ -214,8 +237,6 @@ describe('MessageHandler image upload flow', () => {
       }
     );
 
-    await presenceInternals(harness.handler).store.get(sessionId)
-      .imageGenerationActivityStatusChain;
     expect(presenceInternals(harness.handler).sessionActivePresence.getStatus(sessionId)).toEqual({
       type: 'running',
       phase: 'finalizing',
@@ -223,7 +244,7 @@ describe('MessageHandler image upload flow', () => {
     expect(harness.sessionDoc.setStatus).not.toHaveBeenCalled();
   });
 
-  it('does not let a queued image end undo finalizing or idle', async () => {
+  it('does not let a late image end undo finalizing or idle', async () => {
     const harness = createHarness();
     handlers.push(harness.handler);
     const sessionId = 'session-image-finalization-race' as SessionId;
@@ -235,7 +256,6 @@ describe('MessageHandler image upload flow', () => {
       acpSessionId: 'acp-1',
       callId: 'ig-race',
     });
-    await host.store.get(sessionId).imageGenerationActivityStatusChain;
     expect(host.sessionActivePresence.getStatus(sessionId)).toEqual({
       type: 'running',
       activity: 'image_generation',
@@ -249,7 +269,6 @@ describe('MessageHandler image upload flow', () => {
       callId: 'ig-race',
       status: 'completed',
     });
-    await host.store.get(sessionId).imageGenerationActivityStatusChain;
     expect(host.sessionActivePresence.getStatus(sessionId)).toEqual({
       type: 'running',
       phase: 'finalizing',

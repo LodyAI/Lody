@@ -1154,33 +1154,26 @@ export class MessageHandler {
     const state = this.store.get(sessionId);
     state.imageGenerationTurnIds.set(event.callId, turnId);
     state.imageGenerationActiveCallIds.add(event.callId);
-    this.enqueueImageGenerationActivityStatusSync(sessionId);
+    this.syncImageGenerationActivityPresence(sessionId);
     this.logger.debug(
       `[${sessionId}] Codex image generation started (callId=${event.callId} turnId=${turnId ?? 'none'})`
     );
   }
 
-  private enqueueImageGenerationActivityStatusSync(sessionId: SessionId): void {
-    const state = this.store.get(sessionId);
-    const task = state.imageGenerationActivityStatusChain
-      .catch(() => undefined)
-      .then(() => {
-        const currentState = this.store.get(sessionId);
-        // Presence-only. Reading durable status awaits the doc and can land
-        // after prompt-end already published finalizing and idle. setPhase
-        // dedupes an unchanged phase, so a burst of the same begin does not
-        // republish; do not call this per token or chunk.
-        const nextPhase = resolveImageGenerationPresencePhase({
-          hasActiveImageGeneration: currentState.imageGenerationActiveCallIds.size > 0,
-          current: this.sessionActivePresence.getStatus(sessionId),
-        });
-        if (nextPhase) {
-          this.setSessionActivePresencePhase(sessionId, nextPhase);
-        }
+  private syncImageGenerationActivityPresence(sessionId: SessionId): void {
+    try {
+      const state = this.store.get(sessionId);
+      // Presence-only and synchronous: image lifecycle events cannot leave a
+      // deferred status write that outlives the prompt. The phase owner dedupes
+      // unchanged activity and the resolver preserves finalizing/permission.
+      const nextPhase = resolveImageGenerationPresencePhase({
+        hasActiveImageGeneration: state.imageGenerationActiveCallIds.size > 0,
+        current: this.sessionActivePresence.getStatus(sessionId),
       });
-
-    state.imageGenerationActivityStatusChain = task;
-    void task.catch((error) => {
+      if (nextPhase) {
+        this.setSessionActivePresencePhase(sessionId, nextPhase);
+      }
+    } catch (error) {
       try {
         this.logger.debug(
           `[${sessionId}] Failed to sync Codex image generation activity: ${formatErrorMessage(
@@ -1188,9 +1181,9 @@ export class MessageHandler {
           )}`
         );
       } catch {
-        // Logging must never make the status chain fail recursively.
+        // Best-effort activity reporting must not interrupt image handling.
       }
-    });
+    }
   }
 
   private handleImageGenerationEnd(sessionId: SessionId, event: ImageGenerationEndEvent): void {
@@ -1198,7 +1191,7 @@ export class MessageHandler {
     const isTerminal = isImageGenerationTerminalStatus(event.status);
     if (isTerminal) {
       state.imageGenerationActiveCallIds.delete(event.callId);
-      this.enqueueImageGenerationActivityStatusSync(sessionId);
+      this.syncImageGenerationActivityPresence(sessionId);
     }
 
     if (state.imageGenerationUploadedCallIds.has(event.callId)) {

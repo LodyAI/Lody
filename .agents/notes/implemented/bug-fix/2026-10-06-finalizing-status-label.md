@@ -34,3 +34,12 @@ Intent: [Spec](../../../../specs/session-finalization-status.md).
 The phase predicate regression is retained with updated terminology. Translation
 keys and the diff are checked separately. This checkout has no installed package
 dependencies; component tests and packaged Electron interaction are not verified.
+
+## Synchronous image activity cleanup
+
+Image begin/end now update presence synchronously through the existing phase
+resolver. The Promise chain and its transient-store field were leftovers from
+durable asynchronous status writes; neither is needed for the synchronous path.
+Errors remain contained so activity reporting cannot interrupt image handling.
+The image-upload suite asserts presence immediately after each event and retains
+the late-end finalization regression without awaiting an internal queue.
