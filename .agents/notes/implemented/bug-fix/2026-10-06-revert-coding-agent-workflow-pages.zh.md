@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1273](https://github.com/LodyAI/Lody/pull/1273)
+
 [English](2026-10-06-revert-coding-agent-workflow-pages.md)
 
 ## 摘要
