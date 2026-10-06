@@ -683,12 +683,11 @@ const resolveActivityFromSessionStatus = (
 
 /**
  * History and presence arrive independently. A finished assistant row cannot
- * hide a goal resume whose presence is already `running`. Only the execution
- * owner's finalizing phase hides the activity row.
+ * distinguish finalization from a new running goal prompt. Only the execution
+ * owner's finalizing phase selects the finalization label; the session stays busy.
  */
-export const shouldHideThinkingDuringFinalization = (
-  liveStatus: SessionStatus | null | undefined
-): boolean => liveStatus?.type === 'running' && liveStatus.phase === 'finalizing';
+export const isSessionFinalizing = (liveStatus: SessionStatus | null | undefined): boolean =>
+  liveStatus?.type === 'running' && liveStatus.phase === 'finalizing';
 
 const resolveToneByStatus = (status: SessionStatus['type']) => {
   switch (status) {
@@ -3660,15 +3659,15 @@ export const SessionChatInterface = memo(
       sessionProject,
       workspaceId,
     ]);
-    const hideThinkingDuringFinalization = shouldHideThinkingDuringFinalization(liveSessionStatus);
+    const isFinalizing = isSessionFinalizing(liveSessionStatus);
     const agentActivityLabel =
       initStatusLabel && !isEmptyConversation
         ? initStatusLabel
         : isSessionActive
           ? liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : hideThinkingDuringFinalization
-              ? null
+            : isFinalizing
+              ? t('sessions.statusIndicator.finalizing')
               : runningActivity === 'imageGenerating'
                 ? t('sessions.statusIndicator.imageGenerating')
                 : // Reading, running and editing all read as "Working"; the

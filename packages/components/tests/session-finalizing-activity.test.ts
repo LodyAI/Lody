@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionStatus } from '@lody/shared';
-import { shouldHideThinkingDuringFinalization } from '../src/components/sessions/session-chat-interface';
+import { isSessionFinalizing } from '../src/components/sessions/session-chat-interface';
 
-describe('shouldHideThinkingDuringFinalization', () => {
-  it('hides thinking only during an explicitly reported finalization', () => {
-    expect(shouldHideThinkingDuringFinalization({ type: 'running', phase: 'finalizing' })).toBe(
-      true
-    );
+describe('isSessionFinalizing', () => {
+  it('recognizes an explicitly reported finalization', () => {
+    expect(isSessionFinalizing({ type: 'running', phase: 'finalizing' })).toBe(true);
   });
 
   it.each<SessionStatus | null | undefined>([
@@ -17,7 +15,7 @@ describe('shouldHideThinkingDuringFinalization', () => {
     { type: 'running', activity: 'image_generation' },
     { type: 'initializing' },
     { type: 'requestPermission' },
-  ])('keeps the activity row for live presence %j', (status) => {
-    expect(shouldHideThinkingDuringFinalization(status)).toBe(false);
+  ])('does not label other live presence as finalizing: %j', (status) => {
+    expect(isSessionFinalizing(status)).toBe(false);
   });
 });

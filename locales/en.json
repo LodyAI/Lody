@@ -2324,6 +2324,7 @@
   "sessions.statusIndicator.resuming": "Resuming",
   "sessions.statusIndicator.running": "Working",
   "sessions.statusIndicator.terminated": "This conversation has been terminated",
+  "sessions.statusIndicator.finalizing": "Finalizing…",
   "sessions.statusIndicator.thinking": "Thinking",
   "sessions.stop": "Stop",
   "sessions.stopError": "Failed to send stop request",

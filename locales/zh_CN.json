@@ -2324,6 +2324,7 @@
   "sessions.statusIndicator.resuming": "正在恢复",
   "sessions.statusIndicator.running": "处理中",
   "sessions.statusIndicator.terminated": "对话已终止",
+  "sessions.statusIndicator.finalizing": "收尾中…",
   "sessions.statusIndicator.thinking": "思考中",
   "sessions.stop": "停止",
   "sessions.stopError": "停止指令发送失败",
