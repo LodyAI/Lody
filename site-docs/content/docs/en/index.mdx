@@ -6,9 +6,9 @@ description: A map of the Lody docs — where to install Lody, run your first se
 # Lody
 
 Lody.ai lets you run coding agents in parallel on desktop, mobile, and in any browser, and share
-context with your team. You can run Claude Code, Codex, Grok, OpenCode, Kimi, DeepSeek, custom ACP
-agents, and any CLI in the
-[ACP Registry](https://agentclientprotocol.com/get-started/registry).
+context with your team. You can run every built-in Lody provider: Claude Code, Codex, Grok, Kimi
+Code, Devin, Pi, DeepSeek Harness, Bub, and Dimcode; you can also run custom ACP agents and any CLI
+in the [ACP Registry](https://agentclientprotocol.com/get-started/registry).
 
 ## Start here
 
@@ -27,23 +27,13 @@ agents, and any CLI in the
   </Card>
 </Cards>
 
-## How these docs are organized
-
-| Section | What it is for | Start with |
-| --- | --- | --- |
-| **Getting Started** | Install, sign in, add a project, and finish one session. | [Quick Start](/docs/quickstart) |
-| **Core Concepts** | The mental model and the objects every guide assumes. | [Concepts & Glossary](/docs/concepts) |
-| **Guides** | End-to-end workflows: shipping a change, parallel agents, collaboration, handoff, mobile, and schedules. | [Recommended Workflow](/docs/workflow) |
-| **Coming from another agent** | Concept mapping and migration for Codex and Claude Code users. | [Coming from Codex or Claude Code](/docs/from-codex-claude-code) |
-| **Reference** | Feature-level pages grouped by conversation, agents and runtimes, team and usage, and settings and CLI. | [Agent Config](/docs/agents) |
-
 ## What Lody is good at
 
 - **Run work in parallel.** Each session gets its own Git worktree, so agents do not overwrite each
   other. See [Parallel Coding Agents](/docs/parallel-agents).
-- **Use the agents you already trust.** Claude Code and Codex are maintained directly; every ACP
-  Registry runtime and custom ACP command also works. See [Agent Config](/docs/agents) and
-  [CLI Runtime Types](/docs/cli-runtimes).
+- **Use the agents you already trust.** Lody ships many built-in providers, not just Claude Code and
+  Codex; every ACP Registry runtime and custom ACP command also works. See
+  [Agent Config](/docs/agents) and [CLI Runtime Types](/docs/cli-runtimes).
 - **Review while the agent works.** Round-level diffs, line comments, and GitHub PR review sync.
   See [Diff Viewer](/docs/diff-viewer) and [Diff Comments](/docs/diff-comments).
 - **Let one agent coordinate the others.** Split a task, delegate, and collect results through
