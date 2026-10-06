@@ -437,10 +437,10 @@ describe('live agent status', () => {
         {
           type: 'tool_call',
           toolCallId: 'pi-bash-2',
-          title: 'bash',
+          title: 'pwd',
           kind: 'execute',
           status: 'completed',
-          content: [{ type: 'terminal_command', command: 'true' }],
+          content: [{ type: 'terminal_command', command: 'pwd' }],
         },
       ]),
       { label: 'Working' }
@@ -451,10 +451,14 @@ describe('live agent status', () => {
         candidate.textContent?.includes(text)
       )!;
     await act(async () => button('Ran 2 commands').click());
-    await act(async () => button('Ran bash').click());
+    if (button('Ran bash').getAttribute('aria-expanded') !== 'true') {
+      await act(async () => button('Ran bash').click());
+    }
 
-    const sheet = container.querySelector('[data-tool-detail-sheet]');
-    expect(sheet).not.toBeNull();
+    const sheet = [...container.querySelectorAll('[data-tool-detail-sheet]')].find((candidate) =>
+      candidate.textContent?.includes('echo one; echo two')
+    );
+    expect(sheet).toBeDefined();
     expect(sheet!.querySelector('.markdown-renderer')).toBeNull();
     expect([...sheet!.querySelectorAll('pre')].map((pre) => pre.textContent)).toContain(output);
   });

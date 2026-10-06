@@ -1019,7 +1019,9 @@ describe('acp history apply', () => {
         kind: 'execute',
         status: 'in_progress',
         rawInput: { command },
-        content: [{ type: 'content', content: { type: 'text', text: '  774  -  com.apple.quicklook\n' } }],
+        content: [
+          { type: 'content', content: { type: 'text', text: '  774  -  com.apple.quicklook\n' } },
+        ],
       }),
       makeNotification({
         sessionUpdate: 'tool_call_update',
