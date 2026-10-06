@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#1278](https://github.com/LodyAI/Lody/pull/1278)
+PR: [ladydd/Lody#1](https://github.com/ladydd/Lody/pull/1)
 
 [中文](2026-10-06-finalizing-status-label.zh.md)
 
