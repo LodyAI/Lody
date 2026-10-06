@@ -4,13 +4,13 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type ReactNode,
   type RefObject,
 } from 'react';
 import {
   motion,
   useMotionValue,
+  useMotionValueEvent,
   useReducedMotion,
   useSpring,
   useTransform,
@@ -181,6 +181,7 @@ function DockTab<TabKey extends string>({
   theme,
   expandAriaLabel,
   onClick,
+  ref,
 }: {
   tab: MobileBottomTabBarTabSpec<TabKey>;
   index: number;
@@ -194,6 +195,7 @@ function DockTab<TabKey extends string>({
   theme: 'ios' | 'material';
   expandAriaLabel: string;
   onClick: () => void;
+  ref?: RefObject<HTMLButtonElement | null>;
 }) {
   const cell = () => (width.get() - 2 * PILL_INSET_PX) / count;
   const x = useTransform(() => (PILL_INSET_PX + index * cell()) * (1 - progress.get()));
@@ -204,6 +206,7 @@ function DockTab<TabKey extends string>({
 
   return (
     <Button
+      ref={ref}
       variant="ghost"
       shape="pill"
       className={stylex.props(!active && styles.tabHover).className}
@@ -275,6 +278,7 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
   const collapsed = minimized && tabs.some((tab) => tab.key === selectedTab);
   const slot = useRef<HTMLDivElement>(null);
   const shell = useRef<HTMLDivElement>(null);
+  const selectedTabRef = useRef<HTMLButtonElement>(null);
   const width = useMotionValue(COLLAPSED_PX);
   const reduce = useReducedMotion();
   const progress = useSpring(0, DOCK_SPRING);
@@ -284,13 +288,9 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
   const height = useTransform(progress, [0, 1], [EXPANDED_PX, COLLAPSED_PX]);
   const cornerRadius = useTransform(height, (value) => value / 2);
   const fade = useTransform(progress, [0, FADE_END], [1, 0]);
-  // Only crossing the fade boundary changes the React snapshot.
-  const subscribe = useCallback((notify: () => void) => progress.on('change', notify), [progress]);
-  const faded = useSyncExternalStore(
-    subscribe,
-    () => progress.get() >= FADE_END,
-    () => false
-  );
+  // Only crossing the fade boundary re-renders: React skips equal state.
+  const [faded, setFaded] = useState(false);
+  useMotionValueEvent(progress, 'change', (value) => setFaded(value >= FADE_END));
   const othersHidden = collapsed || faded;
 
   useLayoutEffect(() => {
@@ -321,9 +321,7 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
         // Move focus before React applies inert: browsers may blur an inert
         // control before a layout effect can discover the previous focus.
         if (delta > 0 && shell.current?.contains(document.activeElement)) {
-          shell.current
-            .querySelector<HTMLElement>('[aria-selected="true"]')
-            ?.focus({ preventScroll: true });
+          selectedTabRef.current?.focus({ preventScroll: true });
         }
         setMinimized(delta > 0);
       }
@@ -373,6 +371,7 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
               width={width}
               progress={progress}
               fade={fade}
+              ref={tab.key === selectedTab ? selectedTabRef : undefined}
               active={tab.key === selectedTab}
               hidden={tab.key !== selectedTab && othersHidden}
               collapsed={collapsed}
