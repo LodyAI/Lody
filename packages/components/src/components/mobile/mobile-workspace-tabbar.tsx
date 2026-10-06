@@ -86,6 +86,12 @@ const DOCK_SPRING = {
 };
 const SCROLL_THRESHOLD = 14;
 const AT_TOP_SLACK = 4;
+const EXPANDED_PX = 56;
+const COLLAPSED_PX = 48;
+const PILL_INSET_PX = 8;
+// Labels, selection fill and other tabs fade out together, and other tabs stop
+// accepting input at the same progress.
+const FADE_END = 0.4;
 
 // The global reduced-motion rule gives * a nonzero transition duration.
 // Explicitly opt out so CSS cannot interpolate MotionValue updates a second time.
@@ -104,7 +110,7 @@ const styles = stylex.create({
     paddingBottom: `calc(${space[2]} + var(--k-safe-area-bottom, 0px))`,
     pointerEvents: 'none',
   },
-  slot: { position: 'relative', flex: 1, minWidth: 0, height: 56 },
+  slot: { position: 'relative', flex: 1, minWidth: 0, height: EXPANDED_PX },
   shell: {
     transitionProperty: 'none',
     position: 'absolute',
@@ -158,8 +164,8 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
   },
   fabSlot: {
-    width: 56,
-    height: 56,
+    width: EXPANDED_PX,
+    height: EXPANDED_PX,
     flexShrink: 0,
     display: 'flex',
     alignItems: 'end',
@@ -174,7 +180,9 @@ function DockTab<TabKey extends string>({
   count,
   width,
   progress,
+  fade,
   active,
+  hidden,
   collapsed,
   theme,
   expandAriaLabel,
@@ -185,30 +193,21 @@ function DockTab<TabKey extends string>({
   count: number;
   width: MotionValue<number>;
   progress: MotionValue<number>;
+  fade: MotionValue<number>;
   active: boolean;
+  hidden: boolean;
   collapsed: boolean;
   theme: 'ios' | 'material';
   expandAriaLabel: string;
   onClick: () => void;
 }) {
-  const x = useTransform(() => (8 + (index * (width.get() - 16)) / count) * (1 - progress.get()));
-  const cellWidth = useTransform(() => {
-    const cell = (width.get() - 16) / count;
-    return cell + (48 - cell) * progress.get();
-  });
-  const height = useTransform(progress, [0, 1], [56, 48]);
+  const cell = () => (width.get() - 2 * PILL_INSET_PX) / count;
+  const x = useTransform(() => (PILL_INSET_PX + index * cell()) * (1 - progress.get()));
+  const cellWidth = useTransform(() => cell() + (COLLAPSED_PX - cell()) * progress.get());
+  const height = useTransform(progress, [0, 1], [EXPANDED_PX, COLLAPSED_PX]);
   const iconY = useTransform(progress, [0, 1], [8, 12]);
-  const opacity = useTransform(progress, [0, 0.45], [1, 0]);
-  const labelOpacity = useTransform(progress, [0, 0.4], [1, 0]);
   const labelY = useTransform(progress, [0, 1], [0, -5]);
-  // Only crossing the visibility boundary changes the React snapshot.
-  const subscribe = useCallback((notify: () => void) => progress.on('change', notify), [progress]);
-  const visible = useSyncExternalStore(
-    subscribe,
-    () => progress.get() < 0.4,
-    () => true
-  );
-  const hidden = !active && (collapsed || !visible);
+  const iconProps = stylex.props(styles.icon, active && styles.activeContent);
 
   return (
     <Button
@@ -225,7 +224,7 @@ function DockTab<TabKey extends string>({
             x,
             width: cellWidth,
             height,
-            opacity: active ? 1 : opacity,
+            opacity: active ? 1 : fade,
             zIndex: active ? 2 : 1,
             transition: 'none',
             backgroundColor: collapsed ? undefined : 'transparent',
@@ -245,23 +244,19 @@ function DockTab<TabKey extends string>({
         <motion.span
           aria-hidden="true"
           {...stylex.props(styles.highlight)}
-          style={{ opacity: labelOpacity }}
+          style={{ opacity: fade }}
         />
       )}
       <motion.span
-        {...stylex.props(styles.icon, active && styles.activeContent)}
         // Preserve the existing consumer-SVG sizing contract, including react-icons.
-        className={`${stylex.props(styles.icon, active && styles.activeContent).className} [&>svg]:h-6 [&>svg]:w-6`}
+        className={`${iconProps.className} [&>svg]:h-6 [&>svg]:w-6`}
         style={{ y: iconY }}
       >
         {theme === 'ios' ? tab.ios : tab.material}
       </motion.span>
       <motion.span
         {...stylex.props(styles.label, active && styles.activeContent)}
-        style={{
-          opacity: labelOpacity,
-          y: labelY,
-        }}
+        style={{ opacity: fade, y: labelY }}
       >
         {tab.label}
       </motion.span>
@@ -288,12 +283,23 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
   const collapsed = minimized && hasSelection;
   const slot = useRef<HTMLDivElement>(null);
   const shell = useRef<HTMLDivElement>(null);
-  const width = useMotionValue(48);
+  const width = useMotionValue(COLLAPSED_PX);
   const reduce = useReducedMotion();
   const progress = useSpring(0, DOCK_SPRING);
-  const shellWidth = useTransform(() => width.get() + (48 - width.get()) * progress.get());
-  const height = useTransform(progress, [0, 1], [56, 48]);
-  const cornerRadius = useTransform(progress, [0, 1], [28, 24]);
+  const shellWidth = useTransform(
+    () => width.get() + (COLLAPSED_PX - width.get()) * progress.get()
+  );
+  const height = useTransform(progress, [0, 1], [EXPANDED_PX, COLLAPSED_PX]);
+  const cornerRadius = useTransform(height, (value) => value / 2);
+  const fade = useTransform(progress, [0, FADE_END], [1, 0]);
+  // Only crossing the fade boundary changes the React snapshot.
+  const subscribe = useCallback((notify: () => void) => progress.on('change', notify), [progress]);
+  const faded = useSyncExternalStore(
+    subscribe,
+    () => progress.get() >= FADE_END,
+    () => false
+  );
+  const othersHidden = collapsed || faded;
 
   useLayoutEffect(() => {
     const element = slot.current;
@@ -382,7 +388,9 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
               count={tabs.length}
               width={width}
               progress={progress}
+              fade={fade}
               active={tab.key === selectedTab}
+              hidden={tab.key !== selectedTab && othersHidden}
               collapsed={collapsed}
               theme={resolvedTheme}
               expandAriaLabel={expandAriaLabel ?? '展开导航'}
