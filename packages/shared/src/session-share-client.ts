@@ -59,9 +59,10 @@ export async function readShareResponseBytes(
       if (total > maxBytes) throw new Error('Share object exceeds size limit');
       chunks.push(result.value);
     }
-  } catch {
+  } catch (error) {
     await reader.cancel().catch(() => {});
-    throw new Error('Share object read failed');
+    if (error instanceof Error && error.message === 'Share object exceeds size limit') throw error;
+    throw new Error('Share object read failed', { cause: error });
   } finally {
     reader.releaseLock();
   }

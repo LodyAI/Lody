@@ -104,7 +104,8 @@ export const PublishFailed: Story = {
     selected: ['main', 'child'],
     hasSecret: true,
     shareLink: storyLink,
-    error: 'Could not update sharing. Check the current settings and try again.',
+    error:
+      'The share upload did not finish. Check your connection and retry in this window to continue with the same content.',
     hasPending: true,
   },
 };

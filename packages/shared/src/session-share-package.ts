@@ -3,24 +3,35 @@ import { z } from 'zod';
 /** Product rollout switch, shared by capture and publication authorization. */
 export const SESSION_SHARE_FILE_ATTACHMENTS_ENABLED: boolean = false;
 
-export function assertShareAttachmentPolicy(manifest: SharePackageManifest): void {
-  if (
-    !SESSION_SHARE_FILE_ATTACHMENTS_ENABLED &&
-    manifest.attachments.some((a) => a.kind === 'file')
-  )
-    throw new Error('share_file_attachments_disabled');
-}
-
 /** Portable published data, deliberately independent of Loro and workspace auth. */
 export const SHARE_LIMITS = {
   conversations: 32,
-  attachments: 512,
+  attachments: 64,
+  imageBytes: 20_000_000,
   manifestBytes: 1024 * 1024,
   historyBytes: 32 * 1024 * 1024,
   objectBytes: 100 * 1024 * 1024,
   deploymentBytes: 256 * 1024 * 1024,
   jsonDepth: 64,
 } as const;
+
+export function assertShareAttachmentPolicy(manifest: SharePackageManifest): void {
+  if (manifest.attachments.length > SHARE_LIMITS.attachments)
+    throw new Error('Too many share attachments');
+  const objects = new Map(manifest.objects.map((object) => [object.id, object]));
+  for (const attachment of manifest.attachments) {
+    if (
+      attachment.kind === 'image' &&
+      (objects.get(attachment.objectId)?.sizeBytes ?? 0) > SHARE_LIMITS.imageBytes
+    )
+      throw new Error('Share image exceeds size limit');
+  }
+  if (
+    !SESSION_SHARE_FILE_ATTACHMENTS_ENABLED &&
+    manifest.attachments.some((a) => a.kind === 'file')
+  )
+    throw new Error('share_file_attachments_disabled');
+}
 
 export const ShareResourceId = z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/);
 export const ShareDigest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -58,6 +69,10 @@ export const ShareAttachmentSchema = z
   })
   .strict();
 
+// Reader compatibility: older published shares allowed 512 attachments. New
+// publications enforce SHARE_LIMITS through assertShareAttachmentPolicy instead.
+const MAX_READ_ATTACHMENTS = 512;
+
 export const SharePackageManifestSchema = z
   .object({
     formatVersion: z.union([z.literal(1), z.literal(2)]),
@@ -65,11 +80,11 @@ export const SharePackageManifestSchema = z
     capturedAt: z.string().datetime(),
     rootConversationId: ShareResourceId,
     conversations: z.array(ShareConversationSchema).min(1).max(SHARE_LIMITS.conversations),
-    attachments: z.array(ShareAttachmentSchema).max(SHARE_LIMITS.attachments),
+    attachments: z.array(ShareAttachmentSchema).max(MAX_READ_ATTACHMENTS),
     objects: z
       .array(ShareObjectSchema)
       .min(1)
-      .max(SHARE_LIMITS.conversations + SHARE_LIMITS.attachments),
+      .max(SHARE_LIMITS.conversations + MAX_READ_ATTACHMENTS),
   })
   .strict()
   .superRefine((manifest, ctx) => {

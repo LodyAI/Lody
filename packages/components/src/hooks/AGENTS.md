@@ -12,6 +12,12 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 - A cached session renders in the frame after its click: no promise tick,
   effect-only state or deferred setState before its first cycle.
 
+## Sharing errors
+
+- Keep error operation context independent of React progress state (which resets in
+  `finally`). `lib/session-share-errors.ts` maps only known codes to localized advice;
+  never display raw errors or claim a lost mutation response proves failure.
+
 ## Session, auth, and app shell
 
 - History uses SessionData commands.
