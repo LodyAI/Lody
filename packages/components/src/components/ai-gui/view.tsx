@@ -7528,6 +7528,14 @@ const ToolCallCard = memo(function ToolCallCard({
         // Markdown pipeline so single-`$` math cannot eat fragments like `$(...)`.
         const verbatim =
           detectToolCallJsonText(content.text) ?? extractFencedToolText(content.text);
+        // A shell step's plain text is what the program printed (Pi histories stored
+        // it so); Markdown would fold its line breaks into one paragraph.
+        if (verbatim === null && toolCall.kind === 'execute') {
+          pushOutput(`text-${index}`, [
+            { type: 'terminal_output', output: content.text, stream: 'combined' },
+          ]);
+          continue;
+        }
         sections.push(
           isToolSearch || verbatim !== null ? (
             <ToolVerbatimSection

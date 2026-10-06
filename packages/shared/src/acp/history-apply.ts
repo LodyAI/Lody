@@ -375,6 +375,21 @@ const extractTerminalOutputContent = (
     return buildTerminalOutputBlocks({ output: rawOutput });
   }
 
+  // Pi: a shell result is `{ content: [{ type: 'text', text }], details }`. Other Pi
+  // tools share that shape, so only an execute call's result is terminal output.
+  if (kind === 'execute') {
+    const content = asRecordOrUndefined(rawOutput)?.content;
+    if (Array.isArray(content)) {
+      const output = content
+        .flatMap((block) => {
+          const record = asRecordOrUndefined(block);
+          return record?.type === 'text' && typeof record.text === 'string' ? [record.text] : [];
+        })
+        .join('');
+      if (output.length > 0) return buildTerminalOutputBlocks({ output });
+    }
+  }
+
   return [];
 };
 
@@ -1206,11 +1221,13 @@ export const buildMessageContentFromNotification = (
           if (fenced && candidateOutputs.has(normalizeTerminalOutputForComparison(fenced.body))) {
             return false;
           }
-          // Check plain text match (Kimi style: content text is identical to terminal output)
+          // Check plain text match (Kimi/Pi style: content text is identical to terminal
+          // output). Indented output such as `launchctl print` only matches untrimmed.
           const plainText = c.content.text.trim();
           if (
             plainText.length > 0 &&
-            candidateOutputs.has(normalizeTerminalOutputForComparison(plainText))
+            (candidateOutputs.has(normalizeTerminalOutputForComparison(plainText)) ||
+              candidateOutputs.has(normalizeTerminalOutputForComparison(c.content.text)))
           ) {
             return false;
           }
