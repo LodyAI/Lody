@@ -770,6 +770,8 @@ function SessionConversationDiffPanelImpl({
     );
   }
 
+  const prLinked = Boolean(latestPrNumber && repoFullName);
+
   const renderFileBlock = (filePath: string) => (
     <div
       key={filePath}
@@ -780,10 +782,10 @@ function SessionConversationDiffPanelImpl({
         filePath={filePath}
         data={resolvedByPath[filePath]}
         defaultOpen={shouldOpenDiffFileByDefault({ mode, filePath, focusFilePath })}
-        commentsEnabled={Boolean(latestPrNumber && repoFullName)}
+        commentsEnabled={prLinked || Boolean(onSendToChat)}
         currentUser={currentUser}
         githubThreads={githubThreadsByPath.get(filePath) ?? EMPTY_GITHUB_THREADS}
-        prLinked={Boolean(latestPrNumber && repoFullName)}
+        prLinked={prLinked}
         turnId={turnId}
         mode={mode}
         cacheKey={cacheKey}
