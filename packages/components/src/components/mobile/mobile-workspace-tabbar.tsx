@@ -77,13 +77,7 @@ export type MobileWorkspaceTabBarProps<TabKey extends string = string> = {
 };
 
 // One persistent spring owns all geometry. Retargeting preserves its velocity.
-const DOCK_SPRING = {
-  stiffness: 420,
-  damping: 40,
-  mass: 1,
-  restDelta: 0.001,
-  restSpeed: 0.001,
-};
+const DOCK_SPRING = { stiffness: 420, damping: 40, mass: 1, restDelta: 0.001, restSpeed: 0.001 };
 const SCROLL_THRESHOLD = 14;
 const AT_TOP_SLACK = 4;
 const EXPANDED_PX = 56;
@@ -207,7 +201,6 @@ function DockTab<TabKey extends string>({
   const height = useTransform(progress, [0, 1], [EXPANDED_PX, COLLAPSED_PX]);
   const iconY = useTransform(progress, [0, 1], [8, 12]);
   const labelY = useTransform(progress, [0, 1], [0, -5]);
-  const iconProps = stylex.props(styles.icon, active && styles.activeContent);
 
   return (
     <Button
@@ -249,7 +242,7 @@ function DockTab<TabKey extends string>({
       )}
       <motion.span
         // Preserve the existing consumer-SVG sizing contract, including react-icons.
-        className={`${iconProps.className} [&>svg]:h-6 [&>svg]:w-6`}
+        className={`${stylex.props(styles.icon, active && styles.activeContent).className} [&>svg]:h-6 [&>svg]:w-6`}
         style={{ y: iconY }}
       >
         {theme === 'ios' ? tab.ios : tab.material}
@@ -279,8 +272,7 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
   const resolvedTheme = theme ?? (isIOSRuntimeEnvironment() ? 'ios' : 'material');
   const [minimized, setMinimized] = useState(false);
   // A page outside this tab set must never collapse into an empty, unreachable pill.
-  const hasSelection = tabs.some((tab) => tab.key === selectedTab);
-  const collapsed = minimized && hasSelection;
+  const collapsed = minimized && tabs.some((tab) => tab.key === selectedTab);
   const slot = useRef<HTMLDivElement>(null);
   const shell = useRef<HTMLDivElement>(null);
   const width = useMotionValue(COLLAPSED_PX);
@@ -309,37 +301,31 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
   }, [width]);
 
   useLayoutEffect(() => {
-    if (reduce) progress.jump(collapsed ? 1 : 0);
-    else progress.set(collapsed ? 1 : 0);
+    progress[reduce ? 'jump' : 'set'](collapsed ? 1 : 0);
   }, [collapsed, progress, reduce]);
 
-  const cumulativeScrollRef = useRef(0);
-  const directionRef = useRef(0);
+  // Signed distance travelled in the current direction; a reversal restarts it.
+  const travelRef = useRef(0);
   const lastScrollTopRef = useRef<number | null>(null);
   const applyScrollTop = useCallback((scrollTop: number) => {
     const top = Math.max(0, scrollTop);
     const delta = top - (lastScrollTopRef.current ?? top);
     lastScrollTopRef.current = top;
     if (top <= AT_TOP_SLACK) {
-      cumulativeScrollRef.current = 0;
-      directionRef.current = 0;
+      travelRef.current = 0;
       setMinimized(false);
     } else if (delta !== 0) {
-      const direction = Math.sign(delta);
-      if (direction !== directionRef.current) cumulativeScrollRef.current = 0;
-      directionRef.current = direction;
-      cumulativeScrollRef.current += Math.abs(delta);
-      if (cumulativeScrollRef.current >= SCROLL_THRESHOLD) {
+      if (Math.sign(delta) !== Math.sign(travelRef.current)) travelRef.current = 0;
+      travelRef.current += delta;
+      if (Math.abs(travelRef.current) >= SCROLL_THRESHOLD) {
         // Move focus before React applies inert: browsers may blur an inert
         // control before a layout effect can discover the previous focus.
-        const focusedElement = document.activeElement;
-        if (direction > 0 && shell.current?.contains(focusedElement)) {
-          const selectedButton = shell.current.querySelector<HTMLElement>('[aria-selected="true"]');
-          if (selectedButton && selectedButton !== focusedElement) {
-            selectedButton.focus({ preventScroll: true });
-          }
+        if (delta > 0 && shell.current?.contains(document.activeElement)) {
+          shell.current
+            .querySelector<HTMLElement>('[aria-selected="true"]')
+            ?.focus({ preventScroll: true });
         }
-        setMinimized(direction > 0);
+        setMinimized(delta > 0);
       }
     }
   }, []);
@@ -348,8 +334,7 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
   useEffect(() => {
     // Monaco's signal and a mounted list can coexist. Only the active source
     // owns the baseline; switching sources must not manufacture a scroll delta.
-    cumulativeScrollRef.current = 0;
-    directionRef.current = 0;
+    travelRef.current = 0;
     lastScrollTopRef.current = null;
     if (hasScrollSignal) return undefined;
     const element = scrollContainerRef?.current;
@@ -365,8 +350,7 @@ export function MobileWorkspaceTabBar<TabKey extends string = string>({
   }, [applyScrollTop, scrollSignal]);
 
   const expand = () => {
-    cumulativeScrollRef.current = 0;
-    directionRef.current = 0;
+    travelRef.current = 0;
     setMinimized(false);
   };
 
