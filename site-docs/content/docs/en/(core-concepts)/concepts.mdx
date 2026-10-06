@@ -6,12 +6,7 @@ description: The mental model behind Lody — sessions, rounds, agent configs, r
 # Concepts & Glossary
 
 Most of Lody is a small set of objects arranged the same way on every screen. Read this page once
-and the guides become easier to place. If you remember only two rules, remember these:
-
-<Callout title="The two rules that prevent most confusion" type="idea">
-1. **One session = one task.** A session is the unit of work, history, and review.
-2. **An Agent Config is what can run; an Agent Role is a saved choice of how to run it.**
-</Callout>
+and the guides become easier to place.
 
 ## The mental model
 
@@ -54,7 +49,6 @@ repository, agent config, role) or comes out of it (diff, pull request, handoff)
 | **Worktree** | An isolated checkout so two sessions can edit the same repository without colliding. | [Worktrees](/docs/worktrees) |
 | **Agent Config** | A runtime (Claude Code, Codex, Kimi, ACP, and others) plus its auth and execution machine. | [Agent Config](/docs/agents) · [CLI Runtime Types](/docs/cli-runtimes) |
 | **Agent Role** | A saved preset that combines a machine, Agent Config, model, reasoning, permission, and an optional instruction. | [Agent Roles](/docs/agent-roles) |
-| **Pull request (PR)** | The GitHub review and merge surface a session can create and sync with. | [GitHub Integration](/docs/github) |
 
 ## How the pieces relate
 

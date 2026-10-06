@@ -6,12 +6,6 @@ description: Lody 背后的心智模型——会话、轮次、Agent Config、�
 # 概念与术语表
 
 Lody 的大部分界面背后，都是同一小组对象在重复出现。花几分钟读一遍这页，后面的指南会更容易对号入座。
-如果只记两条，请记住：
-
-<Callout title="能避免大多数困惑的两条规则" type="idea">
-1. **一个会话 = 一个任务。** 会话是工作、历史和审阅的基本单位。
-2. **Agent Config 是“能跑什么”；Agent Role 是“用什么方式跑”的保存项。**
-</Callout>
 
 ## 心智模型
 
@@ -52,7 +46,6 @@ Lody 的大部分界面背后，都是同一小组对象在重复出现。花几
 | **工作树（Worktree）** | 隔离的检出，让两个会话可以编辑同一个仓库而不互相覆盖。 | [工作树](/zh/docs/worktrees) |
 | **Agent Config** | 一个运行时（Claude Code、Codex、Kimi、ACP 等）加上它的认证和执行机器。 | [Agent Config](/zh/docs/agents) · [CLI 运行时类型](/zh/docs/cli-runtimes) |
 | **Agent Role** | 保存好的预设：组合机器、Agent Config、模型、推理、权限和可选指令。 | [Agent 角色](/zh/docs/agent-roles) |
-| **Pull Request（PR）** | 会话可以创建并同步的 GitHub 审阅与合并界面。 | [GitHub 集成](/zh/docs/github) |
 
 ## 它们之间的关系
 
