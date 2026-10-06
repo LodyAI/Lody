@@ -5,6 +5,7 @@
   "sourceCommit": "693d6964a676203757706685b6acca96e740c47b",
   "kind": "node-package",
   "minNodeVersion": "22.19.0",
+  "piExtensionsProtocolVersion": 1,
   "artifact": {
     "fileName": "lody-pi-0.2.0-lody.693d6964a676-82b3c0240ef751c1.tar.zst",
     "sha256": "82b3c0240ef751c19194e29001b9cd175180d0f4951af00796d333cd9ae37039",
