@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import type { CommentReferencePayload } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 
 import { UserAvatar } from '@/components/user-avatar';
@@ -10,7 +11,6 @@ import { corner, radius, space } from '@lody/ui/tokens/scales.stylex';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
 import { withClassName } from '@/lib/stylex';
-import type { CommentReferencePayload } from '@lody/shared';
 import type { CommentAnchor, CommentUser } from './session-comment-types';
 
 const styles = stylex.create({

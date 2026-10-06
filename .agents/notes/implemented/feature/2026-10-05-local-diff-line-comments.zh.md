@@ -29,7 +29,7 @@ diff 面板所在界面能发送到聊天，就会启用行评论；草稿会向
 
 ## 取舍与限制
 
-- 启用评论时 `DiffViewer` 会跳过预渲染 HTML。面板本来就在每个文件上传 `cachePrerenderedHtml={false}`，
+- 启用评论时 `DiffViewer` 会跳过预渲染 HTML。面板本来就向每个文件的查看器传入 `cachePrerenderedHtml={false}`，
   所以这次没有让面板失去正在使用的缓存。新增的是行事件和 annotation 渲染开销；语法高亮仍走共享
   worker pool。大 diff 的耗时尚未实测。
 - 本地评论不会作为线程持久化在 diff 上。这需要在会话文档中存储，属于另一项设计。
