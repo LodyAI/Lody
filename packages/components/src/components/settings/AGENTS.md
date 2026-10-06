@@ -64,18 +64,18 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - The Codex reset forecast chip in the provider row must not fetch on mount:
   [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
 - The usage share card is a fixed-format report, not a second `ChatShareCard`:
-  exact pixel aspects, period = the page range, headline = that range's total.
-  Derive every number through `usage-share-stats.ts` (stamp the metric on the
-  stats; never pass it beside them). Money: `formatUsdCompact` headline,
+  fixed aspects, period = page range, headline = range total.
+  Derive numbers through `usage-share-stats.ts` (stamp the metric on stats,
+  never pass it beside them). Money: `formatUsdCompact` headline,
   `formatUsdTight` cells — never `truncate`. Tokens/member anonymity are
   defaults; cost substitutes for tokens; member slices never include email.
-  Both share cards use `lib/share-image-export.ts` and
-  `components/share-theme-scope.ts`; do not fork either.
-  `StatsSettingsView` keeps the entry behind the opt-in `shareCard` prop with a lazy
-  dialog, because the public landing reuses that view. Type and spacing come
-  from the card's `TEXT`, `PAD_X`, and `RHYTHM` constants, never fresh `text-[…]`
-  or off-grid padding. `PAD_X` binds the footer too, so every band
-  shares one left edge. `ASPECT_SIZE` includes the backdrop; size against the
+  Both cards reuse `lib/share-image-export.ts` and `components/share-theme-scope.ts`;
+  never fork them. Pinned cards bind product and avatar StyleX themes locally;
+  inherited aliases keep the app's resolved colours.
+  `StatsSettingsView` gates its lazy dialog with opt-in `shareCard` for public-landing
+  reuse. Type and spacing use `TEXT`, `PAD_X`, and `RHYTHM`, never fresh `text-[…]`
+  or off-grid padding. `PAD_X` aligns every band, including the footer.
+  `ASPECT_SIZE` includes the backdrop; size against the
   48px-shorter framed case. Keep every band but the headline `shrink-0`.
   The graphic follows the range
   (hour skyline, day-by-hour grid, or 53-week calendar, as on the Usage screen);

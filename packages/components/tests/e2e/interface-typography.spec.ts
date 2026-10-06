@@ -57,6 +57,69 @@ for (const appTheme of ['light', 'dark'] as const) {
   });
 }
 
+for (const appTheme of ['light', 'dark'] as const) {
+  for (const cardTheme of ['light', 'dark'] as const) {
+    for (const aspect of ['portrait', 'wide'] as const) {
+      test(`usage share uses the card palette: ${cardTheme} ${aspect} in ${appTheme} app`, async ({
+        page,
+      }) => {
+        await page.route('https://**/*', (route) => route.abort());
+        await page.emulateMedia({ colorScheme: appTheme === 'light' ? 'dark' : 'light' });
+        await page.goto(
+          `/iframe.html?id=settings-usagesharecard--team-portrait&viewMode=story&globals=theme:${appTheme}&args=theme:${cardTheme};aspect:${aspect}`
+        );
+        const card = page.locator(`.${cardTheme}-scope`);
+        const foreground = cardTheme === 'light' ? 'rgb(26, 27, 30)' : 'rgb(215, 216, 217)';
+        await expect(card.getByText('1.3B', { exact: true })).toHaveCSS('color', foreground);
+        await expect(card.getByText('Ada Lovelace', { exact: true })).toHaveCSS(
+          'color',
+          cardTheme === 'light' ? 'rgb(107, 114, 128)' : 'rgb(156, 159, 163)'
+        );
+        const initials = card.getByText('AD', { exact: true });
+        await expect(initials).toHaveCSS('color', foreground);
+        await expect(initials).toHaveCSS(
+          'background-color',
+          cardTheme === 'light' ? 'rgb(230, 232, 237)' : 'rgb(46, 46, 46)'
+        );
+        await expect(page.locator('html')).toHaveClass(new RegExp(appTheme));
+      });
+    }
+  }
+
+  test(`usage share without a pinned palette follows the ${appTheme} app`, async ({ page }) => {
+    await page.route('https://**/*', (route) => route.abort());
+    await page.goto(
+      `/iframe.html?id=settings-usagesharecard--team-portrait&viewMode=story&globals=theme:${appTheme}&args=theme:!undefined`
+    );
+    const foreground = appTheme === 'light' ? 'rgb(26, 27, 30)' : 'rgb(215, 216, 217)';
+    await expect(page.getByText('1.3B', { exact: true })).toHaveCSS('color', foreground);
+    await expect(page.getByText('AD', { exact: true })).toHaveCSS('color', foreground);
+    await expect(page.locator('.light-scope, .dark-scope')).toHaveCount(0);
+  });
+
+  test(`usage share palette switches keep the ${appTheme} app theme`, async ({ page }) => {
+    await page.route('https://**/*', (route) => route.abort());
+    await page.goto(
+      `/iframe.html?id=settings-usageshareimagedialog--default&viewMode=story&globals=theme:${appTheme}`
+    );
+    await page.getByRole('combobox', { name: 'Card', exact: true }).click();
+    await page.getByRole('option', { name: 'Workspace and members', exact: true }).click();
+    for (const [label, scope, color] of [
+      ['Light', 'light-scope', 'rgb(26, 27, 30)'],
+      ['Dark', 'dark-scope', 'rgb(215, 216, 217)'],
+      ['Light', 'light-scope', 'rgb(26, 27, 30)'],
+    ]) {
+      await page.getByRole('combobox', { name: 'Theme', exact: true }).click();
+      await page.getByRole('option', { name: label, exact: true }).click();
+      await expect(page.locator(`.${scope}`).getByText('AD', { exact: true })).toHaveCSS(
+        'color',
+        color
+      );
+      await expect(page.locator('html')).toHaveClass(new RegExp(appTheme));
+    }
+  });
+}
+
 for (const theme of ['light', 'dark']) {
   test(`subagent thought prose shares its activity summary and tool size: ${theme}`, async ({
     page,

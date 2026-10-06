@@ -10,6 +10,7 @@
     "./alert": "./src/feedback/alert.tsx",
     "./alert-dialog": "./src/dialog/alert-dialog.tsx",
     "./avatar": "./src/avatar/avatar.tsx",
+    "./avatar/avatar.tokens.stylex": "./src/avatar/avatar.tokens.stylex.ts",
     "./badge": "./src/badge/badge.tsx",
     "./badge/badge.tokens.stylex": "./src/badge/badge.tokens.stylex.ts",
     "./button": "./src/button/button.tsx",
