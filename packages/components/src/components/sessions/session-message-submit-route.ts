@@ -8,6 +8,8 @@ export type SessionMessageSubmitRouteInput = {
   forceQueue: boolean;
   /** Swaps the configured busy-send behavior for this one submission only. */
   invertBehavior: boolean;
+  /** Requests a steer for this submission only, whatever the configured behavior. */
+  forceSteer: boolean;
   nativeSteerAvailable: boolean;
   isPromptBusy: boolean;
   hasUnfinishedAssistantTurn: boolean;
@@ -26,11 +28,13 @@ export type SessionMessageSubmitRouteInput = {
  * `invertBehavior` flips `queuedMessageBehavior` for this submission — a queue
  * default steers, a guide default queues — while keeping every other guard
  * (steering requires authoritative support and positive live prompt activity).
+ * `forceSteer` requests a steer under the same guards and outranks the inversion.
  */
 export function resolveSessionMessageSubmitRoute({
   forceDirect,
   forceQueue,
   invertBehavior,
+  forceSteer,
   isPromptBusy,
   nativeSteerAvailable,
   hasUnfinishedAssistantTurn,
@@ -39,11 +43,13 @@ export function resolveSessionMessageSubmitRoute({
   if (forceDirect) {
     return { type: 'direct_dispatch' };
   }
-  const effectiveBehavior = invertBehavior
-    ? queuedMessageBehavior === 'guide'
-      ? 'queue'
-      : 'guide'
-    : queuedMessageBehavior;
+  const effectiveBehavior = forceSteer
+    ? 'guide'
+    : invertBehavior
+      ? queuedMessageBehavior === 'guide'
+        ? 'queue'
+        : 'guide'
+      : queuedMessageBehavior;
   if (
     !forceQueue &&
     nativeSteerAvailable &&

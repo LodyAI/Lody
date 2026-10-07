@@ -7,6 +7,7 @@ const resolve = (overrides: Partial<Parameters<typeof resolveSessionMessageSubmi
     forceDirect: false,
     forceQueue: false,
     invertBehavior: false,
+    forceSteer: false,
     nativeSteerAvailable: true,
     isPromptBusy: false,
     hasUnfinishedAssistantTurn: false,
@@ -94,6 +95,51 @@ describe('resolveSessionMessageSubmitRoute', () => {
     expect(
       resolve({
         invertBehavior: true,
+        forceQueue: true,
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+      })
+    ).toEqual({ type: 'queue', reason: 'forced' });
+  });
+
+  it('steers a forced submission regardless of the configured behavior', () => {
+    for (const queuedMessageBehavior of ['queue', 'guide'] as const) {
+      expect(
+        resolve({
+          forceSteer: true,
+          isPromptBusy: true,
+          hasUnfinishedAssistantTurn: true,
+          queuedMessageBehavior,
+        })
+      ).toEqual({ type: 'guide' });
+    }
+    expect(
+      resolve({
+        forceSteer: true,
+        invertBehavior: true,
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+      })
+    ).toEqual({ type: 'guide' });
+  });
+
+  it('keeps every steering guard for a forced steer', () => {
+    expect(resolve({ forceSteer: true })).toEqual({ type: 'direct_dispatch' });
+    expect(resolve({ forceSteer: true, hasUnfinishedAssistantTurn: true })).toEqual({
+      type: 'queue',
+      reason: 'unfinished_assistant_turn',
+    });
+    expect(
+      resolve({
+        forceSteer: true,
+        nativeSteerAvailable: false,
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+      })
+    ).toEqual({ type: 'queue', reason: 'prompt_busy' });
+    expect(
+      resolve({
+        forceSteer: true,
         forceQueue: true,
         isPromptBusy: true,
         hasUnfinishedAssistantTurn: true,

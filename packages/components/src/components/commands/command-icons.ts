@@ -11,6 +11,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Command,
+  CornerDownRight,
   Focus,
   FolderInput,
   GitBranch,
@@ -82,5 +83,6 @@ export const COMMAND_ICONS: Record<string, PaletteIcon> = {
   'session.cycleProvider': Bot,
   'session.cycleModel': Sparkles,
   'session.cycleThinkEffort': Brain,
+  'session.sendSteer': CornerDownRight,
   'mention.toggleSessionProjectScope': AtSign,
 };

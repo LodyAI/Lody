@@ -51,7 +51,9 @@ this page is the full text of the rules summarised there.
   behavior for that one submission (`invertBehavior` in the route resolver): a
   queue default steers, a guide default queues — with every guard unchanged, so
   an inverted steer still requires positive live prompt activity and authoritative
-  acknowledged-steer support. Composer routing and queued-row native steering share
+  acknowledged-steer support. The optional, user-bound Send and Steer command
+  (`session.sendSteer`, unbound by default) sets `forceSteer` instead: it requests a
+  steer whatever the preference, under the same guards. Composer routing and queued-row native steering share
   the capability predicate. Without confirmed support, busy composer submissions use
   `queueInputBlocks`, appending behind existing rows with their normal edit/remove
   lifecycle; they never enter pending-apply history or issue a steer RPC. Native

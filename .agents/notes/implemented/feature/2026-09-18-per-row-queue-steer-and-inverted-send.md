@@ -77,5 +77,6 @@ non-first item ever reaches the handler without native steering.
 - `packages/components/src/components/sessions/session-chat-input-area.tsx`
 - `packages/components/src/components/sessions/message-queue/{queued-message-steer,message-queue-row,message-queue-display,AGENTS.md}`
 - `packages/components/tests/{session-message-submit-route,queued-message-steer}.test.ts`
+- Followed by: [configurable Send and Steer shortcut](2026-10-07-configurable-send-and-steer-shortcut.md)
 - Related: [steer stop and recovery ownership](../bug-fix/2026-09-16-steer-stop-recovery-ownership.md),
   [interrupt pending input exactly once](../bug-fix/2026-09-14-interrupt-pending-input-exactly-once.md)

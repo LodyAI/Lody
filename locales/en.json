@@ -3847,6 +3847,7 @@
   "commands.session.cycleProvider": "Cycle ACP Provider",
   "commands.session.cycleModel": "Cycle Model",
   "commands.session.cycleThinkEffort": "Cycle Thinking Effort",
+  "commands.session.sendSteer": "Send and Steer",
   "commands.mention.toggleSessionProjectScope": "Toggle Session Mention Project Scope",
   "commands.nav.back": "Back",
   "commands.nav.forward": "Forward",

@@ -232,6 +232,12 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     category: 'Session',
   },
   {
+    id: 'session.sendSteer',
+    titleKey: 'commands.session.sendSteer',
+    title: 'Send and Steer',
+    category: 'Session',
+  },
+  {
     id: 'mention.toggleSessionProjectScope',
     titleKey: 'commands.mention.toggleSessionProjectScope',
     title: 'Toggle Session Mention Project Scope',

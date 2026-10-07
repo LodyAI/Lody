@@ -102,6 +102,9 @@ import {
 import { initI18n } from '../src/i18n';
 import { MAX_PASTED_TEXT_BYTE_SIZE } from '../src/lib/pasted-text-draft';
 import { toast } from '@/lib/toast';
+import { commands } from '../src/lib/commands';
+import { __resetPlatformCacheForTests } from '../src/lib/commands/platform';
+import { CommandShortcutHost } from '../src/lib/commands/shortcut-host';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -1026,5 +1029,141 @@ describe('SessionChatInputArea submission feedback', () => {
     await act(async () => acceptance.resolve(true));
     const textarea = await renderComposer(props);
     expect(textarea.value).toBe('newer unsent draft');
+  });
+
+  describe('Send and Steer shortcut', () => {
+    let hostRoot: Root | null = null;
+    let hostContainer: HTMLDivElement | null = null;
+
+    beforeEach(async () => {
+      Object.assign(window, { __LODY_ELECTRON__: true, __LODY_PLATFORM__: { os: 'linux' } });
+      __resetPlatformCacheForTests();
+      hostContainer = document.createElement('div');
+      document.body.appendChild(hostContainer);
+      hostRoot = createRoot(hostContainer);
+      await act(async () => hostRoot!.render(createElement(CommandShortcutHost)));
+    });
+
+    afterEach(async () => {
+      await act(async () => hostRoot?.unmount());
+      hostContainer?.remove();
+      hostRoot = null;
+      hostContainer = null;
+      commands.resetAllUserKeybindings();
+      Reflect.deleteProperty(window, '__LODY_ELECTRON__');
+      Reflect.deleteProperty(window, '__LODY_PLATFORM__');
+      __resetPlatformCacheForTests();
+    });
+
+    const pressCtrlEnter = async (target: EventTarget) => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      await act(async () => target.dispatchEvent(event));
+      return event;
+    };
+
+    const recordSubmissions = () => {
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      const onSendMessage: SessionChatInputAreaProps['onSendMessage'] = async (...args) => {
+        submissions.push(args);
+        return true;
+      };
+      return { submissions, onSendMessage };
+    };
+
+    it('lists the command unbound by default so plain Mod+Enter keeps sending normally', async () => {
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage });
+      expect(commands.getKeybindingsFor('session.sendSteer')).toEqual([]);
+      textarea.focus();
+      await pressCtrlEnter(textarea);
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][2]?.forceSteer).toBeUndefined();
+    });
+
+    it('sends the focused draft once as a forced steer through the user binding', async () => {
+      commands.setUserKeybindings('session.sendSteer', ['Mod+Enter']);
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage });
+      textarea.focus();
+      const event = await pressCtrlEnter(textarea);
+      expect(event.defaultPrevented).toBe(true);
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][0]).toEqual([{ type: 'text', text: 'focus regression draft' }]);
+      expect(submissions[0][2]?.forceSteer).toBe(true);
+      expect(submissions[0][2]?.invertSubmitBehavior).toBeUndefined();
+      expect(textarea.value).toBe('');
+    });
+
+    it('wins over the built-in inversion when rebound to Mod+Shift+Enter', async () => {
+      commands.setUserKeybindings('session.sendSteer', ['Mod+Shift+Enter']);
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage });
+      textarea.focus();
+      await act(async () =>
+        textarea.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            code: 'Enter',
+            ctrlKey: true,
+            shiftKey: true,
+            bubbles: true,
+            cancelable: true,
+          })
+        )
+      );
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][2]?.forceSteer).toBe(true);
+      expect(submissions[0][2]?.invertSubmitBehavior).toBeUndefined();
+    });
+
+    it('ignores the binding while focus is outside the composer', async () => {
+      commands.setUserKeybindings('session.sendSteer', ['Mod+Enter']);
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage });
+      const other = document.createElement('textarea');
+      document.body.appendChild(other);
+      other.focus();
+      const event = await pressCtrlEnter(other);
+      other.remove();
+      expect(event.defaultPrevented).toBe(false);
+      expect(submissions).toEqual([]);
+      expect(textarea.value).toBe('focus regression draft');
+    });
+
+    it('ignores the binding for a hidden composer', async () => {
+      commands.setUserKeybindings('session.sendSteer', ['Mod+Enter']);
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage, isVisible: false });
+      textarea.focus();
+      await pressCtrlEnter(textarea);
+      expect(submissions).toEqual([]);
+    });
+
+    it('leaves a key still composing in an IME to the input method', async () => {
+      commands.setUserKeybindings('session.sendSteer', ['Mod+Enter']);
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage });
+      textarea.focus();
+      await act(async () =>
+        textarea.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            code: 'Enter',
+            ctrlKey: true,
+            isComposing: true,
+            bubbles: true,
+            cancelable: true,
+          })
+        )
+      );
+      expect(submissions).toEqual([]);
+      expect(textarea.value).toBe('focus regression draft');
+    });
   });
 });

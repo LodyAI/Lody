@@ -6,6 +6,7 @@ function ev(init: Partial<KeyboardEventInit> & { key: string }): KeyboardEvent {
   let prevented = false;
   const e = {
     key: init.key,
+    isComposing: init.isComposing ?? false,
     ctrlKey: init.ctrlKey ?? false,
     metaKey: init.metaKey ?? false,
     altKey: init.altKey ?? false,
@@ -221,6 +222,15 @@ describe('CommandRegistry keydown dispatch', () => {
     event.preventDefault();
     commands.dispatchKeybinding('Mod+b', event);
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('leaves a keydown that is still composing in an IME to the input method', () => {
+    const run = vi.fn();
+    commands.register({ id: 'k', title: 'K', keybindings: ['Mod+Enter'], run });
+    const event = ev({ key: 'Enter', ctrlKey: true, isComposing: true });
+    commands.dispatchKeybinding('Mod+Enter', event);
+    expect(run).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it('skips dispatch entirely while paused (used by the rebinding capture flow)', () => {

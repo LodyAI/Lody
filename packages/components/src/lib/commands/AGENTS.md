@@ -33,6 +33,8 @@ only tells global dispatch to yield for events originating in its subtree.
   and formatting use `@tanstack/hotkeys`; do not introduce another binding grammar.
 - `layout.toggleZenMode` owns `Mod+.` outside editors. Monaco claims that binding
   locally for Quick Fix, so the app command must yield while focus is in its subtree.
+- Dispatch ignores keydowns still composing in an IME; the input method owns them
+  (Enter commits CJK candidates) whatever binding they match.
 - Alt+letter matching and recording must use `event.code`; macOS `event.key` may be a
   generated glyph such as `∫`.
 - Shortcut capture pauses dispatch. It finishes after the last modifier is released and
@@ -84,6 +86,10 @@ only tells global dispatch to yield for events originating in its subtree.
   contain only browser id and input source, never page contents or typed keys.
   Keep the native accelerator and normal key-repeat behavior. See
   [semantic targeting](../../../../../specs/semantic-action-targeting.md).
+- Composer send stays a local key handler. `session.sendSteer` is the configurable
+  exception: unbound by default, registered by the visible session composer, and
+  available only while that composer textarea has focus with no mention menu open.
+  The local handler skips Enter events a command already prevented.
 - Commands carry `titleKey`; palette/settings resolve it through i18n at render time.
 - Desktop native Tab handling is in
   `apps/electron/src/renderer/src/native-tab-behavior.ts`.
