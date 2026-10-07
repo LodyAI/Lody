@@ -12,7 +12,7 @@ import {
 } from '@/lib/local-storage-cache';
 import { useSetAtom, useStore } from 'jotai';
 import {
-  clearWorkspaceRunConfigDraftsAtom,
+  clearSessionRunConfigDraftsAtom,
   sessionRunConfigDraftAccountAtom,
 } from '@/atoms/session-run-config-drafts';
 import {
@@ -644,7 +644,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         if (data) {
           didDelete = true;
           if (draftOwner.accountId) {
-            workspaceContextStore.set(clearWorkspaceRunConfigDraftsAtom, {
+            workspaceContextStore.set(clearSessionRunConfigDraftsAtom, {
               workspaceId: organizationId,
               accountId: draftOwner.accountId,
               lifetime: draftOwner.lifetime,
@@ -769,7 +769,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         if (data) {
           didLeave = true;
           if (draftOwner.accountId) {
-            workspaceContextStore.set(clearWorkspaceRunConfigDraftsAtom, {
+            workspaceContextStore.set(clearSessionRunConfigDraftsAtom, {
               workspaceId: organizationId,
               accountId: draftOwner.accountId,
               lifetime: draftOwner.lifetime,

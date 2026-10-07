@@ -192,16 +192,11 @@ this page is the full text of the rules summarised there.
   edits are the only stored selection state, and effective values resolve per
   render (user edit > runtime baseline > turn preference > capability default;
   a full runtime snapshot owns the non-user config table). Existing-session knob
-  edits, including explicit Fast off, are private draft intent. Only edited fields
-  occupy the account/workspace/session-scoped draft store; viewing a session does
-  not create an entry. Remote Turns update the baseline but never consume local
-  unsent choices. A local accepted send retires only the field generations frozen
-  into its actual inputConfig, even after unmount; newer same-valued edits survive.
-  Direct, queued and attachment-held sends share this admission acknowledgment.
-  Failed admission preserves the draft. No historical Turn IDs, TTL, LRU or
-  retained per-visited-session atoms are needed. Deletion and authoritative account
-  teardown clear owned drafts and invalidate stale edit callbacks; navigation and
-  reversible archive preserve intent. See [private run-config drafts](../../specs/session-run-config-drafts.md).
+  edits, including explicit Fast off, live in a sparse account/workspace/session/
+  target-scoped draft. A successful local send consumes only its captured field
+  generations; remote Turns and navigation preserve unsent edits. Returning to the
+  same target restores its draft. Confirmed deletion and account teardown invalidate
+  stale callbacks. See [private run-config drafts](../../specs/session-run-config-drafts.md).
   Landing and new-session drafts retain their component-local selection lifetime.
   Never reintroduce a
   reducer that stores the resolved selection or an effect that reconciles it —

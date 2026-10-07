@@ -5,7 +5,6 @@ import type { WorkspaceRuntime } from '../src/atoms/runtime';
 import {
   captureSessionRunConfigDraftAcceptance,
   clearSessionRunConfigDraftsAtom,
-  clearWorkspaceRunConfigDraftsAtom,
   editSessionRunConfigDraftAtom,
   getSessionRunConfigDraftKey,
   readSessionRunConfigDraftEdits,
@@ -75,7 +74,22 @@ function admissionFixture() {
     mimeType: 'text/plain',
     lastModified: 0,
   };
-  return { runtime, sessionId, entry, attachment, started, write, written };
+  const admit = (
+    onAccepted: (() => void) | undefined,
+    attachments?: SessionAttachmentDraft[],
+    targetRuntime = runtime
+  ) =>
+    acceptSessionUserTurn(
+      targetRuntime,
+      sessionId,
+      entry,
+      { kind: 'history' },
+      undefined,
+      undefined,
+      attachments,
+      onAccepted
+    );
+  return { runtime, sessionId, entry, attachment, started, write, written, admit };
 }
 
 describe('sparse existing-session run-config drafts', () => {
@@ -351,6 +365,13 @@ describe('sparse existing-session run-config drafts', () => {
     ];
     const leases = targets.map((target) => mount(target));
     for (const lease of leases) config(lease, false);
+    const beforeEmptyClear = store.get(sessionRunConfigDraftsAtom);
+    store.set(clearSessionRunConfigDraftsAtom, {
+      workspaceId: scope().workspaceId,
+      sessionIds: [],
+    });
+    expect(store.get(sessionRunConfigDraftsAtom)).toBe(beforeEmptyClear);
+    expect(leases.every((lease) => lease.active)).toBe(true);
     const acceptDeleted = captureSessionRunConfigDraftAcceptance(store, leases[0], {
       configOptionValues: { 'fast-mode': false },
     });
@@ -394,7 +415,7 @@ describe('sparse existing-session run-config drafts', () => {
     const keep = mount(keepTarget);
     config(removed, false);
     config(keep, true);
-    store.set(clearWorkspaceRunConfigDraftsAtom, { workspaceId: scope().workspaceId });
+    store.set(clearSessionRunConfigDraftsAtom, { workspaceId: scope().workspaceId });
     config(removed, true);
     expect([...store.get(sessionRunConfigDraftsAtom).keys()]).toEqual([
       getSessionRunConfigDraftKey(keepTarget),
@@ -452,7 +473,7 @@ describe('sparse existing-session run-config drafts', () => {
       ...staleOwner,
       sessionIds: [scope().sessionId],
     });
-    store.set(clearWorkspaceRunConfigDraftsAtom, staleOwner);
+    store.set(clearSessionRunConfigDraftsAtom, staleOwner);
     expect(store.get(sessionRunConfigDraftsAtom)).toBe(outstanding);
     config(current, true);
     expect(draft()!.configOptions['fast-mode']).toEqual({ value: true });
@@ -476,7 +497,7 @@ describe('sparse existing-session run-config drafts', () => {
       ...otherAccount,
       sessionIds: [scope().sessionId],
     });
-    store.set(clearWorkspaceRunConfigDraftsAtom, otherAccount);
+    store.set(clearSessionRunConfigDraftsAtom, otherAccount);
     expect(store.get(sessionRunConfigDraftsAtom)).toBe(outstanding);
     config(lease, true);
     expect(draft()!.configOptions['fast-mode']).toEqual({ value: true });
@@ -515,16 +536,7 @@ describe('sparse existing-session run-config drafts', () => {
         lease,
         fixture.entry.inputConfig!
       );
-      const accepted = acceptSessionUserTurn(
-        fixture.runtime,
-        fixture.sessionId,
-        fixture.entry,
-        { kind: 'history' },
-        undefined,
-        undefined,
-        undefined,
-        onAccepted
-      );
+      const accepted = fixture.admit(onAccepted);
       await fixture.started.promise;
       expect(fixture.written.size).toBe(0);
       expect(store.get(sessionRunConfigDraftsAtom)).toBe(outstanding);
@@ -548,16 +560,7 @@ describe('sparse existing-session run-config drafts', () => {
         lease,
         fixture.entry.inputConfig!
       );
-      const accepted = acceptSessionUserTurn(
-        fixture.runtime,
-        fixture.sessionId,
-        fixture.entry,
-        { kind: 'history' },
-        undefined,
-        undefined,
-        undefined,
-        onAccepted
-      );
+      const accepted = fixture.admit(onAccepted);
       await fixture.started.promise;
       config(lease, false);
       const outstanding = store.get(sessionRunConfigDraftsAtom);
@@ -590,18 +593,9 @@ describe('sparse existing-session run-config drafts', () => {
           lease,
           fixture.entry.inputConfig!
         );
-        await expect(
-          acceptSessionUserTurn(
-            runtime,
-            fixture.sessionId,
-            fixture.entry,
-            { kind: 'history' },
-            undefined,
-            undefined,
-            [fixture.attachment],
-            onAccepted
-          )
-        ).resolves.toBe('pending');
+        await expect(fixture.admit(onAccepted, [fixture.attachment], runtime)).resolves.toBe(
+          'pending'
+        );
         expect(pending.getSnapshot()).toHaveLength(1);
         expect(pending.getSnapshot()[0]!.entry.inputConfig).toEqual({
           configOptionValues: { 'fast-mode': false },
@@ -643,18 +637,9 @@ describe('sparse existing-session run-config drafts', () => {
         lease,
         fixture.entry.inputConfig!
       );
-      await expect(
-        acceptSessionUserTurn(
-          fixture.runtime,
-          fixture.sessionId,
-          fixture.entry,
-          { kind: 'history' },
-          undefined,
-          undefined,
-          [fixture.attachment],
-          onAccepted
-        )
-      ).rejects.toThrow('Attachments cannot be sent in this workspace');
+      await expect(fixture.admit(onAccepted, [fixture.attachment])).rejects.toThrow(
+        'Attachments cannot be sent in this workspace'
+      );
       expect(fixture.written.size).toBe(0);
       expect(store.get(sessionRunConfigDraftsAtom)).toBe(outstanding);
       expect(draft()!.configOptions['fast-mode']).toEqual({ value: false });
@@ -670,16 +655,7 @@ describe('sparse existing-session run-config drafts', () => {
         lease,
         fixture.entry.inputConfig!
       );
-      const accepted = acceptSessionUserTurn(
-        fixture.runtime,
-        fixture.sessionId,
-        fixture.entry,
-        { kind: 'history' },
-        undefined,
-        undefined,
-        undefined,
-        onAccepted
-      );
+      const accepted = fixture.admit(onAccepted);
       await fixture.started.promise;
       fixture.write.reject(new Error('Synthetic local write rejected'));
       await expect(accepted).rejects.toThrow('Synthetic local write rejected');

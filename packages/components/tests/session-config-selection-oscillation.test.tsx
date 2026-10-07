@@ -469,12 +469,14 @@ describe('existing-session run-config drafts across tabs', () => {
   };
   function Harness({
     session = 'a',
+    provider = 'codex-a',
     ready = true,
     revision = 'turn:old',
     preferred = false,
     runtime = false,
   }: {
     session?: string;
+    provider?: string;
     ready?: boolean;
     revision?: string;
     preferred?: boolean;
@@ -482,7 +484,7 @@ describe('existing-session run-config drafts across tabs', () => {
   }) {
     selection = useAcpSessionConfigSelectionState({
       enabled: ready,
-      targetKey: `${session}:builtin:codex`,
+      targetKey: `builtin:codex:${provider}`,
       preferenceRevision: revision,
       preferences: { configOptionValues: { 'fast-mode': preferred } },
       runtimePreferences: { configOptionValues: { 'fast-mode': runtime } },
@@ -491,7 +493,7 @@ describe('existing-session run-config drafts across tabs', () => {
         accountId: 'account',
         workspaceId: 'workspace',
         sessionId: session,
-        targetKey: `${session}:builtin:codex`,
+        targetKey: `builtin:codex:${provider}`,
       },
     });
     const resolved = useResolvedAcpSessionConfigSelection(selection.selection, options);
@@ -539,6 +541,21 @@ describe('existing-session run-config drafts across tabs', () => {
     expect(visible()).toBe('false');
     render({ session: 'b' }, true);
     expect(visible()).toBe('true');
+  });
+  it('isolates provider drafts and restores the same target without reviving its old callbacks', () => {
+    render();
+    toggle(true);
+    const editA = selection.selectConfigOption;
+    render({ provider: 'codex-b' });
+    expect(visible()).toBe('false');
+    flushSync(() => editA('fast-mode', false));
+    expect(selection.hasUserEdits).toBe(false);
+    toggle(false);
+    render();
+    expect(visible()).toBe('true');
+    render({ provider: 'codex-b', runtime: true });
+    expect(visible()).toBe('false');
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(2);
   });
   it('does not consume a draft during hydration, remote turns, promotion or rollback', () => {
     render({}, true);

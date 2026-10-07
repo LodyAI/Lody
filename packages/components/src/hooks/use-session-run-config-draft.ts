@@ -43,6 +43,7 @@ export function useSessionRunConfigDraft(
     [stableScope]
   );
   const draft = useAtomValue(selector);
+  // Old callbacks retain their own slot when scope, lifetime or readiness changes.
   const leaseSlot = useMemo<{ current?: SessionRunConfigDraftLease }>(
     () => ({ current: undefined, scope: stableScope, lifetime: owner.lifetime, enabled }),
     [stableScope, owner.lifetime, enabled]
@@ -62,20 +63,15 @@ export function useSessionRunConfigDraft(
     },
     [store, leaseSlot]
   );
-  const selectMode = useCallback(
-    (value: string | null) => update({ type: 'mode', value }),
-    [update]
-  );
-  const selectModel = useCallback(
-    (value: string | null) => update({ type: 'model', value }),
-    [update]
-  );
-  const selectConfigOption = useCallback(
-    (configId: string, value: AcpConfigOptionValue) => update({ type: 'config', configId, value }),
-    [update]
-  );
-  const replaceConfigOptions = useCallback(
-    (values: Record<string, AcpConfigOptionValue>) => update({ type: 'replace-config', values }),
+  const actions = useMemo(
+    () => ({
+      selectMode: (value: string | null) => update({ type: 'mode', value }),
+      selectModel: (value: string | null) => update({ type: 'model', value }),
+      selectConfigOption: (configId: string, value: AcpConfigOptionValue) =>
+        update({ type: 'config', configId, value }),
+      replaceConfigOptions: (values: Record<string, AcpConfigOptionValue>) =>
+        update({ type: 'replace-config', values }),
+    }),
     [update]
   );
   const captureForSend = useCallback(
@@ -86,10 +82,7 @@ export function useSessionRunConfigDraft(
   const edits = useMemo(() => readSessionRunConfigDraftEdits(draft), [draft]);
   return {
     edits,
-    selectMode,
-    selectModel,
-    selectConfigOption,
-    replaceConfigOptions,
+    ...actions,
     captureForSend,
   };
 }

@@ -135,47 +135,6 @@ export const readSessionRunConfigDraftEdits = (
       }
     : EMPTY_ACP_SESSION_USER_CONFIG_EDITS;
 
-const acknowledgeDraftAtom = atom(
-  null,
-  (
-    get,
-    set,
-    captured: {
-      key: string;
-      lifetime: object;
-      snapshot: SessionRunConfigDraft;
-    }
-  ) => {
-    if (get(sessionRunConfigDraftAccountAtom).lifetime !== captured.lifetime) return;
-    const drafts = get(sessionRunConfigDraftsAtom);
-    const current = drafts.get(captured.key);
-    if (!current) return;
-    const mode = current.mode === captured.snapshot.mode ? undefined : current.mode;
-    const model = current.model === captured.snapshot.model ? undefined : current.model;
-    const configOptions = Object.fromEntries(
-      Object.entries(current.configOptions).filter(
-        ([id, field]) => captured.snapshot.configOptions[id] !== field
-      )
-    );
-    if (
-      mode === current.mode &&
-      model === current.model &&
-      Object.keys(configOptions).length === Object.keys(current.configOptions).length
-    )
-      return;
-    const next = new Map(drafts);
-    if (!mode && !model && Object.keys(configOptions).length === 0) next.delete(captured.key);
-    else
-      next.set(captured.key, {
-        scope: current.scope,
-        ...(mode ? { mode } : {}),
-        ...(model ? { model } : {}),
-        configOptions,
-      });
-    set(sessionRunConfigDraftsAtom, next);
-  }
-);
-
 /** Capture beside the actual frozen inputConfig, before any await. */
 export function captureSessionRunConfigDraftAcceptance(
   store: Store,
@@ -196,18 +155,56 @@ export function captureSessionRunConfigDraftAcceptance(
     )
   );
   if (!mode && !model && Object.keys(configOptions).length === 0) return undefined;
-  const snapshot = {
-    scope: draft.scope,
-    ...(mode ? { mode } : {}),
-    ...(model ? { model } : {}),
-    configOptions,
+  return () => {
+    if (store.get(sessionRunConfigDraftAccountAtom).lifetime !== lease.lifetime) return;
+    store.set(sessionRunConfigDraftsAtom, (drafts) => {
+      const current = drafts.get(key);
+      if (!current) return drafts;
+      const remainingMode = current.mode === mode ? undefined : current.mode;
+      const remainingModel = current.model === model ? undefined : current.model;
+      const remainingConfig = Object.fromEntries(
+        Object.entries(current.configOptions).filter(([id, field]) => configOptions[id] !== field)
+      );
+      if (
+        remainingMode === current.mode &&
+        remainingModel === current.model &&
+        Object.keys(remainingConfig).length === Object.keys(current.configOptions).length
+      )
+        return drafts;
+      const next = new Map(drafts);
+      if (!remainingMode && !remainingModel && Object.keys(remainingConfig).length === 0)
+        next.delete(key);
+      else
+        next.set(key, {
+          scope: current.scope,
+          ...(remainingMode ? { mode: remainingMode } : {}),
+          ...(remainingModel ? { model: remainingModel } : {}),
+          configOptions: remainingConfig,
+        });
+      return next;
+    });
   };
-  return () => store.set(acknowledgeDraftAtom, { key, lifetime: lease.lifetime, snapshot });
 }
 
-const clearMatchingDraftsAtom = atom(
+/** Omit sessionIds for workspace removal; an empty list clears nothing. */
+export const clearSessionRunConfigDraftsAtom = atom(
   null,
-  (get, set, matches: (scope: SessionRunConfigDraftScope) => boolean) => {
+  (
+    get,
+    set,
+    args: {
+      workspaceId: string;
+      sessionIds?: readonly string[];
+      accountId?: string;
+      lifetime?: object;
+    }
+  ) => {
+    if (args.lifetime && get(sessionRunConfigDraftAccountAtom).lifetime !== args.lifetime) return;
+    const ids = args.sessionIds === undefined ? undefined : new Set(args.sessionIds);
+    const matches = (scope: SessionRunConfigDraftScope) =>
+      scope.workspaceId === args.workspaceId &&
+      (args.accountId === undefined || scope.accountId === args.accountId) &&
+      (ids === undefined || ids.has(scope.sessionId));
     const drafts = get(sessionRunConfigDraftsAtom);
     const next = new Map([...drafts].filter(([, draft]) => !matches(draft.scope)));
     if (next.size !== drafts.size) set(sessionRunConfigDraftsAtom, next);
@@ -218,50 +215,5 @@ const clearMatchingDraftsAtom = atom(
       else remaining.add(lease);
     }
     if (remaining.size !== leases.size) set(mountedLeasesAtom, remaining);
-  }
-);
-export const clearSessionRunConfigDraftsAtom = atom(
-  null,
-  (
-    get,
-    set,
-    args: {
-      workspaceId: string;
-      sessionIds: readonly string[];
-      targetKey?: string;
-      accountId?: string;
-      lifetime?: object;
-    }
-  ) => {
-    if (args.lifetime && get(sessionRunConfigDraftAccountAtom).lifetime !== args.lifetime) return;
-    const ids = new Set(args.sessionIds);
-    set(
-      clearMatchingDraftsAtom,
-      (scope) =>
-        scope.workspaceId === args.workspaceId &&
-        (args.accountId === undefined || scope.accountId === args.accountId) &&
-        ids.has(scope.sessionId) &&
-        (args.targetKey === undefined || scope.targetKey === args.targetKey)
-    );
-  }
-);
-export const clearWorkspaceRunConfigDraftsAtom = atom(
-  null,
-  (
-    get,
-    set,
-    args: {
-      workspaceId: string;
-      accountId?: string;
-      lifetime?: object;
-    }
-  ) => {
-    if (args.lifetime && get(sessionRunConfigDraftAccountAtom).lifetime !== args.lifetime) return;
-    set(
-      clearMatchingDraftsAtom,
-      (scope) =>
-        scope.workspaceId === args.workspaceId &&
-        (args.accountId === undefined || scope.accountId === args.accountId)
-    );
   }
 );
