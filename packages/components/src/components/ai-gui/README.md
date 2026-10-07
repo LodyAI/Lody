@@ -29,6 +29,12 @@ the reasoning behind those rules.
   streaming turn with `@lobehub/streamdown`. Its dependency patch reveals text
   already present at mount so switching back to a live Session does not replay
   the stream fade ([note](../../../../../.agents/notes/implemented/bug-fix/2026-09-26-streamdown-remount-animation.md)).
+  A nonempty session search renders the complete current Markdown without the
+  stream reveal animation, so index results and marks update together; clearing
+  search resumes the stream engine. Search and outline summaries share
+  `lib/session-chat-search.ts`'s CommonMark/GFM text extraction, preserving literal
+  punctuation in prose and code while removing parsed formatting delimiters.
+  [Decision and synthetic acceptance evidence](../../../../../.agents/notes/implemented/bug-fix/2026-10-07-session-search-literal-punctuation.md).
   Conversation paragraphs use start alignment during and after streaming; see
   [conversation Markdown alignment](../../../../../specs/conversation-markdown-alignment.md).
   `markdown-code-block.tsx` owns fenced

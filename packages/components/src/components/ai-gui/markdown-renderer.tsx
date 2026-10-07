@@ -1533,6 +1533,10 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     return () => window.clearTimeout(timeout);
   }, [isStreaming, streamingRendererActive]);
 
+  // Search needs the complete current text in the same commit as its index.
+  // The stream engine reveals buffered text asynchronously and can replace marks.
+  const showStreamingMarkdown = streamingRendererActive && !(search?.isOpen && search.query);
+
   const staticMarkdown = (
     <Markdown
       components={components}
@@ -1679,7 +1683,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     });
 
     return clearSearchHighlights;
-  }, [search?.isOpen, search?.query, searchBlockId, searchMatch, text]);
+  }, [search?.isOpen, search?.query, searchBlockId, searchMatch, text, showStreamingMarkdown]);
 
   return (
     <MarkdownCompactContext.Provider value={compact}>
@@ -1694,7 +1698,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         onClick={handleContainerClick}
         onKeyDown={handleContainerKeyDown}
       >
-        {streamingRendererActive ? (
+        {showStreamingMarkdown ? (
           <Suspense fallback={staticMarkdown}>
             <StreamingMarkdown
               animateOnMount={false}
