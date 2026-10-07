@@ -899,6 +899,15 @@ const sessionRoostHistoryCursorDocSchema = schema.LoroMap(
   { required: false }
 );
 
+const sessionRoostHistoryRemoteDocSchema = schema.LoroMap(
+  {
+    version: schema.Number(),
+    generation: schema.String(),
+    ownerPublicKey: schema.String(),
+  },
+  { required: false }
+);
+
 /**
  * Legacy/fallback launch config shape. New writers must not persist this per session;
  * resolve customAcp/env from AgentConfigMeta and worktree scripts from project config.
@@ -1341,6 +1350,7 @@ export const sessionDocSchema = schema({
   preview: sessionPreviewDocSchema,
   externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
   roostHistoryCursor: sessionRoostHistoryCursorDocSchema,
+  roostHistoryRemote: sessionRoostHistoryRemoteDocSchema,
   acpRuntimeConfig: sessionAcpRuntimeConfigDocSchema,
 });
 

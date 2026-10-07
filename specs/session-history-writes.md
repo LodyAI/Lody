@@ -191,15 +191,34 @@ loaded window without displaying the superseded suffix. Unloaded rows contribute
 neither fabricated messages nor complete-history facts. Explicit export/snapshot
 operations retain an authoritative full-read capability.
 
-Previously synchronized history remains readable when its owner is unavailable,
-including reopening the conversation, searching and navigating older cached turns.
-The renderer persists a read-only projection scoped by account, workspace, machine
-and session. Owner read responses bind page content, count and a durable revision
-to the same observation. Consecutive changes update the affected cached rows
-atomically; a missed revision stages a replacement through bounded pages while
-retaining the previous coherent snapshot. Reconnection refreshes through the
-existing owner transport. The cache never accepts or replays user commands, and
-cannot supply history this device has never synchronized.
+In a cloud-enabled workspace, history already accepted by the durable Streams
+service remains readable while the owning CLI is offline, including older pages
+that the reader has never cached. The Node owner uploads through Roost's durable
+retry/confirmation machinery. Local acceptance and owner RPC replies do not claim
+remote persistence; the synchronization barrier requires both history confirmation
+and control-plane synchronization.
+
+The renderer keeps a read-only native IndexedDB replica scoped by account,
+workspace, renderer and session. It admits the control-bound owner key and obtains
+the endpoint and credentials only from the authenticated workspace capability.
+The control document carries an immutable history generation and public owner key,
+not a URL or token. Unsealed streaming content remains provisional; seals retain
+signature verification. Public local composition stays local.
+
+Cloud reads bootstrap a bounded reverse window and catch up from that window's
+original tail, so writes arriving during bootstrap are not skipped. Older windows
+resume at contiguous received-message boundaries. Missing prefixes require repair,
+never a fabricated shorter history. Each replica owns its durable receive cursor;
+owner revisions only wake it. Shared browser tabs serialize intake where supported,
+and native transactional receipt/replay rules remain the durability boundary.
+Cached rows remain readable while background network work waits. Full exports use
+a consistent branch read; branch rollback must propagate through native records.
+
+Local Electron retains its owner bridge and durable projection cache. With neither
+owner nor service reachable, either path can read only previously cached data.
+Commands continue to reach the owning CLI; neither a replica nor a cache queues
+or authors user commands. Cache repair includes the native replica databases, and
+workspace disposal cancels their network work before closing storage.
 
 ### Verification limits
 

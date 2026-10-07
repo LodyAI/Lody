@@ -277,6 +277,21 @@ read and retries a moving revision; neither barrier waits for remote sync.
 This lets the renderer persist bounded pages as a coherent offline read replica
 without exposing physical segments or introducing another history writer.
 
+Cloud renderer reads use a native Roost IndexedDB replica directly against the
+authorized Streams service, so an offline owner does not block uncached remote
+pages. Commands still use the owner RPC. `roost-streams-sync.ts` schedules native
+Node uploads on the shared SQLite owner; its persistent enrollment index resumes
+work without joining historical session rooms. Enroll before the first native
+write, including recovery writes. Local writes wake upload without waiting for
+the network. `waitUntilSynced` requires native upload confirmation as well as the
+control barrier; local-only workspaces require only local durability.
+
+The shared remote binding carries only generation and owner public key. Streams
+URLs, credentials and cancellation belong to the existing workspace capability.
+Replica bootstrap catches up from the original reverse window tail; a newer HEAD
+would skip writes. Rollback emits a signed non-message branch-state record so
+the same active branch can be reconstructed on other replicas.
+
 Display bootstrap and ordinary directory/body reads use active-branch pages and
 a bounded body cache. Published-message pages cannot establish branch membership.
 Resolve an off-window physical head before sealing or appending; a late successor

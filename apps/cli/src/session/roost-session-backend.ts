@@ -390,7 +390,7 @@ export class RoostSessionBackend implements SessionBackend {
     await this.sessionDoc.flushLocalWrites();
   }
 
-  /** The local Node owner currently has no remote Roost transport. */
+  /** Both the native history upload and the control plane must confirm. */
   async waitUntilSynced(options?: { timeoutMs?: number }): Promise<boolean> {
     const [historySynced, controlSynced] = await Promise.all([
       this.services.waitUntilSynced?.(options) ?? Promise.resolve(true),

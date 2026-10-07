@@ -65,6 +65,7 @@ import {
   type SessionChatResponse,
   type SessionId,
   type SessionHistoryBackendKind,
+  type RoostStreamsConnection,
   type MachineId,
   type MachineStatusResponse,
   type MachinePingResponse,
@@ -644,6 +645,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // Slow reconcile interval for the reconnect-loop backstop tick.
   const RECONNECT_BACKSTOP_INTERVAL_MS = 60_000;
   let disposePromise: Promise<void> | null = null;
+  const roostReadLifetime = new AbortController();
+  let roostReadConnection: RoostStreamsConnection | undefined;
   let reconnectingStatusTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectingStatusVisible = false;
   let localReconnectLoop: LocalReconnectLoop | null = null;
@@ -1683,6 +1686,20 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     return { provider, streamsBaseUrl };
   };
 
+  const prepareRoostStreamsRead = async (): Promise<RoostStreamsConnection> => {
+    const { provider, streamsBaseUrl } = await prepareStreamsAccess();
+    if (disposePromise || roostReadLifetime.signal.aborted)
+      throw new Error('Workspace runtime is disposed');
+    if (!roostReadConnection || roostReadConnection.baseUrl !== streamsBaseUrl) {
+      roostReadConnection = {
+        baseUrl: streamsBaseUrl,
+        auth: provider.createAuthCallback(),
+        signal: roostReadLifetime.signal,
+      };
+    }
+    return roostReadConnection;
+  };
+
   const createMachineRpcJsonStreamClient = (
     provider: LoroStreamsTokenProvider,
     streamsBaseUrl: string
@@ -1812,7 +1829,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionDispatchTurn,
     requestSessionPrepare,
     requestSessionPrepareCancel,
-    requestSessionHistoryRead,
     requestSessionHistoryWrite,
     requestFilePreview,
     requestLocalCodeCollabFileIndex,
@@ -4114,8 +4130,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
             accountId: deps.accountId,
             workspaceId,
             machineId,
-            requestHistoryRead: async (targetMachineId, targetSessionId, query) =>
-              await requestSessionHistoryRead(targetMachineId, targetSessionId, query),
+            replicaNamespace: cacheIdentity.namespace,
+            getConnection: prepareRoostStreamsRead,
             requestHistoryWrite: async ({
               machineId: targetMachineId,
               sessionId: targetSessionId,
@@ -4764,6 +4780,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     windowBootstrap?.close();
     sharedWindowDocuments.clear();
     disposePromise = (async () => {
+      roostReadLifetime.abort();
       // Held sends are in memory only: closing the workspace drops them.
       pendingSends.dispose();
       // Cancel and join send I/O while its cache, transport and repo still exist.

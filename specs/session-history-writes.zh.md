@@ -144,12 +144,28 @@ control metadata 与投递状态仍由 Loro 保存。本地历史接受不表示
 suffix。未加载行不能生成假消息，也不能被视为完整历史事实。显式 export/snapshot
 操作继续使用权威的完整读取能力。
 
-owner 不可用时，之前同步的历史仍可读取，包括重新打开会话、搜索和浏览已缓存的
-旧 turn。renderer 按账号、工作区、机器和会话隔离持久化只读 projection。
-owner 读取响应把页内容、count 与持久 revision 绑定在同一次 observation。
-连续变更原子更新受影响的缓存行；revision 有缺口时通过有界分页暂存替换快照，
-同时保留之前一致的可读快照。重连通过现有 owner transport 刷新。缓存不能接受
-或重放用户命令，也不能提供本设备从未同步过的历史。
+启用 cloud 的工作区中，Streams 持久服务已接受的历史在 owning CLI 离线后仍可
+读取，包括该读者从未缓存的旧页。Node owner 通过 Roost 的持久重试与确认机制上传。
+本地接受和 owner RPC 响应不能宣称远端持久化；同步 barrier 同时要求历史确认与
+control plane 同步。
+
+renderer 按账号、工作区、renderer 和 session 隔离原生 IndexedDB 只读副本。
+副本只接纳 control 绑定的 owner 公钥，endpoint 和凭证只来自已认证的工作区
+capability。control 文档保存不可变的历史 generation 与 owner 公钥，不保存 URL
+或 token。未 seal 的流式内容仍属 provisional，seal 保留签名验证。公开 local
+composition 保持本地。
+
+云端读取先获取有界反向窗口，再从该窗口的原始 tail 追更，不能跳过 bootstrap
+期间到来的写入。旧窗口从连续已接收消息的边界续读。缺失前缀必须补齐，不能伪造
+更短的历史。各副本独立持久化接收 cursor，owner revision 只用于唤醒。浏览器支持
+时共享标签页串行接收，原生 receipt/replay 事务规则始终承担持久性边界。已有缓存
+在后台网络等待时仍可直接读取。完整导出采用一致的 branch 读取；分支回滚必须通过
+原生记录传播。
+
+本地 Electron 保留 owner bridge 和持久 projection cache。owner 与服务都不可达时，
+两条路径都只能读取已缓存的数据。命令继续发送到 owning CLI，副本与缓存不能排队
+或创作用户命令。缓存修复包含原生副本数据库，workspace 退出先取消网络，再关闭
+存储。
 
 ### 验证限制
 

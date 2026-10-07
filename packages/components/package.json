@@ -100,6 +100,7 @@
     "@lody/shared": "workspace:*",
     "@lody/ui": "workspace:*",
     "@loro-dev/flock-wasm": "catalog:",
+    "@loro-dev/roost": "0.1.2",
     "@loro-dev/streams-crdt": "catalog:",
     "@meowdown/core": "0.59.0",
     "@meowdown/react": "0.59.0",

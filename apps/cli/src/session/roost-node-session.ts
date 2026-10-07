@@ -56,9 +56,9 @@ import {
   type ActiveBranchPageRead,
   toApplicationJson,
   type HistoryProjectedMessage,
-  type LodyNodeHost,
 } from '@loro-dev/roost/lody-history';
 import { Identity } from '@loro-dev/roost';
+import type { ClientOptions, RoostNodeClient } from '@loro-dev/roost/node/client.mjs';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { SessionAgentWrites } from '@/lib/loro/session-agent-writes';
 import { latestSessionModel } from '@/lib/loro/session-model-summary';
@@ -69,22 +69,24 @@ import {
 } from './roost-session-backend';
 import { adaptRoostProjectedMessage, adaptRoostProjectedMessages } from './roost-history-port';
 import { registerSessionBackendFactory } from './session-backend';
+import {
+  RoostWorkspaceHistorySync,
+  type RoostWorkspaceSyncOptions,
+  type RoostSessionSync,
+} from './roost-streams-sync';
 
-type NodeClient = {
-  readonly ready: Promise<unknown>;
-  readonly capabilities?: readonly string[];
-  stream(id: string): LodyNodeHost;
-  close(): Promise<void>;
-};
+type NodeClient = Pick<
+  RoostNodeClient,
+  | 'ready'
+  | 'capabilities'
+  | 'stream'
+  | 'close'
+  | 'registerRemote'
+  | 'listRemotes'
+  | 'setRemoteEnabled'
+>;
 
-type NodeClientConstructor = new (options: {
-  binaryPath: string;
-  dbPath: string;
-  seed: Uint8Array;
-  allowedOwners: Uint8Array[];
-  maxQueuedRequests: number;
-  maxQueuedBytes: number;
-}) => NodeClient;
+type NodeClientConstructor = new (options: ClientOptions) => NodeClient;
 
 type NodeClientModule = { RoostNodeClient: NodeClientConstructor };
 
@@ -100,6 +102,7 @@ type RoostOwnerOptions = {
 type OwnerLease = {
   readonly client: NodeClient;
   readonly owner: Uint8Array;
+  bindAuth(remoteId: Uint8Array, auth: NonNullable<ClientOptions['auth']>): () => void;
   release(): Promise<void>;
 };
 
@@ -267,10 +270,23 @@ let ownerPool:
       key: string;
       client: NodeClient;
       owner: Uint8Array;
+      authRoutes: Map<string, NonNullable<ClientOptions['auth']>>;
       refs: number;
       closePromise?: Promise<void>;
     }
   | undefined;
+
+const bindOwnerAuth = (
+  routes: Map<string, NonNullable<ClientOptions['auth']>>,
+  remoteId: Uint8Array,
+  auth: NonNullable<ClientOptions['auth']>
+): (() => void) => {
+  const key = bytesHex(remoteId);
+  routes.set(key, auth);
+  return () => {
+    if (routes.get(key) === auth) routes.delete(key);
+  };
+};
 
 const acquireOwnerUnlocked = async (options: RoostOwnerOptions): Promise<OwnerLease> => {
   const seed = options.seed ?? (await loadRoostOwnerSeed());
@@ -286,9 +302,11 @@ const acquireOwnerUnlocked = async (options: RoostOwnerOptions): Promise<OwnerLe
   const key = `${dbPath}:${binaryPath}:${bytesHex(seed)}`;
   if (ownerPool?.key === key && !ownerPool.closePromise) {
     ownerPool.refs += 1;
+    const routes = ownerPool.authRoutes;
     return {
       client: ownerPool.client,
       owner: ownerPool.owner.slice(),
+      bindAuth: (remoteId, auth) => bindOwnerAuth(routes, remoteId, auth),
       release: async () => releaseOwner(key),
     };
   }
@@ -296,19 +314,26 @@ const acquireOwnerUnlocked = async (options: RoostOwnerOptions): Promise<OwnerLe
   await mkdir(dirname(dbPath), { recursive: true });
   const module = await loadNodeClientModule(options.nodeClientModule ?? defaultNodeClientModule());
   const owner = Identity.fromSeed(seed).owner();
+  const authRoutes = new Map<string, NonNullable<ClientOptions['auth']>>();
   const client = new module.RoostNodeClient({
     binaryPath,
     dbPath,
     seed,
     allowedOwners: [owner],
+    auth: async (input) => {
+      const auth = authRoutes.get(bytesHex(input.remoteId));
+      if (!auth) throw new Error('Roost Streams remote has no authorized workspace');
+      return await auth(input);
+    },
     maxQueuedRequests: options.maxQueuedRequests ?? 32,
     maxQueuedBytes: options.maxQueuedBytes ?? 8 * 1024 * 1024,
   });
   await client.ready;
-  ownerPool = { key, client, owner, refs: 1 };
+  ownerPool = { key, client, owner, authRoutes, refs: 1 };
   return {
     client,
     owner: owner.slice(),
+    bindAuth: (remoteId, auth) => bindOwnerAuth(authRoutes, remoteId, auth),
     release: async () => releaseOwner(key),
   };
 };
@@ -425,9 +450,20 @@ const createNodeServices = async (
   const lease = await acquireOwner(ownerOptions);
   const historyHost = lease.client.stream(`lody-session:${sessionDoc.sessionId}`);
   const roostHistory = new NodeLodyHistory(historyHost, lease.owner);
+  let remoteSync: RoostSessionSync | undefined;
   try {
-    await roostHistory.catchUpIndex();
-    await roostHistory.recoverPendingBatches();
+    const binding = await sessionDoc.bindRoostHistoryRemote({
+      version: 1,
+      generation: randomBytes(16).toString('hex'),
+      ownerPublicKey: bytesHex(lease.owner),
+    });
+    remoteSync = await sessionDoc.openRoostHistorySync(binding);
+    try {
+      await roostHistory.catchUpIndex();
+      await roostHistory.recoverPendingBatches();
+    } finally {
+      remoteSync?.markDirty();
+    }
   } catch (error) {
     await lease.release().catch(() => {});
     throw error;
@@ -1069,7 +1105,13 @@ const createNodeServices = async (
       }
     });
     writeSerial = next.catch(() => {});
-    await next;
+    try {
+      await next;
+    } finally {
+      // Even a failed multi-step command may have committed native data.
+      // Discovery is durable; a lost wakeup is recovered from the local index.
+      remoteSync?.markDirty();
+    }
   };
 
   const headRow = async (branch: ActiveBranchPageRead) => {
@@ -1607,12 +1649,10 @@ const createNodeServices = async (
       await writeSerial;
       await Promise.all([...pendingSeen.values()]);
     },
-    // This owner is local SQLite today. The backend-level barrier combines
-    // this local durability with the Loro control-plane sync barrier; it does
-    // not claim that Roost history has reached a remote service.
-    waitUntilSynced: async () => {
+    waitUntilSynced: async (options) => {
       await writeSerial;
-      return true;
+      await Promise.all([...pendingSeen.values()]);
+      return (await remoteSync?.waitUntilSynced(options)) ?? true;
     },
     dispose: async () => {
       disposed = true;
@@ -1628,10 +1668,17 @@ const createNodeServices = async (
 };
 
 let installed = false;
+let installedOwnerOptions: RoostOwnerOptions = {};
+
+/** One workspace scheduler shares the process's existing SQLite owner. */
+export async function openRoostWorkspaceHistorySync(options: RoostWorkspaceSyncOptions) {
+  return await RoostWorkspaceHistorySync.open(await acquireOwner(installedOwnerOptions), options);
+}
 
 /** Install the local Node owner adapter once for the daemon process. */
 export function installRoostNodeSessionBackend(options: RoostOwnerOptions = {}): void {
   if (installed) return;
+  installedOwnerOptions = options;
   registerSessionBackendFactory(
     'roost',
     createRoostSessionBackendFactory((sessionDoc) => createNodeServices(sessionDoc, options))

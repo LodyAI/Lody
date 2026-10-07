@@ -37,11 +37,19 @@
   Structure updates prune deleted ids and restart incomplete coverage. Search
   refreshes membership/positions after structure changes. Directory leases and
   retry timers stop on release/dispose; a page failure is never complete coverage.
-- Roost's renderer bridge retains a durable read projection scoped by account,
+- Roost's local renderer bridge retains a durable read projection scoped by account,
   workspace, machine and session. Persist page bodies, positions and owner revision
   together. Consecutive deltas update only affected rows; unknown gaps stage a new
   snapshot while retaining the readable one. Never persist commands or claim remote
   acceptance from the cache. Cache-clear must include its database.
+- Cloud Roost reads use the native read-only replica, with owner RPC only for
+  commands. Remote history must be readable without the owner. Bootstrap from
+  bounded reverse windows and catch up at their original tail, never a later
+  HEAD. Replica cursors, storage and cache cleanup share one account/workspace/
+  renderer identity; an owner revision is only a wakeup. Shared tabs reload
+  progress inside the intake lock. Cached reads must not wait on network work.
+  The workspace capability owns endpoint, auth and cancellation; never derive
+  endpoints or tokens from the control doc or enable cloud in local composition.
 - Send through the selected SessionData backend (the shared HistoryWriter for
   Loro, the owner bridge for Roost), with no optimistic display overlay;
   `readAll` is the authoritative export/hash read.

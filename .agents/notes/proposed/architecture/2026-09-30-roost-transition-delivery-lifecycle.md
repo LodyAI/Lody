@@ -8,7 +8,7 @@ Translation: current
 
 ## Abstract
 
-Lody now uses the Lody-owned session backend boundary for both history implementations. New sessions select Roost, while sessions without a persisted discriminator remain pinned to Loro for compatibility. Queue promotion, steer reconciliation, history reads, assistant writes, renderer composition, and backend lifecycle all resolve through the stored session choice. Roost-specific storage and projection stay behind the adapter; callers consume the same logical history contract. Whole-history directory leases, target-aware restoration and a durable renderer read projection now cover the identified user-visible gaps. A synthetic benchmark measured a 7.8x faster latest-window read at 10,000 turns, with higher short-history startup and paging costs; complete product UX equivalence remains unverified.
+Lody uses its session backend boundary for both history implementations: new sessions select Roost, while sessions without a persisted discriminator retain Loro. Queue, steer, history commands and renderer composition resolve the persisted choice. The integration now includes native Node uploads and an authenticated, read-only browser replica that pages history from Streams independently of the owner; local Electron retains its owner bridge. Local acceptance, remote confirmation and replica receive progress remain separate. Earlier synthetic local-owner measurements showed a 7.8x faster latest-window read at 10,000 turns, with higher short-history startup and paging costs; those measurements do not establish the new remote path's performance or complete product UX equivalence. This revision has static validation only; live-service and release acceptance remain unverified.
 
 ## Decision and scope
 
@@ -673,3 +673,114 @@ pnpm-generated resolution using the real package manifests. Full offline workspa
 resolution stopped at the unrelated cached `@openai/codex@^0.159.2` metadata;
 unrelated dependency records were retained. Test suites, release and publishing
 procedures remain excluded, and neither repository was pushed.
+
+## Remote history synchronization: current work
+
+The local-owner/RPC boundary above was the committed starting point. Remote
+history must also remain readable from the durable service when the owning CLI
+is offline, including pages never cached by that reader. This revision connects
+that path and replaces the former unconditional Node sync result with actual
+upload confirmation. Local writes, RPC responses and remote persistence remain
+distinct events.
+
+Execution plan, owned by this note:
+
+1. Reuse Roost's existing Node `registerRemote` / `stream.sync` and browser sync
+   APIs. Inspect the actual Streams SDK and the SQLite Riverrun implementation
+   it uses for development; do not create a replacement wire protocol or mock
+   storage backend.
+2. Bind credentials, stream identity and owner admission through the existing
+   workspace/platform capabilities. Public local composition stays local;
+   cloud-enabled composition obtains credentials through its existing provider.
+3. Upload committed history in the background, retain persistent retry state,
+   and make the history sync barrier report actual remote confirmation. Release
+   work and credentials with the workspace/session lifecycle.
+4. Let remote readers persist and hydrate native Roost history through bounded
+   reverse windows, then resume forward reads from the tail captured by that
+   window. Preserve the current logical-turn reader and normal write ownership.
+5. Update the shared contracts, owning documentation and bilingual Spec as
+   implementation proceeds. Run type/build/static checks; test suites, deployment
+   and publishing remain excluded by the user's current instructions.
+
+Initial evidence: `streams-client@0.8.0` implements `readBackward` and offset
+resumption; its development dependency is `@loro-dev/sqlite-riverrun@0.3.0`.
+Roost already exposes reverse-window fetch, prefix completion, persistent upload
+and original-tail catch-up. These capabilities must be connected, not treated as
+proof that the current Lody integration already uses them.
+
+### 2026-10-05 implementation checkpoint
+
+The workspace now binds native Node upload to the existing authorized Streams
+lifetime. A native local catalog enrolls a session before its first write and
+resumes uploads after restart without opening session documents. Local acceptance
+only wakes the durable native uploader; the sync barrier requires a drained,
+confirmed upload and still combines with the control-plane barrier. Shared control
+stores only an app-generation and the public owner key, never a token or endpoint.
+
+The renderer integration composes a native IndexedDB partial replica for cloud
+history reads and retains owner RPC for commands. Initial/latest pages use the
+existing logical branch projection; backward
+windows keep contiguous received ranges, and catch-up starts at the original
+window tail. Replica cursors never inherit the owner's event revision. Roost's
+read-only history construction and synchronized branch restoration are implemented.
+
+Checkpoint checks: Roost TS build and Lody CLI typecheck pass. Components typecheck
+reports only the existing missing office/CSV/archive dependencies and their related
+implicit-any errors after the adapter errors were corrected. No test suite,
+benchmark, deployment or publishing has run in this revision.
+Published `sqlite-riverrun@0.3.0` was inspected: it is a real local Streams
+server, but that published build does not contain the backward-read extension.
+Local service acceptance needs a build exposing the current Streams backward API;
+this is not evidence that the deployed service is missing it.
+
+The implemented ownership is:
+
+```mermaid
+flowchart LR
+  Owner[Node owner] -->|native durable upload| Streams[Authorized Streams service]
+  Streams -->|reverse windows and forward catch-up| Replica[Read-only IndexedDB replica]
+  Replica -->|logical turn pages| View[ConversationView]
+  View -->|commands through existing Machine RPC| Owner
+  Control[Loro control document] -->|generation and public owner key| Replica
+```
+
+### Static review corrections
+
+- Shared browser tabs reload durable hints inside their intake lock; native
+  Inbox/Replay remains transactional when Web Locks is unavailable. The first
+  opener no longer overwrites another tab's initialized progress. Event cursors
+  advance only after indexing succeeds. Ordinary cached body/range/directory
+  reads stay synchronous while network work waits; idle polling is two seconds,
+  with immediate control/write wakeups and bounded failure backoff.
+- The initial window remains 40 logical turns with a 500-body cache. Network
+  windows start at 256 KiB; only a single larger transport message increases the
+  assembly budget, up to 64 MiB. Missing old boundaries/prefixes never become an
+  empty or shortened complete history. Prefix repair is explicit and bounded per
+  slice; it may still scan intervening log bytes for a distant Create.
+- Limit check: Roost `MAX_BATCH` caps the complete RST1 encoding, including framing,
+  at 64 MiB. The reader budgets raw batch payload bytes; transport span metadata is
+  outside that payload, so the 64 MiB assembly ceiling covers the largest legal
+  batch without an extra 64-byte allowance.
+- Roost branch checks now capture their event CAS before reading the expected
+  state. Full-branch snapshots use the durable read fence. Restore commits a
+  signed non-message record so other replicas observe rollback; these are TS
+  adapter changes, not Rust core or wire-format changes.
+- `branch_state` is written only through `restoreActiveBranch`: writable identities,
+  generic `accept`, and batch commands exclude it, with runtime rejection at the
+  write entry points. Indexing still recognizes it to reconstruct remote branches.
+- Verification: the Roost TS build, Lody CLI TypeScript check, Lody documentation
+  check, and both repositories' `git diff --check` passed. Components still reports
+  only the pre-existing missing `papaparse`, `@extend-ai/react-docx/pptx/xlsx`, and
+  `fflate` packages with related implicit-any errors. No tests, benchmarks,
+  deployment, publishing, commit or push were run.
+- Restart enrollment precedes writes, including pending-batch recovery. Workspace
+  detach aborts authorized network work; disposal drains it before releasing the
+  shared owner/storage. Recoverable cache clearing includes native replica names;
+  a hard reset retains the deletion manifest until the next-boot database wipe.
+
+The control marker is an application generation, not proof that a service stream
+has never been recreated. Transport uses the existing service auth/TLS with native
+plaintext mode and normal seal verification; this change does not introduce or
+claim payload end-to-end encryption. Both consumers still use the sibling Roost
+package. No registry release or deployed-service capability is inferred from the
+local source/API checks.

@@ -8,7 +8,7 @@ Translation: current
 
 ## 摘要
 
-Lody 现在通过自己的 session backend 边界同时承载 Loro 和 Roost 两种 history 实现。新会话选择 Roost，没有持久 discriminator 的旧会话继续固定在 Loro。queue promotion、steer reconcile、history 读取、assistant 写入、renderer composition 和 backend 生命周期都根据会话保存的选择解析；Roost 的存储与 projection 留在 adapter 内部，调用方只消费相同的逻辑 history 契约。完整 directory lease、按目标补页的阅读位置恢复及 renderer 持久读取副本现已覆盖发现的体验缺口。合成 benchmark 测得 10,000 条历史的最新窗口就绪约快 7.8 倍，但短历史启动和翻页成本更高；完整产品体验等价性仍未验收。
+Lody 通过自己的 session backend 边界承载两种 history 实现：新会话选择 Roost，没有持久 discriminator 的旧会话保留 Loro。queue、steer、历史命令与 renderer composition 都解析已保存的选择。当前集成已包含原生 Node 上传，以及通过现有认证直接从 Streams 分页读取、不依赖 owner 在线的浏览器只读副本；本地 Electron 保留 owner bridge。本地接受、远端确认与副本接收进度保持独立。之前本地 owner 的合成测量显示 10,000 条历史的最新窗口约快 7.8 倍，但短历史启动和翻页成本更高，这些结果不能证明新远端路径的性能或完整产品体验等价性。本次只有静态验证，实际服务与发布验收仍未执行。
 
 ## 决策与范围
 
@@ -603,3 +603,90 @@ Components 类型检查仍被已有依赖缺失阻塞。
 pnpm resolution，核对了 importer 与 package/snapshot 记录。全仓库离线重新解析
 停在无关的 `@openai/codex@^0.159.2` 缓存元数据；保留了其他依赖记录。
 测试套件与发布流程继续排除，两个仓库都没有 push。
+
+## 远端历史同步：当前工作
+
+上方本地 owner/RPC 边界是本轮开始时的已提交实现。owning CLI 离线时，远端历史
+还须能从持久服务读取，包括该读者从未缓存的页面。本次接通该路径，并将原先 Node
+service 无条件成功的 sync 结果改为实际上传确认。本地写入、RPC 响应与远端持久化
+仍是不同事件。
+
+本记录负责的执行计划：
+
+1. 复用 Roost 已有的 Node `registerRemote` / `stream.sync` 与浏览器同步 API。
+   阅读实际 Streams SDK 及其开发使用的 SQLite Riverrun 实现，不另造 wire 协议
+   或 mock storage backend。
+2. 经现有 workspace/platform capability 绑定凭证、stream identity 和 owner
+   admission。公开的 local composition 保持本地；启用 cloud 的组合使用现有
+   token provider。
+3. 后台上传已提交历史，保留持久重试状态，让 history sync barrier 返回实际远端
+   确认；随 workspace/session 生命周期释放工作与凭证。
+4. 远端读者通过有界反向窗口持久化和加载原生 Roost 历史，再从窗口捕获的原始 tail
+   继续向前读取。保留现有逻辑 turn reader 与正常写入归属。
+5. 随实现更新共享契约、所属文档及双语 Spec。运行类型、构建与静态检查；沿用用户
+   当前要求，不运行测试套件、部署或发布。
+
+初始证据：`streams-client@0.8.0` 已实现 `readBackward` 与 offset 续读；开发依赖
+包含 `@loro-dev/sqlite-riverrun@0.3.0`。Roost 已有反向窗口、prefix completion、
+持久上传及原始 tail catch-up。这些能力需要完成接线，不能据其存在宣称当前 Lody
+集成已经使用它们。
+
+### 2026-10-05 实现检查点
+
+workspace 已将原生 Node 上传接到既有 Streams 授权生命周期。本地原生同步索引
+在 session 首次写入前登记，重启恢复不打开历史 session 文档。本地接受只唤醒
+Roost 持久发送器；同步 barrier 要求上传已排空并确认，仍与 control plane barrier
+共同判断。共享 control 只保存应用 generation 和 owner 公钥，不保存 token 或 endpoint。
+
+renderer 已为云历史读取组合原生 IndexedDB partial replica，命令仍经 owner RPC。
+首屏与最新页复用逻辑 branch 投影，反向窗口保留连续的已接收
+范围，追更从原始窗口 tail 开始。副本 cursor 不继承 owner 的事件 revision。
+Roost 的只读 history 构造与可同步的分支恢复已经实现。
+
+检查点：Roost TS build 与 Lody CLI 类型检查通过。修正 adapter 类型错误后，Components
+类型检查只报告原有 office/CSV/archive 依赖缺失及其相应隐式 any 错误。本轮未运行
+测试套件、benchmark、部署或发布。已检查 `sqlite-riverrun@0.3.0` 的发布源码：它是实际的本地 Streams
+服务，但该发布版本尚不包含 backward-read 扩展。本地服务验收需要提供当前反向读
+API 的版本；不能据此推断已部署服务也缺少该接口。
+
+已实现的职责关系：
+
+```mermaid
+flowchart LR
+  Owner[Node owner] -->|原生持久上传| Streams[已授权 Streams 服务]
+  Streams -->|反向窗口与向前追更| Replica[IndexedDB 只读副本]
+  Replica -->|逻辑 turn 分页| View[ConversationView]
+  View -->|现有 Machine RPC 命令| Owner
+  Control[Loro control 文档] -->|generation 与 owner 公钥| Replica
+```
+
+### 静态复核修正
+
+- 共享浏览器标签页在接收锁内部重读持久进度；不支持 Web Locks 时，原生 Inbox/Replay
+  仍保留事务边界。首个 opener 不再覆盖另一标签页已初始化的进度。事件 cursor 只在
+  索引成功后前进。网络等待时，已有 body/range/directory 缓存仍同步返回；空闲轮询
+  间隔两秒，control/write 立即唤醒，失败采用有界退避。
+- 初始窗口仍为 40 条逻辑 turn，正文缓存最多 500 条。网络窗口从 256 KiB 开始，
+  只有单个更大的传输消息会增加组装预算，最多 64 MiB。缺失的旧边界或前缀不能
+  变成空历史或较短的完整历史。prefix repair 显式执行且每片有界；远处的 Create
+  仍可能要求扫描中间的日志字节。
+- 上限核对：Roost `MAX_BATCH` 将完整 RST1 编码（包括 framing）限制为 64 MiB；
+  reader 对原始 batch payload 计预算，不包含 transport span 元数据，所以这里的
+  64 MiB 足以接收最大合法 batch，无需额外加 64 字节。
+- Roost branch 检查在读取预期状态之前捕获事件 CAS。完整 branch snapshot 使用
+  持久读取栅栏。restore 提交签名的非消息记录，让其他副本观察到回滚；这些改动
+  位于 TS adapter，没有修改 Rust 内核或 wire 格式。
+- `branch_state` 仅由 `restoreActiveBranch` 写入：公开 writable identity、generic
+  `accept` 和 batch 命令都排除它，运行时入口也会拒绝；索引仍识别它以恢复远端分支。
+- 复核验收：Roost TS build、Lody CLI TypeScript 检查、Lody 文档检查和两仓
+  `git diff --check` 通过。Components 检查仅报告既有缺失的
+  `papaparse`、`@extend-ai/react-docx/pptx/xlsx`、`fflate` 及关联隐式 any。未运行测试、
+  benchmark、部署或发布，未提交或推送。
+- 重启登记先于写入，包括 pending-batch recovery。workspace detach 取消已授权
+  网络工作，dispose 等待排空后释放共享 owner/storage。普通缓存清理包含原生副本
+  数据库名，hard reset 保留删除清单直到下次启动完成数据库清理。
+
+control marker 是应用 generation，不能证明服务 stream 从未被重新创建。传输沿用
+既有服务认证/TLS、原生 plaintext 模式与正常 seal 验证，本次不引入或宣称 payload
+端到端加密。两端继续引用同级 Roost package；本地源码/API 检查不能代替 registry
+发布，也不能证明已部署服务的能力。

@@ -1,6 +1,8 @@
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
 import { createSessionBackend, disposeSessionBackend } from '@/session/session-backend';
 import type { SessionBackend } from '@/session/session-backend';
+import { openRoostWorkspaceHistorySync } from '@/session/roost-node-session';
+import type { RoostWorkspaceHistorySync, RoostSessionSync } from '@/session/roost-streams-sync';
 import { readLatestTurn } from '@lody/shared/session-data';
 import { isContainer, type LoroDoc, type LoroList, type LoroMap } from 'loro-crdt';
 import {
@@ -41,6 +43,9 @@ import {
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
   type SessionRoostHistoryCursorDocState,
+  type SessionRoostHistoryRemoteDocState,
+  type RoostStreamsConnection,
+  parseRoostHistoryRemoteBinding,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
   SessionTitleSource,
@@ -373,6 +378,10 @@ export class LoroDocumentManager {
   private remoteStreamsStatusUnsubscribe: (() => void) | null = null;
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly streamsTokens: CloudStreamsTokenPort | null;
+  private roostHistorySync: Promise<RoostWorkspaceHistorySync> | null = null;
+  private roostStreamsConnection?: RoostStreamsConnection;
+  private roostStreamsAbort?: AbortController;
+  private detachRoostStreamsOnline?: () => void;
   public readonly cloudBilling: CloudBillingPort | null;
 
   static async create(
@@ -582,6 +591,9 @@ export class LoroDocumentManager {
         this.initialMetaSyncCompleted = true;
       },
     });
+    this.detachRoostStreamsOnline = this.connectionRecovery.onStreamsOnline(() => {
+      if (this.roostStreamsConnection) this.wakeRoostHistorySync();
+    });
     this.machineFlockSync = new MachineFlockSyncCoordinator({
       repo: this.repo,
       workspaceId: this.workspaceId,
@@ -618,6 +630,35 @@ export class LoroDocumentManager {
 
   async attachRemoteStreamsTransport(): Promise<void> {
     await this.runRemoteTransportOp(() => this.attachRemoteStreamsTransportInner());
+  }
+
+  private getRoostHistorySync(): Promise<RoostWorkspaceHistorySync> {
+    if (this.cleaningUp) return Promise.reject(new Error('Workspace is closing'));
+    if (!this.roostHistorySync) {
+      const pending = openRoostWorkspaceHistorySync({
+        workspaceId: this.workspaceId,
+        isCloudEnabled: () => this.streamsTokens !== null,
+        getConnection: () =>
+          this.connectionRecovery.isRecovering() ? undefined : this.roostStreamsConnection,
+        logger: this.logger,
+      });
+      this.roostHistorySync = pending;
+      void pending.catch(() => {
+        if (this.roostHistorySync === pending) this.roostHistorySync = null;
+      });
+    }
+    return this.roostHistorySync;
+  }
+
+  private wakeRoostHistorySync(): void {
+    void this.getRoostHistorySync()
+      .then((sync) => sync.wake())
+      .catch((error) => {
+        if (!this.cleaningUp)
+          this.logger.warn(
+            `Roost history synchronization could not start: ${formatErrorMessage(error)}`
+          );
+      });
   }
 
   private async attachRemoteStreamsTransportInner(): Promise<void> {
@@ -666,6 +707,14 @@ export class LoroDocumentManager {
       });
       this.remoteStreamsAttached = true;
       this.remoteStreamsGeneration += 1;
+      this.roostStreamsAbort?.abort();
+      this.roostStreamsAbort = new AbortController();
+      this.roostStreamsConnection = {
+        baseUrl: streamsTransport.gatewayBaseUrl,
+        auth: streamsTransport.tokenProvider.createAuthCallback(),
+        signal: this.roostStreamsAbort.signal,
+      };
+      this.wakeRoostHistorySync();
       this.logger.info(`[${this.workspaceId}] Remote Streams transport attached`);
       // addTransport resolves even when individual rooms failed to attach at
       // the repo level (their bindings sit in 'error', and repo.reconnect does
@@ -724,6 +773,8 @@ export class LoroDocumentManager {
     }
     this.remoteStreamsAttached = false;
     this.remoteStreamsGeneration += 1;
+    this.roostStreamsAbort?.abort();
+    this.roostStreamsConnection = undefined;
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
     try {
@@ -1261,7 +1312,8 @@ export class LoroDocumentManager {
         this.repo,
         sessionId,
         (sessionDocId) => this.unloadDocRoom(sessionDocId),
-        this.logger
+        this.logger,
+        async (id, binding) => (await this.getRoostHistorySync()).bind(id, binding)
       );
       const meta = options.historyBackend ? undefined : await this.repo.getDocMeta(docId);
       const historyBackend =
@@ -1308,7 +1360,8 @@ export class LoroDocumentManager {
         this.repo,
         sessionId,
         (snapshotDocId) => this.unloadDocRoom(snapshotDocId),
-        this.logger
+        this.logger,
+        async (id, binding) => (await this.getRoostHistorySync()).bind(id, binding)
       );
       const meta = await this.repo.getDocMeta(docId);
       const historyBackend = !isLoroRepoDocDeleted(meta)
@@ -1635,6 +1688,10 @@ export class LoroDocumentManager {
 
   async cleanUp(options: { fast?: boolean; preserveSessionStatus?: boolean } = {}) {
     this.cleaningUp = true;
+    this.roostStreamsAbort?.abort();
+    this.roostStreamsConnection = undefined;
+    this.detachRoostStreamsOnline?.();
+    this.detachRoostStreamsOnline = undefined;
     this.localDocRoomBridgeGeneration += 1;
     for (const docId of [...this.localDocRoomBridges.keys()]) {
       this.cancelLocalDocRoomBridge(docId);
@@ -1682,6 +1739,14 @@ export class LoroDocumentManager {
     await this.machine?.destroy();
     this.machine = null;
     this.sessions.clear();
+    await this.roostHistorySync
+      ?.then((sync) => sync.dispose())
+      .catch((error) => {
+        this.logger.warn(
+          `Roost history synchronization shutdown failed: ${formatErrorMessage(error)}`
+        );
+      });
+    this.roostHistorySync = null;
     this.machineExistenceWatcher?.unsubscribe();
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
@@ -1837,7 +1902,11 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
      * `LoroDocumentManager.unloadDocRoom`.
      */
     private unloadDocRoom: (docId: string) => Promise<void>,
-    private logger: Logger = getLogger('loro')
+    private logger: Logger = getLogger('loro'),
+    private readonly createRoostHistorySync?: (
+      sessionId: SessionId,
+      binding: SessionRoostHistoryRemoteDocState
+    ) => Promise<RoostSessionSync>
   ) {
     this.roomId = getSessionRoomId(this.sessionId);
   }
@@ -2339,6 +2408,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
       roostHistoryCursor: state.roostHistoryCursor as SessionDocMeta['roostHistoryCursor'],
+      roostHistoryRemote: state.roostHistoryRemote as SessionDocMeta['roostHistoryRemote'],
       acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
     };
   }
@@ -2927,6 +2997,30 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   async setRoostHistoryCursor(cursor: SessionRoostHistoryCursorDocState): Promise<void> {
     if (!this.mirror) throw new Error('Mirror not initialized');
     this.mirror.setState((prev) => ({ ...prev, roostHistoryCursor: cursor }));
+  }
+
+  async bindRoostHistoryRemote(
+    proposed: SessionRoostHistoryRemoteDocState
+  ): Promise<SessionRoostHistoryRemoteDocState> {
+    if (!this.mirror) throw new Error('Mirror not initialized');
+    const existing = parseRoostHistoryRemoteBinding(this.mirror.getState().roostHistoryRemote);
+    if (existing) {
+      if (existing.ownerPublicKey !== proposed.ownerPublicKey)
+        throw new Error('Roost history owner changed');
+      return existing;
+    }
+    const binding = parseRoostHistoryRemoteBinding(proposed)!;
+    this.mirror.setState((prev) => ({ ...prev, roostHistoryRemote: binding }));
+    // The binding and its app-generation must survive before accepting native
+    // history. Reopening never chooses a fresh remote for an existing history.
+    await this.repo.flush();
+    return binding;
+  }
+
+  async openRoostHistorySync(
+    binding: SessionRoostHistoryRemoteDocState
+  ): Promise<RoostSessionSync | undefined> {
+    return await this.createRoostHistorySync?.(this.sessionId, binding);
   }
 
   /**

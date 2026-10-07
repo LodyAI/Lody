@@ -11,6 +11,7 @@ import type {
   SessionHistoryWriteResponse,
   SessionId,
   WorkspaceId,
+  RoostStreamsConnection,
 } from '@lody/shared';
 import {
   createRoostSessionData,
@@ -39,6 +40,7 @@ import {
 import type { ConversationSessionDataFactory } from './conversation-view/create-conversation-session';
 import type { SessionSnapshotService } from '@lody/shared/session-data';
 import { SessionHistoryChangeSchema } from '@lody/shared';
+import { createRoostHistoryReplica } from './roost-history-replica';
 
 type HistoryReadResponse = Extract<
   LocalSessionControlResponse,
@@ -73,11 +75,8 @@ export type RemoteRoostSessionBridgeOptions = {
   readonly accountId?: string | null;
   readonly workspaceId: WorkspaceId;
   readonly machineId: MachineId;
-  readonly requestHistoryRead: (
-    machineId: MachineId,
-    sessionId: SessionId,
-    query: SessionHistoryReadQuery
-  ) => Promise<SessionHistoryReadResponse>;
+  readonly replicaNamespace: string;
+  readonly getConnection: () => Promise<RoostStreamsConnection>;
   readonly requestHistoryWrite: (args: {
     readonly machineId: MachineId;
     readonly sessionId: SessionId;
@@ -193,6 +192,69 @@ const assertSerializableHistoryPayload = (
   }
 };
 
+const createRoostCommandPorts = (
+  readAll: () => Promise<SessionEntry[]>,
+  write: (
+    operation: SessionHistoryWriteOperation,
+    payload: Record<string, unknown>
+  ) => Promise<unknown>
+) => {
+  const snapshotProvenance = new WeakSet<object>();
+  const commands = {
+    applyHistoryAction: async (action: HistoryAction): Promise<SessionActionResult> =>
+      (await write('apply_action', { action })) as SessionActionResult,
+    appendTurn: async (turn: SessionTurn): Promise<void> => {
+      await write('append', { entry: turn });
+    },
+    replaceTurn: async (turnId: string, turn: SessionTurn): Promise<void> => {
+      await write('replace', { turnId, entry: turn });
+    },
+    respondPermission: async (
+      requestId: string,
+      outcome: PermissionOutcome,
+      commandOptions?: { readonly turnId?: string }
+    ): Promise<boolean> =>
+      Boolean(
+        await write('respond_permission', {
+          requestId,
+          outcome,
+          ...(commandOptions ? { options: commandOptions } : {}),
+        })
+      ),
+    replaceEditableTail: async (
+      _input: ReplaceEditableTailInput
+    ): Promise<SessionEditableTailResult> =>
+      // The compensation closure returned by this command is an in-process
+      // capability and cannot cross IPC/RPC. The product edit-and-resend path
+      // uses its dedicated session RPC; the generic command reports the same
+      // explicit unsupported result promised by the SessionData contract.
+      ({ status: 'rejected', reason: { code: 'unsupported' } }),
+    applyHistoryImport: async (input: HistoryImportInput): Promise<SessionImportResult> =>
+      (await write('apply_import', { input })) as SessionImportResult,
+  };
+
+  const snapshots: SessionSnapshotService = {
+    capture: async (): Promise<SessionSnapshot> => {
+      const snapshot = Object.freeze({
+        history: [...(await readAll())],
+      }) as unknown as SessionSnapshot;
+      snapshotProvenance.add(snapshot);
+      return snapshot;
+    },
+    copyFrom: async (snapshot, selection): Promise<void> => {
+      if (!snapshotProvenance.has(snapshot)) throw new Error('Invalid Roost snapshot provenance');
+      const sourceIds = new Set(
+        (snapshot.history as readonly SessionHistoryInput[]).map((entry) => entry.id)
+      );
+      if (selection.some((entry) => !sourceIds.has(entry.id))) {
+        throw new Error('Fork selection is not from the captured snapshot');
+      }
+      await write('copy_history', { history: selection });
+    },
+  };
+  return { commands, snapshots };
+};
+
 const createRoostSessionDataFactoryFromTransport =
   (
     createTransport: (sessionId: SessionId) => RoostHistoryTransport,
@@ -226,7 +288,6 @@ const createRoostSessionDataFactoryFromTransport =
     let scheduleRefresh = () => {};
     const pendingReads = new Map<string, Promise<SessionHistoryReadResponse>>();
     const listeners = new Set<SessionDataChangeListener>();
-    const snapshotProvenance = new WeakSet<object>();
 
     const readOwner = (query: SessionHistoryReadQuery): Promise<SessionHistoryReadResponse> => {
       const key = JSON.stringify(query);
@@ -750,58 +811,10 @@ const createRoostSessionDataFactoryFromTransport =
       return receipt.result;
     };
 
-    const commands = {
-      applyHistoryAction: async (action: HistoryAction): Promise<SessionActionResult> =>
-        (await write('apply_action', { action })) as SessionActionResult,
-      appendTurn: async (turn: SessionTurn): Promise<void> => {
-        await write('append', { entry: turn });
-      },
-      replaceTurn: async (turnId: string, turn: SessionTurn): Promise<void> => {
-        await write('replace', { turnId, entry: turn });
-      },
-      respondPermission: async (
-        requestId: string,
-        outcome: PermissionOutcome,
-        commandOptions?: { readonly turnId?: string }
-      ): Promise<boolean> =>
-        Boolean(
-          await write('respond_permission', {
-            requestId,
-            outcome,
-            ...(commandOptions ? { options: commandOptions } : {}),
-          })
-        ),
-      replaceEditableTail: async (
-        _input: ReplaceEditableTailInput
-      ): Promise<SessionEditableTailResult> =>
-        // The compensation closure returned by this command is an in-process
-        // capability and cannot cross IPC/RPC. The product edit-and-resend path
-        // uses its dedicated session RPC; the generic command reports the same
-        // explicit unsupported result promised by the SessionData contract.
-        ({ status: 'rejected', reason: { code: 'unsupported' } }),
-      applyHistoryImport: async (input: HistoryImportInput): Promise<SessionImportResult> =>
-        (await write('apply_import', { input })) as SessionImportResult,
-    };
-
-    const snapshots: SessionSnapshotService = {
-      capture: async (): Promise<SessionSnapshot> => {
-        const snapshot = Object.freeze({
-          history: [...(await readEntries({ kind: 'readAll' }))],
-        }) as unknown as SessionSnapshot;
-        snapshotProvenance.add(snapshot);
-        return snapshot;
-      },
-      copyFrom: async (snapshot, selection): Promise<void> => {
-        if (!snapshotProvenance.has(snapshot)) throw new Error('Invalid Roost snapshot provenance');
-        const sourceIds = new Set(
-          (snapshot.history as readonly SessionHistoryInput[]).map((entry) => entry.id)
-        );
-        if (selection.some((entry) => !sourceIds.has(entry.id))) {
-          throw new Error('Fork selection is not from the captured snapshot');
-        }
-        await write('copy_history', { history: selection });
-      },
-    };
+    const { commands, snapshots } = createRoostCommandPorts(
+      async () => [...(await readEntries({ kind: 'readAll' }))] as SessionEntry[],
+      write
+    );
 
     const sessionData = createRoostSessionData({
       sessionId,
@@ -882,21 +895,25 @@ export function createLocalRoostSessionDataFactory(
   );
 }
 
-/** Renderer bridge for a Roost owner reached through encrypted Machine RPC. */
+/** Direct native history replica; encrypted Machine RPC retains write ownership. */
 export function createRemoteRoostSessionDataFactory(
   options: RemoteRoostSessionBridgeOptions
 ): ConversationSessionDataFactory {
-  return createRoostSessionDataFactoryFromTransport(
-    (sessionId) => ({
-      readHistory: async (query) => {
-        const response = await options.requestHistoryRead(options.machineId, sessionId, query);
-        if (response.sessionId !== sessionId) {
-          throw new Error('Roost history read response targeted a different session');
-        }
-        if (!response.success) throw new Error(response.error ?? 'Roost history read failed');
-        return response;
-      },
-      writeHistory: async (operation, payload) => {
+  return ({ sessionId, doc }) => {
+    const replica = createRoostHistoryReplica({
+      accountId: options.accountId,
+      workspaceId: options.workspaceId,
+      replicaNamespace: options.replicaNamespace,
+      getConnection: options.getConnection,
+      sessionId,
+      doc,
+    });
+    let disposed = false;
+    const { commands, snapshots } = createRoostCommandPorts(
+      async () => [...(await replica.history.readAll())],
+      async (operation, payload) => {
+        if (disposed) throw new Error('Roost session bridge is disposed');
+        assertSerializableHistoryPayload(operation, payload);
         const response = await options.requestHistoryWrite({
           machineId: options.machineId,
           sessionId,
@@ -907,20 +924,20 @@ export function createRemoteRoostSessionDataFactory(
           throw new Error('Roost history write response targeted a different operation');
         }
         if (!response.success) throw new Error(response.error ?? `Roost ${operation} failed`);
-        return {
-          result: response.result,
-          historyRevision: response.historyRevision,
-          historyCount: response.historyCount,
-          historyChange: response.historyChange,
-        };
+        // The owner's revision is a wakeup, not this replica's receive cursor.
+        replica.refresh();
+        return response.result;
+      }
+    );
+    return createRoostSessionData({
+      sessionId,
+      history: replica.history,
+      commands,
+      snapshots,
+      dispose: () => {
+        disposed = true;
+        replica.dispose();
       },
-    }),
-    (sessionId) =>
-      JSON.stringify([
-        options.accountId ?? 'local',
-        options.workspaceId,
-        options.machineId,
-        sessionId,
-      ])
-  );
+    });
+  };
 }

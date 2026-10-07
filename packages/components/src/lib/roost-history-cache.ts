@@ -4,6 +4,36 @@ import { createRoostDirectoryRow, type SessionEntry } from '@lody/shared/session
 
 /** A durable, read-only projection of owner-accepted history; never an outbox. */
 export const ROOST_HISTORY_CACHE_DB = 'lody:roost-history-v1';
+export const ROOST_REPLICA_DATABASES_KEY = 'lody:roost-replica-databases:v1';
+
+export function knownRoostReplicaDatabases(): string[] {
+  try {
+    const names: unknown = JSON.parse(localStorage.getItem(ROOST_REPLICA_DATABASES_KEY) ?? '[]');
+    return Array.isArray(names)
+      ? names.filter(
+          (name): name is string =>
+            typeof name === 'string' && name.startsWith('lody-roost-replica-')
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Fallback for browsers without indexedDB.databases(). These replicas contain
+ * only recoverable remote history and can be removed by ordinary cache repair. */
+export function rememberRoostReplicaDatabase(name: string): void {
+  if (!name.startsWith('lody-roost-replica-'))
+    throw new Error('Invalid Roost replica database name');
+  try {
+    localStorage.setItem(
+      ROOST_REPLICA_DATABASES_KEY,
+      JSON.stringify([...new Set([...knownRoostReplicaDatabases(), name])])
+    );
+  } catch {
+    /* Cache enumeration remains best-effort when localStorage is unavailable. */
+  }
+}
 const HEADS = 'heads';
 const ROWS = 'rows';
 
