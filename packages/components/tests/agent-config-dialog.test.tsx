@@ -546,6 +546,38 @@ describe('AgentConfigDialog', () => {
     expect(closed).toEqual([false]);
   });
 
+  it('names saved Pi extensions by package or folder before a scan', async () => {
+    const config: AgentConfigMeta = {
+      id: 'saved-pi' as AgentConfigId,
+      machineId,
+      name: 'Pi',
+      cliType: 'builtin',
+      agentType: 'pi',
+      env: {},
+      runtimeOverrides: {
+        piExtensions: [
+          '/u/.pi/agent/npm/node_modules/pi-smart-fetch/dist/index.js',
+          '/u/.pi/agent/npm/node_modules/@fradser/pi-vision/index.ts',
+          '/u/.pi/agent/npm/node_modules/@ff-labs/pi-fff/src/index.ts',
+          'C:\\Users\\u\\ext\\my-ext\\index.ts',
+          '/u/ext/single.ts',
+        ],
+      },
+    };
+    await renderDialog(
+      { kind: 'edit', config },
+      createMachine('Pi machine', { piExtensions: 1 }),
+      vi.fn(async () => {})
+    );
+    const field = document.querySelector('[aria-label="Pi extensions"]')!;
+    const paths = config.runtimeOverrides!.piExtensions!;
+    expect(Array.from(field.querySelectorAll('label')).map((row) => row.textContent)).toEqual(
+      ['pi-smart-fetch', '@fradser/pi-vision', '@ff-labs/pi-fff', 'my-ext', 'single.ts'].map(
+        (name, index) => `${name}${paths[index]}`
+      )
+    );
+  });
+
   it('creates a Pi provider with selected extensions through the live-probe path', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
     const scan = async () => ({
