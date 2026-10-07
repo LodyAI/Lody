@@ -95,8 +95,7 @@ Read parent rules and each heading's linked context before edits.
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)
 
-- Canonical cluster in CONSTANT order + exactly one staged item; no items hides
-  the bar (unless syncing) and the stage never empties or relayouts on click.
+- Canonical cluster in CONSTANT order + exactly one staged item; hide only without items, machine identity, or sync and the stage never empties or relayouts on click.
 - The stage icon is inert, colour is reserved for genuine status, and nothing
   in the bar pulses.
 - Open preview stays gated on a real reported target; repository actions are

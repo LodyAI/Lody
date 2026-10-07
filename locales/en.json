@@ -1,4 +1,7 @@
 {
+  "sessions.executionMachine.you": "You",
+  "sessions.executionMachine.unknownOwner": "Unknown owner",
+  "sessions.executionMachine.description": "Execution machine: {{owner}} · {{machine}}",
   "settings.agent.codex.authentication": "Authentication",
   "settings.agent.codex.storage": "Credentials stay on the selected machine. Each provider has its own account.",
   "settings.agent.codex.customApi": "Custom API",

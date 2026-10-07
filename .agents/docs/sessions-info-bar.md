@@ -187,3 +187,13 @@ are hidden unless current. Each pill is agent icon, live title, and the sidebar'
 highlighted. Tab pills navigate with root + exact tab ids. The page reads only
 a boolean (`useHasSessionRelations`); the chip builds the tree in the leaf.
 Decision: [relations note](../notes/implemented/feature/2026-09-24-session-relations-chip.md).
+
+## Execution-machine identity (review patch)
+
+The optional `executionMachine` identity stays outside cluster/stage selection.
+It resolves `sessionMachine.ownerUserId` against existing workspace members,
+never Session ownership. The owner avatar/name and machine name remain visible
+when context/status changes; below a 600px bar width the controls move beneath it.
+Unknown ownership is explicit, and absence of machine metadata does not synthesize
+an identity. See the [draft Spec](../../specs/composer-machine-owner.md) and
+[review decision](../notes/proposed/feature/2026-10-07-composer-machine-owner.md).
