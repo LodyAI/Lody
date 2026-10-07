@@ -9,7 +9,7 @@ Language: [English](2026-10-06-docs-acp-feature-support.md)
 从 Codex 或 Claude Code 迁移过来的读者，此前只能翻适配器源码才能知道 Lody 各内置 provider
 支持哪些能力。本提案在两种语言下新增 `(migrating)/acp-feature-support`：先简要说明 ACP 与
 `acp-extension-core` 的 `_meta.lody` 契约，再用一张 provider × 功能矩阵列出标准 ACP 可选
-能力和全部十二项 v1 Agent 扩展能力。矩阵来自已发布适配器的能力常量和 `InitializeResponse`，
+能力和十项面向用户的 v1 Agent 扩展能力。矩阵来自已发布适配器的能力常量和 `InitializeResponse`，
 是文档快照而非运行时探测，因此 provider 升级后可能滞后，需要维护者重新核对。
 
 ## 问题
@@ -27,21 +27,21 @@ Language: [English](2026-10-06-docs-acp-feature-support.md)
   [信息架构记录](2026-10-01-docs-information-architecture.zh.md)所定义读者路径分组的扩展。
 - 说明 ACP、`acp-extension-core` 的协商模型和 `_meta.lody` 能力键，并链接协议官网与公开
   契约仓库。
-- 发布一张矩阵：列为标准 ACP 可选能力和十二项 v1 Agent 扩展能力，行为九个内置 provider。
+- 发布一张矩阵：列为标准 ACP 可选能力和十项面向用户的 v1 Agent 扩展能力，行为九个内置
+  provider。
   Lody 行依据适配器能力常量填写（`CLAUDE_LODY_CAPABILITIES`、`CODEX_LODY_CAPABILITIES`、
   `LODY_CAPABILITIES`、`GROK_LODY_CAPABILITIES`、`LODY_EXTENSION_CAPABILITIES`、
   `initializeResponse()` 以及 Devin 代理）。外部运行时或纯转发的运行时标为 `运行时`，不靠
   猜测填充。
 - 链接 [ACP Wall](https://github.com/wibus-wee/acp-wall)，作为标准 ACP 实现的独立、带版本
   的对比。
-- 增加扩展能力列说明，因为这些列描述的是适配器声明，而不是用户功能是否存在。尤其是
-  `sessionHistory` 只是 Codex 的只读导入路径，其他 provider 通过标准 ACP 回放导入；
-  `worktreeProject` 映射的是 Codex 原生项目身份，而 Lody 侧的 worktree 对所有 provider 都
-  可用。
+- 为这十项面向用户的能力增加扩展能力列说明。两个 provider 内部使用的 Codex key
+  （`sessionHistory` 只读导入和 `worktreeProject` 原生项目映射）刻意不放进面向用户的矩阵；
+  其他 provider 分别通过标准 ACP 回放和 Lody 侧 worktree 达到同样结果。
 
 ## 考虑过的替代方案
 
-1. 把矩阵直接放在现有迁移页里。否决：21 列的表格会把迁移清单埋掉，而且这份矩阵属于迁移
+1. 把矩阵直接放在现有迁移页里。否决：19 列的表格会把迁移清单埋掉，而且这份矩阵属于迁移
    读者的参考材料。
 2. 没有证据表明不支持时一律标为支持。否决：对于 Lody 不掌握其标准 ACP 支持的外部运行时和
    代理，`运行时` 更准确。

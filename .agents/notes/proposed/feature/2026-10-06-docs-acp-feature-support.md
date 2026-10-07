@@ -9,8 +9,8 @@ Language: [中文](2026-10-06-docs-acp-feature-support.zh.md)
 Readers coming from Codex or Claude Code could see which capabilities Lody's built-in providers
 support only by reading adapter source. This adds `(migrating)/acp-feature-support` in both locales:
 a short explanation of ACP and the `acp-extension-core` `_meta.lody` contract, followed by one
-provider-by-feature matrix for standard ACP capabilities and all twelve v1 agent extension
-capabilities. The matrix is derived from the capability constants and `InitializeResponse` of the
+provider-by-feature matrix for standard ACP capabilities and the ten user-facing v1 agent
+extension capabilities. The matrix is derived from the capability constants and `InitializeResponse` of the
 shipped adapters; it is a documentation snapshot, not runtime probing, so it can lag a provider
 update until a maintainer rechecks it.
 
@@ -31,22 +31,22 @@ update until a maintainer rechecks it.
   [information-architecture note](2026-10-01-docs-information-architecture.md).
 - Explain ACP, the `acp-extension-core` negotiation model, and the `_meta.lody` capability keys,
   with links to the protocol site and the public contract repository.
-- Publish one matrix whose columns are standard ACP optional capabilities and the twelve v1 agent
-  extension capabilities, and whose rows are the nine built-in providers. Fill the Lody rows from
+- Publish one matrix whose columns are standard ACP optional capabilities and the ten user-facing
+  v1 agent extension capabilities, and whose rows are the nine built-in providers. Fill the Lody rows from
   the adapter capability constants (`CLAUDE_LODY_CAPABILITIES`, `CODEX_LODY_CAPABILITIES`,
   `LODY_CAPABILITIES`, `GROK_LODY_CAPABILITIES`, `LODY_EXTENSION_CAPABILITIES`,
   `initializeResponse()`, and the Devin proxy). Mark external or purely forwarded runtimes as
   `Runtime` rather than guessing.
 - Link [ACP Wall](https://github.com/wibus-wee/acp-wall) as an independent, versioned comparison of
   standard ACP implementations.
-- Add an extension-column reference because the columns describe adapter declarations, not
-  user-facing feature availability. In particular, `sessionHistory` is the read-only Codex import
-  path while other providers import through standard ACP replay, and `worktreeProject` maps Codex's
-  native project identity while Lody-side worktrees work for every provider.
+- Add an extension-column reference for those ten user-facing capabilities. The two
+  provider-internal Codex keys (`sessionHistory` read-only import and `worktreeProject` native
+  project mapping) are deliberately omitted from the user-facing matrix; other providers reach the
+  same outcomes through standard ACP replay and Lody-side worktrees.
 
 ## Alternatives considered
 
-1. Put the matrix on the existing migration page. Rejected: a 21-column table would bury the
+1. Put the matrix on the existing migration page. Rejected: a 19-column table would bury the
    migration checklist, and the matrix is reference material for the migration reader.
 2. Mark every cell supported unless proven otherwise. Rejected: `Runtime` is more accurate for
    external runtimes and proxies whose standard ACP support Lody does not own.

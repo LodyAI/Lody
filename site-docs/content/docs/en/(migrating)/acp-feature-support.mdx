@@ -48,17 +48,17 @@ The table combines standard ACP capabilities (prefixed `ACP:`) with Lody extensi
 (prefixed `Lody:`). All nine providers share the ACP baseline described above; only the optional
 capabilities below differ by provider.
 
-| Provider             | ACP: image | ACP: embedded context | ACP: load / resume | ACP: fork | ACP: extra directories | ACP: MCP | ACP: logout | ACP: elicitation | Lody: subagent events | Lody: session title | Lody: usage | Lody: rate limits | Lody: fork at turn | Lody: steering | Lody: tasks | Lody: subagents | Lody: goal | Lody: compaction | Lody: session history | Lody: worktree project |
-| -------------------- | ---------- | --------------------- | ------------------ | --------- | ---------------------- | -------- | ----------- | ---------------- | --------------------- | ------------------- | ----------- | ----------------- | ------------------ | -------------- | ----------- | --------------- | ---------- | ---------------- | --------------------- | ---------------------- |
-| **Claude Code**      | ✓          | ✓                     | ✓                  | ✓         | ✓                      | HTTP+SSE | ✓           | ✓                | ✓                     | ✓                   | ✓           | ✓                 | ✓                  | ✓              | ✓¹          | ◐²              | ✓          | ✓                | —                     | —                      |
-| **Codex**            | ✓          | ✓                     | ✓                  | ✓         | ✓                      | HTTP     | ✓           | ✓                | ✓                     | ✓                   | ✓           | ✓                 | ✓                  | ✓              | ✓¹          | ◐²              | ✓          | ✓                | ✓                     | ✓                      |
-| **Grok**             | Runtime    | Runtime               | Runtime            | ✓         | Runtime                | Runtime  | Runtime     | ✓                | ✓                     | ✓                   | ✓           | ✓                 | ✓                  | —              | ✓³          | —               | —          | —                | —                     | —                      |
-| **Kimi Code**        | ✓          | ✓                     | ✓                  | ✓         | ✓                      | HTTP+SSE | ✓           | ✓                | ✓                     | ◐⁴                  | ✓           | ✓                 | ✓                  | —              | ✓¹          | ✓               | —          | ✓                | —                     | —                      |
-| **Devin**            | Runtime    | Runtime               | Runtime            | Runtime   | Runtime                | Runtime  | Runtime     | ✓                | ✓                     | —                   | —           | —                 | —                  | —              | —           | —               | —          | ✓                | —                     | —                      |
-| **Pi**               | ✓          | ✓                     | ✓                  | —         | —                      | —        | —           | ✓                | ✓                     | —                   | ✓           | —                 | —                  | ✓              | —           | ✓               | —          | ✓                | —                     | —                      |
-| **DeepSeek Harness** | ◐⁵         | —                     | —                  | —         | —                      | HTTP     | —           | ✓                | ✓                     | ✓                   | ✓           | —                 | —                  | —              | —           | —               | —          | ✓                | —                     | —                      |
-| **Bub**              | Runtime    | Runtime               | Runtime            | Runtime   | Runtime                | Runtime  | Runtime     | Runtime          | Runtime               | Runtime             | Runtime     | Runtime           | Runtime            | Runtime        | Runtime     | Runtime         | Runtime    | Runtime          | Runtime               | Runtime                |
-| **Dimcode**          | Runtime    | Runtime               | Runtime            | Runtime   | Runtime                | Runtime  | Runtime     | Runtime          | Runtime               | Runtime             | Runtime     | Runtime           | Runtime            | Runtime        | Runtime     | Runtime         | Runtime    | Runtime          | Runtime               | Runtime                |
+| Provider             | ACP: image | ACP: embedded context | ACP: load / resume | ACP: fork | ACP: extra directories | ACP: MCP | ACP: logout | ACP: elicitation | Lody: subagent events | Lody: session title | Lody: usage | Lody: rate limits | Lody: fork at turn | Lody: steering | Lody: tasks | Lody: subagents | Lody: goal | Lody: compaction |
+| -------------------- | ---------- | --------------------- | ------------------ | --------- | ---------------------- | -------- | ----------- | ---------------- | --------------------- | ------------------- | ----------- | ----------------- | ------------------ | -------------- | ----------- | --------------- | ---------- | ---------------- |
+| **Claude Code**      | ✓          | ✓                     | ✓                  | ✓         | ✓                      | HTTP+SSE | ✓           | ✓                | ✓                     | ✓                   | ✓           | ✓                 | ✓                  | ✓              | ✓¹          | ◐²              | ✓          | ✓                |
+| **Codex**            | ✓          | ✓                     | ✓                  | ✓         | ✓                      | HTTP     | ✓           | ✓                | ✓                     | ✓                   | ✓           | ✓                 | ✓                  | ✓              | ✓¹          | ◐²              | ✓          | ✓                |
+| **Grok**             | Runtime    | Runtime               | Runtime            | ✓         | Runtime                | Runtime  | Runtime     | ✓                | ✓                     | ✓                   | ✓           | ✓                 | ✓                  | —              | ✓³          | —               | —          | —                |
+| **Kimi Code**        | ✓          | ✓                     | ✓                  | ✓         | ✓                      | HTTP+SSE | ✓           | ✓                | ✓                     | ◐⁴                  | ✓           | ✓                 | ✓                  | —              | ✓¹          | ✓               | —          | ✓                |
+| **Devin**            | Runtime    | Runtime               | Runtime            | Runtime   | Runtime                | Runtime  | Runtime     | ✓                | ✓                     | —                   | —           | —                 | —                  | —              | —           | —               | —          | ✓                |
+| **Pi**               | ✓          | ✓                     | ✓                  | —         | —                      | —        | —           | ✓                | ✓                     | —                   | ✓           | —                 | —                  | ✓              | —           | ✓               | —          | ✓                |
+| **DeepSeek Harness** | ◐⁵         | —                     | —                  | —         | —                      | HTTP     | —           | ✓                | ✓                     | ✓                   | ✓           | —                 | —                  | —              | —           | —               | —          | ✓                |
+| **Bub**              | Runtime    | Runtime               | Runtime            | Runtime   | Runtime                | Runtime  | Runtime     | Runtime          | Runtime               | Runtime             | Runtime     | Runtime           | Runtime            | Runtime        | Runtime     | Runtime         | Runtime    | Runtime          |
+| **Dimcode**          | Runtime    | Runtime               | Runtime            | Runtime   | Runtime                | Runtime  | Runtime     | Runtime          | Runtime               | Runtime             | Runtime     | Runtime           | Runtime            | Runtime        | Runtime     | Runtime         | Runtime    | Runtime          |
 
 Legend:
 
@@ -72,8 +72,8 @@ Legend:
 
 ### Extension capability reference
 
-The `Lody:` columns describe what the provider adapter declares, which is not the same as whether
-the user-facing feature exists in Lody. In particular:
+The `Lody:` columns describe what the provider adapter declares. These are the adapter-side
+capabilities behind each column:
 
 - **subagent events** — the adapter streams child-agent snapshots, progress, and output on
   `_lody/subagents/event`.
@@ -92,15 +92,6 @@ the user-facing feature exists in Lody. In particular:
   clear actions.
 - **compaction** — context compaction and retry reported as a tool lifecycle with
   `_meta.lody.activity`.
-- **session history** — the read-only `_lody/session/history/read` method used to import an
-  existing built-in Codex thread without resuming it. Other providers import through the standard
-  ACP `session/list` and `session/load` replay, so `—` here does not mean history cannot be
-  imported.
-- **worktree project** — `_meta.lody.worktreeProject` carries a worktree session's original project
-  root on session establishment, so Codex can group several worktrees under one native project
-  while keeping the worktree as `cwd`. Providers with no separate native project identity do not
-  need it, and Lody-side worktrees work for every provider, so `—` here is not a missing worktree
-  feature.
 
 Notes:
 
