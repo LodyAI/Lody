@@ -16,7 +16,8 @@ virtual rows. Mouse drag, Shift range extension, Ctrl/Command inversion, and
 edge scrolling preserve chronological order. Cancelling selection restores the
 composer. Dismissing the preview retains the selection, so it can be reopened and
 adjusted, but finishing the share ends the whole flow: once the image is on the
-clipboard or written to disk, the preview closes and the selection goes with it.
+clipboard, written to disk, or handed to a native share target, the preview closes
+and the selection goes with it.
 Nothing is left armed behind a task the user has completed.
 
 A cancelled save dialog finishes nothing. It closes neither the preview nor the
@@ -118,7 +119,11 @@ for reading is what a share link is for.
 PNG export captures the card and its ground, independent of preview scrolling
 or scaling. It waits for fonts and images, disables duplicate export or copy
 actions, and reports failures for retry. Electron uses its native save dialog;
-browsers download the file. Canceling the save dialog preserves the preview.
+browsers download the file. Native mobile apps stage the PNG locally and open
+the system share sheet, where iOS offers Save Image alongside other destinations.
+A completed system handoff finishes the flow; it does not certify which destination
+the user chose. Dismissing the save/share dialog preserves the preview and selection.
+Native failures remain retryable and never fall back to a browser download.
 
 A finished copy is announced outside the preview, because the preview is gone by
 then: a save has the native dialog or the browser's own download UI behind it,
