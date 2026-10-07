@@ -27,6 +27,13 @@ import {
   sessionMetaCacheAtom,
 } from '../src/atoms/doc-meta';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import {
+  editSessionRunConfigDraftAtom,
+  getSessionRunConfigDraftTargetKey,
+  registerSessionRunConfigDraftLeaseAtom,
+  sessionRunConfigDraftsAtom,
+  setSessionRunConfigDraftAccountAtom,
+} from '../src/atoms/session-run-config-drafts';
 import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 
 type RepoWithSyncRunner = LoroRepo & {
@@ -41,7 +48,7 @@ type RepoWatchEvent =
       kind: 'doc-metadata';
       docId: string;
       patch: Record<string, unknown>;
-      by: 'live';
+      by: 'live' | 'local';
     }
   | {
       kind: 'doc-existence-changed';
@@ -129,6 +136,7 @@ const importRemoteMeta = async (
 
 const createRuntime = (repo: LoroRepo): WorkspaceRuntime =>
   ({
+    accountId: 'user-1',
     workspaceSlug: 'workspace-slug',
     workspaceId: 'workspace-id',
     repo,
@@ -152,7 +160,297 @@ const createRuntime = (repo: LoroRepo): WorkspaceRuntime =>
     dispose: async () => {},
   }) as WorkspaceRuntime;
 
+function editRunConfigDraft(
+  store: ReturnType<typeof createStore>,
+  sessionId: string,
+  workspaceId = 'workspace-id',
+  targetKey = getSessionRunConfigDraftTargetKey({
+    cliType: 'builtin',
+    agentType: 'codex',
+    agentConfigId: 'codex-a',
+  })
+) {
+  store.set(setSessionRunConfigDraftAccountAtom, 'user-1');
+  const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
+    accountId: 'user-1',
+    workspaceId,
+    sessionId,
+    targetKey,
+  });
+  store.set(editSessionRunConfigDraftAtom, {
+    lease,
+    edit: { type: 'config', configId: 'fast', value: false },
+  });
+  return lease;
+}
+
 describe('docMetaSubscriptionAtom', () => {
+  it.each(
+    [
+      { cliType: 'builtin', agentType: 'claude', agentConfigId: 'claude-a' },
+      { cliType: 'builtin', agentType: 'codex', agentConfigId: 'codex-b' },
+    ].flatMap((nextTarget) => (['local', 'live'] as const).map((by) => ({ nextTarget, by })))
+  )(
+    'abandons the old target on each confirmed $by $nextTarget.agentConfigId transition',
+    async ({ nextTarget, by }) => {
+      vi.useFakeTimers();
+      const sessionId = 'changed-provider' as SessionId;
+      const docId = getSessionRoomId(sessionId);
+      const originalTarget = { cliType: 'builtin', agentType: 'codex', agentConfigId: 'codex-a' };
+      const originalKey = getSessionRunConfigDraftTargetKey(originalTarget);
+      const nextKey = getSessionRunConfigDraftTargetKey(nextTarget);
+      const repo = new CompatRepoDouble([{ docId, meta: { id: sessionId, ...originalTarget } }]);
+      const store = createStore();
+      const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+      try {
+        store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+        await vi.runAllTimersAsync();
+        const abandoned = editRunConfigDraft(store, sessionId);
+        const nextLease = editRunConfigDraft(store, sessionId, 'workspace-id', nextKey);
+        // Observe both changes before the projection flush, where they coalesce.
+        repo.emit({ kind: 'doc-metadata', docId, patch: nextTarget, by });
+        expect(abandoned.active).toBe(false);
+        expect(nextLease.active).toBe(true);
+        expect(
+          [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => scope.targetKey)
+        ).toEqual([nextKey]);
+        repo.emit({ kind: 'doc-metadata', docId, patch: originalTarget, by });
+        expect(nextLease.active).toBe(false);
+        expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+        await vi.runAllTimersAsync();
+        expect(getSessionRunConfigDraftTargetKey(store.get(sessionMetaCacheAtom)[docId])).toBe(
+          originalKey
+        );
+        store.set(editSessionRunConfigDraftAtom, {
+          lease: abandoned,
+          edit: { type: 'config', configId: 'fast', value: true },
+        });
+        expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+      } finally {
+        unmount();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it('retires a legacy provider-less target on an explicit agent-type change', async () => {
+    vi.useFakeTimers();
+    const sessionId = 'legacy-provider' as SessionId;
+    const docId = getSessionRoomId(sessionId);
+    const target = { cliType: 'builtin', agentType: 'codex' };
+    const repo = new CompatRepoDouble([{ docId, meta: { id: sessionId, ...target } }]);
+    const store = createStore();
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      await vi.runAllTimersAsync();
+      const lease = editRunConfigDraft(
+        store,
+        sessionId,
+        'workspace-id',
+        getSessionRunConfigDraftTargetKey(target)
+      );
+      repo.emit({ kind: 'doc-metadata', docId, patch: { agentType: 'claude' }, by: 'live' });
+      expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+      expect(lease.active).toBe(false);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('compares complete bootstrap targets while preserving absent provider metadata', async () => {
+    vi.useFakeTimers();
+    const target = { cliType: 'builtin', agentType: 'claude', agentConfigId: 'claude-a' };
+    const nextKey = getSessionRunConfigDraftTargetKey(target);
+    const repo = new CompatRepoDouble(
+      [],
+      new Map([
+        [
+          getSessionRoomId('changed-while-away' as SessionId),
+          { meta: { id: 'changed-while-away', ...target } },
+        ],
+        [
+          getSessionRoomId('incomplete-provider' as SessionId),
+          { meta: { id: 'incomplete-provider', cliType: 'builtin', agentType: 'claude' } },
+        ],
+      ])
+    );
+    const store = createStore();
+    const oldLease = editRunConfigDraft(store, 'changed-while-away');
+    const newLease = editRunConfigDraft(store, 'changed-while-away', 'workspace-id', nextKey);
+    const incompleteLease = editRunConfigDraft(store, 'incomplete-provider');
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      await vi.runAllTimersAsync();
+      expect(oldLease.active).toBe(false);
+      expect(newLease.active).toBe(true);
+      expect(incompleteLease.active).toBe(true);
+      expect(store.get(sessionRunConfigDraftsAtom).size).toBe(2);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not let a pending bootstrap target check retire replacement intent', async () => {
+    vi.useFakeTimers();
+    let finish!: (entry: { meta: Record<string, unknown> }) => void;
+    class PendingTargetRepo extends CompatRepoDouble {
+      override getDocMeta() {
+        return new Promise<{ meta: Record<string, unknown> }>((resolve) => {
+          finish = resolve;
+        });
+      }
+    }
+    const store = createStore();
+    editRunConfigDraft(store, 'target-race');
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, createRuntime(new PendingTargetRepo([]) as unknown as LoroRepo));
+      const fresh = editRunConfigDraft(store, 'target-race');
+      const drafts = store.get(sessionRunConfigDraftsAtom);
+      finish({
+        meta: {
+          id: 'target-race',
+          cliType: 'builtin',
+          agentType: 'claude',
+          agentConfigId: 'claude-a',
+        },
+      });
+      await vi.runAllTimersAsync();
+      expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
+      expect(fresh.active).toBe(true);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('retires only explicitly deleted session drafts before batched metadata projection', async () => {
+    vi.useFakeTimers();
+    const repo = new CompatRepoDouble([]);
+    const store = createStore();
+    const sessionId = 'remote-deletion' as SessionId;
+    const docId = getSessionRoomId(sessionId);
+    const lease = editRunConfigDraft(store, sessionId);
+    editRunConfigDraft(store, sessionId, 'other-workspace');
+    const drafts = store.get(sessionRunConfigDraftsAtom);
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      await vi.runAllTimersAsync();
+      repo.emit({
+        kind: 'doc-existence-changed',
+        docId,
+        from: 'active',
+        to: 'missing',
+        by: 'live',
+      });
+      repo.emit({ kind: 'doc-metadata', docId, patch: { isArchived: true }, by: 'live' });
+      await vi.runAllTimersAsync();
+      expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
+      expect(lease.active).toBe(true);
+      repo.emit({
+        kind: 'doc-existence-changed',
+        docId,
+        from: 'missing',
+        to: 'deleted',
+        by: 'live',
+      });
+      expect(
+        [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => scope.workspaceId)
+      ).toEqual(['other-workspace']);
+      expect(lease.active).toBe(false);
+      store.set(editSessionRunConfigDraftAtom, {
+        lease,
+        edit: { type: 'config', configId: 'fast', value: true },
+      });
+      expect(store.get(sessionRunConfigDraftsAtom).size).toBe(1);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('checks only outstanding drafts on bootstrap and preserves missing or archived sessions', async () => {
+    vi.useFakeTimers();
+    const snapshots = new Map([
+      [
+        getSessionRoomId('deleted-draft' as SessionId),
+        { exists: false, meta: { id: 'deleted-draft' } },
+      ],
+      [
+        getSessionRoomId('archived-draft' as SessionId),
+        { exists: true, meta: { id: 'archived-draft', isArchived: true } },
+      ],
+    ]);
+    const repo = new CompatRepoDouble([], snapshots);
+    const store = createStore();
+    const deletedLease = editRunConfigDraft(store, 'deleted-draft');
+    editRunConfigDraft(store, 'archived-draft');
+    editRunConfigDraft(store, 'missing-draft');
+    editRunConfigDraft(store, 'deleted-draft', 'other-workspace');
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      await vi.runAllTimersAsync();
+      expect(
+        [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => [
+          scope.workspaceId,
+          scope.sessionId,
+        ])
+      ).toEqual([
+        ['workspace-id', 'archived-draft'],
+        ['workspace-id', 'missing-draft'],
+        ['other-workspace', 'deleted-draft'],
+      ]);
+      expect(deletedLease.active).toBe(false);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('fences late bootstrap deletion reads from a replaced account lifetime', async () => {
+    vi.useFakeTimers();
+    let finish!: (entry: { exists: false; meta: Record<string, unknown> }) => void;
+    class PendingRepo extends CompatRepoDouble {
+      override getDocMeta() {
+        return new Promise<{ exists: false; meta: Record<string, unknown> }>((resolve) => {
+          finish = resolve;
+        });
+      }
+    }
+    const store = createStore();
+    editRunConfigDraft(store, 'pending-deletion');
+    const repo = new PendingRepo([]);
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      store.set(setSessionRunConfigDraftAccountAtom, null);
+      const replacement = editRunConfigDraft(store, 'pending-deletion');
+      const drafts = store.get(sessionRunConfigDraftsAtom);
+      finish({ exists: false, meta: { id: 'pending-deletion' } });
+      await vi.runAllTimersAsync();
+      expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
+      expect(replacement.active).toBe(true);
+      repo.emit({
+        kind: 'doc-existence-changed',
+        docId: getSessionRoomId('pending-deletion' as SessionId),
+        from: 'active',
+        to: 'deleted',
+        by: 'live',
+      });
+      expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+      expect(replacement.active).toBe(false);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it('confirms target deletion despite an obsolete read and unrelated missing metadata', async () => {
     vi.useFakeTimers();
     const sessionId = 'deleted-while-reading' as SessionId;

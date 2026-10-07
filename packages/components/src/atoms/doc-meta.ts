@@ -17,6 +17,13 @@ import {
   type SessionId,
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from './runtime';
+import {
+  clearSessionRunConfigDraftsAtom,
+  getSessionRunConfigDraftKey,
+  getSessionRunConfigDraftTargetKey,
+  sessionRunConfigDraftAccountAtom,
+  sessionRunConfigDraftsAtom,
+} from './session-run-config-drafts';
 import { mergeBootstrapMetaCache } from '@/lib/doc-meta-bootstrap';
 import { listDocMetaEntries, type DocMetaCacheSnapshot } from '@/lib/doc-meta-batch';
 import { jsonValueEqual } from '@/lib/json-value-equal';
@@ -59,6 +66,28 @@ function reportInvalidMeta(context: string, roomId: string, data: unknown): void
 /** Returns false for non-objects / null — the entry should be dropped entirely. */
 function isMetaObject(data: unknown): data is Record<string, unknown> {
   return typeof data === 'object' && data !== null;
+}
+
+function getCompleteRunConfigTargetKey(
+  meta: Record<string, unknown> | undefined,
+  allowMissingProvider = false
+): string | null {
+  if (
+    !meta ||
+    typeof meta.cliType !== 'string' ||
+    !meta.cliType ||
+    typeof meta.agentType !== 'string' ||
+    !meta.agentType ||
+    (meta.agentConfigId !== null &&
+      typeof meta.agentConfigId !== 'string' &&
+      !(allowMissingProvider && meta.agentConfigId === undefined))
+  )
+    return null;
+  return getSessionRunConfigDraftTargetKey({
+    cliType: meta.cliType,
+    agentType: meta.agentType,
+    agentConfigId: typeof meta.agentConfigId === 'string' ? meta.agentConfigId : null,
+  });
 }
 
 function normalizeDocMetaForCache(
@@ -562,6 +591,42 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   }
 
   let cancelled = false;
+  const draftOwner = get.peek(sessionRunConfigDraftAccountAtom);
+  const clearDeletedSessionDraft = (
+    sessionId: string,
+    lifetime = get.peek(sessionRunConfigDraftAccountAtom).lifetime
+  ) => {
+    if (!runtime.accountId) return;
+    set(clearSessionRunConfigDraftsAtom, {
+      accountId: runtime.accountId,
+      lifetime,
+      workspaceId: runtime.workspaceId,
+      sessionIds: [sessionId],
+    });
+  };
+  const clearChangedSessionTargetDraft = (
+    docId: string,
+    previous: Record<string, unknown> | undefined,
+    next: Record<string, unknown>,
+    lifetime = get.peek(sessionRunConfigDraftAccountAtom).lifetime
+  ) => {
+    if (!runtime.accountId || !isSessionDocRoomId(docId)) return;
+    // Legacy sessions can legitimately omit their provider. An explicit agent
+    // type change still retires that old target; provider-only changes need
+    // both identities to be known so hydration cannot invent a transition.
+    const typeChanged =
+      previous?.cliType !== next.cliType || previous?.agentType !== next.agentType;
+    const previousTarget = getCompleteRunConfigTargetKey(previous, typeChanged);
+    const nextTarget = getCompleteRunConfigTargetKey(next, typeChanged);
+    if (!previousTarget || !nextTarget || previousTarget === nextTarget) return;
+    set(clearSessionRunConfigDraftsAtom, {
+      accountId: runtime.accountId,
+      lifetime,
+      workspaceId: runtime.workspaceId,
+      sessionIds: [docId.slice(SESSION_DOC_PREFIX.length)],
+      targetKey: previousTarget,
+    });
+  };
   const pendingReadEpochByDocId = new Map<string, number>();
   const pendingExistenceCounts = new Map<string, number>();
   const markedPendingDocIds = new Set<string>();
@@ -892,8 +957,20 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
 
   const handle = runtime.repo.watch(
     (event) => {
+      if (cancelled) return;
       if (event.kind === 'doc-metadata') {
         const patch = event.patch as Record<string, unknown>;
+        if (isSessionDocRoomId(event.docId)) {
+          // Observe each accepted target transition before patches coalesce:
+          // A→B→A must not restore A's abandoned draft. Sparse/unknown metadata
+          // cannot establish either side of a transition.
+          const previous =
+            pendingFullMetas.get(event.docId) ?? get.peek(sessionMetaCacheAtom)[event.docId];
+          if (previous) {
+            const current = { ...previous, ...pendingPatches.get(event.docId) };
+            clearChangedSessionTargetDraft(event.docId, current, { ...current, ...patch });
+          }
+        }
         // Local writes have already been accepted by Meta Flock. Apply them to
         // an existing UI projection immediately instead of placing a user
         // action behind a potentially large reconnect/catch-up batch.
@@ -919,6 +996,10 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
       } else if ((event as { kind: string }).kind === 'doc-existence-changed') {
         const e = event as unknown as { kind: string; docId: string; from: string; to: string };
         if (e.to !== 'deleted' && e.to !== 'active' && e.to !== 'missing') return;
+        if (e.to === 'deleted' && isSessionDocRoomId(e.docId)) {
+          // Invalidate edit leases immediately, not after the metadata batch.
+          clearDeletedSessionDraft(e.docId.slice(SESSION_DOC_PREFIX.length));
+        }
         pendingExistenceCounts.set(e.docId, (pendingExistenceCounts.get(e.docId) ?? 0) + 1);
         setProjectionPending(e.docId, true);
         if (e.to === 'deleted') {
@@ -933,6 +1014,53 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     },
     { kinds: ['doc-metadata', 'doc-existence-changed'] as string[] as never }
   );
+
+  // A session may have been deleted while this workspace was not open. Probe
+  // only actual drafts, and require a deletion marker: missing metadata during
+  // bootstrap is not proof of deletion. Reads do not acquire Session stores.
+  const workspaceDrafts = [...get.peek(sessionRunConfigDraftsAtom).values()].filter(
+    ({ scope }) =>
+      scope.accountId === runtime.accountId && scope.workspaceId === runtime.workspaceId
+  );
+  const draftSessionIds = new Set(workspaceDrafts.map(({ scope }) => scope.sessionId));
+  for (const sessionId of draftSessionIds) {
+    const docId = getSessionRoomId(sessionId as SessionId);
+    void runtime.repo.getDocMeta(docId).then(
+      (entry) => {
+        if (cancelled) return;
+        if (isLoroRepoDocDeleted(entry)) {
+          clearDeletedSessionDraft(sessionId, draftOwner.lifetime);
+          return;
+        }
+        const targetKey = getCompleteRunConfigTargetKey(entry?.meta);
+        const projectedTarget = getCompleteRunConfigTargetKey(
+          get.peek(sessionMetaCacheAtom)[docId]
+        );
+        if (!targetKey || (projectedTarget && projectedTarget !== targetKey)) return;
+        for (const draft of workspaceDrafts) {
+          const { scope } = draft;
+          if (scope.sessionId !== sessionId || scope.targetKey === targetKey) continue;
+          // A live A→B→A transition may have replaced the captured A draft
+          // while this read was pending. Its fresh intent belongs to that new
+          // visit, not to this obsolete snapshot of the old target.
+          if (
+            get.peek(sessionRunConfigDraftsAtom).get(getSessionRunConfigDraftKey(scope)) !== draft
+          )
+            continue;
+          set(clearSessionRunConfigDraftsAtom, {
+            accountId: scope.accountId,
+            lifetime: draftOwner.lifetime,
+            workspaceId: scope.workspaceId,
+            sessionIds: [sessionId],
+            targetKey: scope.targetKey,
+          });
+        }
+      },
+      (error: unknown) => {
+        if (!cancelled) console.warn('[doc-meta] Failed to check draft session existence', error);
+      }
+    );
+  }
 
   // Started after the watch above so the live subscription covers the whole scan
   // window. The scan and live events overlap regardless, so merge per field: a

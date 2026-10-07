@@ -105,6 +105,12 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
+import {
+  editSessionRunConfigDraftAtom,
+  registerSessionRunConfigDraftLeaseAtom,
+  sessionRunConfigDraftsAtom,
+  setSessionRunConfigDraftAccountAtom,
+} from '../src/atoms/session-run-config-drafts';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
   countSessionMentions,
@@ -130,6 +136,26 @@ function createDeferred(): { promise: Promise<void>; resolve: () => void; reject
     throw new Error('Failed to create deferred');
   }
   return { promise, resolve, reject };
+}
+
+function editRunConfigDraft(
+  store: ReturnType<typeof createStore>,
+  sessionId: string,
+  workspaceId = 'workspace-1',
+  accountId = 'user-1'
+) {
+  store.set(setSessionRunConfigDraftAccountAtom, accountId);
+  const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
+    accountId,
+    workspaceId,
+    sessionId,
+    targetKey: 'codex',
+  });
+  store.set(editSessionRunConfigDraftAtom, {
+    lease,
+    edit: { type: 'config', configId: 'fast', value: false },
+  });
+  return lease;
 }
 
 function ActionsProbe({ onReady }: { onReady: (actions: SessionActions) => void }) {
@@ -1937,12 +1963,35 @@ describe('useSessionActions', () => {
         throw new Error('Session metadata is still loading');
       },
     });
-    const actions = await renderActions(runtime, { sessionMetaCache, docMetaCacheReady: false });
+    const store = createStore();
+    const targetLease = editRunConfigDraft(store, tabSession.id);
+    editRunConfigDraft(store, rootSession.id);
+    editRunConfigDraft(store, tabSession.id, 'other-workspace');
+    const actions = await renderActions(runtime, {
+      store,
+      sessionMetaCache,
+      docMetaCacheReady: false,
+    });
 
     await actions.deleteSessions([tabSession.id]);
 
     expect(metaRepo.getSession(rootSession.id)).toMatchObject({ isArchived: false });
     expect(metaRepo.getSession(tabSession.id)).toBeUndefined();
+    expect(
+      [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => [
+        scope.workspaceId,
+        scope.sessionId,
+      ])
+    ).toEqual([
+      ['workspace-1', rootSession.id],
+      ['other-workspace', tabSession.id],
+    ]);
+    expect(targetLease.active).toBe(false);
+    store.set(editSessionRunConfigDraftAtom, {
+      lease: targetLease,
+      edit: { type: 'config', configId: 'fast', value: true },
+    });
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(2);
     expect(metaRepo.getSession(openedSession.id)).toMatchObject({
       isArchived: false,
       openedBySessionId: rootSession.id,
@@ -1959,6 +2008,53 @@ describe('useSessionActions', () => {
         machineFlockKeys.sessionLaunchConfig(session.id)
       );
     }
+  });
+
+  it.each(['delete', 'flush'] as const)(
+    'fences draft cleanup at accepted deletion when %s fails',
+    async (failure) => {
+      const tree = createContainmentSessions('failed-delete', false);
+      const metaRepo = createSessionMetaRepo(tree.sessions);
+      const store = createStore();
+      const lease = editRunConfigDraft(store, tree.rootSession.id);
+      if (failure === 'delete')
+        metaRepo.repo.deleteDoc = async () => {
+          throw new Error('disk full');
+        };
+      else
+        metaRepo.repo.flush = async () => {
+          throw new Error('disk full');
+        };
+      const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), { store });
+      await expect(actions.deleteSessions([tree.rootSession.id])).rejects.toThrow('disk full');
+      expect(store.get(sessionRunConfigDraftsAtom).size).toBe(failure === 'delete' ? 1 : 0);
+      expect(lease.active).toBe(failure === 'delete');
+    }
+  );
+
+  it('does not let an old deletion clear a new account lifetime', async () => {
+    const tree = createContainmentSessions('old-owner-delete', false);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    const started = createDeferred();
+    const finish = createDeferred();
+    const deleteDoc = metaRepo.repo.deleteDoc.bind(metaRepo.repo);
+    metaRepo.repo.deleteDoc = async (id) => {
+      started.resolve();
+      await finish.promise;
+      await deleteDoc(id);
+    };
+    const store = createStore();
+    editRunConfigDraft(store, tree.rootSession.id);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), { store });
+    const deleting = actions.deleteSessions([tree.rootSession.id]);
+    await started.promise;
+    store.set(setSessionRunConfigDraftAccountAtom, null);
+    const replacement = editRunConfigDraft(store, tree.rootSession.id);
+    const drafts = store.get(sessionRunConfigDraftsAtom);
+    finish.resolve();
+    await deleting;
+    expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
+    expect(replacement.active).toBe(true);
   });
 
   it('cleans up a partially created child absent from the metadata cache', async () => {
@@ -2003,12 +2099,19 @@ describe('useSessionActions', () => {
       },
     });
     const runtime = createRuntime({ repo: metaRepo.repo });
+    const store = createStore();
+    editRunConfigDraft(store, rootSession.id);
+    editRunConfigDraft(store, tabSession.id);
+    editRunConfigDraft(store, openedSession.id);
+    const drafts = store.get(sessionRunConfigDraftsAtom);
     const actions = await renderActions(runtime, {
+      store,
       docMetaCacheReady: true,
       sessionMetaCache,
     });
 
     await actions.archiveSession(rootSession.id);
+    expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
     for (const session of [openedSession, openedFromTabSession]) {
       expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: true });
     }
@@ -2017,6 +2120,9 @@ describe('useSessionActions', () => {
     vi.mocked(runtime.writer.deleteDoc).mockClear();
 
     await actions.deleteArchivedSession(rootSession.id);
+    expect(
+      [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => scope.sessionId)
+    ).toEqual([openedSession.id]);
 
     expect(metaRepo.getSession(rootSession.id)).toBeUndefined();
     expect(metaRepo.getSession(tabSession.id)).toBeUndefined();

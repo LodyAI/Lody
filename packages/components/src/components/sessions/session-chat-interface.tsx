@@ -220,6 +220,7 @@ import { Separator } from '@lody/ui/separator';
 import { Tooltip } from '@lody/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { useSessionPendingConfig } from '@/hooks/use-session-pending-config';
+import { getSessionRunConfigDraftTargetKey } from '@/atoms/session-run-config-drafts';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
 import { UserAvatar } from '@/components/user-avatar';
@@ -2591,10 +2592,7 @@ export const SessionChatInterface = memo(
     const sessionConversationConfigRevision = `${session.id}:${
       sessionConversationSourceFence.currentTurnKey ?? ''
     }`;
-    const sessionKnownConfigRevisions = useMemo(
-      () => sessionConversationSourceFence.knownTurnKeys.map((key) => `${session.id}:${key}`),
-      [session.id, sessionConversationSourceFence.knownTurnKeys]
-    );
+    const sessionRunConfigTargetKey = getSessionRunConfigDraftTargetKey(session);
     const sessionConfigPreferences = useMemo(
       () => ({
         modeId: sessionConversationConfig.modeId,
@@ -2619,15 +2617,23 @@ export const SessionChatInterface = memo(
       selectMode: handleModeChange,
       selectModel: handleModelChange,
       selectConfigOption: handleConfigOptionChange,
+      captureForSend: captureRunConfigForSend,
     } = useAcpSessionConfigSelectionState({
       enabled: !hideMessageArea && (sessionDocReady || hasPendingConfig),
-      targetKey: `${session.id}:${session.cliType}:${session.agentType}`,
+      targetKey: sessionRunConfigTargetKey,
       preferenceRevision: sessionConversationConfigRevision,
       preferences: sessionConfigPreferences,
       runtimePreferences: hasPendingConfig ? null : sessionRuntimeConfig,
       preserveUnsentUserEdits: true,
-      sessionKey: session.id,
-      knownPreferenceRevisions: sessionKnownConfigRevisions,
+      draftScope:
+        runtime?.accountId && runtime.workspaceId
+          ? {
+              accountId: runtime.accountId,
+              workspaceId: runtime.workspaceId,
+              sessionId: session.id,
+              targetKey: sessionRunConfigTargetKey,
+            }
+          : undefined,
     });
     const {
       availableCommands,
@@ -4252,6 +4258,7 @@ export const SessionChatInterface = memo(
             resume: session.acpSessionId ?? undefined,
           });
 
+          const onAccepted = captureRunConfigForSend(inputConfig);
           let userTurnId = options?.existingUserTurnId?.trim() || null;
           if (!userTurnId && options?.createHistory) {
             const pendingHistoryEntry = buildDraftUserHistoryEntry(
@@ -4274,6 +4281,7 @@ export const SessionChatInterface = memo(
               dispatch: options?.requestDispatch === true,
               guideExpectedTurnId: options?.guideExpectedTurnId,
               attachments: options?.attachments,
+              onAccepted,
             });
             userTurnId = historyEntry.id;
             touchSessionActivity(session.id).catch((err: unknown) => {
@@ -4338,6 +4346,7 @@ export const SessionChatInterface = memo(
       },
       [
         addSessionHistory,
+        captureRunConfigForSend,
         captureSessionEvent,
         configOptionValues,
         currentUser?.id,
@@ -4428,14 +4437,18 @@ export const SessionChatInterface = memo(
             return false;
           }
           const userTurnId = uuidv4();
-          await pushMessageQueue({
-            task: prompt || t('sessions.messageQueue.imageOnly', '[Image message]'),
-            project: sessionProject,
-            userId: derivedUserId,
-            userTurnId,
-            acpSessionConfig: queuedInputConfig,
-            attachments: options?.attachments,
-          });
+          const onAccepted = captureRunConfigForSend(inputConfig);
+          await pushMessageQueue(
+            {
+              task: prompt || t('sessions.messageQueue.imageOnly', '[Image message]'),
+              project: sessionProject,
+              userId: derivedUserId,
+              userTurnId,
+              acpSessionConfig: queuedInputConfig,
+              attachments: options?.attachments,
+            },
+            { onAccepted }
+          );
           return true;
         } catch (err) {
           console.error('Failed to queue session message', err);
@@ -4451,6 +4464,7 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        captureRunConfigForSend,
         captureSessionEvent,
         configOptionValues,
         currentUser?.id,

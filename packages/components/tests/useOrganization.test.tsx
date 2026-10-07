@@ -4,6 +4,12 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  editSessionRunConfigDraftAtom,
+  registerSessionRunConfigDraftLeaseAtom,
+  sessionRunConfigDraftsAtom,
+  setSessionRunConfigDraftAccountAtom,
+} from '../src/atoms/session-run-config-drafts';
 
 vi.mock('@/lib/auth-bootstrap', () => ({
   readAuthBootstrapSnapshot: () => null,
@@ -63,6 +69,21 @@ function createDeferred<T>() {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function editRunConfigDraft(store: Store, workspaceId: string, accountId = 'user-1') {
+  store.set(setSessionRunConfigDraftAccountAtom, accountId);
+  const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
+    accountId,
+    workspaceId,
+    sessionId: 'session-1',
+    targetKey: 'codex',
+  });
+  store.set(editSessionRunConfigDraftAtom, {
+    lease,
+    edit: { type: 'config', configId: 'fast', value: false },
+  });
+  return lease;
 }
 
 function OrganizationProbe({ targetSlug }: { targetSlug: string }) {
@@ -182,6 +203,67 @@ describe('useOrganization setActive dedupe', () => {
       await Promise.resolve();
     });
   }
+
+  it.each(['deleteOrganization', 'leaveOrganization'] as const)(
+    '%s clears only accepted workspace drafts and rejects stale edits',
+    async (operation) => {
+      const removed = editRunConfigDraft(store, 'workspace-old');
+      editRunConfigDraft(store, 'workspace-new');
+      const drafts = store.get(sessionRunConfigDraftsAtom);
+      await render('old-workspace', 0);
+      organizationMocks[operation].mockResolvedValueOnce({
+        data: null,
+        error: { message: 'rejected' },
+      });
+      await act(async () => {
+        await expect(latestOrganizationState![operation]('workspace-old')).rejects.toMatchObject({
+          message: 'rejected',
+        });
+      });
+      expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
+      expect(removed.active).toBe(true);
+
+      organizationMocks[operation].mockResolvedValueOnce({
+        data: { id: 'workspace-old' },
+        error: null,
+      });
+      await act(async () => {
+        await latestOrganizationState![operation]('workspace-old');
+      });
+      expect(
+        [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => scope.workspaceId)
+      ).toEqual(['workspace-new']);
+      expect(removed.active).toBe(false);
+      store.set(editSessionRunConfigDraftAtom, {
+        lease: removed,
+        edit: { type: 'config', configId: 'fast', value: true },
+      });
+      expect(store.get(sessionRunConfigDraftsAtom).size).toBe(1);
+    }
+  );
+
+  it.each(['deleteOrganization', 'leaveOrganization'] as const)(
+    '%s cannot clear a replacement account lifetime after a late success',
+    async (operation) => {
+      editRunConfigDraft(store, 'workspace-old');
+      await render('old-workspace', 0);
+      const removal = createDeferred<{ data: { id: string }; error: null }>();
+      organizationMocks[operation].mockReturnValueOnce(removal.promise);
+      let result!: Promise<unknown>;
+      await act(async () => {
+        result = latestOrganizationState![operation]('workspace-old');
+      });
+      store.set(setSessionRunConfigDraftAccountAtom, null);
+      const replacement = editRunConfigDraft(store, 'workspace-old');
+      const drafts = store.get(sessionRunConfigDraftsAtom);
+      await act(async () => {
+        removal.resolve({ data: { id: 'workspace-old' }, error: null });
+        await result;
+      });
+      expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
+      expect(replacement.active).toBe(true);
+    }
+  );
 
   it.each([undefined, null])(
     'gates incomplete membership (%s) and recovers after refetch',

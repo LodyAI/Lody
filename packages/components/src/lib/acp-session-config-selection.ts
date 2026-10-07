@@ -29,8 +29,8 @@ import type { AcpSessionSelectOption } from '@/components/shared/acp-session-sel
  * the moment such a session opened (0.89.x, session `51e236e0…`).
  *
  * Deriving instead of reconciling makes that loop unrepresentable: the only
- * state left is the user's unsent edits (fenced per target/turn by
- * `fenceAcpSessionUserEdits`), and every disagreement between inputs is
+ * state left is the user's unsent edits (creation drafts use
+ * `fenceAcpSessionUserEdits`; existing sessions use local admission acknowledgments), and every disagreement between inputs is
  * settled by ONE priority rule inside `resolveAcpSessionConfigSelection` —
  * user edit > runtime baseline > turn preference > capability default, with a
  * full runtime snapshot owning the whole non-user config table. Resolved values

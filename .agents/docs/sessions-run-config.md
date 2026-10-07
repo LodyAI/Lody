@@ -130,7 +130,8 @@ this page is the full text of the rules summarised there.
   explicit selection; only `agentRoleId: null` means None. Keep unsynced catalog
   rows and not-yet-hydrated Session docs in the unknown state — neither may
   turn a durable Role into explicit None. If the catalog row is still unknown,
-  an unsent manual run-config edit drops stale Role provenance to unknown.
+  an unsent manual run-config edit freezes explicit None for the outgoing Turn,
+  so programmatic fallback cannot reattach a stale Role or its memory binding.
   Session provenance remains the legacy fallback when the selected Turn
   predates these fields; never rewrite `SessionMeta.agentRoleId`, which records
   creation provenance only.
@@ -191,14 +192,18 @@ this page is the full text of the rules summarised there.
   edits are the only stored selection state, and effective values resolve per
   render (user edit > runtime baseline > turn preference > capability default;
   a full runtime snapshot owns the non-user config table). Existing-session knob
-  edits, including explicit Fast off, live in session-keyed app state alongside
-  Role drafts; returning to a tab restores only those edits, never a cached
-  resolved selection. The draft fence tracks known logical Turns and consumes
-  matching fields only at a previously unseen current Turn. Hydration cannot
-  acknowledge edits; queue promotion, deletion/reordering and observed history
-  backfill do not consume a next draft. A guarded effect commits only this draft
-  bookkeeping and cannot overwrite an intervening edit. Landing and new-session
-  drafts retain their component-local selection lifetime. Never reintroduce a
+  edits, including explicit Fast off, are private draft intent. Only edited fields
+  occupy the account/workspace/session-scoped draft store; viewing a session does
+  not create an entry. Remote Turns update the baseline but never consume local
+  unsent choices. A local accepted send retires only the field generations frozen
+  into its actual inputConfig, even after unmount; newer same-valued edits survive.
+  Direct, queued and attachment-held sends share this admission acknowledgment.
+  Failed admission preserves the draft. No historical Turn IDs, TTL, LRU or
+  retained per-visited-session atoms are needed. Deletion and authoritative account
+  teardown clear owned drafts and invalidate stale edit callbacks; navigation and
+  reversible archive preserve intent. See [private run-config drafts](../../specs/session-run-config-drafts.md).
+  Landing and new-session drafts retain their component-local selection lifetime.
+  Never reintroduce a
   reducer that stores the resolved selection or an effect that reconciles it —
   two dispatches disagreeing about a runtime-omitted key plus options rebuilt
   from the selection was a synchronous #185 render loop on session open. The footer names a Role only while

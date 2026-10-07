@@ -246,7 +246,7 @@ export function useSessionAgentRole({
             null
           : !agentRolesSynced
             ? runConfigHasUserEdits
-              ? undefined
+              ? null
               : typeof storedPickedRevision === 'number'
                 ? { agentRoleId: pickedRoleId, agentRoleRevision: storedPickedRevision }
                 : undefined
