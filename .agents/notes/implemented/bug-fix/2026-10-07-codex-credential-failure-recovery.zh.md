@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1298
 
 [English](2026-10-07-codex-credential-failure-recovery.md)
 
