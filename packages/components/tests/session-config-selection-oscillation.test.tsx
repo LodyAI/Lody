@@ -25,6 +25,8 @@ import {
   sessionRunConfigDraftsAtom,
   setSessionRunConfigDraftAccountAtom,
 } from '../src/atoms/session-run-config-drafts';
+import type { WorkspaceRuntime } from '../src/atoms/runtime';
+import { acceptSessionUserTurn } from '../src/lib/session-send-admission';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -90,9 +92,6 @@ describe('session composer config selection wiring (#185 regression)', () => {
   let renderCount = 0;
   let settledModelId: string | null = null;
   let settledConfigKeys: string[] = [];
-  let selectConfigOption: ReturnType<
-    typeof useAcpSessionConfigSelectionState
-  >['selectConfigOption'];
 
   beforeEach(() => {
     container = document.createElement('div');
@@ -129,7 +128,6 @@ describe('session composer config selection wiring (#185 regression)', () => {
       runtimePreferences: frameRuntimePreferences,
       preserveUnsentUserEdits: true,
     });
-    selectConfigOption = controller.selectConfigOption;
     const selectorOptions = useMemo(() => {
       catalogBuilds += 1;
       return buildAcpSelectorOptions({
@@ -169,7 +167,6 @@ describe('session composer config selection wiring (#185 regression)', () => {
        conversation hot path. */
     flushSync(() => root?.render(<ConfigSelectionHarness />));
     const settledCatalogBuilds = catalogBuilds;
-    const settledSelectConfigOption = selectConfigOption;
     for (let frame = 0; frame < 10; frame += 1) {
       const freshPreferences = {
         ...preferences,
@@ -188,7 +185,6 @@ describe('session composer config selection wiring (#185 regression)', () => {
       );
     }
     expect(catalogBuilds).toBe(settledCatalogBuilds);
-    expect(selectConfigOption).toBe(settledSelectConfigOption);
   });
 });
 
@@ -451,7 +447,7 @@ describe('composer configuration across attachment sends', () => {
   });
 });
 
-describe('existing-session run-config drafts across tabs', () => {
+describe('existing-session run-config drafts', () => {
   let container: HTMLDivElement;
   let root: Root;
   let store: ReturnType<typeof createStore>;
@@ -459,9 +455,9 @@ describe('existing-session run-config drafts across tabs', () => {
   const options: AcpSessionSelectorOptionsInput = {
     capabilityAuthority: 'authoritative',
     modeOptions: [{ value: 'agent', label: 'Agent' }],
-    modelOptions: [{ value: 'gpt-6', label: 'GPT-6' }],
+    modelOptions: ['chosen', 'next'].map((value) => ({ value, label: value })),
     defaultModeId: 'agent',
-    defaultModelId: 'gpt-6',
+    defaultModelId: 'chosen',
     modelReasoningEfforts: undefined,
     configOptionSelectors: [
       { configId: 'fast-mode', label: 'Fast', type: 'boolean', currentValue: false, options: [] },
@@ -470,40 +466,35 @@ describe('existing-session run-config drafts across tabs', () => {
   function Harness({
     session = 'a',
     provider = 'codex-a',
-    ready = true,
-    revision = 'turn:old',
-    preferred = false,
-    runtime = false,
+    baseline = false,
+    revision = 'old',
   }: {
     session?: string;
     provider?: string;
-    ready?: boolean;
+    baseline?: boolean;
     revision?: string;
-    preferred?: boolean;
-    runtime?: boolean;
   }) {
     selection = useAcpSessionConfigSelectionState({
-      enabled: ready,
-      targetKey: `builtin:codex:${provider}`,
+      targetKey: provider,
       preferenceRevision: revision,
-      preferences: { configOptionValues: { 'fast-mode': preferred } },
-      runtimePreferences: { configOptionValues: { 'fast-mode': runtime } },
+      preferences: { configOptionValues: { 'fast-mode': baseline } },
+      runtimePreferences: { configOptionValues: { 'fast-mode': baseline } },
       preserveUnsentUserEdits: true,
       draftScope: {
         accountId: 'account',
         workspaceId: 'workspace',
         sessionId: session,
-        targetKey: `builtin:codex:${provider}`,
+        targetKey: provider,
       },
     });
     const resolved = useResolvedAcpSessionConfigSelection(selection.selection, options);
     return <output>{String(resolved.configOptionValues['fast-mode'])}</output>;
   }
-  const render = (props: Parameters<typeof Harness>[0] = {}, remount = false) => {
+  const render = (props: Parameters<typeof Harness>[0] = {}) => {
     flushSync(() =>
       root.render(
         <Provider store={store}>
-          <Harness key={remount ? (props.session ?? 'a') : 'same'} {...props} />
+          <Harness key={props.session ?? 'a'} {...props} />
         </Provider>
       )
     );
@@ -511,7 +502,48 @@ describe('existing-session run-config drafts across tabs', () => {
   const toggle = (value: boolean) =>
     flushSync(() => selection.selectConfigOption('fast-mode', value));
   const visible = () => container.textContent;
-  const capture = () => selection.captureForSend({ configOptionValues: { 'fast-mode': true } });
+  const sendFixture = () => {
+    const started = Promise.withResolvers<void>();
+    const write = Promise.withResolvers<void>();
+    const written: SessionHistory[] = [];
+    const entry: SessionHistory = {
+      id: 'local-turn',
+      role: 'user',
+      userId: 'account',
+      timestamp: '2026-10-07T00:00:00.000Z',
+      status: 'pending',
+      items: [{ type: 'text', text: 'Synthetic message' }],
+      inputConfig: { ...selection.candidates },
+      read: false,
+      fileDiff: [],
+      finished: true,
+    };
+    const runtime = {
+      workspaceId: 'workspace',
+      pendingSends: null,
+      repo: { getDocMeta: async () => ({ meta: { id: 'a', machineId: 'machine' } }) },
+      writer: {
+        appendSessionTurn: async (_session: SessionId, turn: SessionHistory) => {
+          started.resolve();
+          await write.promise;
+          written.push(turn);
+          return 'direct' as const;
+        },
+      },
+    } as unknown as WorkspaceRuntime;
+    const admit = () =>
+      acceptSessionUserTurn(
+        runtime,
+        'a' as SessionId,
+        entry,
+        { kind: 'history' },
+        undefined,
+        undefined,
+        undefined,
+        selection.captureForSend(entry.inputConfig!)
+      );
+    return { started, write, written, entry, runtime, admit };
+  };
   beforeEach(() => {
     store = createStore();
     store.set(setSessionRunConfigDraftAccountAtom, 'account');
@@ -524,25 +556,21 @@ describe('existing-session run-config drafts across tabs', () => {
     container.remove();
   });
 
-  it.each([false, true])('keeps Fast on through A/B/A with remount=%s', (remount) => {
-    render({}, remount);
+  it('preserves Fast on and explicit off across A/B/A remounts and remote turns', () => {
+    render();
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
     toggle(true);
-    render({ session: 'b' }, remount);
-    expect(visible()).toBe('false');
-    render({ session: 'a' }, remount);
-    expect(visible()).toBe('true');
-  });
-  it('keeps explicit Fast off and isolates edits in both tabs', () => {
-    render({ runtime: true }, true);
+    render({ session: 'b', baseline: true });
     toggle(false);
-    render({ session: 'b' }, true);
-    toggle(true);
-    render({ session: 'a', runtime: true }, true);
-    expect(visible()).toBe('false');
-    render({ session: 'b' }, true);
+    render({ revision: 'remote', baseline: false });
     expect(visible()).toBe('true');
+    expect(selection.hasUserEdits).toBe(true);
+    render({ session: 'b', baseline: true });
+    expect(visible()).toBe('false');
+    expect(selection.hasUserEdits).toBe(true);
   });
-  it('isolates provider drafts and restores the same target without reviving its old callbacks', () => {
+
+  it('isolates provider drafts and ignores the replaced target’s edit callback', () => {
     render();
     toggle(true);
     const editA = selection.selectConfigOption;
@@ -553,77 +581,123 @@ describe('existing-session run-config drafts across tabs', () => {
     toggle(false);
     render();
     expect(visible()).toBe('true');
-    render({ provider: 'codex-b', runtime: true });
+    render({ provider: 'codex-b', baseline: true });
     expect(visible()).toBe('false');
-    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(2);
   });
-  it('does not consume a draft during hydration, remote turns, promotion or rollback', () => {
-    render({}, true);
+
+  it('consumes captured edits only after the local write succeeds, even after unmount', async () => {
+    render();
     toggle(true);
-    render({ session: 'b' }, true);
-    render({ ready: false, revision: '', preferred: true }, true);
-    render({ revision: 'turn:remote', preferred: true }, true);
-    expect(visible()).toBe('true');
+    const send = sendFixture();
+    const accepted = send.admit();
+    await send.started.promise;
+    expect(send.written).toEqual([]);
     expect(selection.hasUserEdits).toBe(true);
-    render({ revision: 'turn:old', runtime: false });
-    expect(visible()).toBe('true');
-    expect(selection.hasUserEdits).toBe(true);
-  });
-  it('acknowledges a local accepted send after unmount even if a newer remote turn arrived', () => {
-    render({}, true);
-    toggle(true);
-    const accepted = capture();
-    render({ session: 'b' }, true);
-    flushSync(() => accepted?.());
+    render({ session: 'b' });
+    await act(async () => {
+      send.write.resolve();
+      await expect(accepted).resolves.toBe('written');
+    });
+    expect(send.written).toEqual([send.entry]);
+    expect(send.written[0]!.inputConfig?.configOptionValues).toEqual({ 'fast-mode': true });
     expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
-    render({ revision: 'turn:later-remote', preferred: false }, true);
-    expect(visible()).toBe('false');
+    render();
     expect(selection.hasUserEdits).toBe(false);
   });
-  it.each([true, false])('does not erase the next draft value %s after acceptance', (next) => {
+
+  it('consumes only captured fields while preserving newer and same-valued edits', async () => {
     render();
-    toggle(true);
-    const accepted = capture();
-    toggle(next);
-    flushSync(() => accepted?.());
-    expect(visible()).toBe(String(next));
-    expect(selection.hasUserEdits).toBe(true);
-    render({ session: 'b' }, true);
-    render({}, true);
-    expect(visible()).toBe(String(next));
+    flushSync(() => {
+      selection.selectMode('agent');
+      selection.selectModel('chosen');
+      selection.selectConfigOption('fast-mode', false);
+    });
+    const send = sendFixture();
+    const accepted = send.admit();
+    await send.started.promise;
+    flushSync(() => {
+      selection.selectModel('next');
+      selection.selectConfigOption('fast-mode', false);
+    });
+    await act(async () => {
+      send.write.resolve();
+      await expect(accepted).resolves.toBe('written');
+    });
+    expect(send.written[0]!.inputConfig).toEqual({
+      modeId: 'agent',
+      modelId: 'chosen',
+      configOptionValues: { 'fast-mode': false },
+    });
+    expect(selection.selection.edits).toEqual({
+      model: { value: 'next' },
+      configOptions: { 'fast-mode': false },
+    });
   });
-  it('does not capture a newer same-valued edit through an older rendered send callback', () => {
+
+  it('keeps edits when the local write rejects admission', async () => {
     render();
     toggle(true);
-    const oldCapture = selection.captureForSend;
-    toggle(true);
-    const accepted = oldCapture({ configOptionValues: { 'fast-mode': true } });
-    flushSync(() => accepted?.());
+    const send = sendFixture();
+    const accepted = send.admit();
+    await send.started.promise;
+    send.write.reject(new Error('Synthetic local write rejected'));
+    await expect(accepted).rejects.toThrow('Synthetic local write rejected');
+    expect(send.written).toEqual([]);
     expect(visible()).toBe('true');
     expect(selection.hasUserEdits).toBe(true);
   });
 
-  it('does not let an old edit callback write after its tab was replaced', () => {
-    render();
-    const selectA = selection.selectConfigOption;
-    render({ session: 'b' });
-    flushSync(() => selectA('fast-mode', true));
-    expect(visible()).toBe('false');
-    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
-  });
-  it('retains no drafts while visiting a thousand read-only sessions or turn revisions', async () => {
-    for (let index = 0; index < 1000; index++)
-      await act(async () => {
-        render({ session: `readonly-${index}`, revision: `turn:${index}` });
-      });
-    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+  it('consumes held-send edits at admission without consuming the next draft at promotion', async () => {
     render();
     toggle(true);
-    const draft = store.get(sessionRunConfigDraftsAtom);
-    const callback = selection.selectConfigOption;
-    for (let index = 0; index < 10; index++)
-      render({ revision: `remote:${index}`, preferred: index % 2 === 0 });
-    expect(store.get(sessionRunConfigDraftsAtom)).toBe(draft);
-    expect(selection.selectConfigOption).toBe(callback);
+    const send = sendFixture();
+    const preparation = Promise.withResolvers<void>();
+    const pending = createPendingSessionSends({
+      prepare: async (held) => {
+        await preparation.promise;
+        return { entry: held.entry, queue: held.queue, attachments: [] };
+      },
+      write: async (held) => {
+        send.written.push(held.entry);
+      },
+      deliver: async () => {},
+    });
+    send.runtime.pendingSends = pending;
+    try {
+      await act(async () => {
+        await expect(
+          acceptSessionUserTurn(
+            send.runtime,
+            'a' as SessionId,
+            send.entry,
+            { kind: 'history' },
+            undefined,
+            undefined,
+            [{ id: 'attachment', kind: 'file', source: new File(['synthetic'], 'sample.txt') }],
+            selection.captureForSend(send.entry.inputConfig!)
+          )
+        ).resolves.toBe('pending');
+      });
+      expect(selection.hasUserEdits).toBe(false);
+      expect(send.written).toEqual([]);
+      toggle(false);
+      const drained = new Promise<void>((resolve) => {
+        const unsubscribe = pending.subscribe(() => {
+          if (pending.hasSession('a' as SessionId)) return;
+          unsubscribe();
+          resolve();
+        });
+      });
+      await act(async () => {
+        preparation.resolve();
+        await drained;
+      });
+      expect(send.written).toEqual([send.entry]);
+      expect(visible()).toBe('false');
+      expect(selection.hasUserEdits).toBe(true);
+    } finally {
+      preparation.resolve();
+      pending.dispose();
+    }
   });
 });

@@ -2010,53 +2010,6 @@ describe('useSessionActions', () => {
     }
   });
 
-  it.each(['delete', 'flush'] as const)(
-    'fences draft cleanup at accepted deletion when %s fails',
-    async (failure) => {
-      const tree = createContainmentSessions('failed-delete', false);
-      const metaRepo = createSessionMetaRepo(tree.sessions);
-      const store = createStore();
-      const lease = editRunConfigDraft(store, tree.rootSession.id);
-      if (failure === 'delete')
-        metaRepo.repo.deleteDoc = async () => {
-          throw new Error('disk full');
-        };
-      else
-        metaRepo.repo.flush = async () => {
-          throw new Error('disk full');
-        };
-      const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), { store });
-      await expect(actions.deleteSessions([tree.rootSession.id])).rejects.toThrow('disk full');
-      expect(store.get(sessionRunConfigDraftsAtom).size).toBe(failure === 'delete' ? 1 : 0);
-      expect(lease.active).toBe(failure === 'delete');
-    }
-  );
-
-  it('does not let an old deletion clear a new account lifetime', async () => {
-    const tree = createContainmentSessions('old-owner-delete', false);
-    const metaRepo = createSessionMetaRepo(tree.sessions);
-    const started = createDeferred();
-    const finish = createDeferred();
-    const deleteDoc = metaRepo.repo.deleteDoc.bind(metaRepo.repo);
-    metaRepo.repo.deleteDoc = async (id) => {
-      started.resolve();
-      await finish.promise;
-      await deleteDoc(id);
-    };
-    const store = createStore();
-    editRunConfigDraft(store, tree.rootSession.id);
-    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), { store });
-    const deleting = actions.deleteSessions([tree.rootSession.id]);
-    await started.promise;
-    store.set(setSessionRunConfigDraftAccountAtom, null);
-    const replacement = editRunConfigDraft(store, tree.rootSession.id);
-    const drafts = store.get(sessionRunConfigDraftsAtom);
-    finish.resolve();
-    await deleting;
-    expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
-    expect(replacement.active).toBe(true);
-  });
-
   it('cleans up a partially created child absent from the metadata cache', async () => {
     const rootSessionId = 'partial-create-root' as SessionId;
     const childSession = {

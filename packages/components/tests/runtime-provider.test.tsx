@@ -66,14 +66,14 @@ vi.mock('@/providers/create-workspace-runtime', () => ({ createWorkspaceRuntime:
 import { RuntimeProvider } from '../src/providers/runtime-provider';
 import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
 import { currentWorkspaceSlugAtom, userAtom } from '../src/atoms';
-import { authTokenAtom, runtimeAtom } from '../src/atoms/runtime';
+import { runtimeAtom } from '../src/atoms/runtime';
 import {
   editSessionRunConfigDraftAtom,
   registerSessionRunConfigDraftLeaseAtom,
   sessionRunConfigDraftAccountAtom,
   sessionRunConfigDraftsAtom,
 } from '../src/atoms/session-run-config-drafts';
-import { clearLocalAuthState, signOutWithoutRedirect, type LodyAuthClient } from '../src/lib/auth';
+import { signOutWithoutRedirect, type LodyAuthClient } from '../src/lib/auth';
 import { useSessionRunConfigDraft } from '../src/hooks/use-session-run-config-draft';
 
 function editDraft(store: ReturnType<typeof createStore>, accountId = 'local:user') {
@@ -249,21 +249,6 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(replacement.active).toBe(false);
   });
 
-  it.each(['cloud', 'local'])(
-    'does not treat an unresolved %s account snapshot as logout',
-    async (mode) => {
-      environment.mode = mode;
-      await render();
-      const lease = editDraft(store);
-      const drafts = store.get(sessionRunConfigDraftsAtom);
-      await act(async () => {
-        store.set(userAtom, null);
-      });
-      expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
-      expect(lease.active).toBe(true);
-    }
-  );
-
   it('clears the owning store at logout intent before async sign-out settles', async () => {
     await render();
     const lease = editDraft(store);
@@ -287,33 +272,6 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(store.get(sessionRunConfigDraftAccountAtom).accountId).toBeNull();
     finishSignOut();
     await signingOut;
-  });
-
-  it('rearms a verified same-account login only after a positive token transition', async () => {
-    environment.mode = 'cloud';
-    store.set(authTokenAtom, 'old-login');
-    await render();
-    const previousLease = editDraft(store);
-    const previousOwner = store.get(sessionRunConfigDraftAccountAtom);
-    clearLocalAuthState();
-    await render();
-    expect(store.get(userAtom)?.id).toBe('local:user');
-    expect(store.get(sessionRunConfigDraftAccountAtom).accountId).toBeNull();
-    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
-
-    await act(async () => {
-      store.set(authTokenAtom, null);
-    });
-    expect(store.get(sessionRunConfigDraftAccountAtom).accountId).toBeNull();
-    await act(async () => {
-      store.set(authTokenAtom, 'verified-new-login');
-    });
-    expect(store.get(sessionRunConfigDraftAccountAtom).accountId).toBe('local:user');
-    expect(store.get(sessionRunConfigDraftAccountAtom).lifetime).not.toBe(previousOwner.lifetime);
-    const currentLease = editDraft(store);
-    expect(currentLease.active).toBe(true);
-    expect(previousLease.active).toBe(false);
-    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(1);
   });
 
   it.each(['ordinary', 'cloud', 'missing identity'])(

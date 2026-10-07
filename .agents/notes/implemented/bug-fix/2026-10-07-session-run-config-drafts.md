@@ -37,8 +37,10 @@ semantics. TTL/LRU would silently lose real drafts; neither is used.
 
 ## Verification and limits
 
-Deterministic tests cover remounts, target isolation, sparse state, exact generations,
-remote Turns, admission failures, held sends and lifecycle cleanup. Validation of the
-narrowed implementation is reported in the PR. Local full CLI checks have unrelated
+Regression coverage stays in the owning composer, runtime and cleanup suites: Fast
+on/off tab restoration, scope isolation, exact-generation send admission, failure
+and existing deletion/archive flows. Duplicate atom matrices and synthetic scale
+tests were removed; production behavior is unchanged by that pruning. Validation
+is reported in the PR. Local full CLI checks have unrelated
 sandbox home-directory, socket, proxy and WebRTC limits reproduced on untouched main;
 no packaged Electron acceptance is claimed here.
