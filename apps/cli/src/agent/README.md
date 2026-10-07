@@ -210,6 +210,12 @@ stream; the target machine keeps the recipient private key in memory and decrypt
 immediately before stdin. Local UI and CLI state is in memory. Raw output progress remains
 only as a temporary old-renderer compatibility field.
 
+API-key staging preserves the previous active generation until verification commits.
+Failures propagate the original error and attempt credential deletion; inactive
+generation records remain available to the existing cleanup reconciler. The
+[recovery decision and ablations](../../../../.agents/notes/implemented/bug-fix/2026-10-07-codex-credential-failure-recovery.md)
+explain why failure handling does not restore the entire metadata snapshot.
+
 Grok and Codex authentication requirements come from ACP session creation because
 `codex login status` cannot account for custom model providers with
 `requires_openai_auth = false`. Because protocol authentication spans launch preparation,

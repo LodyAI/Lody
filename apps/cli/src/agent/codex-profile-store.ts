@@ -229,8 +229,11 @@ export class CodexProfileStore {
         await this.write(directory, { ...candidate, activeGeneration: generation, state: 'ready' });
         return result;
       } catch (error) {
-        await this.vault.delete(credentialId);
-        await this.write(directory, record);
+        try {
+          await this.vault.delete(credentialId);
+        } catch {
+          // The inactive generation remains durable cleanup work; preserve the authentication failure.
+        }
         throw error;
       }
     });
