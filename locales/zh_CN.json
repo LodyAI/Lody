@@ -4833,5 +4833,6 @@
   "sessions.messageAuthor.plan": "规划模式：{{value}}",
   "sessions.messageAuthor.source": "打开来源会话",
   "sessions.messageAuthor.on": "开启",
-  "sessions.messageAuthor.off": "关闭"
+  "sessions.messageAuthor.off": "关闭",
+  "settings.memory.rolePromptHint": "记忆 Provider 可能向提示词注入角色定义，请留意是否与 Lody 中的配置重复或冲突。"
 }

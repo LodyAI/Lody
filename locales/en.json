@@ -4833,5 +4833,6 @@
   "sessions.messageAuthor.plan": "Plan mode: {{value}}",
   "sessions.messageAuthor.source": "Open source conversation",
   "sessions.messageAuthor.on": "On",
-  "sessions.messageAuthor.off": "Off"
+  "sessions.messageAuthor.off": "Off",
+  "settings.memory.rolePromptHint": "Memory providers may inject role definitions into the prompt. Check for duplication or conflicts with your Lody configuration."
 }

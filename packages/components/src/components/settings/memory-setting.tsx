@@ -926,6 +926,7 @@ export function RoleMemoryPicker({
   const supported = machineSupportsMemoryProviders(machines.get(machineId));
   return (
     <div {...stylex.props(styles.stack)}>
+      <span {...stylex.props(catalog.meta)}>{t('settings.memory.rolePromptHint')}</span>
       {value ? (
         <div {...stylex.props(styles.unlinkRow)}>
           <Button type="button" size="small" variant="ghost" onClick={() => onChange(undefined)}>
