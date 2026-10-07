@@ -96,7 +96,12 @@ import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
-import { currentWorkspaceIdAtom, mobileKeyboardActionAtom } from '@/atoms';
+import {
+  currentWorkspaceIdAtom,
+  mobileKeyboardActionAtom,
+  queuedMessageBehaviorAtom,
+  type QueuedMessageBehavior,
+} from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
@@ -532,10 +537,8 @@ export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
 
 export type SessionSendMessageOptions = {
   attachments?: SessionAttachmentDraft[];
-  /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
-  invertSubmitBehavior?: boolean;
-  /** Steers a busy prompt for this send, whatever the configured behavior. */
-  forceSteer?: boolean;
+  /** Replaces the configured busy-send behavior (queue or steer) for this send. */
+  submitBehavior?: QueuedMessageBehavior;
 };
 
 export type SessionChatInputAreaHandle = {
@@ -623,6 +626,7 @@ export const SessionChatInputArea = memo(
     );
     const isMobile = useIsMobile();
     const mobileKeyboardAction = useAtomValue(mobileKeyboardActionAtom);
+    const queuedMessageBehavior = useAtomValue(queuedMessageBehaviorAtom);
     const usesMobileKeyboardAction = isMobile || isNativeAppShell();
     const promptEnterKeyHint = resolveMobileKeyboardEnterKeyHint(
       mobileKeyboardAction,
@@ -1762,7 +1766,9 @@ export const SessionChatInputArea = memo(
         // a queue default steers, a steer default queues.
         if (e.shiftKey && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
-          void sendMessage({ invertSubmitBehavior: true });
+          void sendMessage({
+            submitBehavior: queuedMessageBehavior === 'guide' ? 'queue' : 'guide',
+          });
           return;
         }
         if (
@@ -1777,7 +1783,7 @@ export const SessionChatInputArea = memo(
         e.preventDefault();
         void sendMessage();
       },
-      [mobileKeyboardAction, sendMessage, usesMobileKeyboardAction]
+      [mobileKeyboardAction, queuedMessageBehavior, sendMessage, usesMobileKeyboardAction]
     );
 
     // Only the focused composer owns the binding, so a user binding such as Mod+Enter
@@ -1797,7 +1803,7 @@ export const SessionChatInputArea = memo(
             textarea.getAttribute('aria-expanded') !== 'true'
           );
         },
-        run: () => void sendMessage({ forceSteer: true }),
+        run: () => void sendMessage({ submitBehavior: 'guide' }),
       },
       isVisible
     );

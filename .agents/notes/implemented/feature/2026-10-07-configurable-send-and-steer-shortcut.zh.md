@@ -9,8 +9,8 @@ Translation: current
 
 保持 queue 默认行为的用户希望用一个键（例如 Cmd+Enter）始终引导（steer）正在忙碌的
 prompt，而不必记住 Cmd+Shift+Enter 当前是反转为 steer 还是 queue。新增可重新绑定的
-命令 Send and Steer（`session.sendSteer`），以 `forceSteer` 发送当前聚焦的会话草稿；
-提交路由解析器将其视为 guide 行为，并保留现有全部 steer 守卫。该命令默认不绑定，
+命令 Send and Steer（`session.sendSteer`），以 guide 的 `submitBehavior` 覆盖发送当前
+聚焦的会话草稿；提交路由解析器在现有全部 steer 守卫下应用该覆盖。该命令默认不绑定，
 避免改变用户习惯的 Cmd+Enter；用户在键盘快捷键设置页自行绑定。命令只在可见会话输入框
 获得焦点时执行，因此绑定不会发送隐藏草稿，也不会抢占其他文本框的 Cmd+Enter。
 
@@ -21,7 +21,9 @@ prompt，而不必记住 Cmd+Shift+Enter 当前是反转为 steer 还是 queue�
 
 - 命令放在共享 registry 中，因此出现在设置页，并复用录制、冲突检测和跨窗口持久化。
   内置占位注册保证没有会话输入框挂载时它仍会列出。
-- `forceSteer` 优先于 `invertBehavior`，低于 `forceQueue` 和 `forceDirect`。steer 仍需要
+- 解析器用一个 `behaviorOverride` 取代配置的偏好。命令传入 `guide`；Cmd+Shift+Enter
+  改为在输入框按键时算出偏好的反面并传入，不再使用单独的 `invertBehavior` 标志。
+  `forceQueue` 和 `forceDirect` 仍然优先。steer 仍需要
   权威的 acknowledged-steer 支持、正向的实时 prompt 活动以及未完成的 assistant turn；
   否则按普通 queue 或直接发送路由处理。
 - 绑定级 `when` 不作用于用户覆盖，而该命令只有用户绑定。因此命令级 `when` 检查输入框
@@ -31,6 +33,10 @@ prompt，而不必记住 Cmd+Shift+Enter 当前是反转为 steer 还是 queue�
   对所有命令忽略 IME 组字中的 keydown。
 
 ## 备选方案
+
+- 在 `invertBehavior` 旁再加一个 `forceSteer` 标志：评审时否决。两个重叠的标志需要
+  额外的优先级规则，而一个覆盖值就能表达同样的意思。埋点字段 `invert_behavior` 改为
+  `submit_behavior_override`。
 
 - 默认绑定 `Mod+Enter`：已拒绝。Cmd+Enter 已按配置行为发送，静默改变肌肉记忆按键会改变
   忙碌发送的路由。

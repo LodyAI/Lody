@@ -19,6 +19,7 @@ import {
   sendSessionFileToLocalRuntime,
 } from '../src/lib/electron-session-file-sender';
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
+import { queuedMessageBehaviorAtom } from '../src/atoms/settings';
 import { computeSha256Hex, uploadSessionFile } from '../src/lib/session-file-upload';
 import { uploadSessionImage } from '../src/lib/session-image-upload';
 import { createRoot, type Root } from 'react-dom/client';
@@ -307,6 +308,7 @@ describe('SessionChatInputArea submission feedback', () => {
     getDefaultStore().set(localProbeResultAtom, null);
     getDefaultStore().set(authTokenAtom, null);
     getDefaultStore().set(currentWorkspaceIdAtom, null);
+    getDefaultStore().set(queuedMessageBehaviorAtom, 'queue');
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, '__LODY_NATIVE__');
     Reflect.deleteProperty(window.navigator, 'userAgent');
@@ -567,33 +569,40 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(submissions[1][2]?.attachments).toEqual(submissions[0][2]?.attachments);
   });
 
-  it('retains queue inversion for attachment-only draft handoff', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
-    const textarea = await renderComposer({
-      composerRef,
-      onSendMessage: async (...args) => {
-        submissions.push(args);
-        return true;
-      },
-    });
-    await attachDrafts(composerRef);
-    await act(async () => composerRef.current!.setInputText(''));
-    await act(async () =>
-      textarea.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'Enter',
-          ctrlKey: true,
-          shiftKey: true,
-          bubbles: true,
-        })
-      )
-    );
-    expect(submissions).toHaveLength(1);
-    expect(submissions[0][0]).toEqual([]);
-    expect(submissions[0][2]?.invertSubmitBehavior).toBe(true);
-    expect(submissions[0][2]?.attachments).toHaveLength(2);
-  });
+  it.each([
+    ['queue', 'guide'],
+    ['guide', 'queue'],
+  ] as const)(
+    'inverts a %s default to %s for attachment-only draft handoff',
+    async (configured, expected) => {
+      getDefaultStore().set(queuedMessageBehaviorAtom, configured);
+      const composerRef = createRef<SessionChatInputAreaHandle>();
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      const textarea = await renderComposer({
+        composerRef,
+        onSendMessage: async (...args) => {
+          submissions.push(args);
+          return true;
+        },
+      });
+      await attachDrafts(composerRef);
+      await act(async () => composerRef.current!.setInputText(''));
+      await act(async () =>
+        textarea.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            ctrlKey: true,
+            shiftKey: true,
+            bubbles: true,
+          })
+        )
+      );
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][0]).toEqual([]);
+      expect(submissions[0][2]?.submitBehavior).toBe(expected);
+      expect(submissions[0][2]?.attachments).toHaveLength(2);
+    }
+  );
 
   it.each([
     { isMachineRemoved: true },
@@ -1083,7 +1092,7 @@ describe('SessionChatInputArea submission feedback', () => {
       textarea.focus();
       await pressCtrlEnter(textarea);
       expect(submissions).toHaveLength(1);
-      expect(submissions[0][2]?.forceSteer).toBeUndefined();
+      expect(submissions[0][2]?.submitBehavior).toBeUndefined();
     });
 
     it('sends the focused draft once as a forced steer through the user binding', async () => {
@@ -1095,8 +1104,7 @@ describe('SessionChatInputArea submission feedback', () => {
       expect(event.defaultPrevented).toBe(true);
       expect(submissions).toHaveLength(1);
       expect(submissions[0][0]).toEqual([{ type: 'text', text: 'focus regression draft' }]);
-      expect(submissions[0][2]?.forceSteer).toBe(true);
-      expect(submissions[0][2]?.invertSubmitBehavior).toBeUndefined();
+      expect(submissions[0][2]?.submitBehavior).toBe('guide');
       expect(textarea.value).toBe('');
     });
 
@@ -1118,8 +1126,7 @@ describe('SessionChatInputArea submission feedback', () => {
         )
       );
       expect(submissions).toHaveLength(1);
-      expect(submissions[0][2]?.forceSteer).toBe(true);
-      expect(submissions[0][2]?.invertSubmitBehavior).toBeUndefined();
+      expect(submissions[0][2]?.submitBehavior).toBe('guide');
     });
 
     it('ignores the binding while focus is outside the composer', async () => {

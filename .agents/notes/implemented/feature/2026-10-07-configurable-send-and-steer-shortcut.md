@@ -10,9 +10,9 @@ Translation: current
 Users who keep the queue default wanted one key, such as Cmd+Enter, that always
 steers a busy prompt instead of remembering whether Cmd+Shift+Enter currently
 inverts toward steer or queue. A new rebindable command, Send and Steer
-(`session.sendSteer`), sends the focused session draft with `forceSteer`, which
-the submit-route resolver treats as the guide behavior under the existing
-steering guards. It ships unbound so nobody's habitual Cmd+Enter changes meaning;
+(`session.sendSteer`), sends the focused session draft with a guide
+`submitBehavior` override, which the submit-route resolver applies under the
+existing steering guards. It ships unbound so nobody's habitual Cmd+Enter changes meaning;
 users bind it on the Keyboard Shortcuts page. The command only runs while the
 visible session composer textarea has focus, so a binding never sends a hidden
 draft or captures Cmd+Enter in other text fields.
@@ -26,8 +26,10 @@ lived only in a local `onKeyDown`, so no binding could be changed or added.
 - The command lives in the shared registry so it appears on the settings page and
   reuses recording, conflict detection, and cross-window persistence. A built-in
   placeholder keeps it listed when no session composer is mounted.
-- `forceSteer` outranks `invertBehavior` and stays below `forceQueue` and
-  `forceDirect`. Steering still needs authoritative acknowledged-steer support,
+- The resolver takes one `behaviorOverride` in place of the configured preference.
+  The command passes `guide`; Cmd+Shift+Enter now passes the opposite of the
+  preference, computed in the composer at key press, instead of a separate
+  `invertBehavior` flag. `forceQueue` and `forceDirect` still win. Steering still needs authoritative acknowledged-steer support,
   positive live prompt activity, and an unfinished assistant turn; otherwise the
   submission takes the ordinary queue or direct route.
 - Binding-level `when` does not apply to user overrides, and this command has only
@@ -40,6 +42,11 @@ lived only in a local `onKeyDown`, so no binding could be changed or added.
   composing keydowns for every command.
 
 ## Alternatives considered
+
+- A separate `forceSteer` flag beside `invertBehavior`: rejected in review because
+  two overlapping flags needed their own precedence rule, while one override says
+  the same thing. The analytics field `invert_behavior` became
+  `submit_behavior_override`.
 
 - Default binding `Mod+Enter`: rejected because Cmd+Enter already sends through
   the configured behavior and changing a muscle-memory key silently would reroute
