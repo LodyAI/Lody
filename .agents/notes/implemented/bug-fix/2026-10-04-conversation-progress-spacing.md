@@ -64,6 +64,5 @@ Browser assertions cover five theme, width and size combinations. In each, no
 visible row extends past the clip edge, the cap equals seven line boxes, the
 fade starts one line box above the edge, and expanding removes the mask. On the
 previous 160px cap, all five fail because one row crosses the edge by 2–4px.
-Screenshots from the isolated desktop E2E harness show
-[before](../../assets/user-message-collapse/before.png) and
-[after](../../assets/user-message-collapse/after.png).
+Before/after screenshots from the isolated desktop E2E harness are in
+[#1293](https://github.com/LodyAI/Lody/pull/1293).

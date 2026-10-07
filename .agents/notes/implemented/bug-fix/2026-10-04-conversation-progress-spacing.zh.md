@@ -48,6 +48,5 @@ Spec 保持 draft，实现不代表人工批准。
 
 浏览器断言覆盖五种主题、宽度与字号组合：任何可见行都不越过裁切线，上限等于 7 个
 行框，渐隐从裁切线向上一个行框处开始，展开后遮罩移除。在原先的 160px 上限下，五项
-全部失败，因为有一行越过裁切线 2–4px。隔离桌面 E2E harness 截取的
-[修复前](../../assets/user-message-collapse/before.png)与
-[修复后](../../assets/user-message-collapse/after.png)截图展示了差异。
+全部失败，因为有一行越过裁切线 2–4px。隔离桌面 E2E harness 截取的修复前后截图见
+[#1293](https://github.com/LodyAI/Lody/pull/1293)。
