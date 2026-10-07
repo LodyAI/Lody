@@ -73,29 +73,32 @@ describe('KeyboardShortcutsSetting search', () => {
   });
 
   const searchInput = () =>
-    container.querySelector<HTMLInputElement>('input[aria-label="Search shortcuts"]')!;
-  const keySearchButton = () =>
+    container.querySelector<HTMLInputElement>('input[aria-label="Search shortcuts"]');
+  const keystrokeField = () =>
+    container.querySelector<HTMLElement>('[role="textbox"][aria-label="Press a shortcut…"]');
+  const keystrokeToggle = () =>
     container.querySelector<HTMLButtonElement>('button[aria-label="Search by keystroke"]')!;
   const text = () => container.textContent ?? '';
 
-  function captureKeys(init: KeyboardEventInit) {
-    act(() => keySearchButton().click());
+  function pressKeys(init: KeyboardEventInit) {
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init }));
     });
     act(() => {
       window.dispatchEvent(
-        new KeyboardEvent('keyup', {
-          bubbles: true,
-          key: init.key,
-          code: init.code,
-        })
+        new KeyboardEvent('keyup', { bubbles: true, key: init.key, code: init.code })
       );
     });
   }
 
+  function expectAllRows() {
+    expect(text()).toContain(SUBMIT);
+    expect(text()).toContain(PALETTE);
+    expect(text()).toContain(WINDOW);
+  }
+
   it('filters rows by name and hides categories left empty', () => {
-    act(() => setInputValue(searchInput(), 'PALETTE'));
+    act(() => setInputValue(searchInput()!, 'PALETTE'));
 
     expect(text()).toContain(PALETTE);
     expect(text()).not.toContain(WINDOW);
@@ -105,47 +108,97 @@ describe('KeyboardShortcutsSetting search', () => {
   });
 
   it('shows the empty note when nothing matches and clears the text on Escape', () => {
-    act(() => setInputValue(searchInput(), 'no such shortcut'));
+    act(() => setInputValue(searchInput()!, 'no such shortcut'));
     expect(text()).toContain('No matching shortcuts');
     expect(text()).not.toContain(PALETTE);
 
     act(() => {
-      searchInput().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      searchInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
 
-    expect(searchInput().value).toBe('');
+    expect(searchInput()!.value).toBe('');
     expect(text()).not.toContain('No matching shortcuts');
-    expect(text()).toContain(PALETTE);
-    expect(text()).toContain(SUBMIT);
+    expectAllRows();
   });
 
-  it('filters by a recorded bare key and restores every row once cleared', () => {
-    captureKeys({ key: 'Enter', code: 'Enter' });
+  it('starts in text mode and swaps the typed query for a keystroke field', () => {
+    expect(keystrokeToggle().getAttribute('aria-pressed')).toBe('false');
+    expect(keystrokeField()).toBeNull();
+    act(() => setInputValue(searchInput()!, 'charlie'));
+    expect(text()).not.toContain(PALETTE);
+
+    act(() => keystrokeToggle().click());
+
+    expect(keystrokeToggle().getAttribute('aria-pressed')).toBe('true');
+    expect(searchInput()).toBeNull();
+    expect(keystrokeField()?.textContent).toContain('Press a shortcut…');
+    expectAllRows();
+  });
+
+  it('filters by each pressed combo, the next one replacing the last', () => {
+    act(() => keystrokeToggle().click());
+
+    pressKeys({ key: 'Enter', code: 'Enter' });
 
     expect(text()).toContain(SUBMIT);
     expect(text()).not.toContain(PALETTE);
     expect(text()).not.toContain(WINDOW);
+    expect(keystrokeField()?.textContent).not.toContain('Press a shortcut…');
 
-    act(() =>
-      container
-        .querySelector<HTMLButtonElement>('button[aria-label="Clear keystroke filter"]')!
-        .click()
-    );
-
-    expect(text()).toContain(SUBMIT);
-    expect(text()).toContain(PALETTE);
-    expect(text()).toContain(WINDOW);
-  });
-
-  it('matches a recorded combo against a non-primary binding, combined with the name', () => {
-    captureKeys({ key: 'P', code: 'KeyP', ctrlKey: true, shiftKey: true });
+    // A non-primary binding matches too, and no second click is needed.
+    pressKeys({ key: 'P', code: 'KeyP', ctrlKey: true, shiftKey: true });
 
     expect(text()).toContain(PALETTE);
     expect(text()).not.toContain(SUBMIT);
+    expect(text()).not.toContain('No matching shortcuts');
+  });
 
-    act(() => setInputValue(searchInput(), 'charlie'));
-
+  it('clears the key filter and returns to text mode when toggled off', () => {
+    act(() => keystrokeToggle().click());
+    pressKeys({ key: 'Enter', code: 'Enter' });
     expect(text()).not.toContain(PALETTE);
-    expect(text()).toContain('No matching shortcuts');
+
+    act(() => keystrokeToggle().click());
+
+    expect(keystrokeToggle().getAttribute('aria-pressed')).toBe('false');
+    expect(keystrokeField()).toBeNull();
+    expect(searchInput()!.value).toBe('');
+    expectAllRows();
+  });
+
+  it('leaves keystroke mode on a bare Escape', () => {
+    act(() => keystrokeToggle().click());
+    pressKeys({ key: 'Enter', code: 'Enter' });
+    expect(text()).not.toContain(PALETTE);
+
+    pressKeys({ key: 'Escape', code: 'Escape' });
+
+    expect(keystrokeToggle().getAttribute('aria-pressed')).toBe('false');
+    expect(searchInput()).not.toBeNull();
+    expectAllRows();
+  });
+
+  it('keeps the key filter while a filtered row records, and resumes on a click', () => {
+    act(() => keystrokeToggle().click());
+    pressKeys({ key: 'Enter', code: 'Enter' });
+
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>('button[title="Click to record a new shortcut"]')!
+        .click()
+    );
+
+    expect(keystrokeToggle().getAttribute('aria-pressed')).toBe('true');
+    expect(text()).toContain(SUBMIT);
+    expect(text()).not.toContain(PALETTE);
+    expect(text()).not.toContain(WINDOW);
+
+    act(() => keystrokeField()!.click());
+    pressKeys({ key: 'K', code: 'KeyK', ctrlKey: true });
+
+    expect(text()).toContain(PALETTE);
+    expect(text()).not.toContain(SUBMIT);
+    // The row's capture was superseded rather than fed the combo.
+    expect(commands.getKeybindingsFor('test.search.submit')).toEqual(['Enter']);
   });
 });

@@ -3756,7 +3756,7 @@
   "settings.keyboardShortcuts.alreadyUsed": "{{binding}} 已被 {{command}} 占用，请按其他组合",
   "settings.keyboardShortcuts.searchPlaceholder": "搜索快捷键",
   "settings.keyboardShortcuts.searchByKeystroke": "按快捷键搜索",
-  "settings.keyboardShortcuts.clearKeystrokeFilter": "清除按键筛选",
+  "settings.keyboardShortcuts.keystrokePlaceholder": "按下快捷键…",
   "settings.keyboardShortcuts.noMatches": "没有匹配的快捷键",
   "settings.keyboardShortcuts.category.Navigation": "导航",
   "settings.keyboardShortcuts.category.Session": "会话",

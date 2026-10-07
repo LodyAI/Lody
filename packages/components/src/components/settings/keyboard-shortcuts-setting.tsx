@@ -1,19 +1,20 @@
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { type ReactNode, useCallback, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { Keyboard, Search, Trash2, X } from 'lucide-react';
+import { Keyboard, Search, Trash2 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
 import { colors } from '@lody/ui/tokens/colors.stylex';
-import { corner, duration, ease, radius, space } from '@lody/ui/tokens/scales.stylex';
+import { corner, duration, ease, radius } from '@lody/ui/tokens/scales.stylex';
 import {
   globalShortcutBindingHasModifier,
   type GlobalShortcutId,
   type GlobalShortcutSetError,
 } from '@lody/shared';
 import { Button } from '@lody/ui/button';
-import { Input } from '@lody/ui/input';
+import { Input, InputShell } from '@lody/ui/input';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import {
   canonicalizeBinding,
   commands,
@@ -55,10 +56,27 @@ const pulse = stylex.keyframes({
 
 const styles = stylex.create({
   error: { color: colors.destructive },
-  searchBar: { display: 'flex', alignItems: 'center', gap: space[2] },
-  searchInput: { flexGrow: 1, minWidth: 0 },
   searchIcon: { width: '16px', height: '16px', flexShrink: 0 },
-  keyFilter: { display: 'flex', alignItems: 'center', gap: space[1], flexShrink: 0 },
+  toggleOff: { color: field.icon },
+  toggleOn: { color: colors.accent },
+  /** The keystroke field's value: it fills the well and leaves the ring to it. */
+  keystrokeValue: {
+    display: 'flex',
+    alignItems: 'center',
+    flexGrow: 1,
+    minWidth: 0,
+    alignSelf: 'stretch',
+    boxShadow: 'none',
+    outlineStyle: 'none',
+    cursor: 'pointer',
+  },
+  keystrokePlaceholder: {
+    color: field.placeholder,
+    fontWeight: 500,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
   controls: { display: 'flex', alignItems: 'center' },
   // Fixed widths so the shortcut and trash columns line up across rows. The shortcut
   // slot holds up to ~4 chips comfortably; the trash slot stays present even when the
@@ -277,9 +295,10 @@ export function KeyboardShortcutsSetting() {
 }
 
 /**
- * Narrows the list by name and by keystroke. The keystroke is recorded with the same
- * capture the rows use, so it pauses command dispatch and OS global shortcuts while
- * listening and stops any row that was recording.
+ * Narrows the list by name, or — with the toggle at the field's end on — by keystroke.
+ * The two never combine: switching modes drops the other mode's filter. Keystrokes use
+ * the same capture the rows use, so command dispatch and OS global shortcuts stay paused
+ * while the field listens, and starting it stops any row that was recording.
  */
 function ShortcutSearchBar({
   query,
@@ -293,67 +312,122 @@ function ShortcutSearchBar({
   onKeyFilterChange: (binding: string | null) => void;
 }) {
   const { t } = useTranslation();
+  const [keystrokeMode, setKeystrokeMode] = useState(false);
+  const textRef = useRef<HTMLInputElement>(null);
+  const keysRef = useRef<HTMLDivElement>(null);
+  const modeChanged = useRef(false);
+
+  const leaveKeystrokeMode = () => {
+    modeChanged.current = true;
+    setKeystrokeMode(false);
+    onKeyFilterChange(null);
+  };
+
   const { status, preview, start, cancel } = useKeyCapture({
+    // Rejecting every combo keeps the capture listening, so the next combo replaces
+    // this one without the registry un-pausing in between.
     onCapture: (binding) => {
       onKeyFilterChange(binding);
+      return false;
+    },
+    // Only Escape leaves the mode. A row taking over the capture, or the window losing
+    // focus, keeps the filter: the user may be rebinding one of the rows it shows.
+    onCancel: (reason) => {
+      if (reason === 'escape') leaveKeystrokeMode();
     },
   });
-  const recording = status === 'recording';
+  const listening = status === 'recording';
+
+  // Focus follows the mode so the field the user just switched to is the one typed into.
+  useEffect(() => {
+    if (!modeChanged.current) return;
+    modeChanged.current = false;
+    if (keystrokeMode) keysRef.current?.focus();
+    else textRef.current?.focus();
+  }, [keystrokeMode]);
+
+  const toggleKeystrokeMode = () => {
+    if (keystrokeMode) {
+      cancel();
+      leaveKeystrokeMode();
+      return;
+    }
+    modeChanged.current = true;
+    onQueryChange('');
+    setKeystrokeMode(true);
+    start();
+  };
+
+  const resumeListening = () => {
+    if (!listening) start();
+  };
+
   const searchLabel = t('settings.keyboardShortcuts.searchPlaceholder');
-  const keySearchLabel = t('settings.keyboardShortcuts.searchByKeystroke');
-  const clearKeyLabel = t('settings.keyboardShortcuts.clearKeystrokeFilter');
+  const keystrokeLabel = t('settings.keyboardShortcuts.keystrokePlaceholder');
+  const toggleLabel = t('settings.keyboardShortcuts.searchByKeystroke');
+  const shown = listening ? (preview ?? keyFilter) : keyFilter;
+
+  const toggle = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="mini"
+      icon
+      onClick={toggleKeystrokeMode}
+      aria-pressed={keystrokeMode}
+      aria-label={toggleLabel}
+      title={toggleLabel}
+    >
+      <Keyboard
+        {...stylex.props(styles.glyph, keystrokeMode ? styles.toggleOn : styles.toggleOff)}
+      />
+    </Button>
+  );
+
+  if (keystrokeMode) {
+    return (
+      <InputShell
+        leading={<Keyboard {...stylex.props(styles.searchIcon)} aria-hidden="true" />}
+        trailing={toggle}
+      >
+        <div
+          ref={keysRef}
+          role="textbox"
+          aria-readonly="true"
+          aria-label={keystrokeLabel}
+          tabIndex={0}
+          onClick={resumeListening}
+          onFocus={resumeListening}
+          {...stylex.props(styles.keystrokeValue)}
+        >
+          {shown ? (
+            <Kbd binding={shown} size="medium" />
+          ) : (
+            <span {...stylex.props(styles.keystrokePlaceholder)}>{keystrokeLabel}</span>
+          )}
+        </div>
+      </InputShell>
+    );
+  }
 
   return (
-    <div {...stylex.props(styles.searchBar)}>
-      <div {...stylex.props(styles.searchInput)}>
-        <Input
-          type="search"
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape' && query !== '') {
-              event.preventDefault();
-              event.stopPropagation();
-              onQueryChange('');
-            }
-          }}
-          placeholder={searchLabel}
-          aria-label={searchLabel}
-          leading={<Search {...stylex.props(styles.searchIcon)} aria-hidden="true" />}
-        />
-      </div>
-      {keyFilter && !recording && (
-        <div {...stylex.props(styles.keyFilter)}>
-          <Kbd binding={keyFilter} size="medium" />
-          <Button
-            type="button"
-            variant="ghost"
-            size="small"
-            icon
-            onClick={() => onKeyFilterChange(null)}
-            aria-label={clearKeyLabel}
-            title={clearKeyLabel}
-          >
-            <X {...stylex.props(styles.glyph)} />
-          </Button>
-        </div>
-      )}
-      {recording ? (
-        <RecordingButton preview={preview} onCancel={cancel} />
-      ) : (
-        <Button
-          type="button"
-          variant="ghost"
-          size="small"
-          icon
-          onClick={start}
-          aria-label={keySearchLabel}
-          title={keySearchLabel}
-        >
-          <Keyboard {...stylex.props(styles.glyph)} />
-        </Button>
-      )}
-    </div>
+    <Input
+      ref={textRef}
+      type="search"
+      value={query}
+      onChange={(event) => onQueryChange(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && query !== '') {
+          event.preventDefault();
+          event.stopPropagation();
+          onQueryChange('');
+        }
+      }}
+      placeholder={searchLabel}
+      aria-label={searchLabel}
+      leading={<Search {...stylex.props(styles.searchIcon)} aria-hidden="true" />}
+      trailing={toggle}
+    />
   );
 }
 

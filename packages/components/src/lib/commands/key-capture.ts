@@ -50,6 +50,12 @@ export function eventToBindingString(event: KeyboardEvent): string | null {
 
 export type KeyCaptureStatus = 'idle' | 'recording';
 
+/**
+ * Why a recording stopped without a combo: a bare Escape, the window losing focus,
+ * another recorder starting (`superseded`), or the caller's own `cancel()` (`manual`).
+ */
+export type KeyCaptureCancelReason = 'escape' | 'blur' | 'superseded' | 'manual';
+
 export type KeyCaptureOptions = {
   /**
    * Fired once a complete combo has been captured (last modifier released).
@@ -61,8 +67,8 @@ export type KeyCaptureOptions = {
    * dispatch staying suspended for a short settle window.
    */
   onCapture: (binding: string) => boolean | void;
-  /** Fired when the user presses Escape without modifiers, or when focus is lost. */
-  onCancel?: () => void;
+  /** Fired when recording stops without a combo; see `KeyCaptureCancelReason`. */
+  onCancel?: (reason: KeyCaptureCancelReason) => void;
 };
 
 export type KeyCaptureControls = {
@@ -102,19 +108,21 @@ export function useKeyCapture({ onCapture, onCancel }: KeyCaptureOptions): KeyCa
   onCaptureRef.current = onCapture;
   onCancelRef.current = onCancel;
 
-  const cancel = useCallback(() => {
+  const stop = useCallback((reason: KeyCaptureCancelReason) => {
     setStatus('idle');
     setPreview(null);
-    onCancelRef.current?.();
+    onCancelRef.current?.(reason);
   }, []);
+  const cancel = useCallback(() => stop('manual'), [stop]);
+  const supersede = useCallback(() => stop('superseded'), [stop]);
   const start = useCallback(() => {
     // Stop any other row that was recording, so only this one listens.
-    if (activeCaptureCancel && activeCaptureCancel !== cancel) {
+    if (activeCaptureCancel && activeCaptureCancel !== supersede) {
       activeCaptureCancel();
     }
-    activeCaptureCancel = cancel;
+    activeCaptureCancel = supersede;
     setStatus('recording');
-  }, [cancel]);
+  }, [supersede]);
 
   useEffect(() => {
     if (status !== 'recording') return undefined;
@@ -150,7 +158,7 @@ export function useKeyCapture({ onCapture, onCancel }: KeyCaptureOptions): KeyCa
       if (event.key === 'Escape' && noModifiersHeld(event)) {
         setStatus('idle');
         setPreviewIfChanged(null);
-        onCancelRef.current?.();
+        onCancelRef.current?.('escape');
         return;
       }
 
@@ -193,7 +201,7 @@ export function useKeyCapture({ onCapture, onCancel }: KeyCaptureOptions): KeyCa
     const handleBlur = () => {
       setStatus('idle');
       setPreviewIfChanged(null);
-      onCancelRef.current?.();
+      onCancelRef.current?.('blur');
     };
 
     window.addEventListener('keydown', handleKeyDown, { capture: true });
@@ -203,7 +211,7 @@ export function useKeyCapture({ onCapture, onCancel }: KeyCaptureOptions): KeyCa
     return () => {
       // Release our claim on the single active recording (unless another row already
       // took over via start()).
-      if (activeCaptureCancel === cancel) {
+      if (activeCaptureCancel === supersede) {
         activeCaptureCancel = null;
       }
       // Re-arm OS global shortcuts now that recording is over.
@@ -221,7 +229,7 @@ export function useKeyCapture({ onCapture, onCancel }: KeyCaptureOptions): KeyCa
       } as EventListenerOptions);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [status, cancel]);
+  }, [status, supersede]);
 
   return { status, preview, start, cancel };
 }

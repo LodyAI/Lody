@@ -3756,7 +3756,7 @@
   "settings.keyboardShortcuts.alreadyUsed": "{{binding}} is already used by {{command}} — press another combo",
   "settings.keyboardShortcuts.searchPlaceholder": "Search shortcuts",
   "settings.keyboardShortcuts.searchByKeystroke": "Search by keystroke",
-  "settings.keyboardShortcuts.clearKeystrokeFilter": "Clear keystroke filter",
+  "settings.keyboardShortcuts.keystrokePlaceholder": "Press a shortcut…",
   "settings.keyboardShortcuts.noMatches": "No matching shortcuts",
   "settings.keyboardShortcuts.category.Navigation": "Navigation",
   "settings.keyboardShortcuts.category.Session": "Session",
