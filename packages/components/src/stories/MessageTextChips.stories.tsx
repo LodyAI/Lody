@@ -5,7 +5,7 @@ import { applyTextRewrites, type MessageTextSpan } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import {
   conversationReadingFontSizeStyle,
-  userTextCollapsedHeight,
+  userTextCollapsedStyle,
 } from '@/components/ai-gui/conversation-font-size-classes';
 import { getUserTextRenderSlice } from '@/components/ai-gui/message-copy';
 
@@ -105,7 +105,7 @@ function Bubble({
           )}
           style={{
             ...conversationReadingFontSizeStyle(14),
-            ...(collapsed ? { maxHeight: userTextCollapsedHeight(14) } : {}),
+            ...(collapsed ? userTextCollapsedStyle(14) : {}),
           }}
         >
           <MessageTextWithChips text={slice?.text ?? text} spans={slice ? slice.spans : spans} />
@@ -116,7 +116,7 @@ function Bubble({
 }
 
 /**
- * Long enough that `UserPlainTextBlock` collapses it under its fixed
+ * Long enough that `UserPlainTextBlock` collapses it under its
  * `maxHeight`. That height is a whole number of line boxes, so anything that
  * makes one line taller than the rest shows up here as a half-clipped row —
  * which no short fixture can reveal.

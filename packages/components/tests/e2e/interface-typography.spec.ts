@@ -416,10 +416,19 @@ for (const [theme, width, size] of [
       expect(row.bottom).toBeLessThanOrEqual(clip.bottom + 0.5);
     }
     expect(clip.bottom - clip.top).toBeCloseTo(7 * readingLeading, 0);
+    // The fade covers exactly the last visible row and leaves the rows above opaque.
+    const fadeStart = await text.evaluate((node) => {
+      const mask = getComputedStyle(node).maskImage;
+      const stop = /100%[^,]*?([\d.]+)px|([\d.]+)px[^,]*?100%/.exec(mask);
+      return stop ? node.getBoundingClientRect().bottom - parseFloat(stop[1] ?? stop[2]!) : null;
+    });
+    expect(fadeStart).not.toBeNull();
+    expect(fadeStart!).toBeCloseTo(clip.bottom - readingLeading, 0);
 
     await toggle.click();
     await expect(user.getByRole('button', { name: 'Show less', exact: true })).toBeVisible();
     expect(await text.evaluate((node) => node.scrollHeight - node.clientHeight)).toBe(0);
+    await expect(text).toHaveCSS('mask-image', 'none');
     await expect(text).toContainText('Do not reuse any running application or its data.');
   });
 }
