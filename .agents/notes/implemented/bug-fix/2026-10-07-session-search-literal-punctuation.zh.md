@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1283](https://github.com/LodyAI/Lody/pull/1283)
+
 [English](2026-10-07-session-search-literal-punctuation.md)
 
 ## 摘要
