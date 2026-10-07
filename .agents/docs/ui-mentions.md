@@ -47,6 +47,13 @@ the dock and keeps the floating caret menu. The
 [placement Spec](../../specs/composer-mention-menu-placement.md) owns these
 visible guarantees.
 
+Row selection saves the textarea selection, restores focus and that selection,
+then starts insertion/preparation. WebKit touch taps can blur the textarea and
+expose a temporary zero caret during refocus; starting an asynchronous Shortcut
+before that focus cycle lets the empty-query handler cancel it. Preparation keeps
+the menu open for loading and retry feedback. See the
+[touch focus note](../notes/implemented/bug-fix/2026-10-07-shortcut-touch-focus.md).
+
 ## Ranking
 
 File menus use `useMentionFileSearch`: a Worker owns the file/directory index,

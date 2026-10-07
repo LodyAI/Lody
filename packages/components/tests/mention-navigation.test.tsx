@@ -2,9 +2,15 @@
 
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Mention, MentionInput, MentionItem, useMentionContext } from '../src/ui/mention';
+import {
+  Mention,
+  MentionContent,
+  MentionInput,
+  MentionItem,
+  useMentionContext,
+} from '../src/ui/mention';
 import type { ItemData, Mention as MentionRange } from '../src/ui/mention/mention-root';
 
 (
@@ -418,5 +424,114 @@ describe('Mention navigation and insertion', () => {
 
     expect(input.selectionStart).toBe(0);
     expect(input.selectionEnd).toBe(0);
+  });
+});
+
+describe('touch selection of prepared mentions', () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal('matchMedia', () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { docked: true, outcome: 'success' },
+    { docked: false, outcome: 'success' },
+    { docked: true, outcome: 'failure' },
+    { docked: true, outcome: 'dismiss' },
+  ])('prepares after touch focus ($docked, $outcome)', async ({ docked, outcome }) => {
+    let finish!: (result: { text: string; mentions: MentionRange[] } | null) => void;
+    const body = new Promise<{ text: string; mentions: MentionRange[] } | null>((resolve) => {
+      finish = resolve;
+    });
+    let signal: AbortSignal | undefined;
+    function Composer() {
+      const [value, setValue] = React.useState('/review');
+      const [loading, setLoading] = React.useState(false);
+      return (
+        <Mention
+          defaultOpen
+          trigger="/"
+          inputValue={value}
+          onInputValueChange={setValue}
+          autoCloseOnEmpty={false}
+        >
+          <MentionInput value={value} onChange={() => {}} />
+          <MentionContent dockedOnMobile={docked}>
+            <MentionItem
+              value="shortcut"
+              disabled={loading}
+              onMentionPrepare={(request) => {
+                signal = request.signal;
+                setLoading(true);
+                return body;
+              }}
+            >
+              <svg>
+                <path data-testid="shortcut-icon" />
+              </svg>
+              Review
+            </MentionItem>
+          </MentionContent>
+        </Mention>
+      );
+    }
+    await act(async () => root.render(<Composer />));
+    const input = container.querySelector('textarea')!;
+    act(() => {
+      input.focus();
+      input.setSelectionRange(7, 7);
+    });
+    await act(() => vi.advanceTimersByTime(0));
+    const icon = document.querySelector('[data-testid="shortcut-icon"]')!;
+    const down = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
+    Object.defineProperty(down, 'pointerType', { value: 'touch' });
+    await act(() => icon.dispatchEvent(down));
+    // WebKit blurs before click, then exposes a transient zero caret to the
+    // focus handler even though the saved insertion point is still at the end.
+    act(() => input.blur());
+    const focus = input.focus.bind(input);
+    vi.spyOn(input, 'focus').mockImplementation(() => {
+      input.setSelectionRange(0, 0);
+      focus();
+    });
+    await act(async () => icon.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(signal).toBeDefined();
+    expect(signal?.aborted).toBe(false);
+    expect(input.value).toBe('/review');
+    expect(input.getAttribute('aria-expanded')).toBe('true');
+    if (outcome === 'dismiss') {
+      await act(() =>
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      );
+      expect(signal?.aborted).toBe(true);
+    }
+    await act(async () =>
+      finish(outcome === 'failure' ? null : { text: 'Review this change', mentions: [] })
+    );
+    if (outcome !== 'success') {
+      expect(input.value).toBe('/review');
+      if (outcome === 'failure') expect(input.getAttribute('aria-expanded')).toBe('true');
+      return;
+    }
+    expect(input.value).toBe('Review this change');
+    expect(input.selectionStart).toBe('Review this change'.length);
+    expect(input.getAttribute('aria-expanded')).toBe('false');
   });
 });

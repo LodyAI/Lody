@@ -434,10 +434,39 @@ const FLOATING_CATEGORIES: MentionCategory[] = CATEGORIES.map((entry) =>
 function FloatingHarness({
   atTop = false,
   mainComposer = false,
+  preparedShortcut = false,
 }: {
   atTop?: boolean;
   mainComposer?: boolean;
+  preparedShortcut?: boolean;
 }) {
+  const [loading, setLoading] = React.useState(false);
+  const shortcutCategories: MentionCategory[] = [
+    category(
+      'prompt_shortcut',
+      'shortcut',
+      'Prompt Shortcuts',
+      'prompt_shortcut',
+      [
+        {
+          value: 'prompt-shortcut:review',
+          label: 'review',
+          title: '/review',
+          insertText: '/review',
+          kind: 'prompt_shortcut',
+          icon: 'prompt_shortcut',
+          disabled: loading,
+          onPrepare: async () => {
+            setLoading(true);
+            await Promise.resolve();
+            setLoading(false);
+            return { text: 'Review this change', mentions: [] };
+          },
+        },
+      ],
+      { directTrigger: '/' }
+    ),
+  ];
   const [value, setValue] = React.useState('');
   const [mentions, setMentions] = React.useState<MentionRange[]>([]);
   const [selected, setSelected] = React.useState<string[]>([]);
@@ -454,6 +483,7 @@ function FloatingHarness({
         </div>
         <Mention
           triggers={['@', '$', '/']}
+          autoCloseOnEmpty={false}
           inputValue={value}
           onInputValueChange={setValue}
           mentions={mentions}
@@ -470,7 +500,7 @@ function FloatingHarness({
             rows={3}
           />
           <MentionTwoLevelMenu
-            categories={FLOATING_CATEGORIES}
+            categories={preparedShortcut ? shortcutCategories : FLOATING_CATEGORIES}
             surface="unknown"
             anchor={mainComposer ? 'composer' : 'caret'}
             menuSide={mainComposer ? 'top' : 'bottom'}
@@ -644,4 +674,9 @@ export const MainComposerAboveFrame: Story = {
 export const FloatingComposerAtTop: Story = {
   args: { search: '' },
   render: () => <FloatingHarness atTop />,
+};
+
+export const PreparedShortcut: Story = {
+  args: { search: '' },
+  render: () => <FloatingHarness mainComposer preparedShortcut />,
 };

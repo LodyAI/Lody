@@ -289,3 +289,22 @@ test('inline editor keeps a floating menu and focus through category selection',
   await expect(input).toBeFocused();
   await expect(input).toHaveValue(/@Fix-flaky-scroll-tests /);
 });
+
+test.describe('prepared shortcut touch selection', () => {
+  test.use({ isMobile: true, hasTouch: true });
+
+  for (const width of [390, 820]) {
+    test(`inserts a shortcut after touch focus at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(
+        '/iframe.html?id=mentions-mentiontwolevelmenu--prepared-shortcut&viewMode=story'
+      );
+      const input = page.getByRole('combobox', { name: 'composer' });
+      await input.fill('/review');
+      await page.getByRole('option').tap();
+      await expect(input).toHaveValue('Review this change');
+      await expect(input).toBeFocused();
+      await expect(input).toHaveAttribute('aria-expanded', 'false');
+    });
+  }
+});
