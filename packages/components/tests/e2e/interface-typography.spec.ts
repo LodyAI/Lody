@@ -389,9 +389,10 @@ for (const [theme, width, size] of [
     const user = page.locator('[data-conversation-turn-id="rhythm-user-1"]');
     const text = user.locator('[data-search-block-id]');
     const readingLeading = (24 * size) / 14;
-    await metrics(text, size, readingLeading);
     const toggle = user.getByRole('button', { name: 'Show more', exact: true });
-    await expect(toggle).toBeVisible();
+    // The dev Storybook can take longer than the 5s expect timeout to mount the story.
+    await toggle.waitFor();
+    await metrics(text, size, readingLeading);
 
     const clip = await text.evaluate((node) => {
       const box = node.getBoundingClientRect();
