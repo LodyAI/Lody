@@ -2591,6 +2591,10 @@ export const SessionChatInterface = memo(
     const sessionConversationConfigRevision = `${session.id}:${
       sessionConversationSourceFence.currentTurnKey ?? ''
     }`;
+    const sessionKnownConfigRevisions = useMemo(
+      () => sessionConversationSourceFence.knownTurnKeys.map((key) => `${session.id}:${key}`),
+      [session.id, sessionConversationSourceFence.knownTurnKeys]
+    );
     const sessionConfigPreferences = useMemo(
       () => ({
         modeId: sessionConversationConfig.modeId,
@@ -2603,7 +2607,7 @@ export const SessionChatInterface = memo(
         sessionConversationConfig.modelId,
       ]
     );
-    /* No effects here: user edits are the only stored selection state and the
+    /* User edits are the only stored selection state, scoped to this session;
        effective values derive per render. The UNVALIDATED candidates feed the
        capability lookup so the catalog can depend on the selection (Codex
        reasoning tiers, provisional menu enrichment) without feeding back into
@@ -2622,6 +2626,8 @@ export const SessionChatInterface = memo(
       preferences: sessionConfigPreferences,
       runtimePreferences: hasPendingConfig ? null : sessionRuntimeConfig,
       preserveUnsentUserEdits: true,
+      sessionKey: session.id,
+      knownPreferenceRevisions: sessionKnownConfigRevisions,
     });
     const {
       availableCommands,

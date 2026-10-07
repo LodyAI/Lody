@@ -190,7 +190,15 @@ this page is the full text of the rules summarised there.
   there instead of being forced in. That channel is a PURE DERIVATION: user
   edits are the only stored selection state, and effective values resolve per
   render (user edit > runtime baseline > turn preference > capability default;
-  a full runtime snapshot owns the non-user config table). Never reintroduce a
+  a full runtime snapshot owns the non-user config table). Existing-session knob
+  edits, including explicit Fast off, live in session-keyed app state alongside
+  Role drafts; returning to a tab restores only those edits, never a cached
+  resolved selection. The draft fence tracks known logical Turns and consumes
+  matching fields only at a previously unseen current Turn. Hydration cannot
+  acknowledge edits; queue promotion, deletion/reordering and observed history
+  backfill do not consume a next draft. A guarded effect commits only this draft
+  bookkeeping and cannot overwrite an intervening edit. Landing and new-session
+  drafts retain their component-local selection lifetime. Never reintroduce a
   reducer that stores the resolved selection or an effect that reconciles it —
   two dispatches disagreeing about a runtime-omitted key plus options rebuilt
   from the selection was a synchronous #185 render loop on session open. The footer names a Role only while

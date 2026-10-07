@@ -33,8 +33,8 @@ import type { AcpSessionSelectOption } from '@/components/shared/acp-session-sel
  * `fenceAcpSessionUserEdits`), and every disagreement between inputs is
  * settled by ONE priority rule inside `resolveAcpSessionConfigSelection` —
  * user edit > runtime baseline > turn preference > capability default, with a
- * full runtime snapshot owning the whole non-user config table. There are no
- * effects, so there is nothing to oscillate.
+ * full runtime snapshot owning the whole non-user config table. Resolved values
+ * never feed back into stored state, so there is nothing to oscillate.
  */
 
 export type AcpSessionConfigPreferences = {

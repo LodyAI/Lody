@@ -23,6 +23,9 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 - Session ACP catalogs use the bound Provider's runtime overrides.
 
 - History uses SessionData commands.
+- Existing-session run-config edits live in session-keyed app state; never persist
+  resolved values. Draft bookkeeping may consume captured edits at a new logical
+  Turn, but hydration and known-source rollback must not acknowledge them.
 - Held-send config is a session/runtime-scoped input to selection, never a stored
   resolved selection. Keep its logical Turn fence across history/queue handoff;
   next-draft edits win and attachment progress does not rebuild the catalog.

@@ -1,4 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { atom, useAtom } from 'jotai';
+import { atomFamily } from 'jotai/utils';
 import type { AcpConfigOptionValue } from '@lody/shared';
 import {
   areAcpSessionConfigPreferencesEqual,
@@ -16,7 +18,7 @@ import {
 import type { AcpSelectorTarget } from '@/components/shared/acp-selector-options';
 
 /**
- * ACP run-config selection with NO effects. The only stored state is the
+ * ACP run-config selection is derived. The only stored state is the
  * user's unsent edits; everything else derives per render
  * (`lib/acp-session-config-selection.ts` has the full story of the reconcile
  * loop this replaces — do not reintroduce a reducer that stores the resolved
@@ -31,16 +33,61 @@ import type { AcpSelectorTarget } from '@/components/shared/acp-selector-options
  * 2. `useResolvedAcpSessionConfigSelection(selection, selectorOptions)`
  *    validates the same inputs against the catalog those candidates produced.
  *
- * The fencing on (targetKey, preferenceRevision) happens as a render-phase
- * state adjustment: it depends only on those two inputs — never on anything
- * derived from the selection — so it settles in one extra render.
+ * Existing-session drafts live in session-keyed app state, so navigation cannot
+ * discard them. Fencing derives synchronously; an effect only commits consumed
+ * user edits and observed Turn identities, never resolved selection values.
  */
 
 type EditsFence = {
   targetKey: string | null;
   preferenceRevision: string | null;
   edits: AcpSessionUserConfigEdits;
+  knownPreferenceRevisions: readonly string[];
 };
+
+const EMPTY_EDITS_FENCE: EditsFence = {
+  targetKey: null,
+  preferenceRevision: null,
+  edits: EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
+  knownPreferenceRevisions: [],
+};
+
+// App-store scoped, like existing-session Role drafts. No storage or shared
+// SessionDoc write: only sending a Turn publishes these private choices.
+const sessionConfigEditsAtomFamily = atomFamily((_sessionKey: string) => atom(EMPTY_EDITS_FENCE));
+
+function resolveEditsFence(
+  fence: EditsFence,
+  args: UseAcpSessionConfigSelectionStateArgs
+): EditsFence {
+  if (args.enabled === false) return fence;
+  const targetChanged = fence.targetKey !== args.targetKey;
+  const revisionChanged = fence.preferenceRevision !== args.preferenceRevision;
+  const known = targetChanged ? [] : fence.knownPreferenceRevisions;
+  const knownSet = new Set(known);
+  const incoming = [...(args.knownPreferenceRevisions ?? []), args.preferenceRevision];
+  const hasNewKnownRevision = incoming.some((revision) => !knownSet.has(revision));
+  if (!targetChanged && !revisionChanged && !hasNewKnownRevision) return fence;
+  return {
+    targetKey: args.targetKey,
+    preferenceRevision: args.preferenceRevision,
+    knownPreferenceRevisions: args.knownPreferenceRevisions
+      ? hasNewKnownRevision
+        ? [...new Set([...known, ...incoming])]
+        : known
+      : [args.preferenceRevision],
+    edits:
+      targetChanged ||
+      (revisionChanged &&
+        (!args.knownPreferenceRevisions || !knownSet.has(args.preferenceRevision)))
+        ? fenceAcpSessionUserEdits(fence.edits, {
+            targetChanged,
+            preserveUnsentUserEdits: args.preserveUnsentUserEdits ?? false,
+            preferences: args.preferences,
+          })
+        : fence.edits,
+  };
+}
 
 export type UseAcpSessionConfigSelectionStateArgs = {
   /** While false the selection derives from empty inputs and no fencing runs. */
@@ -50,6 +97,10 @@ export type UseAcpSessionConfigSelectionStateArgs = {
   preferences: AcpSessionConfigPreferences;
   runtimePreferences?: AcpSessionConfigPreferences | null;
   preserveUnsentUserEdits?: boolean;
+  /** Existing-session drafts survive composer remounts in this app store. */
+  sessionKey?: string;
+  /** Known logical Turns: promotion, rollback and backfill are not new input. */
+  knownPreferenceRevisions?: readonly string[];
 };
 
 const EMPTY_PREFERENCES: AcpSessionConfigPreferences = {};
@@ -81,27 +132,13 @@ export function useAcpSessionConfigSelectionState({
   preferences,
   runtimePreferences,
   preserveUnsentUserEdits = false,
+  sessionKey,
+  knownPreferenceRevisions,
 }: UseAcpSessionConfigSelectionStateArgs): AcpSessionConfigSelectionHandle {
-  const [fence, setFence] = useState<EditsFence>({
-    targetKey: null,
-    preferenceRevision: null,
-    edits: EMPTY_ACP_SESSION_USER_CONFIG_EDITS,
-  });
-
-  if (
-    enabled &&
-    (fence.targetKey !== targetKey || fence.preferenceRevision !== preferenceRevision)
-  ) {
-    setFence({
-      targetKey,
-      preferenceRevision,
-      edits: fenceAcpSessionUserEdits(fence.edits, {
-        targetChanged: fence.targetKey !== targetKey,
-        preserveUnsentUserEdits,
-        preferences,
-      }),
-    });
-  }
+  const [localFenceAtom] = useState(() => atom(EMPTY_EDITS_FENCE));
+  const [storedFence, setFence] = useAtom(
+    sessionKey ? sessionConfigEditsAtomFamily(sessionKey) : localFenceAtom
+  );
 
   /* VALUE-stabilize the preference inputs. `preferences`/`runtimePreferences`
      are object literals resolved from `sessionDoc.history`, and the doc mirror
@@ -126,8 +163,45 @@ export function useAcpSessionConfigSelectionState({
     stableRuntimePreferencesRef.current = runtimePreferences ?? null;
   }
 
+  const stableKnownRevisionsRef = useRef(knownPreferenceRevisions);
+  if (
+    stableKnownRevisionsRef.current?.length !== knownPreferenceRevisions?.length ||
+    knownPreferenceRevisions?.some(
+      (revision, index) => stableKnownRevisionsRef.current?.[index] !== revision
+    )
+  ) {
+    stableKnownRevisionsRef.current = knownPreferenceRevisions;
+  }
+  const stableKnownRevisions = stableKnownRevisionsRef.current;
+
   const effectivePreferences = enabled ? stablePreferencesRef.current : EMPTY_PREFERENCES;
   const effectiveRuntimePreferences = enabled ? stableRuntimePreferencesRef.current : null;
+  const fence = useMemo(
+    () =>
+      resolveEditsFence(storedFence, {
+        enabled,
+        targetKey,
+        preferenceRevision,
+        preferences: effectivePreferences,
+        preserveUnsentUserEdits,
+        knownPreferenceRevisions: stableKnownRevisions,
+      }),
+    [
+      storedFence,
+      enabled,
+      targetKey,
+      preferenceRevision,
+      effectivePreferences,
+      preserveUnsentUserEdits,
+      stableKnownRevisions,
+    ]
+  );
+  useEffect(() => {
+    if (fence === storedFence) return;
+    // Do not overwrite an edit made after this render (or by another mounted
+    // surface). Resolved values never feed back into the draft atom.
+    setFence((current) => (current === storedFence ? fence : current));
+  }, [fence, setFence, storedFence]);
   const edits = enabled ? fence.edits : EMPTY_ACP_SESSION_USER_CONFIG_EDITS;
 
   const selection = useMemo<AcpSessionConfigSelectionInputs>(
@@ -140,27 +214,57 @@ export function useAcpSessionConfigSelectionState({
   );
   const candidates = useMemo(() => buildAcpSessionConfigCandidates(selection), [selection]);
 
-  const selectMode = useCallback((value: string | null) => {
-    setFence((prev) => ({ ...prev, edits: { ...prev.edits, mode: { value } } }));
-  }, []);
-  const selectModel = useCallback((value: string | null) => {
-    setFence((prev) => ({ ...prev, edits: { ...prev.edits, model: { value } } }));
-  }, []);
-  const selectConfigOption = useCallback((configId: string, value: AcpConfigOptionValue) => {
-    setFence((prev) => ({
-      ...prev,
-      edits: {
-        ...prev.edits,
-        configOptions: { ...prev.edits.configOptions, [configId]: value },
-      },
-    }));
-  }, []);
-  const replaceConfigOptions = useCallback((values: Record<string, AcpConfigOptionValue>) => {
-    setFence((prev) => ({
-      ...prev,
-      edits: { ...prev.edits, configOptions: { ...values } },
-    }));
-  }, []);
+  const updateEdits = useCallback(
+    (update: (edits: AcpSessionUserConfigEdits) => AcpSessionUserConfigEdits) => {
+      setFence((previous) => {
+        const current = resolveEditsFence(previous, {
+          enabled,
+          targetKey,
+          preferenceRevision,
+          preferences: effectivePreferences,
+          preserveUnsentUserEdits,
+          knownPreferenceRevisions: stableKnownRevisions,
+        });
+        return { ...current, edits: update(current.edits) };
+      });
+    },
+    [
+      enabled,
+      targetKey,
+      preferenceRevision,
+      effectivePreferences,
+      preserveUnsentUserEdits,
+      stableKnownRevisions,
+      setFence,
+    ]
+  );
+  const selectMode = useCallback(
+    (value: string | null) => {
+      updateEdits((previousEdits) => ({ ...previousEdits, mode: { value } }));
+    },
+    [updateEdits]
+  );
+  const selectModel = useCallback(
+    (value: string | null) => {
+      updateEdits((previousEdits) => ({ ...previousEdits, model: { value } }));
+    },
+    [updateEdits]
+  );
+  const selectConfigOption = useCallback(
+    (configId: string, value: AcpConfigOptionValue) => {
+      updateEdits((previousEdits) => ({
+        ...previousEdits,
+        configOptions: { ...previousEdits.configOptions, [configId]: value },
+      }));
+    },
+    [updateEdits]
+  );
+  const replaceConfigOptions = useCallback(
+    (values: Record<string, AcpConfigOptionValue>) => {
+      updateEdits((previousEdits) => ({ ...previousEdits, configOptions: { ...values } }));
+    },
+    [updateEdits]
+  );
 
   return {
     selection,

@@ -19,7 +19,8 @@
  * and resolves the runtime-omitted key once, so this must mount and settle.
  */
 
-import { act, useMemo } from 'react';
+import { act, useLayoutEffect, useMemo } from 'react';
+import { Provider, createStore } from 'jotai';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -85,6 +86,9 @@ describe('session composer config selection wiring (#185 regression)', () => {
   let renderCount = 0;
   let settledModelId: string | null = null;
   let settledConfigKeys: string[] = [];
+  let selectConfigOption: ReturnType<
+    typeof useAcpSessionConfigSelectionState
+  >['selectConfigOption'];
 
   beforeEach(() => {
     container = document.createElement('div');
@@ -117,10 +121,12 @@ describe('session composer config selection wiring (#185 regression)', () => {
       enabled: true,
       targetKey,
       preferenceRevision,
+      knownPreferenceRevisions: [preferenceRevision],
       preferences: framePreferences,
       runtimePreferences: frameRuntimePreferences,
       preserveUnsentUserEdits: true,
     });
+    selectConfigOption = controller.selectConfigOption;
     const selectorOptions = useMemo(() => {
       catalogBuilds += 1;
       return buildAcpSelectorOptions({
@@ -160,6 +166,7 @@ describe('session composer config selection wiring (#185 regression)', () => {
        conversation hot path. */
     flushSync(() => root?.render(<ConfigSelectionHarness />));
     const settledCatalogBuilds = catalogBuilds;
+    const settledSelectConfigOption = selectConfigOption;
     for (let frame = 0; frame < 10; frame += 1) {
       const freshPreferences = {
         ...preferences,
@@ -178,6 +185,7 @@ describe('session composer config selection wiring (#185 regression)', () => {
       );
     }
     expect(catalogBuilds).toBe(settledCatalogBuilds);
+    expect(selectConfigOption).toBe(settledSelectConfigOption);
   });
 });
 
@@ -437,5 +445,179 @@ describe('composer configuration across attachment sends', () => {
     durable = [];
     render();
     expect(visible().model).toBe('default');
+  });
+});
+
+describe('existing-session run-config drafts across tabs', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  let store: ReturnType<typeof createStore>;
+  let selection: ReturnType<typeof useAcpSessionConfigSelectionState>;
+  const options: AcpSessionSelectorOptionsInput = {
+    capabilityAuthority: 'authoritative',
+    modeOptions: [{ value: 'agent', label: 'Agent' }],
+    modelOptions: [{ value: 'gpt-6', label: 'GPT-6' }],
+    defaultModeId: 'agent',
+    defaultModelId: 'gpt-6',
+    modelReasoningEfforts: undefined,
+    configOptionSelectors: [
+      {
+        configId: 'fast-mode',
+        label: 'Fast',
+        type: 'boolean',
+        currentValue: false,
+        options: [],
+      },
+    ],
+  };
+  function Harness({
+    session = 'a',
+    ready = true,
+    revision = 'turn:old',
+    known = ['turn:old'],
+    preferred = false,
+    runtime = false,
+    editBeforeFenceCommit = false,
+  }: {
+    session?: string;
+    ready?: boolean;
+    revision?: string;
+    known?: string[];
+    preferred?: boolean;
+    runtime?: boolean;
+    editBeforeFenceCommit?: boolean;
+  }) {
+    selection = useAcpSessionConfigSelectionState({
+      enabled: ready,
+      targetKey: `${session}:builtin:codex`,
+      preferenceRevision: revision,
+      preferences: { configOptionValues: { 'fast-mode': preferred } },
+      runtimePreferences: { configOptionValues: { 'fast-mode': runtime } },
+      preserveUnsentUserEdits: true,
+      sessionKey: session,
+      knownPreferenceRevisions: known,
+    });
+    const selectConfigOption = selection.selectConfigOption;
+    useLayoutEffect(() => {
+      if (editBeforeFenceCommit) selectConfigOption('fast-mode', true);
+    }, [editBeforeFenceCommit, revision, selectConfigOption]);
+    const resolved = useResolvedAcpSessionConfigSelection(selection.selection, options);
+    return <output>{String(resolved.configOptionValues['fast-mode'])}</output>;
+  }
+  const render = (props: Parameters<typeof Harness>[0] = {}, remount = false) => {
+    flushSync(() =>
+      root.render(
+        <Provider store={store}>
+          <Harness key={remount ? (props.session ?? 'a') : 'same'} {...props} />
+        </Provider>
+      )
+    );
+  };
+  const toggle = (value: boolean) =>
+    flushSync(() => selection.selectConfigOption('fast-mode', value));
+  const visible = () => container.textContent;
+  beforeEach(() => {
+    store = createStore();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    flushSync(() => root.unmount());
+    container.remove();
+  });
+
+  it.each([false, true])('keeps Fast on through A/B/A with remount=%s', (remount) => {
+    render({}, remount);
+    expect(visible()).toBe('false');
+    toggle(true);
+    expect(visible()).toBe('true');
+    render({ session: 'b' }, remount);
+    expect(visible()).toBe('false');
+    render({ session: 'a' }, remount);
+    expect(visible()).toBe('true');
+  });
+
+  it('keeps explicit Fast off and isolates edits in both tabs', () => {
+    render({ runtime: true }, true);
+    toggle(false);
+    render({ session: 'b' }, true);
+    toggle(true);
+    render({ session: 'a', runtime: true }, true);
+    expect(visible()).toBe('false');
+    render({ session: 'b' }, true);
+    expect(visible()).toBe('true');
+  });
+
+  it('never acknowledges edits from a disabled hydration snapshot', () => {
+    render({}, true);
+    toggle(true);
+    render({ session: 'b' }, true);
+    render({ ready: false, revision: '', known: [], preferred: true }, true);
+    render({}, true);
+    expect(visible()).toBe('true');
+    expect(selection.hasUserEdits).toBe(true);
+  });
+
+  it('consumes captured edits once and never resurrects them after rollback', () => {
+    render({}, true);
+    toggle(true);
+    render({ revision: 'turn:new', known: ['turn:old', 'turn:new'], preferred: true });
+    expect(visible()).toBe('false');
+    expect(selection.hasUserEdits).toBe(false);
+    render({ session: 'b' }, true);
+    render({}, true);
+    expect(visible()).toBe('false');
+    expect(selection.hasUserEdits).toBe(false);
+  });
+
+  it('preserves a divergent next draft through acceptance and known-source rollback', () => {
+    render();
+    toggle(true);
+    render({ revision: 'turn:new', known: ['turn:old', 'turn:new'] });
+    expect(visible()).toBe('true');
+    // Backfill is not acceptance; learn its identity even while latest is unchanged.
+    render({ revision: 'turn:new', known: ['turn:older', 'turn:old', 'turn:new'] });
+    render({ revision: 'turn:older', known: ['turn:older'], preferred: true });
+    expect(visible()).toBe('true');
+    expect(selection.hasUserEdits).toBe(true);
+    render({ session: 'b' }, true);
+    render({ revision: 'turn:older', preferred: true }, true);
+    expect(visible()).toBe('true');
+    expect(selection.hasUserEdits).toBe(true);
+  });
+
+  it('does not consume a next-draft edit at held-send promotion or stale runtime refresh', () => {
+    render({ revision: 'turn:held', known: ['turn:held'], preferred: true, runtime: true });
+    toggle(true);
+    render({ session: 'b' }, true);
+    render({ revision: 'turn:held', known: ['turn:held'], preferred: true }, true);
+    expect(visible()).toBe('true');
+    expect(selection.hasUserEdits).toBe(true);
+  });
+
+  it('does not let a pending fence commit consume a newer same-valued edit', () => {
+    render();
+    render({
+      revision: 'turn:new',
+      known: ['turn:old', 'turn:new'],
+      preferred: true,
+      editBeforeFenceCommit: true,
+    });
+    expect(visible()).toBe('true');
+    expect(selection.hasUserEdits).toBe(true);
+    render({ session: 'b' }, true);
+    render({ revision: 'turn:new', known: ['turn:old', 'turn:new'], preferred: true }, true);
+    expect(visible()).toBe('true');
+  });
+
+  it('keeps a callback from the previous tab bound to its own session', () => {
+    render();
+    const selectA = selection.selectConfigOption;
+    render({ session: 'b' });
+    flushSync(() => selectA('fast-mode', true));
+    expect(visible()).toBe('false');
+    render();
+    expect(visible()).toBe('true');
   });
 });
