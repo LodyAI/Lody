@@ -457,9 +457,6 @@ function ShortcutRow({
   findGlobalConflictTitle: (binding: string) => string | null;
 }) {
   const { t } = useTranslation();
-  // Resolve a command's display label: prefer its i18n key (set by built-in placeholders),
-  // fall back to the already-translated/static `title`. Keeps labels correct across languages
-  // and consistent between the row, the conflict notes, and the command palette.
   const resolveTitle = (cmd: Command | undefined, fallback: string): string =>
     cmd ? commandLabel(t, cmd) : fallback;
 
