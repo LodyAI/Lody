@@ -125,6 +125,10 @@ import {
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
 import { getSessionCommandEnvironment } from '@/lib/session-command-environment';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
+import {
+  applyAgentRoleCreateTarget,
+  resolveAgentRoleCreateFromCatalog,
+} from '@/lib/agent-role-create';
 import { getLogger, rootLogger } from '@/utils/logger';
 import { parseEnvAssignments } from './agent-config';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -170,6 +174,8 @@ export type CreateOptions = CommonOptions &
     machine?: string;
     agent?: string;
     agentConfig?: string;
+    /** CLI `--agent-role` selector (id or name), resolved from the workspace catalog. */
+    agentRole?: string;
     currentSessionId?: SessionId;
     defaultMachineId?: MachineId;
     requesterUserId?: string;
@@ -4012,6 +4018,10 @@ const sessionCreateCommand = new Command('create')
   .option('--machine <idOrName>', 'Target machine id or name')
   .option('--agent <idOrName>', 'Agent config id or name')
   .option('--agent-config <idOrName>', 'Agent config id or name')
+  .option(
+    '--agent-role <idOrName>',
+    'Agent Role id or name; the Role overrides --machine, --agent(-config), --mode, --model and --config-option'
+  )
   .option('--parent <sessionId>', 'Parent session whose work context should be reused')
   .option('--use-current-session-as-parent', 'Use LODY_SESSION_ID as the parent session')
   .option('--title <title>', 'Fixed session title (default: generated from the prompt)')
@@ -4051,17 +4061,40 @@ const sessionCreateCommand = new Command('create')
         const workspace = await resolveWorkspaceOrThrow(auth, options.workspace);
         const prompt = await readPromptText(options, promptArg);
         await withWorkspaceManager(auth, workspace, async (manager) => {
-          const dispatchConfig = resolveTurnDispatchConfig({
-            mode: options.mode,
-            model: options.model,
-            configOption: options.configOption,
-          });
+          const agentRoleSelector = normalizeCliValue(options.agentRole);
+          const resolvedAgentRole = agentRoleSelector
+            ? await resolveAgentRoleCreateFromCatalog({
+                manager,
+                workspaceId: workspace.id as WorkspaceId,
+                selector: agentRoleSelector,
+                prompt,
+                overrides: options,
+              })
+            : undefined;
+          let effectivePrompt = prompt;
+          let dispatchConfig: ResolvedTurnDispatchConfig;
+          if (resolvedAgentRole) {
+            if (resolvedAgentRole.ignoredOverrides.length > 0) {
+              console.error(
+                `Warning: --agent-role ${resolvedAgentRole.role.id} overrides ${resolvedAgentRole.ignoredOverrides.join(', ')}; the Role's machine, agent config, and run configuration take precedence.`
+              );
+            }
+            applyAgentRoleCreateTarget(options, resolvedAgentRole);
+            effectivePrompt = resolvedAgentRole.prompt;
+            dispatchConfig = resolvedAgentRole.dispatchConfig;
+          } else {
+            dispatchConfig = resolveTurnDispatchConfig({
+              mode: options.mode,
+              model: options.model,
+              configOption: options.configOption,
+            });
+          }
           const shouldWaitForCompletion = shouldWaitForSessionCompletion(options);
           const result = await createSessionResult(
             auth,
             workspace,
             manager,
-            prompt,
+            effectivePrompt,
             options,
             dispatchConfig,
             shouldWaitForCompletion

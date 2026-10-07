@@ -15,6 +15,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 - `resource-discovery-runtime.ts` — synchronized workspace readers and caller-specific
   authorization; it supplies the existing workspace command runtime to the query service.
   Intent and limits: [resource discovery](../../../../specs/resource-discovery.md).
+- `agent-role-create.ts` — Agent Role catalog read and create-path resolution
+  shared by the MCP create tools and CLI `session create --agent-role`: the Role
+  row is authoritative for machine, agent config, run config and prompt prefix,
+  and the create freezes Role id/revision/snapshot as provenance.
 
 ## Message hub and transports
 

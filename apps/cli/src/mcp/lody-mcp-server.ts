@@ -14,15 +14,12 @@ import {
   getAcpCapabilityCacheKey,
   getMachineFlockAcpCapabilities,
   getMachineFlockDocId,
-  getWorkspaceFlockDocId,
   getServerNow,
   getSessionRoomId,
   hasAgentRunConfigSelection,
   isLoroRepoDocDeleted,
   isMachineDocRoomId,
   readMachineFlockRowsFromFlock,
-  readWorkspaceFlockRowsFromFlock,
-  listWorkspaceAgentRoles,
   type AcpCapabilityCacheEntry,
   type AgentRunConfigSelection,
   LocalSessionControlResponseSchema,
@@ -85,6 +82,11 @@ import {
   classifyLocalDaemonIpcError,
 } from '@/lib/command-runtime';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
+import {
+  bindAgentRoleCreateOptions,
+  composeAgentRolePrompt,
+  loadWorkspaceAgentRoleCatalog,
+} from '@/lib/agent-role-create';
 import {
   findReviewRunByReviewerSession,
   syncReviewFlockOnce,
@@ -1269,29 +1271,6 @@ type ResolvedMcpSessionCreate = {
   role?: AgentRole;
 };
 
-const composeAgentRolePrompt = (promptPrefix: string | undefined, prompt: string): string => {
-  const prefix = promptPrefix?.trim();
-  return prefix ? `${prefix}\n\n${prompt}` : prompt;
-};
-
-const loadWorkspaceAgentRoleCatalog = async (
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId
-): Promise<ReadonlyMap<string, AgentRole>> => {
-  const docId = getWorkspaceFlockDocId(workspaceId);
-  await manager.syncFlockDocOrThrow(docId, {
-    timeoutMs: 10_000,
-    reason: 'mcp-agent-role-read',
-  });
-  const handle = await manager.repo.openFlockDoc(docId);
-  return new Map(
-    listWorkspaceAgentRoles(readWorkspaceFlockRowsFromFlock(handle.flock)).map((role) => [
-      role.id,
-      role,
-    ])
-  );
-};
-
 const resolveMcpSessionCreate = (
   input: SessionCreateCommandInput,
   invoking: InvokingTurnContext | undefined,
@@ -1376,13 +1355,6 @@ const buildResolvedMcpCreateCanonicalCommand = (
   ...(resolved.input.workContext ? { workContext: resolved.input.workContext } : {}),
   ...(deadlineSeconds !== undefined ? { deadlineSeconds } : {}),
 });
-
-const bindAgentRoleCreateOptions = (options: CreateOptions, role: AgentRole | undefined): void => {
-  if (!role) return;
-  options.agentRoleId = role.id;
-  options.agentRoleRevision = role.revision;
-  options.agentRoleSnapshot = snapshotAgentRole(role);
-};
 
 const buildMcpCreateOptions = (
   input: SessionCreateCommandInput,
