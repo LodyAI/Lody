@@ -39,6 +39,10 @@ update until a maintainer rechecks it.
   `Runtime` rather than guessing.
 - Link [ACP Wall](https://github.com/wibus-wee/acp-wall) as an independent, versioned comparison of
   standard ACP implementations.
+- Add an extension-column reference because the columns describe adapter declarations, not
+  user-facing feature availability. In particular, `sessionHistory` is the read-only Codex import
+  path while other providers import through standard ACP replay, and `worktreeProject` maps Codex's
+  native project identity while Lody-side worktrees work for every provider.
 
 ## Alternatives considered
 

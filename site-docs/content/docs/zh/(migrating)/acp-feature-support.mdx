@@ -61,6 +61,31 @@ Lody 客户端读到的结构都一致。自定义或注册表里的 ACP Agent �
 - **运行时** —— Lody 只是代理或启动官方 / 外部运行时，自己并不添加该能力；是否可用取决于该
   运行时的版本和配置。在扩展能力列中，`运行时` 表示 Lody 没有提供翻译该能力的适配器。
 
+### 扩展能力说明
+
+`Lody：`列描述的是 provider 适配器声明了什么，并不等同于 Lody 里有没有对应的用户功能。
+尤其需要区分：
+
+- **子代理事件** —— 适配器通过 `_lody/subagents/event` 推送子代理运行的快照、进度和输出。
+- **会话标题** —— 适配器生成标题，并以带 `_meta.lody.titleSource` 的标准
+  `session_info_update` 推送。
+- **用量** —— 标准 `usage_update` 上的上下文与 token 记账，按模型累计。
+- **速率限制** —— 通过 `_lody/rate_limits/update` 推送额度快照，可选
+  `_lody/rate_limits/get` 查询。
+- **按轮 Fork** —— `session/fork` 可以指定从哪一轮历史分叉。
+- **转向** —— 通过 `_lody/session/steer` 或 `_meta.lody.steer` 向进行中的轮次注入指引。
+- **任务** —— 后台或定时任务沿用普通工具调用生命周期，并带 `_meta.lody.task`。
+- **子代理** —— 子代理生命周期，以及可选的列表、取消和输出查询。
+- **持久目标** —— 跨单条 prompt 存续的会话目标，支持 set、pause、resume、clear。
+- **上下文压缩** —— 以带 `_meta.lody.activity` 的工具生命周期上报上下文压缩和重试。
+- **会话历史** —— 只读的 `_lody/session/history/read`，用于在不 resume 的前提下导入内置
+  Codex 的既有 thread。其他 provider 改用标准 ACP `session/list` 和 `session/load` 回放
+  导入，所以这里的 `—` 不等于无法导入历史。
+- **工作树项目** —— 建立会话时用 `_meta.lody.worktreeProject` 告知适配器这个 worktree 会话
+  对应的原始项目根目录，让 Codex 能把同一项目的多个 worktree 归到同一个原生 project 下，
+  同时继续以 worktree 作为 `cwd`。没有独立原生项目身份的 provider 不需要它，而 Lody 侧的
+  worktree 对所有 provider 都可用，所以这里的 `—` 不是缺少 worktree 功能。
+
 注释：
 
 1. **任务：** Claude Code、Codex、Kimi Code 声明的是后台任务；Grok 声明的是定时任务。没有

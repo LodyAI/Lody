@@ -34,6 +34,10 @@ Language: [English](2026-10-06-docs-acp-feature-support.md)
   猜测填充。
 - 链接 [ACP Wall](https://github.com/wibus-wee/acp-wall)，作为标准 ACP 实现的独立、带版本
   的对比。
+- 增加扩展能力列说明，因为这些列描述的是适配器声明，而不是用户功能是否存在。尤其是
+  `sessionHistory` 只是 Codex 的只读导入路径，其他 provider 通过标准 ACP 回放导入；
+  `worktreeProject` 映射的是 Codex 原生项目身份，而 Lody 侧的 worktree 对所有 provider 都
+  可用。
 
 ## 考虑过的替代方案
 

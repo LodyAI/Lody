@@ -70,6 +70,38 @@ Legend:
   capability itself; whether it is available depends on that runtime's version and configuration.
   In the extension columns, `Runtime` means Lody ships no adapter that translates the feature.
 
+### Extension capability reference
+
+The `Lody:` columns describe what the provider adapter declares, which is not the same as whether
+the user-facing feature exists in Lody. In particular:
+
+- **subagent events** — the adapter streams child-agent snapshots, progress, and output on
+  `_lody/subagents/event`.
+- **session title** — the adapter generates the title and pushes it as a standard
+  `session_info_update` tagged with `_meta.lody.titleSource`.
+- **usage** — context and token accounting on the standard `usage_update`, with per-model totals.
+- **rate limits** — quota snapshots on `_lody/rate_limits/update`, with an optional
+  `_lody/rate_limits/get` query.
+- **fork at turn** — `session/fork` can name the historical turn to fork from.
+- **steering** — guidance can be injected into an in-flight turn through `_lody/session/steer` or
+  `_meta.lody.steer`.
+- **tasks** — background or scheduled work reported on the normal tool-call lifecycle with
+  `_meta.lody.task`.
+- **subagents** — subagent lifecycle, plus optional list, cancel, and output queries.
+- **goal** — a durable session goal that survives past one prompt, with set, pause, resume, and
+  clear actions.
+- **compaction** — context compaction and retry reported as a tool lifecycle with
+  `_meta.lody.activity`.
+- **session history** — the read-only `_lody/session/history/read` method used to import an
+  existing built-in Codex thread without resuming it. Other providers import through the standard
+  ACP `session/list` and `session/load` replay, so `—` here does not mean history cannot be
+  imported.
+- **worktree project** — `_meta.lody.worktreeProject` carries a worktree session's original project
+  root on session establishment, so Codex can group several worktrees under one native project
+  while keeping the worktree as `cwd`. Providers with no separate native project identity do not
+  need it, and Lody-side worktrees work for every provider, so `—` here is not a missing worktree
+  feature.
+
 Notes:
 
 1. **Tasks:** Claude Code, Codex, and Kimi Code declare background tasks; Grok declares scheduled
