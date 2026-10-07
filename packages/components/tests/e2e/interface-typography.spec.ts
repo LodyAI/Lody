@@ -368,6 +368,62 @@ for (const mode of ['progress', 'progress-streaming']) {
   });
 }
 
+for (const [theme, width, size] of [
+  ['dark', 1120, 14],
+  ['light', 720, 16],
+  ['dark', 420, 12],
+  ['light', 1120, 13],
+  ['dark', 720, 15],
+] as const) {
+  test(`collapsed user text clips between lines, not through one: ${theme}, ${width}px, ${size}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1500 });
+    await page.addInitScript(
+      (fontSize) => localStorage.setItem('lody-conversation-font-size', JSON.stringify(fontSize)),
+      size
+    );
+    await page.goto(
+      `${rhythmStory.replace('--conversation-rhythm', '--conversation-rhythm-long-user')}&globals=theme:${theme}`
+    );
+    const user = page.locator('[data-conversation-turn-id="rhythm-user-1"]');
+    const text = user.locator('[data-search-block-id]');
+    const readingLeading = (24 * size) / 14;
+    await metrics(text, size, readingLeading);
+    const toggle = user.getByRole('button', { name: 'Show more', exact: true });
+    await expect(toggle).toBeVisible();
+
+    const clip = await text.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rows = new Map<number, number>();
+      for (const rect of range.getClientRects()) {
+        if (rect.height === 0) continue;
+        rows.set(rect.top, Math.max(rows.get(rect.top) ?? 0, rect.bottom));
+      }
+      return {
+        top: box.top,
+        bottom: box.bottom,
+        overflow: node.scrollHeight - node.clientHeight,
+        rows: Array.from(rows, ([top, bottom]) => ({ top, bottom })),
+      };
+    });
+    expect(clip.overflow).toBeGreaterThan(0);
+    const visible = clip.rows.filter((row) => row.top < clip.bottom - 0.5);
+    expect(visible.length).toBeGreaterThanOrEqual(5);
+    for (const row of visible) {
+      expect(row.bottom).toBeLessThanOrEqual(clip.bottom + 0.5);
+    }
+    expect(clip.bottom - clip.top).toBeCloseTo(7 * readingLeading, 0);
+
+    await toggle.click();
+    await expect(user.getByRole('button', { name: 'Show less', exact: true })).toBeVisible();
+    expect(await text.evaluate((node) => node.scrollHeight - node.clientHeight)).toBe(0);
+    await expect(text).toContainText('Do not reuse any running application or its data.');
+  });
+}
+
 async function metrics(element: Locator, font: number, leading?: number) {
   await expect(element).toBeVisible();
   await expect

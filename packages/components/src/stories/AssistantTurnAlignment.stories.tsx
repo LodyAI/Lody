@@ -281,6 +281,43 @@ export const ConversationRhythmWithFiles: Story = {
   render: () => <ConversationRhythmScene items={rhythmWithFiles} />,
 };
 
+/** Long enough to collapse behind "Show more", with wrapped and short lines mixed. */
+const rhythmLongUserItems = rhythmItems.map((item) =>
+  item.type === 'message' && item.message.id === 'rhythm-user-1'
+    ? {
+        ...item,
+        message: {
+          ...item.message,
+          items: [
+            {
+              type: 'text' as const,
+              text: [
+                'Verification only — do not edit, commit, or push anything.',
+                '',
+                '1. Fetch the review branch and confirm HEAD is the expected commit ("fix: keep line breaks in shell output").',
+                '2. Initialize the workspace submodules: packages/extension-core packages/extension-alpha packages/extension-beta.',
+                '3. 安装依赖后运行与终端输出相关的测试，确认中文、English、数字 512 和标点都能正常换行。',
+                '4. Run the static checks and record any failure with its full output.',
+                '5. Open the conversation and compare the collapsed and expanded message.',
+                '6. Report the results in a short summary.',
+                '7. Note which checks were skipped and why.',
+                '8. Keep every command read-only.',
+                '9. Attach the exact commit you verified.',
+                '',
+                'Do not reuse any running application or its data.',
+              ].join('\n'),
+            },
+          ],
+        },
+      }
+    : item
+);
+
+export const ConversationRhythmLongUser: Story = {
+  ...ConversationRhythm,
+  render: () => <ConversationRhythmScene items={rhythmLongUserItems} />,
+};
+
 function ConversationRhythmScene({
   themed = false,
   items = rhythmItems,

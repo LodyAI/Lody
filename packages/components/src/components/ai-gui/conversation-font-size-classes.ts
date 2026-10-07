@@ -39,7 +39,13 @@ export function terminalTextFontSizeStyle(fontSize: ConversationFontSize): CSSPr
   };
 }
 
-/** Collapsed-height cap (px) for long user text, scaled so ~the same line count shows. */
-export function userTextCollapsedHeight(fontSize: ConversationFontSize): number {
-  return Math.round((fontSize / 14) * 160);
+const USER_TEXT_COLLAPSED_LINES = 7;
+
+/**
+ * Collapsed-height cap for long user text. It is a whole number of the user
+ * text's own line boxes, so the clip edge falls between rows; a pixel cap cut
+ * through a row whenever the reading leading changed.
+ */
+export function userTextCollapsedHeight(fontSize: ConversationFontSize): string {
+  return `calc(${conversationTextToken(conversation.readingLeading, fontSize)} * ${USER_TEXT_COLLAPSED_LINES})`;
 }
