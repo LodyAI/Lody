@@ -1,0 +1,91 @@
+---
+title: ACP 与扩展能力支持一览
+description: Lody 内置 ACP provider 的支持矩阵——标准 ACP 能力，以及各 provider 适配器通过 acp-extension-core 协商的 Lody 扩展能力。
+---
+
+# ACP 与扩展能力支持一览
+
+本页面向从 Codex、Claude Code 或其他 ACP Agent 迁移过来的读者：你原本用的能力，换到 Lody
+之后哪些还在。页面先说明 ACP 是什么、Lody 如何扩展它，再给出每个内置 provider 的支持矩阵。
+如果还没有接入运行时，请先看[从 Codex 或 Claude Code 过来](/zh/docs/from-codex-claude-code)
+或 [Agent Config](/zh/docs/agents)。
+
+## ACP 是什么
+
+[Agent Client Protocol](https://agentclientprotocol.com/)（ACP）是客户端（你使用的应用）与
+Agent（真正执行工作的运行时）之间的开放协议。Lody 是 ACP 客户端：它启动 provider 的 ACP
+服务，在 `initialize` 阶段协商能力，然后通过同一条连接交换 prompt、流式更新、工具调用、权限
+请求和会话生命周期事件。
+
+ACP 只覆盖共同的核心，因此两个 ACP Agent 在可选能力上仍可能不同：图片、内嵌上下文、会话恢复
+或 Fork、MCP 传输、提问（elicitation）等等。所以 Lody 会协商能力，而不是默认它们存在。所有
+内置 provider 都具备同一套基线：文本 prompt、流式更新、工具调用、权限请求、取消，以及 Lody
+提供的文件系统与终端回调。
+
+## Lody 如何扩展 ACP
+
+Lody 自己的扩展能力定义在 [`acp-extension-core`](https://github.com/LodyAI/acp-extension-core)
+里：这是 ACP v1 之上、与 provider 无关的契约。流式子代理事件、用量记账、速率限制、持久目标、
+上下文压缩等能力需要一份稳定的共享描述，因此每项能力独立版本化，并通过 `_meta.lody` 单独声明：
+
+- Agent 在 `InitializeResponse.agentCapabilities._meta.lody` 上声明自己实现的能力；
+- 客户端在 `InitializeRequest.clientCapabilities._meta.lody` 上声明自己支持的能力；
+- 缺少某个键就表示对方不支持该项能力，支持其中一项绝不代表支持其他项。
+
+公开的 `acp-extension-*` 适配器把各运行时翻译成这套契约，因此无论连接背后是哪个 provider，
+Lody 客户端读到的结构都一致。自定义或注册表里的 ACP Agent 也可以实现同样的键。具体 payload
+见[能力一览](https://github.com/LodyAI/acp-extension-core/blob/main/README.zh.md#%E8%83%BD%E5%8A%9B%E4%B8%80%E8%A7%88)。
+
+## 支持一览
+
+下表把标准 ACP 能力（前缀 `ACP：`）和 Lody 扩展能力（前缀 `Lody：`）放在一起。九个 provider
+都具备上文所述的 ACP 基线，只有下面这些可选能力会因 provider 而异。
+
+| Provider             | ACP：图片 | ACP：内嵌上下文 | ACP：加载/恢复 | ACP：Fork | ACP：附加目录 | ACP：MCP | ACP：登出 | ACP：提问 | Lody：子代理事件 | Lody：会话标题 | Lody：用量 | Lody：速率限制 | Lody：按轮 Fork | Lody：转向 | Lody：任务 | Lody：子代理 | Lody：持久目标 | Lody：上下文压缩 | Lody：会话历史 | Lody：工作树项目 |
+| -------------------- | --------- | --------------- | -------------- | --------- | ------------- | -------- | --------- | --------- | ---------------- | -------------- | ---------- | -------------- | --------------- | ---------- | ---------- | ------------ | -------------- | ---------------- | -------------- | ---------------- |
+| **Claude Code**      | ✓         | ✓               | ✓              | ✓         | ✓             | HTTP+SSE | ✓         | ✓         | ✓                | ✓              | ✓          | ✓              | ✓               | ✓          | ✓¹         | ◐²           | ✓              | ✓                | —              | —                |
+| **Codex**            | ✓         | ✓               | ✓              | ✓         | ✓             | HTTP     | ✓         | ✓         | ✓                | ✓              | ✓          | ✓              | ✓               | ✓          | ✓¹         | ◐²           | ✓              | ✓                | ✓              | ✓                |
+| **Grok**             | 运行时    | 运行时          | 运行时         | ✓         | 运行时        | 运行时   | 运行时    | ✓         | ✓                | ✓              | ✓          | ✓              | ✓               | —          | ✓³         | —            | —              | —                | —              | —                |
+| **Kimi Code**        | ✓         | ✓               | ✓              | ✓         | ✓             | HTTP+SSE | ✓         | ✓         | ✓                | ◐⁴             | ✓          | ✓              | ✓               | —          | ✓¹         | ✓            | —              | ✓                | —              | —                |
+| **Devin**            | 运行时    | 运行时          | 运行时         | 运行时    | 运行时        | 运行时   | 运行时    | ✓         | ✓                | —              | —          | —              | —               | —          | —          | —            | —              | ✓                | —              | —                |
+| **Pi**               | ✓         | ✓               | ✓              | —         | —             | —        | —         | ✓         | ✓                | —              | ✓          | —              | —               | ✓          | —          | ✓            | —              | ✓                | —              | —                |
+| **DeepSeek Harness** | ◐⁵        | —               | —              | —         | —             | HTTP     | —         | ✓         | ✓                | ✓              | ✓          | —              | —               | —          | —          | —            | —              | ✓                | —              | —                |
+| **Bub**              | 运行时    | 运行时          | 运行时         | 运行时    | 运行时        | 运行时   | 运行时    | 运行时    | 运行时           | 运行时         | 运行时     | 运行时         | 运行时          | 运行时     | 运行时     | 运行时       | 运行时         | 运行时           | 运行时         | 运行时           |
+| **Dimcode**          | 运行时    | 运行时          | 运行时         | 运行时    | 运行时        | 运行时   | 运行时    | 运行时    | 运行时           | 运行时         | 运行时     | 运行时         | 运行时          | 运行时     | 运行时     | 运行时       | 运行时         | 运行时           | 运行时         | 运行时           |
+
+图例：
+
+- **✓** —— 适配器声明了该能力（标准 ACP 能力则在 `initialize` 中声明）。
+- **◐** —— 只声明了部分子能力，见下方注释。
+- **—** —— 适配器未声明。
+- **运行时** —— Lody 只是代理或启动官方 / 外部运行时，自己并不添加该能力；是否可用取决于该
+  运行时的版本和配置。在扩展能力列中，`运行时` 表示 Lody 没有提供翻译该能力的适配器。
+
+注释：
+
+1. **任务：** Claude Code、Codex、Kimi Code 声明的是后台任务；Grok 声明的是定时任务。没有
+   provider 同时声明两者。
+2. **子代理：** Claude Code 和 Codex 只声明生命周期，不声明列表、取消或输出查询。
+3. **Grok 任务**只有定时任务。
+4. **Kimi Code 会话标题**仅在安装的 Kimi 引擎支持其标题功能时才会声明；否则由 Lody 自己
+   生成标题。
+5. **DeepSeek Harness 图片输入**取决于所选模型。只有当前模型声明支持图片输入时，适配器才会
+   开启该能力。
+
+`ACP：MCP` 一列中，`HTTP+SSE` 表示适配器声明了两种传输，`HTTP` 表示只声明了 HTTP；stdio 是
+所有 provider 的 ACP 基线。`Devin` 和 `Grok` 两行的标准 ACP 能力来自其官方运行时转发；Lody
+列只显示 Lody 兼容代理额外添加的能力。`Bub` 和 `Dimcode` 是外部 ACP 服务，Lody 只负责启动、
+不为其提供 Lody 扩展适配器，因此它们的 ACP 与扩展能力都由所安装的运行时决定。
+
+上表反映 Lody 适配器随版本声明的能力。Lody 会在会话建立时读取协商结果，因此 provider 升级
+后，应用里显示的能力可能先于本页更新。若要查看标准 ACP 实现的独立、带版本的对比，见
+[ACP Wall](https://github.com/wibus-wee/acp-wall)。
+
+## 下一步
+
+<Cards>
+  <Card href="/zh/docs/from-codex-claude-code" title="从 Codex 或 Claude Code 过来" />
+  <Card href="/zh/docs/agents" title="Agent Config" />
+  <Card href="/zh/docs/cli-runtimes" title="CLI 运行时类型" />
+  <Card href="/zh/docs/concepts" title="概念与术语表" />
+</Cards>
