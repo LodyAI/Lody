@@ -20,6 +20,8 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Session, auth, and app shell
 
+- Session ACP catalogs use the bound Provider's runtime overrides.
+
 - History uses SessionData commands.
 - Held-send config is a session/runtime-scoped input to selection, never a stored
   resolved selection. Keep its logical Turn fence across history/queue handoff;

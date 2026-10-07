@@ -223,7 +223,6 @@ import { useSessionPendingConfig } from '@/hooks/use-session-pending-config';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
 import { UserAvatar } from '@/components/user-avatar';
-import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
@@ -2655,7 +2654,6 @@ export const SessionChatInterface = memo(
         cliType: session.cliType,
         agentType: session.agentType,
       });
-    useMachineFlockAgentConfigsForMachineIds([session.machineId]);
     const machineDotlodyPath = useMemo(
       () => resolveMachineDotlodyPath(machineFlockRows, isLocalSession ? localHomeDir : null),
       [isLocalSession, localHomeDir, machineFlockRows]

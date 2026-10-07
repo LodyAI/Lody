@@ -4,6 +4,12 @@ The composer footer knobs (Agent / Model / Interaction / Reasoning / Permission)
 Agent Role selection on every surface, attachments, and the two durable run-config
 authorities.
 
+Persisted and draft composers share `useSessionAcpSelectorContext`, which subscribes
+to the exact bound Provider and passes its runtime overrides to model and command
+catalog readers. This keeps extension-enabled Pi catalogs usable while rejecting
+catalogs for removed or changed selections; a missing or mismatched Provider cannot
+lend another launch configuration's catalog.
+
 Independent Plan uses ACP Core's boolean `plan_mode`. Shared capability discovery
 and selector ordering recognize it as Plan; UI changes and semantic run-config
 dispatch send booleans without changing permissions. Static Codex, Grok, Kimi,
