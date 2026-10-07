@@ -33,7 +33,8 @@ and joins it. See the [attachment draft Spec](../../../../specs/session-files.md
 `use-session-acp-selector-context.ts` owns the Provider subscription for persisted
 and draft composers. It resolves the exact bound id through the shared Provider
 atom and passes its current runtime overrides to both models and slash commands.
-Missing or mismatched Providers expose no catalog; extension changes invalidate
+Mismatched Providers expose no catalog; an absent Provider row reads with no
+overrides, so only an override-free catalog applies. Extension changes invalidate
 old capabilities until a matching probe arrives. A matching extension catalog
 must not be read as though no extensions were selected.
 

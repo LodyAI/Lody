@@ -194,12 +194,50 @@ export const hasBuiltinRuntimeOverrideValues = (
     Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.trim().length > 0
   );
 
+const RUNTIME_OVERRIDE_SOURCE_VERSION_MARKER = '+override:';
+
+/**
+ * The launch-relevant override values with sorted keys and trimmed strings.
+ * Session creation re-parses overrides through a schema that emits keys in
+ * schema order and trims extension paths, while probes and readers keep the
+ * Provider row's own order; serializing either form verbatim made one launch
+ * configuration produce two cache suffixes.
+ */
+const serializeBuiltinRuntimeOverrides = (runtimeOverrides: unknown): string | undefined => {
+  if (!runtimeOverrides || typeof runtimeOverrides !== 'object' || Array.isArray(runtimeOverrides)) {
+    return undefined;
+  }
+  const entries = Object.entries(runtimeOverrides)
+    .flatMap(([key, value]): [string, string | string[]][] => {
+      if (Array.isArray(value)) {
+        const items = value.map((item) => (typeof item === 'string' ? item.trim() : ''));
+        return items.length > 0 ? [[key, items]] : [];
+      }
+      const trimmed = typeof value === 'string' ? value.trim() : '';
+      return trimmed ? [[key, trimmed]] : [];
+    })
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return entries.length > 0 ? JSON.stringify(Object.fromEntries(entries)) : undefined;
+};
+
 export const getBuiltinRuntimeOverrideSourceVersionSuffix = (
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
-): string =>
-  hasBuiltinRuntimeOverrideValues(runtimeOverrides)
-    ? `+override:${JSON.stringify(runtimeOverrides)}`
-    : '';
+): string => {
+  const serialized = serializeBuiltinRuntimeOverrides(runtimeOverrides);
+  return serialized ? `${RUNTIME_OVERRIDE_SOURCE_VERSION_MARKER}${serialized}` : '';
+};
+
+/** Canonical overrides a stamped source version was launched with, if any. */
+const readSourceVersionRuntimeOverrides = (sourceVersion: string | undefined): string | undefined => {
+  const index = sourceVersion?.indexOf(RUNTIME_OVERRIDE_SOURCE_VERSION_MARKER) ?? -1;
+  if (!sourceVersion || index < 0) return undefined;
+  const raw = sourceVersion.slice(index + RUNTIME_OVERRIDE_SOURCE_VERSION_MARKER.length);
+  try {
+    return serializeBuiltinRuntimeOverrides(JSON.parse(raw)) ?? raw;
+  } catch {
+    return raw;
+  }
+};
 
 export const isCustomAcpLaunchSpec = (value: unknown): value is CustomAcpLaunchSpec => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -472,12 +510,12 @@ export const getReadableAcpCapabilityCacheEntryForRuntimeOverrides = (
   if (!readableEntry) {
     return undefined;
   }
-  const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
-  const matches = sourceVersionSuffix
-    ? readableEntry.sourceVersion?.endsWith(sourceVersionSuffix) === true
+  const expectedOverrides = serializeBuiltinRuntimeOverrides(runtimeOverrides);
+  const matches = expectedOverrides
+    ? readSourceVersionRuntimeOverrides(readableEntry.sourceVersion) === expectedOverrides
     : readableEntry.cliType !== 'builtin' ||
       readableEntry.agentType !== 'pi' ||
-      !readableEntry.sourceVersion?.includes('+override:');
+      !readableEntry.sourceVersion?.includes(RUNTIME_OVERRIDE_SOURCE_VERSION_MARKER);
   return matches ? readableEntry : undefined;
 };
 
