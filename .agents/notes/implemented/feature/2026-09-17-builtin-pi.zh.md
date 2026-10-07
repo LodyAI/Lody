@@ -65,6 +65,8 @@ Node 上的 CLI 将配置迁移成无法启动的运行时。
 `agent-config-dialog.test.tsx` 覆盖显式扫描/选择、保存时探测、旧响应晚到、验证失败
 重试及不改选择的保存。输入均为模拟数据，不执行用户扩展。Pi 草案 Spec 记录保存
 行为，hooks README 解释共享目录的职责归属。
+验证：`pnpm check`、`pnpm format` 和 `pnpm run docs check` 均通过。
+[PR #1285](https://github.com/LodyAI/Lody/pull/1285)。
 
 ## 历史导入后续工作（2026-09-25）
 

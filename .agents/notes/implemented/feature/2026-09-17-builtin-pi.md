@@ -84,6 +84,8 @@ selection replacement/removal, refreshed catalogs and mismatched/missing binding
 late responses, failed verification/retry and unchanged saves. All fixtures are
 synthetic; no user extension is executed. The draft Pi Spec records the save
 behavior and the hooks README explains the shared catalog ownership.
+Validation: `pnpm check`, `pnpm format`, and `pnpm run docs check` passed.
+[PR #1285](https://github.com/LodyAI/Lody/pull/1285).
 
 ## History import follow-up (2026-09-25)
 
