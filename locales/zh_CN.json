@@ -907,6 +907,7 @@
   "login.desktopErrors.browser_open_failed": "无法打开浏览器，请重试。",
   "login.desktopErrors.authorization_expired": "本次登录已过期，请重新打开浏览器登录。",
   "login.desktopErrors.exchange_failed": "无法完成登录，请重新打开浏览器发起新的登录。",
+  "login.desktopErrors.exchange_certificate_failed": "无法验证登录服务器的证书。请检查系统时间、代理、防火墙或网络证书设置，修复后重新发起登录。如果使用 VPN，请检查其 TUN 模式设置。",
   "login.desktopErrors.exchange_rejected": "服务器拒绝了这次登录，登录链接可能已过期或已被使用。请重新打开浏览器发起新的登录。",
   "login.desktopErrors.exchange_timeout": "登录请求超时，请重新打开浏览器发起新的登录。",
   "login.desktopErrors.restart_required": "本次授权属于应用重启前的登录，请重新打开浏览器登录。",
