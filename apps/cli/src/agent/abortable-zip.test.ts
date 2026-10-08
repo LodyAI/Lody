@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -56,6 +57,19 @@ function deflatedZip(fileName: string, contents: Buffer): Buffer {
   end.writeUInt32LE(centralHeader.byteLength + name.byteLength, 12);
   end.writeUInt32LE(centralOffset, 16);
   return Buffer.concat([localHeader, name, compressed, centralHeader, name, end]);
+}
+
+/** Deterministic bytes that deflate cannot shrink, so the entry spans many reads. */
+function incompressibleBytes(byteLength: number): Buffer {
+  const bytes = Buffer.alloc(byteLength);
+  let state = 0x9e3779b9;
+  for (let offset = 0; offset + 4 <= byteLength; offset += 4) {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    bytes.writeUInt32LE(state >>> 0, offset);
+  }
+  return bytes;
 }
 
 function entry(fileName: string): Entry {
@@ -137,6 +151,20 @@ describe('extractAbortableZip', () => {
 
     expect(zipFile.isOpen).toBe(false);
     expect(await readFile(join(outputDir, 'bin', 'agent'), 'utf8')).toBe('agent-bytes');
+  });
+
+  it('extracts a real deflated entry that spans many reads', async () => {
+    // yauzl 2.x stalled here on Node 24.16+ (#1185).
+    const payload = incompressibleBytes(1024 * 1024);
+    const archivePath = join(rootDir, 'multi-read.zip');
+    await writeFile(archivePath, deflatedZip('agent', payload));
+
+    await extractAbortableZip(archivePath, join(rootDir, 'output'), new AbortController().signal);
+
+    const extracted = await readFile(join(rootDir, 'output', 'agent'));
+    expect(createHash('sha256').update(extracted).digest('hex')).toBe(
+      createHash('sha256').update(payload).digest('hex')
+    );
   });
 
   it('destroys the active entry and waits for its I/O to quiesce on abort', async () => {
