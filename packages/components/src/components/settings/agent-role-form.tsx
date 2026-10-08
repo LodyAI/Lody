@@ -14,7 +14,6 @@ import type {
   AcpSelectorOptions,
 } from '@/components/shared/acp-selector-options';
 import {
-  selectAgentRoleModel,
   selectAuthorableAgentRoleConfigOptions,
   type AgentRoleFormError,
   type AgentRoleFormValue,
@@ -298,15 +297,7 @@ export function AgentRoleForm({
                           label={t('settings.agentRoles.form.model')}
                           value={value.modelId}
                           options={selectorOptions.modelOptions}
-                          onChange={(modelId) =>
-                            onChange(
-                              selectAgentRoleModel(
-                                value,
-                                modelId,
-                                selectorOptions.configOptionSelectors
-                              )
-                            )
-                          }
+                          onChange={(modelId) => update({ modelId })}
                         />
                       </Field>
                     ) : null}

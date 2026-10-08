@@ -66,10 +66,10 @@ effort 选项 id，以及它如何发布这个控件。未知 agent 没有绑定
 - **Role 编辑器切换模型**（[#1308](https://github.com/LodyAI/Lody/issues/1308)）：
   编辑器显示 agent 的默认值，并在第一次编辑时把它们存下来。默认值只填未设置的字段，
   所以把 Claude Code Role 从有 Fast 的模型切到没有 Fast 的模型时，`fast` 被保留，
-  composer 也就始终匹配不上这个 Role。现在选择另一个模型时，只丢弃切换前选择器为 effort 或 Fast
-  的值（`isThoughtLevelSelector`、`isFastModeSelector`），也就是 `normalizePerModelSelectors`
-  按模型调整的那一组，再由默认值按切换后的模型补齐。Plan、权限和其他选项保留；
-  重新选择当前模型不做任何改动。曾考虑重置所有非权限选项，因为会连 Plan 一起丢掉而放弃。
+  composer 也就始终匹配不上这个 Role。现在切换模型时，编辑器会按切换后的模型构建选择器，
+  新模型仍接受的已存值都保留。新模型不再提供的值会被丢弃，例如没有 Fast 的模型上的 `fast`、
+  不在新档位里的 effort，再由默认值补齐。没有对应选择器的值保留；重新选择当前模型不做任何改动。
+  曾考虑重置权限以外的所有选项，因为会连 Plan 和仍有效的 effort 一起丢掉而放弃。
 - **MCP**：
   - 声明为没有 Fast 的模型，会拒绝 `fastMode=true`，并把 `false` 视为无需操作；
   - 声明为有 Fast、但 probe 时没有该选项的模型，会使用内置的 Fast id。
@@ -95,6 +95,6 @@ effort 选项 id，以及它如何发布这个控件。未知 agent 没有绑定
 - `acp-selector-options.test.ts` 检查界面显示的是所选模型自己的推理强度列表和 Fast 开关，
   没有报告的模型保持不变。
 - 逐一移除三个机制（按报告取推理强度、Fast 规整、读取时合并），每次都有对应测试失败。
-- `agent-role-form.test.ts` 覆盖 Role 编辑器切换模型：丢弃 Fast 并补齐 effort，保留 Plan 和权限，
-  重新选择同一模型不做改动。
+- `agent-role-form.test.ts` 覆盖 Role 编辑器切换模型：新模型接受的值和没有选择器的值保留，
+  不再提供的 effort 和 `fast` 被丢弃。
 - 尚未验证：真实适配器的端到端流程。

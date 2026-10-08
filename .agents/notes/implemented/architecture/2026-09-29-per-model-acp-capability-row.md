@@ -86,13 +86,13 @@ ids.
 - **Role editor model switch** ([#1308](https://github.com/LodyAI/Lody/issues/1308)):
   the editor shows the agent's defaults and stores them on the first edit. Defaults
   fill only unset fields, so switching a Claude Code Role from a model with Fast to
-  one without kept `fast`, and the composer never matched the Role. Choosing a
-  different model now drops only the values whose outgoing selector is effort or
-  Fast (`isThoughtLevelSelector`, `isFastModeSelector`), the same set
-  `normalizePerModelSelectors` fits per model, and the defaults refill them for the
-  incoming model. Plan, permission and other options stay; re-selecting the current
-  model changes nothing. A reset of every non-permission option was rejected
-  because it also dropped Plan.
+  one without kept `fast`, and the composer never matched the Role. When the model
+  changes, the editor builds the incoming model's selectors and keeps each stored
+  value the incoming model still accepts. A value it no longer offers, such as `fast`
+  on a model without Fast or an effort outside the new ladder, is dropped and the
+  defaults refill it. Values with no selector stay; re-selecting the current model
+  changes nothing. Resetting every option except permission was rejected because it
+  also dropped Plan and still-valid effort.
 - **MCP**:
   - a model declared without Fast rejects `fastMode=true` and treats `false` as a
     no-op;
@@ -124,6 +124,6 @@ ids.
   Fast toggle are shown, and that undeclared models are unchanged.
 - Removing each of the three mechanisms (declared effort, Fast normalization, the
   read-time merge) fails its test.
-- `agent-role-form.test.ts` covers the Role editor switch: Fast is dropped and effort
-  refilled, Plan and permission survive, and re-selecting the model is a no-op.
+- `agent-role-form.test.ts` covers the Role editor switch: an accepted value and a
+  value without a selector stay, an unoffered effort and `fast` are dropped.
 - Not verified: real adapters end to end.

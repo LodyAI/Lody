@@ -11,13 +11,12 @@ import {
 import type { AcpSelectorOptions } from '../src/components/shared/acp-selector-options';
 import {
   applyAgentRoleRunConfigDefaults,
+  carryAgentRoleOptionsToModel,
   buildAgentRoleFormValue,
-  buildAgentRoleRunConfig,
   buildAgentRoleRunConfigSummary,
   buildAgentRoleFromForm,
   EMPTY_AGENT_ROLE_FORM_VALUE,
   findAgentRoleRunConfigIssues,
-  selectAgentRoleModel,
   selectAuthorableAgentRoleConfigOptions,
   validateAgentRoleForm,
   type AgentRoleFormValue,
@@ -421,100 +420,26 @@ describe('run config defaults', () => {
 });
 
 describe('run config model switch', () => {
-  const effortLadder = (values: string[], currentValue: string) => ({
-    type: 'select' as const,
-    configId: 'effort',
-    category: 'thought_level',
-    label: 'Effort',
-    currentValue,
-    options: values.map((value) => ({ value, label: value })),
-  });
-  const modelSelectorOptions = (modelId: 'model-fast' | 'model-plain'): AcpSelectorOptions =>
-    selectorOptions({
-      defaultModelId: 'model-fast',
-      modelOptions: [
-        { value: 'model-fast', label: 'Model Fast' },
-        { value: 'model-plain', label: 'Model Plain' },
-      ],
-      configOptionSelectors: [
-        modelId === 'model-fast'
-          ? effortLadder(['low', 'medium', 'high', 'xhigh'], 'high')
-          : effortLadder(['low', 'medium'], 'medium'),
-        { type: 'boolean', configId: 'plan_mode', label: 'Plan', options: [], currentValue: false },
-        {
-          type: 'select',
-          configId: 'permission_mode',
-          label: 'Permissions',
-          currentValue: 'default',
-          options: [
-            { value: 'default', label: 'Default' },
-            { value: 'acceptEdits', label: 'Accept edits' },
-          ],
-        },
-        ...(modelId === 'model-fast'
-          ? [
-              {
-                type: 'boolean' as const,
-                configId: 'fast',
-                label: 'Fast',
-                options: [],
-                currentValue: false,
-              },
-            ]
-          : []),
-      ],
+  it('keeps the values the new model still accepts and drops the rest', () => {
+    const effort = (values: string[]) => ({
+      type: 'select' as const,
+      configId: 'effort',
+      label: 'Effort',
+      currentValue: values[0],
+      options: values.map((value) => ({ value, label: value })),
     });
-  const editedOnFastModel = (): AgentRoleFormValue => {
-    const seeded = applyAgentRoleRunConfigDefaults(
-      formValue({ modelId: null }),
-      modelSelectorOptions('model-fast')
-    );
-    return {
-      ...seeded,
-      configOptionValues: {
-        ...seeded.configOptionValues,
-        effort: 'xhigh',
-        fast: true,
-        plan_mode: true,
-        permission_mode: 'acceptEdits',
-      },
-    };
-  };
-  const switchModel = (value: AgentRoleFormValue, modelId: 'model-fast' | 'model-plain') =>
-    buildAgentRoleRunConfig(
-      applyAgentRoleRunConfigDefaults(
-        selectAgentRoleModel(
-          value,
-          modelId,
-          modelSelectorOptions(value.modelId as 'model-fast').configOptionSelectors
-        ),
-        modelSelectorOptions(modelId)
-      )
-    );
+    const fast = { type: 'boolean' as const, configId: 'fast', label: 'Fast', options: [] };
+    const outgoing = [effort(['high', 'xhigh']), fast];
+    const incoming = [effort(['high'])];
+    const values = { effort: 'high', permission_mode: 'acceptEdits', fast: true };
 
-  it('drops Fast and refills effort from the new model when it has no Fast', () => {
-    const runConfig = switchModel(editedOnFastModel(), 'model-plain');
-    expect(runConfig.modelId).toBe('model-plain');
-    expect(runConfig.configOptionValues).not.toHaveProperty('fast');
-    expect(runConfig.configOptionValues?.effort).toBe('medium');
-  });
-
-  it('keeps model-independent options across a model switch', () => {
-    expect(switchModel(editedOnFastModel(), 'model-plain').configOptionValues).toMatchObject({
-      plan_mode: true,
+    expect(carryAgentRoleOptionsToModel(values, outgoing, incoming)).toEqual({
+      effort: 'high',
       permission_mode: 'acceptEdits',
     });
-  });
-
-  it('changes nothing when the current model is selected again', () => {
-    const value = editedOnFastModel();
     expect(
-      selectAgentRoleModel(
-        value,
-        'model-fast',
-        modelSelectorOptions('model-fast').configOptionSelectors
-      )
-    ).toBe(value);
+      carryAgentRoleOptionsToModel({ ...values, effort: 'xhigh' }, outgoing, incoming)
+    ).not.toHaveProperty('effort');
   });
 });
 
