@@ -31,11 +31,7 @@ useful parallel progress.
 Claude Code can expose slash commands such as `/review`, `/compact`, or `/undo`. Type `/` at the
 start of the input to browse the commands available for the current config.
 
-<img
-  src="/_docs-assets/slash.png"
-  alt="Slash commands menu"
-  style={{ maxHeight: '360px', width: 'auto' }}
-/>
+<SlashCommandsPreview locale="en" />
 
 See [Slash Commands](/docs/slash-commands) for the full interaction details.
 
@@ -45,11 +41,7 @@ Claude Code can ask follow-up questions while a task is running. Lody renders th
 interactive cards with single-select, multi-select, and custom-answer inputs, then sends your
 answer back to the agent.
 
-<img
-  src="/_docs-assets/20260507-ask-question.png"
-  alt="Claude Code AskUserQuestion card"
-  style={{ maxHeight: '420px', width: 'auto' }}
-/>
+<AskQuestionPreview locale="en" />
 
 ### Fast Mode
 
@@ -106,33 +98,21 @@ instead.
 Codex can also expose slash commands through capability discovery. The available list depends on
 the installed Codex version and the selected Agent Config.
 
-<img
-  src="/_docs-assets/slash.png"
-  alt="Slash commands menu"
-  style={{ maxHeight: '360px', width: 'auto' }}
-/>
+<SlashCommandsPreview locale="en" />
 
 ### Fast Mode
 
 Codex Fast Mode can be toggled from the session controls when the selected Codex config advertises
 the option. Use it when you want a faster response profile for a task.
 
-<img
-  src="/_docs-assets/fast-think.png"
-  alt="Codex Fast Mode controls"
-  style={{ maxHeight: '260px', width: 'auto' }}
-/>
+<FastModePreview locale="en" />
 
 ### Image Generation
 
 When Codex emits image-generation output, Lody uploads the generated image back into the
 conversation so the prompt, result, and follow-up work stay together.
 
-<img
-  src="/_docs-assets/20260507-codex-image-gen.png"
-  alt="Codex image generation result"
-  style={{ maxHeight: '420px', width: 'auto' }}
-/>
+<ImageOutputPreview locale="en" />
 
 ### Goals
 
@@ -147,8 +127,4 @@ After that, Lody can show the goal status in the conversation and session UI. Ea
 also reports its elapsed time and token usage, so you can see at a glance how much was spent on
 reaching the objective.
 
-<img
-  src="/_docs-assets/20260507-goal.png"
-  alt="Codex Goal status"
-  style={{ maxHeight: '420px', width: 'auto' }}
-/>
+<GoalPreview locale="en" />

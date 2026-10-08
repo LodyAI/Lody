@@ -19,13 +19,13 @@ Lody 对输入框进行了增强，可以使用 `@`、`#` 或 `$` 来使用提�
 
 在输入框输入 `@` 后，将弹出文件列表，你可以通过输入更多来进行模糊的文件名或文件路径匹配。通过 ↑ ↓ 上下方向键进行选择，使用回车来确认选择。提及的文件会将完整路径作为 Prompt 上下文给到 Code Agent。
 
-<img src="/_docs-assets/20260206-mention.png" alt="" />
+<MentionPreview locale="zh" kind="file" />
 
 ## Issue 或 Pull Request 提及
 
 在主页选中仓库之后，你可以使用 `#` 符号来提及当前仓库的 Issue 和 Pull Request 列表。
 
-<img src="/_docs-assets/mention-issue.png" alt="" />
+<MentionPreview locale="zh" kind="issue" />
 
 可以使用 ↑ ↓ 方向键进行选择，使用回车选中，对应的 Issue 或 PR 信息会加入到 Prompt 中，Agent 可以自行进行对应信息的读取，来完成类似 `修复 #12 的问题`， `review #56 PR 的功能实现` 的工作。
 

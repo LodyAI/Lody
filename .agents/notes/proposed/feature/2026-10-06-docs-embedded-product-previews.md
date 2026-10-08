@@ -6,15 +6,15 @@ Language: [中文](2026-10-06-docs-embedded-product-previews.zh.md)
 
 ## Abstract
 
-Docs screenshots age faster than the UI they describe: the Sessions page still
-showed the old multi-line session list, and the GitHub page showed an old home
-composer, long after both surfaces changed. This change adds site-owned,
-display-only previews under `components/docs-replica/`, renders them from
-synthetic mock data in both locales and themes, registers `SessionListPreview`
-and `GithubRepoPickerPreview` in the docs MDX components, and replaces the stale
-screenshots; the archive and delete screenshots stay because they still match.
-The replicas copy app markup rather than import app components, so they can still
-drift and must be re-copied when the app's look changes materially.
+Docs screenshots age faster than the UI they describe. This change first added
+site-owned, display-only previews under `components/docs-replica/` for the
+Sessions and GitHub pages, then converted every Feature List / reference screenshot
+in both locales to registered previews. The previews render from synthetic mock
+data, follow the reader's locale and light/dark theme, and are registered in
+`components/mdx.tsx`; browser and OS notification chrome are modeled as
+site-owned visual replicas because they are not Lody components. The replicas
+copy app markup rather than import app components, so they can still drift and
+must be re-copied when the app's look changes materially.
 
 ## Problem
 
@@ -27,6 +27,10 @@ drift and must be re-copied when the app's look changes materially.
   sit inside a light docs page.
 - Every UI change needs a fresh capture committed as a raster asset, and a miss
   ships silently.
+- The Feature List / reference pages repeated that problem across 19 image usages
+  in each locale: conversation diff and files, mentions and slash commands, image
+  input/output, Browser preview, Agent config and CLI runtimes, Fast/Goal/Ask
+  cards, quota and token usage, plus browser and mobile notification chrome.
 - The app components cannot be imported into the site: the standalone replica
   rule and `scripts/app-boundary.mjs` keep app-only modules, providers, and
   packages out of the public build.
@@ -48,7 +52,20 @@ drift and must be re-copied when the app's look changes materially.
   branch, machine, PR state, CI verdict, and ±line totals; the composer preview
   carries a repository, branch, prompt placeholder, run configuration, and
   permission scope.
-- Keep the archive and delete screenshots; they still match and are out of scope.
+- Expand the same pattern to every Feature List / reference screenshot. Add
+  `components/docs-replica/conversation-reference-previews.tsx`,
+  `command-reference-previews.tsx`, `runtime-reference-previews.tsx`, and
+  `settings-reference-previews.tsx`, using the live app component and the
+  matching Storybook story as the copy source for each surface.
+- Reuse the existing landing replicas where they already match the current
+  component (`ReplicaDiffViewer`, `ReplicaChangesList`, composer controls,
+  `ReplicaBrowserToolbar`); add only the missing display markup for file trees,
+  mention/slash popups, image bubbles, Agent Config, quota, and usage.
+- Replace every `_docs-assets` image reference in the English and Chinese
+  `(reference)` trees. The browser-permission and iOS-notification previews are
+  explicitly site-owned mocks of external chrome, not imports of app components.
+- Keep the archive and delete screenshots; they still match and are outside the
+  Feature List scope.
 
 ## Alternatives considered
 
@@ -65,21 +82,29 @@ drift and must be re-copied when the app's look changes materially.
 4. Build a generic preview framework before the second use. Rejected: the second
    preview reuses the same token scope and landing-replica primitives without new
    machinery; extract shared docs-preview scaffolding only at a third surface.
+5. Capture the real app components through Storybook/Playwright, or embed a
+   static Storybook build. Rejected: captures are still raster snapshots that
+   drift, the Storybook server needs the full app provider/toolchain graph, and
+   an iframe/static Storybook bundling would make docs content depend on
+   JavaScript instead of remaining in the prerendered HTML.
 
 ## Verification and limits
 
-- `pnpm --filter @lody/site-docs generate`, `typecheck`, and `test` pass,
-  including `scripts/app-boundary.mjs`.
-- A production build prerenders every published page. The preview markup is
-  present in the prerendered English and Chinese Sessions and GitHub pages, and
-  both removed screenshot assets are gone.
-- Both previews were checked visually in English and Chinese, light and dark, at
-  desktop and mobile widths.
-- The full static browser suite reports 307 passing cases (309 before the two
-  removed VS Code themes pages) and the same two baseline mobile
-  `no-js navigation` timeouts before and after the change.
+- `pnpm --filter @lody/site-docs generate`, `typecheck`, and `test` pass; the
+  test run includes `scripts/app-boundary.test.mjs` with three passing subtests.
+  `node scripts/docs/main.mjs check` reports 0 errors and the existing 64
+  warnings.
+- A production build prerenders 257 HTML files. The Feature List English and
+  Chinese pages contain the preview markup, and no `_docs-assets` image is
+  referenced from either `(reference)` tree.
+- The new previews were checked visually in the rendered static pages in English
+  and Chinese, light and dark themes, at desktop and mobile widths.
+- The full static browser suite reports 309 passing cases and the same two
+  baseline mobile `no-js navigation` timeouts before and after the change.
 - The replicas copy markup at a point in time; they do not follow app changes.
   Re-copy each one when its surface changes materially, and update the docs copy
   with it.
-- Two surfaces were converted. Other docs screenshots (archive, delete, agent
-  config, diff, and so on) remain and can be converted one surface at a time.
+- The Feature List surfaces are converted, but the browser and iOS notification
+  previews necessarily imitate external chrome rather than a Lody component.
+  Other docs screenshots outside `(reference)` (changelog, guides, and core
+  concepts) remain and can be converted one surface at a time.

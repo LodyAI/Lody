@@ -8,8 +8,29 @@ import * as TypeTableComponents from 'fumadocs-ui/components/type-table';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
 import type { MDXComponents } from 'mdx/types';
 import type { ComponentProps } from 'react';
+import { MentionPreview, SlashCommandsPreview } from './docs-replica/command-reference-previews';
+import {
+  BrowserPreview,
+  ConversationDiffPreview,
+  DiffViewerPreview,
+  ImageInputPreview,
+  ImageOutputPreview,
+  SessionFilesPreview,
+} from './docs-replica/conversation-reference-previews';
 import { GithubRepoPickerPreview } from './docs-replica/github-repo-picker-preview';
+import {
+  AgentConfigPreview,
+  AskQuestionPreview,
+  CliRuntimePreview,
+  FastModePreview,
+  GoalPreview,
+} from './docs-replica/runtime-reference-previews';
 import { SessionListPreview } from './docs-replica/session-list-preview';
+import {
+  NotificationPreview,
+  QuotaPreview,
+  UsagePreview,
+} from './docs-replica/settings-reference-previews';
 
 type StaticImageLike = {
   src: string;
@@ -57,8 +78,24 @@ export function getMDXComponents(components?: MDXComponents) {
     // Site-owned product previews rendered from mock data; see
     // `components/docs-replica/`. Long-form docs pass a `locale` so the mock
     // copy follows the page language.
+    AgentConfigPreview,
+    AskQuestionPreview,
+    BrowserPreview,
+    CliRuntimePreview,
+    ConversationDiffPreview,
+    DiffViewerPreview,
+    FastModePreview,
     GithubRepoPickerPreview,
+    GoalPreview,
+    ImageInputPreview,
+    ImageOutputPreview,
+    MentionPreview,
+    NotificationPreview,
+    QuotaPreview,
+    SessionFilesPreview,
     SessionListPreview,
+    SlashCommandsPreview,
+    UsagePreview,
     // Page shells already render the document title as H1.
     h1: () => null,
     img: ({ ref: _ref, src, ...props }) => {
