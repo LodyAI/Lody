@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1331](https://github.com/LodyAI/Lody/pull/1331)
+
 [中文](2026-10-08-desktop-auth-chromium-transport.zh.md)
 
 ## Abstract
