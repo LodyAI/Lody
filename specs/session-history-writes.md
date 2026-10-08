@@ -13,7 +13,7 @@ That tolerance must not authorize creating new malformed items locally.
 
 ## Contract
 
-- Renderer and CLI share one HistoryWriter for local history changes. A reader
+- Renderer and CLI share one HistoryWriter for local Loro history changes. A reader
   feature flag may replace the view, not the write contract.
 - New turns use explicit message types and runtime input parsing. Legacy typed
   callback callers use the same writer through the session facade.
@@ -47,7 +47,7 @@ That tolerance must not authorize creating new malformed items locally.
   and edits inside that range, except a newly inserted pending user row becoming seen/read
   with every other field unchanged. It is not crash recovery or a distributed transaction.
   External provider imports remain new inputs, not privileged stored-history copies.
-- Acceptance here means a local CRDT write. Existing repo persistence and transport
+- Acceptance in the Loro writer means a local CRDT write. Existing repo persistence and transport
   still own durability, permissions, and remote synchronization.
 - Tool fields other than type/toolCallId
   parse only changed fields without reparsing untouched tool payloads; outcome-only
@@ -170,6 +170,43 @@ on projected history. This is not arbitrary downgrade safety.
 
 ## Limits and review questions
 
+### Backend selection and display reads
+
+New sessions use Loro by default. When the user enables both the experimental
+features switch and the Roost history switch, the renderer explicitly writes
+`historyBackend: 'roost'` while accepting a new session; legacy sessions and
+sessions created by non-renderer paths without an explicit choice retain Loro.
+Existing sessions keep their persisted backend when the switch changes. Commands
+use the session's selected backend, with one writer for its storage. Loro-specific
+container rules above apply to that backend; Roost preserves immutable sealed
+segments and projects successors into the same logical turn. Control metadata and
+delivery state remain in Loro. Local history acceptance does not establish remote
+Roost synchronization.
+
+Opening a Roost conversation reads the latest active-branch window. Scrolling
+up loads older logical turns through a reverse cursor. Whole-history search,
+outline navigation, counts and facts must cover earlier pages without requiring
+manual scrolling. These consumers load directory pages in the background and
+keep body hydration bounded by their leases; opening does not await a full-history
+read. Restoring a reading position loads its logical turn before declaring the
+initial window ready. New messages retain the loaded prefix
+and its cursor. A branch rewrite invalidates incompatible pages and refreshes the
+loaded window without displaying the superseded suffix. Unloaded rows contribute
+neither fabricated messages nor complete-history facts. Explicit export/snapshot
+operations retain an authoritative full-read capability.
+
+Previously synchronized history remains readable when its owner is unavailable,
+including reopening the conversation, searching and navigating older cached turns.
+The renderer persists a read-only projection scoped by account, workspace, machine
+and session. Owner read responses bind page content, count and a durable revision
+to the same observation. Consecutive changes update the affected cached rows
+atomically; a missed revision stages a replacement through bounded pages while
+retaining the previous coherent snapshot. Reconnection refreshes through the
+existing owner transport. The cache never accepts or replays user commands, and
+cannot supply history this device has never synchronized.
+
+### Verification limits
+
 This is not a proof of arbitrary cross-version application compatibility or reader
 safety. TypeScript cannot enforce untrusted inputs, semantic string constraints,
 or prevent deliberate casts/raw access. A command changing an already damaged item
@@ -177,8 +214,8 @@ may need to repair that item; it cannot rely on tolerance reserved for untouched
 history. The initial callback adapter supports order-preserving history edits, not
 arbitrary reordering of existing turns in a plain LoroList.
 
-The current full-Mirror read path still materializes history; this change is not
-the 3000-round performance acceptance or the windowed ConversationView rollout.
+The Roost reader now uses active-branch pages; the legacy Loro reader still loads
+its directory. This does not establish 3000-round performance acceptance.
 Non-history control-field validation remains outside this HistoryWriter contract.
 The v2 canonical form is defined for the shapes this repository writes. The full
 sealed-skeleton feature (a reader-side `ref` payload fetch, payload hooks, and the

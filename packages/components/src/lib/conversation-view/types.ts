@@ -85,6 +85,10 @@ export type ConversationViewChange =
 
 export type ConversationViewListener = (change: ConversationViewChange) => void;
 
+/** Position-only row used while a reverse page has not been loaded yet. */
+export const UNLOADED_TURN_PREFIX = 'unloaded-turn:';
+export const isUnloadedTurnId = (id: string): boolean => id.startsWith(UNLOADED_TURN_PREFIX);
+
 /** Owns the concrete turn containers captured at acquisition, even if they move. */
 export type ConversationRange = {
   ready: Promise<void>;
@@ -119,6 +123,8 @@ export interface ConversationView {
   readonly structureVersion: number;
   /** Resolves once the initial directory and retained tail are ready; offscreen summaries stay lazy. */
   readonly ready: Promise<void>;
+  /** True when this backend can page toward older history. */
+  readonly hasMoreOlder?: boolean;
   index(i: number): TurnIndexRow | undefined;
   /** -1 when the id is unknown. */
   indexOf(turnId: string): number;
@@ -129,6 +135,11 @@ export interface ConversationView {
   isHydrated(i: number): boolean;
   /** Captures `[from, to)` now. Release the returned handle when done. */
   acquireRange(from: number, to: number): ConversationRange;
+  /** Prepends one older directory page when the backend supports paging. */
+  loadOlder?(): Promise<boolean>;
+  /** Load the complete directory, or stop once a requested turn is found.
+   * Bodies remain windowed. Releasing the lease cancels further page requests. */
+  acquireDirectory?(throughTurnId?: string): ConversationRange;
   subscribe(listener: ConversationViewListener): () => void;
   dispose(): void;
 }

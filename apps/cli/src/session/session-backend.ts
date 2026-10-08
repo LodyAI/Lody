@@ -145,7 +145,7 @@ export type QueuePromotionResult = {
   entry: SessionHistoryInput;
 };
 
-/** Explicit failure until the Roost adapter is registered in a later phase. */
+/** Explicit failure when a persisted backend has no installed product adapter. */
 export class SessionBackendUnavailableError extends Error {
   readonly code = 'session_backend_unavailable';
 
@@ -596,3 +596,10 @@ export async function disposeSessionBackend(sessionDoc: SessionDocument): Promis
   const backend = await binding.backend;
   await backend.dispose?.();
 }
+
+export {
+  createRoostSessionBackendFactory,
+  RoostSessionBackend,
+  type RoostSessionBackendServiceFactory,
+  type RoostSessionBackendServices,
+} from './roost-session-backend';

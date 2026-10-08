@@ -1,5 +1,5 @@
 import type { SessionHistory } from '@lody/shared';
-import type { ConversationView, TurnIndexRow } from './types';
+import { isUnloadedTurnId, type ConversationView, type TurnIndexRow } from './types';
 
 /**
  * A per-turn fact table over a `ConversationView`, for the readers that used
@@ -68,6 +68,9 @@ export function createConversationDerivation<F>(
   let passRunning = false;
   let passRequested = false;
   let activeRange: ReturnType<ConversationView['acquireRange']> | undefined;
+  let directoryLease = view.acquireDirectory?.();
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = 250;
 
   const notify = () => {
     version += 1;
@@ -89,6 +92,9 @@ export function createConversationDerivation<F>(
     for (let i = Math.max(0, from); i < Math.min(to, view.turnCount); i += 1) {
       const row = view.index(i);
       if (!row) continue;
+      // Reverse-paged views keep absolute slots with sentinel rows until the
+      // older page arrives.  A sentinel has no body or facts to derive.
+      if (isUnloadedTurnId(row.id)) continue;
       const turn = view.turn(i);
       if (turn) {
         if (derivedFrom.get(row.id)?.deref() === turn) continue;
@@ -146,7 +152,7 @@ export function createConversationDerivation<F>(
       while (cursor > 0 && pending.length < chunkSize) {
         cursor -= 1;
         const row = view.index(cursor);
-        if (row && !facts.has(row.id)) pending.push(cursor);
+        if (row && !isUnloadedTurnId(row.id) && !facts.has(row.id)) pending.push(cursor);
       }
       end = cursor;
       if (pending.length === 0) continue;
@@ -192,8 +198,23 @@ export function createConversationDerivation<F>(
         }
       }
       if (disposed) return;
-      complete = true;
+      // A finished pass covers loaded rows only; the unloaded prefix remains
+      // unknown until reverse pagination reaches the beginning.
+      complete = view.hasMoreOlder !== true;
+      retryDelay = 250;
       notify();
+    } catch (error) {
+      // A failed page/body read is incomplete coverage, never an empty fact
+      // table. A later view change or renewed lease retries the pass.
+      passRequested = true;
+      console.error('Failed to derive conversation history', error);
+      if (!disposed && active && !retryTimer) {
+        retryTimer = setTimeout(() => {
+          retryTimer = undefined;
+          if (active && !disposed) void runPasses();
+        }, retryDelay);
+        retryDelay = Math.min(2_000, retryDelay * 2);
+      }
     } finally {
       passRunning = false;
     }
@@ -228,10 +249,20 @@ export function createConversationDerivation<F>(
     setActive: (next: boolean) => {
       if (active === next || disposed) return;
       active = next;
+      if (active) directoryLease = view.acquireDirectory?.();
+      else {
+        if (retryTimer) clearTimeout(retryTimer);
+        retryTimer = undefined;
+        directoryLease?.release();
+        directoryLease = undefined;
+        activeRange?.release();
+      }
       if (active && passRequested && !passRunning) void runPasses();
     },
     dispose: () => {
       disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      directoryLease?.release();
       activeRange?.release();
       unsubscribe();
       listeners.clear();

@@ -6,6 +6,7 @@ import {
   findLastIndex,
   resolveTailStart,
   subscribeOnFrame,
+  isUnloadedTurnId,
   type ConversationDerivation,
   type ConversationView,
   type DeriveTurnFact,
@@ -44,9 +45,16 @@ export function useTurnRange(
   view: ConversationView | null | undefined,
   from: number,
   to: number,
-  options: { extendToPrecedingUserTurn?: boolean } = {}
+  options: {
+    extendToPrecedingUserTurn?: boolean;
+    loadOlderAtStart?: boolean;
+    /** Absolute viewport position used to decide whether the older edge is visible. */
+    loadOlderAtPosition?: number;
+  } = {}
 ): boolean {
   const extend = options.extendToPrecedingUserTurn === true;
+  const loadOlderAtStart = options.loadOlderAtStart === true;
+  const loadOlderAtPosition = options.loadOlderAtPosition;
   const [settled, setSettled] = useState<{
     view: ConversationView;
     from: number;
@@ -57,6 +65,24 @@ export function useTurnRange(
     if (!view || to <= from) return undefined;
     let range: ReturnType<ConversationView['acquireRange']> | undefined;
     let disposed = false;
+    let loadingOlder = false;
+    const loadOlder = async () => {
+      if (loadingOlder) return;
+      loadingOlder = true;
+      try {
+        for (;;) {
+          if (disposed || !shouldLoadOlder(view, loadOlderAtStart, loadOlderAtPosition ?? from))
+            break;
+          const before = view.structureVersion;
+          const loaded = await view.loadOlder?.();
+          if (!loaded && view.structureVersion === before) break;
+        }
+      } catch (error) {
+        console.error('Failed to load older conversation history', error);
+      } finally {
+        loadingOlder = false;
+      }
+    };
     const acquire = () => {
       const next = view.acquireRange(
         resolveRangeStart(view, from, extend),
@@ -82,15 +108,18 @@ export function useTurnRange(
       });
     };
     const unsubscribe = view.subscribe((change) => {
-      if (change.kind === 'structure') acquire();
+      if (change.kind !== 'structure') return;
+      acquire();
+      void loadOlder();
     });
     acquire();
+    void loadOlder();
     return () => {
       disposed = true;
       unsubscribe();
       range?.release();
     };
-  }, [view, from, to, extend]);
+  }, [view, from, to, extend, loadOlderAtPosition, loadOlderAtStart]);
   if (
     settled &&
     settled.view === view &&
@@ -106,6 +135,13 @@ export function useTurnRange(
   return !!view && to > from && isRangeHydrated(view, resolveRangeStart(view, from, extend), to);
 }
 
+function shouldLoadOlder(view: ConversationView, enabled: boolean, position: number): boolean {
+  if (!enabled || !view.hasMoreOlder || !view.loadOlder) return false;
+  const anchor = Math.max(0, Math.min(position, view.turnCount));
+  if (anchor <= 2) return true;
+  return isUnloadedTurnId(view.index(anchor - 1)?.id ?? '');
+}
+
 function resolveRangeStart(view: ConversationView, from: number, extend: boolean): number {
   let start = Math.max(0, from);
   if (extend && start > 0) {
@@ -119,6 +155,8 @@ function resolveRangeStart(view: ConversationView, from: number, extend: boolean
 function isRangeHydrated(view: ConversationView, from: number, to: number): boolean {
   const end = Math.min(view.turnCount, to);
   for (let i = from; i < end; i++) {
+    const row = view.index(i);
+    if (row && isUnloadedTurnId(row.id)) continue;
     if (!view.isHydrated(i)) return false;
   }
   return true;
@@ -140,6 +178,10 @@ export function useConversationIndexRows(
   view: ConversationView | null | undefined
 ): readonly TurnIndexRow[] {
   const version = useConversationVersion(view);
+  useEffect(() => {
+    const directory = view?.acquireDirectory?.();
+    return () => directory?.release();
+  }, [view]);
   const previousRef = useRef<readonly TurnIndexRow[]>(EMPTY_ROWS);
   return useMemo(() => {
     if (!view) {
@@ -149,7 +191,7 @@ export function useConversationIndexRows(
     const rows: TurnIndexRow[] = [];
     for (let i = 0; i < view.turnCount; i += 1) {
       const row = view.index(i);
-      if (row) rows.push(row);
+      if (row && !isUnloadedTurnId(row.id)) rows.push(row);
     }
     // The view hands back the same row object for a turn whose index facts did
     // not change, so an array of identical rows is the previous array. Every

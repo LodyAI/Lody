@@ -113,6 +113,10 @@ import {
 } from '../src/atoms/session-run-config-drafts';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
+  experimentalFeaturesEnabledAtom,
+  roostHistoryExperimentEnabledAtom,
+} from '../src/atoms/settings';
+import {
   countSessionMentions,
   SessionCreateBillingError,
   resolveSessionChatType,
@@ -1032,6 +1036,34 @@ describe('useSessionActions', () => {
       lastMessageAt: expect.any(Number),
     });
     expect(result.historyEntry.inputConfig?.inputBlocks).toEqual([{ type: 'text', text: 'hi' }]);
+  });
+
+  it('selects Roost for new sessions only when both experimental gates are enabled', async () => {
+    const store = createStore();
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(roostHistoryExperimentEnabledAtom, true);
+    const runtime = createRuntime({});
+    const actions = await renderActions(runtime, { store });
+
+    const result = await actions.createSession(
+      createSessionPayload('session-roost-gated' as SessionId)
+    );
+
+    expect(result.sessionMeta.historyBackend).toBe('roost');
+  });
+
+  it('keeps the legacy backend when the experimental master switch is off', async () => {
+    const store = createStore();
+    store.set(experimentalFeaturesEnabledAtom, false);
+    store.set(roostHistoryExperimentEnabledAtom, true);
+    const runtime = createRuntime({});
+    const actions = await renderActions(runtime, { store });
+
+    const result = await actions.createSession(
+      createSessionPayload('session-roost-master-off' as SessionId)
+    );
+
+    expect(result.sessionMeta.historyBackend).toBe('loro');
   });
 
   it('keeps a local branch selector out of baseBranch until the target machine resolves it', async () => {
