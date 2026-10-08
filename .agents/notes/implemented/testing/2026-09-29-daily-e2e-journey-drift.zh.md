@@ -33,4 +33,4 @@ Windows 的分叉与 Session 管理旅程在源提示后超时。[artifact 的�
 
 ## 验证与限制
 
-同样四处有界 Page Object 修正在 [PR #1175](https://github.com/LodyAI/Lody/pull/1175) 通过了远程静态检查、测试分片和桌面 smoke。当前嵌套 worktree 按规则未安装依赖，`pnpm --filter @lody/e2e check` 因此无法启动；shell 还选中了不受支持的 Node.js 26.10.0。仓库指引要求此处跳过 `pnpm install`，所以构建后的 Electron 旅程交由 PR CI 验证。Issue #507 仍以 macOS、Linux 和 Windows 的完整 Daily 成功作为关闭信号。
+同样四处有界 Page Object 修正在 [PR #1175](https://github.com/LodyAI/Lody/pull/1175) 通过了远程静态检查、测试分片和桌面 smoke；[PR #1318](https://github.com/LodyAI/Lody/pull/1318) 在当前 `main` 基线上交付这些修正，并保留了前者的贡献归属。当前嵌套 worktree 按规则未安装依赖，`pnpm --filter @lody/e2e check` 因此无法启动；shell 还选中了不受支持的 Node.js 26.10.0。仓库指引要求此处跳过 `pnpm install`，所以构建后的 Electron 旅程交由 PR CI 验证。Issue #507 仍以 macOS、Linux 和 Windows 的完整 Daily 成功作为关闭信号。
