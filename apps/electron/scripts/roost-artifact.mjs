@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -10,7 +9,6 @@ const cliAppRoot = path.resolve(electronAppRoot, '../cli')
 // Lody/apps/electron, so the sibling is three levels up from this app root.
 const roostRoot = path.resolve(electronAppRoot, '../../../roost')
 const stagedRoostDir = path.join(electronAppRoot, 'resources', 'roost')
-const require = createRequire(path.join(cliAppRoot, 'package.json'))
 
 function fileExists(filePath) {
   try {
@@ -39,18 +37,16 @@ function resolveClientSource(artifactDir) {
 
   const candidates = [
     ...(artifactDir ? [path.join(artifactDir, 'client.mjs')] : []),
+    // The published subpath is import-only. Resolve the CLI's installed file
+    // directly because this script is outside the CLI dependency scope.
+    path.join(cliAppRoot, 'node_modules', '@loro-dev', 'roost', 'node', 'client.mjs'),
     path.join(roostRoot, 'ts', 'node', 'client.mjs'),
     path.join(roostRoot, 'node', 'client.mjs')
   ]
-  try {
-    candidates.push(require.resolve('@loro-dev/roost/node/client.mjs'))
-  } catch {
-    // The sibling checkout is the normal source while the package is local.
-  }
   const resolved = candidates.find(fileExists)
   if (!resolved) {
     throw new Error(
-      'Roost Node client is missing. Build or install @loro-dev/roost@0.1.1, or set ' +
+      'Roost Node client is missing. Install @loro-dev/roost@0.1.2, or set ' +
         'LODY_ROOST_NODE_CLIENT to its published node/client.mjs.'
     )
   }

@@ -3,7 +3,6 @@ import { existsSync, statSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   applyMessageContentsBatch,
@@ -127,7 +126,7 @@ const existingPath = (candidates: readonly string[]): string | undefined =>
 
 const packageClientPath = (): string | undefined => {
   try {
-    return createRequire(import.meta.url).resolve('@loro-dev/roost/node/client.mjs');
+    return fileURLToPath(import.meta.resolve('@loro-dev/roost/node/client.mjs'));
   } catch {
     return undefined;
   }

@@ -31,9 +31,29 @@ backend regardless of later preference changes.
 The switch does not migrate history, rewrite session metadata, or provide a
 per-message fallback. A backend choice remains an immutable session boundary.
 
+The CLI pins the published `@loro-dev/roost@0.1.2` npm package. Its lockfile uses
+registry integrity instead of a sibling source directory. Only that exact version
+is exempt from the seven-day release-age policy. The CLI resolves the Node client
+through the package's ESM export; Electron stages the client from the CLI's
+installed package before considering a sibling development checkout. The native
+owner binary remains a separate build artifact.
+
 ## Verification
 
 The session-actions contract tests cover both gates: Roost is selected only when
 both are enabled, and the legacy Loro default remains when the master switch is
 off. The settings Storybook story exposes the disabled, remembered, and enabled
 states.
+
+A standalone checkout without a sibling Roost tree passes
+`pnpm install --frozen-lockfile`, workspace typechecking, and lint. Published
+package API and Node client imports succeed. Client staging was checked for
+darwin, linux, and win32 with x64 and arm64 file selections using synthetic owner
+files; this does not verify native binaries. Full desktop packaging still requires
+the target owner artifact.
+
+Full `pnpm check` stops in the CLI suite with 3514 passed, 4 failed, and 7 skipped
+tests. Three runtime-config assertions still expect a synchronous boolean from
+`applyAcpRuntimeConfigPatch`, now a `Promise<boolean>`; machine registration's
+expected capabilities omit `sessionHistory: 2`. These feature-test mismatches
+remain unresolved in the npm dependency update.

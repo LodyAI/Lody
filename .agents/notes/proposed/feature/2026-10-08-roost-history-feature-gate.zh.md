@@ -26,7 +26,22 @@ discriminator 的会话无论偏好之后如何变化，都继续使用自己保
 开关不迁移历史、不重写会话 metadata，也不提供按消息切换 backend 的 fallback。backend 选择
 仍然是不可变的会话边界。
 
+CLI 固定使用 npm 发布的 `@loro-dev/roost@0.1.2`，锁文件记录 registry 校验值，不再依赖
+相邻源码目录。七天发布等待规则仅对这个固定版本开放例外。CLI 通过包的 ESM 导出解析
+Node client；Electron 优先从 CLI 安装的包复制 client，再考虑相邻开发检出。原生 owner
+二进制仍是单独的构建产物。
+
 ## 验证
 
 session-actions 契约测试覆盖两个开关：只有两个开关都打开时才选择 Roost，总开关关闭时仍
 保持 Loro 默认值。设置 Storybook 覆盖关闭、记住 opt-in 和开启三种状态。
+
+没有相邻 Roost 源码树的独立检出通过了 `pnpm install --frozen-lockfile`、全仓库类型检查
+和 lint。发布包 API 与 Node client 的导入正常。使用合成 owner 文件验证了 darwin、linux、
+win32 的 x64 与 arm64 client 复制和文件选择；这不代表验证过原生二进制。完整桌面打包
+仍需提供目标 owner 构建产物。
+
+完整 `pnpm check` 在 CLI 测试阶段停止：3514 个通过、4 个失败、7 个跳过。三个 runtime-config
+断言仍将已返回 `Promise<boolean>` 的 `applyAcpRuntimeConfigPatch` 当作同步布尔值；machine
+registration 的预期 capabilities 缺少 `sessionHistory: 2`。这次 npm 依赖更新没有处理这些
+feature 测试契约不一致。

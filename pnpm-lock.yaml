@@ -302,8 +302,8 @@ importers:
         specifier: 'catalog:'
         version: 0.4.3
       '@loro-dev/roost':
-        specifier: file:../../../roost/ts
-        version: file:../roost/ts
+        specifier: 0.1.2
+        version: 0.1.2
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.16.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.16.3)
@@ -3581,8 +3581,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@loro-dev/roost@file:../roost/ts':
-    resolution: {directory: ../roost/ts, type: directory}
+  '@loro-dev/roost@0.1.2':
+    resolution: {integrity: sha512-j8Knm3tdWwB9PXfObhRk3qQWd/qUL79JcVMcrEKBxMTQxsyk8cV4ZuSJOESQvTRUYEhq7FA0Brqce7Wy7xMPbw==}
 
   '@loro-dev/streams-client@0.7.0':
     resolution: {integrity: sha512-O+LphfngoJe0g0QmRV2OIQKsiytZuvHoSsQeYxiRK00UYHcpqjiZw2OmcXCU4Q5reuxI5kZJz6du24iAamBVtQ==}
@@ -16208,7 +16208,7 @@ snapshots:
       js-yaml: 4.1.1
       loro-crdt: 1.16.3
 
-  '@loro-dev/roost@file:../roost/ts':
+  '@loro-dev/roost@0.1.2':
     dependencies:
       '@loro-dev/streams-client': 0.8.0
       '@noble/curves': 2.4.0
