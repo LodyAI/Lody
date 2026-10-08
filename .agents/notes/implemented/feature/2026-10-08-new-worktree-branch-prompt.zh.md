@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1321](https://github.com/LodyAI/Lody/pull/1321)
 
 [English](2026-10-08-new-worktree-branch-prompt.md)
 
