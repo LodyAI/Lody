@@ -206,6 +206,7 @@ export const builtinPathLauncherIdSchema = z.enum([
   'cursor',
   'antigravity',
   'windsurf',
+  'devin-desktop',
   'zed',
   'sublime',
   'warp',
