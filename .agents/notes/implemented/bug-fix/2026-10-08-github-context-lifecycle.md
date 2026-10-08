@@ -42,6 +42,8 @@ the race is unconfirmed.
 - Preparation acquires its lease after every other credential step. It releases the
   lease on abort, failure or unadopted disposal, and hands it to the durable session
   on adoption.
+- Fork worktree cleanup, which prepares credentials only to resolve the repository,
+  releases its lease once the worktree is removed.
 - Durable sessions keep their context until broker shutdown. Shutdown advances a
   lease generation, so a lease issued before it cannot release a later context.
 - Refresh returns for local projects before checking membership, mirroring
@@ -68,8 +70,8 @@ Rejected alternatives:
 
 Behavioral tests cover broker leases (shared holders, owner rotation, shutdown
 generations) and the real preparation runtime: abort during credential setup,
-unadopted and late disposal, adoption across turns, a local session beside a
-same-ID context, and the managed missing-policy failure. At `5fe0d97b`, these four
+unadopted and late disposal, adoption across turns, fork worktree cleanup, a local
+session beside a same-ID context, and the managed missing-policy failure. At `5fe0d97b`, these four
 focused suites passed 43 tests with no unhandled rejections; format and typecheck
 passed.
 

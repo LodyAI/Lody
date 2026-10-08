@@ -2401,14 +2401,19 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   async cleanupForkWorktree(config: SessionConfig): Promise<void> {
-    if (config.project?.kind === 'github' && !config.repoId) {
-      await this.prepareGitHubRepoSessionConfig(config);
+    const releaseGitHubContext =
+      config.project?.kind === 'github' && !config.repoId
+        ? await this.prepareGitHubRepoSessionConfig(config)
+        : undefined;
+    try {
+      const target = this.resolveSessionWorktreeTarget(config);
+      if (!target || !config.sessionId) return;
+      await target.manager.removeWorktree(config.sessionId, true, undefined, {
+        baseBranchName: config.branch,
+      });
+    } finally {
+      releaseGitHubContext?.();
     }
-    const target = this.resolveSessionWorktreeTarget(config);
-    if (!target || !config.sessionId) return;
-    await target.manager.removeWorktree(config.sessionId, true, undefined, {
-      baseBranchName: config.branch,
-    });
   }
 
   async listMonitorSessions(): Promise<SessionMonitorRuntimeInfo[]> {

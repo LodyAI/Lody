@@ -139,6 +139,7 @@ const createHarness = () => {
       signal: AbortSignal
     ): Promise<PreparedRuntime>;
     prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<unknown>;
+    resolveSessionWorktreeTarget(config: SessionConfig): unknown;
   };
   vi.spyOn(internals, 'ensureGitCredentialBrokerEnv').mockResolvedValue({
     url: 'http://127.0.0.1:9',
@@ -303,6 +304,34 @@ describe('SessionManager GitHub credential context lifecycle', () => {
         machineId: 'machine-1',
       })
     ).toBe(foreign.contextToken);
+  });
+
+  it('releases the context fork cleanup acquires once the worktree is removed', async () => {
+    const h = createHarness();
+    const contextDuringRemoval: boolean[] = [];
+    vi.spyOn(h.internals, 'resolveSessionWorktreeTarget').mockReturnValue({
+      manager: {
+        removeWorktree: async () => {
+          contextDuringRemoval.push(h.broker.hasSessionContext(SESSION_ID));
+        },
+      },
+    });
+    const forkConfig = () =>
+      h.sessionConfig({
+        project: { kind: 'github', repoFullName: 'owner/repo', branch: 'main' },
+        githubRepo: 'owner/repo',
+      });
+
+    await h.manager.cleanupForkWorktree(forkConfig());
+
+    expect(contextDuringRemoval).toEqual([true]);
+    expect(h.broker.hasSessionContext(SESSION_ID)).toBe(false);
+
+    // A live session with the same ID keeps its context through the cleanup.
+    const durableConfig = h.sessionConfig();
+    await h.internals.prepareGitHubRepoSessionConfig(durableConfig);
+    await h.manager.cleanupForkWorktree(forkConfig());
+    expect(h.broker.hasSessionContext(SESSION_ID)).toBe(true);
   });
 
   it('still fails closed when a managed session has a context but no credential policy', async () => {
