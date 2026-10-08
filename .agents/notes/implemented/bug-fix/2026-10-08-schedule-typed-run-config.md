@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: https://github.com/LodyAI/Lody/pull/1306
+
 [中文](2026-10-08-schedule-typed-run-config.zh.md)
 
 ## Abstract
