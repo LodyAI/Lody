@@ -17,7 +17,9 @@ export function ensureGitHubGitTransport(
   const coreGit = path.join(execPath, process.platform === 'win32' ? 'git.exe' : 'git');
   const nativeGit = existsSync(coreGit) ? coreGit : realGit;
   writeIfChanged(path.join(directory, 'package.json'), '{"type":"commonjs"}\n');
-  const source = preamble + String.raw`'use strict';
+  const source =
+    preamble +
+    String.raw`'use strict';
 const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
