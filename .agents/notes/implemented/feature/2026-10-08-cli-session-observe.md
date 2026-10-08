@@ -92,3 +92,5 @@ sharing SQLite storage is not a live subscription between replicas. Permission
 answering, raw-history export, external request IDs and a persisted event log are
 outside this change. Cross-tool memory search was attempted,
 but Nowledge Mem was unreachable.
+
+PR: [LodyAI/Lody #1335](https://github.com/LodyAI/Lody/pull/1335).

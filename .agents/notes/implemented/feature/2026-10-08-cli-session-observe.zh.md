@@ -73,3 +73,5 @@ Cloud bundle 与发布导入检查在 4 GB 堆下通过；2 GB 构建耗尽内�
 仅本地 follow 需要适配已有 daemon/本地传输；共享 SQLite 存储不是独立副本间的实时订阅。
 权限回答、原生历史导出、外部请求 ID 和持久化事件日志不在本次范围。
 已尝试跨工具记忆检索，但 Nowledge Mem 无法连接。
+
+PR：[LodyAI/Lody #1335](https://github.com/LodyAI/Lody/pull/1335)。
