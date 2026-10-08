@@ -1,13 +1,13 @@
 import { MemoryBindingSchema } from './memory-provider';
 import { z } from 'zod';
 
-import { ProjectRefSchema } from './message-schemas';
+import { AcpConfigOptionValueSchema, ProjectRefSchema } from './message-schemas';
 import type { ProjectRef } from './project';
-import { classifyPermissionModeFace } from './ai';
+import { classifyPermissionModeFace, type AcpConfigOptionSummary } from './ai';
 import { isSensitiveAcpConfigOptionId } from './session-preparation';
 
 export const SCHEDULE_PROMPT_MAX_BYTES = 32 * 1024;
-export const SCHEDULE_PROTOCOL_VERSION = 1;
+export { SCHEDULES_PROTOCOL_VERSION as SCHEDULE_PROTOCOL_VERSION } from './machine-protocol-capabilities';
 export const SCHEDULE_DISPATCH_MAX_ATTEMPTS = 5;
 export const SCHEDULE_DISPATCH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const SCHEDULE_MISFIRE_GRACE_MS = 2 * 60 * 1000;
@@ -81,12 +81,40 @@ export const ScheduleAgentSchema = z
             (key) => !isSensitiveAcpConfigOptionId(key),
             'Credentials belong in the Agent configuration'
           ),
-        z.string().max(1024)
+        AcpConfigOptionValueSchema.refine(
+          (value) => typeof value !== 'string' || value.length <= 1024,
+          'Config option value must be at most 1024 characters'
+        )
       )
       .refine((value) => Object.keys(value).length <= 50, 'Too many config options')
       .optional(),
   })
   .strict();
+
+/**
+ * Older Schedule writers stringified ACP booleans. Interpret only exact boolean
+ * literals for options the target declares boolean; select strings stay strings.
+ * This is an execution/display projection, never a persisted-definition migration:
+ * the Registry fingerprint and frozen run definition must remain unchanged.
+ */
+export function normalizeLegacyScheduleAgent(
+  agent: z.infer<typeof ScheduleAgentSchema>,
+  options: readonly Pick<AcpConfigOptionSummary, 'id' | 'type'>[] = []
+): z.infer<typeof ScheduleAgentSchema> {
+  if (!agent.configOptionValues) return agent;
+  const booleans = new Set(
+    options.filter((option) => option.type === 'boolean').map((option) => option.id)
+  );
+  return {
+    ...agent,
+    configOptionValues: Object.fromEntries(
+      Object.entries(agent.configOptionValues).map(([id, value]) => [
+        id,
+        booleans.has(id) && (value === 'true' || value === 'false') ? value === 'true' : value,
+      ])
+    ),
+  };
+}
 
 export const ScheduleDefinitionSchema = z
   .object({
@@ -200,6 +228,7 @@ export function scheduleUsesElevatedPermissions(
   agent: z.infer<typeof ScheduleAgentSchema>
 ): boolean {
   return [agent.modeId, ...Object.values(agent.configOptionValues ?? {})].some((value) => {
+    if (typeof value !== 'string') return false;
     const face = classifyPermissionModeFace(value);
     return face.kind !== 'hidden' && face.tone === 'warning';
   });

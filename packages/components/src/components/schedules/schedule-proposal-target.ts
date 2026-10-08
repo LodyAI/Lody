@@ -24,19 +24,15 @@ export type ProposalConversation = {
 };
 
 /**
- * ACP option values as a schedule stores them: strings, never credentials.
- * A conversation's options arrive as ACP values (booleans included), and the
- * schedule definition rejects anything else, so Create would throw.
+ * Preserve the conversation/Role ACP value types while excluding credentials.
  */
 function scheduleOptionValues(
   values: Record<string, AcpConfigOptionValue> | undefined
-): Record<string, string> | undefined {
+): AgentRunRef['configOptionValues'] {
   if (!values) return undefined;
-  const entries = Object.entries(values)
-    .filter(
-      ([id, value]) => value !== undefined && value !== null && !isSensitiveAcpConfigOptionId(id)
-    )
-    .map(([id, value]) => [id, String(value)] as const);
+  const entries = Object.entries(values).filter(
+    ([id, value]) => value !== undefined && value !== null && !isSensitiveAcpConfigOptionId(id)
+  );
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
 

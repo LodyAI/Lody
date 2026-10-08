@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentConfigMeta, MachineMeta, ProjectRef, SessionId } from '@lody/shared';
+import {
+  ScheduleAgentSchema,
+  type AcpCapabilityCacheEntry,
+  type AgentConfigMeta,
+  type MachineMeta,
+  type ProjectRef,
+  type SessionId,
+  type WorkspaceId,
+} from '@lody/shared';
 
 import { prepareSessionInput, resolveTurnDispatchConfig } from '@/commands/session';
 import type { AuthContext } from '../command-runtime';
@@ -7,6 +15,7 @@ import type { LoroDocumentManager } from '../loro/doc';
 import type { WorkspaceSummary } from '../workspace';
 import {
   buildScheduleRunTarget,
+  resolveScheduleAgentRunConfig,
   buildScheduleSessionCreateOptions,
 } from './schedule-run-preparation';
 
@@ -119,5 +128,80 @@ describe('Session preparation for a scheduled run', () => {
     });
     expect(prepared.meta.project).toMatchObject({ kind: 'local', localProjectId: 'p1' });
     expect(prepared.meta).not.toHaveProperty('baseBranch');
+  });
+});
+
+describe('Schedule ACP values reach ordinary Session preparation', () => {
+  const capability: AcpCapabilityCacheEntry = {
+    cliType: 'custom',
+    agentType: 'acp',
+    modes: [],
+    models: [],
+    fetchedAt: 0,
+    configOptions: [
+      { id: 'plan_mode', name: 'Plan', type: 'boolean', currentValue: false, options: [] },
+      {
+        id: 'select_flag',
+        name: 'String choice',
+        type: 'select',
+        currentValue: 'false',
+        options: [{ value: 'false', name: 'False' }],
+      },
+    ],
+  };
+  const config = { ...agentConfig, cliType: 'custom' as const, agentType: 'acp' };
+  const localManager = {
+    syncMetaOrThrow: async () => {},
+    repo: {
+      getDocMeta: async () => undefined,
+      getWorkspaceMeta: async () => undefined,
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () => [{ key: ['acpCapability', 'agent'], value: capability }],
+        },
+      }),
+    },
+  } as unknown as LoroDocumentManager;
+  const prepareOptions = async (planMode: string | boolean) => {
+    const stored = ScheduleAgentSchema.parse({
+      agentConfigId: 'agent',
+      configOptionValues: { plan_mode: planMode, select_flag: 'false' },
+    });
+    const agent = await resolveScheduleAgentRunConfig(
+      localManager,
+      'workspace' as WorkspaceId,
+      targetMachine.id,
+      stored
+    );
+    const prepared = await prepareSessionInput(
+      auth,
+      workspace,
+      localManager,
+      'Synthetic scheduled prompt',
+      buildScheduleSessionCreateOptions({
+        sessionId: 'session-1' as SessionId,
+        userTurnId: 'turn-1',
+        agentConfigId: 'agent',
+        title: 'Schedule',
+      }),
+      { ...resolveTurnDispatchConfig({}), ...agent, inheritSessionDefaults: false },
+      buildScheduleRunTarget({ targetMachine, agentConfig: config })
+    );
+    expect(stored.configOptionValues?.plan_mode).toBe(planMode);
+    return prepared;
+  };
+  it.each([false, true, 'false', 'true'])(
+    'prepares typed and legacy boolean %s without changing select strings',
+    async (value) => {
+      const prepared = await prepareOptions(value);
+      expect(prepared.userTurn.status).toBe('prepared');
+      expect(prepared.userTurn.inputConfig?.configOptionValues).toEqual({
+        plan_mode: value === true || value === 'true',
+        select_flag: 'false',
+      });
+    }
+  );
+  it('leaves malformed legacy booleans for the ordinary validator to reject', async () => {
+    await expect(prepareOptions('off')).rejects.toThrow('expects a boolean');
   });
 });

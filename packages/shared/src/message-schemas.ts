@@ -97,7 +97,7 @@ export const BuiltinRuntimeOverridesSchema = z
   })
   .strict();
 
-const AcpConfigOptionValueSchema = z.union([z.string(), z.boolean()]);
+export const AcpConfigOptionValueSchema = z.union([z.string(), z.boolean()]);
 const AcpConfigOptionValuesSchema = z
   .record(z.string(), AcpConfigOptionValueSchema)
   .transform((values) =>

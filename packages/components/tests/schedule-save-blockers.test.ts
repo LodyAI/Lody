@@ -46,6 +46,12 @@ const ready = (overrides: Partial<ScheduleSaveContext> = {}): ScheduleSaveContex
 });
 
 describe('what stops a schedule from being saved', () => {
+  it('requires a typed-config daemon before authoring schedules', () => {
+    const context = ready({ machine: { ...machine, protocolCapabilities: { schedules: 1 } } });
+    expect(collectScheduleSaveBlockers(context, t)).toContain(en['schedules.upgrade']);
+    expect(collectScheduleSaveBlockers(ready(), t)).toEqual([]);
+  });
+
   it('does not require a project — a chat-only schedule is complete', () => {
     expect(collectScheduleSaveBlockers(ready(), t)).toEqual([]);
   });
