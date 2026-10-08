@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { Effect } from 'effect';
 import {
   createLoroStreamsJsonStreamClient,
+  DEFAULT_LORO_STREAMS_RPC_CONNECT_TIMEOUT_MS,
   LoroStreamsMachineRpcServer,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
@@ -3248,7 +3249,10 @@ export class MessageHandler {
     const streamsTokens = this.cloudPort.streamsTokens;
     if (streamsTokens) {
       const cliHttpFetch = getCliHttpFetch({ logger: this.logger });
-      const rpcConnectTimeoutMs = readTimeoutEnv('LODY_LORO_RPC_CONNECT_TIMEOUT_MS', 30_000);
+      const rpcConnectTimeoutMs = readTimeoutEnv(
+        'LODY_LORO_RPC_CONNECT_TIMEOUT_MS',
+        DEFAULT_LORO_STREAMS_RPC_CONNECT_TIMEOUT_MS
+      );
       this.logger.debug(
         `[rpc-server:${this.machineId}] using Loro Streams RPC connect timeout ${rpcConnectTimeoutMs}ms`
       );

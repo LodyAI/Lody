@@ -6,12 +6,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AgentConfigId, MachineId, WorkspaceId } from '@lody/shared';
 import {
   LoroStreamsMachineRpcClient,
   LoroStreamsMachineRpcServer,
   createLoroStreamsJsonStreamClient,
+  DEFAULT_LORO_STREAMS_RPC_CONNECT_TIMEOUT_MS,
 } from '../src/index';
 
 type LocalLoroDevServer = {
@@ -347,4 +348,33 @@ describe.runIf(runIntegrationTests)('loro streams rpc integration', () => {
     client.stop();
     server.stop();
   }, 20_000);
+});
+
+it('fails a stalled machine RPC append after 30s by default', async () => {
+  vi.useFakeTimers();
+  try {
+    let error: unknown;
+    void createLoroStreamsJsonStreamClient({
+      bucketId: 'bucket-1',
+      baseUrl: 'https://streams.example.com',
+      getToken: async () => 'token-1',
+      fetchImpl: async (_input, init) =>
+        await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        }),
+    })
+      .appendJson('workspace-1:rpc:req:machine-1', {})
+      .catch((caught: unknown) => {
+        error = caught;
+      });
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_LORO_STREAMS_RPC_CONNECT_TIMEOUT_MS - 1);
+    expect(error).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(String(error)).toContain(
+      `connect request exceeded ${DEFAULT_LORO_STREAMS_RPC_CONNECT_TIMEOUT_MS}ms`
+    );
+  } finally {
+    vi.useRealTimers();
+  }
 });
