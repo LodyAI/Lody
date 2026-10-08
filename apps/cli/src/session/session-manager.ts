@@ -1094,17 +1094,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       cleanupPromise = (async () => {
         const abortError = new Error('Session preparation disposed before claim');
         abortError.name = 'AbortError';
-        if (!started) {
-          // No agent is waiting for an unstarted preparation; resolving avoids
-          // creating an unhandled cancellation rejection during disposal.
-          sessionStart.resolve({ workdir: provisionalWorkdir });
-          workspaceReady.resolve(null);
-          agentResult.reject(abortError);
-          initialized.reject(abortError);
-          sessionReady.reject(abortError);
-        } else {
-          sessionStart.reject(abortError);
-        }
+        sessionStart.reject(abortError);
         try {
           if (session) {
             await session.terminate(true);
@@ -1211,7 +1201,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           const startedAgent = ownedSession.createAgent(
             this.buildCreateAgentConfig(ownedSession, config, launch, {
               abortSignal: signal,
-              resolveSessionStart: () => sessionStart.promise,
+              resolveSessionStart: async () => await sessionStart.promise,
               dispatchEvent: (event) => {
                 if (adopted) event();
               },
