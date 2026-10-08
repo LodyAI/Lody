@@ -8,6 +8,7 @@ import {
   type AgentRole,
 } from '@lody/shared';
 import type { WorkspaceRuntime } from '@/atoms/runtime';
+import { isAgentRolePolicyConfigOptionKey } from './agent-role-form';
 import { uploadWorkspaceCatalog } from './workspace-catalog-write';
 
 /** Only a complete, freshly probed runtime schema may remove saved keys.
@@ -36,7 +37,7 @@ export function reconcileAgentRoleSchema(
   for (const key of Object.keys(values)) {
     if (advertised.has(key)) continue;
     // Permission policy must never silently fall back to the runtime default.
-    if (/(permission|approval|sandbox)/i.test(key) || key === 'mode') continue;
+    if (isAgentRolePolicyConfigOptionKey(key)) continue;
     // Some agents expose different option keys for different models. Independent
     // Plan's retired field identities are known; other omissions need a matching model.
     const retiredPlanField =

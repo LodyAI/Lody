@@ -12,10 +12,12 @@ import type { AcpSelectorOptions } from '../src/components/shared/acp-selector-o
 import {
   applyAgentRoleRunConfigDefaults,
   buildAgentRoleFormValue,
+  buildAgentRoleRunConfig,
   buildAgentRoleRunConfigSummary,
   buildAgentRoleFromForm,
   EMPTY_AGENT_ROLE_FORM_VALUE,
   findAgentRoleRunConfigIssues,
+  selectAgentRoleModel,
   selectAuthorableAgentRoleConfigOptions,
   validateAgentRoleForm,
   type AgentRoleFormValue,
@@ -415,6 +417,81 @@ describe('run config defaults', () => {
       })
     );
     expect(seeded.configOptionValues).toEqual({});
+  });
+});
+
+describe('run config model switch', () => {
+  const claudeSelectorOptions = (modelId: string): AcpSelectorOptions =>
+    selectorOptions({
+      defaultModelId: 'opus-5.5',
+      modelOptions: [
+        { value: 'opus-5.5', label: 'Opus 5.5' },
+        { value: 'fable-5.1', label: 'Fable 5.1' },
+      ],
+      configOptionSelectors: [
+        {
+          type: 'select',
+          configId: 'effort',
+          label: 'Effort',
+          currentValue: modelId === 'opus-5.5' ? 'xhigh' : 'high',
+          options:
+            modelId === 'opus-5.5'
+              ? [
+                  { value: 'high', label: 'High' },
+                  { value: 'xhigh', label: 'Extra high' },
+                ]
+              : [{ value: 'high', label: 'High' }],
+        },
+        {
+          type: 'select',
+          configId: 'permission_mode',
+          label: 'Permissions',
+          currentValue: 'default',
+          options: [
+            { value: 'default', label: 'Default' },
+            { value: 'acceptEdits', label: 'Accept edits' },
+          ],
+        },
+        ...(modelId === 'opus-5.5'
+          ? [
+              {
+                type: 'boolean' as const,
+                configId: 'fast',
+                label: 'Fast',
+                options: [],
+                currentValue: false,
+              },
+            ]
+          : []),
+      ],
+    });
+
+  it('drops model-scoped options from the previous model and keeps policy options', () => {
+    const opus = applyAgentRoleRunConfigDefaults(
+      formValue({ modelId: null }),
+      claudeSelectorOptions('opus-5.5')
+    );
+    const edited = {
+      ...opus,
+      configOptionValues: {
+        ...opus.configOptionValues,
+        permission_mode: 'acceptEdits',
+        mode: 'plan',
+      },
+    };
+
+    const fable = applyAgentRoleRunConfigDefaults(
+      selectAgentRoleModel(edited, 'fable-5.1'),
+      claudeSelectorOptions('fable-5.1')
+    );
+    const runConfig = buildAgentRoleRunConfig(fable);
+
+    expect(runConfig.modelId).toBe('fable-5.1');
+    expect(runConfig.configOptionValues).toEqual({
+      effort: 'high',
+      permission_mode: 'acceptEdits',
+      mode: 'plan',
+    });
   });
 });
 

@@ -240,6 +240,22 @@ export const applyAgentRoleRunConfigDefaults = (
   return { ...value, modelId, modeId, configOptionValues };
 };
 
+export const isAgentRolePolicyConfigOptionKey = (key: string): boolean =>
+  /(permission|approval|sandbox)/i.test(key) || key === 'mode';
+
+export const selectAgentRoleModel = (
+  value: AgentRoleFormValue,
+  modelId: string | null
+): AgentRoleFormValue => ({
+  ...value,
+  modelId,
+  configOptionValues: Object.fromEntries(
+    Object.entries(value.configOptionValues).filter(([key]) =>
+      isAgentRolePolicyConfigOptionKey(key)
+    )
+  ),
+});
+
 // ---------------------------------------------------------------------------
 // Capability compatibility
 // ---------------------------------------------------------------------------
