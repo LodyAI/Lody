@@ -84,6 +84,23 @@ describe('ACP capability cache compatibility', () => {
       ).toBeUndefined();
     }
   });
+  it.each([
+    'builtin-pi:test+override:not-json',
+    'builtin-pi:test+override:{}',
+    'builtin-pi:test+override:{"piPath":"  "}',
+    'builtin-pi:test+override:["/opt/pi"]',
+  ])('rejects the unreadable Pi override suffix %s', (sourceVersion) => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...entry(ACP_CAPABILITY_CACHE_VERSION),
+      agentType: 'pi',
+      sourceVersion,
+    };
+    for (const overrides of [{ piPath: '/opt/pi' }, undefined]) {
+      expect(
+        getReadableAcpCapabilityCacheEntryForRuntimeOverrides(capability, overrides)
+      ).toBeUndefined();
+    }
+  });
 
   it.each([undefined, ACP_CAPABILITY_CACHE_VERSION - 1, ACP_CAPABILITY_CACHE_VERSION + 1])(
     'keeps a parsed cache-version %s entry readable',

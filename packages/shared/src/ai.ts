@@ -204,7 +204,11 @@ const RUNTIME_OVERRIDE_SOURCE_VERSION_MARKER = '+override:';
  * configuration produce two cache suffixes.
  */
 const serializeBuiltinRuntimeOverrides = (runtimeOverrides: unknown): string | undefined => {
-  if (!runtimeOverrides || typeof runtimeOverrides !== 'object' || Array.isArray(runtimeOverrides)) {
+  if (
+    !runtimeOverrides ||
+    typeof runtimeOverrides !== 'object' ||
+    Array.isArray(runtimeOverrides)
+  ) {
     return undefined;
   }
   const entries = Object.entries(runtimeOverrides)
@@ -228,14 +232,16 @@ export const getBuiltinRuntimeOverrideSourceVersionSuffix = (
 };
 
 /** Canonical overrides a stamped source version was launched with, if any. */
-const readSourceVersionRuntimeOverrides = (sourceVersion: string | undefined): string | undefined => {
+const readSourceVersionRuntimeOverrides = (
+  sourceVersion: string | undefined
+): string | undefined => {
   const index = sourceVersion?.indexOf(RUNTIME_OVERRIDE_SOURCE_VERSION_MARKER) ?? -1;
   if (!sourceVersion || index < 0) return undefined;
   const raw = sourceVersion.slice(index + RUNTIME_OVERRIDE_SOURCE_VERSION_MARKER.length);
   try {
-    return serializeBuiltinRuntimeOverrides(JSON.parse(raw)) ?? raw;
+    return serializeBuiltinRuntimeOverrides(JSON.parse(raw));
   } catch {
-    return raw;
+    return undefined;
   }
 };
 

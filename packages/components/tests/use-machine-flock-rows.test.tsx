@@ -2004,6 +2004,41 @@ describe('useMachineFlockRows', () => {
 });
 
 describe('session ACP catalogs from Machine Flock', () => {
+  const mountPiMachine = (
+    store: ReturnType<typeof createStore>,
+    workspaceId: WorkspaceId,
+    machineId: MachineId,
+    rows: () => MachineFlockRowMap
+  ) => {
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug: workspaceId,
+      repo: {
+        openFlockDoc: async () => ({
+          flock: {
+            scan: ({ prefix }: { prefix?: readonly unknown[] } = {}) =>
+              Object.values(rows()).filter(
+                (row) => !prefix || prefix.every((part, i) => row.key[i] === part)
+              ),
+            subscribe: () => () => {},
+          },
+          joinRoom: liveRoom().joinRoom,
+        }),
+      },
+    } as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceId);
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId(machineId)]: {
+        id: machineId,
+        name: 'Pi machine',
+        cliVersion: '',
+        os: '',
+        sessions: [],
+      },
+    } as unknown as Record<string, MachineMeta>);
+  };
+
   it('tracks the exact Provider extension selection for models and commands', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const store = createStore();
@@ -2037,33 +2072,7 @@ describe('session ACP catalogs from Machine Flock', () => {
           { key: machineFlockKeys.acpCapability(configId), value: capability },
         ].map((row) => [serializeMachineFlockKey(row.key), row])
       );
-    store.set(runtimeAtom, {
-      workspaceId,
-      workspaceSlug: workspaceId,
-      repo: {
-        openFlockDoc: async () => ({
-          flock: {
-            scan: ({ prefix }: { prefix?: readonly unknown[] } = {}) =>
-              Object.values(rows()).filter(
-                (row) => !prefix || prefix.every((part, i) => row.key[i] === part)
-              ),
-            subscribe: () => () => {},
-          },
-          joinRoom: liveRoom().joinRoom,
-        }),
-      },
-    } as unknown as WorkspaceRuntime);
-    store.set(currentWorkspaceIdAtom, workspaceId);
-    store.set(currentWorkspaceSlugAtom, workspaceId);
-    store.set(machineMetaCacheAtom, {
-      [getMachineRoomId(machineId)]: {
-        id: machineId,
-        name: 'Pi machine',
-        cliVersion: '',
-        os: '',
-        sessions: [],
-      },
-    } as unknown as Record<string, MachineMeta>);
+    mountPiMachine(store, workspaceId, machineId, rows);
     function Composer() {
       const { modelOptions, availableCommands } = useSessionAcpSelectorContext({
         machineId,
@@ -2143,6 +2152,10 @@ describe('session ACP catalogs from Machine Flock', () => {
     ['no extensions', undefined],
     ['extensions', { piExtensions: ['/fixture/plugin.ts'] }],
     ['extensions and a Pi binary', { piExtensions: ['/fixture/plugin.ts'], piPath: '/opt/pi' }],
+    [
+      'padded extensions and a Pi binary',
+      { piExtensions: [' /fixture/plugin.ts'], piPath: '/opt/pi ' },
+    ],
   ])(
     'keeps Model and Thinking after the first Pi turn with %s',
     async (_label, runtimeOverrides) => {
@@ -2205,33 +2218,7 @@ describe('session ACP catalogs from Machine Flock', () => {
           { key: machineFlockKeys.acpCapability(configId), value: capability },
         ].map((row) => [serializeMachineFlockKey(row.key), row])
       );
-      store.set(runtimeAtom, {
-        workspaceId,
-        workspaceSlug: workspaceId,
-        repo: {
-          openFlockDoc: async () => ({
-            flock: {
-              scan: ({ prefix }: { prefix?: readonly unknown[] } = {}) =>
-                Object.values(rows).filter(
-                  (row) => !prefix || prefix.every((part, i) => row.key[i] === part)
-                ),
-              subscribe: () => () => {},
-            },
-            joinRoom: liveRoom().joinRoom,
-          }),
-        },
-      } as unknown as WorkspaceRuntime);
-      store.set(currentWorkspaceIdAtom, workspaceId);
-      store.set(currentWorkspaceSlugAtom, workspaceId);
-      store.set(machineMetaCacheAtom, {
-        [getMachineRoomId(machineId)]: {
-          id: machineId,
-          name: 'Pi machine',
-          cliVersion: '',
-          os: '',
-          sessions: [],
-        },
-      } as unknown as Record<string, MachineMeta>);
+      mountPiMachine(store, workspaceId, machineId, () => rows);
       function Composer() {
         // The persisted composer's inputs after the first Turn sent Deep/high.
         const { modelOptions, configOptionSelectors } = useSessionAcpSelectorContext({
