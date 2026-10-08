@@ -11,10 +11,13 @@ site-owned, display-only previews under `components/docs-replica/` for the
 Sessions and GitHub pages, then converted every Feature List / reference screenshot
 in both locales to registered previews. The previews render from synthetic mock
 data, follow the reader's locale and light/dark theme, and are registered in
-`components/mdx.tsx`; browser and OS notification chrome are modeled as
-site-owned visual replicas because they are not Lody components. The replicas
-copy app markup rather than import app components, so they can still drift and
-must be re-copied when the app's look changes materially.
+`components/mdx.tsx`. Their `.lody-app-preview` token scope mirrors the live
+Lody Light and Vesper deep-sea palettes after the `@lody/ui` product mapping,
+so the static copy matches the app instead of the old Tailwind defaults. Browser
+and OS notification chrome are modeled as site-owned visual replicas because they
+are not Lody components. The replicas copy app markup rather than import app
+components, so they can still drift and must be re-copied when the app's look
+changes materially.
 
 ## Problem
 
@@ -42,7 +45,10 @@ must be re-copied when the app's look changes materially.
   copied from the app's current session-list and composer-selector markup. Each
   takes only `locale`, builds synthetic mock content, and imports no app code.
 - Render them inside the existing `.lody-app-preview` token scope so they follow
-  the site's light/dark theme.
+  the site's light/dark theme. Keep that scope aligned with the app's runtime
+  output: the light values are the resolved `lody-light` palette and the dark
+  values are the resolved `vesper` deep-sea palette, including the VS Code alias
+  and `@lody/ui` product-palette mapping.
 - Register them in `components/mdx.tsx` as `SessionListPreview` and
   `GithubRepoPickerPreview`, replace the `<img>` usages on the English and Chinese
   Sessions and GitHub pages, and delete the two now-unused assets.
@@ -98,7 +104,9 @@ must be re-copied when the app's look changes materially.
   Chinese pages contain the preview markup, and no `_docs-assets` image is
   referenced from either `(reference)` tree.
 - The new previews were checked visually in the rendered static pages in English
-  and Chinese, light and dark themes, at desktop and mobile widths.
+  and Chinese, light and dark themes, at desktop and mobile widths. The
+  `.lody-app-preview` palette was refreshed to the current Lody Light/Vesper
+  runtime channels and checked again in both themes.
 - The full static browser suite reports 309 passing cases and the same two
   baseline mobile `no-js navigation` timeouts before and after the change.
 - The replicas copy markup at a point in time; they do not follow app changes.

@@ -9,7 +9,9 @@ Language: [English](2026-10-06-docs-embedded-product-previews.md)
 文档截图比它描述的产品界面老化得更快。本变更先在 `components/docs-replica/` 下为会话页
 和 GitHub 页新增站点自有、仅用于展示的预览组件，随后把中英文 Feature List / reference
 文档中的每一张截图都替换为已注册预览。预览使用合成 mock 数据，跟随读者语言与明暗主题，
-并注册在 `components/mdx.tsx`；浏览器和 iOS 通知属于外部界面，因此以站点自有的视觉
+并注册在 `components/mdx.tsx`。其 `.lody-app-preview` token 作用域对齐产品当前运行时的
+Lody Light 与 Vesper deep-sea 调色板（含 VS Code alias 与 `@lody/ui` 产品映射），因此
+静态副本不再停留在旧 Tailwind 默认值。浏览器和 iOS 通知属于外部界面，以站点自有的视觉
 副本呈现，而不是 Lody 组件。副本拷贝产品 markup，而不是直接引用产品组件，所以仍可能
 漂移，产品外观明显变化时需要重新拷贝。
 
@@ -32,7 +34,9 @@ Language: [English](2026-10-06-docs-embedded-product-previews.md)
   `components/docs-replica/github-repo-picker-preview.tsx`，分别从产品当前的会话
   列表和输入框选择器 markup 拷贝，做成仅展示的副本。二者都只接受 `locale`，自行
   构造合成内容，不引用任何产品代码。
-- 用现有的 `.lody-app-preview` token 作用域渲染，使其跟随站点明暗主题。
+- 用现有的 `.lody-app-preview` token 作用域渲染，使其跟随站点明暗主题。该作用域保持
+  与产品运行时输出一致：浅色值来自解析后的 `lody-light` 调色板，深色值来自解析后的
+  `vesper` deep-sea 调色板，并包含 VS Code alias 与 `@lody/ui` 产品调色板映射。
 - 在 `components/mdx.tsx` 中注册为 `SessionListPreview` 和
   `GithubRepoPickerPreview`，替换中英文会话页和 GitHub 页里的 `<img>`，并删除两个
   不再使用的资源。
@@ -72,7 +76,9 @@ Language: [English](2026-10-06-docs-embedded-product-previews.md)
   报告 0 errors 和原有的 64 个 warnings。
 - 生产构建预渲染 257 个 HTML 文件。中英文 Feature List 页面包含预览 markup，
   `(reference)` 树中不再引用任何 `_docs-assets` 图片。
-- 新预览已在静态渲染页面中按中英文、明暗主题、桌面和移动宽度做过目视检查。
+- 新预览已在静态渲染页面中按中英文、明暗主题、桌面和移动宽度做过目视检查；
+  `.lody-app-preview` 调色板也已刷新到当前 Lody Light/Vesper 运行时颜色并再次
+  检查两种主题。
 - 全量静态浏览器套件报告 309 个通过用例，以及变更前后相同的两个移动端
   `no-js navigation` 基线超时。
 - 副本拷贝的是某一时刻的 markup，不会自动跟随产品变化。对应界面明显变化时需要重新
