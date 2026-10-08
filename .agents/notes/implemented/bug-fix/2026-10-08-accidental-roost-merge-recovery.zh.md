@@ -3,6 +3,7 @@
 Date: 2026-10-08
 Status: implemented
 Translation: current
+PR: [#1323](https://github.com/LodyAI/Lody/pull/1323)
 
 [English](2026-10-08-accidental-roost-merge-recovery.md)
 
