@@ -3,6 +3,7 @@
 Status: proposed
 Type: feature
 Translation: current
+PR: [#1329](https://github.com/LodyAI/Lody/pull/1329)
 
 [English](2026-10-08-roost-history-feature-gate.md)
 
