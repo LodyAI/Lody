@@ -676,6 +676,7 @@ export const MainComposerAboveFrame: Story = {
 
 /** The main composer's top caret menu with a full Role catalog and varied prompts. */
 export const MainComposerRoleCatalogAtCaret: Story = {
+  args: { search: '' },
   render: () => (
     <FloatingHarness
       menuSide="top"

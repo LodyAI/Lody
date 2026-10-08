@@ -517,7 +517,9 @@ describe('MentionTwoLevelMenuBody', () => {
       act(() => input.setSelectionRange(7, 7));
 
       for (const row of [role, issue, role]) {
-        act(() => row.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })));
+        act(() => {
+          row.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+        });
         const currentRole = container?.querySelectorAll('[data-slot="mention-item"]')[4];
         expect(currentRole?.parentElement?.scrollTop).toBe(240);
         expect(currentRole).toBe(role);
