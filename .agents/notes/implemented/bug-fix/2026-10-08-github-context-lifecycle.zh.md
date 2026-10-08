@@ -7,43 +7,61 @@ Translation: current
 
 ## 摘要
 
-被放弃的预准备可能在会话 ID 下留下 GitHub broker 上下文，轮次开始的刷新把这种成员关系当作
-托管注册，使之后的本地项目轮次以 `github_context_missing` 失败。broker 上下文现在改为租约，
-未被接管的预准备会释放，刷新也像预准备一样跳过本地项目；缺少 policy 的托管会话仍失败关闭。
-留下残留上下文的桌面交互属于推断，未复现；测试已编写但作者 Agent 未运行。
+本地项目会话可能在后续轮次以 `github_context_missing` 失败：被放弃的预准备在该会话 ID 下
+留下 GitHub broker 上下文，而轮次开始的刷新把任何上下文都当作托管注册。broker 上下文现在是
+计数租约，未被接管的预准备会释放；刷新在检查上下文前先跳过本地项目。缺少 policy 的托管会话
+仍失败关闭。留下残留上下文的桌面交互属于推断、未复现，最终源码也尚未完成全仓库与 E2E 验收。
 
 ## 证据
 
-已确认：同一本地会话首轮刷新成功、Agent 已在运行后，失败轮次记录
-`execution.refresh_gh_token status=error durationMs=0`。用已安装 bundle 自带的预准备、成员
-判断、刷新与策略方法，无 policy 的本地会话仅在其 ID 存在上下文时失败。源码中成员关系是刷新的
-唯一门槛，预准备在最后一次中止检查前注册上下文，清理从不撤销。
+已确认：
 
-推断：取消与认领未命中不等待进行中的凭据设置，被放弃的托管预准备可能在冷启动本地会话首轮刷新
-之后才注册。这与日志相符，但触发它的用户交互尚未确认。
+- 同一本地会话首轮刷新成功、Agent 已在运行后，失败轮次记录
+  `execution.refresh_gh_token status=error durationMs=0`。
+- 调用已安装 bundle 自带的预准备、成员判断、刷新与 policy 方法，无 policy 的本地会话仅在
+  其 ID 存在上下文时失败。
+- 源码中成员关系是刷新的唯一门槛；预准备在最后一次中止检查前注册上下文，预准备清理从不撤销。
+
+推断：取消与认领未命中不等待进行中的凭据设置，被放弃的托管预准备可能在冷启动本地会话首轮
+刷新之后才注册上下文。这与日志相符；触发该竞态的用户交互尚未确认。
 
 ## 决策
 
-`GitCredentialBroker.acquireSessionContext` 返回按会话 ID 计数的幂等租约；最后一次释放撤销当前
-token 与文件，所有者轮换后亦然。预准备最后才获取，中止、失败或未被接管的清理时释放，接管时
-移交租约。持久会话仍保留上下文至关闭，关闭推进代数，旧租约不能释放新上下文。刷新在检查成员
-关系前对本地项目返回；无 policy 的托管会话仍失败关闭，所有者变更仍终止旧进程。
+- `GitCredentialBroker.acquireSessionContext` 返回按会话 ID 计数的幂等租约。预准备与接替它的
+  持久会话可能持有同一上下文；最后一次释放撤销当前 token 及其文件，包括所有者轮换后替换的 token。
+- 预准备在其他凭据步骤全部完成后才获取租约；中止、失败或未被接管的清理时释放，接管时移交给
+  持久会话。
+- 持久会话保留上下文直到 broker 关闭。关闭推进租约代数，关闭前签发的租约不能释放之后的上下文。
+- 刷新与预准备一致，在检查成员关系前对本地项目直接返回。无 policy 的托管会话仍失败关闭，
+  所有者变更仍终止旧进程。
 
-未采用：删除缺 policy 检查或给本地会话补 policy 会掩盖托管设置错误或纳入本地会话；每次清理都
-撤销会让迟到的清理撤销替代会话共享的 token；只看会话自身 policy 会去掉托管失败关闭检查。
+未采用的方案：
 
-限制：会话终止时仍不释放持久上下文；解析出不同所有者的过期预准备仍会轮换 token。
+| 方案                    | 原因                               |
+| ----------------------- | ---------------------------------- |
+| 删除缺 policy 检查      | 掩盖托管设置错误                   |
+| 给本地会话补 policy     | 把本地项目纳入托管凭据             |
+| 每次预准备清理都撤销    | 迟到的清理会撤销接替者共享的 token |
+| 刷新只看会话自身 policy | 去掉托管失败关闭检查               |
+
+## 限制
+
+- 持久会话终止时不释放其上下文，上下文保留至 broker 关闭。
+- 解析出不同所有者的过期预准备仍会轮换共享 token。
 
 ## 验证
 
-回归测试覆盖 broker 租约（共享持有者、所有者轮换、关闭）与真实预准备运行时：凭据设置期间中止、
-未接管与迟到的清理、接管后的多轮刷新、本地会话与他人上下文并存，以及托管会话缺 policy 的失败。
-作者环境未执行这些测试。之后在隔离环境中，聚焦 context 集合（43 tests、无 unhandled errors）、
-format check、typecheck 和 lifecycle 回归均通过。一次 rollback 实验同时删掉四个 cleanup settlement，
-导致两个 lifecycle timeout；保留这些 settlement、仅无条件 reject `sessionStart` 后，六个 lifecycle
-测试全部通过，因此此前“必须 resolve `sessionStart`”的结论错误。root check 与完整桌面 E2E 运行于
-这个错误 rollback checkout，早于修正；root check 还发现 native-SSH fixture 失败，E2E 的 P1 provider
-场景 timeout，二者原因仍未确认。相关：
-[本地原生认证](../feature/2026-09-29-local-project-native-github-auth.zh.md)、
-[按命令选择凭据](../architecture/2026-09-26-github-command-credentials.zh.md)、
-Issue [#1309](https://github.com/LodyAI/Lody/issues/1309)。
+行为测试覆盖 broker 租约（共享持有者、所有者轮换、关闭代数）与真实预准备运行时：凭据设置
+期间中止、未接管与迟到的清理、接管后的多轮刷新、本地会话与同 ID 上下文并存，以及托管会话缺
+policy 的失败。在 `5fe0d97b`，这四个聚焦测试套件通过 43 个测试，无 unhandled rejection；
+format 与 typecheck 通过。
+
+最终源码未验证：全仓库 check 与完整桌面 E2E。早先 checkout 上的运行中，native-SSH fixture 以
+`context_unreadable` 失败，`LODY-AGENT-001` 与 `LODY-ROLE-001` 超时；原因均未归因。
+
+## 链接
+
+- PR [#1314](https://github.com/LodyAI/Lody/pull/1314)、Issue
+  [#1309](https://github.com/LodyAI/Lody/issues/1309)
+- [本地原生认证](../feature/2026-09-29-local-project-native-github-auth.zh.md)
+- [按命令选择凭据](../architecture/2026-09-26-github-command-credentials.zh.md)

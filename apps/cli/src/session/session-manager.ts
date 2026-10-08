@@ -1459,7 +1459,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     agentStart?: AgentStartConfig
   ): Promise<ISession> {
     await this.freezeCodexProfile(config);
-    // A durable session keeps its context until the broker shuts down.
+    // Durable sessions never release; the context lives until broker shutdown.
     await this.prepareGitHubRepoSessionConfig(config);
     const requestedResumeSessionId = agentStart?.resumeSessionId;
     const requestedForkSessionId = agentStart?.forkSessionId;
@@ -1706,8 +1706,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   /**
    * Returns the release for the broker context this call acquired, if any.
-   * A preparation that is never adopted must release it: the broker treats a
-   * context as proof of managed enrollment for every later session with the ID.
+   * A preparation that is never adopted must release it; otherwise the session
+   * ID keeps live managed credentials that no running session owns.
    */
   private async prepareGitHubRepoSessionConfig(
     config: SessionConfig

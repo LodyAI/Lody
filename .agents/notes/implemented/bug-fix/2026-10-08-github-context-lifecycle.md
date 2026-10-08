@@ -7,60 +7,79 @@ Translation: current
 
 ## Abstract
 
-An abandoned speculative preparation could leave a GitHub broker context under a
-session ID, and turn-start refresh treated that membership as managed enrollment,
-failing a later local-project turn with `github_context_missing`. Broker contexts are
-now leases released by unadopted preparations, and refresh skips local projects as
-preparation does; managed sessions still fail closed on a missing policy. The desktop
-interaction that left the stale context is inferred, not reproduced, and the tests were
-written but not run by the authoring agent.
+A local-project session could fail a later turn with `github_context_missing`: an
+abandoned speculative preparation left a GitHub broker context under the session's
+ID, and turn-start refresh treated any context as managed enrollment. Broker contexts
+are now counted leases that unadopted preparations release, and refresh skips local
+projects before checking for a context. Managed sessions still fail closed on a
+missing policy. The desktop interaction that leaves the stale context is inferred
+rather than reproduced, and full repository and E2E acceptance has not run on the
+final source.
 
 ## Evidence
 
-Confirmed: the failing turn logged `execution.refresh_gh_token status=error
-durationMs=0` after the same local session's first refresh succeeded, with the agent
-already running. Running the installed bundle's own preparation, membership, refresh
-and policy methods, a local session without a policy failed only when a context existed
-for its ID. In source, membership was refresh's only gate, preparation registered its
-context before its final abort check, and cleanup never revoked it.
+Confirmed:
 
-Inferred: cancellation and claim misses do not wait for in-flight credential setup, so
-an abandoned managed preparation can register after a cold-started local session's
-first refresh. This matches the log, but the user interaction that started it is
-unconfirmed.
+- The failing turn logged `execution.refresh_gh_token status=error durationMs=0`
+  after the same local session's first refresh had succeeded and its agent was running.
+- Calling the installed bundle's own preparation, membership, refresh and policy
+  methods, a local session without a policy failed only when a context existed for
+  its ID.
+- In source, context membership was refresh's only gate, preparation registered its
+  context before its last abort check, and preparation cleanup never revoked it.
+
+Inferred: cancellation and claim misses do not wait for in-flight credential setup,
+so an abandoned managed preparation can register its context after a cold-started
+local session's first refresh. This fits the log; the user interaction that starts
+the race is unconfirmed.
 
 ## Decision
 
-`GitCredentialBroker.acquireSessionContext` returns an idempotent lease counted per
-session ID; the last release revokes the current token and files, even after owner
-rotation. Preparation acquires last, releases on abort, failure or unadopted disposal,
-and hands the lease over on adoption. Durable sessions keep contexts until shutdown,
-whose generation bump stops older leases releasing newer contexts. Refresh returns for
-local projects before checking membership; managed sessions without a policy still fail
-closed, and owner changes still terminate old processes.
+- `GitCredentialBroker.acquireSessionContext` returns an idempotent lease, counted
+  per session ID. A preparation and the durable session replacing it may hold the
+  same context; the last release revokes the current token and its files, including
+  a token replaced by owner rotation.
+- Preparation acquires its lease after every other credential step. It releases the
+  lease on abort, failure or unadopted disposal, and hands it to the durable session
+  on adoption.
+- Durable sessions keep their context until broker shutdown. Shutdown advances a
+  lease generation, so a lease issued before it cannot release a later context.
+- Refresh returns for local projects before checking membership, mirroring
+  preparation. A managed session without a policy still fails closed, and an owner
+  change still terminates its old processes.
 
-Rejected: removing the missing-policy guard or giving local sessions a policy would hide
-managed setup errors or enroll local sessions; revoking on every disposal would let a
-late disposal revoke the replacing session's shared token; gating only on the live
-policy would drop the managed fail-closed check.
+Rejected alternatives:
 
-Limits: durable contexts are still not released on session termination, and a stale
-preparation resolving a different owner still rotates the token.
+| Alternative                                    | Why rejected                                           |
+| ---------------------------------------------- | ------------------------------------------------------ |
+| Remove the missing-policy guard                | Hides managed setup errors                             |
+| Give local sessions a policy                   | Enrolls local projects in managed credentials          |
+| Revoke on every preparation disposal           | A late disposal revokes the token its successor shares |
+| Gate refresh only on the session's live policy | Drops the managed fail-closed check                    |
+
+## Limits
+
+- Durable contexts are not released when their session terminates; they live until
+  broker shutdown.
+- A stale preparation that resolves a different owner can still rotate the shared
+  token.
 
 ## Verification
 
-Regression tests cover broker leases (shared holders, owner rotation, shutdown) and the
-real preparation runtime: abort during credential setup, unadopted and late disposal,
-adoption across turns, local sessions beside a foreign context, and the managed
-missing-policy failure. They were not executed in the authoring environment. A clean,
-isolated validation later passed the focused context set (43 tests, zero unhandled
-errors), format check, typecheck, and the lifecycle regression. A rollback experiment
-that removed four cleanup settlements caused two lifecycle timeouts; restoring those
-settlements while rejecting `sessionStart` unconditionally passed all six lifecycle
-tests, so the earlier claim that resolving `sessionStart` was required was incorrect.
-The root check and full desktop E2E ran on that faulty rollback checkout, before the
-correction. The root check also found a native-SSH fixture failure, and E2E timed out
-in P1 provider scenarios; their causes remain unconfirmed. Related:
-[local native authentication](../feature/2026-09-29-local-project-native-github-auth.md),
-[command credentials](../architecture/2026-09-26-github-command-credentials.md),
-issue [#1309](https://github.com/LodyAI/Lody/issues/1309).
+Behavioral tests cover broker leases (shared holders, owner rotation, shutdown
+generations) and the real preparation runtime: abort during credential setup,
+unadopted and late disposal, adoption across turns, a local session beside a
+same-ID context, and the managed missing-policy failure. At `5fe0d97b`, these four
+focused suites passed 43 tests with no unhandled rejections; format and typecheck
+passed.
+
+Not verified on the final source: the repository-wide check and full desktop E2E.
+Runs on an earlier checkout failed a native-SSH fixture with `context_unreadable` and
+timed out in `LODY-AGENT-001` and `LODY-ROLE-001`; those causes are not attributed.
+
+## Links
+
+- PR [#1314](https://github.com/LodyAI/Lody/pull/1314), issue
+  [#1309](https://github.com/LodyAI/Lody/issues/1309)
+- [Local native authentication](../feature/2026-09-29-local-project-native-github-auth.md)
+- [Command credentials](../architecture/2026-09-26-github-command-credentials.md)
