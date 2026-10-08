@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createGitCredentialBrokerHandler,
   GitCredentialBroker,
@@ -417,6 +420,70 @@ describe('GitCredentialBroker', () => {
       } finally {
         await broker.shutdown();
       }
+    });
+  });
+
+  describe('acquireSessionContext', () => {
+    const context = { sessionId: 's1', requesterUserId: 'u1', machineId: 'm1' };
+    let directory: string;
+    beforeEach(() => {
+      directory = mkdtempSync(path.join(os.tmpdir(), 'lody-broker-lease-'));
+      vi.stubEnv('LODY_DATA_DIR', directory);
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      rmSync(directory, { recursive: true, force: true });
+    });
+    const makeBroker = () =>
+      new GitCredentialBroker({
+        tokenManager: {} as GitHubTokenManager,
+        logger: { debug: vi.fn() } as unknown as Logger,
+        workspaceId: 'workspace-1',
+      });
+
+    it('keeps a shared session context until its last holder releases it', () => {
+      const broker = makeBroker();
+      const preparation = broker.acquireSessionContext(context);
+      const durable = broker.acquireSessionContext(context);
+      expect(durable.contextToken).toBe(preparation.contextToken);
+      const pinned = broker.getPinnedContextFilePath(durable.contextToken)!;
+      const bySession = broker.getSessionContextFilePath('s1')!;
+
+      preparation.release();
+      preparation.release();
+      expect(broker.hasSessionContext('s1')).toBe(true);
+      expect(existsSync(pinned)).toBe(true);
+      expect(existsSync(bySession)).toBe(true);
+
+      durable.release();
+      expect(broker.hasSessionContext('s1')).toBe(false);
+      expect(broker.refreshSessionContext(context)).toBeUndefined();
+      expect(existsSync(pinned)).toBe(false);
+      expect(existsSync(bySession)).toBe(false);
+    });
+
+    it('revokes the rotated token when the last holder releases after an owner change', () => {
+      const broker = makeBroker();
+      const lease = broker.acquireSessionContext(context);
+      const rotated = broker.refreshSessionContext({ ...context, requesterUserId: 'u2' });
+      expect(rotated).not.toBe(lease.contextToken);
+
+      lease.release();
+      expect(broker.hasSessionContext('s1')).toBe(false);
+      expect(existsSync(broker.getPinnedContextFilePath(rotated!)!)).toBe(false);
+    });
+
+    it('does not let a holder from before shutdown revoke a later context', async () => {
+      const broker = makeBroker();
+      const stale = broker.acquireSessionContext(context);
+      await broker.shutdown();
+      const current = broker.acquireSessionContext(context);
+
+      stale.release();
+      expect(broker.hasSessionContext('s1')).toBe(true);
+      expect(broker.refreshSessionContext(context)).toBe(current.contextToken);
+      current.release();
+      expect(broker.hasSessionContext('s1')).toBe(false);
     });
   });
 

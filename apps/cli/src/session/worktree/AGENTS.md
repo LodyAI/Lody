@@ -10,6 +10,9 @@ and file responsibilities: [../README.md](../README.md).
 
 - Local projects and their worktrees use native Git/GitHub auth, even with GitHub
   remotes. Skip managed credential preparation and never enroll them on refresh.
+- Preparation holds its broker context as a lease: release it unless adopted, or the
+  session ID stays enrolled for a later local session. Durable holders keep theirs.
+  Rationale: [note](../../../../../.agents/notes/implemented/bug-fix/2026-10-08-github-context-lifecycle.md).
 
 - Host clone/fetch must receive the prepared session's managed Git PATH/GIT_EXEC_PATH/config in
   `brokerAuth.transportEnv`, not just a helper: HTTP headers authenticate before

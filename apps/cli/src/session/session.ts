@@ -214,6 +214,10 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.config.parentSessionId;
   }
 
+  getProject(): SessionConfig['project'] {
+    return this.config.project;
+  }
+
   async applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void> {
     await this.sandbox.applyLimits(limits);
   }

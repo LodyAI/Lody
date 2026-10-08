@@ -40,6 +40,12 @@ export type GitCredentialBrokerSessionContext = {
   machineId: string;
 };
 
+/** One holder's claim on a session context; `release` is idempotent. */
+export type GitCredentialBrokerSessionLease = {
+  contextToken: string;
+  release(): void;
+};
+
 export type GitCredentialBrokerEnv = {
   /** URL for same-host access (127.0.0.1) */
   url: string;
@@ -329,6 +335,9 @@ export class GitCredentialBroker {
   private readonly ownerUserId: string | undefined;
   private readonly contexts = new Map<string, GitCredentialBrokerSessionContext>();
   private readonly sessionContextTokens = new Map<string, string>();
+  private readonly sessionContextHolders = new Map<string, number>();
+  /** Advanced by shutdown so leases from before it cannot release later contexts. */
+  private leaseGeneration = 0;
   private server: http.Server | null = null;
   private env: GitCredentialBrokerEnv | null = null;
 
@@ -430,6 +439,46 @@ export class GitCredentialBroker {
     return this.activateSessionContext(context);
   }
 
+  /**
+   * A preparation and the durable session replacing it can hold one session's
+   * context at once. The context survives until its last holder releases it,
+   * so an abandoned preparation neither outlives itself nor revokes its successor.
+   */
+  acquireSessionContext(
+    context: GitCredentialBrokerSessionContext
+  ): GitCredentialBrokerSessionLease {
+    const { sessionId } = context;
+    const contextToken = this.activateSessionContext(context);
+    const holders = this.sessionContextHolders.get(sessionId) ?? 0;
+    this.sessionContextHolders.set(sessionId, holders + 1);
+    const generation = this.leaseGeneration;
+    let released = false;
+    return {
+      contextToken,
+      release: () => {
+        if (released || generation !== this.leaseGeneration) return;
+        released = true;
+        const remaining = (this.sessionContextHolders.get(sessionId) ?? 1) - 1;
+        if (remaining > 0) {
+          this.sessionContextHolders.set(sessionId, remaining);
+          return;
+        }
+        this.sessionContextHolders.delete(sessionId);
+        // Owner rotation may have replaced the token this lease was issued with.
+        const token = this.sessionContextTokens.get(sessionId);
+        if (!token) return;
+        this.sessionContextTokens.delete(sessionId);
+        this.contexts.delete(token);
+        for (const file of [
+          this.getPinnedContextFilePath(token),
+          this.getSessionContextFilePath(sessionId),
+        ]) {
+          if (file) removeFileIfExists(file);
+        }
+      },
+    };
+  }
+
   activateSessionContext(context: GitCredentialBrokerSessionContext): string {
     const existingToken = this.sessionContextTokens.get(context.sessionId);
     if (existingToken) {
@@ -528,6 +577,8 @@ export class GitCredentialBroker {
       if (file) removeFileIfExists(file);
     }
     this.sessionContextTokens.clear();
+    this.sessionContextHolders.clear();
+    this.leaseGeneration++;
 
     if (!this.server) {
       return;

@@ -324,6 +324,7 @@ export interface ISession {
    */
   getHostWorkdir(): string | null;
   getParentSessionId(): SessionId | undefined;
+  getProject?(): SessionConfig['project'];
   applyExecutionPlaneLimits(limits: SessionSandboxLimits): Promise<void>;
   getMonitorRuntimeInfo(): Promise<SessionMonitorRuntimeInfo>;
   exec(command: string, args: string[], workdir: string, isAI: boolean): Promise<string>;
@@ -1042,21 +1043,30 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       config.configOptionValues,
       config.memory
     );
-    await this.prepareGitHubRepoSessionConfig(config);
-    signal.throwIfAborted();
-    const launch = await resolveACPProcessLaunchAsync({
-      cliType: config.agentCliType,
-      agentType: config.agentType,
-      customAcp: config.customAcp,
-      runtimeOverrides: config.runtimeOverrides,
-      env: config.env,
-    });
-    signal.throwIfAborted();
-    const worktreeTarget = this.resolveSessionWorktreeTarget(config);
-
-    let sandbox: SessionSandbox | null = await this.sessionSandboxFactory(
-      getSessionPreparationSandboxId(sessionId, spec.preparationId)
-    );
+    // Aborting does not interrupt credential preparation, so an abandoned
+    // preparation can still acquire a context here and must release it.
+    const releaseGitHubContext = await this.prepareGitHubRepoSessionConfig(config);
+    let launch: ResolvedAcpProcessLaunch;
+    let worktreeTarget: SessionWorktreeTarget | null;
+    let sandbox: SessionSandbox | null;
+    try {
+      signal.throwIfAborted();
+      launch = await resolveACPProcessLaunchAsync({
+        cliType: config.agentCliType,
+        agentType: config.agentType,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        env: config.env,
+      });
+      signal.throwIfAborted();
+      worktreeTarget = this.resolveSessionWorktreeTarget(config);
+      sandbox = await this.sessionSandboxFactory(
+        getSessionPreparationSandboxId(sessionId, spec.preparationId)
+      );
+    } catch (error) {
+      releaseGitHubContext?.();
+      throw error;
+    }
     let session: Session | null = null;
     let createdDefaultWorkdir = false;
     let adopted = false;
@@ -1108,6 +1118,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             });
           }
         } finally {
+          // Adoption hands the context to the durable session.
+          if (!adopted) releaseGitHubContext?.();
           await agentResult.promise.catch(() => undefined);
           const preparedWorktree = await workspaceReady.promise.catch(() => null);
           if (session && this.preparationSessions.get(sessionId) === session) {
@@ -1444,6 +1456,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     agentStart?: AgentStartConfig
   ): Promise<ISession> {
     await this.freezeCodexProfile(config);
+    // A durable session keeps its context until the broker shuts down.
     await this.prepareGitHubRepoSessionConfig(config);
     const requestedResumeSessionId = agentStart?.resumeSessionId;
     const requestedForkSessionId = agentStart?.forkSessionId;
@@ -1688,7 +1701,14 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
   }
 
-  private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void> {
+  /**
+   * Returns the release for the broker context this call acquired, if any.
+   * A preparation that is never adopted must release it: the broker treats a
+   * context as proof of managed enrollment for every later session with the ID.
+   */
+  private async prepareGitHubRepoSessionConfig(
+    config: SessionConfig
+  ): Promise<(() => void) | undefined> {
     // A GitHub remote does not make a local project a managed GitHub checkout.
     // Direct local sessions and their worktrees keep the user's native auth.
     if (config.project?.kind === 'local') return;
@@ -1707,18 +1727,11 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const credentialOwner = await this.resolveGitHubOwner(config.sessionId, config.requesterUserId);
     const allowLocalAuth = credentialOwner === this.cloudPort.identity.userId;
     config.githubCredentialPolicy = { allowLocalAuth };
-    if (!config.sessionId) throw new Error('SessionId is required for GitHub credentials');
-    const contextToken = this.gitCredentialBroker!.activateSessionContext({
-      sessionId: config.sessionId,
-      requesterUserId: credentialOwner,
-      machineId: this.machineId,
-    });
     const brokerStateFilePath = this.gitCredentialBroker!.getStateFilePath();
     if (!brokerStateFilePath) throw new Error('Workspace-scoped GitHub broker is required');
     config.githubCredentialPolicy.stateFilePath = brokerStateFilePath;
     const sessionEnv: Record<string, string> = { ...config.env };
     clearManagedGhTokenEnv(sessionEnv);
-    if (contextToken) sessionEnv[LODY_GIT_CRED_CONTEXT_TOKEN_ENV] = contextToken;
     const contextFile = this.gitCredentialBroker!.getSessionContextFilePath(config.sessionId);
     if (contextFile) sessionEnv[LODY_GIT_CRED_CONTEXT_FILE_ENV] = contextFile;
     this.ensureGhShimSessionEnv(sessionEnv);
@@ -1767,6 +1780,13 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     }
     sessionEnv.GIT_CONFIG_COUNT = String(configCount);
     sessionEnv.GIT_EXEC_PATH = getGhShimHostBinDir(brokerStateFilePath);
+    // Acquired last so a preparation that fails above holds no context.
+    const context = this.gitCredentialBroker!.acquireSessionContext({
+      sessionId: config.sessionId,
+      requesterUserId: credentialOwner,
+      machineId: this.machineId,
+    });
+    sessionEnv[LODY_GIT_CRED_CONTEXT_TOKEN_ENV] = context.contextToken;
     config.env = {
       ...sessionEnv,
       LODY_GIT_CRED_BROKER_URL: brokerEnv.url,
@@ -1775,6 +1795,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       ...(githubRepo ? { LODY_GITHUB_REPO_FULL_NAME: githubRepo } : {}),
       GIT_TERMINAL_PROMPT: '0',
     };
+    return context.release;
   }
 
   private async resolveGitHubOwner(sessionId: SessionId, initialOwner: string): Promise<string> {
@@ -1791,6 +1812,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     _githubRepo: string | undefined,
     requesterUserId: string
   ): Promise<void> {
+    // Mirrors preparation: a local project never enrolls, so a context under its
+    // session ID belongs to another holder and is not this session's policy.
+    if (session.getProject?.()?.kind === 'local') return;
     if (!this.gitCredentialBroker?.hasSessionContext(session.sessionId)) return;
     const owner = await this.resolveGitHubOwner(session.sessionId, requesterUserId);
     const previousOwner = this.gitCredentialBroker.getSessionOwner(session.sessionId);
