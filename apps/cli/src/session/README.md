@@ -64,6 +64,16 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 
 ## Background
 
+### Frozen execution input
+
+Create, continue and steer resolve effective input through shared
+`resolveSessionExecutionInputBlocks`: the accepted turn's `prompt` owns text,
+while `inputBlocks` provide structured attachments and retain authored text for
+editing. Dispatch preserves both fields and supplies legacy history fallback.
+Execution never reconstructs instructions from the current Role catalog. Runtime
+context and attachment materialization remain daemon responsibilities. See the
+[decision and regression evidence](../../../../.agents/notes/implemented/architecture/2026-10-08-frozen-turn-execution-input.md).
+
 ### Why turn activation has its own predicate
 
 Fast-path turns that finish before their history entry syncs are reconciled by
