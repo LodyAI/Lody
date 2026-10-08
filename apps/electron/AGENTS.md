@@ -58,9 +58,10 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 
 - The embedded CLI runs built JavaScript, never source-loader/Jiti. Development
   and packaged builds share the output layout.
-- `better-sqlite3`, `@lydell/node-pty`, and `loro-crdt` remain external and must be
+- `@loro-dev/roost-node`, `better-sqlite3`, `@lydell/node-pty`, and `loro-crdt` remain external and must be
   staged under `resources/cli/node_modules` by `scripts/sync-cli-dist.mjs` and
   `scripts/cli-native-deps.mjs`.
+  Roost's client, Worker, and binding retain relative paths; package only the target prebuild.
 - `@lydell/node-pty` and `better-sqlite3 >= 13.0.2` use N-API artifacts. Stage the
   target platform/architecture artifact; do not rebuild by Electron ABI.
 - Every embedded-CLI descendant launched through `process.execPath` must inherit

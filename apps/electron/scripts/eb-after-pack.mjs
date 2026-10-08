@@ -3,6 +3,8 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 import {
+  stagedRoostBindingPath,
+  stagedRoostDir,
   stagedNodePtyBindingPath,
   stagedNodePtySpawnHelperPath,
   stagedNodeModulesDir,
@@ -104,18 +106,6 @@ export default async function afterPack(context) {
   if (!fs.existsSync(cliEntry)) {
     throw new Error(`[embedded-cli] missing expected path: ${cliEntry}`)
   }
-  const packedRoostDir = path.join(resourcesDir, 'app.asar.unpacked', 'resources', 'roost')
-  const packedRoostClient = path.join(packedRoostDir, 'client.mjs')
-  const packedRoostOwner = path.join(
-    packedRoostDir,
-    platform === 'win32' ? 'roost-node-owner.exe' : 'roost-node-owner'
-  )
-  if (!fs.existsSync(packedRoostClient) || !fs.existsSync(packedRoostOwner)) {
-    throw new Error(
-      `[roost] packaged runtime is incomplete; expected ${packedRoostClient} and ${packedRoostOwner}`
-    )
-  }
-  console.log(`[roost] packaged client and owner in ${packedRoostDir}`)
   assertPackagedDeepSeekAssets(packedCliDir)
   // beforePack staged both native bindings for this exact target, so mirror their
   // staged-relative locations rather than guessing the per-platform file names here.
@@ -144,6 +134,16 @@ export default async function afterPack(context) {
         `[embedded-cli] node-pty spawn-helper missing after copy: ${packedSpawnHelperPath}`
       )
     }
+  }
+  const packedRoostDir = packedFromStaged(stagedRoostDir)
+  for (const file of ['package.json', 'client.mjs', 'worker.mjs', 'binding.cjs']) {
+    if (!fs.existsSync(path.join(packedRoostDir, file))) {
+      throw new Error(`[roost] packaged runtime is missing ${file} in ${packedRoostDir}`)
+    }
+  }
+  const packedRoostBinding = packedFromStaged(stagedRoostBindingPath(nativeTarget))
+  if (!fs.existsSync(packedRoostBinding)) {
+    throw new Error(`[roost] packaged binding missing: ${packedRoostBinding}`)
   }
   console.log(`[embedded-cli] copied runtime node_modules into ${packedCliDir}`)
 
@@ -211,6 +211,29 @@ export default async function afterPack(context) {
         `the packaged app would crash-loop on CLI autostart.\n${detail}`
     )
   }
+
+  const roostProbe = spawnSync(
+    cliRuntimePath,
+    [path.join(import.meta.dirname, 'roost-runtime-probe.mjs'), packedRoostDir],
+    {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      encoding: 'utf8',
+      timeout: SMOKE_TIMEOUT_MS,
+      windowsHide: true
+    }
+  )
+  if (
+    roostProbe.error ||
+    roostProbe.status !== 0 ||
+    !roostProbe.stdout.includes('roost-binding-ok')
+  ) {
+    const detail = [roostProbe.error?.message, roostProbe.stderr, roostProbe.stdout]
+      .filter(Boolean)
+      .join('\n')
+      .slice(-4000)
+    throw new Error(`[roost] packaged SQLite/Worker probe failed: ${detail}`)
+  }
+  console.log('[roost] packaged native Worker wrote and reopened SQLite history')
 
   const nodePtyProbe = [
     `const { createRequire } = require('node:module');`,

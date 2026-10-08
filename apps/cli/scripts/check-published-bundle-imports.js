@@ -23,6 +23,7 @@ const dependencyBlocks = [
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 const workspacePackageNames = new Set();
 const requiredPublishedRuntimeDependencies = [
+  '@loro-dev/roost-node',
   '@napi-rs/keyring',
   'better-sqlite3',
   'loro-crdt',
@@ -38,7 +39,10 @@ const requiredPublishedRuntimeDependencies = [
 // repackages node-pty 1.1.0-beta14, which predates the queued pty writer and writes
 // through tty.WriteStream, where EAGAIN is masked and can block (microsoft/node-pty#833).
 const requiredExactPublishedRuntimeDependencies = ['loro-crdt'];
-const requiredPinnedPublishedRuntimeDependencies = new Map([['@lydell/node-pty', '1.2.0-beta.14']]);
+const requiredPinnedPublishedRuntimeDependencies = new Map([
+  ['@lydell/node-pty', '1.2.0-beta.14'],
+  ['@loro-dev/roost-node', '0.1.0'],
+]);
 
 for (const block of dependencyBlocks) {
   const dependencies = packageJson[block];
@@ -385,7 +389,37 @@ probeDb.close();
 requireFromBundle('@lydell/node-pty');
 requireFromBundle.resolve('loro-crdt');
 requireFromBundle.resolve('tinypool');
-originalStdoutWrite('Published CLI runtime CJS dependency smoke passed.\\n');
+const { RoostNativeClient } = await import('@loro-dev/roost-node');
+const { createPrivateKey, createPublicKey } = await import('node:crypto');
+const { mkdtemp, rm } = await import('node:fs/promises');
+const { tmpdir } = await import('node:os');
+const { join } = await import('node:path');
+const roostSeed = new Uint8Array(32).fill(17);
+const key = createPrivateKey({
+  key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), roostSeed]),
+  format: 'der', type: 'pkcs8',
+});
+const roostOwner = createPublicKey(key).export({ format: 'der', type: 'spki' }).subarray(-32);
+const roostDirectory = await mkdtemp(join(tmpdir(), 'lody-published-roost-'));
+const roost = new RoostNativeClient({
+  dbPath: join(roostDirectory, 'history.db'), seed: roostSeed, allowedOwners: [roostOwner],
+  clockMs: 1700000000000n, maxQueuedRequests: 8, maxQueuedBytes: 4096,
+});
+try {
+  await roost.ready;
+  const stream = roost.stream('published-smoke');
+  const content = '{"text":"published Roost"}';
+  const id = (await stream.create([], content)).updates[0].turnId;
+  await stream.seal(id, 1n);
+  const read = await stream.readTurn(id);
+  if (read.kind !== 'found' || read.turn.contentJson !== content || !read.turn.hashVerified) {
+    throw new Error('Published Roost SQLite/Worker probe failed');
+  }
+} finally {
+  await roost.close();
+  await rm(roostDirectory, { recursive: true, force: true });
+}
+originalStdoutWrite('Published CLI runtime dependency smoke passed.\\n');
 originalExit(0);
 `;
 
@@ -401,7 +435,7 @@ originalExit(0);
       stdio: 'pipe',
     });
   } catch (error) {
-    console.error('Published CLI runtime CJS dependency smoke failed.');
+    console.error('Published CLI runtime dependency smoke failed.');
     if (error && typeof error === 'object') {
       const output = error;
       if ('stdout' in output && output.stdout) {

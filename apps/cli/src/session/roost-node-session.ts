@@ -1,9 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, statSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   applyMessageContentsBatch,
   applyNotificationOnHistory,
@@ -55,9 +53,9 @@ import {
   type ActiveBranchPageRead,
   toApplicationJson,
   type HistoryProjectedMessage,
-  type LodyNodeHost,
 } from '@loro-dev/roost/lody-history';
 import { Identity } from '@loro-dev/roost';
+import { RoostNativeClient } from '@loro-dev/roost-node';
 import type { SessionDocument } from '@/lib/loro/doc';
 import type { SessionAgentWrites } from '@/lib/loro/session-agent-writes';
 import { latestSessionModel } from '@/lib/loro/session-model-summary';
@@ -69,35 +67,15 @@ import {
 import { adaptRoostProjectedMessage, adaptRoostProjectedMessages } from './roost-history-port';
 import { registerSessionBackendFactory } from './session-backend';
 
-type NodeClient = {
-  readonly ready: Promise<unknown>;
-  readonly capabilities?: readonly string[];
-  stream(id: string): LodyNodeHost;
-  close(): Promise<void>;
-};
-
-type NodeClientConstructor = new (options: {
-  binaryPath: string;
-  dbPath: string;
-  seed: Uint8Array;
-  allowedOwners: Uint8Array[];
-  maxQueuedRequests: number;
-  maxQueuedBytes: number;
-}) => NodeClient;
-
-type NodeClientModule = { RoostNodeClient: NodeClientConstructor };
-
-type RoostOwnerOptions = {
-  readonly binaryPath?: string;
+type RoostNativeOptions = {
   readonly dbPath?: string;
-  readonly nodeClientModule?: string;
   readonly seed?: Uint8Array;
   readonly maxQueuedRequests?: number;
   readonly maxQueuedBytes?: number;
 };
 
 type OwnerLease = {
-  readonly client: NodeClient;
+  readonly client: RoostNativeClient;
   readonly owner: Uint8Array;
   release(): Promise<void>;
 };
@@ -111,105 +89,6 @@ const parseSeed = (raw: string | undefined): Uint8Array | undefined => {
     throw new Error('LODY_ROOST_SEED_HEX must contain exactly 32 bytes (64 hex characters)');
   }
   return Uint8Array.from(Buffer.from(value, 'hex'));
-};
-
-const runtimeResourcesPath = (): string | undefined => {
-  const value = (process as NodeJS.Process & { resourcesPath?: unknown }).resourcesPath;
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-};
-
-const existingPath = (candidates: readonly string[]): string | undefined =>
-  candidates
-    .filter((candidate) => candidate.trim().length > 0)
-    .map((candidate) => resolve(candidate))
-    .find((candidate) => existsSync(candidate) && statSync(candidate).isFile());
-
-const packageClientPath = (): string | undefined => {
-  try {
-    return fileURLToPath(import.meta.resolve('@loro-dev/roost/node/client.mjs'));
-  } catch {
-    return undefined;
-  }
-};
-
-const siblingRoostRoot = (start: string): string | undefined => {
-  let current = resolve(start);
-  for (let depth = 0; depth < 10; depth += 1) {
-    const candidate = join(current, 'roost');
-    if (
-      existsSync(join(candidate, 'node', 'client.mjs')) ||
-      existsSync(join(candidate, 'target', 'release', 'roost-node-owner')) ||
-      existsSync(join(candidate, 'target', 'release', 'roost-node-owner.exe')) ||
-      existsSync(join(candidate, 'target', 'debug', 'roost-node-owner')) ||
-      existsSync(join(candidate, 'target', 'debug', 'roost-node-owner.exe'))
-    ) {
-      return candidate;
-    }
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return undefined;
-};
-
-const defaultNodeClientModule = (): string => {
-  const configured = process.env.LODY_ROOST_NODE_CLIENT?.trim();
-  if (configured) return configured;
-  const resources = runtimeResourcesPath();
-  const moduleDir = dirname(fileURLToPath(import.meta.url));
-  const sibling = siblingRoostRoot(moduleDir);
-  const resolved = existingPath([
-    ...(resources
-      ? [
-          join(resources, 'roost', 'client.mjs'),
-          join(resources, 'roost', 'node', 'client.mjs'),
-          join(resources, 'app.asar.unpacked', 'resources', 'roost', 'client.mjs'),
-          join(resources, 'app.asar.unpacked', 'resources', 'roost', 'node', 'client.mjs'),
-          join(resources, 'app.asar.unpacked', 'roost', 'client.mjs'),
-        ]
-      : []),
-    packageClientPath() ?? '',
-    ...(sibling ? [join(sibling, 'node', 'client.mjs')] : []),
-  ]);
-  return resolved ?? 'roost-node-client-unavailable';
-};
-
-const defaultOwnerBinary = (): string => {
-  const configured = process.env.LODY_ROOST_NODE_OWNER?.trim();
-  if (configured) return configured;
-  const resources = runtimeResourcesPath();
-  const moduleDir = dirname(fileURLToPath(import.meta.url));
-  const sibling = siblingRoostRoot(moduleDir);
-  const development = process.env.NODE_ENV !== 'production';
-  const resolved = existingPath([
-    ...(resources
-      ? [
-          join(resources, 'roost', 'roost-node-owner'),
-          join(resources, 'roost', 'roost-node-owner.exe'),
-          join(resources, 'app.asar.unpacked', 'resources', 'roost', 'roost-node-owner'),
-          join(resources, 'app.asar.unpacked', 'resources', 'roost', 'roost-node-owner.exe'),
-          join(resources, 'app.asar.unpacked', 'roost', 'roost-node-owner'),
-          join(resources, 'app.asar.unpacked', 'roost', 'roost-node-owner.exe'),
-        ]
-      : []),
-    ...(sibling
-      ? [
-          join(sibling, 'target', 'release', 'roost-node-owner'),
-          join(sibling, 'target', 'release', 'roost-node-owner.exe'),
-        ]
-      : []),
-    ...(development
-      ? [
-          ...(sibling
-            ? [
-                join(sibling, 'target', 'debug', 'roost-node-owner'),
-                join(sibling, 'target', 'debug', 'roost-node-owner.exe'),
-              ]
-            : []),
-        ]
-      : []),
-  ]);
-  return resolved ?? 'roost-node-owner-unavailable';
 };
 
 const loadRoostOwnerSeed = async (): Promise<Uint8Array> => {
@@ -241,48 +120,20 @@ const defaultDatabase = (): string =>
   process.env.LODY_ROOST_DB_PATH?.trim() ||
   join(getLodyDataDir(undefined, homedir()), 'roost-history.sqlite3');
 
-let nodeClientModulePromise: Promise<NodeClientModule> | undefined;
-const loadNodeClientModule = async (modulePath: string): Promise<NodeClientModule> => {
-  if (modulePath === 'roost-node-client-unavailable') {
-    throw new Error(
-      'Roost Node client is unavailable. The packaged app must contain ' +
-        'resources/roost/client.mjs; rebuild the product with the Roost runtime artifact.'
-    );
-  }
-  const absolute = resolve(modulePath);
-  if (!existsSync(absolute)) {
-    throw new Error(
-      `Roost Node client was not found at ${absolute}; set LODY_ROOST_NODE_CLIENT to the published host client`
-    );
-  }
-  nodeClientModulePromise ??= import(/* @vite-ignore */ pathToFileURL(absolute).href).then(
-    (module) => module as unknown as NodeClientModule
-  );
-  return nodeClientModulePromise;
-};
-
 let ownerPool:
   | {
       key: string;
-      client: NodeClient;
+      client: RoostNativeClient;
       owner: Uint8Array;
       refs: number;
       closePromise?: Promise<void>;
     }
   | undefined;
 
-const acquireOwnerUnlocked = async (options: RoostOwnerOptions): Promise<OwnerLease> => {
+const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerLease> => {
   const seed = options.seed ?? (await loadRoostOwnerSeed());
-  const configuredBinary = options.binaryPath ?? defaultOwnerBinary();
-  if (configuredBinary === 'roost-node-owner-unavailable') {
-    throw new Error(
-      'Roost owner binary is unavailable. The packaged app must contain ' +
-        'resources/roost/roost-node-owner; rebuild the product with the target Roost artifact.'
-    );
-  }
-  const binaryPath = resolve(configuredBinary);
   const dbPath = resolve(options.dbPath ?? defaultDatabase());
-  const key = `${dbPath}:${binaryPath}:${bytesHex(seed)}`;
+  const key = `${dbPath}:${bytesHex(seed)}`;
   if (ownerPool?.key === key && !ownerPool.closePromise) {
     ownerPool.refs += 1;
     return {
@@ -293,17 +144,20 @@ const acquireOwnerUnlocked = async (options: RoostOwnerOptions): Promise<OwnerLe
   }
   if (ownerPool) await releaseOwnerUnlocked(ownerPool.key, true);
   await mkdir(dirname(dbPath), { recursive: true });
-  const module = await loadNodeClientModule(options.nodeClientModule ?? defaultNodeClientModule());
   const owner = Identity.fromSeed(seed).owner();
-  const client = new module.RoostNodeClient({
-    binaryPath,
+  const client = new RoostNativeClient({
     dbPath,
     seed,
     allowedOwners: [owner],
     maxQueuedRequests: options.maxQueuedRequests ?? 32,
     maxQueuedBytes: options.maxQueuedBytes ?? 8 * 1024 * 1024,
   });
-  await client.ready;
+  try {
+    await client.ready;
+  } catch (error) {
+    await client.close().catch(() => undefined);
+    throw error;
+  }
   ownerPool = { key, client, owner, refs: 1 };
   return {
     client,
@@ -322,7 +176,7 @@ const serializeOwnerTransition = <T>(operation: () => Promise<T>): Promise<T> =>
   return next;
 };
 
-const acquireOwner = (options: RoostOwnerOptions): Promise<OwnerLease> => {
+const acquireOwner = (options: RoostNativeOptions): Promise<OwnerLease> => {
   return serializeOwnerTransition(() => acquireOwnerUnlocked(options));
 };
 
@@ -419,7 +273,7 @@ const identityKey = (identity: { businessId: string; segmentId: string }): strin
 
 const createNodeServices = async (
   sessionDoc: SessionDocument,
-  ownerOptions: RoostOwnerOptions = {}
+  ownerOptions: RoostNativeOptions = {}
 ): Promise<RoostSessionBackendServices> => {
   const lease = await acquireOwner(ownerOptions);
   const historyHost = lease.client.stream(`lody-session:${sessionDoc.sessionId}`);
@@ -1629,7 +1483,7 @@ const createNodeServices = async (
 let installed = false;
 
 /** Install the local Node owner adapter once for the daemon process. */
-export function installRoostNodeSessionBackend(options: RoostOwnerOptions = {}): void {
+export function installRoostNodeSessionBackend(options: RoostNativeOptions = {}): void {
   if (installed) return;
   registerSessionBackendFactory(
     'roost',
@@ -1638,4 +1492,4 @@ export function installRoostNodeSessionBackend(options: RoostOwnerOptions = {}):
   installed = true;
 }
 
-export type { RoostOwnerOptions };
+export type { RoostNativeOptions };

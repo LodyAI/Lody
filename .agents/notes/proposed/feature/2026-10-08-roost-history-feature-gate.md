@@ -32,11 +32,10 @@ The switch does not migrate history, rewrite session metadata, or provide a
 per-message fallback. A backend choice remains an immutable session boundary.
 
 The CLI pins the published `@loro-dev/roost@0.1.2` npm package. Its lockfile uses
-registry integrity instead of a sibling source directory. Only that exact version
-is exempt from the seven-day release-age policy. The CLI resolves the Node client
-through the package's ESM export; Electron stages the client from the CLI's
-installed package before considering a sibling development checkout. The native
-owner binary remains a separate build artifact.
+registry integrity instead of a sibling source directory. Only the two pinned Roost versions
+are exempt from the seven-day release-age policy. The [native runtime integration](../architecture/2026-10-09-roost-native-runtime.md)
+replaces the separately staged owner executable with the published
+`@loro-dev/roost-node@0.1.0` package, while preserving this session-selection gate.
 
 ## Verification
 
@@ -45,15 +44,9 @@ both are enabled, and the legacy Loro default remains when the master switch is
 off. The settings Storybook story exposes the disabled, remembered, and enabled
 states.
 
-A standalone checkout without a sibling Roost tree passes
-`pnpm install --frozen-lockfile`, workspace typechecking, and lint. Published
-package API and Node client imports succeed. Client staging was checked for
-darwin, linux, and win32 with x64 and arm64 file selections using synthetic owner
-files; this does not verify native binaries. Full desktop packaging still requires
-the target owner artifact.
-
-Full `pnpm check` stops in the CLI suite with 3514 passed, 4 failed, and 7 skipped
-tests. Three runtime-config assertions still expect a synchronous boolean from
-`applyAcpRuntimeConfigPatch`, now a `Promise<boolean>`; machine registration's
-expected capabilities omit `sessionHistory: 2`. These feature-test mismatches
-remain unresolved in the npm dependency update.
+The native integration now passes the full workspace checks and actual macOS
+arm64 packaging, removing the earlier dependency on a separately supplied owner
+artifact. It also corrects four outdated CLI fixtures: asynchronous runtime-config
+writes are awaited and machine registration expects `sessionHistory: 2`.
+Runtime and cross-platform validation limits are recorded in the linked native
+runtime note.

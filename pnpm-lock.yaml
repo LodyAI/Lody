@@ -243,6 +243,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@loro-dev/roost-node':
+        specifier: 0.1.0
+        version: 0.1.0
       '@lydell/node-pty':
         specifier: 1.2.0-beta.14
         version: 1.2.0-beta.14
@@ -3580,6 +3583,10 @@ packages:
     resolution: {integrity: sha512-/I4ig/6Ie2tL2dsflKFtISMP+IDnfxDS8u9C3tpkibrtSlB6xrHFemRQjuP/dFE5fjp+pJOIumKwyVKmoM/AZQ==}
     engines: {node: '>=22'}
     hasBin: true
+
+  '@loro-dev/roost-node@0.1.0':
+    resolution: {integrity: sha512-2V4e+H+j2Hcfl4fsRfxSuzEToGFgNaJmcWe3CwnoPUQffbZVzpBvj658kOZefXErCN0xgkCMsPlBEGVGJo/Csg==}
+    engines: {node: '>=22.14.0'}
 
   '@loro-dev/roost@0.1.2':
     resolution: {integrity: sha512-j8Knm3tdWwB9PXfObhRk3qQWd/qUL79JcVMcrEKBxMTQxsyk8cV4ZuSJOESQvTRUYEhq7FA0Brqce7Wy7xMPbw==}
@@ -16207,6 +16214,8 @@ snapshots:
       better-sqlite3: 12.10.0
       js-yaml: 4.1.1
       loro-crdt: 1.16.3
+
+  '@loro-dev/roost-node@0.1.0': {}
 
   '@loro-dev/roost@0.1.2':
     dependencies:

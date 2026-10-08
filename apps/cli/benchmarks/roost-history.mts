@@ -2,7 +2,7 @@
  * Synthetic data-path benchmark using the production backends and ConversationView.
  * Run from apps/cli:
  * TSX_TSCONFIG_PATH=tsconfig.json node --import ./node_modules/tsx/dist/loader.mjs benchmarks/roost-history.mts
- * Requires ../roost's release owner and built TypeScript package. No user data,
+ * Uses the pinned npm native package. No user data,
  * transport, React, IndexedDB, or painting is involved. SQLite OS cache is warm;
  * each measured session/backend/view is new. Loro snapshot import is timed.
  */
@@ -11,7 +11,8 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { arch, cpus, platform, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { RoostNativeClient } from '@loro-dev/roost-node';
 import { performance } from 'node:perf_hooks';
 import { LoroRepo } from 'loro-repo';
 import type { SessionHistory, SessionId } from '@lody/shared';
@@ -28,11 +29,8 @@ import { createConversationViewFromReader } from '../../../packages/components/s
 import { buildSessionDoc } from '../../../packages/components/tests/conversation-view-fixtures';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const roostRoot = resolve(root, '../roost');
-const binaryPath =
-  process.env.ROOST_NODE_OWNER ?? join(roostRoot, 'target/release/roost-node-owner');
-const clientModule = pathToFileURL(join(roostRoot, 'node/client.mjs')).href;
-const { RoostNodeClient } = await import(clientModule);
+const clientModule = import.meta.resolve('@loro-dev/roost-node');
+const nativeBinding = fileURLToPath(import.meta.resolve('@loro-dev/roost-node/native'));
 const sizes = (process.env.BENCH_SIZES ?? '100,1000,10000').split(',').map(Number);
 const samples = Number(process.env.BENCH_SAMPLES ?? 7);
 const warmups = Number(process.env.BENCH_WARMUPS ?? 2);
@@ -72,10 +70,8 @@ const resetCounts = () =>
   Object.assign(counts, { fullReads: 0, pageReads: 0, physicalPageRows: 0 });
 
 installRoostNodeSessionBackend({
-  binaryPath,
   dbPath,
   seed,
-  nodeClientModule: fileURLToPath(clientModule),
 });
 
 function fixture(count: number): SessionHistory[] {
@@ -91,8 +87,7 @@ function fixture(count: number): SessionHistory[] {
 }
 
 async function seedRoost(sessionId: SessionId, entries: SessionHistory[]) {
-  const client = new RoostNodeClient({
-    binaryPath,
+  const client = new RoostNativeClient({
     dbPath,
     seed,
     allowedOwners: [owner],
@@ -304,7 +299,8 @@ try {
           bodyBytes,
           pageSize,
           sourceHashes: {
-            owner: await hash(binaryPath),
+            nativeLoader: await hash(nativeBinding),
+            nativeClient: await hash(fileURLToPath(clientModule)),
             nodeSession: await hash(join(root, 'apps/cli/src/session/roost-node-session.ts')),
             view: await hash(
               join(
@@ -312,7 +308,9 @@ try {
                 'packages/components/src/lib/conversation-view/create-conversation-view-from-reader.ts'
               )
             ),
-            roostHistory: await hash(join(roostRoot, 'ts/dist/lody-history.js')),
+            roostHistory: await hash(
+              fileURLToPath(import.meta.resolve('@loro-dev/roost/lody-history'))
+            ),
           },
           boundaries: [
             'Fresh backends/views, warm OS page cache. Loro snapshot import included; Roost owner process startup included.',

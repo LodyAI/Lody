@@ -1,19 +1,11 @@
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Identity } from '@loro-dev/roost';
 import { fromApplicationJson } from '@loro-dev/roost/lody-history';
 import { createRoostHistoryReader } from '@lody/shared/session-data';
 import { createRoostReadPort } from '../src/session/roost-history-port';
-
-const testFile = dirname(fileURLToPath(import.meta.url));
-const roostRoot = resolve(testFile, '../../../../roost');
-const binaryPath = process.env.ROOST_NODE_OWNER ?? join(roostRoot, 'target/debug/roost-node-owner');
-const clientModule = pathToFileURL(join(roostRoot, 'node/client.mjs')).href;
-const hasLocalOwner = existsSync(binaryPath) && existsSync(fileURLToPath(clientModule));
 
 const assistantContent = (text: string, finished = false) =>
   fromApplicationJson({
@@ -23,17 +15,16 @@ const assistantContent = (text: string, finished = false) =>
     finished,
   });
 
-describe.skipIf(!hasLocalOwner)('local Roost history writes', () => {
+describe('local Roost history writes', () => {
   it('appends and seals assistant output, merges late segments, and records permission separately', async () => {
-    const [{ RoostNodeClient }, { NodeLodyHistory }] = await Promise.all([
-      import(clientModule),
+    const [{ RoostNativeClient }, { NodeLodyHistory }] = await Promise.all([
+      import('@loro-dev/roost-node'),
       import('@loro-dev/roost/lody-history'),
     ]);
     const directory = await mkdtemp(join(tmpdir(), 'lody-roost-writes-'));
     const seed = new Uint8Array(32).fill(9);
     const owner = Identity.fromSeed(seed).owner();
-    const client = new RoostNodeClient({
-      binaryPath,
+    const client = new RoostNativeClient({
       dbPath: join(directory, 'history.db'),
       seed,
       allowedOwners: [owner],

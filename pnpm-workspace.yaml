@@ -79,6 +79,7 @@ minimumReleaseAge: 10080
 
 # Allow the exact versions listed below; later releases remain quarantined.
 minimumReleaseAgeExclude:
+  - '@loro-dev/roost-node@0.1.0'
   # Use the pinned npm release instead of requiring a sibling Roost checkout.
   - '@loro-dev/roost@0.1.2'
   # pnpm 10.20 uses the first rule per package; keep exact Codex versions together.

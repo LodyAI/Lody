@@ -33,6 +33,7 @@ const require = createRequire(import.meta.url)
 // strict layout exposes transitive deps only next to the package that
 // declares them (.pnpm/<pkg>/node_modules/<dep>), not under apps/cli.
 const CLI_RUNTIME_PACKAGE_CHAIN = [
+  { name: '@loro-dev/roost-node', from: 'cli', entry: '@loro-dev/roost-node/native' },
   { name: '@napi-rs/keyring', from: 'cli' },
   { name: 'better-sqlite3', from: 'cli' },
   { name: 'loro-crdt', from: 'cli' },
@@ -61,6 +62,43 @@ export const stagedCliDir = path.join(electronAppRoot, 'resources', 'cli')
 export const stagedNodeModulesDir = path.join(stagedCliDir, 'node_modules')
 export const stagedSqliteDir = path.join(stagedNodeModulesDir, 'better-sqlite3')
 export const stagedNodePtyDir = path.join(stagedNodeModulesDir, '@lydell', 'node-pty')
+export const stagedRoostDir = path.join(stagedNodeModulesDir, '@loro-dev', 'roost-node')
+
+export function roostPrebuildFileName({ platform, arch }) {
+  if (!['darwin', 'linux', 'win32'].includes(platform) || !['arm64', 'x64'].includes(arch)) {
+    throw new Error(`No Roost native binding for ${platform}-${arch}`)
+  }
+  const suffix = platform === 'linux' ? '-gnu' : platform === 'win32' ? '-msvc' : ''
+  return `roost.${platform}-${arch}${suffix}.node`
+}
+
+export function stagedRoostBindingPath(target) {
+  return path.join(stagedRoostDir, roostPrebuildFileName(target))
+}
+
+// Keep the client's relative Worker and binding paths; ship one target prebuild.
+export function installEmbeddedRoostBinding(target) {
+  const sourceDir = resolvePackageDir(
+    '@loro-dev/roost-node',
+    cliAppRoot,
+    '@loro-dev/roost-node/native'
+  )
+  stageRoostBinding(sourceDir, stagedRoostDir, target)
+}
+
+export function stageRoostBinding(sourceDir, destinationDir, target) {
+  const name = roostPrebuildFileName(target)
+  const source = path.join(sourceDir, name)
+  if (!fs.existsSync(path.join(destinationDir, 'client.mjs')) || !fs.existsSync(source)) {
+    throw new Error(
+      `Roost native runtime for ${target.platform}-${target.arch} is missing; run pnpm install and sync:cli`
+    )
+  }
+  for (const entry of fs.readdirSync(destinationDir)) {
+    if (entry.endsWith('.node')) fs.rmSync(path.join(destinationDir, entry))
+  }
+  fs.copyFileSync(source, path.join(destinationDir, name))
+}
 
 /**
  * better-sqlite3 >=13 resolves `prebuilds/<target>.node` from process.platform/arch
@@ -143,16 +181,16 @@ export function stagedNodePtySpawnHelperPath({ platform, arch }) {
   )
 }
 
-function resolvePackageDir(packageName, fromDir) {
+function resolvePackageDir(packageName, fromDir, entry = packageName) {
   const resolveOptions = { paths: [fromDir] }
   try {
     // Packages with no `exports` map expose package.json directly.
     return path.dirname(require.resolve(`${packageName}/package.json`, resolveOptions))
   } catch (error) {
     if (error.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error
-    // @lydell/node-pty restricts `exports` to ".", so walk up from its entry point to
-    // the directory that owns package.json.
-    let dir = path.dirname(require.resolve(packageName, resolveOptions))
+    // Restricted exports need a public entry. Roost's root is import-only;
+    // its explicit ./native export also supports require.resolve.
+    let dir = path.dirname(require.resolve(entry, resolveOptions))
     while (!fs.existsSync(path.join(dir, 'package.json'))) {
       const parent = path.dirname(dir)
       if (parent === dir) {
@@ -185,8 +223,8 @@ function copyPackageDir(fromDir, toDir, { isTopLevel }) {
 export function stageCliRuntimePackages() {
   fs.rmSync(stagedNodeModulesDir, { recursive: true, force: true })
   const resolvedDirs = { cli: cliAppRoot }
-  for (const { name, from } of CLI_RUNTIME_PACKAGE_CHAIN) {
-    const fromDir = resolvePackageDir(name, resolvedDirs[from])
+  for (const { name, from, entry } of CLI_RUNTIME_PACKAGE_CHAIN) {
+    const fromDir = resolvePackageDir(name, resolvedDirs[from], entry)
     resolvedDirs[name] = fromDir
     copyPackageDir(fromDir, path.join(stagedNodeModulesDir, name), { isTopLevel: true })
   }

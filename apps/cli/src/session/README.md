@@ -289,6 +289,13 @@ resident ACP process when the next turn changes identity. See the
 
 ## Roost history paging
 
+The CLI uses the pinned `@loro-dev/roost-node` npm runtime for SQLite history in a
+Worker. Electron stages that complete package with one target native binding.
+The shared renderer uses the existing local IPC or remote history RPC bridge;
+Web/iOS clients need no Node addon. The owning machine must be available for RPC
+reads; browser-local IndexedDB replicas and offline sync are separate work.
+Runtime packaging and verification: [native runtime note](../../../../.agents/notes/proposed/architecture/2026-10-09-roost-native-runtime.md).
+
 Renderer read replies bind logical page bodies, count and history revision to
 one durable observation. The RPC waits for local writes before and after the
 read and retries a moving revision; neither barrier waits for remote sync.
