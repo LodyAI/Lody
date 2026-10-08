@@ -109,11 +109,10 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   button but retain warning-tone markings. No Role-level auto-approval policy.
   Settings/mentions use `canReadAgentRole`/`canManageAgentRole`; explicit MCP
   lookup needs no mention grant.
-- Roles bind exact `machineId + agentConfigId` without fallback. Unavailable
-  machine/config/model/mode stays listed with reasons but cannot be mentioned.
-  MCP freezes the current Role's Prompt, target, revision and dispatch config
-  before acceptance; edits/deletion cannot change retries/recovery.
-  Session Role metadata is creation provenance only.
+- Roles bind `machineId + agentConfigId`; no fallback. Unavailable machine/config/model/mode
+  stays listed with reasons, unmentionable. Freeze Role prompt/target/revision/config
+  at acceptance; retries/recovery ignore edits/deletion. Session Role metadata:
+  provenance only. `resolveSessionExecutionInputBlocks` owns text; raw blocks supply attachments.
 - Memory stores provider/id references, frozen per turn. Daemon commands and env
   mapping follow the [memory contract](../../specs/agent-role-memory.md).
 - Keep `author`, human `userId`, and recipient execution config separate.

@@ -10,6 +10,7 @@ import {
   historyItemsToInputBlocks,
   inputBlocksToHistoryItems,
   normalizeSessionInputBlocks,
+  resolveSessionExecutionInputBlocks,
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
   resolveSessionConversationSourceFence,
@@ -21,6 +22,7 @@ import type {
   MessageContent,
   SessionFilePayload,
   SessionId,
+  SessionInputBlock,
   VisualAnnotationReferencePayload,
 } from '../src/ai';
 import type { SessionDoc, SessionHistoryInput } from '../src/schema';
@@ -118,6 +120,51 @@ const localFilePayload: SessionFilePayload = {
 };
 
 describe('session-input helpers', () => {
+  it('executes frozen instructions once while preserving every structured attachment', () => {
+    const attachments: SessionInputBlock[] = [
+      { type: 'image', imageId: 'image-1', mimeType: 'image/png', sizeBytes: 128 },
+      r2FilePayload,
+      { type: 'comment_reference', ...commentReference },
+      { type: 'visual_annotation_reference', ...visualAnnotationReference },
+    ];
+    const raw: SessionInputBlock[] = [
+      {
+        type: 'text',
+        text: 'Review @src/a.ts',
+        spans: [{ start: 7, end: 16, kind: 'file', label: '@src/a.ts', target: 'src/a.ts' }],
+      },
+      ...attachments,
+    ];
+    const config = buildSessionTurnInputConfig({
+      cliType: 'builtin',
+      agentType: 'codex',
+      inputBlocks: raw,
+      prompt: 'CONFIG_INSTRUCTION\n\nROLE_INSTRUCTION\n\nReview @src/a.ts',
+    });
+    const expected = [...attachments, { type: 'text', text: config.prompt }];
+    expect(resolveSessionExecutionInputBlocks(config)).toEqual(expected);
+    expect(resolveSessionExecutionInputBlocks({ ...config, inputBlocks: expected })).toEqual(
+      expected
+    );
+    expect(config.inputBlocks).toEqual(raw);
+    expect(inputBlocksToHistoryItems(raw)[0]).toMatchObject(raw[0]);
+  });
+
+  it('distinguishes an absent legacy prompt from explicit empty execution text', () => {
+    const inputBlocks: SessionInputBlock[] = [{ type: 'text', text: 'legacy task' }, r2FilePayload];
+    expect(resolveSessionExecutionInputBlocks({ inputBlocks })).toEqual(inputBlocks);
+    expect(resolveSessionExecutionInputBlocks({ inputBlocks, prompt: '' })).toEqual([
+      r2FilePayload,
+    ]);
+    expect(resolveSessionExecutionInputBlocks({ prompt: 'only text' })).toEqual([
+      { type: 'text', text: 'only text' },
+    ]);
+    expect(
+      resolveSessionExecutionInputBlocks({ inputBlocks: [r2FilePayload], prompt: '' })
+    ).toEqual([r2FilePayload]);
+    expect(resolveSessionExecutionInputBlocks({ prompt: '' })).toEqual([]);
+  });
+
   it('uses only the latest persisted user conversation config', () => {
     const history = [
       {
