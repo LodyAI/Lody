@@ -13,8 +13,7 @@ ID, and turn-start refresh treated any context as managed enrollment. Broker con
 are now counted leases that unadopted preparations release, and refresh skips local
 projects before checking for a context. Managed sessions still fail closed on a
 missing policy. The desktop interaction that leaves the stale context is inferred
-rather than reproduced, and full repository and E2E acceptance has not run on the
-final source.
+rather than reproduced.
 
 ## Evidence
 
@@ -71,13 +70,14 @@ Rejected alternatives:
 Behavioral tests cover broker leases (shared holders, owner rotation, shutdown
 generations) and the real preparation runtime: abort during credential setup,
 unadopted and late disposal, adoption across turns, fork worktree cleanup, a local
-session beside a same-ID context, and the managed missing-policy failure. At `5fe0d97b`, these four
-focused suites passed 43 tests with no unhandled rejections; format and typecheck
-passed.
+session beside a same-ID context, and the managed missing-policy failure. The fork
+cleanup test fails against the previous implementation.
 
-Not verified on the final source: the repository-wide check and full desktop E2E.
-Runs on an earlier checkout failed a native-SSH fixture with `context_unreadable` and
-timed out in `LODY-AGENT-001` and `LODY-ROLE-001`; those causes are not attributed.
+At `db4e77b2`, the five focused suites passed 87 tests with no unhandled rejections;
+the repository-wide check (10,768 passed, 7 skipped), docs check, desktop build, and
+the agent, session and fork E2E scenarios passed. The full E2E suite was not run to
+completion; scenarios outside this change that failed in the partial run were not
+attributed.
 
 ## Links
 

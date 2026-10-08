@@ -10,7 +10,7 @@ Translation: current
 本地项目会话可能在后续轮次以 `github_context_missing` 失败：被放弃的预准备在该会话 ID 下
 留下 GitHub broker 上下文，而轮次开始的刷新把任何上下文都当作托管注册。broker 上下文现在是
 计数租约，未被接管的预准备会释放；刷新在检查上下文前先跳过本地项目。缺少 policy 的托管会话
-仍失败关闭。留下残留上下文的桌面交互属于推断、未复现，最终源码也尚未完成全仓库与 E2E 验收。
+仍失败关闭。留下残留上下文的桌面交互属于推断、未复现。
 
 ## 证据
 
@@ -53,12 +53,12 @@ Translation: current
 ## 验证
 
 行为测试覆盖 broker 租约（共享持有者、所有者轮换、关闭代数）与真实预准备运行时：凭据设置
-期间中止、未接管与迟到的清理、接管后的多轮刷新、fork worktree 清理、本地会话与同 ID 上下文并存，以及托管会话缺
-policy 的失败。在 `5fe0d97b`，这四个聚焦测试套件通过 43 个测试，无 unhandled rejection；
-format 与 typecheck 通过。
+期间中止、未接管与迟到的清理、接管后的多轮刷新、fork worktree 清理、本地会话与同 ID 上下文
+并存，以及托管会话缺 policy 的失败。fork 清理测试在修复前的实现上失败。
 
-最终源码未验证：全仓库 check 与完整桌面 E2E。早先 checkout 上的运行中，native-SSH fixture 以
-`context_unreadable` 失败，`LODY-AGENT-001` 与 `LODY-ROLE-001` 超时；原因均未归因。
+在 `db4e77b2`，五个聚焦测试套件通过 87 个测试，无 unhandled rejection；全仓库 check（10,768
+passed、7 skipped）、docs check、桌面构建，以及 agent、session、fork 相关 E2E 场景均通过。完整
+E2E 未跑完；部分运行中失败的、与本改动无关的场景未做归因。
 
 ## 链接
 
