@@ -17,6 +17,9 @@ import {
 } from '@lody/shared';
 import {
   isConfigOptionValueValid,
+  isFastModeSelector,
+  isThoughtLevelSelector,
+  type AcpConfigOptionSelector,
   type AcpSelectorOptions,
 } from '@/components/shared/acp-selector-options';
 
@@ -240,21 +243,25 @@ export const applyAgentRoleRunConfigDefaults = (
   return { ...value, modelId, modeId, configOptionValues };
 };
 
-export const isAgentRolePolicyConfigOptionKey = (key: string): boolean =>
-  /(permission|approval|sandbox)/i.test(key) || key === 'mode';
-
 export const selectAgentRoleModel = (
   value: AgentRoleFormValue,
-  modelId: string | null
-): AgentRoleFormValue => ({
-  ...value,
-  modelId,
-  configOptionValues: Object.fromEntries(
-    Object.entries(value.configOptionValues).filter(([key]) =>
-      isAgentRolePolicyConfigOptionKey(key)
-    )
-  ),
-});
+  modelId: string | null,
+  selectors: readonly AcpConfigOptionSelector[]
+): AgentRoleFormValue => {
+  if (modelId === value.modelId) return value;
+  const modelScoped = new Set(
+    selectors
+      .filter((selector) => isThoughtLevelSelector(selector) || isFastModeSelector(selector))
+      .map((selector) => selector.configId)
+  );
+  return {
+    ...value,
+    modelId,
+    configOptionValues: Object.fromEntries(
+      Object.entries(value.configOptionValues).filter(([key]) => !modelScoped.has(key))
+    ),
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Capability compatibility

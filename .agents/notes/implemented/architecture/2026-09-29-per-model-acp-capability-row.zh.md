@@ -63,6 +63,13 @@ effort 选项 id，以及它如何发布这个控件。未知 agent 没有绑定
 - **Role 切换模型**：应用 Role 时，会用切换前模型的选择器过滤 Role 的值。
   当 Role 同时切换模型时，effort 和 Fast（`isPerModelControlConfigId`）即使在切换前的模型上没有对应控件，
   现在也会原样透传，随后由选择解析按切换后的模型校验，所以从没有 Fast 的模型切走时，`fast=true` 得以保留。
+- **Role 编辑器切换模型**（[#1308](https://github.com/LodyAI/Lody/issues/1308)）：
+  编辑器显示 agent 的默认值，并在第一次编辑时把它们存下来。默认值只填未设置的字段，
+  所以把 Claude Code Role 从有 Fast 的模型切到没有 Fast 的模型时，`fast` 被保留，
+  composer 也就始终匹配不上这个 Role。现在选择另一个模型时，只丢弃切换前选择器为 effort 或 Fast
+  的值（`isThoughtLevelSelector`、`isFastModeSelector`），也就是 `normalizePerModelSelectors`
+  按模型调整的那一组，再由默认值按切换后的模型补齐。Plan、权限和其他选项保留；
+  重新选择当前模型不做任何改动。曾考虑重置所有非权限选项，因为会连 Plan 一起丢掉而放弃。
 - **MCP**：
   - 声明为没有 Fast 的模型，会拒绝 `fastMode=true`，并把 `false` 视为无需操作；
   - 声明为有 Fast、但 probe 时没有该选项的模型，会使用内置的 Fast id。
@@ -72,6 +79,8 @@ effort 选项 id，以及它如何发布这个控件。未知 agent 没有绑定
 - **显示可能过时**：在 Lody 之外更换账号或权益，要等到下一次 probe 或新建 session 带回新报告时才会反映出来。
 - **并发写入**：还没有写入序号防护，同一 config 的两个并发 probe 可能乱序写入。只影响显示。
 - **旧客户端**：旧客户端会忽略新的行类型，行为与之前一致。
+- **Role 编辑器中未声明的 Fast**：没有声明时 Lody 保留 probe 得到的选择器，所以如果 probe 时的模型有 Fast，
+  在没有 Fast 的模型上新建 Role 仍可能存下 `fast`。已经存了不受支持值的 Role 不做迁移。
 
 ## 验证
 
@@ -86,4 +95,6 @@ effort 选项 id，以及它如何发布这个控件。未知 agent 没有绑定
 - `acp-selector-options.test.ts` 检查界面显示的是所选模型自己的推理强度列表和 Fast 开关，
   没有报告的模型保持不变。
 - 逐一移除三个机制（按报告取推理强度、Fast 规整、读取时合并），每次都有对应测试失败。
+- `agent-role-form.test.ts` 覆盖 Role 编辑器切换模型：丢弃 Fast 并补齐 effort，保留 Plan 和权限，
+  重新选择同一模型不做改动。
 - 尚未验证：真实适配器的端到端流程。

@@ -298,7 +298,15 @@ export function AgentRoleForm({
                           label={t('settings.agentRoles.form.model')}
                           value={value.modelId}
                           options={selectorOptions.modelOptions}
-                          onChange={(modelId) => onChange(selectAgentRoleModel(value, modelId))}
+                          onChange={(modelId) =>
+                            onChange(
+                              selectAgentRoleModel(
+                                value,
+                                modelId,
+                                selectorOptions.configOptionSelectors
+                              )
+                            )
+                          }
                         />
                       </Field>
                     ) : null}

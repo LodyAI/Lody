@@ -421,27 +421,26 @@ describe('run config defaults', () => {
 });
 
 describe('run config model switch', () => {
-  const claudeSelectorOptions = (modelId: string): AcpSelectorOptions =>
+  const effortLadder = (values: string[], currentValue: string) => ({
+    type: 'select' as const,
+    configId: 'effort',
+    category: 'thought_level',
+    label: 'Effort',
+    currentValue,
+    options: values.map((value) => ({ value, label: value })),
+  });
+  const modelSelectorOptions = (modelId: 'model-fast' | 'model-plain'): AcpSelectorOptions =>
     selectorOptions({
-      defaultModelId: 'opus-5.5',
+      defaultModelId: 'model-fast',
       modelOptions: [
-        { value: 'opus-5.5', label: 'Opus 5.5' },
-        { value: 'fable-5.1', label: 'Fable 5.1' },
+        { value: 'model-fast', label: 'Model Fast' },
+        { value: 'model-plain', label: 'Model Plain' },
       ],
       configOptionSelectors: [
-        {
-          type: 'select',
-          configId: 'effort',
-          label: 'Effort',
-          currentValue: modelId === 'opus-5.5' ? 'xhigh' : 'high',
-          options:
-            modelId === 'opus-5.5'
-              ? [
-                  { value: 'high', label: 'High' },
-                  { value: 'xhigh', label: 'Extra high' },
-                ]
-              : [{ value: 'high', label: 'High' }],
-        },
+        modelId === 'model-fast'
+          ? effortLadder(['low', 'medium', 'high', 'xhigh'], 'high')
+          : effortLadder(['low', 'medium'], 'medium'),
+        { type: 'boolean', configId: 'plan_mode', label: 'Plan', options: [], currentValue: false },
         {
           type: 'select',
           configId: 'permission_mode',
@@ -452,7 +451,7 @@ describe('run config model switch', () => {
             { value: 'acceptEdits', label: 'Accept edits' },
           ],
         },
-        ...(modelId === 'opus-5.5'
+        ...(modelId === 'model-fast'
           ? [
               {
                 type: 'boolean' as const,
@@ -465,33 +464,57 @@ describe('run config model switch', () => {
           : []),
       ],
     });
-
-  it('drops model-scoped options from the previous model and keeps policy options', () => {
-    const opus = applyAgentRoleRunConfigDefaults(
+  const editedOnFastModel = (): AgentRoleFormValue => {
+    const seeded = applyAgentRoleRunConfigDefaults(
       formValue({ modelId: null }),
-      claudeSelectorOptions('opus-5.5')
+      modelSelectorOptions('model-fast')
     );
-    const edited = {
-      ...opus,
+    return {
+      ...seeded,
       configOptionValues: {
-        ...opus.configOptionValues,
+        ...seeded.configOptionValues,
+        effort: 'xhigh',
+        fast: true,
+        plan_mode: true,
         permission_mode: 'acceptEdits',
-        mode: 'plan',
       },
     };
-
-    const fable = applyAgentRoleRunConfigDefaults(
-      selectAgentRoleModel(edited, 'fable-5.1'),
-      claudeSelectorOptions('fable-5.1')
+  };
+  const switchModel = (value: AgentRoleFormValue, modelId: 'model-fast' | 'model-plain') =>
+    buildAgentRoleRunConfig(
+      applyAgentRoleRunConfigDefaults(
+        selectAgentRoleModel(
+          value,
+          modelId,
+          modelSelectorOptions(value.modelId as 'model-fast').configOptionSelectors
+        ),
+        modelSelectorOptions(modelId)
+      )
     );
-    const runConfig = buildAgentRoleRunConfig(fable);
 
-    expect(runConfig.modelId).toBe('fable-5.1');
-    expect(runConfig.configOptionValues).toEqual({
-      effort: 'high',
+  it('drops Fast and refills effort from the new model when it has no Fast', () => {
+    const runConfig = switchModel(editedOnFastModel(), 'model-plain');
+    expect(runConfig.modelId).toBe('model-plain');
+    expect(runConfig.configOptionValues).not.toHaveProperty('fast');
+    expect(runConfig.configOptionValues?.effort).toBe('medium');
+  });
+
+  it('keeps model-independent options across a model switch', () => {
+    expect(switchModel(editedOnFastModel(), 'model-plain').configOptionValues).toMatchObject({
+      plan_mode: true,
       permission_mode: 'acceptEdits',
-      mode: 'plan',
     });
+  });
+
+  it('changes nothing when the current model is selected again', () => {
+    const value = editedOnFastModel();
+    expect(
+      selectAgentRoleModel(
+        value,
+        'model-fast',
+        modelSelectorOptions('model-fast').configOptionSelectors
+      )
+    ).toBe(value);
   });
 });
 
