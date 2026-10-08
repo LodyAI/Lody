@@ -54,11 +54,13 @@ real preparation runtime: abort during credential setup, unadopted and late disp
 adoption across turns, local sessions beside a foreign context, and the managed
 missing-policy failure. They were not executed in the authoring environment. A clean,
 isolated validation later passed the focused context set (43 tests, zero unhandled
-errors), format check, typecheck, and the lifecycle regression; the final branch is
-`99a6e5c6`. The root check still reports the existing recursive native-SSH fixture
-failure and two lifecycle timeouts under the parallel full test runner, while the
-required full desktop E2E run timed out in its P1 provider scenarios; these are retained
-as validation gaps with artifacts rather than reported as passing. Related:
+errors), format check, typecheck, and the lifecycle regression. A rollback experiment
+that removed four cleanup settlements caused two lifecycle timeouts; restoring those
+settlements while rejecting `sessionStart` unconditionally passed all six lifecycle
+tests, so the earlier claim that resolving `sessionStart` was required was incorrect.
+The root check and full desktop E2E ran on that faulty rollback checkout, before the
+correction. The root check also found a native-SSH fixture failure, and E2E timed out
+in P1 provider scenarios; their causes remain unconfirmed. Related:
 [local native authentication](../feature/2026-09-29-local-project-native-github-auth.md),
 [command credentials](../architecture/2026-09-26-github-command-credentials.md),
 issue [#1309](https://github.com/LodyAI/Lody/issues/1309).
