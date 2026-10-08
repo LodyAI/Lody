@@ -29,3 +29,7 @@ and cancel only; no drag, edit or steer) and are hidden by `userTurnId` once the
 real item exists. Upload progress is subscribed only inside the sheet; the page
 reads `useHasPendingQueueRecords`. Decisions: [local queue rows](../../../../../../.agents/notes/implemented/feature/2026-09-28-local-queue-pending-rows.md),
 [in-memory held sends](../../../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).
+
+Coarse-pointer and narrow-screen actions use real, non-overlapping 44 px boxes
+on a separate row; fine-pointer desktop actions stay compact. Intent:
+[queue touch actions](../../../../../../specs/message-queue-touch-actions.md).
