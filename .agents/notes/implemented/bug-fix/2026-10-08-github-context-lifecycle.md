@@ -12,8 +12,8 @@ abandoned speculative preparation left a GitHub broker context under the session
 ID, and turn-start refresh treated any context as managed enrollment. Broker contexts
 are now counted leases that unadopted preparations release, and refresh skips local
 projects before checking for a context. Managed sessions still fail closed on a
-missing policy. The desktop interaction that leaves the stale context is inferred
-rather than reproduced.
+missing policy. The likely trigger, switching a draft from a GitHub project to a
+local project under a shared draft session ID, is traced in code but not reproduced.
 
 ## Evidence
 
@@ -27,10 +27,15 @@ Confirmed:
 - In source, context membership was refresh's only gate, preparation registered its
   context before its last abort check, and preparation cleanup never revoked it.
 
-Inferred: cancellation and claim misses do not wait for in-flight credential setup,
-so an abandoned managed preparation can register its context after a cold-started
-local session's first refresh. This fits the log; the user interaction that starts
-the race is unconfirmed.
+Inferred: the chat landing keys its draft session ID by user and workspace, not
+project, and resets it only after a successful start. A draft prepared on a GitHub
+project and then switched to a local project therefore starts the local session
+under the same ID. Switching cancels the GitHub preparation, but cancellation does
+not wait for in-flight credential setup, so that preparation can register its
+context after the local session's first refresh. This fits the log but has not been
+reproduced in the desktop. The local project selection itself is not misclassified:
+the project kind comes only from the picker, never from matching a local remote
+against connected GitHub repositories.
 
 ## Decision
 
