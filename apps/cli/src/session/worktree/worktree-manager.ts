@@ -8,6 +8,7 @@ import { Logger } from '@/utils/logger';
 import { withFileLock } from '@/utils/file-lock';
 import { redactUrlAuth } from '@/utils/github';
 import { getCredentialHelperHostPath } from '@/lib/git-credential-helper-script';
+import { resolveHostNodeRuntime } from '@/lib/host-node-launcher';
 import { formatErrorMessage } from '@/utils/format-error';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { mapGitSpawnError } from './git-process-error';
@@ -613,8 +614,9 @@ export class WorktreeManager {
   }): Promise<{ exitCode: number | null; returnedCredentials: boolean; stderrNonEmpty: boolean }> {
     const input = `protocol=https\nhost=${options.host}\npath=/${options.repoFullName}.git\n\n`;
     return await new Promise((resolve, reject) => {
-      const child = spawn('node', [options.helperPath, 'get'], {
-        env: options.env,
+      const runtime = resolveHostNodeRuntime();
+      const child = spawn(runtime.execPath, [options.helperPath, 'get'], {
+        env: runtime.electron ? { ...options.env, ELECTRON_RUN_AS_NODE: '1' } : options.env,
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       });

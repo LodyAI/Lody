@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import os from 'node:os';
@@ -232,6 +233,39 @@ describe('generated gh command boundary', () => {
           new vm.Script(fs.readFileSync(path.join(getGhShimHostBinDir(statePath), command), 'utf8'))
       ).not.toThrow();
   });
+  it.skipIf(process.platform === 'win32').each([false, true])(
+    'runs the gh shim without node on PATH (electron=%s)',
+    (electron) => {
+      const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+      const runtimeLog = path.join(directory, 'runtime.log');
+      const execPath = path.join(directory, 'Lody Helper.app', 'Contents', 'MacOS', 'Lody Helper');
+      fs.mkdirSync(path.dirname(execPath), { recursive: true });
+      fs.writeFileSync(
+        execPath,
+        `#!/bin/sh
+printf '%s\\n' "\${ELECTRON_RUN_AS_NODE-unset}" >> ${quote(runtimeLog)}
+exec ${quote(process.execPath)} "$@"
+`,
+        { mode: 0o755 }
+      );
+      const emptyBin = path.join(directory, 'empty bin');
+      fs.mkdirSync(emptyBin);
+      vi.stubEnv('PATH', emptyBin);
+      const runtimeStatePath = path.join(directory, "runtime's broker.json");
+      ensureGhShimScript(runtimeStatePath, { execPath, electron });
+
+      const result = spawnSync(getGhShimHostPath(runtimeStatePath), ['--version'], {
+        env: { PATH: emptyBin, HOME: directory },
+        encoding: 'utf8',
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('"code":"gh_not_found"');
+      expect(fs.readFileSync(runtimeLog, 'utf8').trim().split('\n')).toEqual([
+        electron ? '1' : 'unset',
+      ]);
+    }
+  );
   it.each([
     { args: ['pr', 'view', '1', '-R', 'other/repo'], repo: 'other/repo' },
     { args: ['pr', 'view', 'https://github.com/url/repo/pull/1'], repo: 'url/repo' },

@@ -136,6 +136,57 @@ describe('native Git credential adapter', () => {
     await expect(h.run()).rejects.toMatchObject({ code: 'credentials_exhausted' });
     expect(h.delegates).toEqual([]);
   });
+  it.skipIf(process.platform === 'win32').each([false, true])(
+    'runs the Git wrapper and HTTP adapters without node on PATH (electron=%s)',
+    (electron) => {
+      const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+      const runtimeLog = path.join(directory, 'runtime.log');
+      const execPath = path.join(directory, 'Lody Helper.app', 'Contents', 'MacOS', 'Lody Helper');
+      fs.mkdirSync(path.dirname(execPath), { recursive: true });
+      fs.writeFileSync(
+        execPath,
+        `#!/bin/sh
+printf '%s\\n' "\${ELECTRON_RUN_AS_NODE-unset}" >> ${quote(runtimeLog)}
+exec ${quote(process.execPath)} "$@"
+`,
+        { mode: 0o755 }
+      );
+      const emptyBin = path.join(directory, 'empty bin');
+      fs.mkdirSync(emptyBin);
+      const bin = path.join(directory, "session's bin");
+      fs.mkdirSync(bin);
+      const realGit = path.join(
+        execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(),
+        'git'
+      );
+      ensureGitHubGitTransport(bin, path.join(directory, 'broker.json'), realGit, {
+        execPath,
+        electron,
+      });
+      const env = {
+        PATH: emptyBin,
+        HOME: directory,
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+      };
+
+      const version = spawnSync(path.join(bin, 'git'), ['--version'], { env, encoding: 'utf8' });
+      expect(version.stderr).toBe('');
+      expect(version.status).toBe(0);
+      expect(version.stdout).toMatch(/^git version /);
+      for (const adapter of ['git-remote-https', 'git-remote-http']) {
+        const result = spawnSync(path.join(bin, adapter), ['origin', 'not a url'], {
+          env,
+          encoding: 'utf8',
+        });
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain('"code":"invalid_remote"');
+      }
+      expect(fs.readFileSync(runtimeLog, 'utf8').trim().split('\n')).toEqual(
+        Array(3).fill(electron ? '1' : 'unset')
+      );
+    }
+  );
   it('native receive-pack advertisement leaves refs unchanged', () => {
     const bare = path.join(directory, 'remote.git');
     execFileSync('git', ['init', '--bare', bare], { stdio: 'ignore' });

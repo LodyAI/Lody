@@ -3,6 +3,7 @@ import path from 'path';
 import { RepoId } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { githubCredentialRuntime } from './github-credential-runtime';
+import { buildHostNodeCommand, resolveHostNodeRuntime } from './host-node-launcher';
 
 const HELPER_BASENAME = 'lody-git-credential-helper.cjs';
 
@@ -112,15 +113,18 @@ export const ensureCredentialHelperAtPath = (filePath: string): void => {
 
 const escapeForGitHelper = (value: string): string => value.replace(/"/g, '\\"');
 
-export const buildCredentialHelperValueForHost = (repoId: RepoId): string => {
-  const helperPath = escapeForGitHelper(getCredentialHelperHostPath(repoId));
-  return `!node "${helperPath}"`;
-};
+export const buildCredentialHelperValueForHost = (
+  repoId: RepoId,
+  runtime = resolveHostNodeRuntime()
+): string => buildCredentialHelperValueForPath(getCredentialHelperHostPath(repoId), runtime);
 
 export const buildCredentialHelperValueForContainer = (repoId: RepoId): string => {
   const helperPath = escapeForGitHelper(getCredentialHelperContainerPath(repoId));
   return `!node "${helperPath}"`;
 };
 
-export const buildCredentialHelperValueForPath = (filePath: string): string =>
-  `!node "${escapeForGitHelper(filePath)}"`;
+// Host Git runs `!` helpers through sh; containers bring their own `node`.
+export const buildCredentialHelperValueForPath = (
+  filePath: string,
+  runtime = resolveHostNodeRuntime()
+): string => `!${buildHostNodeCommand(filePath, runtime)}`;

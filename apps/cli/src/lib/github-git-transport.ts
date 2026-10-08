@@ -3,19 +3,21 @@ import { existsSync, readdirSync, symlinkSync, linkSync, copyFileSync, lstatSync
 import { execFileSync } from 'node:child_process';
 import { writeIfChanged } from './shell-file-utils';
 import { githubCredentialRuntime } from './github-credential-runtime';
+import { buildHostNodeScriptPreamble, resolveHostNodeRuntime } from './host-node-launcher';
 
 /** Native Git discovers these adapters through GIT_EXEC_PATH; URLs stay ordinary HTTPS. */
 export function ensureGitHubGitTransport(
   directory: string,
   statePath: string,
-  realGit: string
+  realGit: string,
+  runtime = resolveHostNodeRuntime()
 ): void {
+  const preamble = buildHostNodeScriptPreamble(runtime);
   const execPath = execFileSync(realGit, ['--exec-path'], { encoding: 'utf8' }).trim();
   const coreGit = path.join(execPath, process.platform === 'win32' ? 'git.exe' : 'git');
   const nativeGit = existsSync(coreGit) ? coreGit : realGit;
   writeIfChanged(path.join(directory, 'package.json'), '{"type":"commonjs"}\n');
-  const source = String.raw`#!/usr/bin/env node
-'use strict';
+  const source = preamble + String.raw`'use strict';
 const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
@@ -152,8 +154,8 @@ main().catch(error => { diagnostic('git', 'failed', error); process.exitCode = 1
   }
   writeIfChanged(
     path.join(directory, 'git'),
-    String.raw`#!/usr/bin/env node
-const { spawn } = require('child_process');
+    preamble +
+      String.raw`const { spawn } = require('child_process');
 const path = require('path');
 const args = process.argv.slice(2);
 let command;
@@ -177,7 +179,7 @@ child.on('exit', (code, signal) => { if (signal) process.kill(process.pid, signa
   if (process.platform === 'win32') {
     writeIfChanged(
       path.join(directory, 'git.cmd'),
-      `@echo off\r\n"${process.execPath}" "%~dp0git" %*\r\n`
+      `@echo off\r\n"${runtime.execPath}" "%~dp0git" %*\r\n`
     );
   }
 }

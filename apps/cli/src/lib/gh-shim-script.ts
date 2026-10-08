@@ -15,6 +15,11 @@ import { GITHUB_CREDENTIAL_ENV_KEYS, LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { githubCredentialRuntime } from './github-credential-runtime';
 import { ensureGitHubGitTransport } from './github-git-transport';
+import {
+  buildHostNodeScriptPreamble,
+  resolveHostNodeRuntime,
+  type HostNodeRuntime,
+} from './host-node-launcher';
 
 const GH_SHIM_POSIX_BASENAME = 'gh';
 const GH_SHIM_WINDOWS_BASENAME = 'gh.cmd';
@@ -95,8 +100,7 @@ const resolveExecutableFromPath = (name: string, excludedPath: string): string |
   return null;
 };
 
-const wrapperSourceTemplate = `#!/usr/bin/env node
-'use strict';
+const wrapperSourceTemplate = `'use strict';
 
 const { spawn } = require('child_process');
 const crypto = require('crypto');
@@ -763,19 +767,24 @@ const escapeForSingleQuotedString = (value: string): string =>
 
 const escapeForDoubleQuotedCmdString = (value: string): string => value.replace(/"/g, '""');
 
-const buildGhShimSource = (realGhPath: string | null, brokerStateFilePath?: string): string => {
+const buildGhShimSource = (
+  realGhPath: string | null,
+  brokerStateFilePath: string | undefined,
+  runtime: HostNodeRuntime
+): string => {
   const escapedRealPath = realGhPath ? escapeForSingleQuotedString(realGhPath) : '';
-  return wrapperSourceTemplate
+  const source = wrapperSourceTemplate
     .split(REAL_GH_PATH_PLACEHOLDER)
     .join(escapedRealPath)
     .split(BROKER_STATE_PATH_PLACEHOLDER)
     .join(escapeForSingleQuotedString(resolveBrokerStatePath(brokerStateFilePath)));
+  return buildHostNodeScriptPreamble(runtime) + source;
 };
 
-const buildWindowsLauncherSource = (): string =>
+const buildWindowsLauncherSource = (runtime: HostNodeRuntime): string =>
   windowsLauncherSourceTemplate
     .split(NODE_EXEC_PATH_PLACEHOLDER)
-    .join(escapeForDoubleQuotedCmdString(process.execPath));
+    .join(escapeForDoubleQuotedCmdString(runtime.execPath));
 
 const resolveRealGhPath = (brokerStateFilePath?: string): string | null =>
   resolveExecutableFromPath('gh', getGhShimHostPath(brokerStateFilePath));
@@ -822,15 +831,22 @@ const ensureWritableShimTarget = (filePath: string): void => {
   }
 };
 
-export const ensureGhShimScript = (brokerStateFilePath?: string): void => {
-  const source = buildGhShimSource(resolveRealGhPath(brokerStateFilePath), brokerStateFilePath);
+export const ensureGhShimScript = (
+  brokerStateFilePath?: string,
+  runtime = resolveHostNodeRuntime()
+): void => {
+  const source = buildGhShimSource(
+    resolveRealGhPath(brokerStateFilePath),
+    brokerStateFilePath,
+    runtime
+  );
   const shimTargets =
     process.platform === 'win32'
       ? [
           { filePath: getGhShimHostNodeScriptPath(brokerStateFilePath), content: source },
           {
             filePath: getGhShimHostWindowsLauncherPath(brokerStateFilePath),
-            content: buildWindowsLauncherSource(),
+            content: buildWindowsLauncherSource(runtime),
           },
         ]
       : [{ filePath: getGhShimHostNodeScriptPath(brokerStateFilePath), content: source }];
@@ -859,7 +875,8 @@ export const ensureGhShimScript = (brokerStateFilePath?: string): void => {
     ensureGitHubGitTransport(
       getGhShimHostBinDir(brokerStateFilePath),
       resolveBrokerStatePath(brokerStateFilePath),
-      realGit
+      realGit,
+      runtime
     );
 };
 
