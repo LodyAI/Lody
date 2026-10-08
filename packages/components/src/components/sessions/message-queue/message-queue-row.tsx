@@ -214,7 +214,16 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
             disabled={isPending}
             aria-label={t('sessions.messageQueue.editMessage', 'Edit queued message')}
             onChange={(event) => onEditValueChange(event.currentTarget.value)}
-            onBlur={onCommitEdit}
+            onBlur={(event) => {
+              // Folding is display-only: moving to its header must not save or
+              // discard this draft. The panel remains mounted while hidden.
+              if (
+                event.relatedTarget instanceof Element &&
+                event.relatedTarget.closest('[data-message-queue-toggle]')
+              )
+                return;
+              onCommitEdit();
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
                 event.preventDefault();

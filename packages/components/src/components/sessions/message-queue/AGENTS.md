@@ -29,3 +29,8 @@ and cancel only; no drag, edit or steer) and are hidden by `userTurnId` once the
 real item exists. Upload progress is subscribed only inside the sheet; the page
 reads `useHasPendingQueueRecords`. Decisions: [local queue rows](../../../../../../.agents/notes/implemented/feature/2026-09-28-local-queue-pending-rows.md),
 [in-memory held sends](../../../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).
+
+The queue disclosure is local display state, initially expanded. Keep its editing
+rows mounted while folded; focusing the disclosure must not commit or discard a
+row draft. Folded summaries retain pending/failed-send awareness. Intent:
+[queue presentation](../../../../../../specs/message-queue.md).

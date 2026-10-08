@@ -1980,6 +1980,8 @@
   "sessions.statusStrip.machineRemoved": "This machine was removed from the workspace. Messages can no longer be sent.",
   "sessions.messageListCrashed": "The message list failed to render. Your draft below is safe.",
   "sessions.messageListCrashedTitle": "Messages couldn't be displayed",
+  "sessions.messageQueue.failedCount": "{{count}} not sent",
+  "sessions.messageQueue.preparingCount": "{{count}} preparing",
   "sessions.messageQueue.dragToReorder": "Drag to reorder",
   "sessions.messageQueue.editMessage": "Edit queued message",
   "sessions.messageQueue.guide": "Steer the active response with this message",

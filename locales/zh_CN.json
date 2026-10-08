@@ -1980,6 +1980,8 @@
   "sessions.statusStrip.machineRemoved": "该机器已从工作区移除，无法再发送消息。",
   "sessions.messageListCrashed": "消息列表渲染失败，你的草稿已在下方保留。",
   "sessions.messageListCrashedTitle": "消息无法显示",
+  "sessions.messageQueue.failedCount": "{{count}} 条未发送",
+  "sessions.messageQueue.preparingCount": "{{count}} 条准备中",
   "sessions.messageQueue.dragToReorder": "拖动调整顺序",
   "sessions.messageQueue.editMessage": "编辑排队消息",
   "sessions.messageQueue.guide": "用这条消息引导当前回复",
