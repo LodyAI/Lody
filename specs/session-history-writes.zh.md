@@ -12,7 +12,7 @@ Translation: current
 
 ## 契约
 
-- 前端与 CLI 共用一个 HistoryWriter 进行本地 Loro 历史修改。读取功能开关可切换视图，不能切换写入契约。
+- 前端与 CLI 共用一个 HistoryWriter 进行本地历史修改。读取功能开关可切换视图，不能切换写入契约。
 - 新轮次使用明确消息类型和运行时输入解析。原有带类型的 callback 调用通过会话适配层进入同一 writer。
 - 一条命令修改历史前，先校验新增轮次和变化的已知字段/item。非法命令报告路径和错误码，
   保留旧值；另一条合法命令仍可执行。不重新校验无关旧 item。
@@ -34,7 +34,7 @@ Translation: current
   内容变化，则拒绝覆盖；区间内唯一例外是本次新插入的 pending 用户轮次
   变成 seen/read，且其他字段完全不变；它不是崩溃恢复或分布式事务。
   外部 provider 导入仍是新输入，不能借用已存历史复制权限。
-- Loro writer 的接受表示本地 CRDT 写入。持久化、权限和远端同步仍由原有 repo 和传输层负责。
+- 这里的接受表示本地 CRDT 写入。持久化、权限和远端同步仍由原有 repo 和传输层负责。
 - 除 type/toolCallId 外，工具字段只解析本次变化的值，不重验未修改的工具内容；
   只修改 outcome 时保留已有请求信息。修改工具身份需完整 item 解析；变化的 content block
   单独解析。新增字段非法时，整条命令在写入前拒绝。
@@ -128,54 +128,12 @@ Translation: current
 
 ## 边界与待审事项
 
-### Backend 选择与显示读取
-
-新会话选择 Roost 保存消息历史，没有 backend discriminator 的旧会话保留 Loro。
-命令通过会话选定的 backend，使用该存储唯一的 writer。上文 Loro 容器规则只适用于
-Loro backend；Roost 保持 sealed segment 不可变，将 successor 投影为同一逻辑 turn。
-control metadata 与投递状态仍由 Loro 保存。本地历史接受不表示 Roost 远端已同步。
-
-打开 Roost 会话只读取 active branch 的最新窗口；向上滚动通过反向 cursor 加载旧
-逻辑 turn。全历史搜索、大纲导航、计数和事实必须覆盖更早的页，不要求用户手动
-翻页。这些消费方在后台读取 directory page，正文 hydration 仍受各自 lease 约束；
-打开会话不等待完整历史读取。恢复阅读位置时，先加载对应逻辑 turn，再声明首个
-窗口就绪。新消息保留已加载前缀及
-其 cursor；branch rewrite 使不兼容的页失效，只刷新已加载窗口，不能显示被替换的
-suffix。未加载行不能生成假消息，也不能被视为完整历史事实。显式 export/snapshot
-操作继续使用权威的完整读取能力。
-
-启用 cloud 的工作区中，Streams 持久服务已接受的历史在 owning CLI 离线后仍可
-读取，包括该读者从未缓存的旧页。Node owner 通过 Roost 的持久重试与确认机制上传。
-本地接受和 owner RPC 响应不能宣称远端持久化；同步 barrier 同时要求历史确认与
-control plane 同步。
-
-renderer 按账号、工作区、renderer 和 session 隔离原生 IndexedDB 只读副本。
-副本只接纳 control 绑定的 owner 公钥，endpoint 和凭证只来自已认证的工作区
-capability。control 文档保存不可变的历史 generation 与 owner 公钥，不保存 URL
-或 token。未 seal 的流式内容仍属 provisional，seal 保留签名验证。公开 local
-composition 保持本地。
-
-云端读取先获取有界反向窗口，再从该窗口的原始 tail 追更，不能跳过 bootstrap
-期间到来的写入。旧窗口从连续已接收消息的边界续读。缺失前缀必须补齐，不能伪造
-更短的历史。各副本独立持久化接收 cursor，owner revision 只用于唤醒。浏览器支持
-时共享标签页串行接收，原生 receipt/replay 事务规则始终承担持久性边界。已有缓存
-在后台网络等待时仍可直接读取。完整导出采用一致的 branch 读取；分支回滚必须通过
-原生记录传播。
-
-本地 Electron 保留 owner bridge 和持久 projection cache。owner 与服务都不可达时，
-两条路径都只能读取已缓存的数据。命令继续发送到 owning CLI，副本与缓存不能排队
-或创作用户命令。缓存修复包含原生副本数据库，workspace 退出先取消网络，再关闭
-存储。
-
-### 验证限制
-
 这不是任意跨版本兼容或 reader 安全的证明。TypeScript 无法保证不可信输入、字符串语义约束，
 也不能阻止刻意的类型断言/底层访问。修改已损坏 item 的命令可能需要修复该 item，
 不能借用针对“未修改历史”的兼容处理。初版 callback 适配支持保持既有轮次顺序的修改，
 不支持任意重排普通 LoroList 中的已有轮次。
 
-Roost reader 已采用 active-branch page，旧 Loro reader 仍加载其 directory；这不构成
-3000 轮性能验收。
+目前完整 Mirror 读取仍会物化历史，本次不是 3000 轮性能验收或窗口化 ConversationView 上线。
 非历史控制字段的校验不属于这个 HistoryWriter 契约。v2 规范形式只针对本仓库当前写入的
 形状定义。完整的封存骨架特性（读取侧的 `ref` payload 拉取、payload hook 以及消费它们的
 UI）不在本次实现；本次只是保证将来出现这类骨架轮次时不会被误判为 hash 冲突。

@@ -2,14 +2,6 @@
 
 `CLAUDE.md` is a symlink to this file. Parent guidelines apply.
 
-- `roostHistoryRemote` binds an immutable application generation and owner public
-  key only. Runtime-validate it; never persist an endpoint, credential or replica
-  receive cursor there. The generation is not proof of a server incarnation.
-  Native upload recovery uses a local enrollment index without opening historical
-  session rooms; bind and enroll before any native write, including recovery.
-  Workspace Streams capability owns auth and cancellation. Local acceptance wakes
-  upload; the explicit sync barrier requires native remote confirmation.
-
 - `HistoryWriter` is the only history writer. Reuse its validation, changed-field
   diff, legacy representation, stored-copy and conditional rollback rules.
   Shared business rules live in the planners, not in UI or CLI copies.

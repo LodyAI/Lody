@@ -301,9 +301,6 @@ importers:
       '@loro-dev/flock-wasm':
         specifier: 'catalog:'
         version: 0.4.3
-      '@loro-dev/roost':
-        specifier: 0.1.2
-        version: 0.1.2
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.16.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.16.3)
@@ -1099,9 +1096,6 @@ importers:
       '@loro-dev/flock-wasm':
         specifier: 'catalog:'
         version: 0.4.3
-      '@loro-dev/roost':
-        specifier: 0.1.2
-        version: 0.1.2
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.16.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.16.3)
@@ -3584,9 +3578,6 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@loro-dev/roost@0.1.2':
-    resolution: {integrity: sha512-j8Knm3tdWwB9PXfObhRk3qQWd/qUL79JcVMcrEKBxMTQxsyk8cV4ZuSJOESQvTRUYEhq7FA0Brqce7Wy7xMPbw==}
-
   '@loro-dev/streams-client@0.7.0':
     resolution: {integrity: sha512-O+LphfngoJe0g0QmRV2OIQKsiytZuvHoSsQeYxiRK00UYHcpqjiZw2OmcXCU4Q5reuxI5kZJz6du24iAamBVtQ==}
     engines: {node: '>=18'}
@@ -3896,10 +3887,6 @@ packages:
     resolution: {integrity: sha512-gbKGcRUYIjA3/zCCNaWDciTMFI0dCkvou3TL8Zmy5Nc7sJ47a0jtOeZoTaMxkuqRo9cRhjOdZJXegxYE5FN/xw==}
     engines: {node: ^14.21.3 || >=16}
 
-  '@noble/curves@2.4.0':
-    resolution: {integrity: sha512-P4/62zrgfH33CneE3Dn4WhJVA22YUU0eR51wKIan4NVRvwsA0YnPTwWGpNbpuacSujmSFLvyzpyuR30+fbq2Ew==}
-    engines: {node: '>= 20.19.0'}
-
   '@noble/hashes@1.4.0':
     resolution: {integrity: sha512-V1JJ1WTRUqHHrOSh597hURcMqVKVGL/ea3kv0gSnEdsEZ0/+VyPghM1lMNGc00z7CIQorSvbKpuJkxvuHbvdbg==}
     engines: {node: '>= 16'}
@@ -3910,10 +3897,6 @@ packages:
 
   '@noble/hashes@2.2.0':
     resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
-    engines: {node: '>= 20.19.0'}
-
-  '@noble/hashes@2.4.0':
-    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
     engines: {node: '>= 20.19.0'}
 
   '@nodelib/fs.scandir@2.1.5':
@@ -16211,12 +16194,6 @@ snapshots:
       js-yaml: 4.1.1
       loro-crdt: 1.16.3
 
-  '@loro-dev/roost@0.1.2':
-    dependencies:
-      '@loro-dev/streams-client': 0.8.0
-      '@noble/curves': 2.4.0
-      '@noble/hashes': 2.4.0
-
   '@loro-dev/streams-client@0.7.0': {}
 
   '@loro-dev/streams-client@0.8.0': {}
@@ -16612,17 +16589,11 @@ snapshots:
     dependencies:
       '@noble/hashes': 1.8.0
 
-  '@noble/curves@2.4.0':
-    dependencies:
-      '@noble/hashes': 2.4.0
-
   '@noble/hashes@1.4.0': {}
 
   '@noble/hashes@1.8.0': {}
 
   '@noble/hashes@2.2.0': {}
-
-  '@noble/hashes@2.4.0': {}
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:

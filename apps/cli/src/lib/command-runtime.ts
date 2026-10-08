@@ -24,7 +24,6 @@ import {
 } from '@lody/shared/node/local-ipc';
 import { AuthClient } from '@/lib/auth';
 import { LoroDocumentManager } from '@/lib/loro/doc';
-import { installRoostNodeSessionBackend } from '@/session/roost-node-session';
 import { listWorkspacesForToken, type WorkspaceSummary } from '@/lib/workspace';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL, LODY_SERVER_URL } from '@/utils/const';
 import { initCliAnalytics } from '@/lib/analytics/posthog';
@@ -245,7 +244,6 @@ export async function withWorkspaceManager<T>(
   loggerName: string,
   fn: (manager: LoroDocumentManager) => Promise<T>
 ): Promise<T> {
-  installRoostNodeSessionBackend();
   const environment = getSessionCommandEnvironment();
   if (environment) {
     if (auth !== environment.auth || workspace.id !== environment.workspace.id)

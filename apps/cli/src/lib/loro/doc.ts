@@ -1,8 +1,6 @@
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
 import { createSessionBackend, disposeSessionBackend } from '@/session/session-backend';
 import type { SessionBackend } from '@/session/session-backend';
-import { openRoostWorkspaceHistorySync } from '@/session/roost-node-session';
-import type { RoostWorkspaceHistorySync, RoostSessionSync } from '@/session/roost-streams-sync';
 import { readLatestTurn } from '@lody/shared/session-data';
 import { isContainer, type LoroDoc, type LoroList, type LoroMap } from 'loro-crdt';
 import {
@@ -42,10 +40,6 @@ import {
   SessionPullRequestMeta,
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
-  type SessionRoostHistoryCursorDocState,
-  type SessionRoostHistoryRemoteDocState,
-  type RoostStreamsConnection,
-  parseRoostHistoryRemoteBinding,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
   SessionTitleSource,
@@ -378,10 +372,6 @@ export class LoroDocumentManager {
   private remoteStreamsStatusUnsubscribe: (() => void) | null = null;
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly streamsTokens: CloudStreamsTokenPort | null;
-  private roostHistorySync: Promise<RoostWorkspaceHistorySync> | null = null;
-  private roostStreamsConnection?: RoostStreamsConnection;
-  private roostStreamsAbort?: AbortController;
-  private detachRoostStreamsOnline?: () => void;
   public readonly cloudBilling: CloudBillingPort | null;
 
   static async create(
@@ -591,9 +581,6 @@ export class LoroDocumentManager {
         this.initialMetaSyncCompleted = true;
       },
     });
-    this.detachRoostStreamsOnline = this.connectionRecovery.onStreamsOnline(() => {
-      if (this.roostStreamsConnection) this.wakeRoostHistorySync();
-    });
     this.machineFlockSync = new MachineFlockSyncCoordinator({
       repo: this.repo,
       workspaceId: this.workspaceId,
@@ -630,35 +617,6 @@ export class LoroDocumentManager {
 
   async attachRemoteStreamsTransport(): Promise<void> {
     await this.runRemoteTransportOp(() => this.attachRemoteStreamsTransportInner());
-  }
-
-  private getRoostHistorySync(): Promise<RoostWorkspaceHistorySync> {
-    if (this.cleaningUp) return Promise.reject(new Error('Workspace is closing'));
-    if (!this.roostHistorySync) {
-      const pending = openRoostWorkspaceHistorySync({
-        workspaceId: this.workspaceId,
-        isCloudEnabled: () => this.streamsTokens !== null,
-        getConnection: () =>
-          this.connectionRecovery.isRecovering() ? undefined : this.roostStreamsConnection,
-        logger: this.logger,
-      });
-      this.roostHistorySync = pending;
-      void pending.catch(() => {
-        if (this.roostHistorySync === pending) this.roostHistorySync = null;
-      });
-    }
-    return this.roostHistorySync;
-  }
-
-  private wakeRoostHistorySync(): void {
-    void this.getRoostHistorySync()
-      .then((sync) => sync.wake())
-      .catch((error) => {
-        if (!this.cleaningUp)
-          this.logger.warn(
-            `Roost history synchronization could not start: ${formatErrorMessage(error)}`
-          );
-      });
   }
 
   private async attachRemoteStreamsTransportInner(): Promise<void> {
@@ -707,14 +665,6 @@ export class LoroDocumentManager {
       });
       this.remoteStreamsAttached = true;
       this.remoteStreamsGeneration += 1;
-      this.roostStreamsAbort?.abort();
-      this.roostStreamsAbort = new AbortController();
-      this.roostStreamsConnection = {
-        baseUrl: streamsTransport.gatewayBaseUrl,
-        auth: streamsTransport.tokenProvider.createAuthCallback(),
-        signal: this.roostStreamsAbort.signal,
-      };
-      this.wakeRoostHistorySync();
       this.logger.info(`[${this.workspaceId}] Remote Streams transport attached`);
       // addTransport resolves even when individual rooms failed to attach at
       // the repo level (their bindings sit in 'error', and repo.reconnect does
@@ -773,8 +723,6 @@ export class LoroDocumentManager {
     }
     this.remoteStreamsAttached = false;
     this.remoteStreamsGeneration += 1;
-    this.roostStreamsAbort?.abort();
-    this.roostStreamsConnection = undefined;
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
     try {
@@ -1312,8 +1260,7 @@ export class LoroDocumentManager {
         this.repo,
         sessionId,
         (sessionDocId) => this.unloadDocRoom(sessionDocId),
-        this.logger,
-        async (id, binding) => (await this.getRoostHistorySync()).bind(id, binding)
+        this.logger
       );
       const meta = options.historyBackend ? undefined : await this.repo.getDocMeta(docId);
       const historyBackend =
@@ -1360,8 +1307,7 @@ export class LoroDocumentManager {
         this.repo,
         sessionId,
         (snapshotDocId) => this.unloadDocRoom(snapshotDocId),
-        this.logger,
-        async (id, binding) => (await this.getRoostHistorySync()).bind(id, binding)
+        this.logger
       );
       const meta = await this.repo.getDocMeta(docId);
       const historyBackend = !isLoroRepoDocDeleted(meta)
@@ -1688,10 +1634,6 @@ export class LoroDocumentManager {
 
   async cleanUp(options: { fast?: boolean; preserveSessionStatus?: boolean } = {}) {
     this.cleaningUp = true;
-    this.roostStreamsAbort?.abort();
-    this.roostStreamsConnection = undefined;
-    this.detachRoostStreamsOnline?.();
-    this.detachRoostStreamsOnline = undefined;
     this.localDocRoomBridgeGeneration += 1;
     for (const docId of [...this.localDocRoomBridges.keys()]) {
       this.cancelLocalDocRoomBridge(docId);
@@ -1739,14 +1681,6 @@ export class LoroDocumentManager {
     await this.machine?.destroy();
     this.machine = null;
     this.sessions.clear();
-    await this.roostHistorySync
-      ?.then((sync) => sync.dispose())
-      .catch((error) => {
-        this.logger.warn(
-          `Roost history synchronization shutdown failed: ${formatErrorMessage(error)}`
-        );
-      });
-    this.roostHistorySync = null;
     this.machineExistenceWatcher?.unsubscribe();
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
@@ -1875,8 +1809,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   private readonly docRoomStatusListeners = new Set<(status: RepoTransportRoomStatus) => void>();
   private historyAutoReadHandle: AutoMarkLatestUserHistoryAsReadHandle | null = null;
   private modelSummary: ReturnType<typeof attachSessionModelSummary> | null = null;
-  /** Serialize async ACP runtime patches so history reads cannot race a newer patch. */
-  private acpRuntimeConfigPatchSerial: Promise<unknown> = Promise.resolve();
   private destroyed = false;
   /** Backend bound during initialization; subscriptions must use this instance. */
   private sessionBackendInstance: SessionBackend | null = null;
@@ -1902,11 +1834,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
      * `LoroDocumentManager.unloadDocRoom`.
      */
     private unloadDocRoom: (docId: string) => Promise<void>,
-    private logger: Logger = getLogger('loro'),
-    private readonly createRoostHistorySync?: (
-      sessionId: SessionId,
-      binding: SessionRoostHistoryRemoteDocState
-    ) => Promise<RoostSessionSync>
+    private logger: Logger = getLogger('loro')
   ) {
     this.roomId = getSessionRoomId(this.sessionId);
   }
@@ -2055,19 +1983,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     await this.modelSummary?.flush();
   }
 
-  /** Publish the latest assistant model for a backend-owned history store. */
-  async setLastModel(lastModel: SessionMeta['lastModel']): Promise<void> {
-    if (!this.mirror) {
-      throw new Error('SessionDocument not initialized');
-    }
-    const current = await this.repo.getDocMeta(this.roomId);
-    if (isLoroRepoDocDeleted(current)) return;
-    const meta = current?.meta as SessionMeta | undefined;
-    if (meta?.id !== undefined && meta.id !== this.sessionId) return;
-    if (JSON.stringify(meta?.lastModel) === JSON.stringify(lastModel)) return;
-    await this.repo.upsertDocMeta(this.roomId, { lastModel });
-  }
-
   /**
    * The domain seam for session history. Callers express business operations
    * (`appendTurn`, `setTurnField`, `respondPermission`, ...) and never see the
@@ -2085,12 +2000,11 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    */
   subscribeAll(listener: () => void): () => void {
     if (!this.mirror) throw new Error('SessionDocument not initialized');
-    const history = this.sessionBackendInstance?.history ?? this.sessionData.history;
     let disposed = false;
     const unsubscribeMirror = this.subscribeControl(() => {
       if (!disposed) listener();
     });
-    const observation = history.observe(() => {
+    const observation = this.sessionData.history.observe(() => {
       if (!disposed) listener();
     });
     return () => {
@@ -2104,15 +2018,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   subscribeControl(listener: () => void): () => void {
     if (!this.mirror) throw new Error('SessionDocument not initialized');
     return this.mirror.subscribe(listener);
-  }
-
-  subscribeRoostHistoryCursor(listener: () => void): () => void {
-    if (!this.handle) throw new Error('SessionDocument not initialized');
-    return this.handle.doc.subscribe((batch) => {
-      if (batch.events.some((event) => String(event.path[0]) === 'roostHistoryCursor')) {
-        listener();
-      }
-    });
   }
 
   async init(options: { skipAutoRead?: boolean; historyBackend?: SessionHistoryBackendKind } = {}) {
@@ -2407,8 +2312,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       forkOperation: state.forkOperation as SessionDocMeta['forkOperation'],
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
-      roostHistoryCursor: state.roostHistoryCursor as SessionDocMeta['roostHistoryCursor'],
-      roostHistoryRemote: state.roostHistoryRemote as SessionDocMeta['roostHistoryRemote'],
       acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
     };
   }
@@ -2562,111 +2465,83 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   applyAcpRuntimeConfigPatch(
     basedOnUserTurnId: string,
     patch: SessionAcpRuntimeConfigPatch
-  ): Promise<boolean> {
-    const next = this.acpRuntimeConfigPatchSerial.then(async () => {
-      if (!this.mirror) {
-        throw new Error('SessionDocument not initialized');
-      }
+  ): boolean {
+    if (!this.mirror) {
+      throw new Error('SessionDocument not initialized');
+    }
 
-      const durablePatch: SessionAcpRuntimeConfigPatch =
-        patch.configOptionValues === undefined
-          ? patch
-          : {
-              ...patch,
-              configOptionValues: Object.fromEntries(
-                Object.entries(patch.configOptionValues).filter(
-                  ([configId]) => !isSensitiveAcpConfigOptionId(configId)
-                )
-              ),
-            };
+    const durablePatch: SessionAcpRuntimeConfigPatch =
+      patch.configOptionValues === undefined
+        ? patch
+        : {
+            ...patch,
+            configOptionValues: Object.fromEntries(
+              Object.entries(patch.configOptionValues).filter(
+                ([configId]) => !isSensitiveAcpConfigOptionId(configId)
+              )
+            ),
+          };
 
-      const history = this.sessionBackendInstance?.history ?? this.sessionDataInstance?.history;
-      if (!history) {
-        throw new Error('Session history is not initialized');
-      }
-      const count = await history.count();
-      const rows = await history.readDirectory(0, count);
-      const userTurnIndex = new Map<string, number>();
-      let latestUserTurnIndex = -1;
-      for (const row of rows) {
-        if (row.state !== 'ready' || row.scalars?.role !== 'user' || !row.turnId) continue;
-        userTurnIndex.set(row.turnId, row.position);
-        latestUserTurnIndex = row.position;
-      }
+    const state = this.mirror.getState();
+    const { indexById: userTurnIndex, latestIndex: latestUserTurnIndex } = this.shallowUserTurns();
+    const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
+    if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
+      return false;
+    }
 
-      const state = this.mirror?.getState();
-      if (!state) throw new Error('SessionDocument not initialized');
-      const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
-      if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
-        return false;
-      }
+    const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
+    const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
+    if (currentTurnIndex > incomingTurnIndex) {
+      return false;
+    }
 
-      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
-      const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
-      if (currentTurnIndex > incomingTurnIndex) {
-        return false;
-      }
+    const continuesCurrentSnapshot =
+      current?.acpSessionId === durablePatch.acpSessionId &&
+      current.basedOnUserTurnId === basedOnUserTurnId;
+    const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
+      ...(continuesCurrentSnapshot
+        ? {
+            ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
+            ...(current.modelId !== undefined ? { modelId: current.modelId } : {}),
+            ...(current.configOptionValues !== undefined
+              ? { configOptionValues: current.configOptionValues }
+              : {}),
+          }
+        : {}),
+      ...durablePatch,
+      basedOnUserTurnId,
+    };
+    if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {
+      return false;
+    }
 
-      const continuesCurrentSnapshot =
-        current?.acpSessionId === durablePatch.acpSessionId &&
-        current.basedOnUserTurnId === basedOnUserTurnId;
-      const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
-        ...(continuesCurrentSnapshot
-          ? {
-              ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
-              ...(current.modelId !== undefined ? { modelId: current.modelId } : {}),
-              ...(current.configOptionValues !== undefined
-                ? { configOptionValues: current.configOptionValues }
-                : {}),
-            }
-          : {}),
-        ...durablePatch,
-        basedOnUserTurnId,
-      };
-      if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {
-        return false;
-      }
-
-      const nextSnapshot: SessionAcpRuntimeConfigSnapshot = {
-        ...nextWithoutRevision,
-        revision: (current?.revision ?? 0) + 1,
-      };
-      this.mirror.setState((prev) => {
-        prev.acpRuntimeConfig = nextSnapshot;
-        return prev;
-      });
-      return true;
+    const next: SessionAcpRuntimeConfigSnapshot = {
+      ...nextWithoutRevision,
+      revision: (current?.revision ?? 0) + 1,
+    };
+    this.mirror.setState((prev) => {
+      prev.acpRuntimeConfig = next;
+      return prev;
     });
-    this.acpRuntimeConfigPatchSerial = next.then(
-      () => undefined,
-      () => undefined
-    );
-    return next;
+    return true;
   }
 
   async markHistoryAsSeen(turnId: string): Promise<void> {
-    this.logger.debug(`Marking session ${this.sessionId} history as seen`);
-    if (this.sessionBackendInstance?.kind === 'roost') {
-      await this.sessionBackendInstance.applyHistoryAction({
-        kind: 'user-status',
-        turnId,
-        status: 'seen',
-      });
-      return;
+    if (!this.sessionDataInstance) {
+      throw new Error('SessionDocument not initialized');
     }
-    if (!this.sessionDataInstance) throw new Error('SessionDocument not initialized');
+    this.logger.debug(`Marking session ${this.sessionId} history as seen`);
     this.agentWrites.markTurnSeen(turnId);
   }
 
   async markLatestUserHistoryAsSeenIfNeeded(): Promise<void> {
-    const history = this.sessionBackendInstance?.history ?? this.sessionDataInstance?.history;
-    if (!history) {
+    if (!this.sessionDataInstance) {
       throw new Error('SessionDocument not initialized');
     }
 
-    const count = await history.count();
+    const count = await this.sessionData.history.count();
     for (let position = count - 1; position >= 0; position -= 1) {
-      const read = await history.readAt(position);
+      const read = await this.sessionData.history.readAt(position);
       if (read.state !== 'ready' || read.turn.role !== 'user') continue;
       if (resolveSessionHistoryStatus(read.turn) !== 'pending') return;
       await this.markHistoryAsSeen(read.turn.id);
@@ -2987,49 +2862,12 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     }));
   }
 
-  async getRoostHistoryCursor(): Promise<SessionRoostHistoryCursorDocState | undefined> {
-    if (!this.mirror) return undefined;
-    return this.mirror.getState().roostHistoryCursor as
-      | SessionRoostHistoryCursorDocState
-      | undefined;
-  }
-
-  async setRoostHistoryCursor(cursor: SessionRoostHistoryCursorDocState): Promise<void> {
-    if (!this.mirror) throw new Error('Mirror not initialized');
-    this.mirror.setState((prev) => ({ ...prev, roostHistoryCursor: cursor }));
-  }
-
-  async bindRoostHistoryRemote(
-    proposed: SessionRoostHistoryRemoteDocState
-  ): Promise<SessionRoostHistoryRemoteDocState> {
-    if (!this.mirror) throw new Error('Mirror not initialized');
-    const existing = parseRoostHistoryRemoteBinding(this.mirror.getState().roostHistoryRemote);
-    if (existing) {
-      if (existing.ownerPublicKey !== proposed.ownerPublicKey)
-        throw new Error('Roost history owner changed');
-      return existing;
-    }
-    const binding = parseRoostHistoryRemoteBinding(proposed)!;
-    this.mirror.setState((prev) => ({ ...prev, roostHistoryRemote: binding }));
-    // The binding and its app-generation must survive before accepting native
-    // history. Reopening never chooses a fresh remote for an existing history.
-    await this.repo.flush();
-    return binding;
-  }
-
-  async openRoostHistorySync(
-    binding: SessionRoostHistoryRemoteDocState
-  ): Promise<RoostSessionSync | undefined> {
-    return await this.createRoostHistorySync?.(this.sessionId, binding);
-  }
-
   /**
    * Get the plan from the latest assistant entry in history.
    * Plan is now stored per-turn on each history entry, not at the root level.
    */
   async getPlan(): Promise<SessionPlanEntry[]> {
-    const history = this.sessionBackendInstance?.history ?? this.sessionData.history;
-    const entry = await readLatestTurn(history, 'assistant');
+    const entry = await readLatestTurn(this.sessionData.history, 'assistant');
     if (!entry) {
       return [];
     }
@@ -3071,10 +2909,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       throw new Error(
         `appendUserTurn requires a user entry, received role "${entry.role}" for ${entry.id}`
       );
-    }
-    if (this.sessionBackendInstance?.kind === 'roost') {
-      await this.sessionBackendInstance.appendUserTurn(entry);
-      return;
     }
     // Queue promotion is a dispatch producer: append through the domain command
     // (which validates before writing), then publish the activation pointer.
@@ -3130,10 +2964,6 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   async setPlan(entries: SessionPlanEntry[]) {
     if (!this.mirror) {
       throw new Error('Mirror not initialized');
-    }
-    if (this.sessionBackendInstance?.kind === 'roost') {
-      await this.sessionBackendInstance.setPlan(entries);
-      return;
     }
     const id = this.shallowLatestTurnId('assistant');
     if (!id) return;

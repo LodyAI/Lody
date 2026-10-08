@@ -15,8 +15,6 @@ import type {
   SessionImageGroupContent,
   SessionImagePayload,
   SessionFilePayload,
-  SessionHistoryInput,
-  SessionHistoryChange,
   SessionTurnInputConfig,
   AcpCapabilityCacheEntry,
   SessionGoalAction,
@@ -760,74 +758,6 @@ export interface SessionFileSendLocalResponse {
   files?: SessionFilePayload[];
 }
 
-/**
- * Local renderer bridge for history owned by a machine-side backend such as
- * Roost. The payload is deliberately storage-neutral: the CLI resolves the
- * selected SessionBackend and the renderer never receives physical segments.
- */
-export interface SessionHistoryReadRequest {
-  type: 'session/history-read';
-  machineId: MachineId;
-  workspaceId: WorkspaceId;
-  sessionId: SessionId;
-  query: SessionHistoryReadQuery;
-}
-
-/** Bounded logical reads over the owner session's active history branch. */
-export type SessionHistoryReadQuery =
-  | { readonly kind: 'count' }
-  | { readonly kind: 'readAt'; readonly position: number }
-  | { readonly kind: 'readTurn'; readonly turnId: string }
-  | { readonly kind: 'readRange'; readonly from: number; readonly to: number }
-  | { readonly kind: 'readDirectory'; readonly from: number; readonly to: number }
-  | { readonly kind: 'readLatestPage'; readonly limit: number }
-  | { readonly kind: 'readOlderPage'; readonly cursor: string; readonly limit: number }
-  | { readonly kind: 'readAll' }
-  | { readonly kind: 'readTurnOutput'; readonly userTurnId: string };
-
-export interface SessionHistoryReadResponse {
-  type: 'session/history-read_response';
-  sessionId: SessionId;
-  success: boolean;
-  result?: unknown;
-  /** One locally durable observation, including the bounded page's bodies. */
-  historyRevision?: number;
-  historyCount?: number;
-  historyChange?: SessionHistoryChange | null;
-  pageTurns?: readonly SessionHistoryInput[];
-  error?: string;
-}
-
-export type SessionHistoryWriteOperation =
-  | 'append'
-  | 'replace'
-  | 'respond_permission'
-  | 'apply_action'
-  | 'replace_editable_tail'
-  | 'apply_import'
-  | 'copy_history';
-
-export interface SessionHistoryWriteRequest {
-  type: 'session/history-write';
-  machineId: MachineId;
-  workspaceId: WorkspaceId;
-  sessionId: SessionId;
-  operation: SessionHistoryWriteOperation;
-  payload: unknown;
-}
-
-export interface SessionHistoryWriteResponse {
-  type: 'session/history-write_response';
-  sessionId: SessionId;
-  operation: SessionHistoryWriteOperation;
-  success: boolean;
-  result?: unknown;
-  historyRevision?: number;
-  historyCount?: number;
-  historyChange?: SessionHistoryChange | null;
-  error?: string;
-}
-
 // Local CLI control (Electron -> local CLI) message subsets
 export type LocalSessionControlRequest =
   | SessionCreateRequest
@@ -846,8 +776,6 @@ export type LocalSessionControlRequest =
   | SessionImageUploadRequest
   | SessionFileUploadRequest
   | SessionFileSendLocalRequest
-  | SessionHistoryReadRequest
-  | SessionHistoryWriteRequest
   | PreviewCandidateReportRequest
   | SessionPreviewCreateRequest
   | SessionPreviewRevokeRequest
@@ -875,8 +803,6 @@ export type LocalSessionControlResponse =
   | SessionImageUploadResponse
   | SessionFileUploadResponse
   | SessionFileSendLocalResponse
-  | SessionHistoryReadResponse
-  | SessionHistoryWriteResponse
   | PreviewCandidateReportResponse
   | SessionPreviewCreateResponse
   | SessionPreviewRevokeResponse

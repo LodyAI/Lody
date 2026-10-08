@@ -13,7 +13,7 @@ That tolerance must not authorize creating new malformed items locally.
 
 ## Contract
 
-- Renderer and CLI share one HistoryWriter for local Loro history changes. A reader
+- Renderer and CLI share one HistoryWriter for local history changes. A reader
   feature flag may replace the view, not the write contract.
 - New turns use explicit message types and runtime input parsing. Legacy typed
   callback callers use the same writer through the session facade.
@@ -47,7 +47,7 @@ That tolerance must not authorize creating new malformed items locally.
   and edits inside that range, except a newly inserted pending user row becoming seen/read
   with every other field unchanged. It is not crash recovery or a distributed transaction.
   External provider imports remain new inputs, not privileged stored-history copies.
-- Acceptance in the Loro writer means a local CRDT write. Existing repo persistence and transport
+- Acceptance here means a local CRDT write. Existing repo persistence and transport
   still own durability, permissions, and remote synchronization.
 - Tool fields other than type/toolCallId
   parse only changed fields without reparsing untouched tool payloads; outcome-only
@@ -170,58 +170,6 @@ on projected history. This is not arbitrary downgrade safety.
 
 ## Limits and review questions
 
-### Backend selection and display reads
-
-New sessions select Roost for message history; legacy sessions without a backend
-discriminator retain Loro. Commands use the session's selected backend, with one
-writer for its storage. Loro-specific container rules above apply to that backend;
-Roost preserves immutable sealed segments and projects successors into the same
-logical turn. Control metadata and delivery state remain in Loro. Local history
-acceptance does not establish remote Roost synchronization.
-
-Opening a Roost conversation reads the latest active-branch window. Scrolling
-up loads older logical turns through a reverse cursor. Whole-history search,
-outline navigation, counts and facts must cover earlier pages without requiring
-manual scrolling. These consumers load directory pages in the background and
-keep body hydration bounded by their leases; opening does not await a full-history
-read. Restoring a reading position loads its logical turn before declaring the
-initial window ready. New messages retain the loaded prefix
-and its cursor. A branch rewrite invalidates incompatible pages and refreshes the
-loaded window without displaying the superseded suffix. Unloaded rows contribute
-neither fabricated messages nor complete-history facts. Explicit export/snapshot
-operations retain an authoritative full-read capability.
-
-In a cloud-enabled workspace, history already accepted by the durable Streams
-service remains readable while the owning CLI is offline, including older pages
-that the reader has never cached. The Node owner uploads through Roost's durable
-retry/confirmation machinery. Local acceptance and owner RPC replies do not claim
-remote persistence; the synchronization barrier requires both history confirmation
-and control-plane synchronization.
-
-The renderer keeps a read-only native IndexedDB replica scoped by account,
-workspace, renderer and session. It admits the control-bound owner key and obtains
-the endpoint and credentials only from the authenticated workspace capability.
-The control document carries an immutable history generation and public owner key,
-not a URL or token. Unsealed streaming content remains provisional; seals retain
-signature verification. Public local composition stays local.
-
-Cloud reads bootstrap a bounded reverse window and catch up from that window's
-original tail, so writes arriving during bootstrap are not skipped. Older windows
-resume at contiguous received-message boundaries. Missing prefixes require repair,
-never a fabricated shorter history. Each replica owns its durable receive cursor;
-owner revisions only wake it. Shared browser tabs serialize intake where supported,
-and native transactional receipt/replay rules remain the durability boundary.
-Cached rows remain readable while background network work waits. Full exports use
-a consistent branch read; branch rollback must propagate through native records.
-
-Local Electron retains its owner bridge and durable projection cache. With neither
-owner nor service reachable, either path can read only previously cached data.
-Commands continue to reach the owning CLI; neither a replica nor a cache queues
-or authors user commands. Cache repair includes the native replica databases, and
-workspace disposal cancels their network work before closing storage.
-
-### Verification limits
-
 This is not a proof of arbitrary cross-version application compatibility or reader
 safety. TypeScript cannot enforce untrusted inputs, semantic string constraints,
 or prevent deliberate casts/raw access. A command changing an already damaged item
@@ -229,8 +177,8 @@ may need to repair that item; it cannot rely on tolerance reserved for untouched
 history. The initial callback adapter supports order-preserving history edits, not
 arbitrary reordering of existing turns in a plain LoroList.
 
-The Roost reader now uses active-branch pages; the legacy Loro reader still loads
-its directory. This does not establish 3000-round performance acceptance.
+The current full-Mirror read path still materializes history; this change is not
+the 3000-round performance acceptance or the windowed ConversationView rollout.
 Non-history control-field validation remains outside this HistoryWriter contract.
 The v2 canonical form is defined for the shapes this repository writes. The full
 sealed-skeleton feature (a reader-side `ref` payload fetch, payload hooks, and the

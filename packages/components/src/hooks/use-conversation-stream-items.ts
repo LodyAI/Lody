@@ -6,7 +6,7 @@ import {
   type BuildChatStreamItemsResult,
 } from '@/components/ai-gui/build-chat-stream-items';
 import type { VisibleTurnRange } from '@/components/ai-gui/view';
-import { isUnloadedTurnId, type ConversationView } from '@/lib/conversation-view';
+import type { ConversationView } from '@/lib/conversation-view';
 import { LRUCache } from '@/lib/lru-cache';
 import { scrollDebug } from './scroll-debug-log';
 import { useConversationVersion, useTurnRange } from './use-conversation-view';
@@ -84,23 +84,6 @@ export function useConversationStreamItems(
     range: VisibleTurnRange;
   } | null>(null);
   const reportedRange = visible?.source === source ? visible.range : null;
-  const [resolvedFocus, setResolvedFocus] = useState<{
-    source: ConversationView;
-    turnId: string;
-  } | null>(null);
-  const focusTurnId = options.initialFocusTurnId;
-  useEffect(() => {
-    if (!view || !focusTurnId || reportedRange || view.indexOf(focusTurnId) >= 0) return undefined;
-    let cancelled = false;
-    const directory = view.acquireDirectory?.(focusTurnId);
-    void (directory?.ready ?? view.ready).then(() => {
-      if (!cancelled) setResolvedFocus({ source: view, turnId: focusTurnId });
-    });
-    return () => {
-      cancelled = true;
-      directory?.release();
-    };
-  }, [view, focusTurnId, reportedRange]);
   const focusIndex =
     !reportedRange && options.initialFocusTurnId && view
       ? view.indexOf(options.initialFocusTurnId)
@@ -117,8 +100,7 @@ export function useConversationStreamItems(
         if (
           current?.source === source &&
           Math.abs(current.range.from - next.from) < VISIBLE_RANGE_HYSTERESIS_TURNS &&
-          Math.abs(current.range.to - next.to) < VISIBLE_RANGE_HYSTERESIS_TURNS &&
-          !(source.hasMoreOlder && isUnloadedTurnId(source.index(next.from - 1)?.id ?? ''))
+          Math.abs(current.range.to - next.to) < VISIBLE_RANGE_HYSTERESIS_TURNS
         ) {
           return current;
         }
@@ -141,18 +123,9 @@ export function useConversationStreamItems(
     visibleRange ? view : null,
     hydrationWindow.from,
     hydrationWindow.to,
-    {
-      extendToPrecedingUserTurn: true,
-      loadOlderAtStart: true,
-      loadOlderAtPosition: visibleRange?.from,
-    }
+    { extendToPrecedingUserTurn: true }
   );
-  const focusResolved =
-    !focusTurnId ||
-    focusIndex >= 0 ||
-    reportedRange !== null ||
-    (resolvedFocus?.source === view && resolvedFocus.turnId === focusTurnId);
-  if (focusResolved && tailReady && (!visibleRange || rangeReady)) initialRef.current.ready = true;
+  if (tailReady && (!visibleRange || rangeReady)) initialRef.current.ready = true;
   const initialWindowReady = !!view && initialRef.current.ready;
   useEffect(() => {
     scrollDebug('hydration-window', {
