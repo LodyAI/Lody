@@ -1583,6 +1583,24 @@ const INITIAL_SCROLLER_STATE: ConversationScrollerState = {
   isSticky: true,
 };
 
+const scrollToLatestStyles = stylex.create({
+  icon: { width: space[4], height: space[4] },
+  workingSpinner: {
+    display: {
+      default: 'inline-flex',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):hover')]: 'none',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):focus-visible')]: 'none',
+    },
+  },
+  workingArrow: {
+    display: {
+      default: 'none',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):hover')]: 'block',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):focus-visible')]: 'block',
+    },
+  },
+});
+
 /**
  * The conversation: a virtualized list of keyed rows, rendered and scrolled by
  * the conversation scroll engine (`lib/conversation-scroll`,
@@ -2499,15 +2517,31 @@ export const SessionChatStreamView = forwardRef<
                     variant="secondary"
                     icon
                     data-scroll-to-latest=""
-                    className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
+                    className={cn(
+                      stylex.props(stylex.defaultMarker()).className,
+                      'pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none'
+                    )}
                     onClick={scrollToBottom}
                     aria-label={t('sessions.scrollToLatest')}
                   >
                     {agentActivityLabel && agentActivityShimmer ? (
-                      <Spinner className="h-4 w-4" aria-hidden="true" />
-                    ) : (
-                      <ArrowDown className="h-4 w-4" aria-hidden="true" />
-                    )}
+                      <Spinner
+                        {...stylex.props(
+                          scrollToLatestStyles.icon,
+                          scrollToLatestStyles.workingSpinner
+                        )}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    <ArrowDown
+                      {...stylex.props(
+                        scrollToLatestStyles.icon,
+                        !!agentActivityLabel &&
+                          agentActivityShimmer &&
+                          scrollToLatestStyles.workingArrow
+                      )}
+                      aria-hidden="true"
+                    />
                   </Button>
                 </ConversationColumn>
               </div>
