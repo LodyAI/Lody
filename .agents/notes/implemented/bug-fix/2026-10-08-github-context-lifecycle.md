@@ -54,4 +54,5 @@ real preparation runtime: abort during credential setup, unadopted and late disp
 adoption across turns, local sessions beside a foreign context, and the managed
 missing-policy failure. They were not executed in the authoring environment. Related:
 [local native authentication](../feature/2026-09-29-local-project-native-github-auth.md),
-[command credentials](../architecture/2026-09-26-github-command-credentials.md).
+[command credentials](../architecture/2026-09-26-github-command-credentials.md),
+issue [#1309](https://github.com/LodyAI/Lody/issues/1309).

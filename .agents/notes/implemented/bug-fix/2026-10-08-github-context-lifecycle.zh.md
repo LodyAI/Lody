@@ -40,4 +40,5 @@ token 与文件，所有者轮换后亦然。预准备最后才获取，中止�
 未接管与迟到的清理、接管后的多轮刷新、本地会话与他人上下文并存，以及托管会话缺 policy 的失败。
 作者环境未执行这些测试。相关：
 [本地原生认证](../feature/2026-09-29-local-project-native-github-auth.zh.md)、
-[按命令选择凭据](../architecture/2026-09-26-github-command-credentials.zh.md)。
+[按命令选择凭据](../architecture/2026-09-26-github-command-credentials.zh.md)、
+Issue [#1309](https://github.com/LodyAI/Lody/issues/1309)。
