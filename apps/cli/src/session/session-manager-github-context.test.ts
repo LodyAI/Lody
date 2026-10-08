@@ -19,10 +19,7 @@ import type { SessionConfig } from './types';
 import type { LoroDocumentManager } from '../lib/loro/doc';
 import type { Logger } from '../utils/logger';
 import type { GitHubTokenManager } from '../lib/github-token-manager';
-import {
-  GitCredentialBroker,
-  LODY_GIT_CRED_CONTEXT_TOKEN_ENV,
-} from '../lib/git-credential-broker';
+import { GitCredentialBroker, LODY_GIT_CRED_CONTEXT_TOKEN_ENV } from '../lib/git-credential-broker';
 
 vi.mock('../agent/setting', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../agent/setting')>()),

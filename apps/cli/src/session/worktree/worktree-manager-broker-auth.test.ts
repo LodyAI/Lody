@@ -271,6 +271,7 @@ process.exit(result.status ?? 1);
         gitCredentialBroker: {
           ensureStarted: async () => ({ url: `http://${context}.test`, token: context, port: 0 }),
           activateSessionContext: () => context,
+          acquireSessionContext: () => ({ contextToken: context, release: vi.fn() }),
           getStateFilePath: () => stateFilePath,
           getSessionContextFilePath: () => undefined,
         },
