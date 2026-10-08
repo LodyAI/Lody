@@ -52,7 +52,13 @@ preparation resolving a different owner still rotates the token.
 Regression tests cover broker leases (shared holders, owner rotation, shutdown) and the
 real preparation runtime: abort during credential setup, unadopted and late disposal,
 adoption across turns, local sessions beside a foreign context, and the managed
-missing-policy failure. They were not executed in the authoring environment. Related:
+missing-policy failure. They were not executed in the authoring environment. A clean,
+isolated validation later passed the focused context set (43 tests, zero unhandled
+errors), format check, typecheck, and the lifecycle regression; the final branch is
+`99a6e5c6`. The root check still reports the existing recursive native-SSH fixture
+failure and two lifecycle timeouts under the parallel full test runner, while the
+required full desktop E2E run timed out in its P1 provider scenarios; these are retained
+as validation gaps with artifacts rather than reported as passing. Related:
 [local native authentication](../feature/2026-09-29-local-project-native-github-auth.md),
 [command credentials](../architecture/2026-09-26-github-command-credentials.md),
 issue [#1309](https://github.com/LodyAI/Lody/issues/1309).

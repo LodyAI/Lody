@@ -38,7 +38,10 @@ token 与文件，所有者轮换后亦然。预准备最后才获取，中止�
 
 回归测试覆盖 broker 租约（共享持有者、所有者轮换、关闭）与真实预准备运行时：凭据设置期间中止、
 未接管与迟到的清理、接管后的多轮刷新、本地会话与他人上下文并存，以及托管会话缺 policy 的失败。
-作者环境未执行这些测试。相关：
+作者环境未执行这些测试。之后在隔离环境中，聚焦 context 集合（43 tests、无 unhandled errors）、
+format check、typecheck 和 lifecycle 回归均通过；最终分支为 `99a6e5c6`。root check 在并行完整
+测试 runner 中仍报告既有 recursive native-SSH fixture 失败与两个 lifecycle timeout；要求的完整桌面
+E2E 也在 P1 provider 场景 timeout。这些均作为带 artifact 的验证 gap 保留，没有报告为通过。相关：
 [本地原生认证](../feature/2026-09-29-local-project-native-github-auth.zh.md)、
 [按命令选择凭据](../architecture/2026-09-26-github-command-credentials.zh.md)、
 Issue [#1309](https://github.com/LodyAI/Lody/issues/1309)。
