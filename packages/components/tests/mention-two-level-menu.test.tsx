@@ -14,11 +14,13 @@ import {
   useMentionCategoryActivation,
 } from '../src/components/mentions/mention-two-level-menu';
 import {
+  getMentionViewCandidates,
   selectMentionMenuViewForTrigger,
   toSkillCandidate,
   type MentionCandidate,
   type MentionCandidateDetail,
   type MentionCategory,
+  type MentionMenuView,
 } from '../src/components/mentions/mention-registry';
 import { initI18n } from '../src/i18n';
 
@@ -91,10 +93,12 @@ function Harness({
   initialValue,
   categories,
   detail,
+  followHighlight = false,
 }: {
   initialValue: string;
   categories: MentionCategory[];
   detail?: MentionCandidateDetail | null;
+  followHighlight?: boolean;
 }) {
   const [value, setValue] = React.useState(initialValue);
   const [mentions, setMentions] = React.useState<MentionRange[]>([]);
@@ -116,16 +120,32 @@ function Harness({
     >
       <Probe />
       <MentionInput value={value} onChange={() => {}} />
-      {view ? (
-        <MentionTwoLevelMenuBody
-          view={view}
-          onBack={() => {}}
-          showBack
-          onCategoryNavigate={(category) => category.activation?.activate()}
-          detail={detail}
-        />
-      ) : null}
+      {view ? <MenuBody view={view} detail={detail} followHighlight={followHighlight} /> : null}
     </Mention>
+  );
+}
+
+function MenuBody({
+  view,
+  detail,
+  followHighlight,
+}: {
+  view: MentionMenuView;
+  detail?: MentionCandidateDetail | null;
+  followHighlight: boolean;
+}) {
+  const { highlightedItem } = useMentionContext('MenuBody');
+  const candidates = getMentionViewCandidates(view);
+  const highlighted =
+    candidates.find((candidate) => candidate.value === highlightedItem?.value) ?? candidates[0];
+  return (
+    <MentionTwoLevelMenuBody
+      view={view}
+      onBack={() => {}}
+      showBack
+      onCategoryNavigate={(category) => category.activation?.activate()}
+      detail={followHighlight ? highlighted?.detail : detail}
+    />
   );
 }
 
@@ -451,6 +471,71 @@ describe('MentionTwoLevelMenuBody', () => {
     expect(pane?.closest('[data-slot="mention-item"]')).toBeNull();
   });
 
+  it.each(['click', 'Enter'] as const)(
+    'keeps a scrolled Role reachable as hover opens and closes its detail, then selects by %s',
+    (action) => {
+      const categories: MentionCategory[] = [
+        {
+          id: 'issue',
+          namespace: 'issue',
+          label: 'Issues',
+          icon: 'issue',
+          status: 'ready',
+          getCandidates: () =>
+            Array.from({ length: 4 }, (_, index) => issueCandidate(index + 1, `Review ${index}`)),
+        },
+        {
+          id: 'agent_role',
+          namespace: 'role',
+          label: 'Agent Roles',
+          icon: 'agent_role',
+          status: 'ready',
+          getCandidates: () => [
+            {
+              value: 'reviewer-role',
+              label: 'Reviewer',
+              title: 'Reviewer',
+              insertText: '@Reviewer',
+              kind: 'agent_role',
+              icon: 'agent_role',
+              detail: { title: 'Reviewer', description: 'Review the changes.' },
+            },
+          ],
+        },
+      ];
+      act(() =>
+        root?.render(<Harness initialValue="@review" categories={categories} followHighlight />)
+      );
+      const input = container?.querySelector('textarea');
+      const rows = container?.querySelectorAll<HTMLElement>('[data-slot="mention-item"]');
+      const issue = rows?.[3];
+      const role = rows?.[4];
+      if (!input || !issue || !role) throw new Error('Expected issue and Role candidates');
+      const scroller = role.parentElement;
+      if (!scroller) throw new Error('Expected candidate scroller');
+      scroller.scrollTop = 240;
+      act(() => input.setSelectionRange(7, 7));
+
+      for (const row of [role, issue, role]) {
+        act(() => row.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })));
+        const currentRole = container?.querySelectorAll('[data-slot="mention-item"]')[4];
+        expect(currentRole?.parentElement?.scrollTop).toBe(240);
+        expect(currentRole).toBe(role);
+        expect(row.hasAttribute('data-highlighted')).toBe(true);
+        expect(Boolean(container?.querySelector('[data-mention-detail]'))).toBe(row === role);
+      }
+
+      act(() => {
+        if (action === 'click') role.click();
+        else input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      expect(latest.inputValue).toBe('@Reviewer ');
+      expect(latest.mentions).toEqual([
+        { value: 'reviewer-role', start: 0, end: 9, kind: 'agent_role' },
+      ]);
+    }
+  );
+
   it('states when a session was last active', () => {
     const categories = makeCategories();
     categories.push({
@@ -772,6 +857,43 @@ describe('composer placement', () => {
     frameTop = 40;
     await act(() => window.dispatchEvent(new Event('resize')));
     expect(cap()).toBe('16px');
+  });
+
+  it('repositions changed rows before waiting for a resize observation', async () => {
+    const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+    const height = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+    Object.defineProperties(HTMLElement.prototype, {
+      offsetWidth: {
+        configurable: true,
+        get() {
+          return this.dataset.slot === 'mention-content' ? 300 : (width?.get?.call(this) ?? 0);
+        },
+      },
+      offsetHeight: {
+        configurable: true,
+        get() {
+          return this.dataset.slot === 'mention-content'
+            ? this.children.length * 28
+            : (height?.get?.call(this) ?? 0);
+        },
+      },
+    });
+    try {
+      frameTop = 600;
+      await act(async () => show(true, 2, 'top'));
+      const popup = document.querySelector<HTMLElement>('[data-slot="mention-content"]')!;
+      expect(popup.style.top).toBe('536px');
+
+      await act(async () => show(true, 6, 'top'));
+      expect(document.querySelector('[data-slot="mention-content"]')).toBe(popup);
+      expect(popup.style.top).toBe('424px');
+
+      await act(async () => show(true, 1, 'top'));
+      expect(popup.style.top).toBe('564px');
+    } finally {
+      if (width) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', width);
+      if (height) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', height);
+    }
   });
 
   it('opens below only when there is no room above, choosing again on each open', () => {

@@ -14,9 +14,9 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   registration and mounting `<Mention>`; every source with its own `enabled`
   rule (sessions: having any) belongs there too. Placeholder hints advertise `$`
   only under the conditions that enable Skill mentions.
-- The main desktop chat composer pins menus above its frame; inline and dialog
-  menus follow the caret and flip to fit. All cap/scroll within available room
-  and `var(--mention-input-width)`. The mobile dock stays above the whole frame.
+- Main desktop menus follow the caret and prefer above while a heading and row
+  fit; inline/dialog menus prefer below and flip to fit. All cap/scroll within
+  available room and `var(--mention-input-width)`. The mobile dock stays above the frame.
 - `insertText` must keep its type's prompt form (`@path`, `#123`, `$token`,
   `/cmd`): reaching a type through `@` must not change what the agent receives.
   Directory candidates carry BOTH `navigateText` (`@dir/`, descend) and
