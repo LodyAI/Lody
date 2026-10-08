@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1317](https://github.com/LodyAI/Lody/pull/1317)
 
 [English](2026-10-08-mention-detail-scroll-continuity.md)
 
