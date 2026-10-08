@@ -30,3 +30,5 @@ Windows 的分叉与 Session 管理旅程在源提示后超时。[artifact 的�
 ## 验证与限制
 
 改动文件通过 Oxfmt 和 `git diff --check`。此嵌套 worktree 的 E2E 包未安装 `@cucumber/cucumber`，所以 `pnpm e2e:check` 无法启动；`pnpm e2e:build` 因 CLI 清理步骤缺少 `rimraf` 而停止。根目录的 `pnpm check` 和 `pnpm format` 也因工具缺失而停止。仓库指引要求嵌套 checkout 跳过 `pnpm install`，因此无法在本地启动构建后 Electron smoke。`pnpm run docs check` 报告 62 条指向未填充 ACP submodule 路径的断链，新建的双语 Note 没有相关错误。设置修正已在一次托管 full 运行中通过；显式滚动调整及 Windows、Linux 运行仍待新一轮托管验证。
+
+[10 月 5 日 Daily 运行](https://github.com/LodyAI/Lody/actions/runs/37283733099)还失败于 `LODY-PROJECT-002`：trace 等待项目 `menuitem`，可见选择器却已采用单选项。main 在 `6da6168e95758e4d1b876894c408a0641519455b` 将这些选项改为 `Menu.RadioItem`，本 PR base 则仍渲染 `Menu.Item`。Page Object 的选择操作与单一选项断言现接受这两种可访问角色，仍要求项目名精确匹配。数量断言保留，因此重复选项仍会失败；文件夹操作及产品行为不变。
