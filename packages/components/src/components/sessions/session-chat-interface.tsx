@@ -207,6 +207,7 @@ import type { SessionSharingState } from '@/lib/session-sharing';
 import {
   SessionAccessControl,
   SessionArchivedBadge,
+  SessionRestoreButton,
   SESSION_HEADER_STATUS_PILL_CLASS,
   getSessionSharingDescription,
   getSessionSharingLabel,
@@ -6135,7 +6136,13 @@ export const SessionChatInterface = memo(
           />
         </div>
       ) : null;
-    const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
+    const headerArchivedNode =
+      session.isArchived === true ? (
+        <>
+          <SessionArchivedBadge />
+          {onRestoreSession ? <SessionRestoreButton onRestore={onRestoreSession} /> : null}
+        </>
+      ) : null;
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>

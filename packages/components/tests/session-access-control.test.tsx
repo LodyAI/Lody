@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SessionAccessControl } from '../src/components/session-sharing';
+import { SessionAccessControl, SessionRestoreButton } from '../src/components/session-sharing';
 import type { SessionPublicShareStatus, SessionSharingState } from '../src/lib/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 
@@ -176,5 +176,44 @@ describe('SessionAccessControl', () => {
     // The mocked translator does not interpolate, so assert the reason text
     // the private branch resolved rather than the project name it names.
     expect(menu?.textContent).toContain('is not shared with the team.');
+  });
+});
+
+describe('SessionRestoreButton', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    document.body.innerHTML = '';
+  });
+
+  it('restores once and stays disabled until the restore settles', async () => {
+    let finishRestore: () => void = () => {};
+    const onRestore = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRestore = resolve;
+        })
+    );
+    await act(async () => root.render(<SessionRestoreButton onRestore={onRestore} />));
+    const button = container.querySelector<HTMLButtonElement>('button')!;
+    expect(button.textContent).toBe('Restore');
+
+    await act(async () => button.click());
+    await act(async () => button.click());
+    expect(onRestore).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute('aria-busy')).toBe('true');
+
+    await act(async () => finishRestore());
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-busy')).toBe('false');
   });
 });

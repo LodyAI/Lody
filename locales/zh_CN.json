@@ -1395,6 +1395,7 @@
   "sessions.archived": "已归档",
   "sessions.archivedDescription": "此对话已归档。恢复后可继续聊天。",
   "sessions.archivedInputDisabled": "恢复此会话后才能继续对话",
+  "sessions.restoreArchived": "恢复",
   "sessions.chats": "对话",
   "sessions.htmlAttachment.openReportedPortAction": "连接并打开",
   "sessions.htmlAttachment.openReportedPortDescription": "为了预览 {{name}}，Lody 将连接到 Agent 报告的本地端口，并在浏览器中打开。",

@@ -140,8 +140,9 @@ records the preservation boundary.
 
 `session-sharing.tsx` holds the desktop header's access surface: the team
 visibility copy (`getSessionSharingLabel` / `getSessionSharingDescription`), the
-list-row `SessionSharingIndicator`, the `SessionArchivedBadge`, the team-share
-confirmation dialogs, and `SessionAccessControl` — the one header control
+list-row `SessionSharingIndicator`, the `SessionArchivedBadge` with its
+in-place `SessionRestoreButton` (the mobile header shows a Restore glass button
+instead), the team-share confirmation dialogs, and `SessionAccessControl` — the one header control
 carrying both team visibility and static publication.
 
 Team visibility is resolved by `hooks/use-session-sharing.ts` over

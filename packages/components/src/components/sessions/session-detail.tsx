@@ -5721,6 +5721,16 @@ const SessionDetail = ({
                 hasUnread={hasBackgroundUnread(mobileConversations)}
                 onOpen={() => setMobileTabSheetOpen(true)}
               />
+              {activeSession.isArchived ? (
+                <GlassIconButton
+                  label={t('archive.restore', 'Restore session')}
+                  onClick={() => {
+                    void handleRestoreCurrentSession();
+                  }}
+                >
+                  <ArchiveRestore className="h-5 w-5 text-current" strokeWidth={1.75} />
+                </GlassIconButton>
+              ) : null}
               <GlassIconButton
                 label={t('sessions.moreActions', 'More actions')}
                 onClick={() => setMobileMenuSheetOpen(true)}

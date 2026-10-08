@@ -2,7 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { fn, userEvent, within } from 'storybook/test';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 
-import { SessionAccessControl } from '@/components/session-sharing';
+import {
+  SessionAccessControl,
+  SessionArchivedBadge,
+  SessionRestoreButton,
+} from '@/components/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 
 const machineId = 'machine-access-story' as MachineId;
@@ -133,4 +137,14 @@ export const OwnerOnly: Story = {
       projectName: 'lody',
     },
   },
+};
+
+/** An archived conversation shows its status pill beside the in-place Restore action. */
+export const ArchivedWithRestore: Story = {
+  render: () => (
+    <div className="flex items-center gap-1">
+      <SessionArchivedBadge />
+      <SessionRestoreButton onRestore={fn()} />
+    </div>
+  ),
 };

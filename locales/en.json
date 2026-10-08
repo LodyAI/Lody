@@ -1395,6 +1395,7 @@
   "sessions.archived": "Archived",
   "sessions.archivedDescription": "This conversation is archived. Restore it to continue chatting.",
   "sessions.archivedInputDisabled": "Restore this session before continuing the conversation",
+  "sessions.restoreArchived": "Restore",
   "sessions.chats": "Chats",
   "sessions.htmlAttachment.openReportedPortAction": "Connect and open",
   "sessions.htmlAttachment.openReportedPortDescription": "To preview {{name}}, Lody will connect to the local port reported by the Agent and open it in Browser.",
