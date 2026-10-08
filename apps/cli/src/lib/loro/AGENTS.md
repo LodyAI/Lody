@@ -8,9 +8,10 @@ Every synced Mirror must use `ignoreUnknownProperties: true`: otherwise an
 unknown root from a newer peer blocks writes on this client. Regression:
 `packages/shared/tests/session-doc-forward-compat.test.ts`.
 
-SessionDocument's Mirror is control-only. Loro history reuses HistoryWriter,
-SessionData and shared planners; never add a second writer. Roost synchronization
-and replacement follow the [shared contracts](../../../../../packages/shared/AGENTS.md#session-history).
+SessionDocument's private Mirror is control-only. HistoryWriter owns writes;
+SessionData owns reads. CLI execution methods in `session-agent-writes.ts` reuse
+shared planners over that writer, not UI port methods or a second writer.
+Replacement rules: [shared](../../../../../packages/shared/AGENTS.md#session-history).
 
 ## Opening a doc pulls its stream
 

@@ -82,7 +82,6 @@ export * from './conversation-markdown';
 export * from './reliable-message';
 export * from './worktree-paths';
 export * from './loro-streams-auth';
-export * from './roost-history-sync';
 export * from './rpc-secret';
 export * from './streams-snapshot-codec';
 export * from './presence';
@@ -398,12 +397,6 @@ export const getLoroMetaStreamId = (workspaceId: WorkspaceId) =>
   `${workspaceId}:${LORO_META_STREAM_SUFFIX}`;
 export const getLoroSessionStreamId = (workspaceId: WorkspaceId, sessionId: SessionId) =>
   `${workspaceId}:${LORO_SESSION_STREAM_SEGMENT}:${sessionId}`;
-/** A separate byte stream inside the existing workspace authorization scope. */
-export const getRoostHistoryStreamId = (
-  workspaceId: WorkspaceId,
-  sessionId: SessionId,
-  generation: string
-) => `${workspaceId}:rh:${sessionId}:${generation}`;
 export const getCodeCollabFileIndexFlockDocId = (
   workspaceId: WorkspaceId,
   masterSessionId: SessionId

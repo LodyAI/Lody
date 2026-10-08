@@ -31,8 +31,6 @@ export function useIncrementalSearchBlocks(
     }
     let cancelled = false;
     let range: ReturnType<ConversationView['acquireRange']> | undefined;
-    const directory = view.acquireDirectory?.();
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const rebuild = () => {
       if (cancelled) return;
@@ -53,9 +51,6 @@ export function useIncrementalSearchBlocks(
     // Hydration and streaming both rebuild at most once per frame.
     const unsubscribe = subscribeOnFrame((listener) => view.subscribe(listener), rebuild);
     const acquire = () => {
-      if (cancelled) return;
-      if (retryTimer) clearTimeout(retryTimer);
-      retryTimer = undefined;
       // Pin the new set before releasing the old one, keeping unchanged turns cached.
       const next = view.acquireRange(0, view.turnCount);
       range?.release();
@@ -64,11 +59,7 @@ export function useIncrementalSearchBlocks(
         () => {
           if (range === next) rebuild();
         },
-        (error) => {
-          if (cancelled || range !== next) return;
-          console.error('Failed to load conversation search', error);
-          retryTimer = setTimeout(acquire, 500);
-        }
+        (error) => console.error('Failed to load conversation search', error)
       );
     };
     const unsubscribeStructure = view.subscribe((change) => {
@@ -78,10 +69,8 @@ export function useIncrementalSearchBlocks(
 
     return () => {
       cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
       unsubscribe();
       unsubscribeStructure();
-      directory?.release();
       range?.release();
     };
   }, [isSearchOpen, view]);

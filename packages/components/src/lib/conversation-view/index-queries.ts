@@ -3,7 +3,6 @@ import { isEmptyAssistantIndexRow } from './index-row';
 import {
   conversationTailStart,
   DEFAULT_TAIL_KEEP,
-  isUnloadedTurnId,
   type ConversationView,
   type TurnIndexRow,
 } from './types';
@@ -22,7 +21,7 @@ export function findLastIndex(
   const stop = options.limit === undefined ? 0 : Math.max(0, view.turnCount - options.limit);
   for (let i = view.turnCount - 1; i >= stop; i -= 1) {
     const row = view.index(i);
-    if (row && !isUnloadedTurnId(row.id) && predicate(row, i)) return i;
+    if (row && predicate(row, i)) return i;
   }
   return -1;
 }
@@ -53,13 +52,7 @@ export function resolveLastAssistantTurnIds(
   let lastCompletedAssistantMessageId: string | null = null;
   for (let i = view.turnCount - 1; i >= 0; i -= 1) {
     const row = view.index(i);
-    if (
-      !row ||
-      isUnloadedTurnId(row.id) ||
-      row.role !== 'assistant' ||
-      isEmptyAssistantIndexRow(row)
-    )
-      continue;
+    if (!row || row.role !== 'assistant' || isEmptyAssistantIndexRow(row)) continue;
     // A duplicate id renders once, at its first position; later copies are skipped.
     if (view.indexOf(row.id) !== i) continue;
     if (lastAssistantMessageId === null) lastAssistantMessageId = row.id;
@@ -73,10 +66,7 @@ export function resolveLastAssistantTurnIds(
 
 export function countUserTurns(view: Pick<ConversationView, 'turnCount' | 'index'>): number {
   let count = 0;
-  for (let i = 0; i < view.turnCount; i += 1) {
-    const row = view.index(i);
-    if (row && !isUnloadedTurnId(row.id) && row.role === 'user') count += 1;
-  }
+  for (let i = 0; i < view.turnCount; i += 1) if (view.index(i)?.role === 'user') count += 1;
   return count;
 }
 
@@ -100,14 +90,12 @@ export function resolveTailStart(
 
 /** The hydrated turns in `[from, to)`, contiguous from `from` until the first gap. */
 export function collectHydratedRange(
-  view: Pick<ConversationView, 'turn' | 'index'>,
+  view: Pick<ConversationView, 'turn'>,
   from: number,
   to: number
 ): SessionHistory[] {
   const turns: SessionHistory[] = [];
   for (let i = from; i < to; i += 1) {
-    const row = view.index(i);
-    if (row && isUnloadedTurnId(row.id)) continue;
     const turn = view.turn(i);
     if (!turn) break;
     turns.push(turn);
@@ -143,9 +131,7 @@ export function collectConversationConfigSources(
   }
   for (let i = tailFrom; i < view.turnCount; i += 1) {
     const turn = view.turn(i) ?? view.index(i);
-    if (turn && !isUnloadedTurnId(turn.id)) {
-      sources.push(turn as { id: string; role: unknown; inputConfig?: unknown });
-    }
+    if (turn) sources.push(turn as { id: string; role: unknown; inputConfig?: unknown });
   }
   // Callers memoize the resolved configuration on this array's identity, so an
   // unchanged conversation must hand back the same array.

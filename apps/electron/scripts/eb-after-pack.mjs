@@ -104,18 +104,6 @@ export default async function afterPack(context) {
   if (!fs.existsSync(cliEntry)) {
     throw new Error(`[embedded-cli] missing expected path: ${cliEntry}`)
   }
-  const packedRoostDir = path.join(resourcesDir, 'app.asar.unpacked', 'resources', 'roost')
-  const packedRoostClient = path.join(packedRoostDir, 'client.mjs')
-  const packedRoostOwner = path.join(
-    packedRoostDir,
-    platform === 'win32' ? 'roost-node-owner.exe' : 'roost-node-owner'
-  )
-  if (!fs.existsSync(packedRoostClient) || !fs.existsSync(packedRoostOwner)) {
-    throw new Error(
-      `[roost] packaged runtime is incomplete; expected ${packedRoostClient} and ${packedRoostOwner}`
-    )
-  }
-  console.log(`[roost] packaged client and owner in ${packedRoostDir}`)
   assertPackagedDeepSeekAssets(packedCliDir)
   // beforePack staged both native bindings for this exact target, so mirror their
   // staged-relative locations rather than guessing the per-platform file names here.

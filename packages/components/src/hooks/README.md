@@ -91,12 +91,6 @@ loading again. Before the first viewport report, the window is the
 retained tail plus the turn of the engine's restored reading anchor, so a restored
 position opens on real rows instead of placeholders.
 
-Paged histories acquire a directory lease through the saved turn ID before
-reporting initial readiness. Search and complete index/fact consumers acquire the
-whole directory through the same cancellable page loader. They do not depend on
-the user scrolling back manually; bodies still follow their existing leases and
-are released after a fact chunk, preview, or search completes.
-
 The rendered body set belongs to the reading window, the retained 40-turn tail,
 and native text selection. Other consumers may hydrate the same cache for facts,
 search or outline previews, but those bodies remain placeholders in the stream.
