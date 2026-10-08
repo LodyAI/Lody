@@ -1094,7 +1094,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       cleanupPromise = (async () => {
         const abortError = new Error('Session preparation disposed before claim');
         abortError.name = 'AbortError';
-        sessionStart.reject(abortError);
+        if (!started) {
+          sessionStart.resolve({ workdir: provisionalWorkdir });
+          workspaceReady.resolve(null);
+          agentResult.reject(abortError);
+          initialized.reject(abortError);
+          sessionReady.reject(abortError);
+        } else {
+          sessionStart.reject(abortError);
+        }
         try {
           if (session) {
             await session.terminate(true);
@@ -1201,7 +1209,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           const startedAgent = ownedSession.createAgent(
             this.buildCreateAgentConfig(ownedSession, config, launch, {
               abortSignal: signal,
-              resolveSessionStart: async () => await sessionStart.promise,
+              resolveSessionStart: () => sessionStart.promise,
               dispatchEvent: (event) => {
                 if (adopted) event();
               },
@@ -1708,7 +1716,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   ): Promise<(() => void) | undefined> {
     // A GitHub remote does not make a local project a managed GitHub checkout.
     // Direct local sessions and their worktrees keep the user's native auth.
-    if (config.project?.kind === 'local') return;
+    if (config.project?.kind === 'local') return undefined;
 
     const githubRepo = config.githubRepo ?? tryDeriveGitHubRepoFromUrl(config.githubRepoUrl);
     if (githubRepo) {
@@ -1719,7 +1727,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       }
     }
     const brokerEnv = await this.ensureGitCredentialBrokerEnv();
-    if (!brokerEnv) return;
+    if (!brokerEnv) return undefined;
     if (!config.sessionId) throw new Error('SessionId is required for GitHub credentials');
     const credentialOwner = await this.resolveGitHubOwner(config.sessionId, config.requesterUserId);
     const allowLocalAuth = credentialOwner === this.cloudPort.identity.userId;
