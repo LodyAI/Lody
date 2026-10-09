@@ -11,3 +11,8 @@ CLI-specific Effect platform pieces. The process layer they build on is
 | `sandbox/types.ts`            | `ProcessContainer` contract, resource types, termination policies.                                                                                                                                          |
 | `sandbox/noop-container.ts`   | Container without limits; tracks groups until they are empty, including after the leader exits.                                                                                                             |
 | `sandbox/cgroup-container.ts` | Linux cgroup v2 container: limits, accounting, limit-violation detection, `cgroup.kill`.                                                                                                                    |
+
+`sandbox/process-tree-registry.ts` shares group tracking between containers. It
+keeps failed trees available for retry and removes only groups proven empty.
+Cgroup attachment errors fail spawn; unreadable membership fails termination.
+Cleanup retains resources whose release could not be confirmed.

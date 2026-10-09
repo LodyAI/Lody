@@ -62,6 +62,22 @@ exited, then releases host resources and stops monitor fibers. A closed native
 container rejects new spawns. Only the reusable legacy noop sandbox opens a fresh
 container and Scope for a later generation; a removed cgroup never reopens.
 
+Containers share a process-tree registry, populated before configuration or
+cgroup attachment. An attachment error (including ESRCH from an exited wrapper)
+fails spawn and rolls back its child Scope. Groups that survive rollback remain
+tracked; cgroup termination covers both the kernel subtree and those groups.
+Cleanup removes only trees proven gone. Failed liveness probes retain ownership,
+and the legacy noop adapter cannot replace a failed generation until its trees
+are gone, even after its Scope has closed. Concurrent starts share the replacement
+owner rather than each creating a new generation.
+
+Cgroup membership reads are strict. Permission/I/O errors, missing control files
+in an existing directory, and invalid populated state produce TerminationFailed.
+Only confirmed directory absence (or a successful empty membership read) proves
+absence. cgroup.events is a required initialization capability. Best-effort cleanup
+logs failures and retains the directory and trees for retry instead of claiming
+release. Optional accounting counters retain their existing best-effort policy.
+
 The shared Promise runner forwards an explicit AbortSignal to runPromiseExit.
 It still starts a separate root fiber: wrapping it in tryPromise without forwarding
 that signal cannot propagate cancellation, and even forwarding a signal does not
@@ -87,6 +103,9 @@ container setup cancellation and explicit Promise-entry cancellation. Existing
 termination, output, timeout, failed-spawn and real isolated process cases remain.
 Tests use readiness signals and TestClock; there are no new real sleeps. The fake
 process table now uses Node streams so it exercises the official adapters.
+Regression cases cover ESRCH with a live descendant, failed rollback and retry,
+failed noop cleanup/reuse, and EACCES/EIO/ENOENT membership reads. Restoring the
+original container implementations makes the corresponding regression cases fail.
 
 Real Windows, delegated Linux cgroups and signed desktop packaging remain outside
 local verification. Job Objects are still needed to retain Windows descendants

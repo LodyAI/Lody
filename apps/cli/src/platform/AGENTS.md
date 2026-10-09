@@ -19,3 +19,12 @@ CLI-specific Effect platform pieces over the shared process layer. File map:
   accounting, never another termination path. Capture the official process
   spawner and Session Scope; a failed or interrupted spawn closes its child
   Scope before returning, and successful acquisition remains Session-owned.
+
+- Register process groups before cgroup attachment. Every attachment error,
+  including ESRCH, fails acquisition and rolls it back. Failed termination or
+  liveness probes retain the tree for retry; cleanup never clears survivors.
+- Cgroup membership read errors are not evidence of emptiness. Surface them as
+  TerminationFailed and retain the directory; only a confirmed absent directory
+  or successfully read empty membership proves the cgroup gone.
+- Legacy noop sandbox generations may be replaced only after their tracked trees
+  are proven gone, including when their acquisition Scope already closed.

@@ -302,9 +302,16 @@ class ContainerSessionSandbox implements SessionSandbox {
     options: SessionSpawnOptions
   ): Promise<SessionProcessHandle> {
     if (this.scope.state._tag === 'Closed' && this.reopen) {
-      const fresh = this.reopen();
-      this.container = fresh.container;
-      this.scope = fresh.scope;
+      // Keep the failed generation reachable until all its trees are gone.
+      const retired = this.container;
+      await this.run(retired.terminateAll(terminationPolicy(true)));
+      // Concurrent starts may both await the retired generation. Only the
+      // first replaces it; the rest must use that same new owner.
+      if (this.container === retired) {
+        const fresh = this.reopen();
+        this.container = fresh.container;
+        this.scope = fresh.scope;
+      }
     }
     const { captureOutput, ...spawnOptions } = options;
     let events: ProcessEvents | undefined;

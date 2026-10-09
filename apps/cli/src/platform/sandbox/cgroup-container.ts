@@ -1,7 +1,7 @@
 import type * as fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { Duration, Effect, Ref, Scope, Exit } from 'effect';
+import { Duration, Effect, Ref, Scope, Exit, Option, Result } from 'effect';
 import { ChildProcessSpawner } from 'effect/process';
 
 import { formatErrorMessage } from '@/utils/format-error';
@@ -24,6 +24,8 @@ import {
   type SessionResourceLimitViolation,
   type SessionSandboxLimits,
 } from './types';
+
+import { makeProcessTreeRegistry } from './process-tree-registry';
 
 export type CgroupFs = Pick<typeof fs, 'access' | 'mkdir' | 'readFile' | 'writeFile' | 'rmdir'>;
 
@@ -76,6 +78,7 @@ export const makeCgroupContainer = (options: {
     );
     const currentDir = yield* Ref.make<string | null>(cgroupDir);
     const limits = yield* Ref.make<SessionSandboxLimits>({});
+    const registry = yield* makeProcessTreeRegistry;
 
     const requireDir = Effect.flatMap(Ref.get(currentDir), (dir) =>
       dir
@@ -99,15 +102,44 @@ export const makeCgroupContainer = (options: {
         Effect.map(parseEventCounters),
         Effect.catch(() => Effect.succeed<EventCounters>({}))
       );
-    const readPids = readText('cgroup.procs').pipe(
-      Effect.map(parsePids),
-      Effect.catch(() => Effect.succeed<number[]>([]))
+    const readMembership = (fileName: string) =>
+      Effect.flatMap(Ref.get(currentDir), (dir) => {
+        if (!dir) return Effect.succeed(Option.none<string>());
+        return io(`read ${fileName}`, async () =>
+          String(await options.fs.readFile(path.join(dir, fileName), 'utf8'))
+        ).pipe(
+          Effect.map(Option.some),
+          Effect.catch((error) =>
+            Effect.gen(function* () {
+              if (errnoCode(error.cause) !== 'ENOENT') return yield* Effect.fail(error);
+              const directory = yield* Effect.result(
+                io('probe session cgroup', () => options.fs.access(dir))
+              );
+              // Only an absent directory proves the entire cgroup is gone. A missing
+              // control file, denied read, or failed probe remains an error.
+              if (Result.isFailure(directory) && errnoCode(directory.failure.cause) === 'ENOENT')
+                return Option.none<string>();
+              return yield* Effect.fail(error);
+            })
+          )
+        );
+      });
+    const readPids = Effect.map(readMembership('cgroup.procs'), (raw) =>
+      Option.isSome(raw) ? parsePids(raw.value) : []
     );
-    // `populated` covers nested cgroups too, whose members cgroup.procs omits.
-    const readPopulated = Effect.map(
-      readEvents('cgroup.events'),
-      (events) => (events.populated ?? 0) > 0
-    );
+    const readPopulated = Effect.flatMap(readMembership('cgroup.events'), (raw) => {
+      if (Option.isNone(raw)) return Effect.succeed(false);
+      const populated = parseEventCounters(raw.value).populated;
+      return populated === 0 || populated === 1
+        ? Effect.succeed(populated === 1)
+        : Effect.fail(
+            new SandboxIoError({
+              operation: 'read cgroup.events',
+              message: 'cgroup.events does not contain a valid populated state',
+              cause: null,
+            })
+          );
+    });
     const tree = cgroupTree(np, cgroupDir, readPids, readPopulated, exists, (value) =>
       io('write cgroup.kill', () =>
         options.fs.writeFile(path.join(cgroupDir, 'cgroup.kill'), value)
@@ -151,6 +183,9 @@ export const makeCgroupContainer = (options: {
                       const managed = yield* spawnProcess({ ...spec, processGroup: true }).pipe(
                         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
                       );
+                      // Track before attachment: a wrapper can fork children before
+                      // its leader joins, or exit with ESRCH while they remain outside.
+                      yield* registry.track(managed);
                       const attached = yield* managed.started.pipe(
                         Effect.tap((pid) => options.configureProcess(pid)),
                         Effect.flatMap((pid) =>
@@ -166,18 +201,15 @@ export const makeCgroupContainer = (options: {
                           attached.failure instanceof SpawnFailed
                             ? attached.failure.cause
                             : attached.failure;
-                        // The child exited before it could join; nothing escaped the limits.
-                        if (errnoCode(cause) !== 'ESRCH') {
-                          // It may already have started children outside the limits: end the tree.
-                          yield* managed.terminate(FORCED_TERMINATION).pipe(Effect.ignore);
-                          return yield* Effect.fail(
-                            new SpawnFailed({
-                              command: spec.command,
-                              message: `Failed to start ${spec.command} in the session sandbox: ${formatErrorMessage(cause)}`,
-                              cause,
-                            })
-                          );
-                        }
+                        // Every attachment failure fails acquisition. Closing the
+                        // child Scope rolls back; failed trees remain in the registry.
+                        return yield* Effect.fail(
+                          new SpawnFailed({
+                            command: spec.command,
+                            message: `Failed to start ${spec.command} in the session sandbox: ${formatErrorMessage(cause)}`,
+                            cause,
+                          })
+                        );
                       }
                       return {
                         ...managed,
@@ -200,7 +232,18 @@ export const makeCgroupContainer = (options: {
                   Exit.isFailure(exit) ? Scope.close(childScope, exit) : Effect.void
               )
         ),
-      terminateAll: (policy) => terminateTree(tree, policy),
+      terminateAll: (policy) =>
+        Effect.gen(function* () {
+          const outcomes = yield* Effect.all(
+            [
+              Effect.result(terminateTree(tree, policy)),
+              Effect.result(registry.terminateAll(policy)),
+            ],
+            { concurrency: 'unbounded' }
+          );
+          const failure = outcomes.find(Result.isFailure);
+          if (failure) yield* Effect.fail(failure.failure);
+        }),
       applyLimits: (next) =>
         Effect.gen(function* () {
           const dir = yield* requireDir;
@@ -259,12 +302,20 @@ export const makeCgroupContainer = (options: {
         } satisfies SessionResourceAccounting;
       }),
       cleanup: Effect.gen(function* () {
-        yield* container
-          .terminateAll(FORCED_TERMINATION)
-          .pipe(Effect.catch((error) => Effect.logWarning(error.message)));
+        const terminated = yield* Effect.result(container.terminateAll(FORCED_TERMINATION));
+        if (Result.isFailure(terminated)) {
+          yield* Effect.logWarning(terminated.failure.message);
+          return;
+        }
         const dir = yield* Ref.get(currentDir);
         if (!dir) return;
-        yield* waitUntilGone(tree, CLEANUP_DRAIN_WAIT).pipe(Effect.ignore);
+        const drained = yield* Effect.result(waitUntilGone(tree, CLEANUP_DRAIN_WAIT));
+        if (Result.isFailure(drained) || !drained.success) {
+          yield* Effect.logWarning(
+            `Session cgroup ${dir} could not be proven empty; retaining it for retry`
+          );
+          return;
+        }
         const removed = yield* io('remove cgroup', () => options.fs.rmdir(dir)).pipe(Effect.result);
         if (removed._tag === 'Success') {
           yield* Ref.set(currentDir, null);
@@ -314,6 +365,7 @@ const initializeCgroup = (
 
     for (const fileName of [
       'cgroup.procs',
+      'cgroup.events',
       'memory.events',
       'memory.max',
       'cpu.max',
@@ -346,12 +398,19 @@ const initializeCgroup = (
 const cgroupTree = (
   np: NodeProcessApi,
   cgroupDir: string,
-  readPids: Effect.Effect<number[]>,
-  readPopulated: Effect.Effect<boolean>,
+  readPids: Effect.Effect<number[], SandboxIoError>,
+  readPopulated: Effect.Effect<boolean, SandboxIoError>,
   exists: (filePath: string) => Effect.Effect<boolean>,
   writeKill: (value: string) => Effect.Effect<void, SandboxIoError>
 ): ProcessTree => {
   const description = `session cgroup ${path.basename(cgroupDir)}`;
+  const readFailure = (error: SandboxIoError) =>
+    new TerminationFailed({
+      target: description,
+      reason: 'signal-failed',
+      message: `Cannot determine membership of ${description}: ${error.message}`,
+      cause: error,
+    });
   const signalEach = (signal: TreeSignal, pids: number[]) =>
     Effect.forEach(
       pids,
@@ -376,7 +435,7 @@ const cgroupTree = (
     description,
     isAlive: Effect.gen(function* () {
       return (yield* readPids).length > 0 || (yield* readPopulated);
-    }),
+    }).pipe(Effect.mapError(readFailure)),
     signal: (signal) =>
       Effect.gen(function* () {
         const pids = yield* readPids;
@@ -397,7 +456,9 @@ const cgroupTree = (
         }
         yield* signalEach(signal, pids);
         return 'delivered' as const;
-      }),
+      }).pipe(
+        Effect.mapError((error) => (error instanceof SandboxIoError ? readFailure(error) : error))
+      ),
   };
 };
 
