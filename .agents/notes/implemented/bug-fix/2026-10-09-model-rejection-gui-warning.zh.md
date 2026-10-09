@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1341](https://github.com/LodyAI/Lody/pull/1341)
 
 [English](2026-10-09-model-rejection-gui-warning.md)
 
