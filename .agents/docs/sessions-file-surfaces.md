@@ -123,6 +123,9 @@ this page is the full text of the rules summarised there.
   and 200,000 cells, and virtualizes rows and columns. Search also stays in the
   worker. Hiding the panel terminates the worker; source editing stays in the
   existing Monaco/native text surface.
+- CSV/TSV and XLSX support preview-only resize and rectangular selection copy.
+  Clipboard values preserve table structure; XLSX reads from its worker through
+  a bounded adapter. See the [decision](../notes/implemented/feature/2026-10-09-spreadsheet-preview-controls.md).
 - **Core viewers are intentionally NOT code-split** (file viewer, diff viewer,
   diff panel, inner Monaco/Markdown remain static imports). The old
   `lazy(() => import())` wrappers produced stale-chunk load failures in the

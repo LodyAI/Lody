@@ -47,7 +47,13 @@ DOCX, XLSX, and PPTX open in read-only session viewers. DOCX offers page zoom,
 XLSX offers a virtual worksheet grid and sheet navigation, and PPTX offers slide
 and thumbnail navigation. CSV and TSV open as a virtual table with cell search
 and zoom; the existing Source tab remains available for text editing. These
-previews do not add write or upload actions. The lightweight viewer entry is
+previews do not add write or upload actions. CSV, TSV, and XLSX allow column resizing
+and selection of a cell or rectangular range with pointer, Shift, and keyboard
+navigation. Copy selection and Cmd/Ctrl+C copy displayed values with row/column
+boundaries, including empty cells and embedded line breaks. Oversized selections
+show a smaller-range message instead of silently truncating the copy. Width and
+selection changes belong to the preview only; they never save the file.
+The lightweight viewer entry is
 available with the file panel, but an Office format engine and its worker load
 only after that preview is active and the browser reaches an idle period. CSV/TSV
 parsing and search run in a worker; inactive panels do not start it. Office
