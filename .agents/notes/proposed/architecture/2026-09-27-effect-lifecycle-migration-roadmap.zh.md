@@ -273,5 +273,5 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 剩余 stack 为 #1355 → #1065 → #1069 → #1348。#1065 直接在 shared 中引入 v4 进程核心、
 sandbox 与 ACP 调用方；#1069 迁移其余 CLI 调用方和 CLI 守卫；#1348 迁移 Electron、
 supervisor、shared 辅助模块与 review helper，并扩大守卫。所有层均基于 v4，核心不再经历
-CLI 到 shared 的搬迁。每次 squash 合并后，先将 main 更新到下一分支，再把该 PR 的 base
-改为 main，最后合并。
+CLI 到 shared 的搬迁。使用 GitHub 原生 stack 的合并流程；合并底部 PR 后，它会 rebase
+剩余层。继续合并前，核对下一层的 base 和差异。

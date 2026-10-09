@@ -400,5 +400,6 @@ The remaining stack is #1355 → #1065 → #1069 → #1348. #1065 introduces the
 core directly in shared, CLI containers and ACP consumers; #1069 migrates the remaining
 CLI consumers and adds the CLI guard. #1348 migrates Electron, supervisor, shared helpers
 and the review helper and expands the guard. Every layer uses v4; the core is not first
-introduced in CLI and then relocated. After each squash merge, update the next branch
-from main and retarget its PR to main before merging.
+introduced in CLI and then relocated. Use GitHub's native stack merge workflow; it
+rebases the remaining layers after merging the bottom PR. Verify the next layer's
+base and diff before continuing.
