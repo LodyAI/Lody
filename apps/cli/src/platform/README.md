@@ -14,5 +14,7 @@ CLI-specific Effect platform pieces. The process layer they build on is
 
 `sandbox/process-tree-registry.ts` shares group tracking between containers. It
 keeps failed trees available for retry and removes only groups proven empty.
+Successful command Scopes close after setup, whole-group exit and drained stdio,
+so a reused Session does not retain completed commands and their output buffers.
 Cgroup attachment errors fail spawn; unreadable membership fails termination.
 Cleanup retains resources whose release could not be confirmed.

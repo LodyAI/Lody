@@ -1,4 +1,4 @@
-import { Duration, Effect, HashMap, Option, Ref, Result } from 'effect';
+import { Deferred, Duration, Effect, Exit, HashMap, Option, Ref, Result, Scope } from 'effect';
 import {
   terminateTree,
   type ManagedProcess,
@@ -39,12 +39,25 @@ export const makeProcessTreeRegistry = Effect.gen(function* () {
     track: (managed: ManagedProcess) =>
       Effect.gen(function* () {
         const pid = managed.child.pid;
-        if (typeof pid !== 'number' || pid <= 0) return;
+        if (typeof pid !== 'number' || pid <= 0)
+          return (_processScope: Scope.Closeable) => Effect.void;
+        const gone = yield* Deferred.make<void>();
         yield* Ref.update(tracked, HashMap.set(pid, managed.tree));
         yield* managed.exited.pipe(
           Effect.andThen(forgetWhenGone(pid, managed.tree)),
+          Effect.andThen(Deferred.succeed(gone, undefined)),
           Effect.forkIn(scope)
         );
+        // Start only after configuration succeeds. Closing earlier could race
+        // with cgroup attachment or a caller waiting to receive the handle.
+        const closed = managed.closed;
+        return (processScope: Scope.Closeable) =>
+          Deferred.await(gone).pipe(
+            Effect.andThen(closed),
+            Effect.andThen(Scope.close(processScope, Exit.void)),
+            Effect.forkIn(scope),
+            Effect.asVoid
+          );
       }),
     rootPids: Effect.map(Ref.get(tracked), (trees) => Array.from(HashMap.keys(trees))),
     terminateAll: (policy: TerminationPolicy) =>

@@ -46,8 +46,9 @@ export const makeNoopContainer = (options: {
                       );
                       const pid = managed.child.pid;
                       if (typeof pid === 'number' && pid > 0) {
-                        yield* registry.track(managed);
+                        const releaseWhenDone = yield* registry.track(managed);
                         yield* options.configureProcess(pid);
+                        yield* releaseWhenDone(childScope);
                       }
                       return { ...managed, inspectExit: () => Effect.succeed(null) };
                     }),

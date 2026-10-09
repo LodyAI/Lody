@@ -18,7 +18,9 @@ CLI-specific Effect platform pieces over the shared process layer. File map:
   `@lody/shared/node/process`; they add containment (groups, cgroups), limits and
   accounting, never another termination path. Capture the official process
   spawner and Session Scope; a failed or interrupted spawn closes its child
-  Scope before returning, and successful acquisition remains Session-owned.
+  Scope before returning. A successful command releases its child Scope after
+  configuration completes, its entire tree is proven gone and stdio closes;
+  the Session retains only live or unresolved acquisitions.
 
 - Register process groups before cgroup attachment. Every attachment error,
   including ESRCH, fails acquisition and rolls it back. Failed termination or

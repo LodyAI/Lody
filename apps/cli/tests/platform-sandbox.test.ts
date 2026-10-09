@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@effect/vitest';
 import { Deferred, Effect, Fiber, Exit } from 'effect';
 import { TestClock } from 'effect/testing';
+import { ChildProcessSpawner } from 'effect/process';
 import { processLayer } from '@lody/shared/node/process';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
 
@@ -17,7 +18,163 @@ const settleEvents = Effect.andThen(
   Effect.yieldNow
 );
 
+/** Observe the actual process Scope release without relying on garbage collection. */
+const withReleaseSignal = (released: Deferred.Deferred<void>) =>
+  Effect.map(ChildProcessSpawner.ChildProcessSpawner, (backend) =>
+    ChildProcessSpawner.make((command) =>
+      Effect.gen(function* () {
+        yield* Effect.addFinalizer(() => Deferred.succeed(released, undefined));
+        return yield* backend.spawn(command);
+      })
+    )
+  );
+
 describe('noop process container', () => {
+  it.effect('releases each completed command Scope while its container remains reusable', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      let released = yield* Deferred.make<void>();
+      const backend = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const spawner = ChildProcessSpawner.make((command) =>
+        Effect.suspend(() => {
+          const commandReleased = released;
+          return Effect.gen(function* () {
+            yield* Effect.addFinalizer(() => Deferred.succeed(commandReleased, undefined));
+            return yield* backend.spawn(command);
+          });
+        })
+      );
+      const container = yield* makeNoopContainer({
+        description: 'test',
+        configureProcess: () => Effect.void,
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+      for (let index = 0; index < 20; index++) {
+        released = yield* Deferred.make<void>();
+        const process = yield* container.spawn({ command: 'command', args: [], options: {} });
+        const chunks: Buffer[] = [];
+        process.child.stdout?.on('data', (chunk: Buffer) => chunks.push(chunk));
+        const expected = Buffer.from(`output ${index}`);
+        process.child.stdout?.emit('data', expected);
+        table.exitOnItsOwn(process.child.pid!);
+        yield* process.closed;
+        yield* Deferred.await(released);
+        expect(Buffer.concat(chunks)).toEqual(expected);
+        const accounting = yield* container.readAccounting;
+        expect(accounting.kind === 'process-tree' && accounting.rootPids).toEqual([]);
+      }
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+  });
+
+  it.effect(
+    'waits for both drained stdio and the last descendant before releasing the Scope',
+    () => {
+      const table = new FakeProcessTable('linux');
+      return Effect.gen(function* () {
+        const released = yield* Deferred.make<void>();
+        const spawner = yield* withReleaseSignal(released);
+        const container = yield* makeNoopContainer({
+          description: 'test',
+          configureProcess: () => Effect.void,
+        }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+        let flushClose = () => {};
+        const process = yield* container.spawn({
+          command: 'command',
+          args: [],
+          options: {},
+          onSpawned: (child) => {
+            const emit = child.emit.bind(child);
+            child.emit = (event, ...args: unknown[]) => {
+              if (event === 'close') {
+                flushClose = () => {
+                  emit(event, ...args);
+                };
+                return true;
+              }
+              return emit(event, ...args);
+            };
+          },
+        });
+        const descendant = table.addDescendant(process.child.pid!);
+        table.exitOnItsOwn(process.child.pid!);
+        yield* settleEvents;
+        expect(yield* Deferred.isDone(released)).toBe(false);
+        flushClose();
+        yield* process.closed;
+        yield* settleEvents;
+        expect(yield* Deferred.isDone(released)).toBe(false);
+        expect(table.isAlive(descendant)).toBe(true);
+        table.exitOnItsOwn(descendant);
+        yield* TestClock.adjust(LINGERING_GROUP_PROBE_INTERVAL);
+        yield* Deferred.await(released);
+      }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+    }
+  );
+
+  it.effect('keeps the Scope open until stdio closes even when its group is already empty', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      const released = yield* Deferred.make<void>();
+      const spawner = yield* withReleaseSignal(released);
+      const container = yield* makeNoopContainer({
+        description: 'test',
+        configureProcess: () => Effect.void,
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+      let flushClose = () => {};
+      const process = yield* container.spawn({
+        command: 'command',
+        args: [],
+        options: {},
+        onSpawned: (child) => {
+          const emit = child.emit.bind(child);
+          child.emit = (event, ...args: unknown[]) => {
+            if (event === 'close') {
+              flushClose = () => {
+                emit(event, ...args);
+              };
+              return true;
+            }
+            return emit(event, ...args);
+          };
+        },
+      });
+      table.exitOnItsOwn(process.child.pid!);
+      yield* settleEvents;
+      const accounting = yield* container.readAccounting;
+      expect(accounting.kind === 'process-tree' && accounting.rootPids).toEqual([]);
+      expect(yield* Deferred.isDone(released)).toBe(false);
+      flushClose();
+      yield* Deferred.await(released);
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+  });
+
+  it.effect('does not release a fast-exiting command while configuration is pending', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      const released = yield* Deferred.make<void>();
+      const configuring = yield* Deferred.make<void>();
+      const continueSetup = yield* Deferred.make<void>();
+      const spawner = yield* withReleaseSignal(released);
+      const container = yield* makeNoopContainer({
+        description: 'test',
+        configureProcess: () =>
+          Deferred.succeed(configuring, undefined).pipe(
+            Effect.andThen(Deferred.await(continueSetup))
+          ),
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+      const creating = yield* Effect.forkChild(
+        container.spawn({ command: 'command', args: [], options: {} })
+      );
+      yield* Deferred.await(configuring);
+      table.exitOnItsOwn(1000);
+      yield* settleEvents;
+      expect(yield* Deferred.isDone(released)).toBe(false);
+      yield* Deferred.succeed(continueSetup, undefined);
+      const process = yield* Fiber.join(creating);
+      yield* process.closed;
+      yield* Deferred.await(released);
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+  });
+
   it.effect('keeps a group whose leader exited until its last member is gone', () => {
     const table = new FakeProcessTable('linux');
     return Effect.gen(function* () {

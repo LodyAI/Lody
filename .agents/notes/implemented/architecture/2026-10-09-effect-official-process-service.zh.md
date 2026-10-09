@@ -13,6 +13,7 @@ PR: https://github.com/LodyAI/Lody/pull/1065
 适配器，通过作用域管理获取，并在初始化被中断时回收资源。官方默认 Node 实现尚不能满足
 Lody 的有界关停与原始 ACP/IPC 句柄要求，因此保留 Lody 的进程树后端。CLI 的日志组合模块
 不再提供 Promise 包装；尚未迁移的入口直接使用 shared 兼容函数，并可传入明确的取消信号。
+命令的 Scope 在整组退出和 stdio 关闭后释放，避免复用 Session 时累积进程对象和输出缓冲。
 
 ## 官方能力与后端边界
 
@@ -39,8 +40,12 @@ v3 的“不升级到强杀、强制合并环境变量”不再是理由：v4 �
 
 spawnProcess 和 spawnScoped 均要求 Scope。后端在等待启动或可中断的后续初始化之前登记释放。
 OS spawn 后的 owner hook 失败也会在释放已登记后上报。命令在收集输出时被中断，会释放整棵
-进程树；container 初始化失败或被取消，会关闭刚创建的子 Scope。初始化成功后，进程归
-Session 的父 Scope 持有。container 释放会结束已跟踪的进程组，包括根进程先退出的后代，
+进程树；container 初始化失败或被取消，会关闭刚创建的子 Scope。初始化成功后，只有仍在运行
+或尚未确认结束的进程继续挂在 Session 的父 Scope 下。配置完成后，登记表等待整组进程退出
+和 stdio 关闭（close），再关闭命令的子 Scope；Effect 会将它从父 Scope 脱离，释放进程对象
+和输出回调。此前仅移除空进程组，Scope 的 finalizer 仍持有这些对象，直到 Session 清理。
+自动释放在配置成功后才启动，避免快速退出的命令在配置或加入 cgroup 期间被提前关闭。
+container 释放会结束已跟踪的进程组，包括根进程先退出的后代，
 然后释放宿主资源并停止监控 fiber。
 
 两个 container 共用进程组登记表，在配置或加入 cgroup 之前登记。加入失败（包括首进程已退出的
@@ -77,7 +82,11 @@ container 初始化取消、明确的 Promise 入口取消。保留已有的终�
 及真实隔离进程测试。测试使用就绪信号和 TestClock，没有新增真实 sleep。假进程表改用
 Node Stream，实际执行官方适配器。回归案例覆盖带存活后代的 ESRCH、回滚失败后的重试、
 noop 清理失败与复用，以及 EACCES/EIO/ENOENT 成员状态读取错误。恢复原 container 实现时，
-对应回归测试都会失败。
+对应回归测试都会失败。新增确定性测试在 Session 清理之前观察实际命令 Scope 的 finalizer：
+两个 container 连续执行命令后均释放；延迟 stdio、残留后代和未完成配置均保留所有权。
+禁用自动释放会使五个新案例全部失败。真实 noop 进程探针在未关闭的 Session Scope 下执行
+20 个各输出 8 MiB 的命令：禁用自动释放时，GC 后仍保留约 160 MiB 的数组缓冲；启用后，
+container 清理前已回到基线附近。这是本机进程实验，不代表生产环境内存测量。
 
 未验证真实 Windows、Linux 委派 cgroup 和签名桌面安装包。Windows 根进程先退出后仍需
 Job Object 才能保留后代归属。Session、ACP、Turn 层仍待迁移，本次不声称已通过其 Promise

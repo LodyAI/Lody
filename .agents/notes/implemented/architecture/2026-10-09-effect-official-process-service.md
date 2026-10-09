@@ -16,6 +16,8 @@ retains its bounded process-tree backend because the default Node implementation
 cannot meet its shutdown and raw ACP/IPC requirements. CLI logging composition
 no longer exposes Promise wrappers; unmigrated entry points use the shared
 compatibility functions directly and may supply an explicit cancellation signal.
+Completed command Scopes retire after whole-group exit and drained stdio so reused
+Sessions do not accumulate process objects and output buffers.
 
 ## Official capability and backend boundary
 
@@ -56,7 +58,14 @@ release before awaiting start or running interruptible post-spawn work. An owner
 hook failing after OS spawn is reported only after scoped release is registered.
 Commands interrupted while collecting output release their process trees; failure
 or cancellation during container configuration closes the newly forked child
-Scope. Successful acquisition transfers ownership to the Session's parent Scope.
+Scope. Successful acquisition remains attached to the Session's parent Scope
+only while work is live or unresolved. After configuration succeeds, the registry
+waits for both whole-group exit and drained stdio (`close`), then closes the
+command's child Scope. Effect detaches this closed Scope from its parent, releasing
+process objects and captured output callbacks during Session reuse. Tracking alone
+was insufficient: removing an empty tree left the Scope's finalizers holding those
+objects until Session cleanup. Retirement starts after setup so fast exit cannot
+close a Scope during configuration or cgroup attachment.
 Container release ends tracked groups, including descendants whose leaders
 exited, then releases host resources and stops monitor fibers. A closed native
 container rejects new spawns. Only the reusable legacy noop sandbox opens a fresh
@@ -106,6 +115,14 @@ process table now uses Node streams so it exercises the official adapters.
 Regression cases cover ESRCH with a live descendant, failed rollback and retry,
 failed noop cleanup/reuse, and EACCES/EIO/ENOENT membership reads. Restoring the
 original container implementations makes the corresponding regression cases fail.
+Additional deterministic tests observe actual command Scope finalizers before
+Session cleanup: sequential commands release in both containers, delayed stdio and
+remaining descendants retain ownership, and pending configuration prevents early
+release. Disabling retirement fails all five new cases. A real-process noop probe
+ran 20 commands producing 8 MiB each under an open Session Scope: disabling
+retirement retained about 160 MiB of array buffers after GC; with retirement the
+retained allocation returned to baseline before container cleanup. This is local
+process evidence, not a production memory profile.
 
 Real Windows, delegated Linux cgroups and signed desktop packaging remain outside
 local verification. Job Objects are still needed to retain Windows descendants

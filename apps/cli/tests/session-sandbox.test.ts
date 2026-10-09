@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { it as effectIt } from '@effect/vitest';
 import { Cause, Deferred, Effect, Exit, Fiber, Option } from 'effect';
 import { TestClock } from 'effect/testing';
+import { ChildProcessSpawner } from 'effect/process';
 import { processLayer, TerminationFailed } from '@lody/shared/node/process';
 import { makeCgroupContainer } from '../src/platform/sandbox/cgroup-container';
 import type { ChildProcess } from 'child_process';
@@ -789,6 +790,41 @@ const firstError = <A, E>(exit: Exit.Exit<A, E>) =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
 
 describe('cgroup failure ownership', () => {
+  effectIt.effect('releases completed process Scopes without removing the reusable cgroup', () => {
+    const fakeFs = new FakeCgroupFs(cgroupMount);
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      let released = yield* Deferred.make<void>();
+      const backend = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const spawner = ChildProcessSpawner.make((command) =>
+        Effect.suspend(() => {
+          const commandReleased = released;
+          return Effect.gen(function* () {
+            yield* Effect.addFinalizer(() => Deferred.succeed(commandReleased, undefined));
+            return yield* backend.spawn(command);
+          });
+        })
+      );
+      const container = yield* makeReviewContainer(fakeFs).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+      );
+      for (let index = 0; index < 20; index++) {
+        released = yield* Deferred.make<void>();
+        const process = yield* container.spawn({ command: 'command', args: [], options: {} });
+        const chunks: Buffer[] = [];
+        process.child.stdout?.on('data', (chunk: Buffer) => chunks.push(chunk));
+        const output = Buffer.from(`cgroup output ${index}`);
+        process.child.stdout?.emit('data', output);
+        table.exitOnItsOwn(process.child.pid!);
+        yield* process.closed;
+        yield* Deferred.await(released);
+        expect(Buffer.concat(chunks)).toEqual(output);
+        expect(fakeFs.hasDir(reviewSessionDir)).toBe(true);
+      }
+      // Scope retirement keeps the cgroup available for subsequent commands.
+      fakeFs.writeText(path.join(reviewSessionDir, 'cgroup.procs'), '');
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+  });
   effectIt.effect(
     'retains an escaped group after rollback fails so later termination can retry',
     () => {

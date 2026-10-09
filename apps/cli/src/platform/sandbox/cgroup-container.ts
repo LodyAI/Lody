@@ -185,7 +185,7 @@ export const makeCgroupContainer = (options: {
                       );
                       // Track before attachment: a wrapper can fork children before
                       // its leader joins, or exit with ESRCH while they remain outside.
-                      yield* registry.track(managed);
+                      const releaseWhenDone = yield* registry.track(managed);
                       const attached = yield* managed.started.pipe(
                         Effect.tap((pid) => options.configureProcess(pid)),
                         Effect.flatMap((pid) =>
@@ -211,6 +211,7 @@ export const makeCgroupContainer = (options: {
                           })
                         );
                       }
+                      yield* releaseWhenDone(childScope);
                       return {
                         ...managed,
                         inspectExit: (exit: ProcessExit) =>
