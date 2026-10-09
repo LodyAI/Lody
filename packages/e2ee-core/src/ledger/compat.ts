@@ -1,15 +1,16 @@
 /** The only value/throw and Promise boundary for the legacy `./ledger` facade.
  * Every protocol computation lives in pure/ or workflows/; this module only
  * runs those descriptions and maps typed failures back to `LedgerError`. */
-import { Cause, Effect, Either, Exit, Layer } from 'effect';
+import { Cause, Effect, Result, Exit, Layer } from 'effect';
 import { SignatureVerifier } from '../ports/ledger';
 import type { ValidationError } from '../pure/errors';
 import { makeSignatureVerifier, type SigningPointCache } from '../platform/signature-verifier';
+import { boundaryFailure } from '../effect-run';
 import { LedgerError } from './error';
 
-export function unwrap<A>(value: Either.Either<A, ValidationError>): A {
-  if (Either.isLeft(value)) throw new LedgerError(value.left.code, value.left.position);
-  return value.right;
+export function unwrap<A>(value: Result.Result<A, ValidationError>): A {
+  if (Result.isFailure(value)) throw new LedgerError(value.failure.code, value.failure.position);
+  return value.success;
 }
 
 function legacyFailure(error: unknown): unknown {
@@ -30,9 +31,11 @@ function legacyFailure(error: unknown): unknown {
 
 function squash<A, E>(exit: Exit.Exit<A, E>): A {
   if (Exit.isSuccess(exit)) return exit.value;
-  const failure = Cause.failureOption(exit.cause);
+  if (exit.cause.reasons.length > 1 || Cause.hasDies(exit.cause) || Cause.hasInterrupts(exit.cause))
+    throw boundaryFailure(exit.cause);
+  const failure = Cause.findErrorOption(exit.cause);
   if (failure._tag === 'Some') throw legacyFailure(failure.value);
-  throw Cause.squash(exit.cause);
+  throw boundaryFailure(exit.cause);
 }
 
 /** Runs a self-contained description; expected failures become `LedgerError`. */

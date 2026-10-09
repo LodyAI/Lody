@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import type { Entropy } from '@lody/e2ee-core';
 import { liveEntropy } from '@lody/e2ee-core';
 import { parseEpochEnvelopeChunk } from '@lody/e2ee-core/effect';
-import { Either } from 'effect';
+import { Result } from 'effect';
 import {
   applyAttackAction,
   createAttackLab,
@@ -158,7 +158,7 @@ async function lastFrame(client: HonestClient): Promise<Uint8Array> {
   let tail: Uint8Array = new Uint8Array();
   let last: Uint8Array | undefined;
   for (const page of pages) {
-    const parsed = Either.getOrThrowWith(parseEpochEnvelopeChunk(tail, page), (error) => error);
+    const parsed = Result.getOrThrowWith(parseEpochEnvelopeChunk(tail, page), (error) => error);
     tail = parsed.tail;
     for (const frame of parsed.frames) last = frame.bytes;
   }
@@ -679,7 +679,7 @@ export function collabScript(): readonly CollabStep[] {
     step('host-restart', async (w) => {
       await w.host.close();
       w.host = await launchLab(w.dataDir);
-      for (const name of MEMBERS) w.members[name].close();
+      for (const name of MEMBERS) await w.members[name].close();
     }),
     step('final-converge', async (w) => {
       for (const name of MEMBERS) {
@@ -790,6 +790,19 @@ async function applyRecorded(
   }
 }
 
+/** Attacker observation/mutation must finish at the current boundary. Only
+ * finish measurements need automatic honest-client permits. Advancing actions
+ * grant their own explicit permits; the driver must not add hidden ones. */
+function applyAtBoundary(
+  runtime: LabRuntime,
+  lab: AttackLab,
+  action: AttackAction,
+  outcomes: CollabOutcome[]
+) {
+  const work = applyRecorded(lab, action, outcomes);
+  return action.op === 'finish' ? drainUntil(runtime, work) : work;
+}
+
 /**
  * Run the collab script with an attacker acting at event boundaries. Each
  * step's promise starts first, so its first gate is already requested when
@@ -871,8 +884,8 @@ export async function runCollabScenario(options: CollabRunOptions): Promise<Coll
       }
       for (const action of Array.isArray(choice) ? choice : [choice]) {
         actionCount += 1;
-        // Drain while applying: actions like `finish` issue gated reads.
-        report = (await drainUntil(world.runtime, applyRecorded(lab, action, outcomes))) ?? report;
+        // Finish measurements drain; other actions settle at this boundary.
+        report = (await applyAtBoundary(world.runtime, lab, action, outcomes)) ?? report;
       }
       markRecorded(stepIndex, before);
     }
@@ -912,7 +925,7 @@ export async function runCollabScenario(options: CollabRunOptions): Promise<Coll
       }
       for (const action of Array.isArray(choice) ? choice : [choice]) {
         actionCount += 1;
-        report = (await drainUntil(world.runtime, applyRecorded(lab, action, outcomes))) ?? report;
+        report = (await applyAtBoundary(world.runtime, lab, action, outcomes)) ?? report;
       }
       markRecorded(script.length, before);
     }
@@ -999,13 +1012,13 @@ export async function replayCollabScenario(material: CollabMaterial): Promise<Co
       ),
     ]);
     for (const action of byStep.get(index) ?? []) {
-      report = (await drainUntil(world.runtime, applyRecorded(lab, action, outcomes))) ?? report;
+      report = (await applyAtBoundary(world.runtime, lab, action, outcomes)) ?? report;
     }
     outcomes.push(await drainUntil(world.runtime, outcome));
     if (debug) console.error(`[collab-replay] done ${index} ${collabStep.name}`);
   }
   for (const action of byStep.get(script.length) ?? []) {
-    report = (await drainUntil(world.runtime, applyRecorded(lab, action, outcomes))) ?? report;
+    report = (await applyAtBoundary(world.runtime, lab, action, outcomes)) ?? report;
   }
   if (!report) report = await drainUntil(world.runtime, lab.finish());
   const actual = await harnessReplayMaterial(lab);

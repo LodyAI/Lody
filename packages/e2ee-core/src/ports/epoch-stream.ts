@@ -9,7 +9,7 @@ export interface EpochStreamPage {
 }
 
 /** One explicitly selected raw-envelope stream. Offsets are opaque and stream-local. */
-export class EpochStream extends Context.Tag('@lody/e2ee-core/EpochStream')<
+export class EpochStream extends Context.Service<
   EpochStream,
   {
     readonly read: (
@@ -23,4 +23,4 @@ export class EpochStream extends Context.Tag('@lody/e2ee-core/EpochStream')<
       TransportError | StreamProtocolError | ValidationError
     >;
   }
->() {}
+>()('@lody/e2ee-core/EpochStream') {}

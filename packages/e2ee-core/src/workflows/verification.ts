@@ -55,8 +55,8 @@ function viewOf(
   return Effect.gen(function* () {
     return ledgerView(
       state,
-      yield* genesisHash(state.genesis),
-      yield* recordHash(headBytes),
+      yield* Effect.fromResult(genesisHash(state.genesis)),
+      yield* Effect.fromResult(recordHash(headBytes)),
       facts
     );
   });
@@ -65,8 +65,8 @@ function viewOf(
 export function decodeRecord(input: Uint8Array): Effect.Effect<DecodedRecord, ValidationError> {
   const bytes = new Uint8Array(input);
   return Effect.gen(function* () {
-    const parsed = yield* decodeWire(bytes);
-    const signer = yield* signingPublicKey(parsed.body.fields.signer);
+    const parsed = yield* Effect.fromResult(decodeWire(bytes));
+    const signer = yield* Effect.fromResult(signingPublicKey(parsed.body.fields.signer));
     return decodedRecord(parsed.recordBytes, signer);
   });
 }
@@ -76,11 +76,11 @@ export function verifyRecordSignature(
 ): Effect.Effect<SignatureCheckedRecord, ValidationError, SignatureVerifier> {
   return Effect.gen(function* () {
     const verifier = yield* SignatureVerifier;
-    const parsed = yield* decodeWire(record.toBytes());
+    const parsed = yield* Effect.fromResult(decodeWire(record.toBytes()));
     yield* verifier.verify({
-      publicKey: yield* signingPublicKey(parsed.body.fields.signer),
+      publicKey: yield* Effect.fromResult(signingPublicKey(parsed.body.fields.signer)),
       message: recordSigningBytes(parsed.bodyBytes),
-      signature: yield* signature(parsed.signature),
+      signature: yield* Effect.fromResult(signature(parsed.signature)),
     });
     return checkedRecord(record);
   });
@@ -126,7 +126,7 @@ function decodeAndVerify(
     for (let offset = 0; offset < records.length; offset++) {
       const position = start + offset;
       const parsed = yield* Effect.mapError(
-        decodeRecordWithFacts(records[offset]!, facts),
+        Effect.fromResult(decodeRecordWithFacts(records[offset]!, facts)),
         atPosition(position)
       );
       facts = parsed.facts;
@@ -148,7 +148,7 @@ function decodeAndVerify(
         record.body.fields.operation.type === 'admitMember'
       ) {
         const jobs = yield* Effect.mapError(
-          operationProofJobs(genesis, record.body.fields.operation),
+          Effect.fromResult(operationProofJobs(genesis, record.body.fields.operation)),
           atPosition(position)
         );
         memberProofs.push(...proofInputs(jobs, position));
@@ -180,20 +180,24 @@ function replay(
         record.body.type === 'ordinary' &&
         record.body.fields.operation.type === 'admitDevice'
       ) {
-        const jobs = yield* operationProofJobs(
-          state.genesis,
-          record.body.fields.operation,
-          state.devices.get(keyId(record.body.fields.signer))?.membershipId
+        const jobs = yield* Effect.fromResult(
+          operationProofJobs(
+            state.genesis,
+            record.body.fields.operation,
+            state.devices.get(keyId(record.body.fields.signer))?.membershipId
+          )
         );
         yield* verifier.verifyMany(proofInputs(jobs, position), batch.facts);
       }
-      state = yield* applyDecodedRecord(
-        state,
-        record,
-        batch.hashes[offset]!,
-        position,
-        position === 0 ? anchor : undefined,
-        batch.facts
+      state = yield* Effect.fromResult(
+        applyDecodedRecord(
+          state,
+          record,
+          batch.hashes[offset]!,
+          position,
+          position === 0 ? anchor : undefined,
+          batch.facts
+        )
       );
     }
     return state;
@@ -263,18 +267,22 @@ export function prepareChecked(
     const previousHash = state.hashes[state.hashes.length - 1];
     if (!previousHash)
       return yield* Effect.fail(new ValidationError({ code: 'invalid-operation' }));
-    const jobs = yield* operationProofJobs(
-      state.genesis,
-      operation,
-      state.devices.get(keyId(signer.toBytes()))?.membershipId
+    const jobs = yield* Effect.fromResult(
+      operationProofJobs(
+        state.genesis,
+        operation,
+        state.devices.get(keyId(signer.toBytes()))?.membershipId
+      )
     );
     if (jobs.length > 0) yield* verifier.verifyMany(proofInputs(jobs), viewFacts(view));
-    yield* operationChanges(state, signer.toBytes(), operation, viewFacts(view));
-    const bodyBytes = yield* encodeOrdinaryBody({
-      previousHash: copyBytes(previousHash),
-      signer: signer.toBytes(),
-      operation,
-    });
+    yield* Effect.fromResult(operationChanges(state, signer.toBytes(), operation, viewFacts(view)));
+    const bodyBytes = yield* Effect.fromResult(
+      encodeOrdinaryBody({
+        previousHash: copyBytes(previousHash),
+        signer: signer.toBytes(),
+        operation,
+      })
+    );
     return {
       bodyBytes,
       signingBytes: recordSigningBytes(bodyBytes),
@@ -293,7 +301,7 @@ export function finalizePrepared(
     const head = viewState(view).hashes[viewState(view).hashes.length - 1];
     if (!head || !bytesEqual(previousHash, head))
       return yield* Effect.fail(new ValidationError({ code: 'wrong-parent' }));
-    const record = yield* encodeSignedRecord(bodyBytes, signed.toBytes());
+    const record = yield* Effect.fromResult(encodeSignedRecord(bodyBytes, signed.toBytes()));
     return { record, view: yield* extendLedger(view, [record]) };
   });
 }
@@ -310,16 +318,15 @@ export function verifySnapshot(input: {
   const suffix = (input.suffix ?? []).map((record) => new Uint8Array(record));
   return Effect.gen(function* () {
     const verifier = yield* SignatureVerifier;
-    const attestation = yield* headAttestationSigningBytes(
-      input.genesis.toBytes(),
-      input.head.toBytes()
+    const attestation = yield* Effect.fromResult(
+      headAttestationSigningBytes(input.genesis.toBytes(), input.head.toBytes())
     );
     yield* verifier.verify({
       publicKey: input.endorser,
       message: attestation,
       signature: input.headSignature,
     });
-    const parsed = yield* parseSignedSnapshot(snapshot);
+    const parsed = yield* Effect.fromResult(parseSignedSnapshot(snapshot));
     if (
       !bytesEqual(parsed.genesis, input.genesis.toBytes()) ||
       !bytesEqual(parsed.signer, input.endorser.toBytes()) ||
@@ -327,11 +334,11 @@ export function verifySnapshot(input: {
     )
       return yield* Effect.fail(new ValidationError({ code: 'wrong-anchor' }));
     yield* verifier.verify({
-      publicKey: yield* signingPublicKey(parsed.signer),
+      publicKey: yield* Effect.fromResult(signingPublicKey(parsed.signer)),
       message: snapshotSigningBytes(parsed.bodyBytes),
-      signature: yield* signature(parsed.signature),
+      signature: yield* Effect.fromResult(signature(parsed.signature)),
     });
-    const state = yield* snapshotStateFromParsed(parsed);
+    const state = yield* Effect.fromResult(snapshotStateFromParsed(parsed));
     const base = yield* viewOf(state);
     return suffix.length === 0 ? base : yield* extendLedger(base, suffix);
   });

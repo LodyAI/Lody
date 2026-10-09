@@ -8,8 +8,8 @@ import type { JournalStore } from '../ports/ledger';
 import type { KeyOutbox } from '../ports/key-delivery';
 import { unwrap } from './compat';
 
-type JournalStoreService = JournalStore['Type'];
-type KeyOutboxService = KeyOutbox['Type'];
+type JournalStoreService = JournalStore['Service'];
+type KeyOutboxService = KeyOutbox['Service'];
 
 export { createNodeSignatureVerifyExecutor } from './node-sig-pool';
 

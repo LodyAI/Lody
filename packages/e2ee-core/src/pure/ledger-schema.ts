@@ -1,8 +1,8 @@
 import { SigningFacts } from './signing-facts';
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { ValidationError, type LedgerErrorCode } from './errors';
-const fail = (code: LedgerErrorCode): Either.Either<never, ValidationError> =>
-  Either.left(new ValidationError({ code }));
+const fail = (code: LedgerErrorCode): Result.Result<never, ValidationError> =>
+  Result.fail(new ValidationError({ code }));
 import {
   asArray,
   asExactBytes,
@@ -132,8 +132,8 @@ function encodeRole(role: Exclude<Role, 'owner'>): number {
   if (role === 'member') return ROLE_MEMBER;
   return ROLE_GUEST;
 }
-function decodeRole(value: CborValue): Either.Either<Exclude<Role, 'owner'>, ValidationError> {
-  return Either.gen(function* () {
+function decodeRole(value: CborValue): Result.Result<Exclude<Role, 'owner'>, ValidationError> {
+  return Result.gen(function* () {
     const role = yield* asUint(value, 'invalid-operation');
     if (role === ROLE_ADMIN) return 'admin';
     if (role === ROLE_MEMBER) return 'member';
@@ -146,8 +146,8 @@ function encodeKind(kind: DeviceKind): number {
   if (kind === 'machine') return KIND_MACHINE;
   return KIND_RECOVERY;
 }
-function decodeKind(value: CborValue): Either.Either<DeviceKind, ValidationError> {
-  return Either.gen(function* () {
+function decodeKind(value: CborValue): Result.Result<DeviceKind, ValidationError> {
+  return Result.gen(function* () {
     const kind = yield* asUint(value, 'invalid-operation');
     if (kind === KIND_PERSONAL) return 'personal';
     if (kind === KIND_MACHINE) return 'machine';
@@ -168,8 +168,8 @@ function joinPayload(genesis: Hash, request: Omit<JoinRequest, 'signature'>): Cb
 export function joinRequestSigningBytes(
   genesis: Hash,
   request: Omit<JoinRequest, 'signature'>
-): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     return yield* joinSigningBytes(joinPayload(genesis, request));
   });
 }
@@ -179,8 +179,8 @@ export function possessionSigningBytes(input: {
   signingPublicKey: SigningPublicKey;
   encryptionPublicKey: EncryptionPublicKey;
   kind: DeviceKind;
-}): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+}): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     return yield* possessSigningBytes([
       copyBytes(input.genesis),
       copyBytes(yield* asExactBytes(input.targetMembershipId, MEMBERSHIP_ID_BYTES)),
@@ -201,13 +201,13 @@ function encodeJoinRequest(request: JoinRequest): CborValue {
   ];
 }
 // Private decoder capability: callers cannot inject an unchecked public-key parser.
-type CheckSigningKey = (bytes: Uint8Array) => Either.Either<SigningPublicKey, ValidationError>;
+type CheckSigningKey = (bytes: Uint8Array) => Result.Result<SigningPublicKey, ValidationError>;
 
 function decodeJoinRequest(
   value: CborValue,
   checkKey: CheckSigningKey
-): Either.Either<JoinRequest, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<JoinRequest, ValidationError> {
+  return Result.gen(function* () {
     const parts = yield* asArray(value, 'invalid-operation');
     if (parts.length !== 6) return yield* fail('invalid-operation');
     return {
@@ -230,8 +230,8 @@ function decodeJoinRequest(
     };
   });
 }
-function encodeOperation(operation: Operation): Either.Either<CborValue, ValidationError> {
-  return Either.gen(function* () {
+function encodeOperation(operation: Operation): Result.Result<CborValue, ValidationError> {
+  return Result.gen(function* () {
     switch (operation.type) {
       case 'admitMember':
         return [
@@ -269,8 +269,8 @@ function encodeOperation(operation: Operation): Either.Either<CborValue, Validat
 function decodeOperation(
   value: CborValue,
   checkKey: CheckSigningKey
-): Either.Either<Operation, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Operation, ValidationError> {
+  return Result.gen(function* () {
     const parts = yield* asArray(value, 'unknown-operation');
     if (parts.length === 0) return yield* fail('unknown-operation');
     const tag = yield* asUint(parts[0]!, 'unknown-operation');
@@ -359,8 +359,8 @@ function decodeOperation(
 export function encodeGenesisBody(
   fields: GenesisFields,
   facts = SigningFacts.empty
-): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     yield* checkSigningPublicKey(fields.signer, facts);
     yield* checkUserId(fields.userId);
     yield* checkMembershipId(fields.membershipId);
@@ -379,8 +379,8 @@ export function encodeGenesisBody(
 export function encodeOrdinaryBody(
   fields: OrdinaryFields,
   facts = SigningFacts.empty
-): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     yield* checkHash(fields.previousHash);
     yield* checkSigningPublicKey(fields.signer, facts);
     return yield* encodeCbor([
@@ -393,8 +393,8 @@ export function encodeOrdinaryBody(
 export function encodeSignedRecord(
   bodyBytes: Uint8Array,
   signature: Signature
-): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     yield* checkSignature(signature);
     const body = yield* decodeCbor(bodyBytes);
     return yield* encodeCbor([body, copyBytes(signature)]);
@@ -402,8 +402,8 @@ export function encodeSignedRecord(
 }
 export function signingBytesForBody(
   bodyBytes: Uint8Array
-): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     yield* decodeCbor(bodyBytes);
     return recordSigningBytes(bodyBytes);
   });
@@ -411,8 +411,8 @@ export function signingBytesForBody(
 function decodeBody(
   value: CborValue,
   checkKey: CheckSigningKey
-): Either.Either<Body, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Body, ValidationError> {
+  return Result.gen(function* () {
     const parts = yield* asArray(value);
     if (parts.length === 6 && typeof parts[0] === 'number') {
       if (parts[0] !== PROTOCOL_VERSION) return yield* fail('unknown-version');
@@ -449,8 +449,8 @@ function decodeBody(
 function bodyBytesFromRecord(
   record: Uint8Array,
   bodyValue: CborValue
-): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     const signatureStart = record.byteLength - 66;
     if (
       record[0] === 0x82 &&
@@ -466,15 +466,15 @@ function bodyBytesFromRecord(
 export function decodeRecord(
   recordBytes: Uint8Array,
   facts = SigningFacts.empty
-): Either.Either<DecodedRecord, ValidationError> {
-  return Either.map(decodeRecordWithFacts(recordBytes, facts), ({ record }) => record);
+): Result.Result<DecodedRecord, ValidationError> {
+  return Result.map(decodeRecordWithFacts(recordBytes, facts), ({ record }) => record);
 }
 
 function decodeRecordUsing(
   recordBytes: Uint8Array,
   checkKey: CheckSigningKey
-): Either.Either<DecodedRecord, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<DecodedRecord, ValidationError> {
+  return Result.gen(function* () {
     const stable = copyBytes(recordBytes);
     const root = yield* asArray(yield* decodeCbor(stable));
     if (root.length !== 2) return yield* fail('canonical');
@@ -494,8 +494,8 @@ export function encodeRecord(
   body: Body,
   signature: Signature,
   facts = SigningFacts.empty
-): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     const bodyBytes =
       body.type === 'genesis'
         ? yield* encodeGenesisBody(body.fields, facts)
@@ -506,11 +506,11 @@ export function encodeRecord(
 
 /** Returns updated immutable point facts; neither success nor failure mutates input facts. */
 export function decodeRecordWithFacts(bytes: Uint8Array, facts = SigningFacts.empty) {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     let next = facts;
     const record = yield* decodeRecordUsing(bytes, (key) =>
-      Either.map(
-        Either.mapLeft(next.check(key), () => new ValidationError({ code: 'invalid-key' })),
+      Result.map(
+        Result.mapError(next.check(key), () => new ValidationError({ code: 'invalid-key' })),
         (checked) => {
           next = checked.facts;
           return checked.key.toBytes();

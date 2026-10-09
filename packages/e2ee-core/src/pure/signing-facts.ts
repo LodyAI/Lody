@@ -1,4 +1,4 @@
-import { Either, HashMap, Option } from 'effect';
+import { Result, HashMap, Option } from 'effect';
 import { signingPublicKey, type SigningPublicKey } from './bytes';
 import { keyId } from './identifiers';
 import type { ValidationError } from './errors';
@@ -25,7 +25,7 @@ export class SigningFacts {
     if (this.size === 0) return other;
     return new SigningFacts(HashMap.union(this.#keys, other.#keys));
   }
-  check(bytes: Uint8Array): Either.Either<
+  check(bytes: Uint8Array): Result.Result<
     {
       readonly key: SigningPublicKey;
       readonly facts: SigningFacts;
@@ -34,8 +34,8 @@ export class SigningFacts {
   > {
     const id = keyId(bytes);
     const known = HashMap.get(this.#keys, id);
-    if (Option.isSome(known)) return Either.right({ key: known.value, facts: this });
-    return Either.map(signingPublicKey(bytes), (key) => ({
+    if (Option.isSome(known)) return Result.succeed({ key: known.value, facts: this });
+    return Result.map(signingPublicKey(bytes), (key) => ({
       key,
       facts: new SigningFacts(HashMap.set(this.#keys, id, key)),
     }));

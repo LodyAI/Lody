@@ -1,5 +1,9 @@
 # @lody/e2ee-lab
 
+E2EE 的独立 catalog 固定为 Effect **4.0.2**。`LabRun` 为每个所有者只构建一次服务，保持长期 Scope，关闭时中断活跃 fiber 并等待资源释放。host 在 Scope 中获取 SQLite、Riverrun 和 HTTP 资源，启动失败也会清理；Promise 调用方须等待 `host.close()`、`session.close()`。session 的账本意图调用声明依赖的 `SessionLedger` workflow；HTTP 处理器和 streams-crdt 回调仍是明确的原生 Promise 桥接。
+
+每个 runtime 用自己的 Ref 保存调度状态。Deferred 门控仍须明确许可；请求与完成通知唤醒 Scope 中的队列消费者，替代定时轮询。Effect Clock 的超时保护与逻辑调度分开。原生 SDK 回调继续通过明确的 AsyncLocalStorage 桥接传递嵌套事件的父级。`runtime.close()` 拒绝待许可操作；等待 `runtime.dispose()` 才完成 fiber 清理。
+
 [English](README.md)
 
 本地确定性 E2EE 协作实验室。不是产品 E2EE，也不接入 Lody。诚实客户端是程序；

@@ -3,7 +3,7 @@ import type { ContentError, CryptoError } from '../pure/errors';
 import type { ContentHeader } from '../pure/content-frame';
 
 /** Caller-owned authority lookup. Policy throws remain defects at the Promise boundary. */
-export class ContentAuthority extends Context.Tag('@lody/e2ee-core/ContentAuthority')<
+export class ContentAuthority extends Context.Service<
   ContentAuthority,
   {
     readonly authorize: (
@@ -11,10 +11,10 @@ export class ContentAuthority extends Context.Tag('@lody/e2ee-core/ContentAuthor
       expected?: string
     ) => Effect.Effect<string, ContentError | CryptoError>;
   }
->() {}
+>()('@lody/e2ee-core/ContentAuthority') {}
 
 /** Injected WebCrypto/random for content HKDF, Ed25519 sign, and verify. */
-export class ContentCrypto extends Context.Tag('@lody/e2ee-core/ContentCrypto')<
+export class ContentCrypto extends Context.Service<
   ContentCrypto,
   {
     readonly random: (
@@ -34,4 +34,4 @@ export class ContentCrypto extends Context.Tag('@lody/e2ee-core/ContentCrypto')<
       signatureHex: string
     ) => Effect.Effect<boolean, ContentError | CryptoError>;
   }
->() {}
+>()('@lody/e2ee-core/ContentCrypto') {}

@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { encryptionPublicKey } from './bytes';
 import { SigningFacts } from './signing-facts';
 import { copyBytes } from './cbor';
@@ -7,19 +7,19 @@ import { ValidationError, type LedgerErrorCode } from './errors';
 import type { InternalState, Member, Device, EpochState, HistoryPacketRow } from './ledger-state';
 import type { Operation, GenesisFields } from './ledger-schema';
 
-type Result<A> = Either.Either<A, ValidationError>;
+type PolicyResult<A> = Result.Result<A, ValidationError>;
 export function genesisState(
   fields: GenesisFields,
   recordHash: Uint8Array,
   facts = SigningFacts.empty
-): Result<InternalState> {
-  return Either.gen(function* () {
-    yield* Either.mapLeft(
+): PolicyResult<InternalState> {
+  return Result.gen(function* () {
+    yield* Result.mapError(
       facts.check(fields.signer),
       () => new ValidationError({ code: 'invalid-key' })
     );
     const signerId = keyId(fields.signer);
-    yield* Either.mapLeft(
+    yield* Result.mapError(
       encryptionPublicKey(fields.encryptionPublicKey),
       () => new ValidationError({ code: 'invalid-key' })
     );
@@ -64,8 +64,9 @@ export function genesisState(
     };
   });
 }
-const fail = (code: LedgerErrorCode): Result<never> => Either.left(new ValidationError({ code }));
-const unknownOperation = (_operation: never): Result<never> => fail('unknown-operation');
+const fail = (code: LedgerErrorCode): PolicyResult<never> =>
+  Result.fail(new ValidationError({ code }));
+const unknownOperation = (_operation: never): PolicyResult<never> => fail('unknown-operation');
 
 /** Internal delta, not authority or a public patch-state API. No input is mutated. */
 export interface PolicyChanges {
@@ -82,16 +83,16 @@ export interface PolicyChanges {
   historyPackets?: Array<readonly [number, HistoryPacketRow]>;
 }
 
-function activeDevice(state: InternalState, signer: Uint8Array): Result<Device> {
+function activeDevice(state: InternalState, signer: Uint8Array): PolicyResult<Device> {
   const device = state.devices.get(keyId(signer));
-  return device ? Either.right(device) : fail('unauthorized');
+  return device ? Result.succeed(device) : fail('unauthorized');
 }
-function memberOf(state: InternalState, device: Device): Result<Member> {
+function memberOf(state: InternalState, device: Device): PolicyResult<Member> {
   const member = state.members.get(keyId(device.membershipId));
-  return member ? Either.right(member) : fail('unauthorized');
+  return member ? Result.succeed(member) : fail('unauthorized');
 }
 function requirePersonalManage(state: InternalState, signer: Uint8Array) {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     const device = yield* activeDevice(state, signer);
     if (device.kind !== 'personal') return yield* fail('unauthorized');
     const member = yield* memberOf(state, device);
@@ -108,14 +109,14 @@ function canStillGovern(state: InternalState, membershipHex: string, excluding?:
   return false;
 }
 function requireOwnerManage(state: InternalState, signer: Uint8Array) {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     const found = yield* requirePersonalManage(state, signer);
     if (found.member.role !== 'owner') return yield* fail('unauthorized');
     return found;
   });
 }
 function requireOwnPersonalOrRecovery(state: InternalState, signer: Uint8Array) {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     const device = yield* activeDevice(state, signer);
     if (device.kind !== 'personal' && device.kind !== 'recovery')
       return yield* fail('unauthorized');
@@ -123,23 +124,27 @@ function requireOwnPersonalOrRecovery(state: InternalState, signer: Uint8Array) 
   });
 }
 function requireOwnPersonal(state: InternalState, signer: Uint8Array) {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     const device = yield* activeDevice(state, signer);
     if (device.kind !== 'personal') return yield* fail('unauthorized');
     return { device, member: yield* memberOf(state, device) };
   });
 }
-function claimSigning(state: InternalState, key: Uint8Array, facts: SigningFacts): Result<string> {
-  return Either.gen(function* () {
-    yield* Either.mapLeft(facts.check(key), () => new ValidationError({ code: 'invalid-key' }));
+function claimSigning(
+  state: InternalState,
+  key: Uint8Array,
+  facts: SigningFacts
+): PolicyResult<string> {
+  return Result.gen(function* () {
+    yield* Result.mapError(facts.check(key), () => new ValidationError({ code: 'invalid-key' }));
     const id = keyId(key);
     if (state.usedSigningKeys.has(id) || state.devices.has(id)) return yield* fail('replay');
     return id;
   });
 }
-function claimEnc(state: InternalState, key: Uint8Array): Result<string> {
-  return Either.gen(function* () {
-    yield* Either.mapLeft(
+function claimEnc(state: InternalState, key: Uint8Array): PolicyResult<string> {
+  return Result.gen(function* () {
+    yield* Result.mapError(
       encryptionPublicKey(key),
       () => new ValidationError({ code: 'invalid-key' })
     );
@@ -155,8 +160,8 @@ export function operationChanges(
   signer: Uint8Array,
   operation: Operation,
   facts = SigningFacts.empty
-): Result<PolicyChanges> {
-  return Either.gen(function* () {
+): PolicyResult<PolicyChanges> {
+  return Result.gen(function* () {
     const changes: PolicyChanges = {};
     switch (operation.type) {
       case 'admitMember': {

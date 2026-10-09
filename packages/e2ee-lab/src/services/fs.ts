@@ -11,7 +11,7 @@ export interface LabFsShape {
   readonly unlink: (path: string) => void;
 }
 
-export class LabFs extends Context.Tag('lody/e2ee-lab/LabFs')<LabFs, LabFsShape>() {}
+export class LabFs extends Context.Service<LabFs, LabFsShape>()('lody/e2ee-lab/LabFs') {}
 
 export function makeLiveFs(): LabFsShape {
   return {

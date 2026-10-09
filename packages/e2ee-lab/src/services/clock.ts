@@ -4,7 +4,9 @@ export interface LabClockShape {
   readonly nowMs: () => number;
 }
 
-export class LabClock extends Context.Tag('lody/e2ee-lab/LabClock')<LabClock, LabClockShape>() {}
+export class LabClock extends Context.Service<LabClock, LabClockShape>()(
+  'lody/e2ee-lab/LabClock'
+) {}
 
 export function makeLabClock(nowMs: () => number): LabClockShape {
   return { nowMs };

@@ -6,7 +6,7 @@ export interface LabHttpShape {
   readonly fetch: LabFetch;
 }
 
-export class LabHttp extends Context.Tag('lody/e2ee-lab/LabHttp')<LabHttp, LabHttpShape>() {}
+export class LabHttp extends Context.Service<LabHttp, LabHttpShape>()('lody/e2ee-lab/LabHttp') {}
 
 export function makeLabHttp(fetchImpl: LabFetch = globalThis.fetch.bind(globalThis)): LabHttpShape {
   return { fetch: fetchImpl };

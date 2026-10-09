@@ -3,7 +3,7 @@
  * One shared real-signed fixture; fresh verifier per client/run; SQLite journals.
  * This measures cold clients in a warmed process, not cold process startup.
  */
-import { Effect, Either, Layer } from 'effect';
+import { Effect, Result, Layer } from 'effect';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -51,8 +51,8 @@ if (last.body.type !== 'ordinary' || last.body.fields.operation.type !== 'admitD
 const admission = last.body.fields.operation;
 const dir = mkdtempSync(join(tmpdir(), 'e2ee-native-compare-'));
 const results: Record<string, Record<string, number[]>> = {};
-const value = <A, E>(result: Either.Either<A, E>) =>
-  Either.getOrThrowWith(result, (error) => error);
+const value = <A, E>(result: Result.Result<A, E>) =>
+  Result.getOrThrowWith(result, (error) => error);
 const equal = (a: Uint8Array, b: Uint8Array) => Buffer.from(a).equals(Buffer.from(b));
 for (const metric of ['replay', 'submit', 'snapshot', 'recovery', 'snapshot-promise']) {
   results[metric] = { before: [], after: [] };

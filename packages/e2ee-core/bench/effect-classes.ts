@@ -1,7 +1,7 @@
 /** Four-class 1000-record gates: full replay, incremental extend, snapshot start, journal recovery.
  * Local measurement only; no CI timing assertion and no restored 10k/100ms target. */
 import { Effect } from 'effect';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Ledger } from '../src/ledger/ledger';
@@ -30,18 +30,64 @@ async function main() {
   const warmup = 3;
   const runs = 10;
   process.stderr.write(`building ${count} signed records\n`);
-  const { owner, created, records, ledger } = await buildChain(count);
+  const fixturePath = process.argv.find((value) => value.startsWith('--fixture='))?.slice(10);
+  const fixture =
+    fixturePath && existsSync(fixturePath)
+      ? (JSON.parse(readFileSync(fixturePath, 'utf8')) as {
+          anchor: number[];
+          records: number[][];
+          snapshot: number[];
+          trust: { genesis: number[]; endorser: number[]; head: number[]; headSignature: number[] };
+        })
+      : null;
+  const generated = fixture ? null : await buildChain(count);
+  const created = { anchor: new Uint8Array(fixture?.anchor ?? generated!.created.anchor) };
+  const records = fixture ? fixture.records.map((row) => new Uint8Array(row)) : generated!.records;
   const prefix = records.slice(0, count - 1);
   const last = records.slice(count - 1);
-  const proposal = ledger.prepareSnapshot(owner.publicKey);
-  const snapshot = await Ledger.finalizeSnapshot(proposal, await owner.sign(proposal.signingBytes));
-  const headSignature = await owner.sign(proposal.headAttestationSigningBytes);
-  const trust = {
-    genesis: proposal.genesis,
-    endorser: owner.publicKey,
-    head: proposal.head,
-    headSignature,
-  };
+  const snapshotData = fixture
+    ? {
+        snapshot: new Uint8Array(fixture.snapshot),
+        trust: {
+          genesis: new Uint8Array(fixture.trust.genesis),
+          endorser: new Uint8Array(fixture.trust.endorser),
+          head: new Uint8Array(fixture.trust.head),
+          headSignature: new Uint8Array(fixture.trust.headSignature),
+        },
+      }
+    : await (async () => {
+        const { owner, ledger } = generated!;
+        const proposal = ledger.prepareSnapshot(owner.publicKey);
+        return {
+          snapshot: await Ledger.finalizeSnapshot(
+            proposal,
+            await owner.sign(proposal.signingBytes)
+          ),
+          trust: {
+            genesis: proposal.genesis,
+            endorser: owner.publicKey,
+            head: proposal.head,
+            headSignature: await owner.sign(proposal.headAttestationSigningBytes),
+          },
+        };
+      })();
+  const { snapshot, trust } = snapshotData;
+  if (fixturePath && !fixture)
+    writeFileSync(
+      fixturePath,
+      JSON.stringify({
+        anchor: [...created.anchor],
+        records: records.map((row) => [...row]),
+        snapshot: [...snapshot],
+        trust: {
+          genesis: [...trust.genesis],
+          endorser: [...trust.endorser],
+          head: [...trust.head],
+          headSignature: [...trust.headSignature],
+        },
+      }),
+      { mode: 0o600 }
+    );
   const dir = mkdtempSync(join(tmpdir(), 'e2ee-effect-classes-'));
   const path = join(dir, 'journal.sqlite');
   try {

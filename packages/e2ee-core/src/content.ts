@@ -1,4 +1,4 @@
-import { Effect, Either } from 'effect';
+import { Effect, Result } from 'effect';
 import { runPromiseThrow } from './effect-run';
 import { contentRuntimeLayer } from './platform/content';
 import {
@@ -28,8 +28,8 @@ export { MAX_CONTENT_BYTES };
 /** Unverified metadata for selecting a known epoch key; never an identity/permission assertion. */
 export function inspectContent(frame: Uint8Array): Readonly<ContentHeader> {
   const parsed = inspectContentFrame(frame);
-  if (Either.isLeft(parsed)) throw new ControlLogError(parsed.left.code);
-  return parsed.right;
+  if (Result.isFailure(parsed)) throw new ControlLogError(parsed.failure.code);
+  return parsed.success;
 }
 
 async function unwrap<A>(effect: Effect.Effect<A, unknown>): Promise<A> {

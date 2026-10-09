@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { encodeCbor } from './cbor';
 import {
@@ -11,23 +11,23 @@ import {
 import { bytesEqual } from './cbor';
 import { ValidationError } from './errors';
 
-export function checkDeliveryId(id: string): Either.Either<string, ValidationError> {
+export function checkDeliveryId(id: string): Result.Result<string, ValidationError> {
   return /^[0-9a-f]{32}$/.test(id)
-    ? Either.right(id)
-    : Either.left(new ValidationError({ code: 'canonical' }));
+    ? Result.succeed(id)
+    : Result.fail(new ValidationError({ code: 'canonical' }));
 }
 
 /** Persistence wins; a retry may not replace the original sealed bytes. */
 export function selectDeliveryFrame(
   saved: Uint8Array | null,
   proposed: Uint8Array | undefined
-): Either.Either<Uint8Array, ValidationError> {
+): Result.Result<Uint8Array, ValidationError> {
   if (saved && proposed && !bytesEqual(saved, proposed))
-    return Either.left(new ValidationError({ code: 'replay' }));
+    return Result.fail(new ValidationError({ code: 'replay' }));
   const frame = saved ?? proposed;
   return frame === undefined
-    ? Either.left(new ValidationError({ code: 'invalid-operation' }))
-    : Either.right(new Uint8Array(frame));
+    ? Result.fail(new ValidationError({ code: 'invalid-operation' }))
+    : Result.succeed(new Uint8Array(frame));
 }
 
 export type DeliveryOutcome =
@@ -51,10 +51,10 @@ export function unverifiedEpochDeliveryId(
   sender: Uint8Array,
   recipient: Uint8Array
 ) {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     yield* epochNumber(epoch);
     if (genesis.length !== 32 || sender.length !== 32 || recipient.length !== 32)
-      return yield* Either.left(new ValidationError({ code: 'canonical' }));
+      return yield* Result.fail(new ValidationError({ code: 'canonical' }));
     const bytes = yield* encodeCbor([
       new TextEncoder().encode('lody-e2ee/local-epoch-delivery/v0'),
       genesis,

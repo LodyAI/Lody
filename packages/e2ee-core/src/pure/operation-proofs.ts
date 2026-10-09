@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { copyBytes } from './cbor';
 import { ValidationError } from './errors';
 import { joinRequestSigningBytes, possessionSigningBytes, type Operation } from './ledger-schema';
@@ -10,8 +10,8 @@ export function operationProofJobs(
   genesis: Uint8Array,
   operation: Operation,
   targetMembershipId?: Uint8Array
-): Either.Either<readonly SignatureJob[], ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<readonly SignatureJob[], ValidationError> {
+  return Result.gen(function* () {
     if (operation.type === 'admitMember') {
       return [
         {
@@ -23,7 +23,7 @@ export function operationProofJobs(
     }
     if (operation.type === 'admitDevice') {
       if (!targetMembershipId) {
-        return yield* Either.left(new ValidationError({ code: 'unauthorized' }));
+        return yield* Result.fail(new ValidationError({ code: 'unauthorized' }));
       }
       return [
         {

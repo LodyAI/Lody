@@ -7,7 +7,7 @@ import { TransportError, ValidationError } from '../pure/errors';
 export function keyDeliveryRemoteLayer(remote: LedgerKeyRemote): Layer.Layer<KeyDeliveryRemote> {
   const call = <A>(operation: 'read' | 'deliver', work: () => Promise<A>) =>
     Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
-      Effect.catchAll((error): Effect.Effect<never, TransportError | ValidationError> => {
+      Effect.catch((error): Effect.Effect<never, TransportError | ValidationError> => {
         if (error instanceof LedgerError)
           return Effect.fail(new ValidationError({ code: error.code, position: error.position }));
         if (error instanceof TypeError || error instanceof ReferenceError) return Effect.die(error);

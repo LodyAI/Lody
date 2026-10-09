@@ -1,3 +1,6 @@
+import { Deferred, Effect, Layer } from 'effect';
+import { ScheduleDriver } from './driver';
+import { runLabPromise } from './services/run';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,10 +30,10 @@ export function tempDir(prefix: string): string {
 
 export async function cleanupLab(): Promise<void> {
   clearContentWrites();
-  LabRuntime.closeAll();
+  await LabRuntime.disposeAll();
   while (clients.length > 0) {
     try {
-      clients.pop()!.close();
+      await clients.pop()!.close();
     } catch {
       /* already closed */
     }
@@ -134,22 +137,23 @@ export async function permitUntil(
   throw new Error('permit-until-exhausted');
 }
 
-/** Permit every eligible event on a timer until the returned stop runs. */
-export function drainRuntime(runtime: LabRuntime): () => void {
-  const timer = setInterval(() => {
-    let guard = 0;
-    while (runtime.permitNext() !== null && guard++ < 1024) {
-      /* keep pumping while work produces new requests */
-    }
-  }, 0);
-  return () => clearInterval(timer);
+/** Event-driven drain. Await the returned stop to release its scoped queue/fibers. */
+export function drainRuntime(runtime: LabRuntime): () => Promise<void> {
+  const stopped = Deferred.makeUnsafe<void>();
+  const lifetime = runLabPromise(Deferred.await(stopped), Layer.empty);
+  const driving = new ScheduleDriver(runtime, 'record').drive(lifetime).then(
+    () => ({ ok: true as const }),
+    (error: unknown) => ({ ok: false as const, error })
+  );
+  const stop = async () => {
+    Deferred.doneUnsafe(stopped, Effect.void);
+    const outcome = await driving;
+    if (!outcome.ok) throw outcome.error;
+  };
+  runtime.addFinalizer(Effect.promise(stop));
+  return stop;
 }
 
-export async function drainUntil<T>(runtime: LabRuntime, work: Promise<T>): Promise<T> {
-  const stop = drainRuntime(runtime);
-  try {
-    return await work;
-  } finally {
-    stop();
-  }
+export function drainUntil<T>(runtime: LabRuntime, work: Promise<T>): Promise<T> {
+  return new ScheduleDriver(runtime, 'record').drive(work);
 }

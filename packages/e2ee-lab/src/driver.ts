@@ -1,3 +1,6 @@
+import { Deferred, Effect, Queue } from 'effect';
+import { runLabPromise } from './services/run';
+import { Layer } from 'effect';
 import type { Divergence } from './replay';
 import type { LabRuntime } from './runtime';
 import { canPermitEvent, type LabEvent } from './scheduler';
@@ -22,9 +25,9 @@ const DEFAULT_WATCHDOG_MS = 180_000;
 export class ScheduleDriver {
   private index = 0;
   private permits = 0;
-  private readonly startedMs = Date.now();
   private divergence: Divergence | null = null;
   private failed: Error | null = null;
+  private readonly failure = Deferred.makeUnsafe<never, Error>();
   private readonly fulfilled = new Set<number>();
 
   constructor(
@@ -42,28 +45,56 @@ export class ScheduleDriver {
   }
 
   async drive<T>(work: Promise<T>): Promise<T> {
-    const pump = setInterval(() => this.tickSafe(), 0);
-    const outcome = await work
-      .then(
-        (value) => ({ ok: true as const, value }),
-        (error: unknown) => ({ ok: false as const, error })
-      )
-      .finally(() => {
-        clearInterval(pump);
-        this.tickSafe();
-      });
+    // Observe rejection immediately, before asynchronous Layer acquisition.
+    const settled = work.then(
+      (value) => ({ ok: true as const, value }),
+      (error: unknown) => ({ ok: false as const, error })
+    );
+    const outcome = await runLabPromise(
+      Effect.scoped(
+        Effect.gen({ self: this }, function* () {
+          const changes = yield* this.runtime.changes();
+          this.tickSafe();
+          yield* Effect.forkChild(
+            Effect.forever(
+              Queue.take(changes).pipe(
+                // Let native SDK callbacks publish their ready events before a
+                // permit batch. Yielding is event-driven, not a clock poll.
+                Effect.andThen(Effect.yieldNow),
+                Effect.andThen(Queue.clear(changes)),
+                Effect.andThen(Effect.sync(() => this.tickSafe()))
+              )
+            )
+          );
+          // The Effect Clock timer is separate from logical scheduler choices.
+          yield* Effect.forkChild(
+            Effect.sleep(this.options.watchdogMs ?? DEFAULT_WATCHDOG_MS).pipe(
+              Effect.andThen(Effect.sync(() => this.tickSafe(true)))
+            )
+          );
+          const completed = yield* Effect.raceFirst(
+            Effect.promise(() => settled),
+            Deferred.await(this.failure)
+          );
+          this.tickSafe();
+          return completed;
+        })
+      ),
+      Layer.empty
+    );
     // Preserve the scheduler's failure priority explicitly, not via a throw in finally.
     if (this.failed) throw this.failed;
     if (!outcome.ok) throw outcome.error;
     return outcome.value;
   }
 
-  private tickSafe(): void {
+  private tickSafe(watchdog = false): void {
     if (this.failed) return;
     try {
-      this.tick();
+      this.tick(watchdog);
     } catch (error) {
       this.failed = error instanceof Error ? error : new Error(String(error));
+      Deferred.doneUnsafe(this.failure, Effect.fail(this.failed));
       this.runtime.close();
     }
   }
@@ -109,11 +140,10 @@ export class ScheduleDriver {
     return null;
   }
 
-  private tick(): void {
+  private tick(watchdog: boolean): void {
     const maxSteps = this.options.maxSteps ?? DEFAULT_MAX_STEPS;
-    const watchdogMs = this.options.watchdogMs ?? DEFAULT_WATCHDOG_MS;
     if (this.permits > maxSteps) throw new Error('logical-step-budget');
-    if (Date.now() - this.startedMs > watchdogMs) {
+    if (watchdog) {
       const next =
         this.recorded !== 'record' && this.index < this.recorded.length
           ? choiceKey(this.recorded[this.index]!)

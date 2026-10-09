@@ -2,7 +2,7 @@ import { Effect } from 'effect';
 import { CONTROL_STREAM, DEVICE_HEADER } from './platform/protocol';
 import { deviceHex } from './platform/device';
 import type { HonestClient } from './actors';
-import { LabFs, LabHttp, LiveLabHttp, makeLiveFs, runLabPromise } from './services';
+import { LabFs, LabHttp, LiveLabHttp, makeLiveFs, runLabPromise, runLabSync } from './services';
 
 function frameRecord(record: Uint8Array): Uint8Array {
   const framed = new Uint8Array(4 + record.length);
@@ -83,7 +83,7 @@ export function riverrunRecordCountEffect(
       const response = yield* Effect.tryPromise({
         try: () => http.fetch(`${base}?offset=${encodeURIComponent(offset)}`),
         catch: (error) => error,
-      }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+      }).pipe(Effect.catch(() => Effect.succeed(null)));
       if (!response) return { ok: false, status, count };
       status = response.status;
       if (!response.ok) return { ok: false, status, count };
@@ -91,7 +91,7 @@ export function riverrunRecordCountEffect(
         yield* Effect.tryPromise({
           try: () => response.arrayBuffer(),
           catch: (error) => error,
-        }).pipe(Effect.catchAll(() => Effect.succeed(new ArrayBuffer(0))))
+        }).pipe(Effect.catch(() => Effect.succeed(new ArrayBuffer(0))))
       );
       count += countFramedRecords(body);
       const next =
@@ -223,7 +223,7 @@ export function maliciousAppendCas(input: {
 
 /** Sync Live LabFs path for matrix tests. AttackLab uses `mutateSqliteBytesEffect`. */
 export function mutateSqliteBytes(path: string, needle: Uint8Array, xor = 0xff): boolean {
-  return Effect.runSync(
+  return runLabSync(
     mutateSqliteBytesEffect(path, needle, xor).pipe(Effect.provideService(LabFs, makeLiveFs()))
   );
 }

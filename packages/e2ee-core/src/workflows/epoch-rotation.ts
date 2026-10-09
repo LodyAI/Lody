@@ -63,15 +63,15 @@ function settleCandidate(
   engine: LedgerEngine,
   signer: SigningPublicKey,
   tx: EpochCandidateTransaction,
-  keyring: EpochKeyring['Type'],
+  keyring: EpochKeyring['Service'],
   initial: LedgerView,
   text: string
 ): Effect.Effect<EpochRotationOutcome, ClientError | EpochRotationError> {
   return Effect.gen(function* () {
-    const candidate = yield* decodeEpochCandidate(text).pipe(
+    const candidate = yield* Effect.fromResult(decodeEpochCandidate(text)).pipe(
       Effect.mapError(() => new EpochRotationError({ reason: 'candidate-corrupt' }))
     );
-    const record = yield* decodeRecord(candidate.record);
+    const record = yield* Effect.fromResult(decodeRecord(candidate.record));
     if (!bytesEqual(record.body.fields.signer, signer.toBytes()))
       return yield* Effect.fail(new EpochRotationError({ reason: 'candidate-mismatch' }));
     if (initial.inspectEpochCandidate(candidate) === 'mismatch')
@@ -88,8 +88,8 @@ function settleCandidate(
       return yield* Effect.fail(new EpochRotationError({ reason: 'candidate-mismatch' }));
     yield* keyring.put(
       result.ledger.genesis,
-      yield* epochNumber(candidate.epoch),
-      yield* epochKey(candidate.secret)
+      yield* Effect.fromResult(epochNumber(candidate.epoch)),
+      yield* Effect.fromResult(epochKey(candidate.secret))
     );
     yield* tx.clear;
     return { ...result, epoch: candidate.epoch, binding };
@@ -99,7 +99,7 @@ function settleCandidate(
 /** Existing candidates always win: an explicit retry never regenerates secret or signature. */
 export function rotateEpoch(
   engine: LedgerEngine,
-  signer: DeviceSigner['Type']
+  signer: DeviceSigner['Service']
 ): Effect.Effect<
   EpochRotationOutcome,
   ClientError | EpochRotationError,
@@ -120,36 +120,40 @@ export function rotateEpoch(
         const state = current.inspectState();
         const previous = yield* keyring.get(
           current.genesis,
-          yield* epochNumber(state.epoch.number)
+          yield* Effect.fromResult(epochNumber(state.epoch.number))
         );
         if (previous === null)
           return yield* Effect.fail(new EpochRotationError({ reason: 'key-missing' }));
-        yield* checkEpochKey(state, previous);
-        const epoch = yield* epochNumber(state.epoch.number + 1);
+        yield* Effect.fromResult(checkEpochKey(state, previous));
+        const epoch = yield* Effect.fromResult(epochNumber(state.epoch.number + 1));
         const entropy = yield* CryptoEntropy;
         const secret = new Uint8Array(yield* entropy.bytes('publish-epoch-secret', 32));
         const previousBytes = copyEpochKeyBytes(previous);
         return yield* Effect.gen(function* () {
           const nonce = yield* entropy.bytes('history-packet-nonce', 24);
-          const commitment = yield* commitEpochKey(state.genesis, epoch, secret);
-          const packet = yield* sealHistoryPacket({
-            currentKey: secret,
-            previousKey: previousBytes,
-            genesis: state.genesis,
-            epoch,
-            nonce,
-          });
+          const commitment = yield* Effect.fromResult(commitEpochKey(state.genesis, epoch, secret));
+          const packet = yield* Effect.fromResult(
+            sealHistoryPacket({
+              currentKey: secret,
+              previousKey: previousBytes,
+              genesis: state.genesis,
+              epoch,
+              nonce,
+            })
+          );
           const record = yield* engine.prepareEpochPublication(
             { type: 'publishEpoch', epoch, commitment, previousEpochKey: packet },
             signer
           );
-          const text = yield* encodeEpochCandidate({
-            genesis: state.genesis,
-            epoch,
-            commitment,
-            secret,
-            record,
-          });
+          const text = yield* Effect.fromResult(
+            encodeEpochCandidate({
+              genesis: state.genesis,
+              epoch,
+              commitment,
+              secret,
+              record,
+            })
+          );
           yield* Effect.uninterruptible(tx.save(text));
           return yield* settleCandidate(engine, signer.publicKey, tx, keyring, current, text);
         }).pipe(

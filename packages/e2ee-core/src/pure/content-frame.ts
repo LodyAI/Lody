@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { signingPublicKey } from './bytes';
 import { copyBytes } from './cbor';
@@ -81,7 +81,7 @@ const PURPOSES: readonly ContentPurpose[] = [
   'rpc-request',
   'rpc-response',
 ];
-const fail = (code: string) => Either.left(new ContentError({ code }));
+const fail = (code: string) => Result.fail(new ContentError({ code }));
 
 export function contentSigningBytes(unsigned: Uint8Array): Uint8Array<ArrayBuffer> {
   return concat([CONTENT_SIGNATURE_DOMAIN, unsigned]);
@@ -89,19 +89,19 @@ export function contentSigningBytes(unsigned: Uint8Array): Uint8Array<ArrayBuffe
 
 export function copyContentKey(
   key: Uint8Array
-): Either.Either<Uint8Array<ArrayBuffer>, ContentError> {
+): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
   if (!(key instanceof Uint8Array) || key.byteLength !== CONTENT_KEY_BYTES)
     return fail('invalid-content-key');
-  return Either.right(copyBytes(key));
+  return Result.succeed(copyBytes(key));
 }
 
-export function checkContentSigningKey(value: unknown): Either.Either<string, ContentError> {
+export function checkContentSigningKey(value: unknown): Result.Result<string, ContentError> {
   if (typeof value !== 'string' || !/^(?:[0-9a-f]{2})*$/.test(value)) return fail('invalid-hex');
   if (value.length !== 64) return fail('invalid-length');
   const bytes = new Uint8Array(32);
   for (let i = 0; i < 32; i++) bytes[i] = Number.parseInt(value.slice(i * 2, i * 2 + 2), 16);
-  return Either.map(
-    Either.mapLeft(
+  return Result.map(
+    Result.mapError(
       signingPublicKey(bytes),
       () => new ContentError({ code: 'invalid-signing-key' })
     ),
@@ -109,7 +109,7 @@ export function checkContentSigningKey(value: unknown): Either.Either<string, Co
   );
 }
 
-export function contentScopeParts(scope: ContentScope): Either.Either<string[], ContentError> {
+export function contentScopeParts(scope: ContentScope): Result.Result<string[], ContentError> {
   if (typeof scope.genesis !== 'string' || !/^(?:[0-9a-f]{2})*$/.test(scope.genesis))
     return fail('invalid-hex');
   if (scope.genesis.length !== 64) return fail('invalid-length');
@@ -117,13 +117,13 @@ export function contentScopeParts(scope: ContentScope): Either.Either<string[], 
   if (typeof scope.resource !== 'string' || !/^[\x21-\x7e]{1,1024}$/.test(scope.resource))
     return fail('invalid-content-resource');
   if (!PURPOSES.includes(scope.purpose)) return fail('invalid-content-purpose');
-  return Either.right([scope.genesis, String(scope.epoch), scope.resource, scope.purpose]);
+  return Result.succeed([scope.genesis, String(scope.epoch), scope.resource, scope.purpose]);
 }
 
 export function encodeContentHeader(
   header: ContentHeader
-): Either.Either<Uint8Array<ArrayBuffer>, ContentError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
+  return Result.gen(function* () {
     const scope = yield* contentScopeParts(header);
     for (const id of [header.actor, header.memberInstance, header.device]) {
       if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id))
@@ -150,8 +150,8 @@ export function encodeContentHeader(
 
 export function contentKeyInfo(
   header: ContentHeader
-): Either.Either<Uint8Array<ArrayBuffer>, ContentError> {
-  return Either.map(contentScopeParts(header), (scope) =>
+): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
+  return Result.map(contentScopeParts(header), (scope) =>
     encoder.encode(JSON.stringify(['lody-content-key/v1', ...scope]))
   );
 }
@@ -160,7 +160,7 @@ export const CONTENT_HKDF_SALT = encoder.encode('lody-content-hkdf/v1');
 
 export function parseContentFrame(
   frame: Uint8Array
-): Either.Either<ParsedContentFrame, ContentError> {
+): Result.Result<ParsedContentFrame, ContentError> {
   const min = 2 + CONTENT_NONCE_BYTES + CONTENT_TAG_BYTES + CONTENT_SIGNATURE_BYTES;
   const max =
     MAX_CONTENT_BYTES +
@@ -215,9 +215,9 @@ export function parseContentFrame(
     device: values[7]!,
     messageId: values[8]!,
   });
-  return Either.flatMap(encodeContentHeader(header), (canonical) => {
+  return Result.flatMap(encodeContentHeader(header), (canonical) => {
     if (decoder.decode(canonical) !== text) return fail('noncanonical-content-header');
-    return Either.right({
+    return Result.succeed({
       header,
       aad,
       nonce: wire.subarray(start, start + CONTENT_NONCE_BYTES),
@@ -228,8 +228,8 @@ export function parseContentFrame(
   });
 }
 
-export function inspectContentFrame(frame: Uint8Array): Either.Either<ContentHeader, ContentError> {
-  return Either.map(parseContentFrame(frame), (parsed) => parsed.header);
+export function inspectContentFrame(frame: Uint8Array): Result.Result<ContentHeader, ContentError> {
+  return Result.map(parseContentFrame(frame), (parsed) => parsed.header);
 }
 
 export function assembleUnsignedContent(
@@ -254,8 +254,8 @@ export function encryptContent(
   nonce: Uint8Array,
   aad: Uint8Array,
   plaintext: Uint8Array
-): Either.Either<Uint8Array, ContentError> {
-  return Either.try({
+): Result.Result<Uint8Array, ContentError> {
+  return Result.try({
     try: () => xchacha20poly1305(key, nonce, aad).encrypt(plaintext),
     catch: () => new ContentError({ code: 'invalid-content-key' }),
   });
@@ -266,15 +266,15 @@ export function decryptContent(
   nonce: Uint8Array,
   aad: Uint8Array,
   ciphertext: Uint8Array
-): Either.Either<Uint8Array, ContentError> {
-  return Either.try({
+): Result.Result<Uint8Array, ContentError> {
+  return Result.try({
     try: () => xchacha20poly1305(key, nonce, aad).decrypt(ciphertext),
     catch: () => new ContentError({ code: 'content-authentication-failed' }),
   });
 }
 
-export function contentScopeBinding(scope: ContentScope): Either.Either<string, ContentError> {
-  return Either.map(contentScopeParts(scope), (parts) => JSON.stringify(parts));
+export function contentScopeBinding(scope: ContentScope): Result.Result<string, ContentError> {
+  return Result.map(contentScopeParts(scope), (parts) => JSON.stringify(parts));
 }
 
 export function hexBytes(bytes: Uint8Array): string {

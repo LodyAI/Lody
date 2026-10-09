@@ -33,6 +33,15 @@ describe('P2 permit runtime', () => {
     runtime.close();
     exhausted.close();
   });
+  it('aborts a logical-budget failure even if external work never settles', async () => {
+    const runtime = new LabRuntime({ mode: 'manual' });
+    const never = new Promise<never>(() => {});
+    await expect(
+      new ScheduleDriver(runtime, 'record', { maxSteps: -1 }).drive(never)
+    ).rejects.toThrow('logical-step-budget');
+    await runtime.dispose();
+  });
+
   it('does not send CAS until permitted and can pause one actor', async () => {
     const runtime = new LabRuntime({ mode: 'manual' });
     const host = await launchLab();
@@ -93,7 +102,7 @@ describe('P2 permit runtime', () => {
       await pending;
       expect(await readLoro(alice)).toContain('gated-content');
     } finally {
-      stop();
+      await stop();
     }
     const phases = runtime.events().map((event) => event.phase);
     expect(phases).toContain('request-queued');
@@ -113,7 +122,7 @@ describe('P2 permit runtime', () => {
       await alice.readLedger();
       await writeLoro(alice, 'parent-seed');
     } finally {
-      stop0();
+      await stop0();
     }
     const read = readLoro(alice);
     const imported = await permitUntil(
@@ -136,7 +145,7 @@ describe('P2 permit runtime', () => {
       expect(nestedPersist.length).toBeGreaterThan(0);
       expect(nestedPersist.every((event) => event.status === 'completed')).toBe(true);
     } finally {
-      stop();
+      await stop();
     }
     expect(existsSync(loroCursorPath(alice.clientDir))).toBe(true);
   });

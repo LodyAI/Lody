@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Cause, Effect, Exit, Either, Layer } from 'effect';
+import { Cause, Effect, Exit, Result, Layer } from 'effect';
 import { EpochStream } from '../src/ports/epoch-stream';
 import { KeyDeliveryRemote } from '../src/ports/key-delivery';
 import { epochStreamDeliveryLayer } from '../src/workflows/epoch-stream';
@@ -35,7 +35,7 @@ describe('Effect raw epoch stream', () => {
       epochKey: key,
       sign: owner.sign,
     });
-    const parsed = Either.getOrThrow(parseEpochEnvelopeChunk(new Uint8Array(), frame));
+    const parsed = Result.getOrThrow(parseEpochEnvelopeChunk(new Uint8Array(), frame));
     const first = parsed.frames[0];
     if (!first) throw new Error('fixture frame missing');
     return { frame, id: hex(first.deliveryId.toBytes()) };
@@ -84,9 +84,9 @@ describe('Effect raw epoch stream', () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const remote = yield* KeyDeliveryRemote;
-        expect(yield* Effect.either(remote.put(id, frame))).toMatchObject({
-          _tag: 'Left',
-          left: { _tag: 'TransportError' },
+        expect(yield* Effect.result(remote.put(id, frame))).toMatchObject({
+          _tag: 'Failure',
+          failure: { _tag: 'TransportError' },
         });
         expect(yield* remote.read(id)).toEqual(frame);
         yield* remote.put(id, frame);
@@ -113,12 +113,12 @@ describe('Effect raw epoch stream', () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const remote = yield* KeyDeliveryRemote;
-        return yield* Effect.either(remote.read(id));
+        return yield* Effect.result(remote.read(id));
       }).pipe(Effect.provide(layer))
     );
     expect(result).toMatchObject({
-      _tag: 'Left',
-      left: { _tag: 'ValidationError', code: 'truncated' },
+      _tag: 'Failure',
+      failure: { _tag: 'ValidationError', code: 'truncated' },
     });
   });
 
@@ -145,9 +145,9 @@ describe('Effect raw epoch stream', () => {
     const read = Effect.gen(function* () {
       return yield* (yield* KeyDeliveryRemote).read(id);
     });
-    expect(await Effect.runPromise(Effect.either(read.pipe(Effect.provide(bad))))).toMatchObject({
-      _tag: 'Left',
-      left: { _tag: 'StreamProtocolError' },
+    expect(await Effect.runPromise(Effect.result(read.pipe(Effect.provide(bad))))).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'StreamProtocolError' },
     });
     const conflict = epochStreamDeliveryLayer.pipe(
       Layer.provide(
@@ -167,8 +167,8 @@ describe('Effect raw epoch stream', () => {
       return yield* (yield* KeyDeliveryRemote).put(id, frame);
     });
     expect(
-      await Effect.runPromise(Effect.either(put.pipe(Effect.provide(conflict))))
-    ).toMatchObject({ _tag: 'Right', right: 'conflict' });
+      await Effect.runPromise(Effect.result(put.pipe(Effect.provide(conflict))))
+    ).toMatchObject({ _tag: 'Success', success: 'conflict' });
   });
 });
 
@@ -216,9 +216,9 @@ describe('K1 durable epoch-key delivery', () => {
     expect(outbox.frames.get(id)).toEqual(expected);
     expect(remote.get(id)).toEqual(expected);
     const invalid = delivery.sendEffect('invalid-id', expected, () => {});
-    expect(await Effect.runPromise(Effect.either(invalid))).toMatchObject({
-      _tag: 'Left',
-      left: { code: 'canonical' },
+    expect(await Effect.runPromise(Effect.result(invalid))).toMatchObject({
+      _tag: 'Failure',
+      failure: { code: 'canonical' },
     });
   });
 
@@ -239,12 +239,12 @@ describe('K1 durable epoch-key delivery', () => {
       const id = deliveryId();
       const frame = random(112);
       const exit = await Effect.runPromiseExit(delivery.sendEffect(id, frame, () => {}));
-      expect(Exit.isFailure(exit) && Cause.isDie(exit.cause)).toBe(true);
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
       expect(outbox.frames.get(id)).toEqual(frame);
       failure = new LedgerError('unauthorized');
       expect(
-        await Effect.runPromise(Effect.either(delivery.sendEffect(id, undefined, () => {})))
-      ).toMatchObject({ _tag: 'Left', left: { code: 'unauthorized' } });
+        await Effect.runPromise(Effect.result(delivery.sendEffect(id, undefined, () => {})))
+      ).toMatchObject({ _tag: 'Failure', failure: { code: 'unauthorized' } });
       expect(outbox.frames.get(id)).toEqual(frame);
     }
   );

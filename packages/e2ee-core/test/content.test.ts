@@ -3,7 +3,7 @@ import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { LoroDoc } from 'loro-crdt';
 import { Flock } from '@loro-dev/flock-wasm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { Effect, Either } from 'effect';
+import { Effect, Result } from 'effect';
 import {
   ContentCipher,
   inspectContent,
@@ -225,7 +225,7 @@ describe('signed content envelope', () => {
       const changed = Buffer.concat([length, bytes, wire.subarray(2 + parsed.length)]);
       expect(() => inspectContent(changed)).toThrow(error);
       const inspected = inspectContentFrame(changed);
-      expect(Either.isLeft(inspected) && inspected.left.code).toBe(error);
+      expect(Result.isFailure(inspected) && inspected.failure.code).toBe(error);
       await expect(cipher().open(scope, epochKey, changed)).rejects.toMatchObject({
         message: error,
       });
@@ -526,8 +526,8 @@ describe('signed content envelope', () => {
       signingKey: alice.privateKey,
       plaintext: encoder.encode('hello'),
     }).pipe(Effect.provide(layer));
-    const first = await Effect.runPromise(Effect.either(sealing));
-    expect(Either.isLeft(first) && first.left._tag).toBe('CryptoError');
+    const first = await Effect.runPromise(Effect.result(sealing));
+    expect(Result.isFailure(first) && first.failure._tag).toBe('CryptoError');
     const wire = await Effect.runPromise(sealing);
     expect(decoder.decode((await cipher().open(scope, epochKey, wire)).plaintext)).toBe('hello');
   });

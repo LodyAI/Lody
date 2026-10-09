@@ -15,7 +15,7 @@ export const cryptoEntropyLayer = Layer.succeed(CryptoEntropy, {
       },
       catch: (error) => error,
     }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         error instanceof DOMException
           ? Effect.fail(new CryptoError({ operation: 'generate' }))
           : Effect.die(error)

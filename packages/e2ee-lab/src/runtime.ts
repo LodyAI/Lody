@@ -1,3 +1,5 @@
+import { Deferred, Effect, Layer, Queue, Ref } from 'effect';
+import { LabRun, runLabSync } from './services/run';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   canPermitEvent,
@@ -41,7 +43,36 @@ export type ViewFreeze = {
 
 export class LabRuntime {
   private static readonly live = new Set<LabRuntime>();
-  state: SchedulerState;
+  private readonly scheduler: Ref.Ref<SchedulerState>;
+  private readonly run = new LabRun(Layer.empty);
+  private readonly notifications = new Set<Queue.Queue<void>>();
+  private readonly abort = new AbortController();
+  get state(): SchedulerState {
+    return Ref.getUnsafe(this.scheduler);
+  }
+  private set state(next: SchedulerState) {
+    runLabSync(Ref.set(this.scheduler, next));
+  }
+
+  /** Subscription is scoped. Notifications wake the driver without granting a permit. */
+  changes() {
+    return Effect.acquireRelease(
+      Effect.gen({ self: this }, function* () {
+        const queue = yield* Queue.unbounded<void>();
+        this.notifications.add(queue);
+        return queue;
+      }),
+      (queue) =>
+        Effect.sync(() => {
+          this.notifications.delete(queue);
+          Queue.shutdownUnsafe(queue);
+        })
+    );
+  }
+  private changed(): void {
+    for (const queue of this.notifications) Queue.offerUnsafe(queue, undefined);
+  }
+
   readonly paused = new Set<string>();
   readonly frames: ProtocolFrame[] = [];
   private readonly intercepts: FetchIntercept[] = [];
@@ -50,11 +81,10 @@ export class LabRuntime {
     match: (event: LabEvent) => boolean;
     intercept: Omit<FetchIntercept, 'eventId'>;
   }[] = [];
-  private readonly waiters = new Map<string, { resolve: () => void; reject: (e: Error) => void }>();
+  private readonly waiters = new Map<string, Deferred.Deferred<void, Error>>();
   private readonly requestWaiters: Array<{
     count: number;
-    resolve: () => void;
-    reject: (e: Error) => void;
+    ready: Deferred.Deferred<void, Error>;
   }> = [];
   private readonly gateContext = new AsyncLocalStorage<string>();
   private readonly mode: 'auto' | 'manual';
@@ -74,7 +104,7 @@ export class LabRuntime {
   }) {
     this.mode = options?.mode ?? 'auto';
     this.fetchImpl = options?.fetch ?? globalThis.fetch.bind(globalThis);
-    this.state = emptyScheduler(options?.time ?? 0);
+    this.scheduler = Ref.makeUnsafe(emptyScheduler(options?.time ?? 0));
     LabRuntime.live.add(this);
   }
 
@@ -89,6 +119,7 @@ export class LabRuntime {
   resumeActor(actor: string): void {
     this.paused.delete(actor);
     this.dispatch();
+    this.changed();
   }
 
   permitActor(actor: string): void {
@@ -113,9 +144,13 @@ export class LabRuntime {
   }
 
   whenRequested(count: number): Promise<void> {
+    if (this.closed) return Promise.reject(new Error('runtime-closed'));
     if (this.requestedCount() >= count) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      this.requestWaiters.push({ count, resolve, reject });
+    const ready = Deferred.makeUnsafe<void, Error>();
+    this.requestWaiters.push({ count, ready });
+    return this.run.run(Deferred.await(ready)).finally(() => {
+      const index = this.requestWaiters.findIndex((row) => row.ready === ready);
+      if (index >= 0) this.requestWaiters.splice(index, 1);
     });
   }
 
@@ -145,11 +180,13 @@ export class LabRuntime {
       },
       occurrence: this.startLog.length,
     });
+    this.changed();
   }
 
   complete(eventId: string): void {
     this.state = completeEvent(this.state, eventId);
     this.dispatch();
+    this.changed();
   }
 
   intercept(input: FetchIntercept): void {
@@ -212,12 +249,32 @@ export class LabRuntime {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    LabRuntime.live.delete(this);
     const error = new Error('runtime-closed');
     const waiters = [...this.waiters.values()];
     this.waiters.clear();
-    for (const waiter of waiters) waiter.reject(error);
-    for (const waiter of this.requestWaiters.splice(0)) waiter.reject(error);
+    this.abort.abort(error);
+    for (const waiter of waiters) Deferred.doneUnsafe(waiter, Effect.fail(error));
+    for (const waiter of this.requestWaiters.splice(0))
+      Deferred.doneUnsafe(waiter.ready, Effect.fail(error));
+    this.changed();
+  }
+
+  /** Harness owners register cleanup without exposing their private Context. */
+  addFinalizer(finalizer: Effect.Effect<void>): void {
+    this.run.addFinalizer(finalizer);
+  }
+
+  async dispose(): Promise<void> {
+    this.close();
+    try {
+      await this.run.close();
+    } finally {
+      LabRuntime.live.delete(this);
+    }
+  }
+
+  static async disposeAll(): Promise<void> {
+    await Promise.all([...LabRuntime.live].map((runtime) => runtime.dispose()));
   }
 
   static closeAll(): void {
@@ -241,11 +298,15 @@ export class LabRuntime {
       this.pendingIntercepts.splice(armed, 1);
       this.intercepts.push({ ...matched.intercept, eventId });
     }
-    const ready = new Promise<void>((resolve, reject) => {
-      this.waiters.set(eventId, { resolve, reject });
-    });
+    const ready = Deferred.makeUnsafe<void, Error>();
+    this.waiters.set(eventId, ready);
     this.dispatch();
-    await ready;
+    this.changed();
+    try {
+      await this.run.run(Deferred.await(ready));
+    } finally {
+      this.waiters.delete(eventId);
+    }
     return eventId;
   }
 
@@ -270,7 +331,10 @@ export class LabRuntime {
 
   gatedFetch(actor: string): typeof globalThis.fetch {
     return async (input, init) => {
-      const request = new Request(input, init);
+      const original = new Request(input, init);
+      const request = new Request(original, {
+        signal: AbortSignal.any([original.signal, this.abort.signal]),
+      });
       const url = request.url;
       const method = request.method.toUpperCase();
       const labPath = url.includes('/ds/') || url.includes('/append-cas');
@@ -340,7 +404,7 @@ export class LabRuntime {
     const count = this.requestedCount();
     const pending = this.requestWaiters.splice(0);
     for (const waiter of pending) {
-      if (count >= waiter.count) waiter.resolve();
+      if (count >= waiter.count) Deferred.doneUnsafe(waiter.ready, Effect.void);
       else this.requestWaiters.push(waiter);
     }
   }
@@ -351,7 +415,7 @@ export class LabRuntime {
       const waiter = this.waiters.get(event.eventId);
       if (waiter) {
         this.waiters.delete(event.eventId);
-        waiter.resolve();
+        Deferred.doneUnsafe(waiter, Effect.void);
       }
     }
     if (this.mode !== 'auto') return;

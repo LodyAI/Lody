@@ -107,6 +107,47 @@ for (const file of files(join(root, 'src', 'ledger'))) {
   visit(source);
 }
 
+// Runtime ownership is audited across active source, including platform adapters
+// and the lab. This does not certify purity of the remaining native SDK bridges.
+for (const [packageRoot, owners] of [
+  [root, new Set(['ledger/compat.ts', 'effect-run.ts'])],
+  [resolve(root, '../e2ee-lab'), new Set(['services/run.ts'])],
+]) {
+  for (const file of files(join(packageRoot, 'src'))) {
+    const name = relative(join(packageRoot, 'src'), file);
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(file, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true
+    );
+    const visit = (node) => {
+      if (
+        ts.isCallExpression(node) &&
+        /^Effect\.run(?:Promise|Sync|Fork)/.test(node.expression.getText(source)) &&
+        !owners.has(name)
+      ) {
+        const line = source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+        failures.push(
+          `${relative(root, packageRoot) || 'core'}/${name}:${line}: runtime start outside declared owner`
+        );
+      }
+      if (ts.isImportDeclaration(node) && node.moduleSpecifier.text === 'effect') {
+        const imports = node.importClause?.namedBindings;
+        if (
+          imports &&
+          ts.isNamedImports(imports) &&
+          imports.elements.some((item) => item.name.text === 'Either')
+        ) {
+          failures.push(`${name}: v3 Either import in E2EE v4 source`);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+}
+
 for (const bridge of transitional) {
   if (!observedBridges.has(bridge)) failures.push(`Remove obsolete migration exception: ${bridge}`);
 }
@@ -121,7 +162,7 @@ console.log(
       failures,
       protocolBridgesRemaining: observedBridges.size,
       scope:
-        'pure/ports/workflows purity plus ledger/ compat-facade rules; other modules unchecked',
+        'core pure/ports/workflows and ledger facade; core/lab runtime ownership and v4 imports; native bridge purity not certified',
     },
     null,
     2

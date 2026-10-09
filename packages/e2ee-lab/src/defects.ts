@@ -1,4 +1,5 @@
-import { Effect } from 'effect';
+import { runLabPromise } from './services/run';
+import { Effect, Layer } from 'effect';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SqliteLedgerStore } from '@lody/e2ee-core/ledger-node';
@@ -14,7 +15,7 @@ export type KnownDefect = 'skip-verify' | 'cursor-before-document' | 'wrong-cont
 /** Flip one byte of a persisted journal record so verify fails on reload. */
 export async function injectSkipVerify(clientDir: string): Promise<void> {
   const store = new SqliteLedgerStore(join(clientDir, 'ledger.sqlite'));
-  await Effect.runPromise(
+  await runLabPromise(
     store.exclusive((tx) =>
       Effect.gen(function* () {
         const journal = yield* tx.load;
@@ -25,7 +26,8 @@ export async function injectSkipVerify(clientDir: string): Promise<void> {
         records[records.length - 1] = last;
         return yield* tx.save({ ...journal, records });
       })
-    )
+    ),
+    Layer.empty
   );
 }
 
@@ -51,9 +53,15 @@ export async function injectWrongContextJournal(
 ): Promise<void> {
   const source = new SqliteLedgerStore(join(foreignDir, 'ledger.sqlite'));
   const dest = new SqliteLedgerStore(join(targetDir, 'ledger.sqlite'));
-  const journal = await Effect.runPromise(source.exclusive((tx) => tx.load));
+  const journal = await runLabPromise(
+    source.exclusive((tx) => tx.load),
+    Layer.empty
+  );
   if (!journal) throw new Error('defect-no-foreign-journal');
-  await Effect.runPromise(dest.exclusive((tx) => tx.save(journal)));
+  await runLabPromise(
+    dest.exclusive((tx) => tx.save(journal)),
+    Layer.empty
+  );
 }
 
 export async function applyKnownDefect(

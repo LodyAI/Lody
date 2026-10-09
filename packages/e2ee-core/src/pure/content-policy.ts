@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import type { OrgState } from './ledger-state';
 import type { ContentHeader } from './content-frame';
 import { ContentError } from './errors';
@@ -33,11 +33,11 @@ export function contentAuthorKey(
   state: OrgState,
   header: Pick<ContentHeader, 'genesis' | 'actor' | 'memberInstance' | 'device'>,
   wasAdmitted: (deviceIdHex: string) => boolean = () => false
-): Either.Either<string, ContentError> {
-  const refuse = Either.left(new ContentError({ code: 'unauthorized' }));
+): Result.Result<string, ContentError> {
+  const refuse = Result.fail(new ContentError({ code: 'unauthorized' }));
   if (header.genesis !== keyId(state.genesis)) return refuse;
   const device = state.devices.get(header.device);
-  if (!device) return wasAdmitted(header.device) ? Either.right(header.device) : refuse;
+  if (!device) return wasAdmitted(header.device) ? Result.succeed(header.device) : refuse;
   const member = state.members.get(keyId(device.membershipId));
   if (
     !member ||
@@ -45,5 +45,5 @@ export function contentAuthorKey(
     header.actor !== keyId(member.userId)
   )
     return refuse;
-  return Either.right(header.device);
+  return Result.succeed(header.device);
 }

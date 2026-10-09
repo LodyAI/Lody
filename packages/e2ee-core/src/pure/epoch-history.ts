@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { bytesEqual, copyBytes } from './cbor';
 import { ValidationError } from './errors';
@@ -12,11 +12,11 @@ import {
 } from './wire-crypto';
 import { decodeRecord } from './ledger-schema';
 
-const invalid = () => Either.left(new ValidationError({ code: 'invalid-operation' }));
+const invalid = () => Result.fail(new ValidationError({ code: 'invalid-operation' }));
 
 /** Structural collection only; callers must obtain records from a verified ledger. */
 export function collectEpochPackets(records: readonly Uint8Array[], genesisCommitment: Hash) {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     const packets = new Map<number, { commitment: Hash; packet: Uint8Array }>();
     packets.set(0, { commitment: yield* checkHash(genesisCommitment), packet: new Uint8Array() });
     for (const bytes of records) {
@@ -45,8 +45,8 @@ export function sealHistoryPacket(input: {
   readonly genesis: Hash;
   readonly epoch: number;
   readonly nonce: Uint8Array;
-}): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+}): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     if (
       input.currentKey.byteLength !== 32 ||
       input.previousKey.byteLength !== 32 ||
@@ -69,12 +69,12 @@ export function openHistoryPacket(input: {
   readonly packet: Uint8Array;
   readonly genesis: Hash;
   readonly epoch: number;
-}): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+}): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     if (input.currentKey.byteLength !== 32 || input.packet.byteLength !== HISTORY_PACKET_BYTES)
       return yield* invalid();
     yield* checkEpoch(input.epoch, 1);
-    return yield* Either.try({
+    return yield* Result.try({
       try: () =>
         xchacha20poly1305(
           copyBytes(input.currentKey),
@@ -92,8 +92,8 @@ export function recoverHistory(input: {
   readonly latestEpoch: number;
   readonly latestKey: Uint8Array;
   readonly packets: ReadonlyMap<number, { readonly commitment: Hash; readonly packet: Uint8Array }>;
-}): Either.Either<Map<number, Uint8Array>, ValidationError> {
-  return Either.gen(function* () {
+}): Result.Result<Map<number, Uint8Array>, ValidationError> {
+  return Result.gen(function* () {
     const latest = input.packets.get(input.latestEpoch);
     if (!latest) return yield* invalid();
     const commitment = yield* commitEpochKey(input.genesis, input.latestEpoch, input.latestKey);

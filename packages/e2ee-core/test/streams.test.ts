@@ -43,13 +43,13 @@ describe('Effect raw epoch SDK adapter', () => {
       });
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          return yield* Effect.either((yield* EpochStream).append('previous', new Uint8Array([1])));
+          return yield* Effect.result((yield* EpochStream).append('previous', new Uint8Array([1])));
         }).pipe(Effect.provide(streamsEpochLayer(client)))
       );
       expect(result).toMatchObject(
         expected === 'previous'
-          ? { _tag: 'Right', right: 'conflict' }
-          : { _tag: 'Left', left: { _tag: 'StreamProtocolError' } }
+          ? { _tag: 'Success', success: 'conflict' }
+          : { _tag: 'Failure', failure: { _tag: 'StreamProtocolError' } }
       );
     }
   );
@@ -63,12 +63,12 @@ describe('Effect raw epoch SDK adapter', () => {
       });
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          return yield* Effect.either((yield* EpochStream).read('-1'));
+          return yield* Effect.result((yield* EpochStream).read('-1'));
         }).pipe(Effect.provide(streamsEpochLayer(client)))
       );
       expect(result).toMatchObject({
-        _tag: 'Left',
-        left: {
+        _tag: 'Failure',
+        failure: {
           _tag:
             status === 401 || status === 403
               ? 'ValidationError'

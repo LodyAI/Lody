@@ -12,7 +12,7 @@ const readFrames = (text: string | null) =>
   text === null
     ? Effect.succeed(new Map<string, Uint8Array>())
     : Effect.mapError(
-        decodeKeyOutbox(text),
+        Effect.fromResult(decodeKeyOutbox(text)),
         (error) =>
           new StorageError({
             reason: error.code === 'unknown-version' ? 'foreign' : 'corrupt',
@@ -21,7 +21,7 @@ const readFrames = (text: string | null) =>
       );
 
 /** Effect exact-byte outbox over one SQLite file; disk is not authority. */
-export function sqliteKeyOutboxService(database: SqliteTextStore): KeyOutbox['Type'] {
+export function sqliteKeyOutboxService(database: SqliteTextStore): KeyOutbox['Service'] {
   return KeyOutbox.of({
     exclusive: (work) =>
       Effect.acquireUseRelease(
@@ -34,7 +34,7 @@ export function sqliteKeyOutboxService(database: SqliteTextStore): KeyOutbox['Ty
               work({
                 load: (id) =>
                   Effect.gen(function* () {
-                    yield* checkDeliveryId(id);
+                    yield* Effect.fromResult(checkDeliveryId(id));
                     const frames = yield* readFrames(yield* storageSync(() => lease.load()));
                     const saved = frames.get(id);
                     return saved === undefined ? null : new Uint8Array(saved);
@@ -43,7 +43,7 @@ export function sqliteKeyOutboxService(database: SqliteTextStore): KeyOutbox['Ty
                   const owned = new Uint8Array(bytes);
                   return Effect.gen(function* () {
                     const text = yield* storageSync(() => lease.load());
-                    const next = yield* saveOutboxFrame(text, id, owned);
+                    const next = yield* Effect.fromResult(saveOutboxFrame(text, id, owned));
                     yield* storageSync(() => lease.save(next));
                   });
                 },

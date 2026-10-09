@@ -11,7 +11,7 @@ export { nodeDeviceIdentityLayer } from './node-device-identity';
 export { nodeUserIdentityLayer } from './node-user-identity';
 
 /** Effect journal service over one SQLite file; each transaction owns an EXCLUSIVE lease. */
-export function sqliteJournalService(database: SqliteTextStore): JournalStore['Type'] {
+export function sqliteJournalService(database: SqliteTextStore): JournalStore['Service'] {
   return JournalStore.of({
     exclusive: (work) =>
       Effect.acquireUseRelease(
@@ -24,7 +24,7 @@ export function sqliteJournalService(database: SqliteTextStore): JournalStore['T
                   text === null
                     ? Effect.succeed(null)
                     : Effect.mapError(
-                        decodeLedgerJournal(text),
+                        Effect.fromResult(decodeLedgerJournal(text)),
                         (error) =>
                           new StorageError({
                             reason: error.code === 'unknown-version' ? 'foreign' : 'corrupt',
@@ -37,7 +37,9 @@ export function sqliteJournalService(database: SqliteTextStore): JournalStore['T
               save: (journal) => {
                 // Capture exact bytes before deferred execution.
                 const encoded = encodeLedgerJournal(journal);
-                return Effect.flatMap(encoded, (text) => storageSync(() => lease.save(text)));
+                return Effect.flatMap(Effect.fromResult(encoded), (text) =>
+                  storageSync(() => lease.save(text))
+                );
               },
             };
             return work(tx);

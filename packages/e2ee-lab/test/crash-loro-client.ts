@@ -98,5 +98,5 @@ if (mode === 'recover') {
   const recovered = await readLoro(alice);
   writeFileSync(marker, JSON.stringify({ status: 'completed', text: recovered }));
 }
-alice.close();
+await alice.close();
 await host?.close();

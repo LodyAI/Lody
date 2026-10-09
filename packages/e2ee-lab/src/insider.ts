@@ -87,7 +87,7 @@ function compactedStartEffect(
   return Effect.gen(function* () {
     const http = yield* LabHttp;
     const head = yield* Effect.tryPromise(() => http.fetch(base, { method: 'HEAD' })).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
+      Effect.catch(() => Effect.succeed(null))
     );
     const earliest = head?.headers.get('stream-earliest-offset');
     if (!head?.ok || !earliest) return null;
@@ -95,11 +95,11 @@ function compactedStartEffect(
     if (!at || at === '-1') return { earliest, snapshot: null };
     const response = yield* Effect.tryPromise(() =>
       http.fetch(`${base}/snapshot/${encodeURIComponent(at)}`)
-    ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    ).pipe(Effect.catch(() => Effect.succeed(null)));
     if (!response?.ok) return null;
     const snapshot = new Uint8Array(
       yield* Effect.tryPromise(() => response.arrayBuffer()).pipe(
-        Effect.catchAll(() => Effect.succeed(new ArrayBuffer(0)))
+        Effect.catch(() => Effect.succeed(new ArrayBuffer(0)))
       )
     );
     return { earliest, snapshot };
@@ -119,7 +119,7 @@ function readStreamEffect(
     for (let page = 0; page < 256; page++) {
       const response = yield* Effect.tryPromise(() =>
         http.fetch(`${base}?offset=${encodeURIComponent(offset)}`)
-      ).pipe(Effect.catchAll(() => Effect.succeed(null)));
+      ).pipe(Effect.catch(() => Effect.succeed(null)));
       // A stream that was never created is empty, not unreadable.
       if (response?.status === 404 && page === 0) return new Uint8Array();
       if (response?.status === 410 && page === 0) {
@@ -140,7 +140,7 @@ function readStreamEffect(
       }
       const body = new Uint8Array(
         yield* Effect.tryPromise(() => response.arrayBuffer()).pipe(
-          Effect.catchAll(() => Effect.succeed(new ArrayBuffer(0)))
+          Effect.catch(() => Effect.succeed(new ArrayBuffer(0)))
         )
       );
       chunks.push(body);

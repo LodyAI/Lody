@@ -1,7 +1,7 @@
 import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from '@hpke/core';
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
 import { describe, expect, it } from 'vitest';
-import { Cause, Effect, Either, Exit, Layer } from 'effect';
+import { Cause, Effect, Result, Exit, Layer } from 'effect';
 import {
   Bytes,
   HpkeSender,
@@ -69,25 +69,25 @@ describe('raw epoch envelope framing', () => {
       const packed = new Uint8Array(frame.length * 2);
       packed.set(frame);
       packed.set(frame, frame.length);
-      const expectedId = Either.getOrThrow(
+      const expectedId = Result.getOrThrow(
         epochDeliveryId(
-          Either.getOrThrow(Bytes.genesisHash(genesis)),
-          Either.getOrThrow(Bytes.epochNumber(epoch)),
-          Either.getOrThrow(Bytes.signingPublicKey(sender)),
-          Either.getOrThrow(Bytes.signingPublicKey(recipient))
+          Result.getOrThrow(Bytes.genesisHash(genesis)),
+          Result.getOrThrow(Bytes.epochNumber(epoch)),
+          Result.getOrThrow(Bytes.signingPublicKey(sender)),
+          Result.getOrThrow(Bytes.signingPublicKey(recipient))
         )
       );
       for (let cut = 0; cut <= packed.length; cut++) {
-        const first = Either.getOrThrow(
+        const first = Result.getOrThrow(
           parseEpochEnvelopeChunk(new Uint8Array(), packed.subarray(0, cut))
         );
-        const second = Either.getOrThrow(parseEpochEnvelopeChunk(first.tail, packed.subarray(cut)));
+        const second = Result.getOrThrow(parseEpochEnvelopeChunk(first.tail, packed.subarray(cut)));
         const frames = [...first.frames, ...second.frames];
         expect(frames.map((entry) => entry.bytes)).toEqual([frame, frame]);
         expect(frames.every((entry) => entry.deliveryId.equals(expectedId))).toBe(true);
         expect(second.tail.length).toBe(0);
       }
-      const parsed = Either.getOrThrow(parseEpochEnvelopeChunk(new Uint8Array(), frame));
+      const parsed = Result.getOrThrow(parseEpochEnvelopeChunk(new Uint8Array(), frame));
       frame.fill(0);
       expect(parsed.frames[0]?.bytes[0]).toBe(0x84);
     }
@@ -102,7 +102,7 @@ describe('raw epoch envelope framing', () => {
     ]);
     const frame = new Uint8Array(aad.length + 144);
     frame.set(aad);
-    const partial = Either.getOrThrow(
+    const partial = Result.getOrThrow(
       parseEpochEnvelopeChunk(new Uint8Array(), frame.subarray(0, -1))
     );
     expect(partial.frames).toEqual([]);
@@ -112,8 +112,8 @@ describe('raw epoch envelope framing', () => {
     noncanonical.set([0x18, 0], 35);
     noncanonical.set(frame.subarray(36), 37);
     for (const bytes of [new Uint8Array([0x83]), noncanonical])
-      expect(Either.isLeft(parseEpochEnvelopeChunk(new Uint8Array(), bytes))).toBe(true);
-    expect(Either.isLeft(parseEpochEnvelopeChunk(new Uint8Array(252), new Uint8Array()))).toBe(
+      expect(Result.isFailure(parseEpochEnvelopeChunk(new Uint8Array(), bytes))).toBe(true);
+    expect(Result.isFailure(parseEpochEnvelopeChunk(new Uint8Array(252), new Uint8Array()))).toBe(
       true
     );
   });
@@ -129,11 +129,11 @@ describe('epoch candidate storage', () => {
   };
   it('preserves the old JSON bytes without confusing decoding with authorization', () => {
     const text = `${JSON.stringify(row)}\n`;
-    const decoded = Either.getOrThrow(EpochCandidateStorage.decodeEpochCandidate(text));
+    const decoded = Result.getOrThrow(EpochCandidateStorage.decodeEpochCandidate(text));
     expect(decoded.secret).toEqual(new Uint8Array(32).fill(3));
-    expect(Either.getOrThrow(EpochCandidateStorage.encodeEpochCandidate(decoded))).toBe(text);
+    expect(Result.getOrThrow(EpochCandidateStorage.encodeEpochCandidate(decoded))).toBe(text);
     decoded.secret.fill(0);
-    expect(Either.getOrThrow(EpochCandidateStorage.decodeEpochCandidate(text)).secret[0]).toBe(3);
+    expect(Result.getOrThrow(EpochCandidateStorage.decodeEpochCandidate(text)).secret[0]).toBe(3);
     // Shape-valid record bytes are deliberately not treated as a signed/committed record.
     expect(decoded.record).toEqual(new Uint8Array([4, 5]));
   });
@@ -151,7 +151,7 @@ describe('epoch candidate storage', () => {
       JSON.stringify({ ...row, recordHex: 'gg' }),
       JSON.stringify({ ...row, genesisHex: undefined }),
     ]) {
-      expect(Either.isLeft(EpochCandidateStorage.decodeEpochCandidate(bad))).toBe(true);
+      expect(Result.isFailure(EpochCandidateStorage.decodeEpochCandidate(bad))).toBe(true);
     }
   });
 });
@@ -223,8 +223,8 @@ describe('P3 key delivery and history unwrap', () => {
     );
     const stream = new MemoryLedgerStream();
     stream.records = [created.record, admitted.record];
-    const value = <A, E>(parsed: Either.Either<A, E>) =>
-      Either.getOrThrowWith(parsed, (error) => error);
+    const value = <A, E>(parsed: Result.Result<A, E>) =>
+      Result.getOrThrowWith(parsed, (error) => error);
     let afterOwnerSign = () => {};
     const makeClient = (keys: DeviceKeys, sign = keys.sign, remote = stream) =>
       Effect.runPromise(
@@ -258,15 +258,15 @@ describe('P3 key delivery and history unwrap', () => {
     const receiverLayer = Layer.merge(hpkeRecipientLayer(phone.dh), signatureVerifierLayer);
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           ownerClient
             .prepareEpochEnvelope(phoneId, value(Bytes.epochKey(random(32))))
             .pipe(Effect.provide(senderLayer))
         )
       )
     ).toMatchObject({
-      _tag: 'Left',
-      left: { _tag: 'ContextMismatch', context: 'epoch' },
+      _tag: 'Failure',
+      failure: { _tag: 'ContextMismatch', context: 'epoch' },
     });
     const prepared = await Effect.runPromise(
       ownerClient.prepareEpochEnvelope(phoneId, key).pipe(Effect.provide(senderLayer))
@@ -306,18 +306,18 @@ describe('P3 key delivery and history unwrap', () => {
     expect([...frames.values()]).toEqual([prepared.toBytes()]);
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           ownerClient.resumeEpochDelivery(deliveryId, ownerId).pipe(Effect.provide(deliveryLayer))
         )
       )
-    ).toMatchObject({ _tag: 'Left', left: { code: 'canonical' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { code: 'canonical' } });
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           phoneClient.deliverEpochEnvelope(deliveryId, prepared).pipe(Effect.provide(deliveryLayer))
         )
       )
-    ).toMatchObject({ _tag: 'Left', left: { code: 'canonical' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { code: 'canonical' } });
     await expect(
       openEpochEnvelope({
         state: admitted.ledger.state,
@@ -335,18 +335,18 @@ describe('P3 key delivery and history unwrap', () => {
       .pipe(Effect.provide(receiverLayer));
     input.fill(0);
     const opened = await Effect.runPromise(opening);
-    expect(Envelope.checkEpochKey(admitted.ledger.state, opened)).toEqual(Either.void);
+    expect(Envelope.checkEpochKey(admitted.ledger.state, opened)).toEqual(Result.void);
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           phoneClient
             .openEpochEnvelope(ownerId, prepared.toBytes())
             .pipe(Effect.provide(Layer.merge(hpkeRecipientLayer(owner.dh), signatureVerifierLayer)))
         )
       )
     ).toMatchObject({
-      _tag: 'Left',
-      left: { _tag: 'ContextMismatch', context: 'recipient' },
+      _tag: 'Failure',
+      failure: { _tag: 'ContextMismatch', context: 'recipient' },
     });
     frames.clear();
     reachable = false;
@@ -375,7 +375,7 @@ describe('P3 key delivery and history unwrap', () => {
     const intentKey = await Effect.runPromise(
       phoneClient.openEpochEnvelope(ownerId, delivered[0]!).pipe(Effect.provide(receiverLayer))
     );
-    expect(Envelope.checkEpochKey(admitted.ledger.state, intentKey)).toEqual(Either.void);
+    expect(Envelope.checkEpochKey(admitted.ledger.state, intentKey)).toEqual(Result.void);
     const concurrent = await Effect.runPromise(
       Effect.all(
         [restartedSender.sendEpochKey(phoneId, key), restartedSender.sendEpochKey(phoneId, key)],
@@ -399,7 +399,7 @@ describe('P3 key delivery and history unwrap', () => {
     expect(fromKeyring.frame).toEqual(delivered[0]);
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           restartedSender.sendCurrentEpochKey(phoneId).pipe(
             Effect.provide(
               Layer.merge(
@@ -413,7 +413,7 @@ describe('P3 key delivery and history unwrap', () => {
           )
         )
       )
-    ).toMatchObject({ _tag: 'Left', left: { reason: 'key-missing' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { reason: 'key-missing' } });
     const installed = new Map<number, Bytes.EpochKey>();
     let failInstall = false;
     const installLayer = Layer.merge(
@@ -431,11 +431,11 @@ describe('P3 key delivery and history unwrap', () => {
     failInstall = true;
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           phoneClient.receiveEpochKey(ownerId, delivered[0]!).pipe(Effect.provide(installLayer))
         )
       )
-    ).toMatchObject({ _tag: 'Left', left: { reason: 'io' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { reason: 'io' } });
     expect(installed.size).toBe(0);
     failInstall = false;
     expect(
@@ -448,11 +448,11 @@ describe('P3 key delivery and history unwrap', () => {
     tampered[tampered.length - 1] = tampered[tampered.length - 1]! ^ 1;
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           phoneClient.openEpochEnvelope(ownerId, tampered).pipe(Effect.provide(receiverLayer))
         )
       )
-    ).toMatchObject({ _tag: 'Left', left: { code: 'bad-signature' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { code: 'bad-signature' } });
     const revoked = await append(admitted.ledger, owner, {
       type: 'revokeDevice',
       target: phone.publicKey,
@@ -469,11 +469,11 @@ describe('P3 key delivery and history unwrap', () => {
     const rotatedClient = await makeClient(owner, owner.sign, rotatedStream);
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           rotatedClient.resumeEpochDelivery(deliveryId, phoneId).pipe(Effect.provide(deliveryLayer))
         )
       )
-    ).toMatchObject({ _tag: 'Left', left: { code: 'canonical' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { code: 'canonical' } });
     // Isolated backend view: revoke only after real HPKE decryption resolves.
     const receivingStream = new MemoryLedgerStream();
     receivingStream.records = [created.record, admitted.record];
@@ -497,44 +497,44 @@ describe('P3 key delivery and history unwrap', () => {
     ).pipe(Layer.provide(hpkeRecipientLayer(phone.dh)));
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           receiver
             .openEpochEnvelope(ownerId, prepared.toBytes())
             .pipe(Effect.provide(Layer.merge(revokeAfterOpen, signatureVerifierLayer)))
         )
       )
     ).toMatchObject({
-      _tag: 'Left',
-      left: { code: 'unauthorized' },
+      _tag: 'Failure',
+      failure: { code: 'unauthorized' },
     });
     afterOwnerSign = () => {
       stream.records.push(revoked.record);
     };
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           ownerClient.prepareEpochEnvelope(phoneId, key).pipe(Effect.provide(senderLayer))
         )
       )
-    ).toMatchObject({ _tag: 'Left', left: { code: 'unauthorized' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { code: 'unauthorized' } });
     frames.clear();
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           ownerClient.resumeEpochDelivery(deliveryId, phoneId).pipe(Effect.provide(deliveryLayer))
         )
       )
-    ).toMatchObject({ _tag: 'Left', left: { code: 'unauthorized' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { code: 'unauthorized' } });
     expect(frames.size).toBe(0);
     expect(
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           phoneClient
             .openEpochEnvelope(ownerId, prepared.toBytes())
             .pipe(Effect.provide(receiverLayer))
         )
       )
-    ).toMatchObject({ _tag: 'Left', left: { code: 'unauthorized' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { code: 'unauthorized' } });
   });
 
   it('native HPKE Services interoperate with legacy envelopes and own deferred inputs', async () => {
@@ -562,35 +562,35 @@ describe('P3 key delivery and history unwrap', () => {
       entropy,
     });
     const original = Envelope.decodeEnvelopeFrame(context, frame);
-    if (Either.isLeft(original)) throw new Error('valid envelope required');
+    if (Result.isFailure(original)) throw new Error('valid envelope required');
     await Effect.runPromise(
       Effect.gen(function* () {
         const sender = yield* HpkeSender;
         const recipient = yield* HpkeRecipient;
         expect(recipient.publicKey.toBytes()).toEqual(owner.enc);
-        const key = yield* Bytes.epochKey(created.secret);
-        const aad = new Uint8Array(original.right.aad);
+        const key = yield* Effect.fromResult(Bytes.epochKey(created.secret));
+        const aad = new Uint8Array(original.success.aad);
         const sealing = sender.seal({ recipient: recipient.publicKey, key, aad });
         aad.fill(0);
         const sealed = yield* sealing;
-        expect(sealed.enc).toEqual(original.right.enc);
-        expect(sealed.ct).toEqual(original.right.ct);
-        const opening = recipient.open({ ...sealed, aad: original.right.aad });
+        expect(sealed.enc).toEqual(original.success.enc);
+        expect(sealed.ct).toEqual(original.success.ct);
+        const opening = recipient.open({ ...sealed, aad: original.success.aad });
         sealed.ct.fill(0);
         sealed.enc.fill(0);
         const openedKey = yield* opening;
         const resealed = yield* sender.seal({
           recipient: recipient.publicKey,
           key: openedKey,
-          aad: original.right.aad,
+          aad: original.success.aad,
         });
-        expect(resealed.enc).toEqual(original.right.enc);
-        expect(resealed.ct).toEqual(original.right.ct);
+        expect(resealed.enc).toEqual(original.success.enc);
+        expect(resealed.ct).toEqual(original.success.ct);
         expect(
-          yield* Effect.either(recipient.open({ ...sealed, aad: original.right.aad }))
+          yield* Effect.result(recipient.open({ ...sealed, aad: original.success.aad }))
         ).toMatchObject({
-          _tag: 'Left',
-          left: { _tag: 'CryptoError', operation: 'open' },
+          _tag: 'Failure',
+          failure: { _tag: 'CryptoError', operation: 'open' },
         });
       }).pipe(
         Effect.provide(
@@ -615,8 +615,8 @@ describe('P3 key delivery and history unwrap', () => {
     const program = Effect.gen(function* () {
       const sender = yield* HpkeSender;
       return yield* sender.seal({
-        recipient: yield* Bytes.encryptionPublicKey(owner.enc),
-        key: yield* Bytes.epochKey(random(32)),
+        recipient: yield* Effect.fromResult(Bytes.encryptionPublicKey(owner.enc)),
+        key: yield* Effect.fromResult(Bytes.epochKey(random(32))),
         aad: new Uint8Array(),
       });
     }).pipe(
@@ -631,7 +631,7 @@ describe('P3 key delivery and history unwrap', () => {
       )
     );
     const exit = await Effect.runPromiseExit(program);
-    expect(Exit.isFailure(exit) && Cause.isDie(exit.cause)).toBe(true);
+    expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
   });
 
   it('native HPKE requests fresh entropy per execution and rejects malformed entropy', async () => {
@@ -650,7 +650,7 @@ describe('P3 key delivery and history unwrap', () => {
       Effect.gen(function* () {
         const sender = yield* HpkeSender;
         const recipient = yield* HpkeRecipient;
-        const key = yield* Bytes.epochKey(secret);
+        const key = yield* Effect.fromResult(Bytes.epochKey(secret));
         const aad = new Uint8Array([1, 2, 3]);
         const seal = sender.seal({ recipient: recipient.publicKey, key, aad });
         expect(generation).toBe(0);
@@ -664,9 +664,9 @@ describe('P3 key delivery and history unwrap', () => {
         const resealed = yield* sender.seal({ recipient: recipient.publicKey, key: opened, aad });
         expect(resealed).toEqual(first);
         malformed = true;
-        expect(yield* Effect.either(seal)).toMatchObject({
-          _tag: 'Left',
-          left: { _tag: 'CryptoError', operation: 'generate' },
+        expect(yield* Effect.result(seal)).toMatchObject({
+          _tag: 'Failure',
+          failure: { _tag: 'CryptoError', operation: 'generate' },
         });
       }).pipe(
         Effect.provide(
@@ -685,7 +685,7 @@ describe('P3 key delivery and history unwrap', () => {
     const previousKey = random(32);
     const nonce = random(24);
     const packet = History.sealHistoryPacket({ currentKey, previousKey, genesis, epoch: 1, nonce });
-    if (Either.isLeft(packet)) throw new Error('valid history fixture required');
+    if (Result.isFailure(packet)) throw new Error('valid history fixture required');
     expect(packet).toEqual(
       History.sealHistoryPacket({ currentKey, previousKey, genesis, epoch: 1, nonce })
     );
@@ -696,7 +696,7 @@ describe('P3 key delivery and history unwrap', () => {
           return bytes;
         },
       })
-    ).toEqual(packet.right);
+    ).toEqual(packet.success);
     expect(
       History.sealHistoryPacket({
         currentKey,
@@ -705,10 +705,10 @@ describe('P3 key delivery and history unwrap', () => {
         epoch: 1,
         nonce: new Uint8Array(23),
       })
-    ).toMatchObject({ _tag: 'Left' });
+    ).toMatchObject({ _tag: 'Failure' });
     const packets = new Map([
       [0, { commitment: await commitEpochKey(genesis, 0, previousKey), packet: new Uint8Array() }],
-      [1, { commitment: await commitEpochKey(genesis, 1, currentKey), packet: packet.right }],
+      [1, { commitment: await commitEpochKey(genesis, 1, currentKey), packet: packet.success }],
     ]);
     const result = History.recoverHistory({
       genesis,
@@ -716,15 +716,15 @@ describe('P3 key delivery and history unwrap', () => {
       latestKey: currentKey,
       packets,
     });
-    if (Either.isLeft(result)) throw new Error('valid chain must recover');
+    if (Result.isFailure(result)) throw new Error('valid chain must recover');
     const original = new Uint8Array(currentKey);
-    expect(result.right.get(0)).toEqual(previousKey);
-    result.right.get(1)?.fill(0);
+    expect(result.success.get(0)).toEqual(previousKey);
+    result.success.get(1)?.fill(0);
     expect(currentKey).toEqual(original);
-    packet.right[30] = packet.right[30]! ^ 1;
+    packet.success[30] = packet.success[30]! ^ 1;
     expect(
       History.recoverHistory({ genesis, latestEpoch: 1, latestKey: currentKey, packets })
-    ).toMatchObject({ _tag: 'Left' });
+    ).toMatchObject({ _tag: 'Failure' });
   });
 
   it('pure envelope parsing owns frame bytes but never proves a forged signature', async () => {
@@ -745,26 +745,26 @@ describe('P3 key delivery and history unwrap', () => {
       sign: owner.sign,
     });
     const parsed = Envelope.decodeEnvelopeFrame(context, frame);
-    if (Either.isLeft(parsed)) throw new Error('valid frame must parse');
+    if (Result.isFailure(parsed)) throw new Error('valid frame must parse');
     const saved = new Uint8Array(frame);
     frame.fill(0);
-    expect(parsed.right.signature).toEqual(saved.subarray(-64));
-    expect(parsed.right.enc).toEqual(
-      saved.subarray(parsed.right.aad.length, parsed.right.aad.length + 32)
+    expect(parsed.success.signature).toEqual(saved.subarray(-64));
+    expect(parsed.success.enc).toEqual(
+      saved.subarray(parsed.success.aad.length, parsed.success.aad.length + 32)
     );
     const recipientKey = Envelope.recipientEncryptionKey(state, owner.publicKey, owner.publicKey);
-    if (Either.isLeft(recipientKey)) throw new Error('admitted recipient required');
-    recipientKey.right.fill(0);
+    if (Result.isFailure(recipientKey)) throw new Error('admitted recipient required');
+    recipientKey.success.fill(0);
     expect(Envelope.recipientEncryptionKey(state, owner.publicKey, owner.publicKey)).toEqual(
-      Either.right(owner.enc)
+      Result.succeed(owner.enc)
     );
     saved[saved.length - 1] = saved[saved.length - 1]! ^ 1;
-    expect(Either.isRight(Envelope.decodeEnvelopeFrame(context, saved))).toBe(true);
+    expect(Result.isSuccess(Envelope.decodeEnvelopeFrame(context, saved))).toBe(true);
     await expect(
       openEpochEnvelope({ ...context, state, frame: saved, recipientKeyPair: owner.dh })
     ).rejects.toMatchObject({ code: 'bad-signature' });
     expect(Envelope.decodeEnvelopeFrame({ ...context, epoch: 1 }, saved)).toMatchObject({
-      _tag: 'Left',
+      _tag: 'Failure',
     });
   });
 

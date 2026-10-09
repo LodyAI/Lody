@@ -1,5 +1,17 @@
 # @lody/e2ee-core
 
+Core uses the exact `e2eeEffect` catalog pin, Effect **4.0.2**. Pure codecs and
+policy return `Result`; workflows convert it with `Effect.fromResult` and declare
+`Context.Service` dependencies. Other workspace packages keep their own Effect
+major. Electron calls `./node-identity-client`, a Promise interface returning keys,
+bytes and ordinary errors; Effect values never cross that boundary.
+
+Ledger operations have explicit transaction-local state. The retained verified
+view is only a prefix cache. Saving a checkpoint and publishing the new view share
+a narrow uninterruptible region; CAS and readback remain interruptible. Each saved
+page and the exact signed pending record survive cancellation. Page selection is
+pure (`pure/ledger-page.ts`); verification and durable ordering stay in workflows.
+
 ## Effect API migration (2026-09-22, incomplete)
 
 The new `@lody/e2ee-core/effect` entry provides checked opaque value types,
@@ -62,7 +74,7 @@ inputs. The temporary replay adapter applies them only after complete success to
 the privately owned accumulator, without copying full history per record.
 This internal delta is not a public authorization token or patch-state API.
 
-`pure/ledger-schema.ts` owns the Either codec and signature-message construction;
+`pure/ledger-schema.ts` owns the Result codec and signature-message construction;
 the old schema entry only unwraps its result. `SigningFacts` is immutable evidence
 of public-key point validity, not permission or a verified signature. Parsing takes
 these facts explicitly and returns updated facts without mutating the input; no
@@ -78,7 +90,7 @@ possession. Both replay paths share it. Device proofs still require the actor's
 preceding verified membership; constructing a job is not verifying it.
 
 `pure/ledger-snapshot.ts` owns snapshot encoding, structural validation and state
-import as Either computations. Parsed snapshots do not establish signature trust;
+import as Result computations. Parsed snapshots do not establish signature trust;
 the existing validator still checks the independent anchor and endorsements.
 `verifyRecordSignature`, `prepareDeviceAdmission` and `prepareJoinRequest` require
 `SignatureVerifier`; explicitly provide

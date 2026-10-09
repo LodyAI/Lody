@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Either } from 'effect';
+import { Result } from 'effect';
 import {
   encodeSignedRecord,
   joinRequestSigningBytes,
@@ -185,7 +185,7 @@ describe('design probes: binding, host cache, guest content', () => {
     );
     const removed = await alice.readLedger();
     expect(
-      Either.isRight(
+      Result.isSuccess(
         contentAuthorKey(
           removed.state,
           {
@@ -761,7 +761,7 @@ describe('design probes: ordinary plane vs harness', () => {
     const device = await exportDevice(alice.device);
     const clientDir = alice.clientDir;
     const genesisHex = alice.genesisHex!;
-    alice.close();
+    await alice.close();
     const restarted = await labClient({
       host,
       account: 'alice',

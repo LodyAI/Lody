@@ -4,19 +4,18 @@ Local deterministic collaboration plus one attack Agent. Not product E2EE.
 
 ## Required source style
 
-- **Effect v3 only**: exact workspace catalog pin (currently `3.18.4`).
-  No v4/prereleases without approval.
-- `pure/`: deterministic values or typed `Either`; no I/O, ambient state,
+- **Effect 4.0.2**: use the `e2eeEffect` catalog; do not change the default
+  v3 catalog or pass Effect objects between majors.
+- `pure/`: deterministic values or typed `Result`; no I/O, ambient state,
   clocks, randomness, logging or input mutation. Only unobservable local scratch
   mutation is allowed.
-- `workflows/`: `Effect<A, E, R>` descriptions with declared Services for ALL
-  side effects and external/global dependencies (storage, network, crypto handles,
-  entropy, time, environment, process). No eager execution, hidden Live defaults
-  or internal runtime starts.
+- `workflows/`: `Effect<A, E, R>` descriptions declare Services for storage, network, crypto, entropy,
+  clocks, environment and process. No eager execution, hidden Live defaults or
+  internal runtime starts. Convert pure Results with `Effect.fromResult`.
 - `platform/`: thin Service implementations/Layers; direct external API access
   belongs here or in composition. Concentrate complexity in pure first, workflows
   second; keep domain policy/state transitions out of platform.
-- No expected `throw`: pure returns typed `Either`; workflows use typed Effect
+- No expected `throw`: pure returns typed `Result`; workflows use typed Effect
   failures. Only unexpected fatal defects may throw. Never disguise defects or
   interruption as ordinary failure or Pending.
 - Use Effect logging/tracing and injected Services, never `console` or ambient
@@ -35,6 +34,9 @@ Local deterministic collaboration plus one attack Agent. Not product E2EE.
   private replay bundles, or judge expectations.
 - Replay compares events, labeled entropy, and protocol frames. Private device
   material is test-only and never part of the attacker view.
+- Observation/mutation settles at the current boundary before automatic honest
+  permits; advancing actions own explicit permits. Only finish measurements drain.
+  `finish` seals the public handle; private replay services live until runtime disposal.
 - Attackers use `createAttackLab` only. That handle does not expose honest
   client directories, epoch keys, or judge expected plaintext. The one exception
   is an excluded insider: from its removal/revoke on, `insiderRead` uses the keys
@@ -75,8 +77,8 @@ Local deterministic collaboration plus one attack Agent. Not product E2EE.
   the record. Never silently recompute commitments in old captured artifacts.
 - Lab I/O goes through Effect `LabClock` / `LabFs` / `LabHttp`
   (`src/services/`): AttackLab, attacks, persist, session, host, content-session,
-  and restricted-agent LLM fetch. Promise/Live defaults provide `LiveLabLayer`
-  adapters. Crash `spawn` and CLI entrypoints still use Node process APIs.
+  and restricted-agent LLM fetch. Promise owners use `LabRun` with a persistent Scope; await disposal.
+  `services/run.ts` owns runtime starts; Live boundaries provide `LiveLabLayer`. Crash `spawn` and CLI entrypoints still use Node process APIs.
   Effect is not a sandbox; isolation is the capability handle.
 - Independent packs (`e2ee-lab-repro/v1`) bind dirty-tree identity; private
   material is mode 0700 and is not the attacker view. Auto-advance is oldest

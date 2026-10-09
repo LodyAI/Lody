@@ -56,6 +56,74 @@ describe('lab host lifecycle', () => {
     expect(existsSync(host.riverrunDbPath)).toBe(true);
   });
 
+  it('closes transports and SQLite owners after startup failure and supports idempotent close', async () => {
+    const dataDir = tempDir('host-acquisition-failure-');
+    const disk = makeLiveFs();
+    let port = 0;
+    await expect(
+      startLabBackend({
+        dataDir,
+        fs: {
+          ...disk,
+          writeText(path, text) {
+            if (path.endsWith('/host.json')) {
+              port = Number(new URL((JSON.parse(text) as { baseUrl: string }).baseUrl).port);
+              throw new Error('startup-persist-failed');
+            }
+            disk.writeText(path, text);
+          },
+        },
+      })
+    ).rejects.toThrow('startup-persist-failed');
+    expect(port).toBeGreaterThan(0);
+    const reopened = await startLabBackend({ dataDir, port });
+    try {
+      expect((await fetch(`${reopened.baseUrl}/healthz`)).status).toBe(200);
+    } finally {
+      await reopened.close();
+    }
+    await reopened.close();
+    await expect(fetch(`${reopened.baseUrl}/healthz`)).rejects.toThrow();
+  });
+
+  it('propagates scope cancellation to an in-flight native upstream request', async () => {
+    let notify!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      notify = resolve;
+    });
+    let aborted = false;
+    const host = await startLabBackend({
+      dataDir: tempDir('host-native-abort-'),
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        return new Promise<Response>((_, reject) => {
+          request.signal.addEventListener(
+            'abort',
+            () => {
+              aborted = true;
+              reject(request.signal.reason);
+            },
+            { once: true }
+          );
+          notify();
+        });
+      },
+    });
+    try {
+      const alice = await labClient({ host, account: 'alice' });
+      const creating = alice.createSpace().then(
+        () => 'success',
+        () => 'failed'
+      );
+      await entered;
+      await host.close();
+      expect(aborted).toBe(true);
+      expect(await creating).toBe('failed');
+    } finally {
+      await host.close();
+    }
+  });
+
   it('rejects unjoined POST/DELETE on the control stream', async () => {
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice' });
@@ -451,7 +519,7 @@ describe('lab host lifecycle', () => {
     const deviceJson = await exportDevice(alice.device);
     const clientDir = alice.clientDir;
     const genesisHex = alice.genesisHex!;
-    alice.close();
+    await alice.close();
     host.setFailpoint('hang-control-ack');
     const marker = join(tempDir('e2ee-lab-epoch-crash-mark-'), 'marker');
     const child = spawn(
@@ -499,7 +567,7 @@ describe('lab host lifecycle', () => {
     const history = await restarted.recoverEpochHistory();
     expect(history.has(0)).toBe(true);
     expect(history.has(1)).toBe(true);
-    restarted.close();
+    await restarted.close();
     const reopen = await labClient({
       host,
       account: 'alice',
@@ -595,7 +663,7 @@ describe('lab host lifecycle', () => {
     ).toBe('committed');
     await writeLoro(alice, 'alice-after-demotion;');
     expect(await readLoro(bob)).toContain('alice-after-demotion;');
-    bob.close();
+    await bob.close();
     const restarted = await labClient({
       host,
       account: 'bob',
@@ -706,7 +774,7 @@ describe('lab host lifecycle', () => {
     const first = await alice.deliverEpochKey(tablet, 0);
     const deviceJson = await exportDevice(alice.device);
     const genesisHex = alice.genesisHex!;
-    alice.close();
+    await alice.close();
     const restarted = await labClient({
       host,
       account: 'alice',

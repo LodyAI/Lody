@@ -28,7 +28,7 @@ import type { LabFsShape } from '../services/fs';
 export function testFiles(fs: LabFsShape): EpochFileIO {
   const perform = <A>(work: () => A) =>
     Effect.try({ try: work, catch: (error) => error }).pipe(
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         error instanceof TypeError || error instanceof ReferenceError
           ? Effect.die(error)
           : Effect.fail(new StorageError({ reason: 'io', code: 'lab-file-io' }))
@@ -53,7 +53,7 @@ export function labEntropyLayer(entropy: Entropy): Layer.Layer<CryptoEntropy> {
         try: () => entropy.fill(label, new Uint8Array(length)),
         catch: (error) => error,
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           error instanceof DOMException
             ? Effect.fail(new CryptoError({ operation: 'generate' }))
             : Effect.die(error)
@@ -63,7 +63,7 @@ export function labEntropyLayer(entropy: Entropy): Layer.Layer<CryptoEntropy> {
 }
 
 function signerLayer(device: DemoDevice) {
-  return Effect.map(Bytes.signingPublicKey(device.publicKey), (signer) =>
+  return Effect.map(Effect.fromResult(Bytes.signingPublicKey(device.publicKey)), (signer) =>
     deviceSignerLayer(signer, (bytes) => device.sign(bytes))
   );
 }

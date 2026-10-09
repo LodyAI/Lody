@@ -129,7 +129,7 @@ export function nodeEpochFilesLayer(input: {
         yield* validatePaths;
         return EpochCandidateStore.of({
           exclusive: (actual, work) =>
-            Effect.zipRight(
+            Effect.andThen(
               scoped(actual),
               candidateLock(
                 Effect.suspend(() => {
@@ -146,7 +146,7 @@ export function nodeEpochFilesLayer(input: {
                         access(
                           Effect.gen(function* () {
                             const decoded = yield* Effect.mapError(
-                              decodeEpochCandidate(text),
+                              Effect.fromResult(decodeEpochCandidate(text)),
                               corrupt
                             );
                             if (
@@ -186,22 +186,29 @@ export function nodeEpochFilesLayer(input: {
       Effect.gen(function* () {
         yield* validatePaths;
         yield* keyringLock(
-          Effect.flatMap(readKeys, (text) => Effect.mapError(decodeEpochKeyring(text), corrupt))
+          Effect.flatMap(readKeys, (text) =>
+            Effect.mapError(Effect.fromResult(decodeEpochKeyring(text)), corrupt)
+          )
         );
         return EpochKeyring.of({
           get: (actual, epoch) =>
-            Effect.zipRight(
+            Effect.andThen(
               scoped(actual),
               keyringLock(
                 Effect.gen(function* () {
-                  const keys = yield* Effect.mapError(decodeEpochKeyring(yield* readKeys), corrupt);
+                  const keys = yield* Effect.mapError(
+                    Effect.fromResult(decodeEpochKeyring(yield* readKeys)),
+                    corrupt
+                  );
                   const key = keys.get(epoch);
-                  return key === undefined ? null : yield* Effect.mapError(epochKey(key), corrupt);
+                  return key === undefined
+                    ? null
+                    : yield* Effect.mapError(Effect.fromResult(epochKey(key)), corrupt);
                 })
               )
             ),
           put: (actual, epoch, key) =>
-            Effect.zipRight(
+            Effect.andThen(
               scoped(actual),
               keyringLock(
                 Effect.gen(function* () {
@@ -209,7 +216,7 @@ export function nodeEpochFilesLayer(input: {
                   return yield* Effect.gen(function* () {
                     const before = yield* readKeys;
                     const after = yield* Effect.mapError(
-                      installEpochKey(before, epoch, secret),
+                      Effect.fromResult(installEpochKey(before, epoch, secret)),
                       corrupt
                     );
                     if (after !== before) yield* files.replace(keyringPath, after);

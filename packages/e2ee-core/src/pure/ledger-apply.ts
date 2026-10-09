@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { bytesEqual } from './cbor';
 import { ValidationError } from './errors';
 import { applyPolicyChanges, genesisState, operationChanges } from './ledger-policy';
@@ -17,36 +17,36 @@ export function applyDecodedRecord(
   position: number,
   expectedAnchor: Uint8Array | undefined,
   facts = SigningFacts.empty
-): Either.Either<InternalState, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<InternalState, ValidationError> {
+  return Result.gen(function* () {
     if (decoded.body.type === 'genesis') {
       if (position !== 0)
-        return yield* Either.left(
+        return yield* Result.fail(
           positioned(new ValidationError({ code: 'genesis-mismatch' }), position)
         );
       if (expectedAnchor && !bytesEqual(recordHash, expectedAnchor))
-        return yield* Either.left(
+        return yield* Result.fail(
           positioned(new ValidationError({ code: 'wrong-anchor' }), position)
         );
       if (state)
-        return yield* Either.left(
+        return yield* Result.fail(
           positioned(new ValidationError({ code: 'genesis-mismatch' }), position)
         );
-      return yield* Either.mapLeft(genesisState(decoded.body.fields, recordHash, facts), (error) =>
+      return yield* Result.mapError(genesisState(decoded.body.fields, recordHash, facts), (error) =>
         positioned(error, position)
       );
     }
     if (!state || position === 0 || decoded.body.type !== 'ordinary')
-      return yield* Either.left(
+      return yield* Result.fail(
         positioned(new ValidationError({ code: 'genesis-mismatch' }), position)
       );
     const ordinary = decoded.body.fields;
     const parent = state.hashes[state.hashes.length - 1];
     if (!parent || !bytesEqual(ordinary.previousHash, parent))
-      return yield* Either.left(
+      return yield* Result.fail(
         positioned(new ValidationError({ code: 'wrong-parent' }), position)
       );
-    const changes = yield* Either.mapLeft(
+    const changes = yield* Result.mapError(
       operationChanges(state, ordinary.signer, ordinary.operation, facts),
       (error) => positioned(error, position)
     );

@@ -10,7 +10,7 @@ export interface EpochCandidateTransaction {
 }
 
 /** Per-Org exclusive lease, including across processes for durable implementations. */
-export class EpochCandidateStore extends Context.Tag('@lody/e2ee-core/EpochCandidateStore')<
+export class EpochCandidateStore extends Context.Service<
   EpochCandidateStore,
   {
     readonly exclusive: <A, E, R>(
@@ -18,10 +18,10 @@ export class EpochCandidateStore extends Context.Tag('@lody/e2ee-core/EpochCandi
       work: (tx: EpochCandidateTransaction) => Effect.Effect<A, E, R>
     ) => Effect.Effect<A, E | StorageError, R>;
   }
->() {}
+>()('@lody/e2ee-core/EpochCandidateStore') {}
 
 /** Append-only key installation. Current epoch comes from verified ledger, not this store. */
-export class EpochKeyring extends Context.Tag('@lody/e2ee-core/EpochKeyring')<
+export class EpochKeyring extends Context.Service<
   EpochKeyring,
   {
     readonly get: (
@@ -35,4 +35,4 @@ export class EpochKeyring extends Context.Tag('@lody/e2ee-core/EpochKeyring')<
       key: EpochKey
     ) => Effect.Effect<void, StorageError>;
   }
->() {}
+>()('@lody/e2ee-core/EpochKeyring') {}

@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { ValidationError, type LedgerErrorCode } from './errors';
 import { copyBytes } from './cbor';
 import { keyId } from './identifiers';
@@ -7,23 +7,23 @@ import { MAX_LEDGER_RECORDS, type LedgerJournal } from './journal';
 const FORMAT = 'lody-e2ee-journal/v0';
 const SNAPSHOT_FORMAT = 'lody-e2ee-journal/v1';
 const MAX_BYTES = 32 * 1024 * 1024;
-const invalid = (code: LedgerErrorCode): Either.Either<never, ValidationError> =>
-  Either.left(new ValidationError({ code }));
+const invalid = (code: LedgerErrorCode): Result.Result<never, ValidationError> =>
+  Result.fail(new ValidationError({ code }));
 
-function fromHex(hex: unknown): Either.Either<Uint8Array, ValidationError> {
+function fromHex(hex: unknown): Result.Result<Uint8Array, ValidationError> {
   if (typeof hex !== 'string' || !/^(?:[0-9a-f]{2})+$/.test(hex)) return invalid('canonical');
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++)
     bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return Either.right(bytes);
+  return Result.succeed(bytes);
 }
 
 /** Existing persisted JSON envelope; signed records remain exact DAG-CBOR bytes.
  * Successful decoding is structure validation, never ledger authorization. */
 export function encodeLedgerJournal(
   journal: LedgerJournal
-): Either.Either<string, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<string, ValidationError> {
+  return Result.gen(function* () {
     if (journal.records.length > MAX_LEDGER_RECORDS) return yield* invalid('oversize');
     if (
       typeof journal.offset !== 'string' ||
@@ -58,10 +58,10 @@ export function encodeLedgerJournal(
   });
 }
 
-export function decodeLedgerJournal(text: string): Either.Either<LedgerJournal, ValidationError> {
-  return Either.gen(function* () {
+export function decodeLedgerJournal(text: string): Result.Result<LedgerJournal, ValidationError> {
+  return Result.gen(function* () {
     if (typeof text !== 'string' || text.length > MAX_BYTES) return yield* invalid('oversize');
-    const parsed: unknown = yield* Either.try({
+    const parsed: unknown = yield* Result.try({
       try: (): unknown => JSON.parse(text),
       catch: () => new ValidationError({ code: 'canonical' }),
     });

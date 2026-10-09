@@ -351,7 +351,7 @@ describe('P4 AttackLab intercept and advanceUntil', () => {
         .filter((event) => event.phase === 'deliver' && event.status === 'completed');
       expect(deliverEvents.length).toBeGreaterThan(0);
     } finally {
-      stop();
+      await stop();
     }
   });
 

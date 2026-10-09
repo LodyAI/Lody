@@ -97,7 +97,7 @@ describe('verified view immutability', () => {
     const view = await Effect.runPromise(
       Effect.gen(function* () {
         return yield* verifyLedger({
-          anchor: yield* Bytes.genesisHash(created.anchor),
+          anchor: yield* Effect.fromResult(Bytes.genesisHash(created.anchor)),
           records: [created.record],
         });
       }).pipe(Effect.provide(signatureVerifierLayer))
@@ -128,10 +128,10 @@ describe('enrollment proof binding', () => {
     const command = await Effect.runPromise(
       Effect.gen(function* () {
         return yield* prepareDeviceAdmission({
-          genesis: yield* Bytes.genesisHash(created.anchor),
+          genesis: yield* Effect.fromResult(Bytes.genesisHash(created.anchor)),
           // Caller believes the proof targets the Owner's membership...
-          membershipId: yield* Bytes.membershipId(created.membershipId),
-          encryptionPublicKey: yield* Bytes.encryptionPublicKey(newDevice.enc),
+          membershipId: yield* Effect.fromResult(Bytes.membershipId(created.membershipId)),
+          encryptionPublicKey: yield* Effect.fromResult(Bytes.encryptionPublicKey(newDevice.enc)),
           // ...but an extra runtime key (e.g. from parsed JSON) retargets it to Bob.
           grant: { kind: 'personal', targetMembershipId: bobM } as never,
         });
@@ -140,8 +140,8 @@ describe('enrollment proof binding', () => {
           Layer.merge(
             deviceSignerLayer(
               Bytes.signingPublicKey(newDevice.publicKey).pipe((e) => {
-                if (e._tag === 'Left') throw new Error('key');
-                return e.right;
+                if (e._tag === 'Failure') throw new Error('key');
+                return e.success;
               }),
               newDevice.sign
             ),

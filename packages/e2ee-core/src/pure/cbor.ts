@@ -1,5 +1,5 @@
 import { decode, encode } from '@ipld/dag-cbor';
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { ValidationError } from './errors';
 import type { LedgerErrorCode } from './errors';
 
@@ -10,9 +10,9 @@ export const MAX_BSTR_BYTES = 256;
 export const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 export const MAX_SNAPSHOT_ARRAY_LENGTH = 16_384;
 export type CborValue = null | boolean | number | Uint8Array | readonly CborValue[];
-type Result<A> = Either.Either<A, ValidationError>;
+type Result<A> = Result.Result<A, ValidationError>;
 const invalid = (code: LedgerErrorCode): Result<never> =>
-  Either.left(new ValidationError({ code }));
+  Result.fail(new ValidationError({ code }));
 
 export const copyBytes = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => new Uint8Array(bytes);
 export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -23,13 +23,13 @@ export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 
 function asPlain(value: unknown, depth: number, maxArray: number): Result<CborValue> {
   if (depth > MAX_DEPTH) return invalid('nesting');
-  if (value === null || value === true || value === false) return Either.right(value);
+  if (value === null || value === true || value === false) return Result.succeed(value);
   if (typeof value === 'number') {
-    return Number.isSafeInteger(value) && value >= 0 ? Either.right(value) : invalid('canonical');
+    return Number.isSafeInteger(value) && value >= 0 ? Result.succeed(value) : invalid('canonical');
   }
   if (value instanceof Uint8Array) {
     return value.byteLength <= MAX_BSTR_BYTES
-      ? Either.right(copyBytes(value))
+      ? Result.succeed(copyBytes(value))
       : invalid('oversize');
   }
   if (Array.isArray(value)) {
@@ -37,10 +37,10 @@ function asPlain(value: unknown, depth: number, maxArray: number): Result<CborVa
     const result: CborValue[] = [];
     for (const item of value) {
       const parsed = asPlain(item, depth + 1, maxArray);
-      if (Either.isLeft(parsed)) return parsed;
-      result.push(parsed.right);
+      if (Result.isFailure(parsed)) return parsed;
+      result.push(parsed.success);
     }
-    return Either.right(result);
+    return Result.succeed(result);
   }
   return invalid('canonical');
 }
@@ -62,13 +62,13 @@ function decodingError(error: unknown): ValidationError {
 }
 
 function decodeBounded(input: unknown, maxBytes: number, maxArray: number): Result<CborValue> {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     if (!(input instanceof Uint8Array)) return yield* invalid('canonical');
     if (input.byteLength === 0) return yield* invalid('truncated');
     if (input.byteLength > maxBytes) return yield* invalid('oversize');
     const stable = copyBytes(input);
-    const decoded: unknown = yield* Either.try({ try: () => decode(stable), catch: decodingError });
-    const encoded = yield* Either.try({
+    const decoded: unknown = yield* Result.try({ try: () => decode(stable), catch: decodingError });
+    const encoded = yield* Result.try({
       try: () => encode(decoded),
       catch: () => new ValidationError({ code: 'canonical' }),
     });
@@ -91,8 +91,8 @@ export const decodeSnapshotCbor = (input: unknown): Result<CborValue> =>
   decodeBounded(input, MAX_SNAPSHOT_BYTES, MAX_SNAPSHOT_ARRAY_LENGTH);
 
 function encodeBounded(value: CborValue, maxBytes: number): Result<Uint8Array<ArrayBuffer>> {
-  return Either.gen(function* () {
-    const bytes = yield* Either.try({
+  return Result.gen(function* () {
+    const bytes = yield* Result.try({
       try: () => copyBytes(encode(value)),
       catch: () => new ValidationError({ code: 'canonical' }),
     });
@@ -103,13 +103,13 @@ function encodeBounded(value: CborValue, maxBytes: number): Result<Uint8Array<Ar
 
 export const encodeCanonical = (value: CborValue) => encodeBounded(value, MAX_RECORD_BYTES);
 export const encodeCbor = (value: CborValue): Result<Uint8Array<ArrayBuffer>> =>
-  Either.gen(function* () {
+  Result.gen(function* () {
     const bytes = yield* encodeCanonical(value);
     yield* decodeCbor(bytes);
     return bytes;
   });
 export const encodeSnapshotCbor = (value: CborValue): Result<Uint8Array<ArrayBuffer>> =>
-  Either.gen(function* () {
+  Result.gen(function* () {
     const bytes = yield* encodeBounded(value, MAX_SNAPSHOT_BYTES);
     yield* decodeSnapshotCbor(bytes);
     return bytes;
@@ -119,15 +119,15 @@ export function asArray(
   value: CborValue,
   code: LedgerErrorCode = 'canonical'
 ): Result<readonly CborValue[]> {
-  return Array.isArray(value) ? Either.right(value) : invalid(code);
+  return Array.isArray(value) ? Result.succeed(value) : invalid(code);
 }
 export function asUint(value: CborValue, code: LedgerErrorCode = 'canonical'): Result<number> {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-    ? Either.right(value)
+    ? Result.succeed(value)
     : invalid(code);
 }
 export function asBool(value: CborValue, code: LedgerErrorCode = 'canonical'): Result<boolean> {
-  return value === true || value === false ? Either.right(value) : invalid(code);
+  return value === true || value === false ? Result.succeed(value) : invalid(code);
 }
 export function asExactBytes(
   value: CborValue,
@@ -135,9 +135,9 @@ export function asExactBytes(
   code: LedgerErrorCode = 'canonical'
 ): Result<Uint8Array> {
   return value instanceof Uint8Array && value.byteLength === length
-    ? Either.right(copyBytes(value))
+    ? Result.succeed(copyBytes(value))
     : invalid(code);
 }
 export function asNullOrUint(value: CborValue): Result<number | null> {
-  return value === null ? Either.right(null) : asUint(value);
+  return value === null ? Result.succeed(null) : asUint(value);
 }

@@ -15,8 +15,7 @@ import {
 } from '@lody/e2ee-core/effect';
 import { deviceSignerLayer, signatureVerifierLayer } from '@lody/e2ee-core/effect/platform';
 import { EpochKeyringStorage, nodeJournalStoreLayer } from '@lody/e2ee-core/effect/platform-node';
-import { Effect, Either, Layer } from 'effect';
-import type { LedgerCommand } from '@lody/e2ee-core/effect';
+import { Effect, Result, Layer } from 'effect';
 import {
   commitEpochKey,
   decodeRecord,
@@ -47,8 +46,14 @@ import { makeLabClock } from '../services/clock';
 import type { ContentAuthority } from './content-session';
 import { makeLiveFs, type LabFsShape } from '../services/fs';
 import type { LabFetch } from '../services/http';
-import { runLabPromise } from '../services/run';
+import { LabRun } from '../services/run';
 import { rotationLayer } from './rotation-layer';
+import {
+  SessionLedger,
+  executeSessionOperation,
+  readSessionLedger,
+  resumeSessionLedger,
+} from '../workflows/session-ledger';
 import { receiveKeyLayer, sendKeyLayer } from './key-delivery-layer';
 
 export interface SessionOptions {
@@ -88,7 +93,7 @@ function parseNote(wire: ComparisonWire): ComparisonNote {
 }
 
 function signerLayer(device: DemoDevice) {
-  return Effect.map(Bytes.signingPublicKey(device.publicKey), (key) =>
+  return Effect.map(Effect.fromResult(Bytes.signingPublicKey(device.publicKey)), (key) =>
     deviceSignerLayer(key, (bytes) => device.sign(bytes))
   );
 }
@@ -103,65 +108,6 @@ const genesisTransportLayer = Layer.succeed(LedgerTransport, {
   readAfter: () => Effect.fail(new TransportError({ operation: 'read' })),
   appendCas: () => Effect.succeed('accepted' as const),
 });
-
-function ledgerCommand(operation: Operation): Effect.Effect<LedgerCommand, ValidationError> {
-  return Effect.gen(function* () {
-    switch (operation.type) {
-      case 'admitMember':
-        return {
-          _tag: 'AdmitMember' as const,
-          membershipId: yield* Bytes.membershipId(operation.membershipId),
-          request: {
-            requestId: yield* Bytes.requestId(operation.request.requestId),
-            userId: yield* Bytes.userId(operation.request.userId),
-            signingPublicKey: yield* Bytes.signingPublicKey(operation.request.signingPublicKey),
-            encryptionPublicKey: yield* Bytes.encryptionPublicKey(
-              operation.request.encryptionPublicKey
-            ),
-            expiresAt: operation.request.expiresAt,
-            signature: yield* Bytes.signature(operation.request.signature),
-          },
-        };
-      case 'removeMember':
-        return {
-          _tag: 'RemoveMember' as const,
-          membershipId: yield* Bytes.membershipId(operation.membershipId),
-        };
-      case 'setRole':
-        return {
-          _tag: 'SetRole' as const,
-          membershipId: yield* Bytes.membershipId(operation.membershipId),
-          role: operation.role,
-        };
-      case 'admitDevice': {
-        const signingPublicKey = yield* Bytes.signingPublicKey(operation.signingPublicKey);
-        const encryptionPublicKey = yield* Bytes.encryptionPublicKey(operation.encryptionPublicKey);
-        const possessionSignature = yield* Bytes.signature(operation.possessionSignature);
-        return {
-          _tag: 'AdmitDevice' as const,
-          kind: operation.kind,
-          signingPublicKey,
-          encryptionPublicKey,
-          possessionSignature,
-        };
-      }
-      case 'revokeDevice':
-        return {
-          _tag: 'RevokeDevice' as const,
-          target: yield* Bytes.signingPublicKey(operation.target),
-        };
-      case 'transferOwner':
-        return {
-          _tag: 'TransferOwner' as const,
-          successorMembershipId: yield* Bytes.membershipId(operation.successorMembershipId),
-        };
-      case 'publishEpoch':
-        return yield* Effect.fail(new ValidationError({ code: 'invalid-operation' }));
-    }
-    const exhaustive: never = operation;
-    return exhaustive;
-  });
-}
 
 function joinHelperStatus(error: unknown): string {
   if (error instanceof LedgerError) {
@@ -207,6 +153,8 @@ export class DemoSession {
   // Per-session verification cache: no mutable cache state shared across runs.
   private readonly pointCache = new SigningPointCache();
   private closed = false;
+  private readonly run = new LabRun(Layer.empty);
+  private disposal?: Promise<void>;
   private readonly disk: LabFsShape;
   private readonly fetchImpl: LabFetch;
 
@@ -220,7 +168,6 @@ export class DemoSession {
     this.disk = options.fs ?? makeLiveFs();
     this.fs = this.disk;
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
-    this.disk.mkdir(this.clientDir);
   }
 
   private headers(extra?: HeadersInit): Headers {
@@ -237,6 +184,7 @@ export class DemoSession {
   }
 
   async fetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+    if (this.closed) throw new Error('session-closed');
     const target =
       typeof input === 'string' && !input.startsWith('http://') && !input.startsWith('https://')
         ? `${this.baseUrl}${input}`
@@ -271,21 +219,24 @@ export class DemoSession {
       this.epochKeys = new Map();
       return;
     }
-    this.epochKeys = Either.getOrThrowWith(
+    this.epochKeys = Result.getOrThrowWith(
       EpochKeyringStorage.decodeEpochKeyring(this.disk.readText(path)),
       (error) => error
     );
   }
 
-  close(): void {
+  close(): Promise<void> {
     this.closed = true;
     this.ledgerClient = null;
     this.loroDoc?.free();
     this.loroDoc = null;
     this.flockDoc = null;
+    return (this.disposal ??= this.run.close());
   }
 
   async start(): Promise<void> {
+    if (this.closed) throw new Error('session-closed');
+    this.disk.mkdir(this.clientDir);
     this.device = this.options.device ?? (await generateDevice());
     this.loadEpochs();
     this.credential = await this.requestCredential(null);
@@ -328,19 +279,35 @@ export class DemoSession {
     return `${this.baseUrl}/ds/${encodeURIComponent(genesisHex)}/${name}`;
   }
 
-  private async openLedger(): Promise<LedgerClient> {
-    if (this.ledgerClient) return this.ledgerClient;
-    if (!this.genesis) throw new Error('no-space');
-    const store = new SqliteLedgerStore(join(this.clientDir, 'ledger.sqlite'));
-    const stream = new StreamsLedgerStream(
-      new StreamsClient({
-        url: this.streamUrl(CONTROL_STREAM),
-        fetch: (input, init) => this.fetch(input, init),
-        retry: { maxAttempts: 0 },
-      })
-    );
-    this.ledgerClient = await LedgerClient.open(this.genesis, store, stream, this.pointCache);
-    return this.ledgerClient;
+  private openLedgerEffect() {
+    return Effect.suspend(() => {
+      if (this.closed) return Effect.fail(new Error('session-closed'));
+      if (this.ledgerClient) return Effect.succeed(this.ledgerClient);
+      if (!this.genesis) return Effect.fail(new Error('no-space'));
+      const store = new SqliteLedgerStore(join(this.clientDir, 'ledger.sqlite'));
+      const stream = new StreamsLedgerStream(
+        new StreamsClient({
+          url: this.streamUrl(CONTROL_STREAM),
+          fetch: (input, init) => this.fetch(input, init),
+          retry: { maxAttempts: 0 },
+        })
+      );
+      return LedgerClient.openEffect(this.genesis, store, stream, this.pointCache).pipe(
+        Effect.tap((client) =>
+          Effect.sync(() => {
+            this.ledgerClient = client;
+          })
+        )
+      );
+    });
+  }
+
+  private ledgerLayer() {
+    return Layer.succeed(SessionLedger, { open: this.openLedgerEffect() });
+  }
+
+  private openLedger(): Promise<LedgerClient> {
+    return this.run.run(this.openLedgerEffect());
   }
 
   async prepareWrite(): Promise<void> {
@@ -369,7 +336,7 @@ export class DemoSession {
   }
 
   async readLedger(): Promise<Ledger> {
-    const ledger = await (await this.openLedger()).read();
+    const ledger = await this.run.run(readSessionLedger.pipe(Effect.provide(this.ledgerLayer())));
     this.verifiedLedger = ledger;
     this.ledgerEpoch = ledger.state.epoch.number;
     this.canWriteDocument = maySealNewContent(ledger.state, deviceHex(this.device));
@@ -400,14 +367,14 @@ export class DemoSession {
     const journalPath = join(this.clientDir, 'ledger.sqlite');
     const encryptionKey = this.device.enc;
     const device = this.device;
-    await runLabPromise(
+    await this.run.run(
       Effect.gen(function* () {
         const signing = yield* signerLayer(device);
         yield* IntentLedgerClient.create({
-          userId: yield* Bytes.userId(userId),
-          membershipId: yield* Bytes.membershipId(membershipId),
-          encryptionPublicKey: yield* Bytes.encryptionPublicKey(encryptionKey),
-          epochCommitment: yield* Bytes.epochCommitment(commitment),
+          userId: yield* Effect.fromResult(Bytes.userId(userId)),
+          membershipId: yield* Effect.fromResult(Bytes.membershipId(membershipId)),
+          encryptionPublicKey: yield* Effect.fromResult(Bytes.encryptionPublicKey(encryptionKey)),
+          epochCommitment: yield* Effect.fromResult(Bytes.epochCommitment(commitment)),
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
@@ -418,14 +385,13 @@ export class DemoSession {
             )
           )
         );
-      }),
-      Layer.empty
+      }).pipe(Effect.provide(Layer.empty))
     );
     const store = new SqliteLedgerStore(journalPath, {
       createFile: false,
       initializeSchema: false,
     });
-    const journal = await Effect.runPromise(store.exclusive((tx) => tx.load));
+    const journal = await this.run.run(store.exclusive((tx) => tx.load));
     const genesisRecord = journal?.records[0];
     if (!journal || !genesisRecord) throw new Error('missing-genesis');
     this.genesis = new Uint8Array(genesisRecord);
@@ -461,15 +427,14 @@ export class DemoSession {
   /** Promise SDK boundary. Intent execute owns parent, signing and CAS. */
   async submit(operation: Operation): Promise<{ status: string; ledger: Ledger }> {
     if (!this.device) throw new Error('not-started');
-    const client = await this.openLedger();
-    const layer = await Effect.runPromise(signerLayer(this.device));
     try {
-      const result = await runLabPromise(
-        Effect.gen(function* () {
-          const command = yield* ledgerCommand(operation);
-          return yield* client.executeEffect(command);
-        }),
-        layer
+      const result = await this.run.run(
+        Effect.gen({ self: this }, function* () {
+          const signing = yield* signerLayer(this.device);
+          return yield* executeSessionOperation(operation).pipe(
+            Effect.provide(Layer.merge(signing, this.ledgerLayer()))
+          );
+        })
       );
       return { status: result.status, ledger: result.ledger };
     } catch (error) {
@@ -479,7 +444,7 @@ export class DemoSession {
   }
 
   async resume(): Promise<{ status: string; ledger: Ledger }> {
-    const result = await (await this.openLedger()).resume();
+    const result = await this.run.run(resumeSessionLedger.pipe(Effect.provide(this.ledgerLayer())));
     return { status: result.status, ledger: result.ledger };
   }
 
@@ -491,18 +456,17 @@ export class DemoSession {
     this.userId = userId;
     const encryptionKey = this.device.enc;
     const device = this.device;
-    const prepared = await runLabPromise(
+    const prepared = await this.run.run(
       Effect.gen(function* () {
         const layer = yield* enrollmentLayer(device);
         return yield* prepareJoinRequest({
-          genesis: yield* Bytes.genesisHash(fromHex(genesisHex)),
-          requestId: yield* Bytes.requestId(requestId),
-          userId: yield* Bytes.userId(userId),
-          encryptionPublicKey: yield* Bytes.encryptionPublicKey(encryptionKey),
+          genesis: yield* Effect.fromResult(Bytes.genesisHash(fromHex(genesisHex))),
+          requestId: yield* Effect.fromResult(Bytes.requestId(requestId)),
+          userId: yield* Effect.fromResult(Bytes.userId(userId)),
+          encryptionPublicKey: yield* Effect.fromResult(Bytes.encryptionPublicKey(encryptionKey)),
           expiresAt: null,
         }).pipe(Effect.provide(layer));
-      }),
-      Layer.empty
+      }).pipe(Effect.provide(Layer.empty))
     );
     const wire: JoinRequestWire = {
       requestId: toHex(prepared.requestId.toBytes()),
@@ -690,22 +654,23 @@ export class DemoSession {
     const genesisHex = this.genesisHex;
     const membership = actor.membershipId;
     const encryptionKey = target.enc;
-    const command = await runLabPromise(
+    const command = await this.run.run(
       Effect.gen(function* () {
         const layer = yield* enrollmentLayer(target);
         return yield* prepareDeviceAdmission({
-          genesis: yield* Bytes.genesisHash(fromHex(genesisHex)),
-          membershipId: yield* Bytes.membershipId(membership),
-          encryptionPublicKey: yield* Bytes.encryptionPublicKey(encryptionKey),
+          genesis: yield* Effect.fromResult(Bytes.genesisHash(fromHex(genesisHex))),
+          membershipId: yield* Effect.fromResult(Bytes.membershipId(membership)),
+          encryptionPublicKey: yield* Effect.fromResult(Bytes.encryptionPublicKey(encryptionKey)),
           grant,
         }).pipe(Effect.provide(layer));
-      }),
-      Layer.empty
+      }).pipe(Effect.provide(Layer.empty))
     );
     const client = await this.openLedger();
-    const ownerLayer = await Effect.runPromise(signerLayer(this.device));
+    const ownerLayer = await this.run.run(signerLayer(this.device));
     try {
-      const result = await runLabPromise(client.executeEffect(command), ownerLayer);
+      const result = await this.run.run(
+        client.executeEffect(command).pipe(Effect.provide(ownerLayer))
+      );
       return { status: result.status };
     } catch (error) {
       if (error instanceof ValidationError) throw new LedgerError(error.code, error.position);
@@ -725,9 +690,9 @@ export class DemoSession {
   async publishEpoch(): Promise<{ status: string; epoch: number }> {
     if (!this.genesis || !this.genesisHex) throw new Error('no-space');
     const client = await this.openLedger();
-    const result = await runLabPromise(
-      Effect.gen(this, function* () {
-        const genesis = yield* Bytes.genesisHash(fromHex(this.genesisHex ?? ''));
+    const result = await this.run.run(
+      Effect.gen({ self: this }, function* () {
+        const genesis = yield* Effect.fromResult(Bytes.genesisHash(fromHex(this.genesisHex ?? '')));
         const layer = yield* rotationLayer({
           genesis,
           candidatePath: join(this.clientDir, 'epoch-candidate.json'),
@@ -737,8 +702,7 @@ export class DemoSession {
           fs: this.options.fs,
         });
         return yield* client.rotateEpochEffect().pipe(Effect.provide(layer));
-      }),
-      Layer.empty
+      }).pipe(Effect.provide(Layer.empty))
     );
     this.loadEpochs();
     this.ledgerEpoch = result.ledger.inspectState().epoch.number;
@@ -760,10 +724,10 @@ export class DemoSession {
     this.ensureKeyring();
     const client = await this.openLedger();
     const files = this.epochFiles();
-    const result = await runLabPromise(
-      Effect.gen(this, function* () {
-        const genesis = yield* Bytes.genesisHash(fromHex(this.genesisHex ?? ''));
-        const recipientKey = yield* Bytes.signingPublicKey(recipient.publicKey);
+    const result = await this.run.run(
+      Effect.gen({ self: this }, function* () {
+        const genesis = yield* Effect.fromResult(Bytes.genesisHash(fromHex(this.genesisHex ?? '')));
+        const recipientKey = yield* Effect.fromResult(Bytes.signingPublicKey(recipient.publicKey));
         const layer = yield* sendKeyLayer({
           genesis,
           candidatePath: files.candidatePath,
@@ -780,8 +744,7 @@ export class DemoSession {
           fs: this.options.fs,
         });
         return yield* client.sendCurrentEpochKeyEffect(recipientKey).pipe(Effect.provide(layer));
-      }),
-      Layer.empty
+      }).pipe(Effect.provide(Layer.empty))
     );
     if (result._tag !== 'Observed') throw new Error('pending-key-delivery');
     return result.frame;
@@ -799,10 +762,10 @@ export class DemoSession {
     this.ensureKeyring();
     const client = await this.openLedger();
     const files = this.epochFiles();
-    await runLabPromise(
-      Effect.gen(this, function* () {
-        const genesis = yield* Bytes.genesisHash(fromHex(this.genesisHex ?? ''));
-        const senderKey = yield* Bytes.signingPublicKey(sender.publicKey);
+    await this.run.run(
+      Effect.gen({ self: this }, function* () {
+        const genesis = yield* Effect.fromResult(Bytes.genesisHash(fromHex(this.genesisHex ?? '')));
+        const senderKey = yield* Effect.fromResult(Bytes.signingPublicKey(sender.publicKey));
         const layer = yield* receiveKeyLayer({
           genesis,
           candidatePath: files.candidatePath,
@@ -811,8 +774,7 @@ export class DemoSession {
           fs: this.options.fs,
         });
         return yield* client.receiveEpochKeyEffect(senderKey, frame).pipe(Effect.provide(layer));
-      }),
-      Layer.empty
+      }).pipe(Effect.provide(Layer.empty))
     );
     this.loadEpochs();
   }

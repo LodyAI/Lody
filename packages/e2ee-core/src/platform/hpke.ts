@@ -56,7 +56,7 @@ function cryptoCall<A>(
   work: () => Promise<A>
 ): Effect.Effect<A, CryptoError> {
   return Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       error instanceof HpkeError || error instanceof DOMException
         ? Effect.fail(new CryptoError({ operation }))
         : Effect.die(error)
@@ -114,8 +114,8 @@ export function hpkeRecipientLayer(
     HpkeRecipient,
     Effect.gen(function* () {
       const driver = yield* Effect.sync(createHpkeDriver);
-      const publicKey = yield* encryptionPublicKey(
-        yield* cryptoCall('import', () => driver.publicKey(keyPair))
+      const publicKey = yield* Effect.fromResult(
+        encryptionPublicKey(yield* cryptoCall('import', () => driver.publicKey(keyPair)))
       );
       return HpkeRecipient.of({
         publicKey,
@@ -128,7 +128,7 @@ export function hpkeRecipientLayer(
           ).pipe(
             Effect.flatMap((plaintext) => {
               try {
-                return epochKey(plaintext);
+                return Effect.fromResult(epochKey(plaintext));
               } finally {
                 plaintext.fill(0);
               }

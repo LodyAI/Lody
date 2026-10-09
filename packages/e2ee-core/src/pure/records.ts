@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import type { GenesisHash, RecordHash, SigningPublicKey } from './bytes';
 import { bytesEqual } from './cbor';
 import { ContextMismatch } from './errors';
@@ -73,10 +73,10 @@ class ApplicableValue {
     this.#next = next;
     Object.freeze(this);
   }
-  [applicationMaterial](base: ViewValue): Either.Either<ViewValue, ContextMismatch> {
+  [applicationMaterial](base: ViewValue): Result.Result<ViewValue, ContextMismatch> {
     return base === this.#base
-      ? Either.right(this.#next)
-      : Either.left(new ContextMismatch({ context: 'view' }));
+      ? Result.succeed(this.#next)
+      : Result.fail(new ContextMismatch({ context: 'view' }));
   }
 }
 
@@ -104,4 +104,4 @@ export const viewFacts = (view: LedgerView): SigningFacts => viewSigningFacts.ge
 export const applyAuthorizedRecord = (
   base: LedgerView,
   record: ApplicableRecord
-): Either.Either<LedgerView, ContextMismatch> => record[applicationMaterial](base);
+): Result.Result<LedgerView, ContextMismatch> => record[applicationMaterial](base);

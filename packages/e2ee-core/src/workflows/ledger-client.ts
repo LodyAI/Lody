@@ -20,7 +20,7 @@ type Dependencies = JournalStore | LedgerTransport | DeviceSigner | SignatureVer
 export class LedgerClient {
   private constructor(
     private readonly engine: LedgerEngine,
-    private readonly signer: DeviceSigner['Type']
+    private readonly signer: DeviceSigner['Service']
   ) {}
 
   private static bind(
@@ -37,7 +37,7 @@ export class LedgerClient {
   }
 
   /** Promise-adapter bridge. The engine already owns journal/transport. */
-  static fromEngine(engine: LedgerEngine, signer: DeviceSigner['Type']) {
+  static fromEngine(engine: LedgerEngine, signer: DeviceSigner['Service']) {
     return new LedgerClient(engine, signer);
   }
 
@@ -48,16 +48,18 @@ export class LedgerClient {
     const { userId, membershipId, encryptionPublicKey, epochCommitment } = command;
     return Effect.gen(function* () {
       const signer = yield* DeviceSigner;
-      const body = yield* encodeGenesisBody({
-        signer: signer.publicKey.toBytes(),
-        userId: userId.toBytes(),
-        membershipId: membershipId.toBytes(),
-        encryptionPublicKey: encryptionPublicKey.toBytes(),
-        epochCommitment: epochCommitment.toBytes(),
-      });
+      const body = yield* Effect.fromResult(
+        encodeGenesisBody({
+          signer: signer.publicKey.toBytes(),
+          userId: userId.toBytes(),
+          membershipId: membershipId.toBytes(),
+          encryptionPublicKey: encryptionPublicKey.toBytes(),
+          epochCommitment: epochCommitment.toBytes(),
+        })
+      );
       const signature = yield* signer.sign(recordSigningBytes(body));
-      const genesisRecord = yield* encodeSignedRecord(body, signature.toBytes());
-      const anchor = yield* genesisHash(hashRecordBytes(genesisRecord));
+      const genesisRecord = yield* Effect.fromResult(encodeSignedRecord(body, signature.toBytes()));
+      const anchor = yield* Effect.fromResult(genesisHash(hashRecordBytes(genesisRecord)));
       // The engine verifies the signature and genesis rules before saving anything.
       const engine = yield* LedgerEngine.create({ anchor, genesisRecord });
       return new LedgerClient(engine, signer);

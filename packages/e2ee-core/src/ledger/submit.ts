@@ -23,6 +23,7 @@ import {
 import { rotateEpoch } from '../workflows/epoch-rotation';
 import { LedgerClient as EffectLedgerClient } from '../workflows/ledger-client';
 import { LedgerEngine, type ResumeOutcome } from '../workflows/ledger-engine';
+import { verifyLedger } from '../workflows/verification';
 import { runLegacy } from './compat';
 import type { Hash } from './crypto';
 import { Ledger } from './ledger';
@@ -43,7 +44,7 @@ export type { LedgerJournal, LedgerReadPage, LedgerStream } from '../pure/journa
 export { MemoryJournalStore as MemoryLedgerStore } from '../platform/memory-stores';
 
 /** The journal port is the native Effect `JournalStore` service. */
-export type LedgerStore = JournalStore['Type'];
+export type LedgerStore = JournalStore['Service'];
 export type LedgerTransaction = JournalTransaction;
 
 export type LedgerSubmitStatus = 'committed' | 'conflict' | 'unknown' | 'unsupported';
@@ -80,7 +81,7 @@ function copyTrust(trust: SnapshotTrust): SnapshotTrust {
 export class LedgerClient {
   private readonly anchor: Hash;
   private readonly genesisRecord: Uint8Array | null;
-  private readonly signatures: SignatureVerifier['Type'];
+  private readonly signatures: SignatureVerifier['Service'];
   private engine: LedgerEngine | undefined;
 
   constructor(
@@ -102,10 +103,27 @@ export class LedgerClient {
     stream: LedgerStream,
     pointCache?: SigningPointCache
   ): Promise<LedgerClient> {
-    const record = ownBytes(genesisRecord);
+    return runLegacy(LedgerClient.openEffect(ownBytes(genesisRecord), store, stream, pointCache));
+  }
+
+  /** Inert native description for consumers with an existing runtime owner. */
+  static openEffect(
+    genesisRecord: Uint8Array,
+    store: LedgerStore,
+    stream: LedgerStream,
+    pointCache?: SigningPointCache
+  ) {
+    const record = copyBytes(genesisRecord);
     const anchor = hashRecordBytes(record);
-    await Ledger.verify({ anchor, records: [record], pointCache });
-    return new LedgerClient(record, anchor, store, stream, pointCache);
+    return Effect.gen(function* () {
+      yield* verifyLedger({
+        anchor: yield* Effect.fromResult(genesisHash(anchor)),
+        records: [record],
+      }).pipe(
+        Effect.provideService(SignatureVerifier, makeSignatureVerifier({ cache: pointCache }))
+      );
+      return new LedgerClient(record, anchor, store, stream, pointCache);
+    });
   }
 
   static async openFromSnapshot(input: {
@@ -128,10 +146,10 @@ export class LedgerClient {
       client.provide(
         Effect.gen(function* () {
           return yield* LedgerEngine.legacyFromSnapshot({
-            genesis: yield* genesisHash(trust.genesis),
-            endorser: yield* signingPublicKey(trust.endorser),
-            head: yield* recordHash(trust.head),
-            headSignature: yield* signature(trust.headSignature),
+            genesis: yield* Effect.fromResult(genesisHash(trust.genesis)),
+            endorser: yield* Effect.fromResult(signingPublicKey(trust.endorser)),
+            head: yield* Effect.fromResult(recordHash(trust.head)),
+            headSignature: yield* Effect.fromResult(signature(trust.headSignature)),
             snapshot,
           });
         })
@@ -176,9 +194,9 @@ export class LedgerClient {
   private engineEffect(): Effect.Effect<LedgerEngine, ClientError> {
     return Effect.suspend(() => {
       if (this.engine) return Effect.succeed(this.engine);
-      return Effect.gen(this, function* () {
+      return Effect.gen({ self: this }, function* () {
         const engine = yield* LedgerEngine.legacy(
-          yield* genesisHash(this.anchor),
+          yield* Effect.fromResult(genesisHash(this.anchor)),
           this.genesisRecord,
           yield* JournalStore,
           yield* LedgerTransport,
@@ -195,9 +213,11 @@ export class LedgerClient {
   }
 
   read(): Promise<Ledger> {
-    return runLegacy(
-      this.withEngine((engine) => engine.refresh()).pipe(Effect.map(Ledger.fromView))
-    );
+    return runLegacy(this.readEffect());
+  }
+
+  readEffect() {
+    return this.withEngine((engine) => engine.refresh()).pipe(Effect.map(Ledger.fromView));
   }
 
   submit(record: Uint8Array): Promise<LedgerSubmitResult> {

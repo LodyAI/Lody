@@ -1,6 +1,6 @@
 import { createHpkeDriver } from '../platform/hpke';
 import * as history from '../pure/epoch-history';
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { unwrap } from './compat';
 import * as envelope from '../pure/epoch-envelope';
 import { parseEpochEnvelopeChunk } from '../pure/epoch-envelope-stream';
@@ -113,10 +113,10 @@ export function assertEpochStreamAppend(
 }
 
 function envelopeRecipient(frame: Uint8Array) {
-  return Either.flatMap(decodeCbor(frame.subarray(0, frame.byteLength - 144)), (aad) =>
+  return Result.flatMap(decodeCbor(frame.subarray(0, frame.byteLength - 144)), (aad) =>
     Array.isArray(aad) && aad.length === 4 && aad[3] instanceof Uint8Array
-      ? Either.right(aad[3])
-      : Either.left(new ValidationErrorClass({ code: 'canonical' }))
+      ? Result.succeed(aad[3])
+      : Result.fail(new ValidationErrorClass({ code: 'canonical' }))
   );
 }
 

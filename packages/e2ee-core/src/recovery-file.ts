@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { liveEntropy, type Entropy } from './capabilities';
 import {
   encodeRecoveryFile,
@@ -15,9 +15,9 @@ import { keyId } from './pure/identifiers';
 export { MAX_RECOVERY_MATERIAL_BYTES };
 export type { RecoveryBackupContext };
 
-function unwrap<A>(result: Either.Either<A, RecoveryError>): A {
-  if (Either.isLeft(result)) throw new ControlLogError(result.left.code);
-  return result.right;
+function unwrap<A>(result: Result.Result<A, RecoveryError>): A {
+  if (Result.isFailure(result)) throw new ControlLogError(result.failure.code);
+  return result.success;
 }
 
 /** Secret file bytes. Save/reselect/read-back confirmation belongs to the UI, not this primitive. */

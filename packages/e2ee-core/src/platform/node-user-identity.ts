@@ -58,10 +58,10 @@ export function nodeUserIdentityLayer(input: {
   const store = new SqliteUserIdentityStore(input.path, input.binding, input.protection);
   return Layer.succeed(UserIdentityStore, {
     create: Effect.tryPromise({ try: () => store.create(), catch: (error) => error }).pipe(
-      Effect.catchAll(identityFailure)
+      Effect.catch(identityFailure)
     ),
     load: Effect.tryPromise({ try: () => store.load(), catch: (error) => error }).pipe(
-      Effect.catchAll(identityFailure)
+      Effect.catch(identityFailure)
     ),
     sealBackup: (file, context) => {
       const owned = new Uint8Array(file);
@@ -69,7 +69,7 @@ export function nodeUserIdentityLayer(input: {
       return Effect.tryPromise({
         try: () => store.sealBackup(owned, expected),
         catch: (error) => error,
-      }).pipe(Effect.catchAll(recoveryFailure));
+      }).pipe(Effect.catch(recoveryFailure));
     },
     recover: (file, context, frame) => {
       const ownedFile = new Uint8Array(file);
@@ -78,7 +78,7 @@ export function nodeUserIdentityLayer(input: {
       return Effect.tryPromise({
         try: () => store.recover(ownedFile, expected, ownedFrame),
         catch: (error) => error,
-      }).pipe(Effect.catchAll(recoveryFailure));
+      }).pipe(Effect.catch(recoveryFailure));
     },
   });
 }

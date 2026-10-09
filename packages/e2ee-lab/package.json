@@ -23,7 +23,7 @@
     "@loro-dev/sqlite-riverrun": "0.3.0",
     "@loro-dev/streams-client": "catalog:",
     "@loro-dev/streams-crdt": "file:./vendor/streams-crdt.tgz",
-    "effect": "catalog:",
+    "effect": "catalog:e2eeEffect",
     "loro-crdt": "catalog:"
   },
   "devDependencies": {

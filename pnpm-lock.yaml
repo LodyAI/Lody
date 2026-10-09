@@ -117,6 +117,10 @@ catalogs:
     vite-plugin-wasm:
       specifier: ^3.6.0
       version: 3.6.0
+  e2eeEffect:
+    effect:
+      specifier: 4.0.2
+      version: 4.0.2
 
 overrides:
   '@loro-dev/sqlite-riverrun>better-sqlite3': ^13.0.2
@@ -1374,8 +1378,8 @@ importers:
         specifier: 2.2.0
         version: 2.2.0
       effect:
-        specifier: 'catalog:'
-        version: 3.18.4
+        specifier: catalog:e2eeEffect
+        version: 4.0.2
     devDependencies:
       '@loro-dev/flock-wasm':
         specifier: 'catalog:'
@@ -1414,8 +1418,8 @@ importers:
         specifier: file:./vendor/streams-crdt.tgz
         version: file:packages/e2ee-lab/vendor/streams-crdt.tgz(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)
       effect:
-        specifier: 'catalog:'
-        version: 3.18.4
+        specifier: catalog:e2eeEffect
+        version: 4.0.2
       loro-crdt:
         specifier: 'catalog:'
         version: 1.15.1
@@ -8227,6 +8231,9 @@ packages:
 
   effect@3.18.4:
     resolution: {integrity: sha512-b1LXQJLe9D11wfnOKAk3PKxuqYshQ0Heez+y5pnkd3jLj1yx9QhM72zZ9uUrOQyNvrs2GZZd/3maL0ZV18YuDA==}
+
+  effect@4.0.2:
+    resolution: {integrity: sha512-YeYnLqSFrL4+tCOXRrfNP03w8FILoF/wDl+ukraJAGzXrjcS383W7LAAvGBbLatEyktmLxRq+9xJinx7QzXW5A==}
 
   ejs@3.1.10:
     resolution: {integrity: sha512-UeJmFfOrAQS8OJWPZ4qtgHyWExa088/MtK5UEyoJGFH67cDEXkZSviOiKRCZ4Xij0zxI3JECgYs3oKx+AizQBA==}
@@ -20866,6 +20873,8 @@ snapshots:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 3.23.2
+
+  effect@4.0.2: {}
 
   ejs@3.1.10:
     dependencies:

@@ -1,4 +1,4 @@
-import { Effect, Either } from 'effect';
+import { Effect, Result } from 'effect';
 import { ContentAuthority, ContentCrypto } from '../ports/content';
 import {
   assembleContentFrame,
@@ -36,12 +36,12 @@ export function sealContent(input: SealContent) {
   return Effect.acquireUseRelease(
     Effect.sync(() => ({
       plaintext: copyBytes(snapshotPlain),
-      epochKey: Either.map(snapshotKey, copyBytes),
+      epochKey: Result.map(snapshotKey, copyBytes),
     })),
     ({ plaintext, epochKey: epochKeyCopy }) =>
       Effect.gen(function* () {
         if (oversized) return yield* Effect.fail(oversized);
-        const epochKey = yield* epochKeyCopy;
+        const epochKey = yield* Effect.fromResult(epochKeyCopy);
         const contentCrypto = yield* ContentCrypto;
         const authority = yield* ContentAuthority;
         const messageId = hexBytes(yield* contentCrypto.random(16));
@@ -55,13 +55,13 @@ export function sealContent(input: SealContent) {
           device: author.device,
           messageId,
         });
-        const aad = yield* encodeContentHeader(header);
+        const aad = yield* Effect.fromResult(encodeContentHeader(header));
         const publicKey = yield* authority.authorize(header);
-        yield* checkContentSigningKey(publicKey);
+        yield* Effect.fromResult(checkContentSigningKey(publicKey));
         const nonce = yield* contentCrypto.random(24);
         const key = yield* contentCrypto.derive(epochKey, header);
         try {
-          const ciphertext = yield* encryptContent(key, nonce, aad, plaintext);
+          const ciphertext = yield* Effect.fromResult(encryptContent(key, nonce, aad, plaintext));
           const unsigned = assembleUnsignedContent(aad, nonce, ciphertext);
           const message = contentSigningBytes(unsigned);
           const signature = yield* contentCrypto.sign(signingKey, message);
@@ -76,7 +76,7 @@ export function sealContent(input: SealContent) {
     ({ plaintext, epochKey: epochKeyCopy }) =>
       Effect.sync(() => {
         plaintext.fill(0);
-        if (Either.isRight(epochKeyCopy)) epochKeyCopy.right.fill(0);
+        if (Result.isSuccess(epochKeyCopy)) epochKeyCopy.success.fill(0);
       })
   ).pipe(Effect.withSpan('e2ee.content.seal'));
 }
@@ -84,11 +84,11 @@ export function sealContent(input: SealContent) {
 export function authenticateContent(frame: Uint8Array) {
   const snapshot = copyBytes(frame);
   return Effect.gen(function* () {
-    const parsed = yield* parseContentFrame(snapshot);
+    const parsed = yield* Effect.fromResult(parseContentFrame(snapshot));
     const authority = yield* ContentAuthority;
     const contentCrypto = yield* ContentCrypto;
     const publicKey = yield* authority.authorize(parsed.header);
-    yield* checkContentSigningKey(publicKey);
+    yield* Effect.fromResult(checkContentSigningKey(publicKey));
     const ok = yield* contentCrypto.verify(
       publicKey,
       contentSigningBytes(parsed.unsigned),
@@ -105,19 +105,19 @@ export function openContent(scope: ContentScopeInput, epochKey: Uint8Array, fram
   const snapshotFrame = copyBytes(frame);
   const snapshotKey = copyContentKey(epochKey);
   return Effect.acquireUseRelease(
-    Effect.sync(() => ({ epochKey: Either.map(snapshotKey, copyBytes) })),
+    Effect.sync(() => ({ epochKey: Result.map(snapshotKey, copyBytes) })),
     ({ epochKey: epochKeyCopy }) =>
       Effect.gen(function* () {
-        const expected = yield* contentScopeBinding(expectedScope);
-        const parsed = yield* parseContentFrame(snapshotFrame);
-        const actual = yield* contentScopeBinding(parsed.header);
+        const expected = yield* Effect.fromResult(contentScopeBinding(expectedScope));
+        const parsed = yield* Effect.fromResult(parseContentFrame(snapshotFrame));
+        const actual = yield* Effect.fromResult(contentScopeBinding(parsed.header));
         if (actual !== expected)
           return yield* Effect.fail(new ContentError({ code: 'content-context-mismatch' }));
-        const copied = yield* epochKeyCopy;
+        const copied = yield* Effect.fromResult(epochKeyCopy);
         const authority = yield* ContentAuthority;
         const contentCrypto = yield* ContentCrypto;
         const publicKey = yield* authority.authorize(parsed.header);
-        yield* checkContentSigningKey(publicKey);
+        yield* Effect.fromResult(checkContentSigningKey(publicKey));
         const ok = yield* contentCrypto.verify(
           publicKey,
           contentSigningBytes(parsed.unsigned),
@@ -127,7 +127,9 @@ export function openContent(scope: ContentScopeInput, epochKey: Uint8Array, fram
         const key = yield* contentCrypto.derive(copied, parsed.header);
         try {
           yield* authority.authorize(parsed.header, publicKey);
-          const plaintext = yield* decryptContent(key, parsed.nonce, parsed.aad, parsed.ciphertext);
+          const plaintext = yield* Effect.fromResult(
+            decryptContent(key, parsed.nonce, parsed.aad, parsed.ciphertext)
+          );
           return { header: parsed.header, plaintext };
         } finally {
           key.fill(0);
@@ -135,7 +137,7 @@ export function openContent(scope: ContentScopeInput, epochKey: Uint8Array, fram
       }),
     ({ epochKey: epochKeyCopy }) =>
       Effect.sync(() => {
-        if (Either.isRight(epochKeyCopy)) epochKeyCopy.right.fill(0);
+        if (Result.isSuccess(epochKeyCopy)) epochKeyCopy.success.fill(0);
       })
   ).pipe(Effect.withSpan('e2ee.content.open'));
 }

@@ -1,4 +1,4 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { bytesEqual } from './cbor';
 import { SnapshotAdmissionError } from './errors';
 
@@ -56,7 +56,7 @@ export type SnapshotAdmitResult =
       readonly header: null;
     };
 
-const fail = (code: string) => Either.left(new SnapshotAdmissionError({ code }));
+const fail = (code: string) => Result.fail(new SnapshotAdmissionError({ code }));
 
 export function checkSnapshotOffset(offset: unknown) {
   return typeof offset === 'string' &&
@@ -64,7 +64,7 @@ export function checkSnapshotOffset(offset: unknown) {
     offset.length <= MAX_OFFSET &&
     offset !== 'now' &&
     offset !== '-1'
-    ? Either.right(offset)
+    ? Result.succeed(offset)
     : fail('invalid-snapshot-offset');
 }
 
@@ -80,7 +80,7 @@ export function checkSnapshotLease(time: number, issuedAt: number, expiresAt: nu
     expiresAt - issuedAt > CONTENT_SNAPSHOT_ADMISSION_WINDOW_MS
   )
     return fail('snapshot-lease-invalid');
-  return time < expiresAt ? Either.void : fail('snapshot-lease-expired');
+  return time < expiresAt ? Result.void : fail('snapshot-lease-expired');
 }
 
 function parseOffsetOrder(value: string): number | undefined {
@@ -101,13 +101,13 @@ export function existingSnapshot(
   tx: SnapshotTxView,
   offset: string,
   body: Uint8Array
-): Either.Either<SnapshotAdmitResult | undefined, SnapshotAdmissionError> {
+): Result.Result<SnapshotAdmitResult | undefined, SnapshotAdmissionError> {
   const current = tx.current();
   const prior = tx.admitted(offset);
   if (prior) {
     if (current === undefined) return fail('snapshot-store-corrupt');
     if (!bytesEqual(prior, body)) return fail('snapshot-identity-conflict');
-    return Either.right({
+    return Result.succeed({
       status: 'idempotent',
       currentOffset: current.offset,
       currentBody: current.body,
@@ -116,14 +116,14 @@ export function existingSnapshot(
   }
   if (current && compareSnapshotOffsets(offset, current.offset) === 0) {
     if (!bytesEqual(current.body, body)) return fail('snapshot-identity-conflict');
-    return Either.right({
+    return Result.succeed({
       status: 'idempotent',
       currentOffset: current.offset,
       currentBody: current.body,
       header: null,
     });
   }
-  return Either.right(undefined);
+  return Result.succeed(undefined);
 }
 
 export function commitSnapshotAdmission(
@@ -140,8 +140,8 @@ export function commitSnapshotAdmission(
     readonly leaseIssuedAt: number;
     readonly leaseExpiresAt: number;
   }
-): Either.Either<SnapshotAdmitResult, SnapshotAdmissionError> {
-  return Either.gen(function* () {
+): Result.Result<SnapshotAdmitResult, SnapshotAdmissionError> {
+  return Result.gen(function* () {
     // Identical bytes are not a credential: only the signing device may retry, in the
     // same context. A lost-ACK retry needs no fresh lease or write right because it
     // changes nothing; hosts must not republish a non-current idempotent result.
@@ -175,7 +175,7 @@ export function commitSnapshotAdmission(
 
 /** Framing only. Does not authenticate the inner content signature. */
 export function parseLsceSnapshot(payload: Uint8Array) {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     if (payload.byteLength < PROVIDER_PREFIX_BYTES || !LSCE.every((byte, i) => payload[i] === byte))
       return yield* fail('invalid-snapshot-envelope');
     const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
@@ -197,7 +197,7 @@ export function parseLsceSnapshot(payload: Uint8Array) {
 }
 
 export function checkSnapshotPut(input: SnapshotPut) {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     if (typeof input.streamKey !== 'string' || input.streamKey.length === 0)
       return yield* fail('invalid-snapshot-stream');
     const offset = yield* checkSnapshotOffset(input.offset);

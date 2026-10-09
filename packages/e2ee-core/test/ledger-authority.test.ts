@@ -420,7 +420,7 @@ describe('management derives from role ∩ personal kind', () => {
     const view = await Effect.runPromise(
       Effect.gen(function* () {
         return yield* verifyLedger({
-          anchor: yield* Bytes.genesisHash(o.created.anchor),
+          anchor: yield* Effect.fromResult(Bytes.genesisHash(o.created.anchor)),
           records: o.records,
         });
       }).pipe(Effect.provide(signatureVerifierLayer))

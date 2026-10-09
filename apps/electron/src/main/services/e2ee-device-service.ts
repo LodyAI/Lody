@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { Effect } from 'effect'
-import { DeviceIdentityStore, StorageError } from '@lody/e2ee-core/effect'
-import { nodeDeviceIdentityLayer } from '@lody/e2ee-core/effect/platform-node'
+import { nodeDeviceIdentityClient } from '@lody/e2ee-core/node-identity-client'
 import type { LocalDeviceProtection } from '@lody/e2ee-core/node-device-store'
 
 export interface DeviceAccountLease {
@@ -67,35 +65,16 @@ export class E2eeDeviceService {
       account.assertCurrent()
       await mkdir(this.options.directory, { recursive: true, mode: 0o700 })
       account.assertCurrent()
-      const layer = nodeDeviceIdentityLayer({
+      const client = nodeDeviceIdentityClient({
         path: join(this.options.directory, `${binding}.sqlite`),
         binding,
         protection: this.options.protection
       })
-      const identity = await Effect.runPromise(
-        Effect.gen(function* () {
-          const store = yield* DeviceIdentityStore
-          if (create === 'initialize') {
-            return yield* store.load.pipe(
-              Effect.catchIf(
-                (error): error is StorageError =>
-                  error instanceof StorageError && error.reason === 'missing',
-                () => {
-                  account.assertCurrent()
-                  return store.create.pipe(
-                    Effect.catchIf(
-                      (error): error is StorageError =>
-                        error instanceof StorageError && error.reason === 'exists',
-                      () => store.load
-                    )
-                  )
-                }
-              )
-            )
-          }
-          return yield* create ? store.create : store.load
-        }).pipe(Effect.provide(layer))
-      )
+      const identity = await (create === 'initialize'
+        ? client.initialize(() => account.assertCurrent())
+        : create
+          ? client.create()
+          : client.load())
       const signingPublicKey = Buffer.from(
         await crypto.subtle.exportKey('raw', identity.signing.publicKey)
       ).toString('hex')

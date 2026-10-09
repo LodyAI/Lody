@@ -1,4 +1,6 @@
-import { Cause, Deferred, Effect, Either, Exit, Fiber, Layer } from 'effect';
+import { runLegacy } from '../src/ledger/compat';
+import { ValidationError } from '../src/pure/errors';
+import { Cause, Deferred, Effect, Result, Exit, Fiber, Layer, Semaphore } from 'effect';
 import { describe, expect, it } from 'vitest';
 import {
   LedgerClient,
@@ -25,8 +27,8 @@ import { ed25519, signGenesis, random, append as appendFixture } from './ledger-
 import { commitEpochKey, sealHistoryPacket } from '../src/ledger';
 import { ControlLogError } from '../src/pure/legacy-error';
 
-const value = <A, E>(either: Either.Either<A, E>): A =>
-  Either.getOrThrowWith(either, (error) => error);
+const value = <A, E>(either: Result.Result<A, E>): A =>
+  Result.getOrThrowWith(either, (error) => error);
 
 function outcomeContracts(outcome: CommandOutcome) {
   switch (outcome._tag) {
@@ -101,7 +103,7 @@ describe('Effect rotation recovery', () => {
     let failInstall = false;
     let failSave = false;
     const installed = new Map<number, EpochKey>();
-    const semaphore = Effect.unsafeMakeSemaphore(1);
+    const semaphore = Semaphore.makeUnsafe(1);
     const layer = Layer.mergeAll(
       Layer.succeed(EpochCandidateStore, {
         exclusive: (genesis, work) =>
@@ -211,9 +213,12 @@ describe('Effect rotation recovery', () => {
       bytes: (_, length) => Effect.sync(() => random(length)),
     });
     const result = await Effect.runPromise(
-      s.client.rotateEpoch().pipe(Effect.provide(s.layer), Effect.provide(entropy), Effect.either)
+      s.client.rotateEpoch().pipe(Effect.provide(s.layer), Effect.provide(entropy), Effect.result)
     );
-    expect(result).toMatchObject({ _tag: 'Left', left: { _tag: 'StorageError', reason: 'io' } });
+    expect(result).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'StorageError', reason: 'io' },
+    });
     expect(s.stream.records).toEqual([]);
     expect(s.store.journal?.pending).toBeNull();
     expect(s.installed.has(1)).toBe(false);
@@ -223,9 +228,12 @@ describe('Effect rotation recovery', () => {
     const s = await candidateSetup();
     s.failInstall(true);
     const failure = await Effect.runPromise(
-      s.client.resumeEpochRotation().pipe(Effect.provide(s.layer), Effect.either)
+      s.client.resumeEpochRotation().pipe(Effect.provide(s.layer), Effect.result)
     );
-    expect(failure).toMatchObject({ _tag: 'Left', left: { _tag: 'StorageError', reason: 'io' } });
+    expect(failure).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'StorageError', reason: 'io' },
+    });
     expect(s.saved()).toBe(s.text);
     expect(s.installed.size).toBe(0);
     expect(s.stream.records).toEqual([s.first.record]);
@@ -246,13 +254,13 @@ describe('Effect rotation recovery', () => {
         work({
           load: Effect.sync(s.saved),
           save: (text) => Effect.sync(() => s.replace(text)),
-          clear: Deferred.succeed(atClear, undefined).pipe(Effect.zipRight(Effect.never)),
+          clear: Deferred.succeed(atClear, undefined).pipe(Effect.andThen(Effect.never)),
         }),
     });
     const fiber = await Effect.runPromise(
       s.client
         .resumeEpochRotation()
-        .pipe(Effect.provide(blockedStore), Effect.provide(s.layer), Effect.forkDaemon)
+        .pipe(Effect.provide(blockedStore), Effect.provide(s.layer), Effect.forkDetach)
     );
     await Effect.runPromise(Deferred.await(atClear));
     await Effect.runPromise(Fiber.interrupt(fiber));
@@ -285,9 +293,12 @@ describe('Effect rotation recovery', () => {
     ] as const) {
       s.replace(text);
       const result = await Effect.runPromise(
-        s.client.resumeEpochRotation().pipe(Effect.provide(s.layer), Effect.either)
+        s.client.resumeEpochRotation().pipe(Effect.provide(s.layer), Effect.result)
       );
-      expect(result).toMatchObject({ _tag: 'Left', left: { _tag: 'EpochRotationError', reason } });
+      expect(result).toMatchObject({
+        _tag: 'Failure',
+        failure: { _tag: 'EpochRotationError', reason },
+      });
       expect(s.saved()).toBe(text);
       expect(s.installed.size).toBe(0);
       expect(s.stream.records).toEqual([]);
@@ -296,9 +307,9 @@ describe('Effect rotation recovery', () => {
     if (!s.store.journal) throw new Error('missing fixture journal');
     s.store.journal = { ...s.store.journal, pending: s.first.record };
     const result = await Effect.runPromise(
-      s.client.resumeEpochRotation().pipe(Effect.provide(s.layer), Effect.either)
+      s.client.resumeEpochRotation().pipe(Effect.provide(s.layer), Effect.result)
     );
-    expect(result).toMatchObject({ _tag: 'Left', left: { reason: 'candidate-missing' } });
+    expect(result).toMatchObject({ _tag: 'Failure', failure: { reason: 'candidate-missing' } });
     expect(s.store.journal.pending).toEqual(s.first.record);
   });
 
@@ -362,9 +373,9 @@ describe('Effect client owns submissions', () => {
         )
       )
     );
-    expect(await Effect.runPromise(Effect.either(create))).toMatchObject({
-      _tag: 'Left',
-      left: { code: 'bad-signature', position: 0 },
+    expect(await Effect.runPromise(Effect.result(create))).toMatchObject({
+      _tag: 'Failure',
+      failure: { code: 'bad-signature', position: 0 },
     });
     expect(s.store.journal).toBeNull();
     expect(s.stream.records).toEqual([]);
@@ -405,8 +416,8 @@ describe('Effect client owns submissions', () => {
     s.stream.mode = 'false-ack';
     expect((await Effect.runPromise(client.execute(s.command)))._tag).toBe('Pending');
     const pending = new Uint8Array(s.store.journal!.pending!);
-    const blocked = await Effect.runPromise(Effect.either(client.execute(s.command)));
-    expect(blocked).toEqual(Either.left(new PendingOperationExists()));
+    const blocked = await Effect.runPromise(Effect.result(client.execute(s.command)));
+    expect(blocked).toEqual(Result.fail(new PendingOperationExists()));
     const reopened = await Effect.runPromise(
       LedgerClient.restore(s.anchor).pipe(Effect.provide(s.layer))
     );
@@ -419,12 +430,12 @@ describe('Effect client owns submissions', () => {
     const s = await setup();
     expect(
       await Effect.runPromise(
-        Effect.either(LedgerClient.restore(s.anchor).pipe(Effect.provide(s.layer)))
+        Effect.result(LedgerClient.restore(s.anchor).pipe(Effect.provide(s.layer)))
       )
-    ).toEqual(Either.left(new StorageError({ reason: 'missing' })));
+    ).toEqual(Result.fail(new StorageError({ reason: 'missing' })));
     await Effect.runPromise(s.create);
-    expect(await Effect.runPromise(Effect.either(s.create))).toEqual(
-      Either.left(new StorageError({ reason: 'exists' }))
+    expect(await Effect.runPromise(Effect.result(s.create))).toEqual(
+      Result.fail(new StorageError({ reason: 'exists' }))
     );
     expect(s.stream.records).toEqual([]);
   });
@@ -435,10 +446,10 @@ describe('Effect client owns submissions', () => {
     const before = structuredClone(s.store.journal);
     expect((await Effect.runPromise(client.execute(s.command)))._tag).toBe('Committed');
     s.store.journal = before;
-    const result = await Effect.runPromise(Effect.either(client.refresh()));
+    const result = await Effect.runPromise(Effect.result(client.refresh()));
     expect(result).toMatchObject({
-      _tag: 'Left',
-      left: { _tag: 'ValidationError', code: 'replay' },
+      _tag: 'Failure',
+      failure: { _tag: 'ValidationError', code: 'replay' },
     });
   });
 
@@ -468,10 +479,10 @@ describe('Effect client owns submissions', () => {
       encryptionPublicKey: value(Bytes.encryptionPublicKey(s.owner.enc)),
       possessionSignature: value(Bytes.signature(new Uint8Array(64))),
     };
-    const result = await Effect.runPromise(Effect.either(client.execute(forged)));
+    const result = await Effect.runPromise(Effect.result(client.execute(forged)));
     expect(result).toMatchObject({
-      _tag: 'Left',
-      left: { _tag: 'ValidationError', code: 'bad-proof' },
+      _tag: 'Failure',
+      failure: { _tag: 'ValidationError', code: 'bad-proof' },
     });
     expect(s.stream.records).toEqual([]);
     expect(s.store.journal?.pending).toBeNull();
@@ -505,7 +516,7 @@ describe('Effect client owns submissions', () => {
     const result = await Effect.runPromiseExit(client.execute(s.command));
     expect(Exit.isFailure(result)).toBe(true);
     if (Exit.isSuccess(result)) return;
-    expect(Cause.dieOption(result.cause)._tag).toBe('Some');
+    expect(Cause.hasDies(result.cause)).toBe(true);
     expect(s.store.journal?.pending).not.toBeNull();
     expect(s.stream.records).toEqual([]);
   });
@@ -516,17 +527,17 @@ describe('Effect client owns submissions', () => {
     const foreign = value(Bytes.genesisHash(random(32)));
     expect(
       await Effect.runPromise(
-        Effect.either(LedgerClient.restore(foreign).pipe(Effect.provide(s.layer)))
+        Effect.result(LedgerClient.restore(foreign).pipe(Effect.provide(s.layer)))
       )
-    ).toMatchObject({ _tag: 'Left', left: { _tag: 'StorageError', reason: 'foreign' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { _tag: 'StorageError', reason: 'foreign' } });
     const journal = s.store.journal;
     if (!journal) throw new Error('fixture journal missing');
     s.store.journal = { ...journal, snapshot: new Uint8Array([1]) };
     expect(
       await Effect.runPromise(
-        Effect.either(LedgerClient.restore(s.anchor).pipe(Effect.provide(s.layer)))
+        Effect.result(LedgerClient.restore(s.anchor).pipe(Effect.provide(s.layer)))
       )
-    ).toMatchObject({ _tag: 'Left', left: { _tag: 'StorageError', reason: 'corrupt' } });
+    ).toMatchObject({ _tag: 'Failure', failure: { _tag: 'StorageError', reason: 'corrupt' } });
   });
 
   it('does not downgrade a malformed read-back page to a transient Pending result', async () => {
@@ -540,10 +551,10 @@ describe('Effect client owns submissions', () => {
       };
       return result;
     };
-    const result = await Effect.runPromise(Effect.either(client.execute(s.command)));
+    const result = await Effect.runPromise(Effect.result(client.execute(s.command)));
     expect(result).toMatchObject({
-      _tag: 'Left',
-      left: { _tag: 'StreamProtocolError', code: 'invalid-page' },
+      _tag: 'Failure',
+      failure: { _tag: 'StreamProtocolError', code: 'invalid-page' },
     });
     expect(s.store.journal?.pending).toEqual(s.stream.records[0]);
   });
@@ -554,12 +565,12 @@ describe('Effect client owns submissions', () => {
     s.stream.mode = 'false-ack';
     const results = await Effect.runPromise(
       Effect.all(
-        [Effect.either(client.execute(s.command)), Effect.either(client.execute(s.command))],
+        [Effect.result(client.execute(s.command)), Effect.result(client.execute(s.command))],
         { concurrency: 2 }
       )
     );
-    expect(results.filter(Either.isRight).map((r) => r.right._tag)).toEqual(['Pending']);
-    expect(results.filter(Either.isLeft).map((r) => r.left._tag)).toEqual([
+    expect(results.filter(Result.isSuccess).map((r) => r.success._tag)).toEqual(['Pending']);
+    expect(results.filter(Result.isFailure).map((r) => r.failure._tag)).toEqual([
       'PendingOperationExists',
     ]);
     const exact = s.store.journal?.pending;
@@ -590,9 +601,9 @@ describe('transaction lifetime', () => {
       )
     );
     s.stream.mode = 'ok';
-    expect(await Effect.runPromise(Effect.either(otherClient.resume()))).toMatchObject({
-      _tag: 'Left',
-      left: { _tag: 'ContextMismatch', context: 'signer' },
+    expect(await Effect.runPromise(Effect.result(otherClient.resume()))).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'ContextMismatch', context: 'signer' },
     });
     expect(s.store.journal?.pending).toEqual(exact);
     expect(s.stream.records).toEqual([]);
@@ -630,7 +641,7 @@ describe('transaction lifetime', () => {
                   }
                   if (chosen) armed = false;
                   const pause = Effect.sync(enter).pipe(
-                    Effect.zipRight(Effect.promise(() => released))
+                    Effect.andThen(Effect.promise(() => released))
                   );
                   if (chosen && point.startsWith('before')) yield* pause;
                   yield* tx.save(journal);
@@ -659,7 +670,7 @@ describe('transaction lifetime', () => {
       controller.abort();
       release();
       const interrupted = await operation;
-      expect(Exit.isFailure(interrupted) && Cause.isInterrupted(interrupted.cause)).toBe(true);
+      expect(Exit.isFailure(interrupted) && Cause.hasInterrupts(interrupted.cause)).toBe(true);
       const reopened = await Effect.runPromise(
         LedgerClient.restore(s.anchor).pipe(Effect.provide(layer))
       );
@@ -676,9 +687,9 @@ describe('transaction lifetime', () => {
     const program = Effect.gen(function* () {
       const service = yield* JournalStore;
       const acquired = yield* Deferred.make<void>();
-      const worker = yield* Effect.fork(
+      const worker = yield* Effect.forkChild(
         service.exclusive(() =>
-          Deferred.succeed(acquired, undefined).pipe(Effect.zipRight(Effect.never))
+          Deferred.succeed(acquired, undefined).pipe(Effect.andThen(Effect.never))
         )
       );
       yield* Deferred.await(acquired);
@@ -708,17 +719,18 @@ describe('transaction lifetime', () => {
       const service = yield* JournalStore;
       const acquired = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
-      const first = yield* Effect.fork(
+      const first = yield* Effect.forkChild(
         service.exclusive(() =>
-          Deferred.succeed(acquired, undefined).pipe(Effect.zipRight(Deferred.await(release)))
+          Deferred.succeed(acquired, undefined).pipe(Effect.andThen(Deferred.await(release)))
         )
       );
       yield* Deferred.await(acquired);
-      const second = yield* Effect.fork(
+      const second = yield* Effect.forkChild(
         service.exclusive(() => Effect.die('cancelled callback must not run'))
       );
       yield* Effect.promise(() => scheduled);
-      const interrupted = yield* Fiber.interrupt(second);
+      yield* Fiber.interrupt(second);
+      const interrupted = yield* Fiber.await(second);
       yield* Deferred.succeed(release, undefined);
       yield* Fiber.join(first);
       const next = yield* service.exclusive((tx) => tx.load);
@@ -726,8 +738,20 @@ describe('transaction lifetime', () => {
     }).pipe(Effect.provide(Layer.succeed(JournalStore, store)));
     const result = await Effect.runPromise(program);
     expect(
-      Exit.isFailure(result.interrupted) && Cause.isInterrupted(result.interrupted.cause)
+      Exit.isFailure(result.interrupted) && Cause.hasInterrupts(result.interrupted.cause)
     ).toBe(true);
     expect(result.next).toBeNull();
   });
+});
+
+it('retains all mixed-cause reasons across the legacy Promise boundary', async () => {
+  const failure = new ValidationError({ code: 'unauthorized' });
+  const defect = new TypeError('cleanup-defect');
+  const cause = Cause.combine(Cause.fail(failure), Cause.die(defect));
+  const error = await runLegacy(Effect.failCause(cause)).then(
+    () => null,
+    (caught: unknown) => caught
+  );
+  expect(error).toBeInstanceOf(AggregateError);
+  expect((error as AggregateError).errors).toEqual([failure, defect]);
 });

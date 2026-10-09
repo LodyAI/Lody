@@ -15,16 +15,16 @@ export interface JournalTransaction {
   readonly save: (journal: LedgerJournal) => Effect.Effect<void, StorageError | ValidationError>;
 }
 
-export class JournalStore extends Context.Tag('@lody/e2ee-core/JournalStore')<
+export class JournalStore extends Context.Service<
   JournalStore,
   {
     readonly exclusive: <A, E, R>(
       work: (tx: JournalTransaction) => Effect.Effect<A, E, R>
     ) => Effect.Effect<A, E | StorageError | ValidationError, R>;
   }
->() {}
+>()('@lody/e2ee-core/JournalStore') {}
 
-export class LedgerTransport extends Context.Tag('@lody/e2ee-core/LedgerTransport')<
+export class LedgerTransport extends Context.Service<
   LedgerTransport,
   {
     readonly initialOffset: string;
@@ -39,15 +39,15 @@ export class LedgerTransport extends Context.Tag('@lody/e2ee-core/LedgerTranspor
       TransportError | StreamProtocolError | ValidationError
     >;
   }
->() {}
+>()('@lody/e2ee-core/LedgerTransport') {}
 
-export class DeviceSigner extends Context.Tag('@lody/e2ee-core/DeviceSigner')<
+export class DeviceSigner extends Context.Service<
   DeviceSigner,
   {
     readonly publicKey: SigningPublicKey;
     readonly sign: (message: Uint8Array) => Effect.Effect<Signature, CryptoError | ValidationError>;
   }
->() {}
+>()('@lody/e2ee-core/DeviceSigner') {}
 
 export interface SignatureJobInput {
   readonly publicKey: Uint8Array;
@@ -58,7 +58,7 @@ export interface SignatureJobInput {
 }
 
 /** Trusted cryptographic implementation; success proves a signature, not permission. */
-export class SignatureVerifier extends Context.Tag('@lody/e2ee-core/SignatureVerifier')<
+export class SignatureVerifier extends Context.Service<
   SignatureVerifier,
   {
     readonly verify: (input: {
@@ -73,4 +73,4 @@ export class SignatureVerifier extends Context.Tag('@lody/e2ee-core/SignatureVer
       facts?: SigningFacts
     ) => Effect.Effect<void, ValidationError>;
   }
->() {}
+>()('@lody/e2ee-core/SignatureVerifier') {}

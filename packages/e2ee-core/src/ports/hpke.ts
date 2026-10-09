@@ -2,7 +2,7 @@ import { Context, type Effect } from 'effect';
 import type { EncryptionPublicKey, EpochKey } from '../pure/bytes';
 import type { CryptoError, ValidationError } from '../pure/errors';
 
-export class HpkeSender extends Context.Tag('@lody/e2ee-core/HpkeSender')<
+export class HpkeSender extends Context.Service<
   HpkeSender,
   {
     readonly seal: (input: {
@@ -14,10 +14,10 @@ export class HpkeSender extends Context.Tag('@lody/e2ee-core/HpkeSender')<
       CryptoError | ValidationError
     >;
   }
->() {}
+>()('@lody/e2ee-core/HpkeSender') {}
 
 /** The private key handle stays inside the platform implementation. */
-export class HpkeRecipient extends Context.Tag('@lody/e2ee-core/HpkeRecipient')<
+export class HpkeRecipient extends Context.Service<
   HpkeRecipient,
   {
     readonly publicKey: EncryptionPublicKey;
@@ -27,4 +27,4 @@ export class HpkeRecipient extends Context.Tag('@lody/e2ee-core/HpkeRecipient')<
       readonly aad: Uint8Array;
     }) => Effect.Effect<EpochKey, CryptoError | ValidationError>;
   }
->() {}
+>()('@lody/e2ee-core/HpkeRecipient') {}

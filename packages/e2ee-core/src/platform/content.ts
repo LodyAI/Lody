@@ -1,4 +1,4 @@
-import { Effect, Either, Layer } from 'effect';
+import { Effect, Result, Layer } from 'effect';
 import { Point, verifyAsync } from '@noble/ed25519';
 import { ContentAuthority, ContentCrypto } from '../ports/content';
 import {
@@ -41,10 +41,10 @@ export function contentAuthorityLayer(policy: ContentPolicy): Layer.Layer<Conten
         try: () => policy.authorize(header),
         catch: (error) => error,
       }).pipe(
-        Effect.catchAll(contentFailure),
+        Effect.catch(contentFailure),
         Effect.flatMap((key) =>
           Effect.gen(function* () {
-            yield* checkContentSigningKey(key);
+            yield* Effect.fromResult(checkContentSigningKey(key));
             if (expected !== undefined && key !== expected)
               return yield* Effect.fail(new ContentError({ code: 'content-authority-changed' }));
             return key;
@@ -66,15 +66,15 @@ export function contentCryptoLayer(
           return bytes;
         },
         catch: (error) => error,
-      }).pipe(Effect.catchAll(contentFailure)),
+      }).pipe(Effect.catch(contentFailure)),
     derive: (epochKey, header: ContentHeader) => {
       const snapshot = new Uint8Array(epochKey);
       const info = contentKeyInfo(header);
-      if (Either.isLeft(info)) {
+      if (Result.isFailure(info)) {
         snapshot.fill(0);
-        return Effect.fail(info.left);
+        return Effect.fail(info.failure);
       }
-      const infoBytes = info.right;
+      const infoBytes = info.success;
       return Effect.tryPromise({
         try: async () => {
           const owned = new Uint8Array(snapshot);
@@ -94,14 +94,14 @@ export function contentCryptoLayer(
           }
         },
         catch: (error) => error,
-      }).pipe(Effect.catchAll(contentFailure));
+      }).pipe(Effect.catch(contentFailure));
     },
     sign: (signingKey, message) => {
       const owned = new Uint8Array(message);
       return Effect.tryPromise({
         try: async () => new Uint8Array(await platform.subtle.sign('Ed25519', signingKey, owned)),
         catch: (error) => error,
-      }).pipe(Effect.catchAll(contentFailure));
+      }).pipe(Effect.catch(contentFailure));
     },
     verify: (publicKeyHex, message, signatureHex) => {
       const owned = new Uint8Array(message);
@@ -120,7 +120,7 @@ export function contentCryptoLayer(
           return verifyAsync(sig, owned, key, { zip215: false });
         },
         catch: (error) => error,
-      }).pipe(Effect.catchAll(contentFailure));
+      }).pipe(Effect.catch(contentFailure));
     },
   });
 }

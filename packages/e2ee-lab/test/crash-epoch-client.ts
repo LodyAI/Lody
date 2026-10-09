@@ -23,4 +23,4 @@ await alice.start();
 await alice.adoptGenesis(genesisHex);
 const result = await alice.publishEpoch();
 writeFileSync(marker, JSON.stringify(result));
-alice.close();
+await alice.close();

@@ -15,7 +15,7 @@ export interface UserIdentityHandles {
 }
 
 /** Explicit create vs load. Load must never generate a replacement identity. */
-export class UserIdentityStore extends Context.Tag('@lody/e2ee-core/UserIdentityStore')<
+export class UserIdentityStore extends Context.Service<
   UserIdentityStore,
   {
     readonly create: Effect.Effect<UserIdentityHandles, StorageError | CryptoError>;
@@ -30,13 +30,13 @@ export class UserIdentityStore extends Context.Tag('@lody/e2ee-core/UserIdentity
       frame: Uint8Array
     ) => Effect.Effect<UserIdentityHandles, StorageError | CryptoError | RecoveryError>;
   }
->() {}
+>()('@lody/e2ee-core/UserIdentityStore') {}
 
 /** Explicit create vs load. Load must never generate a replacement identity. */
-export class DeviceIdentityStore extends Context.Tag('@lody/e2ee-core/DeviceIdentityStore')<
+export class DeviceIdentityStore extends Context.Service<
   DeviceIdentityStore,
   {
     readonly create: Effect.Effect<DeviceIdentityHandles, StorageError | CryptoError>;
     readonly load: Effect.Effect<DeviceIdentityHandles, StorageError | CryptoError>;
   }
->() {}
+>()('@lody/e2ee-core/DeviceIdentityStore') {}

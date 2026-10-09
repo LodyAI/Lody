@@ -1,9 +1,9 @@
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { ValidationError, type LedgerErrorCode } from './errors';
 import { SigningFacts } from './signing-facts';
 import { keyId, joinKey } from './identifiers';
-const fail = (code: LedgerErrorCode): Either.Either<never, ValidationError> =>
-  Either.left(new ValidationError({ code }));
+const fail = (code: LedgerErrorCode): Result.Result<never, ValidationError> =>
+  Result.fail(new ValidationError({ code }));
 import {
   asArray,
   asBool,
@@ -99,16 +99,16 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   }
   return a.byteLength - b.byteLength;
 }
-function assertSortedUnique(values: readonly Uint8Array[]): Either.Either<void, ValidationError> {
-  return Either.gen(function* () {
+function assertSortedUnique(values: readonly Uint8Array[]): Result.Result<void, ValidationError> {
+  return Result.gen(function* () {
     for (let i = 1; i < values.length; i++) {
       if (compareBytes(values[i - 1]!, values[i]!) >= 0) return yield* fail('canonical');
     }
     return undefined;
   });
 }
-function bytesFromHex(id: string): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+function bytesFromHex(id: string): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     if (id.length % 2 !== 0) return yield* fail('canonical');
     const out = new Uint8Array(id.length / 2);
     for (let i = 0; i < out.length; i++) {
@@ -125,8 +125,8 @@ function encodeRole(role: Role): number {
   if (role === 'member') return ROLE_MEMBER;
   return ROLE_GUEST;
 }
-function decodeRole(value: CborValue): Either.Either<Role, ValidationError> {
-  return Either.gen(function* () {
+function decodeRole(value: CborValue): Result.Result<Role, ValidationError> {
+  return Result.gen(function* () {
     const role = yield* asUint(value);
     if (role === ROLE_OWNER) return 'owner';
     if (role === ROLE_ADMIN) return 'admin';
@@ -140,8 +140,8 @@ function encodeKind(kind: DeviceKind): number {
   if (kind === 'machine') return KIND_MACHINE;
   return KIND_RECOVERY;
 }
-function decodeKind(value: CborValue): Either.Either<DeviceKind, ValidationError> {
-  return Either.gen(function* () {
+function decodeKind(value: CborValue): Result.Result<DeviceKind, ValidationError> {
+  return Result.gen(function* () {
     const kind = yield* asUint(value);
     if (kind === KIND_PERSONAL) return 'personal';
     if (kind === KIND_MACHINE) return 'machine';
@@ -149,8 +149,8 @@ function decodeKind(value: CborValue): Either.Either<DeviceKind, ValidationError
     return yield* fail('canonical');
   });
 }
-function encodeAuthState(state: InternalState): Either.Either<CborValue, ValidationError> {
-  return Either.gen(function* () {
+function encodeAuthState(state: InternalState): Result.Result<CborValue, ValidationError> {
+  return Result.gen(function* () {
     const members: Array<{
       id: Uint8Array;
       member: Member;
@@ -214,8 +214,8 @@ function encodeAuthState(state: InternalState): Either.Either<CborValue, Validat
 export function encodeSnapshotBody(
   state: InternalState,
   signer: SigningPublicKey
-): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     const head = state.hashes[state.hashes.length - 1];
     if (!head) return yield* fail('invalid-operation');
     return yield* encodeSnapshotCbor([
@@ -228,8 +228,8 @@ export function encodeSnapshotBody(
     ]);
   });
 }
-export function digestBodyBytes(state: InternalState): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+export function digestBodyBytes(state: InternalState): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     const head = state.hashes[state.hashes.length - 1];
     if (!head) return yield* fail('invalid-operation');
     return yield* encodeSnapshotCbor([
@@ -241,16 +241,16 @@ export function digestBodyBytes(state: InternalState): Either.Either<Uint8Array,
     ]);
   });
 }
-export function stateDigestOf(state: InternalState): Either.Either<Hash, ValidationError> {
-  return Either.gen(function* () {
+export function stateDigestOf(state: InternalState): Result.Result<Hash, ValidationError> {
+  return Result.gen(function* () {
     return snapshotStateDigest(yield* digestBodyBytes(state));
   });
 }
 export function encodeSignedSnapshot(
   bodyBytes: Uint8Array,
   signature: Signature
-): Either.Either<Uint8Array, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array, ValidationError> {
+  return Result.gen(function* () {
     if (signature.byteLength !== SIGNATURE_BYTES) return yield* fail('canonical');
     const body = yield* decodeSnapshotCbor(bodyBytes);
     return yield* encodeSnapshotCbor([body, copyBytes(signature)]);
@@ -259,8 +259,8 @@ export function encodeSignedSnapshot(
 export function assertEndorserEligible(
   state: InternalState,
   signer: SigningPublicKey
-): Either.Either<void, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<void, ValidationError> {
+  return Result.gen(function* () {
     const device = state.devices.get(keyId(signer));
     if (!device || device.kind !== 'personal') return yield* fail('unauthorized');
     const member = state.members.get(keyId(device.membershipId));
@@ -272,8 +272,8 @@ export function assertEndorserEligible(
 function decodeKeyList(
   value: CborValue,
   size: number
-): Either.Either<Uint8Array[], ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<Uint8Array[], ValidationError> {
+  return Result.gen(function* () {
     const list = yield* asArray(value);
     const keys: Uint8Array[] = [];
     for (const item of list) keys.push(yield* asExactBytes(item, size));
@@ -288,8 +288,8 @@ function importAuthState(
   head: Hash,
   signer: SigningPublicKey,
   facts = SigningFacts.empty
-): Either.Either<InternalState, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<InternalState, ValidationError> {
+  return Result.gen(function* () {
     const fields = yield* asArray(auth);
     if (fields.length !== 11) return yield* fail('canonical');
     const owner = yield* asExactBytes(fields[0]!, MEMBERSHIP_ID_BYTES);
@@ -440,7 +440,7 @@ function importAuthState(
 export function parseSignedSnapshot(
   bytes: Uint8Array,
   facts = SigningFacts.empty
-): Either.Either<
+): Result.Result<
   {
     bodyBytes: Uint8Array;
     signature: Signature;
@@ -452,7 +452,7 @@ export function parseSignedSnapshot(
   },
   ValidationError
 > {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     const root = yield* asArray(yield* decodeSnapshotCbor(bytes));
     if (root.length !== 2) return yield* fail('canonical');
     const body = yield* asArray(root[0]!);
@@ -479,10 +479,10 @@ export function parseSignedSnapshot(
   });
 }
 export function snapshotStateFromParsed(
-  parsed: Either.Either.Right<ReturnType<typeof parseSignedSnapshot>>,
+  parsed: Result.Result.Success<ReturnType<typeof parseSignedSnapshot>>,
   facts = SigningFacts.empty
-): Either.Either<InternalState, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<InternalState, ValidationError> {
+  return Result.gen(function* () {
     return yield* importAuthState(
       parsed.auth,
       parsed.genesis,
@@ -496,7 +496,7 @@ export function snapshotStateFromParsed(
 export function decodeSignedSnapshot(
   bytes: Uint8Array,
   facts = SigningFacts.empty
-): Either.Either<
+): Result.Result<
   {
     bodyBytes: Uint8Array;
     signature: Signature;
@@ -508,7 +508,7 @@ export function decodeSignedSnapshot(
   },
   ValidationError
 > {
-  return Either.gen(function* () {
+  return Result.gen(function* () {
     const parsed = yield* parseSignedSnapshot(bytes, facts);
     const state = yield* importAuthState(
       parsed.auth,

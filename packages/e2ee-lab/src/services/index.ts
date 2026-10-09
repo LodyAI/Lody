@@ -16,4 +16,4 @@ export {
   type LabHttpShape,
 } from './http';
 export { LiveLabLayer, type LabServices } from './live';
-export { runLabPromise, runLiveLabPromise } from './run';
+export { LabRun, runLabSync, runLabPromise, runLiveLabPromise } from './run';

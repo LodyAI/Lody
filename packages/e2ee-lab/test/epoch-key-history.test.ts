@@ -220,7 +220,7 @@ describe('history recovery (Lab)', () => {
 
     const recovered = await alice.recoverEpochHistory().catch(() => null);
     tamper = null;
-    // Either recovery fails closed on the tampered read, or it yields the verified K1.
+    // Result recovery fails closed on the tampered read, or it yields the verified K1.
     if (recovered) expect(recovered.get(1)).toEqual(realK1);
     expect(alice.epochKeys.get(1)).toEqual(realK1);
     expect((await alice.recoverEpochHistory()).get(1)).toEqual(realK1);

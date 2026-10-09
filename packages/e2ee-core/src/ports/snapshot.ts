@@ -2,7 +2,7 @@ import { Context, type Effect } from 'effect';
 import type { SnapshotAdmissionError } from '../pure/errors';
 import type { SnapshotHeader, SnapshotTxView } from '../pure/snapshot-admission';
 
-export class SnapshotStore extends Context.Tag('@lody/e2ee-core/SnapshotStore')<
+export class SnapshotStore extends Context.Service<
   SnapshotStore,
   {
     readonly exclusive: <A>(
@@ -10,18 +10,18 @@ export class SnapshotStore extends Context.Tag('@lody/e2ee-core/SnapshotStore')<
       work: (tx: SnapshotTxView) => A
     ) => Effect.Effect<A, SnapshotAdmissionError>;
   }
->() {}
+>()('@lody/e2ee-core/SnapshotStore') {}
 
-export class SnapshotAuthenticator extends Context.Tag('@lody/e2ee-core/SnapshotAuthenticator')<
+export class SnapshotAuthenticator extends Context.Service<
   SnapshotAuthenticator,
   {
     readonly authenticate: (
       inner: Uint8Array
     ) => Effect.Effect<SnapshotHeader, SnapshotAdmissionError>;
   }
->() {}
+>()('@lody/e2ee-core/SnapshotAuthenticator') {}
 
-export class SnapshotWriteGate extends Context.Tag('@lody/e2ee-core/SnapshotWriteGate')<
+export class SnapshotWriteGate extends Context.Service<
   SnapshotWriteGate,
   {
     readonly mayWrite: (author: {
@@ -30,11 +30,11 @@ export class SnapshotWriteGate extends Context.Tag('@lody/e2ee-core/SnapshotWrit
       readonly device: string;
     }) => boolean;
   }
->() {}
+>()('@lody/e2ee-core/SnapshotWriteGate') {}
 
-export class AdmissionClock extends Context.Tag('@lody/e2ee-core/AdmissionClock')<
+export class AdmissionClock extends Context.Service<
   AdmissionClock,
   {
     readonly now: () => number;
   }
->() {}
+>()('@lody/e2ee-core/AdmissionClock') {}

@@ -14,18 +14,18 @@ Translation: pending
 
 ### 人、设备与组织
 
-| 说法               | 英文                           | 含义                                                                                                                                                           |
-| ------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 加密组织           | Org                            | 一套独立的成员、权限、账本和文档加密密钥。口语也叫工作区。首版不再套一层 Team（旧产品里 Team 是 Org 之上的分组，本稿没有）。                                   |
-| 用户               | user                           | 成员和角色的主体，是人，不是某台电脑。                                                                                                                         |
-| 成员实例           | membership                     | 某用户在本 Org 的这一次资格。移除后再加入是新实例，旧资格不复活。                                                                                              |
-| 设备               | device                         | 一台电脑、手机、远程机器或恢复设备。每台自己生成密钥，不复制旧设备私钥。                                                                                       |
-| 个人 / 机器 / 恢复 | personal / machine / recovery  | 设备种类。机器不能管理 Org；恢复设备平时不运行，只用来收密钥和批准本人的新个人设备。                                                                           |
-| 角色               | Owner / Admin / Member / Guest | 用户在本 Org 的权限档。Guest 只读。设备不另存一套角色。                                                                                                        |
+| 说法               | 英文                           | 含义                                                                                                                                                                             |
+| ------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 加密组织           | Org                            | 一套独立的成员、权限、账本和文档加密密钥。口语也叫工作区。首版不再套一层 Team（旧产品里 Team 是 Org 之上的分组，本稿没有）。                                                     |
+| 用户               | user                           | 成员和角色的主体，是人，不是某台电脑。                                                                                                                                           |
+| 成员实例           | membership                     | 某用户在本 Org 的这一次资格。移除后再加入是新实例，旧资格不复活。                                                                                                                |
+| 设备               | device                         | 一台电脑、手机、远程机器或恢复设备。每台自己生成密钥，不复制旧设备私钥。                                                                                                         |
+| 个人 / 机器 / 恢复 | personal / machine / recovery  | 设备种类。机器不能管理 Org；恢复设备平时不运行，只用来收密钥和批准本人的新个人设备。                                                                                             |
+| 角色               | Owner / Admin / Member / Guest | 用户在本 Org 的权限档。Guest 只读。设备不另存一套角色。                                                                                                                          |
 | 管理设备           | managing device                | 角色为 Owner/Admin 的成员的当前有效 personal 设备。由角色与设备种类推出，账本不另存能力字段：升为 Admin 后该用户已登记的手机立即可管理，降级后立即失去。机器和恢复设备永不管理。 |
-| 恢复设备           | recovery device，文中常写 R    | 已登记、平时不上线的虚拟设备。私钥用 Passkey 或恢复文件包起来，需要时才解锁。                                                                                  |
-| Passkey            | Passkey / PRF                  | 系统级通行密钥；这里只用它派生一段密钥来包装 R 的私钥。Passkey 不是 R，也不能代替账本授权。真机 PRF 仍待验收。                                                 |
-| 用户根私钥         | user root key                  | 旧设想：每人一把凌驾于所有设备之上的私钥。本稿没有这种钥匙；恢复走登记过的 R。                                                                                 |
+| 恢复设备           | recovery device，文中常写 R    | 已登记、平时不上线的虚拟设备。私钥用 Passkey 或恢复文件包起来，需要时才解锁。                                                                                                    |
+| Passkey            | Passkey / PRF                  | 系统级通行密钥；这里只用它派生一段密钥来包装 R 的私钥。Passkey 不是 R，也不能代替账本授权。真机 PRF 仍待验收。                                                                   |
+| 用户根私钥         | user root key                  | 旧设想：每人一把凌驾于所有设备之上的私钥。本稿没有这种钥匙；恢复走登记过的 R。                                                                                                   |
 
 ### 账本长什么样
 
@@ -510,16 +510,16 @@ epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 
 ### 8.2 操作编码
 
-| tag  | 操作          | 数组                                                              |
-| ---- | ------------- | ----------------------------------------------------------------- |
-| 创世 | createOrg     | `genesisBody`，见 §8.1                                            |
-| 1    | admitMember   | `[1, membershipId, joinRequest]`                                  |
-| 2    | removeMember  | `[2, membershipId]`                                               |
-| 3    | setRole       | `[3, membershipId, role]` role=1 admin / 2 member / 3 guest       |
-| 4    | admitDevice   | `[4, kind, newSign, newEnc, possessionSig]` kind=0/1/2            |
-| 5    | revokeDevice  | `[5, targetSign]`                                                 |
-| 6    | transferOwner | `[6, successorMembershipId]`                                      |
-| 7    | publishEpoch  | `[7, epoch, commitment, previousEpochKey72]` epoch≥1              |
+| tag  | 操作          | 数组                                                        |
+| ---- | ------------- | ----------------------------------------------------------- |
+| 创世 | createOrg     | `genesisBody`，见 §8.1                                      |
+| 1    | admitMember   | `[1, membershipId, joinRequest]`                            |
+| 2    | removeMember  | `[2, membershipId]`                                         |
+| 3    | setRole       | `[3, membershipId, role]` role=1 admin / 2 member / 3 guest |
+| 4    | admitDevice   | `[4, kind, newSign, newEnc, possessionSig]` kind=0/1/2      |
+| 5    | revokeDevice  | `[5, targetSign]`                                           |
+| 6    | transferOwner | `[6, successorMembershipId]`                                |
+| 7    | publishEpoch  | `[7, epoch, commitment, previousEpochKey72]` epoch≥1        |
 
 ### 8.2.1 每条记录都要过的检查
 
@@ -671,6 +671,12 @@ AAD 为 `"lody-e2ee/epoch-history/v1\0" || genesis32 || uint32be(n)`，明文固
 recordHash 标识精确记录字节，不是业务操作的唯一身份；未知提交必须重试已保存的原字节，不能重签。
 
 ## 9. 公开 API 与调用示例（草案）
+
+### Effect 运行边界
+
+E2EE 实现使用独立 catalog 固定 Effect 4.0.2。纯解析和策略返回 `Result`，workflow 用 `Effect.fromResult` 转入错误通道并声明服务依赖。旧 Promise 入口运行同一 workflow；不同 Effect 主版本之间只传普通值和 Promise，不传 Effect、Layer、Context 或 fiber。
+
+每次独占操作持有自己的账本事务状态，长期缓存只用于复用已验证前缀。每页落盘和精确 pending 记录保存后，应在同一个很窄的不可中断步骤中发布相应视图；网络 CAS 和读回保持可中断。取消不撤销之前已保存的页，不允许重签或换掉未确认的 pending。纯分页选择不能把未知快照前缀当作已验证授权。失败、程序缺陷和取消保持区分，不能因存在一个预期错误而丢掉同时发生的缺陷或取消。
 
 入口：`@lody/e2ee-core` 导出 `Ledger` / `LedgerError`；完整编解码与域常量在 `@lody/e2ee-core/ledger`。
 纯核心：无网络、无磁盘、无隐式时钟。随机数只出现在宿主生成密钥/ID 时。

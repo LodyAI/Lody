@@ -1,5 +1,18 @@
 # @lody/e2ee-lab
 
+The E2EE catalog pins Effect **4.0.2**. `LabRun` builds services once per owner,
+keeps a persistent Scope, and interrupts active fibers before awaiting finalizers.
+Host startup acquires SQLite/Riverrun/HTTP resources in that scope, including cleanup
+when startup fails; Promise `host.close()` and `session.close()` must be awaited.
+Session ledger intents use declared `SessionLedger` workflows. HTTP request handlers
+and streams-crdt callbacks remain explicit native Promise bridges.
+
+Scheduler state lives in a per-runtime Ref. Deferred gates require explicit permits;
+request/completion notifications wake a scoped queue consumer instead of interval
+polling. The Effect Clock watchdog is separate from logical scheduling. Native SDK
+callbacks still use an explicit AsyncLocalStorage bridge for nested event parents.
+`runtime.close()` rejects pending gates; await `runtime.dispose()` for fiber cleanup.
+
 [中文](README.zh.md)
 
 Local deterministic E2EE collaboration lab. Not product E2EE and not Lody
@@ -74,7 +87,7 @@ fault tests. JSON key/candidate formats are unchanged; `.lock.sqlite` files cont
 only operational locking metadata. Different pending operations produce the typed
 `PendingOperationExists` failure, and storage faults produce `StorageError` rather
 than a generic unknown result. Listed Promise SDK boundaries that remain: host
-`Ledger.verify`/`extend` per HTTP request, `createStreamsContentProvider` for
+HTTP callbacks and response-body reads, `createStreamsContentProvider` for
 streams-crdt, `createContentSnapshotPublication`, and demo `backup.ts` file wrap.
 Those unwrap core workflows; they are not a second content or admission algorithm.
 Reproduction packs, fingerprints, and minimizer coverage live in

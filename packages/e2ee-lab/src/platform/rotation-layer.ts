@@ -15,7 +15,7 @@ export function rotationLayer(input: {
   readonly entropy: Entropy;
   readonly fs?: LabFsShape;
 }) {
-  return Effect.map(Bytes.signingPublicKey(input.device.publicKey), (signer) =>
+  return Effect.map(Effect.fromResult(Bytes.signingPublicKey(input.device.publicKey)), (signer) =>
     Layer.mergeAll(
       deviceSignerLayer(signer, (bytes) => input.device.sign(bytes)),
       nodeEpochFilesLayer({ ...input, files: input.fs ? testFiles(input.fs) : undefined }),

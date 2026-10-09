@@ -1,10 +1,10 @@
-import { Brand, Either } from 'effect';
+import { Brand, Result } from 'effect';
 import { Point } from '@noble/ed25519';
 import { ValidationError } from './errors';
 
 /** Unexported constructor: successful parsers are the only public constructors. */
 class OwnedBytes<K extends string> implements Brand.Brand<K> {
-  declare readonly [Brand.BrandTypeId]: { readonly [P in K]: K };
+  declare readonly ['~effect/Brand']: { readonly [P in K]: K };
   readonly #bytes: Uint8Array<ArrayBuffer>;
 
   constructor(
@@ -43,36 +43,36 @@ function exact<K extends string>(
   kind: K,
   size: number,
   input: unknown
-): Either.Either<OwnedBytes<K>, ValidationError> {
+): Result.Result<OwnedBytes<K>, ValidationError> {
   if (!(input instanceof Uint8Array) || input.byteLength !== size) {
-    return Either.left(new ValidationError({ code: 'canonical' }));
+    return Result.fail(new ValidationError({ code: 'canonical' }));
   }
-  return Either.right(new OwnedBytes(kind, input));
+  return Result.succeed(new OwnedBytes(kind, input));
 }
 
-export function signingPublicKey(input: unknown): Either.Either<SigningPublicKey, ValidationError> {
-  return Either.gen(function* () {
+export function signingPublicKey(input: unknown): Result.Result<SigningPublicKey, ValidationError> {
+  return Result.gen(function* () {
     const key = yield* exact('SigningPublicKey', 32, input);
-    const valid = Either.try({
+    const valid = Result.try({
       try: () => {
         const point = Point.fromBytes(key.toBytes(), false);
         return !point.isSmallOrder() && point.isTorsionFree();
       },
       catch: () => new ValidationError({ code: 'invalid-key' }),
     });
-    if (!(yield* valid)) return yield* Either.left(new ValidationError({ code: 'invalid-key' }));
+    if (!(yield* valid)) return yield* Result.fail(new ValidationError({ code: 'invalid-key' }));
     return key;
   });
 }
 
 export function encryptionPublicKey(
   input: unknown
-): Either.Either<EncryptionPublicKey, ValidationError> {
-  return Either.gen(function* () {
+): Result.Result<EncryptionPublicKey, ValidationError> {
+  return Result.gen(function* () {
     const key = yield* exact('EncryptionPublicKey', 32, input);
     // Preserve the current wire policy; low-order hardening is a separate change.
     if (!key.toBytes().some((byte) => byte !== 0)) {
-      return yield* Either.left(new ValidationError({ code: 'invalid-key' }));
+      return yield* Result.fail(new ValidationError({ code: 'invalid-key' }));
     }
     return key;
   });
@@ -87,11 +87,11 @@ export const requestId = (input: unknown) => exact('RequestId', 16, input);
 export const deliveryId = (input: unknown) => exact('DeliveryId', 16, input);
 export const userId = (input: unknown) => exact('UserId', 32, input);
 
-export function epochNumber(input: unknown): Either.Either<EpochNumber, ValidationError> {
+export function epochNumber(input: unknown): Result.Result<EpochNumber, ValidationError> {
   return typeof input === 'number' &&
     Number.isSafeInteger(input) &&
     input >= 0 &&
     input <= 0xffff_ffff
-    ? Either.right(epochBrand(input))
-    : Either.left(new ValidationError({ code: 'invalid-operation' }));
+    ? Result.succeed(epochBrand(input))
+    : Result.fail(new ValidationError({ code: 'invalid-operation' }));
 }

@@ -10,7 +10,7 @@ import { bytesEqual } from '../pure/cbor';
 /** Bounded complete scan; finding a matching prefix is not successful catch-up.
  * This is routing/exact-byte observation, never signature or authority verification.
  */
-function scan(stream: EpochStream['Type'], id: string) {
+function scan(stream: EpochStream['Service'], id: string) {
   return Effect.gen(function* () {
     let offset = '-1';
     let tail: Uint8Array = new Uint8Array();
@@ -33,7 +33,7 @@ function scan(stream: EpochStream['Type'], id: string) {
       total += page.body.length;
       if (total > 16 * 1024 * 1024)
         return yield* Effect.fail(new StreamProtocolError({ code: 'epoch-stream-read-limit' }));
-      const parsed = yield* parseEpochEnvelopeChunk(tail, page.body);
+      const parsed = yield* Effect.fromResult(parseEpochEnvelopeChunk(tail, page.body));
       tail = parsed.tail;
       for (const frame of parsed.frames) {
         if (keyId(frame.deliveryId.toBytes()) !== id) continue;
@@ -63,14 +63,14 @@ export const epochStreamDeliveryLayer = Layer.effect(
     return KeyDeliveryRemote.of({
       read: (id) =>
         Effect.gen(function* () {
-          yield* checkDeliveryId(id);
+          yield* Effect.fromResult(checkDeliveryId(id));
           return (yield* scan(stream, id)).found;
         }).pipe(Effect.withSpan('e2ee.epoch-stream.read')),
       put: (id, bytes) => {
         const owned = new Uint8Array(bytes);
         return Effect.gen(function* () {
-          yield* checkDeliveryId(id);
-          const parsed = yield* parseEpochEnvelopeChunk(new Uint8Array(), owned);
+          yield* Effect.fromResult(checkDeliveryId(id));
+          const parsed = yield* Effect.fromResult(parseEpochEnvelopeChunk(new Uint8Array(), owned));
           const frame = parsed.frames[0];
           if (
             parsed.tail.length !== 0 ||

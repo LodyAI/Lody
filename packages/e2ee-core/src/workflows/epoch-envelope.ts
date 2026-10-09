@@ -29,17 +29,21 @@ import type { LedgerClient } from './ledger-client';
 /** One intent; the slot is stable across restart, while ciphertext is generated only once. */
 export function sendEpochKey(
   client: LedgerClient,
-  signer: DeviceSigner['Type'],
+  signer: DeviceSigner['Service'],
   recipient: SigningPublicKey,
   key: EpochKey
 ) {
   return Effect.gen(function* () {
     const view = yield* client.refresh();
     const state = view.inspectState();
-    yield* recipientEncryptionKey(state, signer.publicKey.toBytes(), recipient.toBytes());
-    yield* checkEpochKey(state, key);
-    const epoch = yield* epochNumber(state.epoch.number);
-    const id = yield* epochDeliveryId(view.genesis, epoch, signer.publicKey, recipient);
+    yield* Effect.fromResult(
+      recipientEncryptionKey(state, signer.publicKey.toBytes(), recipient.toBytes())
+    );
+    yield* Effect.fromResult(checkEpochKey(state, key));
+    const epoch = yield* Effect.fromResult(epochNumber(state.epoch.number));
+    const id = yield* Effect.fromResult(
+      epochDeliveryId(view.genesis, epoch, signer.publicKey, recipient)
+    );
     const prepare = prepareEpochEnvelope(client, signer, recipient, key).pipe(
       Effect.flatMap((prepared) =>
         prepared.genesis.equals(view.genesis) && prepared.epoch === epoch
@@ -60,13 +64,13 @@ export function sendEpochKey(
 /** Ordinary send: the caller names the recipient device, not its encryption key. */
 export function sendCurrentEpochKey(
   client: LedgerClient,
-  signer: DeviceSigner['Type'],
+  signer: DeviceSigner['Service'],
   recipient: SigningPublicKey
 ) {
   return Effect.gen(function* () {
     const keyring = yield* EpochKeyring;
     const view = yield* client.refresh();
-    const epoch = yield* epochNumber(view.inspectState().epoch.number);
+    const epoch = yield* Effect.fromResult(epochNumber(view.inspectState().epoch.number));
     const key = yield* keyring.get(view.genesis, epoch);
     if (key === null) return yield* Effect.fail(new EpochRotationError({ reason: 'key-missing' }));
     return yield* sendEpochKey(client, signer, recipient, key);
@@ -94,7 +98,7 @@ export function installEpochEnvelope(
 /** Internal client workflow; sender identity is already bound by LedgerClient. */
 export function prepareEpochEnvelope(
   client: LedgerClient,
-  signer: DeviceSigner['Type'],
+  signer: DeviceSigner['Service'],
   recipient: SigningPublicKey,
   key: EpochKey
 ) {
@@ -105,24 +109,30 @@ export function prepareEpochEnvelope(
     const state = view.inspectState();
     const senderBytes = signer.publicKey.toBytes(),
       recipientBytes = recipient.toBytes();
-    const recipientKey = yield* encryptionPublicKey(
-      yield* recipientEncryptionKey(state, senderBytes, recipientBytes)
+    const recipientKey = yield* Effect.fromResult(
+      encryptionPublicKey(
+        yield* Effect.fromResult(recipientEncryptionKey(state, senderBytes, recipientBytes))
+      )
     );
-    yield* checkEpochKey(state, key);
-    const epoch = yield* epochNumber(state.epoch.number);
-    const aad = yield* envelopeAad({
-      genesis: view.genesis.toBytes(),
-      epoch,
-      sender: senderBytes,
-      recipient: recipientBytes,
-    });
+    yield* Effect.fromResult(checkEpochKey(state, key));
+    const epoch = yield* Effect.fromResult(epochNumber(state.epoch.number));
+    const aad = yield* Effect.fromResult(
+      envelopeAad({
+        genesis: view.genesis.toBytes(),
+        epoch,
+        sender: senderBytes,
+        recipient: recipientBytes,
+      })
+    );
     const sealed = yield* sealer.seal({ recipient: recipientKey, key, aad });
     const unsigned = concat([aad, sealed.enc, sealed.ct]);
     const message = envelopeSigningBytes(unsigned);
     const signed = yield* signer.sign(message);
     yield* verifier.verify({ publicKey: signer.publicKey, message, signature: signed });
     const latest = yield* client.refresh();
-    yield* recheckEnvelopeContext(state, latest.inspectState(), senderBytes, recipientBytes);
+    yield* Effect.fromResult(
+      recheckEnvelopeContext(state, latest.inspectState(), senderBytes, recipientBytes)
+    );
     return preparedEnvelope(
       view.genesis,
       epoch,
@@ -160,28 +170,38 @@ function openVerifiedEnvelope(
     const state = view.inspectState();
     const senderBytes = sender.toBytes(),
       recipientBytes = recipient.toBytes();
-    const expected = yield* recipientEncryptionKey(state, senderBytes, recipientBytes);
+    const expected = yield* Effect.fromResult(
+      recipientEncryptionKey(state, senderBytes, recipientBytes)
+    );
     if (!bytesEqual(expected, opener.publicKey.toBytes()))
       return yield* Effect.fail(new ContextMismatch({ context: 'recipient' }));
-    const parts = yield* decodeEnvelopeFrame(
-      {
-        genesis: view.genesis.toBytes(),
-        epoch: state.epoch.number,
-        sender: senderBytes,
-        recipient: recipientBytes,
-      },
-      frame
+    const parts = yield* Effect.fromResult(
+      decodeEnvelopeFrame(
+        {
+          genesis: view.genesis.toBytes(),
+          epoch: state.epoch.number,
+          sender: senderBytes,
+          recipient: recipientBytes,
+        },
+        frame
+      )
     );
     yield* verifier.verify({
       publicKey: sender,
       message: parts.signingBytes,
-      signature: yield* signature(parts.signature),
+      signature: yield* Effect.fromResult(signature(parts.signature)),
     });
     const key = yield* opener.open(parts);
-    yield* checkEpochKey(state, key);
+    yield* Effect.fromResult(checkEpochKey(state, key));
     const latest = yield* client.refresh();
-    yield* recheckEnvelopeContext(state, latest.inspectState(), senderBytes, recipientBytes);
-    return { key, genesis: view.genesis, epoch: yield* epochNumber(state.epoch.number) };
+    yield* Effect.fromResult(
+      recheckEnvelopeContext(state, latest.inspectState(), senderBytes, recipientBytes)
+    );
+    return {
+      key,
+      genesis: view.genesis,
+      epoch: yield* Effect.fromResult(epochNumber(state.epoch.number)),
+    };
   });
 }
 
@@ -199,22 +219,26 @@ export function authorizeEpochDelivery(
     const state = view.inspectState();
     const senderBytes = sender.toBytes(),
       recipientBytes = recipient.toBytes();
-    yield* recipientEncryptionKey(state, senderBytes, recipientBytes);
-    const parts = yield* decodeEnvelopeFrame(
-      {
-        genesis: view.genesis.toBytes(),
-        epoch: state.epoch.number,
-        sender: senderBytes,
-        recipient: recipientBytes,
-      },
-      frame
+    yield* Effect.fromResult(recipientEncryptionKey(state, senderBytes, recipientBytes));
+    const parts = yield* Effect.fromResult(
+      decodeEnvelopeFrame(
+        {
+          genesis: view.genesis.toBytes(),
+          epoch: state.epoch.number,
+          sender: senderBytes,
+          recipient: recipientBytes,
+        },
+        frame
+      )
     );
     yield* verifier.verify({
       publicKey: sender,
       message: parts.signingBytes,
-      signature: yield* signature(parts.signature),
+      signature: yield* Effect.fromResult(signature(parts.signature)),
     });
     const latest = yield* client.refresh();
-    yield* recheckEnvelopeContext(state, latest.inspectState(), senderBytes, recipientBytes);
+    yield* Effect.fromResult(
+      recheckEnvelopeContext(state, latest.inspectState(), senderBytes, recipientBytes)
+    );
   });
 }

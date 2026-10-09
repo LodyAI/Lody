@@ -11,7 +11,7 @@ export function deliverFrame<E, R>(
 ) {
   const proposed = frame === undefined ? undefined : new Uint8Array(frame);
   return Effect.gen(function* () {
-    yield* checkDeliveryId(id);
+    yield* Effect.fromResult(checkDeliveryId(id));
     const outbox = yield* KeyOutbox;
     const remote = yield* KeyDeliveryRemote;
     return yield* outbox.exclusive((tx) =>
@@ -19,7 +19,7 @@ export function deliverFrame<E, R>(
         const saved = yield* tx.load(id);
         const candidate =
           !saved && proposed === undefined && prepare !== undefined ? yield* prepare : proposed;
-        const bytes = yield* selectDeliveryFrame(saved, candidate);
+        const bytes = yield* Effect.fromResult(selectDeliveryFrame(saved, candidate));
         yield* authorize(new Uint8Array(bytes));
         if (!saved) yield* tx.save(id, new Uint8Array(bytes));
         yield* authorize(new Uint8Array(bytes));

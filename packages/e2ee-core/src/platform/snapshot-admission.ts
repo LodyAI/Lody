@@ -28,7 +28,7 @@ export function snapshotStoreLayer(store: SnapshotPublicationStore): Layer.Layer
       Effect.try({
         try: () => store.transaction(streamKey, work),
         catch: (error) => error,
-      }).pipe(Effect.catchAll(snapshotFailure)),
+      }).pipe(Effect.catch(snapshotFailure)),
   });
 }
 
@@ -41,7 +41,7 @@ export function snapshotAuthenticatorLayer(
       return Effect.tryPromise({
         try: () => cipher.authenticate(owned) as Promise<ContentHeader>,
         catch: (error) => error,
-      }).pipe(Effect.catchAll(snapshotFailure));
+      }).pipe(Effect.catch(snapshotFailure));
     },
   });
 }

@@ -29,13 +29,15 @@ export function prepareDeviceAdmission(input: {
   return Effect.gen(function* () {
     const signer = yield* DeviceSigner;
     const verifier = yield* SignatureVerifier;
-    const message = yield* possessionSigningBytes({
-      genesis: genesis.toBytes(),
-      targetMembershipId: membershipId.toBytes(),
-      signingPublicKey: signer.publicKey.toBytes(),
-      encryptionPublicKey: encryptionPublicKey.toBytes(),
-      kind,
-    });
+    const message = yield* Effect.fromResult(
+      possessionSigningBytes({
+        genesis: genesis.toBytes(),
+        targetMembershipId: membershipId.toBytes(),
+        signingPublicKey: signer.publicKey.toBytes(),
+        encryptionPublicKey: encryptionPublicKey.toBytes(),
+        kind,
+      })
+    );
     const proof = yield* signer.sign(message);
     yield* verifier
       .verify({ publicKey: signer.publicKey, message, signature: proof })
@@ -61,16 +63,18 @@ export function prepareJoinRequest(input: {
 }) {
   const { genesis, requestId, userId, encryptionPublicKey, expiresAt } = input;
   return Effect.gen(function* () {
-    yield* asNullOrUint(expiresAt);
+    yield* Effect.fromResult(asNullOrUint(expiresAt));
     const signer = yield* DeviceSigner;
     const verifier = yield* SignatureVerifier;
-    const message = yield* joinRequestSigningBytes(genesis.toBytes(), {
-      requestId: requestId.toBytes(),
-      userId: userId.toBytes(),
-      signingPublicKey: signer.publicKey.toBytes(),
-      encryptionPublicKey: encryptionPublicKey.toBytes(),
-      expiresAt,
-    });
+    const message = yield* Effect.fromResult(
+      joinRequestSigningBytes(genesis.toBytes(), {
+        requestId: requestId.toBytes(),
+        userId: userId.toBytes(),
+        signingPublicKey: signer.publicKey.toBytes(),
+        encryptionPublicKey: encryptionPublicKey.toBytes(),
+        expiresAt,
+      })
+    );
     const signature = yield* signer.sign(message);
     yield* verifier
       .verify({ publicKey: signer.publicKey, message, signature })

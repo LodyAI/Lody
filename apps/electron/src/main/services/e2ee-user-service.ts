@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { Effect } from 'effect'
-import { UserIdentityStore } from '@lody/e2ee-core/effect'
-import { nodeUserIdentityLayer } from '@lody/e2ee-core/effect/platform-node'
+import { nodeUserIdentityClient } from '@lody/e2ee-core/node-identity-client'
 import type { LocalUserProtection } from '@lody/e2ee-core/node-user-store'
 import {
   createRecoveryFile,
@@ -74,7 +72,7 @@ export class E2eeUserService {
     )
       throw new Error('invalid-recovery-backup')
     const expected = { ...backup, ciphertext: new Uint8Array(backup.ciphertext) }
-    return this.withIdentity(async ({ account, run }) => {
+    return this.withIdentity(async ({ account, identities }) => {
       if (expected.accountId !== account.userId) throw new Error('recovery-account-mismatch')
       const file = await select(() => account.assertCurrent())
       try {
@@ -83,11 +81,7 @@ export class E2eeUserService {
         const parsed = parseRecoveryFile(file)
         parsed.key.fill(0)
         if (parsed.backupId !== expected.backupId) throw new Error('recovery-file-mismatch')
-        const identity = await run(
-          Effect.flatMap(UserIdentityStore, (store) =>
-            store.recover(file, expected, expected.ciphertext)
-          )
-        )
+        const identity = await identities.recover(file, expected, expected.ciphertext)
         account.assertCurrent()
         return { accountId: account.userId, fingerprint: identity.fingerprint }
       } finally {
@@ -103,8 +97,8 @@ export class E2eeUserService {
   ) {
     if (!Number.isSafeInteger(revision) || revision < 0)
       throw new Error('invalid-recovery-revision')
-    return this.withIdentity(async ({ account, run }) => {
-      const identity = await run(Effect.flatMap(UserIdentityStore, (store) => store.load))
+    return this.withIdentity(async ({ account, identities }) => {
+      const identity = await identities.load()
       account.assertCurrent()
       const file = createRecoveryFile()
       try {
@@ -114,9 +108,7 @@ export class E2eeUserService {
         account.assertCurrent()
         if (!saved) return null
         const context = { identity: identity.fingerprint, revision }
-        const ciphertext = await run(
-          Effect.flatMap(UserIdentityStore, (store) => store.sealBackup(file, context))
-        )
+        const ciphertext = await identities.sealBackup(file, context)
         account.assertCurrent()
         return { accountId: account.userId, backupId: parsed.backupId, ...context, ciphertext }
       } finally {
@@ -153,8 +145,8 @@ export class E2eeUserService {
     if (!(ciphertext instanceof Uint8Array) || ciphertext.length === 0 || ciphertext.length > 2346)
       throw new Error('invalid-recovery-backup')
     const frame = new Uint8Array(ciphertext)
-    return this.withIdentity(async ({ account, run }) => {
-      const identity = await run(Effect.flatMap(UserIdentityStore, (store) => store.load))
+    return this.withIdentity(async ({ account, identities }) => {
+      const identity = await identities.load()
       account.assertCurrent()
       const file = await select(() => account.assertCurrent())
       try {
@@ -180,7 +172,7 @@ export class E2eeUserService {
   private async withIdentity<T>(
     work: (input: {
       account: DeviceAccountLease
-      run: <A, E>(effect: Effect.Effect<A, E, UserIdentityStore>) => Promise<A>
+      identities: ReturnType<typeof nodeUserIdentityClient>
     }) => Promise<T>
   ) {
     if (!this.options.enabled) throw new Error('e2ee-user-unavailable')
@@ -198,26 +190,21 @@ export class E2eeUserService {
       account.assertCurrent()
       await mkdir(this.options.directory, { recursive: true, mode: 0o700 })
       account.assertCurrent()
-      const layer = nodeUserIdentityLayer({
+      const identities = nodeUserIdentityClient({
         path: join(this.options.directory, `${binding}.sqlite`),
         binding,
         protection: this.options.protection
       })
       return await work({
         account,
-        run: (effect) => Effect.runPromise(effect.pipe(Effect.provide(layer)))
+        identities
       })
     })
   }
 
   private async access(create: boolean) {
-    return this.withIdentity(async ({ account, run }) => {
-      const identity = await run(
-        Effect.gen(function* () {
-          const identities = yield* UserIdentityStore
-          return yield* create ? identities.create : identities.load
-        })
-      )
+    return this.withIdentity(async ({ account, identities }) => {
+      const identity = await (create ? identities.create() : identities.load())
       const signingPublicKey = Buffer.from(
         await crypto.subtle.exportKey('raw', identity.signing.publicKey)
       ).toString('hex')

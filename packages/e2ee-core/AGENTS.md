@@ -1,32 +1,30 @@
 # E2EE core
 
 Experimental primitives, not enabled product E2EE.
-Binding surface: [ledger spec](../../specs/e2ee-ledger.zh.md) and
+Contracts: [ledger spec](../../specs/e2ee-ledger.zh.md) and
 [README.md](README.md). JSON/hex control-log lives in `src/legacy.ts` for
 in-package tests only; do not re-export it.
 
 ## Required source style
 
-- **Effect v3 only**: exact workspace catalog pin (currently `3.18.4`).
-  No v4/prereleases without approval.
-- `pure/`: deterministic values or typed `Either`; no I/O, ambient state,
+- **Effect 4.0.2**: use the `e2eeEffect` catalog; do not change the default
+  v3 catalog or pass Effect objects between majors.
+- `pure/`: deterministic values or typed `Result`; no I/O, ambient state,
   clocks, randomness, logging or input mutation. Only unobservable local scratch
   mutation is allowed.
-- `workflows/`: `Effect<A, E, R>` descriptions with declared Services for ALL
-  side effects and external/global dependencies (storage, network, crypto handles,
-  entropy, time, environment, process). No eager execution, hidden Live defaults
-  or internal runtime starts.
+- `workflows/`: `Effect<A, E, R>` descriptions declare Services for storage, network, crypto, entropy,
+  clocks, environment and process. No eager execution, hidden Live defaults or
+  internal runtime starts. Convert pure Results with `Effect.fromResult`.
 - `platform/`: thin Service implementations/Layers; direct external API access
   belongs here or in composition. Concentrate complexity in pure first, workflows
   second; keep domain policy/state transitions out of platform.
-- No expected `throw`: pure returns typed `Either`; workflows use typed Effect
+- No expected `throw`: pure returns typed `Result`; workflows use typed Effect
   failures. Only unexpected fatal defects may throw. Never disguise defects or
   interruption as ordinary failure or Pending.
 - Use Effect logging/tracing and injected Services, never `console` or ambient
   loggers. Platform/composition configures sinks; pure returns diagnostic data.
   Never log secrets.
-- Required migration target, not completed purity: existing bridges remain
-  explicit, temporary exceptions, not permission to add more.
+- Existing bridges are explicit temporary exceptions; they do not permit more.
 
 ## Protocol and integration invariants
 
@@ -49,7 +47,8 @@ in-package tests only; do not re-export it.
   or duplicate known hashes fail closed without cursor advance. Unknown prefix,
   even junk followed by an empty final page, must not become up-to-date success.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
-  same bytes. `./effect` has the intent client; old `./ledger` submit/resume
+  same bytes. Each transaction owns its state; save and publication are one
+  narrow uninterruptible step. `./effect` has the intent client; old `./ledger` submit/resume
   delegate to the same `workflows/ledger-engine.ts`. No second submit path.
   Verify/extend live only in `workflows/verification.ts`; `./ledger` runs them
   via `ledger/compat.ts` (no own replay/cache); `check:effect-boundaries

@@ -1,7 +1,7 @@
 /** Promise/throw facade over the native verification workflows.
  * It owns no replay, signature or policy logic: every state transition runs
  * `workflows/verification.ts`, and every rule lives in pure/. */
-import { Effect, Either, Layer } from 'effect';
+import { Effect, Result, Layer } from 'effect';
 import type { SignatureVerifyExecutor } from '../capabilities';
 import { SignatureVerifier } from '../ports/ledger';
 import {
@@ -59,7 +59,7 @@ function ownedRecords(records: readonly Uint8Array[], start: number): Uint8Array
   return records.map((record, offset) => {
     if (!(record instanceof Uint8Array))
       return unwrap(
-        Either.left(new ValidationError({ code: 'canonical', position: start + offset }))
+        Result.fail(new ValidationError({ code: 'canonical', position: start + offset }))
       );
     return copyBytes(record);
   });
@@ -160,7 +160,7 @@ export class Ledger {
 
   hashAt(position: number): Hash {
     const hash = Number.isSafeInteger(position) ? this.#internal.hashes[position] : undefined;
-    if (!hash) return unwrap(Either.left(new ValidationError({ code: 'invalid-operation' })));
+    if (!hash) return unwrap(Result.fail(new ValidationError({ code: 'invalid-operation' })));
     return copyBytes(hash);
   }
 

@@ -11,7 +11,7 @@ import {
 } from '@loro-dev/streams-crdt/loro';
 import { StreamsCrdt as FlockStreamsCrdt, createFlockAdapter } from '@loro-dev/streams-crdt/flock';
 import { ContentCipher } from '@lody/e2ee-core';
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { ContentError } from '@lody/e2ee-core/effect';
 import type { OrgState } from '@lody/e2ee-core/ledger';
 import { contentAuthorKey, createStreamsContentProvider } from '@lody/e2ee-core/streams-content';
@@ -140,7 +140,7 @@ function provider(session: ContentClient, resource: string, model: 'loro' | 'flo
         authorize(header) {
           const authority = session.contentAuthority?.();
           if (!authority) throw new ContentError({ code: 'unauthorized' });
-          return Either.getOrThrowWith(
+          return Result.getOrThrowWith(
             contentAuthorKey(authority.state, header, (id) => authority.wasDeviceAdmitted(id)),
             (error) => error
           );

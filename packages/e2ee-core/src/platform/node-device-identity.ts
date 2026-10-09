@@ -40,10 +40,10 @@ export function nodeDeviceIdentityLayer(input: {
   const store = new SqliteDeviceIdentityStore(input.path, input.binding, input.protection);
   return Layer.succeed(DeviceIdentityStore, {
     create: Effect.tryPromise({ try: () => store.create(), catch: (error) => error }).pipe(
-      Effect.catchAll(identityFailure)
+      Effect.catch(identityFailure)
     ),
     load: Effect.tryPromise({ try: () => store.load(), catch: (error) => error }).pipe(
-      Effect.catchAll(identityFailure)
+      Effect.catch(identityFailure)
     ),
   });
 }

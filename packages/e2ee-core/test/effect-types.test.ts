@@ -1,4 +1,4 @@
-import { Effect, Either } from 'effect';
+import { Effect, Result } from 'effect';
 import { verifyRecordSignature } from '../src/workflows/verification';
 import type { PreparedEpochEnvelope } from '@lody/e2ee-core/effect';
 import { describe, expect, it } from 'vitest';
@@ -18,31 +18,31 @@ describe('validated opaque bytes', () => {
   it('owns input/output bytes and rejects wrong lengths and signing points', () => {
     const input = Point.BASE.toBytes();
     const parsed = Bytes.signingPublicKey(input);
-    expect(Either.isRight(parsed)).toBe(true);
-    if (Either.isLeft(parsed)) return;
+    expect(Result.isSuccess(parsed)).toBe(true);
+    if (Result.isFailure(parsed)) return;
     input.fill(0);
-    const exported = parsed.right.toBytes();
+    const exported = parsed.success.toBytes();
     exported.fill(0);
-    expect(parsed.right.toBytes()).toEqual(Point.BASE.toBytes());
-    expect(Either.isLeft(Bytes.signingPublicKey(input))).toBe(true);
-    expect(Either.isLeft(Bytes.signature(new Uint8Array(32)))).toBe(true);
-    expect(Either.isLeft(Bytes.encryptionPublicKey(new Uint8Array(32)))).toBe(true);
+    expect(parsed.success.toBytes()).toEqual(Point.BASE.toBytes());
+    expect(Result.isFailure(Bytes.signingPublicKey(input))).toBe(true);
+    expect(Result.isFailure(Bytes.signature(new Uint8Array(32)))).toBe(true);
+    expect(Result.isFailure(Bytes.encryptionPublicKey(new Uint8Array(32)))).toBe(true);
   });
 
   it('returns errors instead of throwing for untrusted bytes and epoch bounds', () => {
     for (const invalid of [null, undefined, {}, 1, 'key', new Uint8Array(33)]) {
-      expect(Either.isLeft(Bytes.signingPublicKey(invalid))).toBe(true);
-      expect(Either.isLeft(Bytes.membershipId(invalid))).toBe(true);
+      expect(Result.isFailure(Bytes.signingPublicKey(invalid))).toBe(true);
+      expect(Result.isFailure(Bytes.membershipId(invalid))).toBe(true);
     }
     for (const invalid of [-1, 1.5, NaN, Infinity, 0x1_0000_0000, '0']) {
-      expect(Either.isLeft(Bytes.epochNumber(invalid))).toBe(true);
+      expect(Result.isFailure(Bytes.epochNumber(invalid))).toBe(true);
     }
-    expect(Either.isRight(Bytes.epochNumber(0xffff_ffff))).toBe(true);
+    expect(Result.isSuccess(Bytes.epochNumber(0xffff_ffff))).toBe(true);
   });
 });
 
 describe('total CBOR boundary', () => {
-  it('rejects noncanonical/untrusted input through Either', () => {
+  it('rejects noncanonical/untrusted input through Result', () => {
     for (const input of [
       null,
       {},
@@ -52,33 +52,33 @@ describe('total CBOR boundary', () => {
       Uint8Array.of(0xa0),
       Uint8Array.of(0x61, 0x61),
     ]) {
-      expect(Either.isLeft(Cbor.decodeCbor(input))).toBe(true);
+      expect(Result.isFailure(Cbor.decodeCbor(input))).toBe(true);
     }
     const value = [0, true, null, Uint8Array.of(1, 2)] as const;
     const encoded = Cbor.encodeCbor(value);
-    expect(Either.isRight(encoded)).toBe(true);
-    if (Either.isLeft(encoded)) return;
-    const decoded = Cbor.decodeCbor(encoded.right);
-    encoded.right.fill(0);
-    expect(decoded).toEqual(Either.right(value));
+    expect(Result.isSuccess(encoded)).toBe(true);
+    if (Result.isFailure(encoded)) return;
+    const decoded = Cbor.decodeCbor(encoded.success);
+    encoded.success.fill(0);
+    expect(decoded).toEqual(Result.succeed(value));
   });
 });
 
 it('reuses immutable point-validity evidence without accepting modified or low-order keys', () => {
   const bytes = Point.BASE.toBytes();
   const first = SigningFacts.empty.check(bytes);
-  if (Either.isLeft(first)) throw new Error('base point fixture must be valid');
+  if (Result.isFailure(first)) throw new Error('base point fixture must be valid');
   expect(SigningFacts.empty.size).toBe(0);
-  expect(first.right.facts.size).toBe(1);
+  expect(first.success.facts.size).toBe(1);
   bytes.fill(0);
-  first.right.key.toBytes().fill(0);
-  const second = first.right.facts.check(Point.BASE.toBytes());
-  if (Either.isLeft(second)) throw new Error('previously checked point must remain valid');
-  expect(second.right.facts).toBe(first.right.facts);
-  expect(second.right.key.toBytes()).toEqual(Point.BASE.toBytes());
-  expect(first.right.facts.check(bytes)).toMatchObject({ _tag: 'Left' });
-  expect(first.right.facts.check(Point.ZERO.toBytes())).toMatchObject({ _tag: 'Left' });
-  expect(first.right.facts.size).toBe(1);
+  first.success.key.toBytes().fill(0);
+  const second = first.success.facts.check(Point.BASE.toBytes());
+  if (Result.isFailure(second)) throw new Error('previously checked point must remain valid');
+  expect(second.success.facts).toBe(first.success.facts);
+  expect(second.success.key.toBytes()).toEqual(Point.BASE.toBytes());
+  expect(first.success.facts.check(bytes)).toMatchObject({ _tag: 'Failure' });
+  expect(first.success.facts.check(Point.ZERO.toBytes())).toMatchObject({ _tag: 'Failure' });
+  expect(first.success.facts.size).toBe(1);
 });
 
 // Compiled, never invoked: meaningful negative contracts for ordinary consumers.

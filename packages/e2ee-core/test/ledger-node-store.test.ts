@@ -1,7 +1,7 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import { Cause, Deferred, Effect, Either, Exit, Fiber, Layer } from 'effect';
+import { Cause, Deferred, Effect, Result, Exit, Fiber, Layer } from 'effect';
 import {
   Bytes,
   LedgerClient as EffectLedgerClient,
@@ -46,13 +46,13 @@ it('native rotation reopens a pending file candidate without fresh entropy or a 
   const candidatePath = `${path}.candidate.json`;
   const owner = await ed25519();
   const created = await signGenesis(owner);
-  const genesis = Either.getOrThrow(Bytes.genesisHash(created.anchor));
+  const genesis = Result.getOrThrow(Bytes.genesisHash(created.anchor));
   const oldKeys = `${JSON.stringify([[0, Buffer.from(created.secret).toString('hex')]])}\n`;
   writeFileSync(keyringPath, oldKeys);
   const stream = new MemoryLedgerStream();
   stream.mode = 'false-ack';
   const capabilities = Layer.mergeAll(
-    deviceSignerLayer(Either.getOrThrow(Bytes.signingPublicKey(owner.publicKey)), owner.sign),
+    deviceSignerLayer(Result.getOrThrow(Bytes.signingPublicKey(owner.publicKey)), owner.sign),
     ledgerTransportLayer(stream),
     signatureVerifierLayer
   );
@@ -81,7 +81,7 @@ it('native rotation reopens a pending file candidate without fresh entropy or a 
   const saved = JSON.parse(candidate);
   expect(stream.records).toEqual([new Uint8Array(Buffer.from(saved.recordHex, 'hex'))]);
   expect(
-    Either.getOrThrow(KeyringCodec.decodeEpochKeyring(readFileSync(keyringPath, 'utf8'))).get(1)
+    Result.getOrThrow(KeyringCodec.decodeEpochKeyring(readFileSync(keyringPath, 'utf8'))).get(1)
   ).toEqual(new Uint8Array(Buffer.from(saved.secretHex, 'hex')));
   expect(existsSync(candidatePath)).toBe(false);
   expect(
@@ -92,18 +92,18 @@ it('native rotation reopens a pending file candidate without fresh entropy or a 
 it('native epoch files preserve old JSON, reject replacement keys, and fail closed on missing/corrupt data', async () => {
   const keyringPath = location();
   const candidatePath = `${keyringPath}.candidate`;
-  const genesis = Either.getOrThrow(Bytes.genesisHash(new Uint8Array(32).fill(1)));
-  const epoch = Either.getOrThrow(Bytes.epochNumber(0));
-  const key = Either.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(2)));
+  const genesis = Result.getOrThrow(Bytes.genesisHash(new Uint8Array(32).fill(1)));
+  const epoch = Result.getOrThrow(Bytes.epochNumber(0));
+  const key = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(2)));
   const layer = () => nodeEpochFilesLayer({ genesis, keyringPath, candidatePath });
   const run = Effect.gen(function* () {
     const keys = yield* EpochKeyring;
     yield* keys.put(genesis, epoch, key);
     return yield* keys.get(genesis, epoch);
   });
-  expect(await Effect.runPromise(run.pipe(Effect.provide(layer()), Effect.either))).toMatchObject({
-    _tag: 'Left',
-    left: { reason: 'missing' },
+  expect(await Effect.runPromise(run.pipe(Effect.provide(layer()), Effect.result))).toMatchObject({
+    _tag: 'Failure',
+    failure: { reason: 'missing' },
   });
   expect(existsSync(keyringPath)).toBe(false);
   writeFileSync(keyringPath, '[]\n');
@@ -112,21 +112,21 @@ it('native epoch files preserve old JSON, reject replacement keys, and fail clos
   expect(readFileSync(keyringPath, 'utf8')).toBe(exact);
   await Effect.runPromise(run.pipe(Effect.provide(layer())));
   expect(readFileSync(keyringPath, 'utf8')).toBe(exact);
-  const wrong = Either.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(3)));
+  const wrong = Result.getOrThrow(Bytes.epochKey(new Uint8Array(32).fill(3)));
   const overwrite = Effect.flatMap(EpochKeyring, (keys) => keys.put(genesis, epoch, wrong));
   expect(
-    await Effect.runPromise(overwrite.pipe(Effect.provide(layer()), Effect.either))
-  ).toMatchObject({ _tag: 'Left', left: { reason: 'corrupt' } });
+    await Effect.runPromise(overwrite.pipe(Effect.provide(layer()), Effect.result))
+  ).toMatchObject({ _tag: 'Failure', failure: { reason: 'corrupt' } });
   expect(readFileSync(keyringPath, 'utf8')).toBe(exact);
   for (const broken of ['{', '[[0,"00"]]', `[[0,"${'02'.repeat(32)}"],[0,"${'02'.repeat(32)}"]]`]) {
     writeFileSync(keyringPath, broken);
-    expect(await Effect.runPromise(run.pipe(Effect.provide(layer()), Effect.either))).toMatchObject(
-      { _tag: 'Left', left: { reason: 'corrupt' } }
+    expect(await Effect.runPromise(run.pipe(Effect.provide(layer()), Effect.result))).toMatchObject(
+      { _tag: 'Failure', failure: { reason: 'corrupt' } }
     );
     expect(readFileSync(keyringPath, 'utf8')).toBe(broken);
   }
   expect(KeyringCodec.decodeEpochKeyring(exact)).toEqual(
-    Either.right(new Map([[0, new Uint8Array(32).fill(2)]]))
+    Result.succeed(new Map([[0, new Uint8Array(32).fill(2)]]))
   );
 });
 
@@ -134,14 +134,14 @@ it('native epoch candidate leases retain saved bytes across interruption and exc
   const keyringPath = location();
   const candidatePath = `${keyringPath}.candidate`;
   writeFileSync(keyringPath, '[]\n');
-  const genesis = Either.getOrThrow(Bytes.genesisHash(new Uint8Array(32).fill(1)));
+  const genesis = Result.getOrThrow(Bytes.genesisHash(new Uint8Array(32).fill(1)));
   const layer = () => nodeEpochFilesLayer({ genesis, keyringPath, candidatePath });
   const text = `${JSON.stringify({ genesisHex: '01'.repeat(32), epoch: 1, commitmentHex: '02'.repeat(32), secretHex: '03'.repeat(32), recordHex: '0102' })}\n`;
   await Effect.runPromise(
     Effect.gen(function* () {
       const store = yield* EpochCandidateStore;
       const saved = yield* Deferred.make<void>();
-      const holder = yield* Effect.fork(
+      const holder = yield* Effect.forkChild(
         store.exclusive(genesis, (tx) =>
           Effect.gen(function* () {
             yield* tx.save(text);
@@ -153,26 +153,26 @@ it('native epoch candidate leases retain saved bytes across interruption and exc
       yield* Deferred.await(saved);
       const concurrent = yield* Effect.flatMap(EpochCandidateStore, (other) =>
         other.exclusive(genesis, (tx) => tx.load)
-      ).pipe(Effect.provide(layer()), Effect.either);
-      expect(concurrent).toMatchObject({ _tag: 'Left', left: { reason: 'busy' } });
+      ).pipe(Effect.provide(layer()), Effect.result);
+      expect(concurrent).toMatchObject({ _tag: 'Failure', failure: { reason: 'busy' } });
       yield* Fiber.interrupt(holder);
       expect(yield* store.exclusive(genesis, (tx) => tx.load)).toBe(text);
       expect(readFileSync(candidatePath, 'utf8')).toBe(text);
       const overwrite = yield* store
         .exclusive(genesis, (tx) => tx.save(text.replace('"epoch":1', '"epoch":2')))
-        .pipe(Effect.either);
-      expect(overwrite).toMatchObject({ _tag: 'Left', left: { reason: 'exists' } });
+        .pipe(Effect.result);
+      expect(overwrite).toMatchObject({ _tag: 'Failure', failure: { reason: 'exists' } });
       expect(readFileSync(candidatePath, 'utf8')).toBe(text);
       yield* store.exclusive(genesis, (tx) => tx.clear);
       expect(existsSync(candidatePath)).toBe(false);
       const escaped = yield* store.exclusive(genesis, (tx) => Effect.succeed(tx));
-      expect(yield* escaped.save(text).pipe(Effect.either)).toMatchObject({
-        _tag: 'Left',
-        left: { reason: 'closed' },
+      expect(yield* escaped.save(text).pipe(Effect.result)).toMatchObject({
+        _tag: 'Failure',
+        failure: { reason: 'closed' },
       });
-      expect(yield* escaped.load.pipe(Effect.either)).toMatchObject({
-        _tag: 'Left',
-        left: { reason: 'closed' },
+      expect(yield* escaped.load.pipe(Effect.result)).toMatchObject({
+        _tag: 'Failure',
+        failure: { reason: 'closed' },
       });
       expect(existsSync(candidatePath)).toBe(false);
     }).pipe(Effect.provide(layer()))
@@ -183,10 +183,10 @@ it('outbox codec preserves canonical v0 bytes and rejects ambiguous rows', () =>
   const id = '12'.repeat(16);
   const text = `["lody-e2ee-key-outbox/v0",[["${id}","0102ff"]]]`;
   expect(OutboxCodec.encodeKeyOutbox(new Map([[id, new Uint8Array([1, 2, 255])]]))).toEqual(
-    Either.right(text)
+    Result.succeed(text)
   );
   expect(OutboxCodec.decodeKeyOutbox(text)).toEqual(
-    Either.right(new Map([[id, new Uint8Array([1, 2, 255])]]))
+    Result.succeed(new Map([[id, new Uint8Array([1, 2, 255])]]))
   );
   for (const bad of [
     text + ' ',
@@ -194,13 +194,13 @@ it('outbox codec preserves canonical v0 bytes and rejects ambiguous rows', () =>
     `["lody-e2ee-key-outbox/v0",[["${id}","01"],["${id}","02"]]]`,
   ]) {
     expect(OutboxCodec.decodeKeyOutbox(bad)).toMatchObject({
-      _tag: 'Left',
-      left: { code: 'canonical' },
+      _tag: 'Failure',
+      failure: { code: 'canonical' },
     });
   }
   expect(OutboxCodec.decodeKeyOutbox(text.replace('/v0', '/v9'))).toMatchObject({
-    _tag: 'Left',
-    left: { code: 'unknown-version' },
+    _tag: 'Failure',
+    failure: { code: 'unknown-version' },
   });
 });
 
@@ -212,19 +212,17 @@ it('native outbox interruption keeps committed bytes and releases its SQLite lea
     Effect.gen(function* () {
       const store = yield* KeyOutbox;
       const saved = yield* Deferred.make<void>();
-      const holder = yield* Effect.fork(
+      const holder = yield* Effect.forkChild(
         store.exclusive((tx) =>
           tx
             .save(id, frame)
-            .pipe(
-              Effect.zipRight(Deferred.succeed(saved, undefined)),
-              Effect.zipRight(Effect.never)
-            )
+            .pipe(Effect.andThen(Deferred.succeed(saved, undefined)), Effect.andThen(Effect.never))
         )
       );
       yield* Deferred.await(saved);
-      const interrupted = yield* Fiber.interrupt(holder);
-      expect(Exit.isFailure(interrupted) && Cause.isInterrupted(interrupted.cause)).toBe(true);
+      yield* Fiber.interrupt(holder);
+      const interrupted = yield* Fiber.await(holder);
+      expect(Exit.isFailure(interrupted) && Cause.hasInterrupts(interrupted.cause)).toBe(true);
       expect(yield* store.exclusive((tx) => tx.load(id))).toEqual(frame);
     }).pipe(Effect.provide(nodeKeyOutboxLayer({ path, mode: 'create' })))
   );
@@ -257,14 +255,14 @@ it('native outbox preserves the v0 payload across legacy and Effect reopen', asy
       const store = yield* KeyOutbox;
       expect(yield* store.exclusive((tx) => tx.load(otherId))).toEqual(new Uint8Array([4, 5]));
       expect(
-        yield* Effect.either(store.exclusive((tx) => tx.save(id, new Uint8Array([9]))))
-      ).toMatchObject({ _tag: 'Left', left: { code: 'replay' } });
-      const failed = yield* Effect.either(
+        yield* Effect.result(store.exclusive((tx) => tx.save(id, new Uint8Array([9]))))
+      ).toMatchObject({ _tag: 'Failure', failure: { code: 'replay' } });
+      const failed = yield* Effect.result(
         store.exclusive((tx) =>
-          tx.save('56'.repeat(16), frame).pipe(Effect.zipRight(Effect.fail('after-save')))
+          tx.save('56'.repeat(16), frame).pipe(Effect.andThen(Effect.fail('after-save')))
         )
       );
-      expect(failed).toEqual(Either.left('after-save'));
+      expect(failed).toEqual(Result.fail('after-save'));
     }).pipe(Effect.provide(reopened))
   );
   expect(
@@ -282,21 +280,21 @@ it('native outbox open never creates missing or initializes foreign files', asyn
   const open = Effect.gen(function* () {
     yield* KeyOutbox;
   }).pipe(Effect.provide(nodeKeyOutboxLayer({ path, mode: 'open' })));
-  expect(await Effect.runPromise(Effect.either(open))).toMatchObject({
-    _tag: 'Left',
-    left: { _tag: 'StorageError', reason: 'missing' },
+  expect(await Effect.runPromise(Effect.result(open))).toMatchObject({
+    _tag: 'Failure',
+    failure: { _tag: 'StorageError', reason: 'missing' },
   });
   expect(existsSync(path)).toBe(false);
   writeFileSync(path, '');
-  expect(await Effect.runPromise(Effect.either(open))).toMatchObject({
-    _tag: 'Left',
-    left: { _tag: 'StorageError', reason: 'foreign' },
+  expect(await Effect.runPromise(Effect.result(open))).toMatchObject({
+    _tag: 'Failure',
+    failure: { _tag: 'StorageError', reason: 'foreign' },
   });
   expect(readFileSync(path).byteLength).toBe(0);
   writeFileSync(path, 'not a sqlite database');
-  expect(await Effect.runPromise(Effect.either(open))).toMatchObject({
-    _tag: 'Left',
-    left: { _tag: 'StorageError', reason: 'corrupt' },
+  expect(await Effect.runPromise(Effect.result(open))).toMatchObject({
+    _tag: 'Failure',
+    failure: { _tag: 'StorageError', reason: 'corrupt' },
   });
   expect(readFileSync(path, 'utf8')).toBe('not a sqlite database');
 });
@@ -328,8 +326,8 @@ describe('L6 sqlite journal restart', () => {
     const created = await signGenesis(owner);
     const proof = await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal');
     const stream = new MemoryLedgerStream();
-    const value = <A, E>(result: Either.Either<A, E>) =>
-      Either.getOrThrowWith(result, (error) => error);
+    const value = <A, E>(result: Result.Result<A, E>) =>
+      Result.getOrThrowWith(result, (error) => error);
     const publicKey = value(Bytes.signingPublicKey(owner.publicKey));
     const create = EffectLedgerClient.create({
       userId: value(Bytes.userId(created.userId)),
@@ -397,7 +395,7 @@ describe('L6 sqlite journal restart', () => {
       Effect.gen(function* () {
         const store = yield* JournalStore;
         const saved = yield* Deferred.make<JournalTransaction>();
-        const holder = yield* Effect.fork(
+        const holder = yield* Effect.forkChild(
           store.exclusive((tx) =>
             Effect.gen(function* () {
               yield* tx.save(journal);
@@ -407,15 +405,16 @@ describe('L6 sqlite journal restart', () => {
           )
         );
         const escaped = yield* Deferred.await(saved);
-        const interrupted = yield* Fiber.interrupt(holder);
-        expect(Exit.isFailure(interrupted) && Cause.isInterrupted(interrupted.cause)).toBe(true);
-        expect(yield* Effect.either(escaped.load)).toMatchObject({
-          _tag: 'Left',
-          left: { _tag: 'StorageError', reason: 'closed' },
+        yield* Fiber.interrupt(holder);
+        const interrupted = yield* Fiber.await(holder);
+        expect(Exit.isFailure(interrupted) && Cause.hasInterrupts(interrupted.cause)).toBe(true);
+        expect(yield* Effect.result(escaped.load)).toMatchObject({
+          _tag: 'Failure',
+          failure: { _tag: 'StorageError', reason: 'closed' },
         });
         expect(yield* store.exclusive((tx) => tx.load)).toEqual(journal);
         const defect = yield* Effect.exit(store.exclusive(() => Effect.die('fixture-defect')));
-        expect(Exit.isFailure(defect) && Cause.isDie(defect.cause)).toBe(true);
+        expect(Exit.isFailure(defect) && Cause.hasDies(defect.cause)).toBe(true);
         expect(yield* store.exclusive((tx) => tx.load)).toEqual(journal);
       }).pipe(Effect.provide(nodeJournalStoreLayer({ path, mode: 'create' })))
     );
@@ -430,25 +429,25 @@ describe('L6 sqlite journal restart', () => {
       return yield* store.exclusive((tx) => tx.load);
     });
     const opening = inspect.pipe(Effect.provide(nodeJournalStoreLayer({ path, mode: 'open' })));
-    expect(await Effect.runPromise(Effect.either(opening))).toMatchObject({
-      _tag: 'Left',
-      left: { _tag: 'StorageError', reason: 'missing' },
+    expect(await Effect.runPromise(Effect.result(opening))).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'StorageError', reason: 'missing' },
     });
     expect(existsSync(path)).toBe(false);
     const creating = inspect.pipe(Effect.provide(nodeJournalStoreLayer({ path, mode: 'create' })));
     expect(existsSync(path)).toBe(false);
     expect(await Effect.runPromise(creating)).toBeNull();
-    expect(await Effect.runPromise(Effect.either(creating))).toMatchObject({
-      _tag: 'Left',
-      left: { reason: 'exists' },
+    expect(await Effect.runPromise(Effect.result(creating))).toMatchObject({
+      _tag: 'Failure',
+      failure: { reason: 'exists' },
     });
     expect(await Effect.runPromise(opening)).toBeNull();
     await Effect.runPromise(
       Effect.gen(function* () {
         const store = yield* JournalStore;
         unlinkSync(path);
-        const missing = yield* Effect.either(store.exclusive((tx) => tx.load));
-        expect(missing).toMatchObject({ _tag: 'Left', left: { reason: 'missing' } });
+        const missing = yield* Effect.result(store.exclusive((tx) => tx.load));
+        expect(missing).toMatchObject({ _tag: 'Failure', failure: { reason: 'missing' } });
         expect(existsSync(path)).toBe(false);
       }).pipe(Effect.provide(nodeJournalStoreLayer({ path, mode: 'open' })))
     );
@@ -463,8 +462,11 @@ describe('L6 sqlite journal restart', () => {
       writeFileSync(path, contents);
       const opening = Effect.gen(function* () {
         return yield* JournalStore;
-      }).pipe(Effect.provide(nodeJournalStoreLayer({ path, mode: 'open' })), Effect.either);
-      expect(await Effect.runPromise(opening)).toMatchObject({ _tag: 'Left', left: { reason } });
+      }).pipe(Effect.provide(nodeJournalStoreLayer({ path, mode: 'open' })), Effect.result);
+      expect(await Effect.runPromise(opening)).toMatchObject({
+        _tag: 'Failure',
+        failure: { reason },
+      });
       expect(readFileSync(path, 'utf8')).toBe(contents);
     }
   });
@@ -486,7 +488,7 @@ describe('L6 sqlite journal restart', () => {
     });
     const held = Effect.runPromise(
       new SqliteLedgerStore(path).exclusive(() =>
-        Effect.sync(enter).pipe(Effect.zipRight(Effect.promise(() => released)))
+        Effect.sync(enter).pipe(Effect.andThen(Effect.promise(() => released)))
       )
     );
     await entered;
@@ -495,9 +497,9 @@ describe('L6 sqlite journal restart', () => {
       return yield* store.exclusive((tx) => tx.load);
     }).pipe(Effect.provide(nodeJournalStoreLayer({ path, mode: 'open' })));
     try {
-      expect(await Effect.runPromise(Effect.either(inspect))).toMatchObject({
-        _tag: 'Left',
-        left: { reason: 'busy' },
+      expect(await Effect.runPromise(Effect.result(inspect))).toMatchObject({
+        _tag: 'Failure',
+        failure: { reason: 'busy' },
       });
     } finally {
       release();
@@ -514,18 +516,18 @@ describe('L6 sqlite journal restart', () => {
     ];
     for (const text of samples) {
       const decoded = JournalCodec.decodeLedgerJournal(text);
-      if (Either.isLeft(decoded)) throw new Error('frozen journal must decode');
-      expect(JournalCodec.encodeLedgerJournal(decoded.right)).toEqual(Either.right(text));
-      expect(encodeLedgerJournal(decoded.right)).toBe(text);
-      decoded.right.genesis.fill(0);
+      if (Result.isFailure(decoded)) throw new Error('frozen journal must decode');
+      expect(JournalCodec.encodeLedgerJournal(decoded.success)).toEqual(Result.succeed(text));
+      expect(encodeLedgerJournal(decoded.success)).toBe(text);
+      decoded.success.genesis.fill(0);
       expect(JournalCodec.decodeLedgerJournal(text)).not.toEqual(decoded);
       expect(JournalCodec.decodeLedgerJournal(text + ' ')).toMatchObject({
-        _tag: 'Left',
-        left: { code: 'canonical' },
+        _tag: 'Failure',
+        failure: { code: 'canonical' },
       });
     }
     for (const text of ['{', 'null', '["foreign"]'])
-      expect(JournalCodec.decodeLedgerJournal(text)).toMatchObject({ _tag: 'Left' });
+      expect(JournalCodec.decodeLedgerJournal(text)).toMatchObject({ _tag: 'Failure' });
   });
 
   it('reloads verified records after process restart and does not treat disk as authority', async () => {
@@ -619,9 +621,9 @@ describe('L6 sqlite journal restart', () => {
     const locked = once(child, 'message');
     child.send({ mode: 'save', journal: encodeLedgerJournal(withPending) });
     expect(await Promise.race([locked, failed])).toEqual(['locked', undefined]);
-    expect(await Effect.runPromise(Effect.either(store.exclusive((tx) => tx.load)))).toMatchObject({
-      _tag: 'Left',
-      left: { reason: 'busy' },
+    expect(await Effect.runPromise(Effect.result(store.exclusive((tx) => tx.load)))).toMatchObject({
+      _tag: 'Failure',
+      failure: { reason: 'busy' },
     });
     await kill(child);
     const recovered = await Effect.runPromise(store.exclusive((tx) => tx.load));

@@ -1,6 +1,6 @@
 // Record codec canonicality and signature strictness.
 import { describe, expect, it } from 'vitest';
-import { Either } from 'effect';
+import { Result } from 'effect';
 import { Ledger, LedgerError } from '../src/ledger';
 import * as PureSchema from '../src/pure/ledger-schema';
 import * as PureSnapshot from '../src/pure/ledger-snapshot';
@@ -79,7 +79,7 @@ describe('codec strictness', () => {
     };
     for (const [name, bytes] of Object.entries(variants)) {
       const decoded = PureSchema.decodeRecord(bytes);
-      expect([name, Either.isLeft(decoded)]).toEqual([name, true]);
+      expect([name, Result.isFailure(decoded)]).toEqual([name, true]);
       expect([name, await code(created.ledger.extend([bytes]))]).not.toEqual([name, 'accepted']);
     }
   });
@@ -121,14 +121,14 @@ describe('codec strictness', () => {
       headSignature,
     };
     await expect(Ledger.verifySnapshot({ trust, snapshot })).resolves.toBeDefined();
-    expect(Either.isLeft(PureSnapshot.parseSignedSnapshot(Uint8Array.from([...snapshot, 0])))).toBe(
-      true
-    );
+    expect(
+      Result.isFailure(PureSnapshot.parseSignedSnapshot(Uint8Array.from([...snapshot, 0])))
+    ).toBe(true);
     // version 1 encoded non-minimally: [[1, ...]] => 0x82 0x86 0x01
     expect(snapshot[0]).toBe(0x82);
     expect(snapshot[1]).toBe(0x86);
     const nonMinimal = splice(snapshot, 2, 1, [0x18, 0x01]);
-    expect(Either.isLeft(PureSnapshot.parseSignedSnapshot(nonMinimal))).toBe(true);
+    expect(Result.isFailure(PureSnapshot.parseSignedSnapshot(nonMinimal))).toBe(true);
     await expect(Ledger.verifySnapshot({ trust, snapshot: nonMinimal })).rejects.toBeInstanceOf(
       LedgerError
     );

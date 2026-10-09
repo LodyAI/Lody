@@ -31,7 +31,7 @@ export function storageError(error: unknown): StorageError {
 /** Synchronous foreign boundary. Expected storage failures stay typed; defects stay defects. */
 export function storageSync<A>(work: () => A): Effect.Effect<A, StorageError | ValidationError> {
   return Effect.try({ try: work, catch: (error) => error }).pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       error instanceof TypeError || error instanceof ReferenceError
         ? Effect.die(error)
         : Effect.fail(storageError(error))
@@ -46,12 +46,12 @@ export function ledgerTransportLayer(stream: LedgerStream): Layer.Layer<LedgerTr
       Effect.tryPromise({
         try: () => stream.readAfter(offset),
         catch: (error) => error,
-      }).pipe(Effect.catchAll((error) => transportFailure('read', error))),
+      }).pipe(Effect.catch((error) => transportFailure('read', error))),
     appendCas: (offset, bytes) =>
       Effect.tryPromise({
         try: () => stream.appendCas(offset, bytes),
         catch: (error) => error,
-      }).pipe(Effect.catchAll((error) => transportFailure('append', error))),
+      }).pipe(Effect.catch((error) => transportFailure('append', error))),
   });
 }
 
@@ -82,12 +82,12 @@ export function deviceSignerLayer(
         try: () => sign(new Uint8Array(ownedMessage)),
         catch: (error) => error,
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           error instanceof TypeError || error instanceof ReferenceError
             ? Effect.die(error)
             : Effect.fail(new CryptoError({ operation: 'sign' }))
         ),
-        Effect.flatMap(signature)
+        Effect.flatMap((bytes) => Effect.fromResult(signature(bytes)))
       );
     },
   });

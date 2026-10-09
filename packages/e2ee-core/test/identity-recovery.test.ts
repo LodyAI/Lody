@@ -1,3 +1,4 @@
+import { nodeDeviceIdentityClient } from '../src/node-identity-client';
 // recovery device R, join/enrollment binding, recovery file and
 // local device identity storage. Real Ed25519/X25519/XChaCha20 and real SQLite in
 // temp dirs; no crypto stubs, clocks, sleeps or network.
@@ -32,7 +33,7 @@ import {
   signJoin,
   type DeviceKeys,
 } from './ledger-fixtures';
-import { Either } from 'effect';
+import { Result } from 'effect';
 
 type L = Awaited<ReturnType<typeof Ledger.verify>>;
 
@@ -230,7 +231,7 @@ describe('recovery file / backup frame', () => {
     ).toThrow('recovery-context-mismatch');
     // Same backupId, different key: AEAD fails closed.
     const { backupId } = parseRecoveryFile(file);
-    const forged = Either.getOrThrow(encodeRecoveryFile(backupId, random(32)));
+    const forged = Result.getOrThrow(encodeRecoveryFile(backupId, random(32)));
     expect(() => openRecoveryBackup(forged, { identity, revision: 2 }, rev2)).toThrow(
       'recovery-authentication-failed'
     );
@@ -370,4 +371,37 @@ describe('open never initializes missing storage', () => {
       fileCreatedByLoad: false,
     });
   });
+});
+
+it('initializes through the Promise facade without replacing identity and checks account before create', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'identity-facade-'));
+  const protectedKeys = protection();
+  try {
+    const path = join(dir, 'device.sqlite');
+    const client = nodeDeviceIdentityClient({
+      path,
+      binding: 'ab'.repeat(32),
+      protection: protectedKeys.device,
+    });
+    await expect(
+      client.initialize(() => {
+        throw new Error('stale-account');
+      })
+    ).rejects.toThrow('stale-account');
+    await expect(client.load()).rejects.toMatchObject({ _tag: 'StorageError', reason: 'missing' });
+    const created = await client.initialize(() => {});
+    const loaded = await client.initialize(() => {
+      throw new Error('must-not-recreate');
+    });
+    expect(loaded.id).toEqual(created.id);
+    expect(await crypto.subtle.exportKey('raw', loaded.signing.publicKey)).toEqual(
+      await crypto.subtle.exportKey('raw', created.signing.publicKey)
+    );
+    expect(await crypto.subtle.exportKey('raw', loaded.encryption.publicKey)).toEqual(
+      await crypto.subtle.exportKey('raw', created.encryption.publicKey)
+    );
+    await expect(client.create()).rejects.toMatchObject({ _tag: 'StorageError', reason: 'exists' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

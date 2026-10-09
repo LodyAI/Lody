@@ -37,6 +37,7 @@ import {
   LabHttp,
   LiveLabLayer,
   runLabPromise,
+  LabRun,
   type LabServices,
 } from './services';
 
@@ -212,6 +213,7 @@ type PrivateState = {
   closed: boolean;
   hostClosed: boolean;
   layer: Layer.Layer<LabServices, never, never>;
+  run: LabRun<LabServices>;
 };
 
 const secrets = new WeakMap<AttackLab, PrivateState>();
@@ -226,7 +228,7 @@ function priv(lab: AttackLab): PrivateState {
 function runLab<A>(lab: AttackLab, effect: Effect.Effect<A, unknown, LabServices>): Promise<A> {
   const state = secrets.get(lab);
   if (!state) throw new Error('attack-lab-invalid');
-  return runLabPromise(effect, state.layer);
+  return state.run.run(effect);
 }
 
 function publicViewEffect(state: PrivateState): Effect.Effect<PublicView, never, LabFs> {
@@ -291,23 +293,23 @@ function inspectClientEffect(
     const ledger = yield* Effect.tryPromise({
       try: () => client.readLedger(),
       catch: (error) => error,
-    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    }).pipe(Effect.catch(() => Effect.succeed(null)));
     if (ledger) facts.verifiedRecords = ledger.length;
     else facts.importFailed = true;
     const counted = yield* riverrunRecordCountEffect(
       host.riverrunUrl,
       genesisHex,
       CONTROL_STREAM
-    ).pipe(Effect.catchAll(() => Effect.succeed({ ok: false as const, status: 0, count: 0 })));
+    ).pipe(Effect.catch(() => Effect.succeed({ ok: false as const, status: 0, count: 0 })));
     if (counted.ok && facts.verifiedRecords !== undefined) {
       facts.rejectedRecords = Math.max(0, counted.count - facts.verifiedRecords);
     }
     const store = new SqliteLedgerStore(join(client.clientDir, 'ledger.sqlite'));
     const journal = yield* store
       .exclusive((tx) => tx.load)
-      .pipe(Effect.catchAllCause(() => Effect.succeed(null)));
+      .pipe(Effect.catch(() => Effect.succeed(null)));
     if (journal && journal.records.length > 0) {
-      const verified = yield* Bytes.genesisHash(journal.genesis).pipe(
+      const verified = yield* Effect.fromResult(Bytes.genesisHash(journal.genesis)).pipe(
         Effect.flatMap((anchor) => verifyLedger({ anchor, records: journal.records })),
         Effect.provide(signatureVerifierLayer),
         Effect.option
@@ -477,7 +479,7 @@ function cursorFactsEffect(
       else if (covered === undefined) ahead = undefined;
       const stream = cursor.streamUrl?.split('/').filter(Boolean).pop() ?? kind;
       const tail = yield* riverrunNextOffsetEffect(host.riverrunUrl, genesisHex, stream).pipe(
-        Effect.catchAll(() => Effect.succeed(null as string | null))
+        Effect.catch(() => Effect.succeed(null as string | null))
       );
       if (tail === null) {
         ahead = undefined;
@@ -544,7 +546,7 @@ function clientStateDigestEffect(dir: string): Effect.Effect<ClientDigest, unkno
     let journal: { genesis: Uint8Array; records: readonly Uint8Array[] } | null = null;
     journal = yield* Effect.suspend(() =>
       new SqliteLedgerStore(join(dir, 'ledger.sqlite')).exclusive((tx) => tx.load)
-    ).pipe(Effect.catchAllCause(() => Effect.succeed(null)));
+    ).pipe(Effect.catch(() => Effect.succeed(null)));
     const hash = createHash('sha256');
     if (journal) {
       hash.update(journal.genesis);
@@ -586,7 +588,7 @@ export async function harnessReplayMaterial(lab: AttackLab): Promise<ReplayMater
   const clients: ClientDigest[] = [];
   if (state) {
     for (const dir of state.clientDirs) {
-      clients.push(await runLabPromise(clientStateDigestEffect(dir), state.layer));
+      clients.push(await state.run.run(clientStateDigestEffect(dir)));
     }
   }
   return {
@@ -632,11 +634,15 @@ export function createAttackLab(input: {
     actions: () => [...(secrets.get(lab)?.actions ?? [])],
   };
   // startedMs is set after providing clock from the same layer.
-  const startedMs = Effect.runSync(
+  const run = new LabRun(layer);
+  // finish seals the attacker handle; private replay measurement still belongs
+  // to the enclosing harness run. Dispose only after the runtime is finished.
+  input.runtime.addFinalizer(Effect.promise(() => run.close()));
+  const startedMs = run.runSync(
     Effect.gen(function* () {
       const clock = yield* LabClock;
       return clock.nowMs();
-    }).pipe(Effect.provide(layer))
+    })
   );
   secrets.set(lab, {
     host: input.host,
@@ -663,6 +669,7 @@ export function createAttackLab(input: {
     closed: false,
     hostClosed: false,
     layer,
+    run,
   });
   return lab;
 }
@@ -949,7 +956,7 @@ function finishEffect(lab: AttackLab): Effect.Effect<PublicReport, unknown, LabS
     const health = yield* Effect.tryPromise({
       try: () => http.fetch(`${state.host.baseUrl}/healthz`),
       catch: (error) => error,
-    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    }).pipe(Effect.catch(() => Effect.succeed(null)));
     if (health) reachable = health.ok;
     const backendPlaintext = judgeLeak({ backendContainsPlaintext: leaked || recovered });
     const insider = yield* insiderLeakEffect(state);
@@ -1186,7 +1193,7 @@ export async function replayAttackActions(
     const actualClients: ClientDigest[] = [];
     if (state) {
       for (const dir of state.clientDirs) {
-        actualClients.push(await runLabPromise(clientStateDigestEffect(dir), state.layer));
+        actualClients.push(await state.run.run(clientStateDigestEffect(dir)));
       }
     }
     const count = Math.max(expected.clients.length, actualClients.length);

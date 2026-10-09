@@ -20,7 +20,8 @@
     "./streams": "./src/streams.ts",
     "./streams-content": "./src/streams-content.ts",
     "./snapshot-admission": "./src/snapshot-admission.ts",
-    "./node-snapshot-publication-store": "./src/node-snapshot-publication-store.ts"
+    "./node-snapshot-publication-store": "./src/node-snapshot-publication-store.ts",
+    "./node-identity-client": "./src/node-identity-client.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
@@ -48,7 +49,7 @@
     "@noble/ciphers": "2.1.1",
     "@noble/ed25519": "3.2.0",
     "@noble/hashes": "2.2.0",
-    "effect": "catalog:"
+    "effect": "catalog:e2eeEffect"
   },
   "devDependencies": {
     "@loro-dev/flock-wasm": "catalog:",

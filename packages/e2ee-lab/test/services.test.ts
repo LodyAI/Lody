@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { Layer } from 'effect';
-import { createAttackLab } from '../src/attack-lab';
+import { Context, Deferred, Effect, Layer } from 'effect';
+import { createAttackLab, harnessReplayMaterial } from '../src/attack-lab';
 import { LabRuntime } from '../src/runtime';
 import {
+  LabClock,
+  LabRun,
+  runLabPromise,
   LiveLabClock,
   LiveLabHttp,
   MemoryLabFs,
@@ -154,5 +157,151 @@ describe('Lab services', () => {
     });
     expect(ok).toEqual({ ok: true });
     expect([...memory.fs.readBytes('/lab/rr.sqlite')]).toEqual([0x10, 0xdf, 0x30, 0x40]);
+  });
+});
+
+describe('scoped lab owners', () => {
+  it('interrupts unfinished layer acquisition and releases already acquired resources', async () => {
+    class Resource extends Context.Service<Resource, object>()('test/AcquiringResource') {}
+    const entered = Deferred.makeUnsafe<void>();
+    let live = false;
+    const layer = Layer.effect(
+      Resource,
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          live = true;
+          return {};
+        }),
+        () =>
+          Effect.sync(() => {
+            live = false;
+          })
+      ).pipe(
+        Effect.tap(() => Deferred.succeed(entered, undefined)),
+        Effect.andThen(Effect.never)
+      )
+    );
+    const owner = new LabRun(layer);
+    const work = owner.run(Resource.use(Effect.succeed)).then(
+      () => 'success',
+      () => 'interrupted'
+    );
+    await Effect.runPromise(Deferred.await(entered));
+    expect(live).toBe(true);
+    await owner.close();
+    expect(await work).toBe('interrupted');
+    expect(live).toBe(false);
+    await owner.close();
+  });
+
+  it('keeps one Context per owner and awaits resource and fiber cleanup', async () => {
+    class Resource extends Context.Service<Resource, { readonly identity: object }>()(
+      'test/Resource'
+    ) {}
+    const live = new Set<object>();
+    const layer = Layer.effect(
+      Resource,
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const identity = {};
+          live.add(identity);
+          return { identity };
+        }),
+        ({ identity }) =>
+          Effect.sync(() => {
+            live.delete(identity);
+          })
+      )
+    );
+    const first = new LabRun(layer);
+    const second = new LabRun(layer);
+    expect(live.size).toBe(0);
+    const a = await first.run(Resource.use(Effect.succeed));
+    expect(await first.run(Resource.use(Effect.succeed))).toBe(a);
+    const b = await second.run(Resource.use(Effect.succeed));
+    expect(b.identity).not.toBe(a.identity);
+    expect(live.has(a.identity) && live.has(b.identity)).toBe(true);
+    const entered = Deferred.makeUnsafe<void>();
+    let finalized = false;
+    const waiting = first
+      .run(
+        Deferred.succeed(entered, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(
+            Effect.sync(() => {
+              finalized = true;
+            })
+          )
+        )
+      )
+      .then(
+        () => 'success',
+        () => 'interrupted'
+      );
+    await Effect.runPromise(Deferred.await(entered));
+    await first.close();
+    expect(await waiting).toBe('interrupted');
+    expect(finalized).toBe(true);
+    expect(live.has(a.identity)).toBe(false);
+    expect(live.has(b.identity)).toBe(true);
+    await first.close();
+    await expect(first.run(Resource.use(Effect.succeed))).rejects.toThrow('lab-run-closed');
+    await second.close();
+    expect(live.size).toBe(0);
+  });
+
+  it('keeps private replay services after finish and releases them on runtime disposal', async () => {
+    let alive = false;
+    const clock = Layer.effect(
+      LabClock,
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          alive = true;
+          return { nowMs: () => 1000 };
+        }),
+        () =>
+          Effect.sync(() => {
+            alive = false;
+          })
+      )
+    );
+    const host = await launchLab();
+    const runtime = new LabRuntime();
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [],
+      expectedPlaintext: 'synthetic-private-text',
+      layer: Layer.mergeAll(clock, MemoryLabFs(), LiveLabHttp),
+    });
+    await lab.finish();
+    expect(alive).toBe(true);
+    expect((await harnessReplayMaterial(lab)).clients).toEqual([]);
+    await runtime.dispose();
+    expect(alive).toBe(false);
+  });
+
+  it('releases partially acquired layers when construction fails', async () => {
+    class Resource extends Context.Service<Resource, object>()('test/FailedResource') {}
+    const live = new Set<object>();
+    const defect = new TypeError('layer-failed');
+    const layer = Layer.effect(
+      Resource,
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const resource = {};
+          live.add(resource);
+          return resource;
+        }),
+        (resource) =>
+          Effect.sync(() => {
+            live.delete(resource);
+          })
+      ).pipe(Effect.andThen(Effect.die(defect)))
+    );
+    await expect(runLabPromise(Resource.use(Effect.succeed), layer)).rejects.toThrow(
+      'layer-failed'
+    );
+    expect(live.size).toBe(0);
   });
 });

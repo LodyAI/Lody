@@ -14,16 +14,16 @@ export interface KeyOutboxTransaction {
   ) => Effect.Effect<void, StorageError | ValidationError>;
 }
 
-export class KeyOutbox extends Context.Tag('@lody/e2ee-core/KeyOutbox')<
+export class KeyOutbox extends Context.Service<
   KeyOutbox,
   {
     readonly exclusive: <A, E, R>(
       work: (tx: KeyOutboxTransaction) => Effect.Effect<A, E, R>
     ) => Effect.Effect<A, E | StorageError | ValidationError, R>;
   }
->() {}
+>()('@lody/e2ee-core/KeyOutbox') {}
 
-export class KeyDeliveryRemote extends Context.Tag('@lody/e2ee-core/KeyDeliveryRemote')<
+export class KeyDeliveryRemote extends Context.Service<
   KeyDeliveryRemote,
   {
     readonly put: (
@@ -34,4 +34,4 @@ export class KeyDeliveryRemote extends Context.Tag('@lody/e2ee-core/KeyDeliveryR
       id: string
     ) => Effect.Effect<Uint8Array | null, TransportError | StreamProtocolError | ValidationError>;
   }
->() {}
+>()('@lody/e2ee-core/KeyDeliveryRemote') {}

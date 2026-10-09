@@ -124,7 +124,7 @@ function rejected(job: SignatureJobInput): ValidationError {
 /** In-process verifier. The optional cache is owned by the caller or the Layer. */
 export function makeSignatureVerifier(options?: {
   readonly cache?: SigningPointCache;
-}): SignatureVerifier['Type'] {
+}): SignatureVerifier['Service'] {
   const cache = options?.cache;
   return SignatureVerifier.of({
     verify: ({ publicKey, message, signature }) => {
@@ -152,7 +152,7 @@ export function makeSignatureVerifier(options?: {
  * Executor faults are defects; a malformed verdict list is `invalid-operation`. */
 export function makeExecutorSignatureVerifier(
   executor: SignatureVerifyExecutor
-): Effect.Effect<SignatureVerifier['Type'], ValidationError> {
+): Effect.Effect<SignatureVerifier['Service'], ValidationError> {
   if (!isTrustedSignatureVerifyExecutor(executor))
     return Effect.fail(new ValidationError({ code: 'invalid-operation' }));
   const verdict = (

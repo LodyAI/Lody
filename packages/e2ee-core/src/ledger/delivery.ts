@@ -7,7 +7,7 @@ import { runLegacy } from './compat';
 import { LedgerError } from './error';
 
 export { MemoryKeyOutbox as MemoryLedgerKeyOutbox } from '../platform/memory-stores';
-export type LedgerKeyOutbox = KeyOutbox['Type'];
+export type LedgerKeyOutbox = KeyOutbox['Service'];
 
 export interface LedgerKeyRemote {
   put(id: string, frame: Uint8Array): Promise<void>;
@@ -39,7 +39,7 @@ export class LedgerKeyDelivery {
         try: () => Promise.resolve(authorize(bytes)),
         catch: (error) => error,
       }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           error instanceof LedgerError
             ? Effect.fail(new ValidationError({ code: error.code, position: error.position }))
             : Effect.die(error)

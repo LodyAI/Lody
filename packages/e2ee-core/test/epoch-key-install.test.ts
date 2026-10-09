@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Effect, Either, Layer } from 'effect';
+import { Effect, Result, Layer } from 'effect';
 import {
   Bytes,
   EpochKeyring,
@@ -51,8 +51,8 @@ async function device(): Promise<DeviceKeys & { dh: CryptoKeyPair }> {
   return { ...keys, enc, dh };
 }
 
-const value = <A, E>(parsed: Either.Either<A, E>) =>
-  Either.getOrThrowWith(parsed, (error) => error);
+const value = <A, E>(parsed: Result.Result<A, E>) =>
+  Result.getOrThrowWith(parsed, (error) => error);
 
 /** A stream whose reads can be observed and extended deterministically. */
 class HookedStream extends MemoryLedgerStream {
@@ -196,7 +196,7 @@ async function racedReceive(
   ).pipe(Layer.provide(hpkeRecipientLayer(s.phone.dh)));
   const layer = Layer.mergeAll(flagOpen, signatureVerifierLayer, s.phoneKeyring);
   const result = await Effect.runPromise(
-    Effect.either(phoneClient.receiveEpochKey(s.ownerId, frame).pipe(Effect.provide(layer)))
+    Effect.result(phoneClient.receiveEpochKey(s.ownerId, frame).pipe(Effect.provide(layer)))
   );
   return { result, phoneClient, phoneStream, layer };
 }
@@ -215,7 +215,7 @@ describe('epoch-key installation slot', () => {
     const s = await scenario();
     const frame = await epochZeroFrame(s);
     const raced = await racedReceive(s, frame, 2);
-    expect(raced.result).toEqual(Either.right({ _tag: 'Installed', epoch: 0 }));
+    expect(raced.result).toEqual(Result.succeed({ _tag: 'Installed', epoch: 0 }));
     expect(await readSlot(s, 0)).toEqual(s.created.secret);
     // K0 (known to the revoked laptop) never occupies the epoch-1 slot ...
     expect(await readSlot(s, 1)).toBeNull();
@@ -242,7 +242,7 @@ describe('epoch-key installation slot', () => {
   it('fails closed when rotation lands between decryption and the recheck', async () => {
     const s = await scenario();
     const raced = await racedReceive(s, await epochZeroFrame(s), 1);
-    expect(raced.result).toMatchObject({ _tag: 'Left', left: { _tag: 'ContextMismatch' } });
+    expect(raced.result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'ContextMismatch' } });
     expect(await readSlot(s, 0)).toBeNull();
     expect(await readSlot(s, 1)).toBeNull();
   });
@@ -336,13 +336,13 @@ describe('C safe checks (role-derived rotation, R cannot send, cross-epoch repla
     stream.records = [s.created.record, withR.record];
     const rClient = await s.makeClient(recovery, stream);
     const refused = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         rClient
           .sendEpochKey(s.ownerId, value(Bytes.epochKey(s.created.secret)))
           .pipe(Effect.provide(s.deliveryLayer))
       )
     );
-    expect(refused).toMatchObject({ _tag: 'Left', left: { code: 'unauthorized' } });
+    expect(refused).toMatchObject({ _tag: 'Failure', failure: { code: 'unauthorized' } });
 
     // An epoch-0 frame presented after the phone already observed epoch 1 is refused.
     const frame = await epochZeroFrame(s);
@@ -350,7 +350,7 @@ describe('C safe checks (role-derived rotation, R cannot send, cross-epoch repla
     phoneStream.records = [...s.prefix, s.rotate.record];
     const phoneClient = await s.makeClient(s.phone, phoneStream);
     const stale = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         phoneClient
           .receiveEpochKey(s.ownerId, frame)
           .pipe(
@@ -360,7 +360,7 @@ describe('C safe checks (role-derived rotation, R cannot send, cross-epoch repla
           )
       )
     );
-    expect(stale).toMatchObject({ _tag: 'Left', left: { code: 'canonical' } });
+    expect(stale).toMatchObject({ _tag: 'Failure', failure: { code: 'canonical' } });
     expect(await readSlot(s, 1)).toBeNull();
   });
 });

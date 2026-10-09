@@ -28,7 +28,7 @@ import {
   type EpochPublicationStore,
 } from '../src/legacy';
 
-import { Effect, Either } from 'effect';
+import { Effect, Result } from 'effect';
 import { DeviceIdentityStore, RecoveryError, StorageError, UserIdentityStore } from '../src/effect';
 import { nodeDeviceIdentityLayer } from '../src/platform/node-device-identity';
 import { nodeUserIdentityLayer } from '../src/platform/node-user-identity';
@@ -93,11 +93,11 @@ it('Effect user identity recovery seals then installs only into empty storage', 
     Effect.runPromise(effect.pipe(Effect.provide(layer)));
   expect(
     await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.flatMap(UserIdentityStore, (store) => store.load).pipe(Effect.provide(layer))
       )
     )
-  ).toEqual(Either.left(new StorageError({ reason: 'missing', code: 'user-identity-missing' })));
+  ).toEqual(Result.fail(new StorageError({ reason: 'missing', code: 'user-identity-missing' })));
   const created = await run(Effect.flatMap(UserIdentityStore, (store) => store.create));
   const file = createRecoveryFile();
   const context = { identity: created.fingerprint, revision: 0 };
@@ -106,13 +106,13 @@ it('Effect user identity recovery seals then installs only into empty storage', 
   );
   expect(
     await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.flatMap(UserIdentityStore, (store) =>
           store.sealBackup(file, { ...context, identity: '25'.repeat(32) })
         ).pipe(Effect.provide(layer))
       )
     )
-  ).toEqual(Either.left(new RecoveryError({ code: 'user-identity-mismatch' })));
+  ).toEqual(Result.fail(new RecoveryError({ code: 'user-identity-mismatch' })));
   const target = nodeUserIdentityLayer({
     path: location(),
     binding,
@@ -126,13 +126,13 @@ it('Effect user identity recovery seals then installs only into empty storage', 
   expect(recovered.fingerprint).toBe(created.fingerprint);
   expect(
     await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.flatMap(UserIdentityStore, (store) => store.recover(file, context, frame)).pipe(
           Effect.provide(target)
         )
       )
     )
-  ).toEqual(Either.left(new StorageError({ reason: 'exists', code: 'user-identity-exists' })));
+  ).toEqual(Result.fail(new StorageError({ reason: 'exists', code: 'user-identity-exists' })));
 });
 
 it('does not persist or replace a user identity when its protected roundtrip fails', async () => {
@@ -357,8 +357,8 @@ it('Effect device identity load never creates a replacement', async () => {
   const load = Effect.flatMap(DeviceIdentityStore, (store) => store.load).pipe(
     Effect.provide(layer)
   );
-  expect(await Effect.runPromise(Effect.either(load))).toEqual(
-    Either.left(new StorageError({ reason: 'missing', code: 'device-identity-missing' }))
+  expect(await Effect.runPromise(Effect.result(load))).toEqual(
+    Result.fail(new StorageError({ reason: 'missing', code: 'device-identity-missing' }))
   );
   const created = await Effect.runPromise(
     Effect.flatMap(DeviceIdentityStore, (store) => store.create).pipe(Effect.provide(layer))
@@ -367,11 +367,11 @@ it('Effect device identity load never creates a replacement', async () => {
   expect(loaded.id).toBe(created.id);
   expect(
     await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.flatMap(DeviceIdentityStore, (store) => store.create).pipe(Effect.provide(layer))
       )
     )
-  ).toEqual(Either.left(new StorageError({ reason: 'exists', code: 'device-identity-exists' })));
+  ).toEqual(Result.fail(new StorageError({ reason: 'exists', code: 'device-identity-exists' })));
   expect((await Effect.runPromise(load)).id).toBe(created.id);
 });
 

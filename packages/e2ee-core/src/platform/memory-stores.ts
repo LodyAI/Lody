@@ -1,12 +1,12 @@
-import { Effect } from 'effect';
+import { Effect, Semaphore } from 'effect';
 import type { JournalStore, JournalTransaction } from '../ports/ledger';
 import type { KeyOutbox, KeyOutboxTransaction } from '../ports/key-delivery';
 import { StorageError } from '../pure/errors';
 import { copyBytes } from '../pure/cbor';
 import type { LedgerJournal } from '../pure/journal';
 
-type JournalStoreService = JournalStore['Type'];
-type KeyOutboxService = KeyOutbox['Type'];
+type JournalStoreService = JournalStore['Service'];
+type KeyOutboxService = KeyOutbox['Service'];
 
 function copyJournal(journal: LedgerJournal): LedgerJournal {
   return {
@@ -32,7 +32,7 @@ function copyJournal(journal: LedgerJournal): LedgerJournal {
 export class MemoryJournalStore implements JournalStoreService {
   journal: LedgerJournal | null = null;
   failSave: 'before' | 'after' | null = null;
-  readonly #lock = Effect.unsafeMakeSemaphore(1);
+  readonly #lock = Semaphore.makeUnsafe(1);
 
   readonly exclusive: JournalStoreService['exclusive'] = (work) =>
     this.#lock.withPermits(1)(Effect.suspend(() => work(this.#transaction())));
@@ -59,7 +59,7 @@ export class MemoryJournalStore implements JournalStoreService {
 /** Non-durable exact-byte outbox for tests and experiments. */
 export class MemoryKeyOutbox implements KeyOutboxService {
   readonly frames = new Map<string, Uint8Array>();
-  readonly #lock = Effect.unsafeMakeSemaphore(1);
+  readonly #lock = Semaphore.makeUnsafe(1);
 
   readonly exclusive: KeyOutboxService['exclusive'] = (work) =>
     this.#lock.withPermits(1)(Effect.suspend(() => work(this.#transaction())));
