@@ -710,7 +710,7 @@ describe('session MCP input schemas', () => {
     expect(catalog.get(role.id)).toEqual(role);
     expect(syncFlockDocOrThrow).toHaveBeenCalledWith('workspace-id:wf:workspace', {
       timeoutMs: 10_000,
-      reason: 'mcp-agent-role-read',
+      reason: 'agent-role-catalog-read',
     });
   });
 

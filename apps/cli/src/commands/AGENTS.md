@@ -102,6 +102,11 @@ Metadata idle/Presence loss is not completion; sequence is local.
   override inherited scalar selectors. Reject conflicting legacy Plan/mode selections.
   `validateSessionCreateOptions({ dispatchConfig })` validates before acceptance;
   freeze each effective target config and use it for recovery, never mutable history.
+- `--agent-role` resolves the workspace catalog Role through
+  `../lib/agent-role-create.ts`, the same module the MCP create tools use. The Role
+  row is authoritative: manual machine/agent/run-config flags are cleared before
+  dispatch (with a stderr warning), and Role id/revision/snapshot freeze as creation
+  provenance. Work-context flags and `--parent` still apply.
 - Local daemon IPC sends the real control request once; do not restore a health preflight. Native
   `LocalDaemonAvailabilityError` must be thrown outside the Effect runtime boundary so MCP can
   preserve `DAEMON_NOT_RUNNING` versus retryable `DAEMON_BUSY`: a connection refusal means not

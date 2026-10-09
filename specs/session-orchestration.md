@@ -46,6 +46,12 @@ a different explicit mode rather than silently overwriting it. An explicit Role
 remains authoritative: manual target and configuration fields are ignored before
 capability validation, command identity and dispatch.
 
+The CLI `lody session create --agent-role <idOrName>` resolves the same catalog
+Role by fixed id or unique name. The Role's machine, agent config, run
+configuration and Prompt prefix take precedence; overridden manual flags are
+reported as ignored, and the work-context flags (`--repo`, `--local-project`,
+`--branch`, `--worktree`) still apply.
+
 An explicit permission selection may be broader than the parent's. The caller
 must act within its user authorization. This interface introduces no permission
 ranking, escalation approval rule or safety boundary relative to CLI creation.

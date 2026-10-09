@@ -276,6 +276,7 @@ lody session create --workspace my-team --agent-config codex --repo owner/repo "
 
 - `--workspace <idOrSlug>`：指定目标 workspace
 - `--agent-config <idOrName>`：选择[代理配置](/zh/docs/agents)
+- `--agent-role <idOrName>`：基于工作区 Agent Role 创建；Role 的 machine、代理配置和运行配置会覆盖 `--machine`、`--agent`/`--agent-config`、`--mode`、`--model` 和 `--config-option`（被忽略的参数会输出警告）
 - `--repo <owner/repo>`：绑定 GitHub 仓库
 - `--local-project <id|name|path>`：绑定一个已注册的本地项目
 - `--repo` 与 `--local-project` 二选一

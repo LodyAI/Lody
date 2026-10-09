@@ -38,6 +38,11 @@ option。独立 Plan option 可以与权限共存。旧式 Plan 若占用 ACP mo
 则拒绝不同的显式 mode，不能静默覆盖。显式 Role 仍具有完整优先级：手填目标和
 配置字段在能力校验、命令身份和派发前被忽略。
 
+CLI `lody session create --agent-role <idOrName>` 按固定 id 或唯一名称解析同一
+目录中的 Role。Role 的 machine、代理配置、运行配置和 Prompt 前缀具有优先级；
+被覆盖的手填参数会以警告形式报告，`--repo`、`--local-project`、`--branch`、
+`--worktree` 等工作上下文参数仍然有效。
+
 显式权限可能宽于父会话。调用方必须遵守获得的用户授权。本接口不新增权限等级、
 升级审批政策，也不形成相对 CLI 创建路径的安全边界。通过 `lody_session_chat`
 修改已有会话不在本次范围。
