@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,46 +17,6 @@ import {
   resolveLocalProjectLegacyBaseBranchAtRootPath,
   selectLocalProjectBranchSelector,
 } from '../src/node/local-project';
-
-const require = createRequire(import.meta.url);
-const {
-  checkoutLocalProjectBranchAtRootPath: checkoutLocalProjectBranchAtRootPathCjs,
-  getLocalProjectGitStateAtRootPath: getLocalProjectGitStateAtRootPathCjs,
-  getLocalProjectGitHubRepoAtRootPath: getLocalProjectGitHubRepoAtRootPathCjs,
-  resolveLocalProjectBranchAtRootPath: resolveLocalProjectBranchAtRootPathCjs,
-  parseLocalProjectBranchRefAtRootPath: parseLocalProjectBranchRefAtRootPathCjs,
-  resolveLocalProjectBranchRefAtRootPath: resolveLocalProjectBranchRefAtRootPathCjs,
-  resolveLocalProjectLegacyBaseBranchAtRootPath: resolveLocalProjectLegacyBaseBranchAtRootPathCjs,
-  selectLocalProjectBranchSelector: selectLocalProjectBranchSelectorCjs,
-} = require('../src/node/local-project.cjs') as {
-  getLocalProjectGitHubRepoAtRootPath: typeof getLocalProjectGitHubRepoAtRootPath;
-  checkoutLocalProjectBranchAtRootPath: (
-    rootPath: string,
-    branchName: string
-  ) => Promise<{ currentBranch: string }>;
-  getLocalProjectGitStateAtRootPath: (
-    rootPath: string
-  ) => ReturnType<typeof getLocalProjectGitStateAtRootPath>;
-  resolveLocalProjectBranchAtRootPath: (
-    rootPath: string,
-    branchName: string,
-    options?: { preferLocalOnCollision?: boolean }
-  ) => Promise<{ kind: string; branchName: string; refName: string; commitHash: string }>;
-  selectLocalProjectBranchSelector: (branches: string[], branchName: string) => string | null;
-  parseLocalProjectBranchRefAtRootPath: (
-    rootPath: string,
-    refName: string
-  ) => Promise<{ kind: string; branchName: string; refName: string }>;
-  resolveLocalProjectBranchRefAtRootPath: (
-    rootPath: string,
-    refName: string
-  ) => Promise<{ kind: string; branchName: string; refName: string; commitHash: string }>;
-  resolveLocalProjectLegacyBaseBranchAtRootPath: (
-    rootPath: string,
-    branchName: string,
-    options?: { useWorktree?: boolean }
-  ) => Promise<{ kind: string; branchName: string; refName: string; commitHash: string }>;
-};
 
 const GIT_HELPER_TEST_TIMEOUT_MS = 60_000;
 
@@ -221,7 +180,6 @@ describe('local-project helpers', () => {
       expect(runGit(tempDir, ['status', '--porcelain'])).not.toBe('');
 
       expect(await getLocalProjectGitStateAtRootPath(projectDir)).toEqual({ git: false });
-      expect(await getLocalProjectGitStateAtRootPathCjs(projectDir)).toEqual({ git: false });
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );
@@ -316,9 +274,6 @@ describe('local-project helpers', () => {
       await expect(resolveLocalProjectBranchAtRootPath(projectDir, 'foo')).rejects.toThrow(
         expectedMessage
       );
-      await expect(resolveLocalProjectBranchAtRootPathCjs(projectDir, 'foo')).rejects.toThrow(
-        expectedMessage
-      );
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );
@@ -338,9 +293,6 @@ describe('local-project helpers', () => {
         defaultBranch: 'lody:branch:local:main',
       };
       await expect(getLocalProjectGitStateAtRootPath(projectDir)).resolves.toMatchObject(
-        expectedState
-      );
-      await expect(getLocalProjectGitStateAtRootPathCjs(projectDir)).resolves.toMatchObject(
         expectedState
       );
       await expect(
@@ -371,9 +323,6 @@ describe('local-project helpers', () => {
       await expect(
         resolveLocalProjectBranchRefAtRootPath(projectDir, 'refs/heads/main~1')
       ).rejects.toThrow('Local project branch ref not found: refs/heads/main~1');
-      await expect(
-        resolveLocalProjectBranchRefAtRootPathCjs(projectDir, 'refs/heads/main~1')
-      ).rejects.toThrow('Local project branch ref not found: refs/heads/main~1');
 
       runGit(projectDir, ['update-ref', '-d', 'refs/remotes/upstream/feature/remote-branch']);
       await expect(
@@ -385,12 +334,6 @@ describe('local-project helpers', () => {
         kind: 'remote',
         refName: 'refs/remotes/upstream/feature/remote-branch',
       });
-      await expect(
-        parseLocalProjectBranchRefAtRootPathCjs(
-          projectDir,
-          'refs/remotes/upstream/feature/remote-branch'
-        )
-      ).resolves.toMatchObject({ kind: 'remote' });
       await expect(
         resolveLocalProjectBranchRefAtRootPath(
           projectDir,
@@ -421,9 +364,6 @@ describe('local-project helpers', () => {
         refName: 'refs/remotes/origin/foo',
         commitHash: remoteCommit,
       });
-      await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'foo')
-      ).resolves.toMatchObject({ kind: 'remote', commitHash: remoteCommit });
 
       fs.writeFileSync(path.join(projectDir, 'session.txt'), 'session change\n', 'utf8');
       runGit(projectDir, ['add', 'session.txt']);
@@ -444,9 +384,6 @@ describe('local-project helpers', () => {
         refName: 'refs/remotes/origin/foo',
         commitHash: remoteCommit,
       });
-      await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'foo')
-      ).resolves.toMatchObject({ kind: 'remote', commitHash: remoteCommit });
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );
@@ -487,9 +424,6 @@ describe('local-project helpers', () => {
         await expect(
           resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'master', options)
         ).resolves.toMatchObject(expected);
-        await expect(
-          resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'master', options)
-        ).resolves.toMatchObject(expected);
       }
 
       // The strict selector contract is unchanged: only the legacy/human paths
@@ -499,11 +433,6 @@ describe('local-project helpers', () => {
       );
       await expect(
         resolveLocalProjectBranchAtRootPath(projectDir, 'master', { preferLocalOnCollision: true })
-      ).resolves.toMatchObject(expected);
-      await expect(
-        resolveLocalProjectBranchAtRootPathCjs(projectDir, 'master', {
-          preferLocalOnCollision: true,
-        })
       ).resolves.toMatchObject(expected);
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -543,9 +472,6 @@ describe('local-project helpers', () => {
       await expect(
         resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'main', { useWorktree: true })
       ).resolves.toMatchObject(worktreeExpected);
-      await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'main', { useWorktree: true })
-      ).resolves.toMatchObject(worktreeExpected);
 
       // Checkout mode still recovers the upstream, because there the local
       // branch may be the session's own work branch.
@@ -556,9 +482,6 @@ describe('local-project helpers', () => {
       };
       await expect(
         resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'main')
-      ).resolves.toMatchObject(checkoutExpected);
-      await expect(
-        resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'main')
       ).resolves.toMatchObject(checkoutExpected);
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -583,9 +506,6 @@ describe('local-project helpers', () => {
         await expect(
           resolveLocalProjectLegacyBaseBranchAtRootPath(projectDir, 'release', options)
         ).rejects.toThrow(expectedMessage);
-        await expect(
-          resolveLocalProjectLegacyBaseBranchAtRootPathCjs(projectDir, 'release', options)
-        ).rejects.toThrow(expectedMessage);
       }
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -601,20 +521,19 @@ describe('local-project helpers', () => {
       'lody:branch:remote:origin:shared',
     ];
 
-    for (const select of [selectLocalProjectBranchSelector, selectLocalProjectBranchSelectorCjs]) {
-      expect(select(branches, 'main')).toBe('lody:branch:local:main');
-      expect(select(branches, 'lody:branch:remote:origin:main')).toBe(
-        'lody:branch:remote:origin:main'
-      );
-      // Exact members win before any precedence rule applies.
-      expect(select(branches, 'origin/release')).toBe('origin/release');
-      // A bare name with a single remote match resolves to that remote.
-      expect(select(branches, 'solo')).toBe('lody:branch:remote:origin:solo');
-      // Several remotes and no local branch stays unresolved.
-      expect(select(branches, 'shared')).toBeNull();
-      expect(select(branches, 'missing')).toBeNull();
-      expect(select(branches, '  ')).toBeNull();
-    }
+    const select = selectLocalProjectBranchSelector;
+    expect(select(branches, 'main')).toBe('lody:branch:local:main');
+    expect(select(branches, 'lody:branch:remote:origin:main')).toBe(
+      'lody:branch:remote:origin:main'
+    );
+    // Exact members win before any precedence rule applies.
+    expect(select(branches, 'origin/release')).toBe('origin/release');
+    // A bare name with a single remote match resolves to that remote.
+    expect(select(branches, 'solo')).toBe('lody:branch:remote:origin:solo');
+    // Several remotes and no local branch stays unresolved.
+    expect(select(branches, 'shared')).toBeNull();
+    expect(select(branches, 'missing')).toBeNull();
+    expect(select(branches, '  ')).toBeNull();
   });
 
   it(
@@ -684,14 +603,6 @@ describe('local-project helpers', () => {
           'upstream/foo',
         ]),
       });
-      await expect(getLocalProjectGitStateAtRootPathCjs(projectDir)).resolves.toMatchObject({
-        git: true,
-        branches: expect.arrayContaining([
-          'lody:branch:local:origin%2Ffoo',
-          'lody:branch:remote:origin:foo',
-          'upstream/foo',
-        ]),
-      });
 
       await expect(resolveLocalProjectBranchAtRootPath(projectDir, 'origin/foo')).rejects.toThrow(
         'Local project branch is ambiguous: origin/foo. Matches: refs/heads/origin/foo, refs/remotes/origin/foo'
@@ -701,9 +612,6 @@ describe('local-project helpers', () => {
       ).resolves.toMatchObject({ kind: 'local', commitHash: localCommit });
       await expect(
         resolveLocalProjectBranchAtRootPath(projectDir, 'lody:branch:remote:origin:foo')
-      ).resolves.toMatchObject({ kind: 'remote', commitHash: remoteCommit });
-      await expect(
-        resolveLocalProjectBranchAtRootPathCjs(projectDir, 'lody:branch:remote:origin:foo')
       ).resolves.toMatchObject({
         kind: 'remote',
         refName: 'refs/remotes/origin/foo',
@@ -747,9 +655,6 @@ describe('local-project helpers', () => {
         refName: 'refs/heads/refs/heads/foo',
         commitHash: namespaceCommit,
       });
-      await expect(
-        resolveLocalProjectBranchAtRootPathCjs(projectDir, 'refs/heads/foo')
-      ).resolves.toMatchObject({ commitHash: namespaceCommit });
 
       runGit(projectDir, ['switch', 'main']);
       await expect(
@@ -840,7 +745,7 @@ describe('local-project helpers', () => {
 
       runGit(projectDir, ['switch', 'main']);
       await expect(
-        checkoutLocalProjectBranchAtRootPathCjs(projectDir, 'lody:branch:local:-f')
+        checkoutLocalProjectBranchAtRootPath(projectDir, 'lody:branch:local:-f')
       ).resolves.toEqual({ currentBranch: '-f' });
       expect(runGit(projectDir, ['symbolic-ref', '--short', 'HEAD'])).toBe('-f');
     },
@@ -870,7 +775,7 @@ describe('local-project helpers', () => {
 
       runGit(projectDir, ['switch', 'main']);
       await expect(
-        checkoutLocalProjectBranchAtRootPathCjs(projectDir, 'lody:branch:remote:origin:-f')
+        checkoutLocalProjectBranchAtRootPath(projectDir, 'lody:branch:remote:origin:-f')
       ).resolves.toEqual({ currentBranch: '-f' });
       expect(runGit(projectDir, ['symbolic-ref', '--short', 'HEAD'])).toBe('-f');
     },
@@ -927,9 +832,9 @@ describe('local-project helpers', () => {
 
       runGit(projectDir, ['checkout', 'main']);
       runGit(projectDir, ['branch', '-D', 'foo']);
-      await expect(
-        checkoutLocalProjectBranchAtRootPathCjs(projectDir, 'origin/foo')
-      ).resolves.toEqual({ currentBranch: 'foo' });
+      await expect(checkoutLocalProjectBranchAtRootPath(projectDir, 'origin/foo')).resolves.toEqual(
+        { currentBranch: 'foo' }
+      );
       expect(runGit(projectDir, ['config', 'branch.foo.remote'])).toBe('origin');
     },
     GIT_HELPER_TEST_TIMEOUT_MS
@@ -964,9 +869,9 @@ describe('local-project helpers', () => {
       expect(runGit(projectDir, ['rev-parse', 'foo'])).toBe(aheadCommit);
 
       runGit(projectDir, ['checkout', 'main']);
-      await expect(
-        checkoutLocalProjectBranchAtRootPathCjs(projectDir, 'origin/foo')
-      ).resolves.toEqual(first);
+      await expect(checkoutLocalProjectBranchAtRootPath(projectDir, 'origin/foo')).resolves.toEqual(
+        first
+      );
       expect(runGit(projectDir, ['rev-parse', 'HEAD'])).toBe(remoteCommit);
       expect(
         runGit(projectDir, ['for-each-ref', '--format=%(refname)', 'refs/heads']).match(
@@ -1030,7 +935,7 @@ describe('local-project helpers', () => {
         'Local project branch not found: foo~0'
       );
       await expect(
-        checkoutLocalProjectBranchAtRootPathCjs(projectDir, 'foo^{commit}')
+        checkoutLocalProjectBranchAtRootPath(projectDir, 'foo^{commit}')
       ).rejects.toThrow('Local project branch not found: foo^{commit}');
       expect(runGit(projectDir, ['symbolic-ref', '--short', 'HEAD'])).toBe('main');
     },
@@ -1248,23 +1153,6 @@ describe('local-project helpers', () => {
         expect(gitState.githubRepoFullName).toBe('loro-dev/lody');
         expect(await getLocalProjectGitHubRepoAtRootPath(projectDir)).toBe('loro-dev/lody');
       }
-    },
-    GIT_HELPER_TEST_TIMEOUT_MS
-  );
-
-  it(
-    'loads the cjs helper and resolves github remotes',
-    async () => {
-      tempDir = makeTempDir();
-      const projectDir = createGitProjectWithRemotes(tempDir, [
-        { name: 'origin', url: 'git@github.com:loro-dev/lody.git' },
-      ]);
-
-      expect(await getLocalProjectGitHubRepoAtRootPathCjs(projectDir)).toBe('loro-dev/lody');
-      expect(await getLocalProjectGitStateAtRootPathCjs(projectDir)).toMatchObject({
-        git: true,
-        githubRepoFullName: 'loro-dev/lody',
-      });
     },
     GIT_HELPER_TEST_TIMEOUT_MS
   );

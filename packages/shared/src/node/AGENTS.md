@@ -20,12 +20,16 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   and execute once at their owning application entry point.
   Use the workspace Effect v4 catalog and `Context.Service` / `Layer.effect`;
   follow the pinned-version APIs in cli-effect-ts, not v3 compatibility helpers.
-- New or refactored process callers use the official Effect service or shared
-  legacy Promise entry points; never add raw spawn or kill paths, and never put
-  an Effect through a Promise facade and wrap it back into Effect.
-  ACP and remaining CLI callers use this layer, enforced by the CLI process guard.
-  Existing Node git/lock helpers, Electron and supervisor migrate in the next PR;
-  the guard expands with those consumers.
+- Only `process.ts` imports `child_process`, a process library (`cross-spawn`,
+  `execa`, `shell-env`, ...) or signals the OS (`process.kill`, Node `child.kill`).
+  Everything else uses the official process service or shared legacy facades;
+  never put an Effect through a Promise facade and wrap it back into Effect.
+  `pnpm check:cli-process-boundary` enforces this across `apps/cli`,
+  `apps/electron/src/main`, `packages/cli-supervisor`,
+  `packages/code-review-helper` and this directory; its allowlist names each
+  exception and its reason.
+- The login-shell environment has one probe, `login-shell-env.ts`, shared by
+  the CLI and the desktop.
 - `process.ts` stays one module with no relative imports: Electron's
   `node --test` cannot resolve extensionless relative imports.
 - Missing a capability (a new spawn shape, a pid-only kill)? Add it to

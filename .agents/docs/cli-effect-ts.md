@@ -1,8 +1,11 @@
 # Effect TS in the CLI
 
 How `apps/cli` code uses [Effect](https://effect.website) and how Effect code
-meets the Promise code it has not replaced yet. Binding rules live in each module's `AGENTS.md`. This guide describes the existing Effect consumers and the
-workspace v4 API choices; process ownership is implemented in a later PR.
+meets the Promise code it has not replaced yet. The migration order and the
+layer map live in the
+[lifecycle migration roadmap](../notes/proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.md);
+binding rules for already-migrated directories live in their `AGENTS.md`
+(for example [the shared process layer](../../packages/shared/src/node/AGENTS.md)).
 The catalog pins `effect` and `@effect/vitest` to 4.0.2. The [v4 migration
 record](../notes/implemented/architecture/2026-10-09-effect-v4-migration.md)
 explains version selection and the preserved lifecycle behavior.
@@ -75,13 +78,24 @@ owner must await `terminate`; it is not a scoped Effect API.
 
 ## Temporary Promise facades
 
-The process foundation is `@lody/shared/node/process`. Its Promise entry points
-run v4 programs at the legacy boundary. CLI's `platform/process-options.ts` only
-composes services and logging; it executes no program and has no Promise API.
-`SessionSandbox`, the ACP runner and authentication probes use this foundation.
-Other CLI callers use the same core, enforced by `check:cli-process-boundary`.
-Electron, supervisor and shared helpers migrate in the final layer. Delete each temporary facade
-when the corresponding caller itself becomes an Effect service.
+A migrated layer is consumed by callers that are still Promise-based. Such a
+caller reaches the new service through a facade: the process layer's own
+facades at the end of `packages/shared/src/node/process.ts`, which the CLI
+uses directly with options composed by `apps/cli/src/platform/process-options.ts`.
+They provide the service Layers and apply the failure rule above. A facade is temporary:
+it is deleted when its caller migrates, and it never appears inside an already
+migrated layer. Current facades:
+
+| Facade                                                                                                                                                                                                                                                                                                                                                                                                       | Used by                                                                                                 | Replaced when                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `apps/cli/src/session/session-sandbox.ts` (`SessionSandbox`)                                                                                                                                                                                                                                                                                                                                                 | `Session`, `TerminalManager`                                                                            | the session resource layer owns process containers directly |
+| `terminateAcpProcessTree` in `apps/cli/src/agent/acp-runner.ts`                                                                                                                                                                                                                                                                                                                                              | auxiliary ACP agents                                                                                    | auxiliary ACP agents become scoped processes                |
+| `runCommandText` / `runCommandTextSync` / `startProcess` / `terminateChildTree` / `signalChildTreeNow` / `isPidAliveSync` / `probePidSync` and the runners `makeProcessRunner` / `runPromiseSquashed` in `@lody/shared/node/process` (CLI: `process-options.ts` composes its logger; worker bundles use shared defaults) | every other process caller in the CLI, Electron main, the CLI supervisor and `packages/shared/src/node` | each caller's own layer migrates                            |
+| `terminatePtyProcessGroup` in `apps/cli/src/lib/terminal-pty-service.ts`                                                                                                                                                                                                                                                                                                                                     | local terminal PTYs                                                                                     | terminal/PTY ownership becomes an Effect layer              |
+
+`pnpm check:cli-process-boundary` fails when code in those packages bypasses
+these and reaches `child_process`, `cross-spawn`, `node-pty`, `process.kill` or
+a child's `kill` directly.
 
 Execution facades carry a `Legacy` suffix and `@deprecated`; keep that suffix
 visible in imports and calls. New Effect workflows compose core APIs and leave
@@ -110,8 +124,9 @@ The guard rejects retired facade imports/exports and aliases that hide Legacy.
   separate `it.scoped`. Use `TestClock.adjust` to drive time. Fork the program, adjust the clock, then
   join or await the fiber.
 - Replace services with test Layers or `Effect.provideService`, and assert the
-  resulting state (what was written, which work remains alive), not how often a
-  mock was called.
+  resulting state (which processes are alive, what was written), not how often a
+  mock was called. `@lody/shared/node/process-testing` models the OS process
+  table for the process layer.
 - `vi.useFakeTimers()` with default options also fakes the timers Effect's
   clock uses. It drives Effect sleeps only when the test advances timers
   (`vi.advanceTimersByTimeAsync`); prefer `TestClock` for Effect-first code.
@@ -121,8 +136,8 @@ The guard rejects retired facade imports/exports and aliases that hide Legacy.
 - Define capabilities with `Context.Service<Self, Api>()(id)`. `Layer.effect`
   builds both ordinary and scoped implementations; acquisition can require Scope.
 - Use `Effect.forkChild` for child-owned work, `Effect.forkIn` for an explicit
-  Scope, and `Effect.forkDetach` only when ownership is managed explicitly. Detached work must be explicitly
-  interrupted and awaited by its owner.
+  Scope, and `Effect.forkDetach` only when ownership is managed explicitly. The
+  taskkill deadline uses the last form and always interrupts and awaits it.
 - Use `Scope.provide(program, scope)` when an existing scope owns a program.
   Context-based runners are `Effect.runForkWith(services)`, not a v3 Runtime.
 - `Effect.result` returns `Result` (`Success.success` / `Failure.failure`);

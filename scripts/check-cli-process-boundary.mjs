@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-// Every OS process the CLI starts, waits for or signals goes
+// Every OS process the CLI, the desktop main process, the CLI supervisor, the
+// review helper and the shared Node helpers start, wait for or signal goes
 // through the Effect process layer (`@lody/shared/node/process`). This guard
 // fails when their source reaches for child_process, a process-spawning library
 // (cross-spawn, execa, shell-env, node-pty, ...) or a direct kill, so a second
@@ -18,8 +19,10 @@ const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoots = [
   'apps/cli/src/',
-  'packages/shared/src/node/process.ts',
-  'packages/shared/src/node/login-shell-env.ts',
+  'apps/electron/src/main/',
+  'packages/cli-supervisor/src/',
+  'packages/code-review-helper/src/',
+  'packages/shared/src/node/',
 ];
 
 /** Files allowed to reach the OS directly, each with the reason it is not a second implementation. */

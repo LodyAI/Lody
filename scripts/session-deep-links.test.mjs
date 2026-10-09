@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
-import { EventEmitter } from 'node:events';
 import ts from 'typescript';
 import * as sessionLinks from '../packages/shared/src/session-link.ts';
 import { getDesktopCallbackProtocol } from '../apps/electron/src/main/desktop-channel.ts';
@@ -144,7 +143,13 @@ test('Windows first launch registers an unhandled scheme and preserves any exist
     };
     const receiver = loadMain(
       'protocol-client',
-      { electron: { app }, '@lody/shared/session-link': sessionLinks },
+      {
+        electron: { app },
+        '@lody/shared/session-link': sessionLinks,
+        '@lody/shared/node/process': {
+          runCommandText: async () => ({ code: 0, signal: null, stdout: '', stderr: '' }),
+        },
+      },
       {
         platform: 'win32',
         execPath: '/synthetic/app.exe',
@@ -191,12 +196,13 @@ for (const protocol of ['lody', 'lody-oss', 'ai.lody.nightly']) {
   });
 }
 
-test('AppImage launch preserves the common default, while explicit selection changes it', (t) => {
+test('AppImage launch preserves the common default, while explicit selection changes it', async (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'lody-link-registration-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const iconPath = join(directory, 'synthetic-icon.png');
   writeFileSync(iconPath, 'synthetic');
   const handlers = new Map([['lody', 'previous.desktop']]);
+  const commands = [];
   const app = {
     isPackaged: true,
     getAppPath: () => directory,
@@ -211,13 +217,14 @@ test('AppImage launch preserves the common default, while explicit selection cha
     {
       electron: { app },
       '@lody/shared/session-link': sessionLinks,
-      'node:child_process': {
-        spawn: (command, args) => {
-          if (command === 'xdg-mime') handlers.set(args[2].split('/')[1], args[1]);
-          const child = new EventEmitter();
-          child.stderr = null;
-          queueMicrotask(() => child.emit('close', 0, null));
-          return child;
+      '@lody/shared/node/process': {
+        runCommandText: ({ command, args }) => {
+          const result = Promise.resolve().then(() => {
+            if (command === 'xdg-mime') handlers.set(args[2].split('/')[1], args[1]);
+            return { code: 0, signal: null, stdout: '', stderr: '' };
+          });
+          commands.push(result);
+          return result;
         },
       },
     },
@@ -235,12 +242,14 @@ test('AppImage launch preserves the common default, while explicit selection cha
     iconPath,
     log: () => {},
   });
+  await Promise.all(commands);
   assert.equal(handlers.get('lody'), 'previous.desktop');
   assert.equal(handlers.get('lody-oss'), 'synthetic.desktop');
   const desktop = readFileSync(join(directory, 'applications/synthetic.desktop'), 'utf8');
   assert.match(desktop, /MimeType=x-scheme-handler\/lody-oss;x-scheme-handler\/lody;/);
   assert.equal(receiver.isDefaultLodyProtocolClient(), false);
   receiver.setDefaultLodyProtocolClient();
+  await Promise.all(commands);
   assert.equal(receiver.isDefaultLodyProtocolClient(), true);
   assert.equal(handlers.get('lody-oss'), 'synthetic.desktop');
 });

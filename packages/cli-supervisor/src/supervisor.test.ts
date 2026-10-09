@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CliRuntimeState } from '@lody/shared/electron-ipc';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import { CliSupervisor } from './supervisor';
 import type { CliRunResult, LaunchHandle, PreparedLaunch, SupervisorOptions } from './types';
 
@@ -24,26 +25,23 @@ function deferred<T>(): Deferred<T> {
 function createRun(pid: number): {
   handle: LaunchHandle;
   child: ChildProcess;
-  kill: ReturnType<typeof vi.fn>;
   requestShutdown: ReturnType<typeof vi.fn>;
   exit: (result: CliRunResult) => void;
   rejectResult: (error: unknown) => void;
   confirmExit: (code?: number | null) => void;
 } {
   const result = deferred<CliRunResult>();
-  const kill = vi.fn(() => true);
   const requestShutdown = vi.fn();
   const child = Object.assign(new EventEmitter(), {
     pid,
     exitCode: null as number | null,
     signalCode: null as NodeJS.Signals | null,
     killed: false,
-    kill,
+    kill: () => true,
   }) as unknown as ChildProcess;
   return {
     handle: { child, result: result.promise, requestShutdown },
     child,
-    kill,
     requestShutdown,
     exit: (runResult) => {
       if (runResult.code === null) {
@@ -65,6 +63,39 @@ function createRun(pid: number): {
       child.emit('exit', code, child.signalCode);
       child.emit('close', code, child.signalCode);
     },
+  };
+}
+
+/**
+ * A launch whose child lives in the fake OS process table, so termination is
+ * observed as process state rather than as calls on a mock.
+ */
+function spawnTableRun(
+  table: FakeProcessTable,
+  options: {
+    ignores?: NodeJS.Signals[];
+    processGroup?: boolean;
+    requestShutdown?: () => Promise<void>;
+  } = {}
+): {
+  handle: LaunchHandle;
+  child: ChildProcess;
+  pid: number;
+  requestShutdown: ReturnType<typeof vi.fn>;
+} {
+  table.queueSpawn({ ignores: options.ignores });
+  const child = table.api.spawn('lody', ['start'], { detached: options.processGroup === true });
+  const result = new Promise<CliRunResult>((resolve) => {
+    child.once('close', (code: number | null, signal: NodeJS.Signals | null) =>
+      resolve({ code, signal, stdout: '', stderr: '' })
+    );
+  });
+  const requestShutdown = vi.fn(options.requestShutdown ?? (async () => {}));
+  return {
+    handle: { child, result, requestShutdown, processGroup: options.processGroup },
+    child,
+    pid: child.pid as number,
+    requestShutdown,
   };
 }
 
@@ -389,32 +420,97 @@ describe('CliSupervisor lifecycle actor', () => {
     expect(supervisor.getActiveChild()).toBe(second.child);
   });
 
-  it('escalates graceful shutdown to SIGKILL and still waits for real exit', async () => {
-    const run = createRun(201);
+  it('escalates an unanswered graceful shutdown to SIGKILL and waits for the real exit', async () => {
+    const table = new FakeProcessTable();
+    const run = spawnTableRun(table);
     const supervisor = createSupervisor(async () => ({ spawn: () => run.handle }), {
       terminationGraceMs: 1_000,
       forceKillWaitMs: 500,
+      processOptions: { nodeProcess: table.api },
+    });
+
+    await supervisor.start();
+    let resolved = false;
+    const stopped = supervisor.stop().then(() => {
+      resolved = true;
+    });
+    await vi.advanceTimersByTimeAsync(999);
+    // The shutdown request was accepted, so no signal preempts the drain.
+    expect(run.requestShutdown).toHaveBeenCalledOnce();
+    expect(table.isAlive(run.pid)).toBe(true);
+    expect(supervisor.getState().phase).toBe('stopping');
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(table.isAlive(run.pid)).toBe(false);
+    await vi.advanceTimersByTimeAsync(20);
+    await stopped;
+    expect(resolved).toBe(true);
+    expect(supervisor.getState()).toMatchObject({ phase: 'stopped', lastExitCode: null });
+  });
+
+  it('falls back to SIGTERM when the shutdown channel fails', async () => {
+    const table = new FakeProcessTable();
+    const run = spawnTableRun(table, {
+      requestShutdown: async () => {
+        throw new Error('IPC channel closed');
+      },
+    });
+    const supervisor = createSupervisor(async () => ({ spawn: () => run.handle }), {
+      terminationGraceMs: 30_000,
+      processOptions: { nodeProcess: table.api },
     });
 
     await supervisor.start();
     const stopped = supervisor.stop();
     await flushMicrotasks();
-    expect(run.requestShutdown).toHaveBeenCalledOnce();
-    expect(run.kill).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(run.kill).toHaveBeenCalledWith('SIGKILL');
-
-    let resolved = false;
-    void stopped.then(() => {
-      resolved = true;
-    });
-    await flushMicrotasks();
-    expect(resolved).toBe(false);
-
-    run.exit({ code: null, stdout: '', stderr: '' });
     await stopped;
+
+    expect(table.delivered).toEqual([{ target: run.pid, signal: 'SIGTERM' }]);
     expect(supervisor.getState().phase).toBe('stopped');
+  });
+
+  it('ends the whole process group of a child started as a group leader', async () => {
+    const table = new FakeProcessTable();
+    const run = spawnTableRun(table, { ignores: ['SIGTERM'], processGroup: true });
+    const descendant = table.addDescendant(run.pid, { ignores: ['SIGTERM'] });
+    const supervisor = createSupervisor(async () => ({ spawn: () => run.handle }), {
+      terminationGraceMs: 1_000,
+      forceKillWaitMs: 500,
+      processOptions: { nodeProcess: table.api },
+    });
+
+    await supervisor.start();
+    const stopped = supervisor.stop();
+    await vi.advanceTimersByTimeAsync(1_020);
+    await stopped;
+
+    expect(table.isAlive(run.pid)).toBe(false);
+    expect(table.isAlive(descendant)).toBe(false);
+  });
+
+  it('turns fatal and keeps the run when the child survives SIGKILL', async () => {
+    const table = new FakeProcessTable();
+    const run = spawnTableRun(table, { ignores: ['SIGTERM', 'SIGKILL'] });
+    const supervisor = createSupervisor(async () => ({ spawn: () => run.handle }), {
+      terminationGraceMs: 1_000,
+      forceKillWaitMs: 500,
+      processOptions: { nodeProcess: table.api },
+    });
+
+    await supervisor.start();
+    const stopped = supervisor.stop();
+    const failure = expect(stopped).rejects.toThrow(
+      `CLI process ${run.pid} did not exit after SIGKILL`
+    );
+    await vi.advanceTimersByTimeAsync(1_600);
+    await failure;
+
+    expect(table.isAlive(run.pid)).toBe(true);
+    expect(supervisor.getActiveChild()).toBe(run.child);
+    expect(supervisor.getState()).toMatchObject({
+      phase: 'stopping',
+      message: expect.stringContaining('did not exit after SIGKILL'),
+    });
   });
 
   it('cancels an in-progress preparation before restart and spawns only the new generation', async () => {

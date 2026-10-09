@@ -1,7 +1,7 @@
-import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
+
+import { runCommandText } from '@lody/shared/node/process';
 
 import { parseReviewMarkdown } from '../parser';
 import { createSparseTextForRanges } from '../sparse-text';
@@ -16,8 +16,6 @@ import type {
   ReviewResolvedGroup,
 } from '../types';
 import { countLines, validateParsedReviewDocument, validateResolvedBlock } from '../validation';
-
-const execFileAsync = promisify(execFile);
 
 export interface ResolveReviewBundleOptions {
   readonly reviewFilePath: string;
@@ -400,12 +398,17 @@ function parseRenameNumstatPath(filePath: string): string | undefined {
   return undefined;
 }
 
+/** Every read is local; a git that runs longer than this is stuck, not slow. */
+const GIT_TIMEOUT_MS = 60_000;
+
 async function runGit(repoPath: string, args: readonly string[], maxBuffer = 8 * 1024 * 1024) {
-  const result = await execFileAsync('git', args, {
+  const result = await runCommandText({
+    command: 'git',
+    args,
     cwd: repoPath,
-    encoding: 'utf8',
-    maxBuffer,
-    windowsHide: true,
+    maxOutputBytes: maxBuffer,
+    timeout: GIT_TIMEOUT_MS,
+    check: 'exit-0',
   });
   return result.stdout;
 }

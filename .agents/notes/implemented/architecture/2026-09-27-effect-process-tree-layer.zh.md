@@ -80,3 +80,26 @@ Git、worktree setup/GC、daemon 命令、MCP、preview、文件扫描、资源�
 后代退出，以及幸存进程必须报告失败。禁用命令进程组会使 shell 超时案例失败。
 浏览器命令构造器测试仅重复其字面量映射，已连同仅供测试的导出删除；平台打开方式与 URL
 参数传递不变。
+
+## 跨运行时调用方（[#1348](https://github.com/LodyAI/Lody/pull/1348)）
+
+Electron main、cli-supervisor、shared Node 辅助模块与 code-review-helper 使用继承的核心。
+守卫扩展到这些目录；新增进程能力必须进核心，不能在调用方复制。删除没有运行时使用方的手写
+CJS 副本，把独有行为用例留在 TypeScript 模块。文件锁通过显式三态探测保留原有 EPERM 失效策略。
+
+Electron 退出时同步开始发信号，Windows 也同步启动 taskkill。桌面 shell-env 使用继承的探测，
+同时缓存成功与失败。supervisor 使用核心终止，不再跨重启保留永不结束的共享 Promise。
+review 的 git 有上限，并使用 Windows PATH-only 解析。进程源码保持单文件、没有省略扩展名的
+相对导入，以适配 Node strip-types 测试。
+
+main 带入的桌面协议测试注入共享进程门面，并等待命令完成，保留启动时不覆盖现有公共协议
+处理器、只有显式选择才更改它的行为断言。
+
+初次重排后，每个代码层分别通过 pnpm check、冻结安装、格式和文档检查，最终源码与配置与此前
+已验证的 v4 快照一致。当前 main 的集成继续保持该归属，并在每个合并后的代码层重新检查。
+Simulator 和 memory provider 新增调用的迁移属于 #1069，不放进这一层。
+
+集成当前 main 后，底层、进程层、CLI 层和跨运行时层各自通过 pnpm check、格式和文档检查。
+最终层 CLI 3567 通过 / 4 跳过、shared 1330、components 4888、supervisor 52、Electron 211；
+重建的各层也检查了冻结安装。
+集成 main 后的 CLI 生产构建及发布包导入守卫也通过，包含迁移后的 Simulator worker。

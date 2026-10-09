@@ -112,3 +112,36 @@ stop, and that a survivor reports failure. Disabling command grouping fails the
 shell timeout case. The browser command-builder test only repeated its literal
 mapping; it and the test-only export were removed. Platform opener behavior and
 URL argument passing remain unchanged.
+
+## Cross-runtime consumers ([#1348](https://github.com/LodyAI/Lody/pull/1348))
+
+Electron main, cli-supervisor, shared Node helpers and code-review-helper consume
+the inherited core. The guard expands to those directories; new process
+capabilities must be added to the core rather than copied into a caller.
+Unused handwritten CJS twins are removed and their unique behavioral cases
+stay on the TypeScript helpers. File locks preserve their EPERM stale-lock
+policy through an explicit three-state probe.
+
+Electron shutdown starts signalling synchronously, including Windows taskkill.
+Its shell-env wrapper uses the inherited probe and caches failure as well as
+success. Supervisor uses core termination and does not retain a shared
+never-settling promise across restarts. Review git calls have a bounded budget
+and use PATH-only Windows resolution. The process source remains a single
+module without extensionless relative imports for Node's strip-types runner.
+
+Desktop protocol tests inherited from main inject the shared process facade and
+await command completion, preserving the behavior checks that startup keeps an
+existing common handler and only an explicit selection changes it.
+
+The initial restack independently passed each code layer's `pnpm check`, frozen
+installation, format and document checks. Its final source/configuration matched
+the previously checked v4 snapshot. Current-main integration preserves that
+layer ownership and is checked again on each merged code layer; Simulator and
+memory-provider additions are owned by #1069, not this increment.
+
+After integrating current main, the bottom, process, CLI and cross-runtime code
+layers each passed `pnpm check`, format and docs checks independently. The final
+layer passed CLI 3567 / 4 skipped, shared 1330, components 4888, supervisor 52 and
+Electron 211 tests. Frozen installs were also checked for the reconstructed layers.
+The CLI production build and published-bundle import guard passed after the
+main integration, including the migrated Simulator worker.

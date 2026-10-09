@@ -933,6 +933,9 @@ importers:
       '@lody/components':
         specifier: workspace:*
         version: link:../components
+      '@lody/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@pierre/diffs':
         specifier: ^1.0.5
         version: 1.0.10(patch_hash=0afca3b16a96287f9f3c9a7ae70d10d86090cc8a1adaa35886b799bd5087b3d8)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
