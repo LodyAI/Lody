@@ -1,11 +1,14 @@
-import { toApplicationJson, type HistoryProjectedMessage } from '@loro-dev/roost/lody-history';
+import {
+  fromApplicationJson,
+  toApplicationJson,
+  type HistoryProjectedMessage,
+} from '@loro-dev/roost/lody-history';
 import type { RoostHistorySegment, RoostHistoryPort } from '@lody/shared/session-data';
 
 /**
  * Convert the current Roost 0.1.1 projected row into Lody's storage-neutral
- * port DTO. This is the only source file that knows the published Roost package
- * shape; the shared reader and the rest of session orchestration do not
- * import Roost types or inspect segment storage.
+ * port DTO. Shared readers and session orchestration do not inspect the
+ * published Roost package's envelope or segment storage.
  */
 export function adaptRoostProjectedMessage(row: HistoryProjectedMessage): RoostHistorySegment {
   return {
@@ -21,6 +24,11 @@ export function adaptRoostProjectedMessages(
   rows: readonly HistoryProjectedMessage[]
 ): readonly RoostHistorySegment[] {
   return rows.map(adaptRoostProjectedMessage);
+}
+
+/** Validated optional fields use undefined for absence; JSON storage omits them. */
+export function encodeRoostContent(value: unknown) {
+  return fromApplicationJson(JSON.parse(JSON.stringify(value)));
 }
 
 /**

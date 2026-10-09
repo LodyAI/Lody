@@ -48,136 +48,98 @@ The [feature gate](../feature/2026-10-08-roost-history-feature-gate.md) still co
 new-session selection. Loro remains the default; existing backend discriminators,
 history, Loro control metadata, and transport authorization remain unchanged.
 
+## History mutation and command routing
+
+Status corrections must not reset the active view or recreate a sealed primary.
+Mutable state records are anchored to their primary and projected as the same
+business turn. Permission responses use the SDK's independent response record;
+readers join the outcome onto the corresponding tool without sealing an ongoing
+assistant. Ordinary changes refresh affected bodies only.
+
+For structural copy/edit/import, stage a complete history through public SDK
+operations in an independent generation. Publish a signed application-owned
+activation in the old stream with one native event-cursor CAS. Failed preparation
+or a concurrent old-stream write retains the old branch. Never reproduce SDK
+envelopes/index formats or rewrite sealed storage. Serial generation resolution
+and guarded old handles prevent concurrent readers/writers using a superseded view.
+Count/position reads refresh after a lost activation reply; local write barriers
+republish that committed projection before RPC binds its durable control revision.
+Recovery does not replay an indeterminate action.
+Old generations remain archived; reclamation and arbitrary old-adapter downgrade
+compatibility are not established by this repair.
+
+ACP output and stable per-item receipts commit together, including chunked batches;
+retries find receipts through prior generations. Imports bind their baseline and
+source cursor to the same activation; Loro cursor failure is indeterminate and
+reopening reads the committed native baseline. Conditional tail rollback retains
+later appends and refuses concurrent edits. Fork uses the shared writer's sole
+snapshot provenance registry and preflights all collisions before a whole prepend.
+
+Both Cloud one-shot manager entry points inject the same owner RPC composition,
+covering session commands, export and MCP history. Native execution remains with
+the daemon; only local MCP reuses its manager, whose access gate refuses foreign
+machines. RPC directory reads clip to the owner count, batch within the 500-row
+limit and restart a moving revision. Fork/Edit & Resend keep their owner sagas;
+process-local snapshot/compensation handles are not sent over RPC. New-session
+preferences negotiate target capabilities before any durable write.
+
 ## Verification
 
-### Published 0.1.1 integration (2026-10-09)
+### Production adapter repair (2026-10-09)
 
-The user has published the complete split release. The public registry exposes
-all six platform packages and the main package at 0.1.1, with `latest` selecting
-0.1.1; the main tarball integrity matches the prepared release. Upgrade the CLI
-pin and lockfile together, preserving the existing Worker and history contracts.
-Exempt each exact platform version from pnpm's seven-day release-age policy so
-fresh resolution retains the complete optional dependency graph on every host.
+The final focused suite passes 27 cases: 23 production-history contracts using
+actual SessionDocument, LoroRepo and published native SQLite, plus four RPC/backend
+cases. Coverage includes seven durable queue failure stages, sealed status
+correction, permission followed by sparse tool/text output, held cross-session
+Fork captures, opaque stored values, failed private staging, concurrent generation
+resolution, stale activation/old handles, per-item receipt retries, conditional
+rollback, import cursor failure across reopen, and count/position recovery after
+an activation reply is lost. The recovery barrier republishes the committed
+projection without replaying the action.
 
-Adapt the existing staging fixtures to the installed split package: use the
-actual published host binding for SQLite execution and distinct synthetic bytes
-for foreign target selection. Keep adjacent-layout compatibility, exact-version
-validation and failed-fetch preservation covered without network-dependent tests
-or a legacy all-platform development dependency.
+Transport tests enforce the actual RPC range schema and revision restart. A real
+owner SQLite composition test exercises the common Cloud factory and owner-failure
+propagation. Renderer tests reject explicit unsupported Roost before creation
+side effects. The complete `pnpm check` passes: CLI 3604 with four existing skips,
+shared 1302, shared components 4892 and Electron 214. Formatting, documentation,
+public/platform guards and the rebuilt CLI publication smoke also pass.
 
-Frozen installation and the complete `pnpm check` pass: CLI 3530 tests with four
-existing skips, shared components 4885 tests and Electron 214 tests. All 16 focused
-Roost history/backend regressions pass with native version enforcement enabled.
-The installed main package contains no binding and resolves only darwin-arm64.
-Actual published-package staging passes for all six targets, using installed host
-resolution and the production public npm download path for foreign targets;
-signed host SQLite reopen passes. Foreign binaries are selected on disk, not run.
+The synthetic production benchmark uses 100 and 1000 turns with 4 KiB bodies,
+one warm-up and two measured samples. Each Roost open/older read loads one
+40-turn page; ten streaming updates use no full history or branch-page reads.
+It excludes RPC, renderer paint, IndexedDB, real provider execution and generation
+churn. Logs: `/private/tmp/lody-roost-repair-bench.json`,
+`/private/tmp/lody-roost-native-contract.log`, `/private/tmp/lody-roost-repair-check.log`
+and `/private/tmp/lody-roost-repair-published-bundle.log`.
+This repair uses the existing 0.1.1 runtime; no new npm publication is required.
 
-The first desktop build identified an outdated 0.1.0 pin in the CLI publication
-gate. It now matches the tested 0.1.1 manifest and lockfile, and the actual bundled
-runtime smoke passes.
-Merged main `5fc401b5ca46eb62d85449b1d8ea19308d58eadf` into the feature branch.
-The only conflict was adjacent Session command imports; retain both the Roost
-backend installation and the new read-only observation command. The Codex
-submodule is checked out at main's recorded commit. Frozen installation, complete
-`pnpm check`, formatting and documentation checks pass on the merged worktree:
-CLI 3590 tests with four existing skips, shared components 4890 tests and Electron
-214 tests. Public/platform guards pass.
+### Published runtime and packaging checkpoint
 
-The merged CLI build passes with a 2 GiB heap, including actual publication
-runtime smoke and native staging. Applying that limit to the renderer as well
-caused an out-of-memory abort; rerunning only `build:app` with the normal renderer
-configuration passes, without changing build source or raising the CLI heap.
-Renderer output contains no native Roost imports.
+The user published all six platform packages and the main package at 0.1.1.
+The main tarball integrity matches the prepared release; its installed package
+contains no binding and resolves only the host platform. Actual published-package
+staging passes for all six targets through the installed-host or production public
+npm download path. Fixtures cover adjacent/split layouts, exact-version mismatch
+and failed-download preservation. Signed host SQLite reopen passes; foreign
+binaries are selected on disk locally. The upstream six-platform release
+[CI](https://github.com/loro-dev/roost/actions/runs/37877651895) supplies execution
+coverage for those targets.
 
-The normal packaging wrapper produces a macOS arm64 Lody OSS 0.104.0 directory
-package with publishing and release signing disabled. Actual packaged CLI boot,
-native bindings and Worker signed SQLite write/reopen probes pass. The application
-contains `@loro-dev/roost-node@0.1.1` and exactly one 8,021,248-byte darwin-arm64
-binding, SHA-256 `1d0e23d144491d5e566de679a6a9e2477332027a98e86af74849a4c60a983d93`,
-matching the installed published artifact. The packaged executable also passes an
-explicit repeat of the Worker probe with native version enforcement. Temporary
-synthetic databases are removed; user history is not used for validation.
+Before this history repair, source `8b1073e0ceef32829b0230ab64801f6a34e36c01`
+passed [CI](https://github.com/LodyAI/Lody/actions/runs/37889429418) and
+[Desktop E2E](https://github.com/LodyAI/Lody/actions/runs/37889429365).
+The normal CLI build passed with a 2 GiB heap; the renderer build used its normal
+configuration and contained no native Roost imports. Normal macOS arm64 OSS
+0.104.0 directory packaging passed actual CLI boot, native binding and Worker
+signed SQLite write/reopen probes. It contained native runtime 0.1.1 and exactly
+one 8,021,248-byte host binding, SHA-256
+`1d0e23d144491d5e566de679a6a9e2477332027a98e86af74849a4c60a983d93`,
+matching the published artifact. This packaging checkpoint predates the adapter
+repair; it is not a claim that a new signed application was released.
+Logs: `/private/tmp/lody-roost-011-check-merged.log`,
+`/private/tmp/lody-roost-011-package.log` and `/private/tmp/lody-roost-011-platforms.log`.
 
-Source `8b1073e0ceef32829b0230ab64801f6a34e36c01` is pushed to the existing PR.
-[CI](https://github.com/LodyAI/Lody/actions/runs/37889429418) and
-[Desktop E2E](https://github.com/LodyAI/Lody/actions/runs/37889429365) pass on that
-source commit.
-Local logs: `/private/tmp/lody-roost-011-check-merged.log`,
-`/private/tmp/lody-roost-011-package.log` and
-`/private/tmp/lody-roost-011-platforms.log`.
-
-### Platform package compatibility (2026-10-09)
-
-This records the earlier 0.1.0 compatibility checkpoint; the published upgrade
-above supersedes its deferred dependency step.
-
-Roost is preparing 0.1.1 as a small main package with six optional platform
-packages. Extend Electron staging to accept both an adjacent 0.1.0 prebuild and
-a matching installed platform package. A foreign target may download only the
-exact platform version declared by the main package, using the existing public
-npm packaging path. Copy the selected binary adjacent to the staged loader so
-the unpacked application still contains one binary and preserves Worker paths.
-
-Staging validation passes for all six targets, real host SQLite reopen, version
-mismatch and failed-fetch preservation. The existing suite adds two behavioral
-cases using real published binaries in both installed and downloaded split layouts;
-all 214 Electron tests pass. Keep the CLI dependency pinned to the
-published 0.1.0 until the user publishes the complete 0.1.1 release; this prepares
-compatibility without making public CI depend on an unpublished version.
-
-Formatting, documentation, type checks, lint and public/platform guards pass.
-A new macOS arm64 directory package through the normal wrapper passes CLI boot,
-native Worker and SQLite reopen probes, retaining exactly one 8,021,248-byte Roost
-binary. This package still uses the pinned 0.1.0. The final upstream 0.1.1 bundle
-also passes all six real platform-package selections and signed SQLite reopen
-on Node 24.14 and the actual packaged Lody Electron executable, using temporary
-unpacked runtime directories and synthetic databases. The dependency upgrade
-remains deferred until the user publishes the complete release.
-
-The full local `pnpm check` reaches an unrelated CLI failure: the simulator
-guest-buttons descendant shutdown test raises `kill EPERM` on macOS (3529 CLI
-tests passed, four existing skips). An isolated archive of unchanged HEAD
-`6f5332f` reproduces that exact failure, with four other cases passing. No simulator
-source was changed. Logs: `/private/tmp/lody-roost-split-check.log` and
-`/private/tmp/lody-roost-split-baseline-test.log`.
-
-All [CI checks](https://github.com/LodyAI/Lody/actions/runs/37878236234) and
-[Desktop E2E smoke](https://github.com/LodyAI/Lody/actions/runs/37878236205) pass
-on source commit `8e6cf25de374b50dbaa6b3582710d0a17b265f0c`. The upstream six-platform
-build and complete 0.1.1 release preparation also
-[pass](https://github.com/loro-dev/roost/actions/runs/37877651895). No npm upload
-or dependency upgrade was performed. The previous evidence below refers to the
-original integration commit.
-
-The actual published tarball integrity matches the prepared release. A clean
-consumer passes signed history batches, SQLite reopen, and encrypted Streams
-loopback tests on Node 24.14 and Electron 43.7.6. These verify the published native
-package, not Lody's remote deployment or a mobile application.
-
-The three existing native history adapter suites run without a sibling checkout
-or a skip gate. The production-backend benchmark fixture opens a real
-`SessionDocument`, reads 80 turns through the shared view, pages backward, and
-updates assistant output. A synthetic sealed history database is readable after
-switching from the legacy executable to the native addon and back; the legacy
-comparison used the macOS arm64 debug build, not the Linux artifacts stored in
-another checkout.
-
-`pnpm install --frozen-lockfile`, `pnpm check`, `pnpm format`, documentation checks,
-and the public/platform boundary guards pass. The CLI has 3530 passing tests and
-4 existing skips; shared components have 4885 passing tests; Electron has 212
-passing tests. The former four CLI failures were stale fixtures: runtime-config
-writes need awaiting and machine capabilities include `sessionHistory: 2`.
-
-`pnpm --dir apps/electron build` passes with the CLI's 2 GiB build heap. Its renderer
-output has no native Roost imports. A macOS arm64 directory package, produced by
-`package-electron.mjs` with publishing disabled, passes the actual packaged CLI
-startup, native Worker, SQLite write/reopen, and existing native dependency probes.
-This is a local packaging probe, not a signed/notarized release.
-
-Packaging tests select all six published prebuilds and run the host's staged
-Worker against SQLite; rejected targets leave the working runtime usable. Other
-OS/architecture binaries are selected and checked on disk locally, not executed.
-The upstream native package's six-runner CI provides those execution results;
-Lody's remote deployment, private Web/mobile app builds, offline browser replicas,
-and non-host full desktop packages remain outside this validation.
+Private Web/mobile builds, remote deployment, browser-local offline replicas,
+non-host full desktop packages, release signing/notarization and archived-generation
+reclamation remain outside this validation. Test databases are synthetic and
+isolated; no user history is used.

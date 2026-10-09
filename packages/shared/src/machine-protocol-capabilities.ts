@@ -135,6 +135,22 @@ export function machineSupportsSessionHistoryProtocol(
   );
 }
 
+/** Negotiate only a new session's preference, before persisting its immutable choice. */
+export function resolveNewSessionHistoryBackend(
+  machine: MachineProtocolCapabilityCarrier | null | undefined,
+  options: {
+    requested?: import('./schema').SessionHistoryBackendKind;
+    preferred?: import('./schema').SessionHistoryBackendKind;
+  }
+): import('./schema').SessionHistoryBackendKind {
+  const backend = options.requested ?? options.preferred ?? 'loro';
+  if (backend !== 'roost' || machineSupportsSessionHistoryProtocol(machine)) return backend;
+  if (options.requested === 'roost') {
+    throw new Error('This machine does not support Roost session history. Update the machine.');
+  }
+  return 'loro';
+}
+
 export function machineSupportsSubagentEvents(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {

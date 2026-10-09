@@ -37,9 +37,9 @@ That tolerance must not authorize creating new malformed items locally.
   and opaque items. Explicit changes and new fork notices still require parsing.
   Prepend copied rows and reject id collisions; retain target containers.
   Caller-created JSON cannot claim this provenance. Copying does not modify the source.
-  A fork's detached capture belongs to the fork operation and survives source-cache
-  eviction until explicitly released. Ordinary store-scoped captures become invalid
-  on teardown; release remains safe after teardown.
+  A detached capture held by a fork survives source-cache eviction and source
+  teardown. Its writer provenance remains authoritative across backend instances;
+  copying never depends on the source store remaining open.
 - Failed edit-and-resend can restore captured old history without reparsing it as
   new input. A one-use local rollback receipt restores only the changed range, preserving
   current content of untouched rows and subsequent appends. It captures only the affected
@@ -172,14 +172,20 @@ on projected history. This is not arbitrary downgrade safety.
 
 ### Backend selection and display reads
 
-New sessions use Loro by default. When the user enables both the experimental
-features switch and the Roost history switch, the renderer explicitly writes
-`historyBackend: 'roost'` while accepting a new session; legacy sessions and
-sessions created by non-renderer paths without an explicit choice retain Loro.
+New sessions use Loro by default. With both experimental switches enabled, the
+renderer prefers Roost only when the target advertises the required history
+protocol. Missing or older capabilities retain Loro before any session write.
+An explicit Roost request to an unsupported target fails before metadata, history
+or warm-up is created. Legacy sessions and non-renderer creation paths without an
+explicit choice retain Loro.
 Existing sessions keep their persisted backend when the switch changes. Commands
 use the session's selected backend, with one writer for its storage. Loro-specific
 container rules above apply to that backend; Roost preserves immutable sealed
-segments and projects successors into the same logical turn. Control metadata and
+segments and projects state corrections and independent permission outcomes into
+the same logical turn. Structural replacement prepares a complete private branch
+and atomically activates it; a failed preparation never empties the visible branch.
+Cloud command clients read and write through the session's owning machine rather
+than selecting a database on the calling machine. Control metadata and
 delivery state remain in Loro. Local history acceptance does not establish remote
 Roost synchronization.
 
@@ -227,6 +233,8 @@ sealed turn from looking like a hash conflict once such skeletons exist.
 - `packages/shared/src/{history-writer,history-write-schema,history-materializer,session-mirror,schema}.ts`
 - `packages/shared/src/session-data/{history-import,loro}.ts`
 - `apps/cli/src/lib/local-project-history-sync-service.ts`
+- `apps/cli/src/session/{roost-node-session,roost-history-generation,roost-rpc-session}.ts`
+- `apps/cli/tests/roost-session-backend-contract.test.ts`
 - `packages/shared/tests/history-writer.test.ts`, `history-writer.contract.ts`,
   `history-storage-policy.test.ts` and `session-history-import-port.test.ts`
 - `apps/cli/tests/local-project-history-sync-service.test.ts` and `local-project-history-sync-writer.test.ts`

@@ -12,9 +12,12 @@ import type {
 } from '@lody/shared';
 import {
   getSessionRoomId,
+  getMachineRoomId,
   getServerNow,
   LEGACY_SESSION_HISTORY_BACKEND,
   normalizeSessionTurnInputConfig,
+  resolveNewSessionHistoryBackend,
+  type MachineMeta,
   type SessionHistoryBackendKind,
   SessionStatusFactory,
 } from '@lody/shared';
@@ -120,11 +123,26 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     onRpcDelivered,
   } = ports;
 
+  const prepareCreate = async (payload: SessionToCreate): Promise<CreateSessionResult> => {
+    const wanted = payload.historyBackend ?? defaultHistoryBackend;
+    const machine =
+      wanted === 'roost'
+        ? ((await runtime!.repo.getDocMeta(getMachineRoomId(payload.machineId)))?.meta as
+            | MachineMeta
+            | undefined)
+        : undefined;
+    const backend = resolveNewSessionHistoryBackend(machine, {
+      requested: payload.historyBackend,
+      preferred: defaultHistoryBackend,
+    });
+    return buildSessionCreateResult({ ...payload, historyBackend: backend }, backend);
+  };
+
   const createSession = async (payload: SessionToCreate): Promise<CreateSessionResult> => {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    const { sessionId, sessionMeta } = buildSessionCreateResult(payload, defaultHistoryBackend);
+    const { sessionId, sessionMeta } = await prepareCreate(payload);
     const sessionRoomId = getSessionRoomId(sessionId);
     // The local Flock index is the session-count source of truth. Incomplete
     // local state fails open so session creation never depends on Convex
@@ -156,7 +174,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    const { sessionId, sessionMeta } = buildSessionCreateResult(payload, defaultHistoryBackend);
+    const { sessionId, sessionMeta } = await prepareCreate(payload);
     // The accept unit includes the first user message, so the meta it
     // publishes already carries that activity. Written here, not by a
     // follow-up touch: a close between acceptance and the first turn must

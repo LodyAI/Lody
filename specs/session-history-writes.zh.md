@@ -29,6 +29,8 @@ Translation: current
   保留未改动的未知字段和不透明 item；显式修改及新增 fork notice 仍需解析。
   复制轮次插在目标已有轮次之前，拒绝 id 冲突，保留目标容器。
   调用者构造的 JSON 不能冒充这种来源。复制不修改源文档。
+  Fork 持有的独立捕获在源会话缓存回收及关闭后仍有效；不同 backend 实例继续依赖
+  writer 的既有来源校验，复制不要求源存储保持打开。
 - 编辑后重发失败时，可恢复捕获的旧历史，不将其当新输入重验。一次性的本地回滚凭据
   只恢复本次变化的区间，保留未涉及轮次的当前内容及随后追加的轮次。期间若轮次身份/顺序变化，或区间内
   内容变化，则拒绝覆盖；区间内唯一例外是本次新插入的 pending 用户轮次
@@ -130,12 +132,15 @@ Translation: current
 
 ### Backend 选择与显示读取
 
-新会话默认使用 Loro。用户同时打开 Experimental features 总开关和 Roost history
-开关后，renderer 才会在接受新会话时明确写入 `historyBackend: 'roost'`；没有显式
-选择的旧会话和非 renderer 创建路径仍使用 Loro。开关变化不会改变已有会话保存的
+新会话默认使用 Loro。两个实验开关打开时，renderer 仅在目标机器声明支持所需
+历史协议时优先选择 Roost；能力缺失或较旧时，在任何会话写入前保留 Loro。
+明确要求 Roost 而目标不支持时，在 metadata、历史或 warm-up 创建前报错。
+没有显式选择的旧会话和非 renderer 创建路径仍使用 Loro。开关变化不会改变已有会话保存的
 backend。命令通过会话选定的 backend，使用该存储唯一的 writer。上文 Loro 容器规则
-只适用于 Loro backend；Roost 保持 sealed segment 不可变，将 successor 投影为同一
-逻辑 turn。control metadata 与投递状态仍由 Loro 保存。本地历史接受不表示 Roost
+只适用于 Loro backend；Roost 保持 sealed segment 不可变，将状态修正和独立权限
+结果投影为同一逻辑 turn。结构替换先准备完整的私有分支，再原子激活；准备失败
+不能清空可见历史。Cloud 命令通过会话所属机器读写，不选择调用者本机数据库。
+control metadata 与投递状态仍由 Loro 保存。本地历史接受不表示 Roost
 远端已同步。
 
 打开 Roost 会话只读取 active branch 的最新窗口；向上滚动通过反向 cursor 加载旧
@@ -172,6 +177,8 @@ UI）不在本次实现；本次只是保证将来出现这类骨架轮次时不
 - `packages/shared/src/{history-writer,history-write-schema,history-materializer,session-mirror,schema}.ts`
 - `packages/shared/src/session-data/{history-import,loro}.ts`
 - `apps/cli/src/lib/local-project-history-sync-service.ts`
+- `apps/cli/src/session/{roost-node-session,roost-history-generation,roost-rpc-session}.ts`
+- `apps/cli/tests/roost-session-backend-contract.test.ts`
 - `packages/shared/tests/history-writer.test.ts`、`history-writer.contract.ts`、
   `history-storage-policy.test.ts` 与 `session-history-import-port.test.ts`
 - `apps/cli/tests/local-project-history-sync-service.test.ts` 与 `local-project-history-sync-writer.test.ts`

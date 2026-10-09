@@ -27,6 +27,10 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
 - `roost-node-session.ts` — owns Roost history reads/writes and its bounded active-branch
   page cache; `roost-session-backend.ts` joins it to the existing Loro control plane.
+- `roost-history-generation.ts` — stages structural replacements privately and
+  atomically activates them, fencing writes through superseded handles.
+- `roost-rpc-session.ts` — one-shot Cloud CLI history services backed by owner RPC;
+  `lib/command-runtime.ts` supplies the same composition for sessions, export and MCP.
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns. Created in
   message-handler's `beginConversationTurn`, stored/disposed via `SessionTransientStore` turn
   state; it creates the assistant entry when it opens.
@@ -321,10 +325,26 @@ it never authorizes switching back to Loro or reading a superseded published suf
 
 ACP batch appliers can mutate item arrays. The Roost adapter applies them to a
 detached working copy, preserving the before-image used to decide what to persist.
-Refreshing an unsealed primary reads only its known physical turn and installs
-the result only while the branch identity and read generation still match.
+Content changes refresh only affected primary bodies. Sealed-turn corrections
+use mutable SDK state records anchored to their primary; permission responses
+remain independent SDK records projected onto the matching tool. Responding does
+not seal the assistant or interrupt its output.
+Structural changes prepare a complete SDK-managed generation and publish one
+signed application-owned activation with a native event-cursor CAS. Failed staging
+retains the old stream; sealed envelopes and SDK indexes are never rewritten.
+Per-item ACP receipts commit with their output and remain discoverable through
+prior generations, so a lost reply or overlapping retry cannot replay a prefix.
+Count and position reads refresh after a lost activation reply. The local write
+barrier republishes the committed projection before RPC binds its control revision;
+it never retries an indeterminate history action.
 External cursor refreshes share the local write queue so an earlier branch read
 cannot overwrite a later mutation's projection; disposal rejects pending reads.
+Cloud one-shot managers inject owner RPC services and never open a caller-local
+Roost database. Open-ended directory reads clip to the owner count and use at most
+500 rows per RPC, restarting when the durable revision moves. Fork and Edit & Resend
+retain their owner sagas; process-local snapshot/rollback handles do not cross RPC.
+The production SQLite regressions live in
+[`roost-session-backend-contract.test.ts`](../../tests/roost-session-backend-contract.test.ts).
 The synthetic [history benchmark](../../benchmarks/roost-history.mts) exercises
 these production backends and the shared view; its timing excludes renderer
 transport, IndexedDB and paint.

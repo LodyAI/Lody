@@ -568,7 +568,10 @@ export async function createSessionBackend(
   const sessionMeta =
     meta === undefined ? await (sessionDoc.getMetaState?.() ?? Promise.resolve(undefined)) : meta;
   const kind = resolveSessionBackendKind(sessionMeta);
-  const factory = sessionBackendFactories.get(kind);
+  const factory =
+    kind === 'roost'
+      ? (sessionDoc.historyBackendFactory ?? sessionBackendFactories.get(kind))
+      : sessionBackendFactories.get(kind);
   if (!factory) throw new SessionBackendUnavailableError(kind, sessionDoc.sessionId);
   const backend = Promise.resolve().then(() => factory(sessionDoc, sessionMeta));
   const binding = { kind, backend };

@@ -22,11 +22,12 @@ The Experimental features section owns a master switch and a Roost history switc
 The effective gate requires both switches. The preference is stored per renderer
 in local storage and is read before session creation.
 
-When the effective gate is off, a new session has no explicit Roost selection and
-the shared creation default resolves to Loro. When it is on, the renderer writes
-`historyBackend: 'roost'` into the new session metadata before accepting its first
-turn. A session that already has a persisted discriminator continues using that
-backend regardless of later preference changes.
+When the effective gate is off, the shared creation default resolves to Loro.
+When it is on, the renderer reads the target machine's capabilities before any
+session write. It persists Roost only for a supported target; missing/older
+capabilities retain Loro for that new session. An explicitly requested Roost
+backend fails before metadata, history or warm-up if the target is unsupported.
+An existing discriminator remains immutable regardless of later preference changes.
 
 The switch does not migrate history, rewrite session metadata, or provide a
 per-message fallback. A backend choice remains an immutable session boundary.
@@ -44,6 +45,10 @@ The session-actions contract tests cover both gates: Roost is selected only when
 both are enabled, and the legacy Loro default remains when the master switch is
 off. The settings Storybook story exposes the disabled, remembered, and enabled
 states.
+
+Creation regressions additionally cover unavailable/older target capabilities,
+explicit Roost refusal before side effects, and explicit Loro overrides. Both
+renderer entry points and the CLI use the same capability resolver.
 
 The native integration now passes the full workspace checks and actual macOS
 arm64 packaging, removing the earlier dependency on a separately supplied owner

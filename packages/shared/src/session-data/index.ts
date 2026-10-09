@@ -37,7 +37,7 @@ export {
 
 export * from './history-import';
 
-export { applyHistoryAction, type HistoryAction } from './history-actions';
+export { applyHistoryAction, historyActionTarget, type HistoryAction } from './history-actions';
 
 export {
   getOperationProgressTurnId,

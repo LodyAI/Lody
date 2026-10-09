@@ -6,6 +6,8 @@ import type {
   SessionQueuePromotionRecord,
   SessionSteerOperationRecord,
 } from '@lody/shared';
+import { SessionHistoryReadQuerySchema, type SessionHistoryReadResponse } from '@lody/shared';
+import { createRoostRpcSessionServices } from './roost-rpc-session';
 import {
   createRoostHistoryReader,
   type RoostHistoryChange,
@@ -173,5 +175,92 @@ describe('RoostSessionBackend', () => {
     const backend = await fixture.factory(fixture.control, { historyBackend: 'roost' });
     expect(backend).toBeInstanceOf(RoostSessionBackend);
     expect(backend.kind).toBe('roost');
+  });
+});
+
+describe('Roost owner RPC reader', () => {
+  it('clips open-ended directory reads and batches within the negotiated RPC limit', async () => {
+    const doc = {
+      sessionId: 'remote-session',
+      subscribeRoostHistoryCursor: () => () => {},
+    } as unknown as SessionDocument;
+    const rows = Array.from({ length: 1001 }, (_, index) => ({
+      position: index,
+      state: 'ready',
+      turnId: `remote-${index}`,
+      scalars: { role: 'user' },
+    }));
+    const services = createRoostRpcSessionServices(doc, {
+      read: async (query) => {
+        const parsed = SessionHistoryReadQuerySchema.parse(query);
+        return {
+          type: 'session/history-read_response',
+          sessionId: doc.sessionId,
+          success: true,
+          historyRevision: 2,
+          historyCount: rows.length,
+          result:
+            parsed.kind === 'count'
+              ? rows.length
+              : parsed.kind === 'readDirectory'
+                ? rows.slice(parsed.from, parsed.to)
+                : undefined,
+        };
+      },
+      write: async () => {
+        throw new Error('Read-only transport');
+      },
+    });
+    expect(await services.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER)).toEqual(
+      rows
+    );
+    expect(await services.sessionData.history.readDirectory(999, Number.MAX_SAFE_INTEGER)).toEqual(
+      rows.slice(999)
+    );
+    await services.dispose?.();
+  });
+
+  it('restarts a multi-page observation when its owner revision changes', async () => {
+    const doc = {
+      sessionId: 'remote-revision',
+      subscribeRoostHistoryCursor: () => () => {},
+    } as unknown as SessionDocument;
+    let revision = 1;
+    const services = createRoostRpcSessionServices(doc, {
+      read: async (query): Promise<SessionHistoryReadResponse> => {
+        const parsed = SessionHistoryReadQuerySchema.parse(query);
+        const result =
+          parsed.kind === 'count'
+            ? 501
+            : parsed.kind === 'readDirectory'
+              ? Array.from({ length: parsed.to - parsed.from }, (_, index) => ({
+                  position: parsed.from + index,
+                  state: 'ready',
+                  turnId: `v${revision}-${parsed.from + index}`,
+                }))
+              : undefined;
+        const reply = {
+          type: 'session/history-read_response' as const,
+          sessionId: doc.sessionId,
+          success: true,
+          historyRevision: revision,
+          historyCount: 501,
+          result,
+        };
+        if (parsed.kind === 'readDirectory' && parsed.from === 0) revision = 2;
+        return reply;
+      },
+      write: async () => {
+        throw new Error('Read-only transport');
+      },
+    });
+    expect(await services.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER)).toEqual(
+      Array.from({ length: 501 }, (_, position) => ({
+        position,
+        state: 'ready',
+        turnId: `v2-${position}`,
+      }))
+    );
+    await services.dispose?.();
   });
 });

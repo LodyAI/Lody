@@ -23,6 +23,7 @@ import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   SESSION_DOC_PREFIX,
   getMachineRoomId,
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   machineFlockKeys,
@@ -297,7 +298,11 @@ const createRuntime = (
     ({
       upsertDocMeta: vi.fn(async () => undefined),
       getDocMeta: vi.fn(async (roomId: string) => ({
-        meta: { id: roomId.slice(SESSION_DOC_PREFIX.length), machineId: 'machine-1' },
+        meta: {
+          id: roomId.slice(SESSION_DOC_PREFIX.length),
+          machineId: 'machine-1',
+          protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        },
       })),
     } as unknown as WorkspaceRuntime['repo']);
 
@@ -1064,6 +1069,46 @@ describe('useSessionActions', () => {
     );
 
     expect(result.sessionMeta.historyBackend).toBe('loro');
+  });
+
+  it('keeps creating ordinary Loro sessions on targets without Roost capability', async () => {
+    const store = createStore();
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(roostHistoryExperimentEnabledAtom, true);
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime, { store });
+    const result = await actions.createSession(
+      createSessionPayload('old-machine-session' as SessionId)
+    );
+    expect(result.sessionMeta.historyBackend).toBe('loro');
+    expect(metaRepo.repo.upsertDocMeta).toHaveBeenCalledWith(
+      getSessionRoomId(result.sessionId),
+      expect.objectContaining({ historyBackend: 'loro' })
+    );
+  });
+
+  it('rejects explicit Roost creation before metadata, history or warm-up on unsupported targets', async () => {
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime);
+    const payload = {
+      ...createSessionPayload('unsupported-roost-session' as SessionId),
+      historyBackend: 'roost' as const,
+    };
+    await expect(actions.createSession(payload)).rejects.toThrow('Update the machine');
+    await expect(
+      actions.startSession(payload, {
+        role: 'user',
+        userId: 'user-1',
+        timestamp: '2026-10-09T00:00:00.000Z',
+        items: [{ type: 'text', text: 'hello' }],
+        fileDiff: [],
+        inputConfig: { inputBlocks: [{ type: 'text', text: 'hello' }] },
+      } as never)
+    ).rejects.toThrow('Update the machine');
+    expect(metaRepo.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(runtime.ensureDocStream).not.toHaveBeenCalled();
   });
 
   it('keeps a local branch selector out of baseBranch until the target machine resolves it', async () => {

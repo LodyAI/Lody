@@ -19,9 +19,10 @@ renderer 在接受会话时明确传递 backend 选择，已保存的会话 meta
 Experimental features 区域包含一个总开关和一个 Roost history 开关。有效 gate 要求两个
 开关都打开。偏好按 renderer 保存在 local storage 中，并在创建会话前读取。
 
-有效 gate 关闭时，新会话不显式选择 Roost，共享创建默认值解析为 Loro。有效 gate 打开时，
-renderer 在接受首个 turn 前向新会话 metadata 写入 `historyBackend: 'roost'`。已有持久
-discriminator 的会话无论偏好之后如何变化，都继续使用自己保存的 backend。
+有效 gate 关闭时，共享创建默认值解析为 Loro。有效 gate 打开时，renderer 在任何会话
+写入之前读取目标机器能力；仅受支持的目标保存 Roost 选择，能力缺失或较旧时为该新会话
+保留 Loro。若调用者明确要求 Roost，而目标不支持，则在 metadata、历史和 warm-up 之前
+报错。已有 discriminator 的会话无论偏好之后如何变化，都继续使用自己保存的 backend。
 
 开关不迁移历史、不重写会话 metadata，也不提供按消息切换 backend 的 fallback。backend 选择
 仍然是不可变的会话边界。
@@ -35,6 +36,9 @@ CLI 保留 npm 发布的 `@loro-dev/roost@0.1.2`，锁文件记录 registry 校�
 
 session-actions 契约测试覆盖两个开关：只有两个开关都打开时才选择 Roost，总开关关闭时仍
 保持 Loro 默认值。设置 Storybook 覆盖关闭、记住 opt-in 和开启三种状态。
+
+创建回归还覆盖目标能力缺失/较旧、显式 Roost 在副作用前拒绝，以及显式 Loro 覆盖。
+renderer 两个创建入口与 CLI 复用同一个能力解析函数。
 
 原生接入已通过完整工作区检查和实际 macOS arm64 打包，无须另行提供 owner 产物。
 它也修正了此前四个过期 CLI 测试：等待异步 runtime-config 写入，并在机器注册预期中包含
