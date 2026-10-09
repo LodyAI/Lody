@@ -149,6 +149,12 @@ defines locale-specific spacing for these labels.
   ([note](../../../../../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md)).
   `bufferSize` is a trade between blank space during a fast scroll and keeping
   resizing rows mounted.
+- **Touch input before scroll delivery.** The adapter releases following on a single
+  upward conversation pan, including its final touch position when no move was
+  delivered. The controller adopts post-touch momentum as reader movement even if
+  a resize samples it before the scroll event. Taps, pinches, horizontal gestures,
+  cancelled touches and nested scrolling do not leave momentum evidence. Model and
+  adapter tests cover these orderings; iOS device behavior still needs verification.
 - **`buildChatStreamItems()` filtering.** An empty assistant entry renders `null`,
   which Virtua cannot measure, and a duplicate history id produces a duplicate key
   that desyncs the list.

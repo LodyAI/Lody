@@ -992,3 +992,26 @@ reproduces "Maximum update depth exceeded" without the pause and passes with it.
 - Reviews on 2026-09-27: Codex (GPT-6 Astra), session
   `0bc8379d-78b4-4a13-bee7-4ec862c9bf52`, five rounds; Claude session `dfd4a856`, three
   rounds.
+
+## Touch input and delayed scroll delivery (2026-10-07)
+
+A model reproduction found that an upward offset first observed after `touchend` was
+classified as unknown: follow wrote the bottom back on every native step. The adapter
+also waited for an offset before releasing follow, allowing a streaming commit to
+overwrite a pending touch scroll. This violates the existing reading contract and is
+separate from the accepted WebKit compensation cost above.
+
+The adapter now releases on single-touch upward conversation input, checking the
+final touch position as well as move events. Nested scrollers, taps, horizontal input,
+pinches and cancellation do not arm conversation momentum. The controller recognizes
+post-touch momentum during scroll and resize sampling; a new touch, cancellation,
+`scrollend`, or entering follow supersedes the previous evidence. No timer, delayed
+compensation or extra scroll writer was introduced.
+
+The existing model and adapter suites reproduce four failures on the old code and
+pass with the fix. They cover continuous momentum, new output while reading, returning
+to follow and non-scroll touches; the model retains its 40 seeded sequences. The two
+suites and keyed-layout suites pass 102 tests; scoped strict type and lint checks pass.
+Full-package checks are blocked by missing dependencies and outdated borrowed workspace
+packages. Validation uses synthetic events and simulated layout, not an iOS compositor.
+Real-device verification remains open; layout compensation can still interrupt an iOS fling.
