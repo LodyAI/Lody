@@ -20,6 +20,10 @@ save path's text reads.
 
 ## Invariants
 
+- Cold ordinary-chat previews resolve the existing default workspace from durable
+  Session metadata, using the parent owner for child tabs and `getDefaultSessionWorkdir`.
+  Do not create a directory, start an agent, or replace an unavailable project with
+  a chat workspace just to preview a file.
 - `file-preview-service.ts` never throws for a domain failure: every rejection is a
   typed `status: 'error'` response.
 - `file-preview-path-policy.ts` is the security boundary. Remote `file/preview`

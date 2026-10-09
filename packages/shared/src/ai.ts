@@ -1892,7 +1892,9 @@ export type IssuePRMention = {
 
 export type ACPTurnConfig = {
   memory?: MemoryBinding;
+  /** Frozen effective execution text, including accepted Config/Role instructions. */
   prompt: string;
+  /** Authored input for display/editing and structured attachments for execution. */
   inputBlocks?: SessionInputBlock[];
   cliType: AgentConfigCliType;
   agentType: AgentType;

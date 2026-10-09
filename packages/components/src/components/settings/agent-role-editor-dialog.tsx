@@ -8,6 +8,7 @@ import { getServerNow, type AgentRole, type AgentRoleId, type MachineId } from '
 import { userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
+import { buildAcpSelectorOptions } from '@/components/shared/acp-selector-options';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
@@ -17,6 +18,7 @@ import {
   buildAgentRoleFormValue,
   buildAgentRoleFromForm,
   buildAgentRoleRunConfig,
+  carryAgentRoleOptionsToModel,
   findAgentRoleRunConfigIssues,
   validateAgentRoleForm,
   type AgentRoleFormValue,
@@ -125,20 +127,23 @@ export function AgentRoleEditorDialog({
     () => machineAgentConfigs.find((config) => config.id === editor?.value.agentConfigId),
     [editor?.value.agentConfigId, machineAgentConfigs]
   );
+  const selectorTarget = selectedAgentConfig
+    ? {
+        configId: selectedAgentConfig.id,
+        cliType: selectedAgentConfig.cliType,
+        agentType: selectedAgentConfig.agentType,
+        runtimeOverrides: selectedAgentConfig.runtimeOverrides,
+        machine: selectedMachineId ? (machines.get(selectedMachineId) ?? null) : null,
+      }
+    : undefined;
   const selectorOptions = useAcpSelectorOptions(
-    selectedAgentConfig
-      ? {
-          configId: selectedAgentConfig.id,
-          cliType: selectedAgentConfig.cliType,
-          agentType: selectedAgentConfig.agentType,
-          // A Role pins its model: the effort ladder must follow the model
-          // being edited, not the probe-time current one, so the picker and
-          // the compatibility check agree on the same ladder.
-          selectedModelId: editor?.value.modelId ?? null,
-          runtimeOverrides: selectedAgentConfig.runtimeOverrides,
-          machine: selectedMachineId ? (machines.get(selectedMachineId) ?? null) : null,
-        }
-      : undefined
+    selectorTarget && {
+      ...selectorTarget,
+      // A Role pins its model: the effort ladder must follow the model
+      // being edited, not the probe-time current one, so the picker and
+      // the compatibility check agree on the same ladder.
+      selectedModelId: editor?.value.modelId ?? null,
+    }
   );
 
   // A Role pins concrete values, so as soon as an agent config's capabilities
@@ -264,7 +269,20 @@ export function AgentRoleEditorDialog({
             }
             // A panel fading out is not edited: a change there would reopen it.
             onChange={(value) => {
-              if (openEditor) onChange({ ...openEditor, value });
+              if (!openEditor) return;
+              const modelChanged =
+                value.agentConfigId === editorValue.agentConfigId &&
+                value.modelId !== editorValue.modelId;
+              const configOptionValues = modelChanged
+                ? carryAgentRoleOptionsToModel(
+                    value.configOptionValues,
+                    selectorOptions.configOptionSelectors,
+                    buildAcpSelectorOptions(
+                      selectorTarget && { ...selectorTarget, selectedModelId: value.modelId }
+                    ).configOptionSelectors
+                  )
+                : value.configOptionValues;
+              onChange({ ...openEditor, value: { ...value, configOptionValues } });
             }}
             machines={machineOptions}
             agentConfigs={machineAgentConfigs.map((config) => ({

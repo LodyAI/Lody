@@ -182,6 +182,19 @@ describe('electron browser sign-in handoff', () => {
     expect(findButton(/Open browser to sign in/i)).toBeUndefined();
   });
 
+  it.each(['en', 'zh_CN'])('shows certificate recovery guidance in %s', async (language) => {
+    await initI18n(language);
+    window.history.replaceState({}, '', '/login');
+    store.set(electronLoginPhaseAtom, 'error');
+    store.set(electronLoginErrorAtom, 'exchange_certificate_failed');
+    await renderLoginPage(createAuthClient({}), createSessionValue(false), true);
+    expect(container.textContent).toContain(language === 'en' ? 'certificate' : '证书');
+    expect(container.textContent).toContain(language === 'en' ? 'system clock' : '系统时间');
+    expect(container.textContent).toContain('TUN');
+    expect(container.textContent).not.toContain('login.desktopErrors.exchange_certificate_failed');
+    expect(container.querySelector('button')?.disabled).toBe(false);
+  });
+
   it('names the browser account and hands nothing over until the user chooses', async () => {
     const transferUser = vi.fn<TransferUser>(async () => ({
       data: { electron_authorization_code: 'code-123' },

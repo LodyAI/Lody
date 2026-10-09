@@ -233,8 +233,14 @@ export function useSessionFileActions({
   );
 
   const resolveHostPath = useCallback(
-    (filePath: string) => resolveLocalWorkspaceFilePath(workspacePath, filePath, isLocalMachine),
-    [isLocalMachine, workspacePath]
+    (filePath: string) =>
+      resolveLocalWorkspaceFilePath(
+        workspacePath,
+        filePath,
+        isLocalMachine,
+        isLocalMachine ? localHomeDir : null
+      ),
+    [isLocalMachine, localHomeDir, workspacePath]
   );
 
   // Keep the Markdown menu's "Open in" target aligned with the session-header

@@ -39,6 +39,12 @@ timing and ownership problems recorded there. The
 [branch observation](../bug-fix/2026-09-24-workspace-branch-observation.md) remains the
 metadata owner.
 
+The first-task context is composed before the shared execution-input resolver runs,
+following the [frozen execution-input decision](../architecture/2026-10-08-frozen-turn-execution-input.md).
+This preserves accepted Config/Role instructions and structured attachments while adding
+branch guidance. Regression coverage observes all three at the provider port and retains
+the persisted-turn retry tests for create, continue and restore.
+
 ## Verification and limits
 
 Execution tests inspect prompt blocks delivered to ACP across new GitHub/local worktrees,
@@ -48,17 +54,20 @@ context; attachment coverage checks the resulting agent input. A real temporary 
 worktree test renames the branch and verifies owner metadata publication and preservation
 after detached HEAD.
 
-Validation: 174 tests passed across the execution service, prompt helpers, and Git
-observation suites; three selected SessionManager tests also passed for speculative
-worktree adoption, retry, and rebuilding a missing prepared worktree. The execution
-matrix checks that the next turn after a fresh worktree task receives only its new input.
-CLI `pnpm run typecheck`, scoped type-aware lint (no errors), root `pnpm format`,
-scoped formatting checks, and `pnpm run docs check` passed. Cached workspace dependencies
-with an identical root lockfile and pinned submodules from local clones were used for
-validation.
+Validation after reconciling `main`: 239 distinct tests passed across execution,
+prompt helpers, Git observation, shared execution input, selected worktree adoption,
+preparation retirement and cold file preview. The execution matrix checks that the
+next turn receives only its new input. Final CLI type checking, `pnpm check:quick`
+(type-aware lint, i18n and repository boundaries), root `pnpm format`, scoped
+formatting and `pnpm run docs check` passed. Dependencies were installed from the
+frozen root lockfile and submodules checked out at their merged pins.
 
-Full root `pnpm check` could not finish with the incomplete cached dependency setup:
-initial validation stopped at site-docs' missing `fumadocs-mdx`, and PR preparation
-stopped at the ACP build's missing `@tsconfig/node22` after the reused cache became
-unavailable. It is not reported as passing. Model compliance is not proven by
-deterministic tests. No live Claude/Codex invocation or desktop UI smoke test is included.
+Full root `pnpm check` passed workspace type checks and lint but stopped at the
+unrelated native recursive SSH submodule fixture (`github-git-transport.test.ts`):
+the Lody Git wrapper reports `context_unreadable`, also recorded in the
+[frozen-input verification](../architecture/2026-10-08-frozen-turn-execution-input.md#verification).
+CLI totals were 3530 passed, 1 failed and 4 skipped; the full pipeline did not
+complete. This run preceded the final base refresh; affected execution/preparation/
+file-preview suites, CLI types and static/boundary checks were rerun afterward.
+Model compliance is not proven by deterministic tests. No live Claude/Codex
+invocation or desktop UI smoke test is included.

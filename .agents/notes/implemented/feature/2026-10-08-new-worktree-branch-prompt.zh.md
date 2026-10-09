@@ -33,6 +33,11 @@ Agent 检查当前引用是否仍为 Lody 分配的 `session/<id>` 或 `lody/<id
 [分支约定](../../../../specs/workspace-branch-state.zh.md) 记录当前意图，
 [分支观测](../bug-fix/2026-09-24-workspace-branch-observation.zh.md) 仍负责元数据。
 
+首次任务上下文在共享执行输入解析器运行前完成组合，遵循
+[冻结执行输入决策](../architecture/2026-10-08-frozen-turn-execution-input.zh.md)。
+这样在添加分支指导时仍保留已接受的 Config／Role 指令及结构化附件。
+回归测试检查 Provider 实际收到的三类内容，并保留创建、继续和恢复路径的持久化回合重试测试。
+
 ## 验证与限制
 
 执行测试检查实际发送给 ACP 的提示词块，覆盖新 GitHub／本地 Worktree、直接
@@ -41,14 +46,16 @@ Agent 检查当前引用是否仍为 Lody 分配的 `session/<id>` 或 `lody/<id
 收到的内容。真实临时 Git Worktree 测试执行分支改名，验证所属会话元数据更新
 及 Detached HEAD 后的保留行为。
 
-验证结果：执行服务、提示词辅助函数与 Git 观测套件共 174 项测试通过；另外选取
-的三项 SessionManager 测试通过，覆盖预创建 Worktree 的采用、重试和已消失
-目录的重建。执行测试矩阵还检查新 Worktree 首次任务后的下一轮只收到新输入。
-CLI `pnpm run typecheck`、范围内类型感知 lint（无错误）、根 `pnpm format`、
-范围内格式检查及 `pnpm run docs check` 通过。验证复用了根锁文件完全一致的
-本机依赖，并从本机克隆初始化了固定版本子模块。
+合并 `main` 后的验证：执行服务、提示词辅助函数、Git 观测、共享执行输入、
+选取的 Worktree 采用测试、准备退休与冷会话文件预览共 239 项不同测试通过。
+执行矩阵检查下一回合只收到新输入。最终 CLI 类型检查、`pnpm check:quick`
+（类型感知 lint、i18n 及仓库边界）、根 `pnpm format`、范围内格式检查和
+`pnpm run docs check` 通过。依赖按冻结的根锁文件安装，子模块检出合并后的固定版本。
 
-不完整的缓存依赖使全仓 `pnpm check` 无法完成：初次验证在 site-docs 缺少
-`fumadocs-mdx` 处停止，准备 PR 时复用的缓存已不可用，又在 ACP 构建缺少
-`@tsconfig/node22` 处停止，不记为通过。确定性测试不能证明模型遵循要求。
+全仓 `pnpm check` 通过工作区类型检查和 lint，但在无关的原生递归 SSH 子模块
+用例（`github-git-transport.test.ts`）处停止：Lody Git 包装器返回
+`context_unreadable`；[冻结输入验证记录](../architecture/2026-10-08-frozen-turn-execution-input.zh.md)
+也记录了这一限制。CLI 共 3530 项通过、1 项失败、4 项跳过，完整流水线未完成。
+该次执行早于最终基线刷新；刷新后重跑了受影响的执行／准备／文件预览套件、
+CLI 类型及静态／边界检查。确定性测试不能证明模型遵循要求。
 本次未调用真实 Claude／Codex，也未进行桌面界面冒烟测试。
