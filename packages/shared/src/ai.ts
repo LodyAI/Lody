@@ -1927,6 +1927,7 @@ export type ACPSessionConfig = ACPTurnConfig & {
   customAcp?: CustomAcpLaunchSpec;
   /** Advanced runtime binary override for builtin Claude/Codex agents. */
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
 };
 
 /**

@@ -47,7 +47,8 @@ Repository map and entry points: [README.md](README.md#repository).
   public `LodyAI/acp-extension-core` submodule, consumed through the root workspace;
   never duplicate them locally.
 - Magpie import requires confirmation on the desktop local machine; accept only fixed
-  loopback mappings and its public attribution token. Generate native catalogs under
+  loopback mappings and its public attribution token. Store gateway metadata outside env.
+  Generate native catalogs under
   the Lody data root, never user profiles. Contract: [Magpie import](specs/magpie-provider-import.md).
 - Pi provider migration requires owner confirmation and the target's `builtinPi`
   protocol capability. Preserve provider IDs and settings; never convert legacy

@@ -49,7 +49,8 @@ Provider，不覆盖已有配置。
 请求已成功。Providers 展示托管准备进度和错误。工作区、机器或请求变化时停止
 剩余写入，不撤销已经持久化的配置。
 
-`LODY_MAGPIE_GATEWAY` 选择 daemon 拥有的准备流程。每次启动检查 `/api/hello`，
+`AgentConfigMeta.magpieGatewayUrl` 是经过校验的 Provider 元数据，独立于 `env`，
+在存储、编辑、恢复与分叉时保留。它选择 daemon 拥有的准备流程。每次启动检查 `/api/hello`，
 在超时、大小限制和禁止重定向的条件下读取 `/v1/models`。网关不可用、目录无效或
 为空时明确失败。网关地址参与能力缓存身份；正常刷新启动新的实时探测。Magpie
 目录变化不会热更新已运行的 Agent。

@@ -130,7 +130,7 @@ type ResolvedHistoryACPProcessLaunch = Omit<ResolvedACPProcessLaunch, 'env'> & {
 };
 
 export type HistoryProviderLaunch = LocalProjectHistoryProvider &
-  Pick<ResolveACPSettingInput, 'customAcp' | 'runtimeOverrides' | 'env'> & {
+  Pick<ResolveACPSettingInput, 'customAcp' | 'runtimeOverrides' | 'magpieGatewayUrl' | 'env'> & {
     codexProfile?: ResolvedCodexProfile;
   };
 

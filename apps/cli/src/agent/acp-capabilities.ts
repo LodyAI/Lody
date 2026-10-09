@@ -23,6 +23,7 @@ export { normalizeConfigOptions } from '@/agent/acp-capability-normalization';
 export type { AcpCapabilitiesResult } from '@/agent/acp-capability-normalization';
 
 export type FetchAcpCapabilitiesOptions = {
+  magpieGatewayUrl?: string;
   codexProfile?: CodexProfileExecution;
   verifyCodexCredential?: boolean;
   onManagedRuntimeProgress?: ManagedRuntimeProgressCallback;
@@ -87,6 +88,7 @@ export async function fetchAcpCapabilities(
       agentType,
       customAcp,
       runtimeOverrides,
+      magpieGatewayUrl: options.magpieGatewayUrl,
       workdir,
       env: probeEnv,
       onManagedRuntimeProgress: options.onManagedRuntimeProgress,

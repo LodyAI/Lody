@@ -3,7 +3,6 @@ import {
   isMagpieImportLink,
   parseMagpieImportLink,
   magpieProviderSettings,
-  MAGPIE_GATEWAY_ENV,
   machineSupportsProtocolCapability,
   supportsBuiltinProviderSetup,
   getMachineFlockDocId,
@@ -103,7 +102,7 @@ export const importMagpieProvidersAtom = atom(
               c.machineId === machineId &&
               c.cliType === 'builtin' &&
               c.agentType === settings.agentType &&
-              c.env?.[MAGPIE_GATEWAY_ENV] === request.gatewayUrl
+              c.magpieGatewayUrl === request.gatewayUrl
           )
         )
           continue;

@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1357](https://github.com/LodyAI/Lody/pull/1357)
 
 [中文](2026-10-09-magpie-provider-import.zh.md)
 
@@ -25,8 +26,11 @@ owners and were not adopted.
 
 The import accepts only Magpie's nonsecret `magpie-lody` loopback attribution token.
 It is not a generic API-key importer: vendor credentials stay with the local
-gateway. Provider env contains fixed mappings and `LODY_MAGPIE_GATEWAY`; launch
-preparation generates configuration under `getLodyDataDir()`. Codex uses a separate
+gateway. Provider env contains only agent-supported mappings; `AgentConfigMeta.magpieGatewayUrl`
+is separate host-owned launch metadata. Storage, resume, forks, probes and capability
+identity preserve it without exporting an internal process environment switch. The
+unreleased draft marker was removed without a legacy fallback. Launch preparation
+generates configuration under `getLodyDataDir()`. Codex uses a separate
 home and the existing adapter startup-overlay contract; its model catalog must be
 applied before native `model/list`, not only as a later session override. Pi uses
 an isolated profile instead of changing the user's `models.json`. The cost is that
@@ -55,6 +59,13 @@ therefore means durable configuration, not successful upstream inference.
   as did `pnpm format` and `pnpm docs check`. The test command used native Git
   (`env -u GIT_EXEC_PATH PATH="/usr/bin:$PATH" pnpm check`) because the authoring
   session Git shim otherwise contaminates the synthetic recursive-clone fixture.
+- The installed manifest-pinned `acp-extension-pi` artifact
+  `0.2.0-lody.693d6964a676` was also exercised through ACP, using
+  `prepareMagpieRuntime` against a loopback synthetic gateway: `session/new`
+  exposed both generated models, `session/set_config_option` selected the second,
+  and `session/prompt` reached `/v1/chat/completions` with the expected public token.
+  Native `read` returned a synthetic file into the next request and the ACP turn
+  finished with `end_turn`. This validates the adapter path, not commercial inference.
 - Remaining acceptance: real Magpie conversations/tool calls across all four
   agents, packaged cold/warm launch across OSes, and a separate upstream Magpie
   adapter. Tests do not claim these have run.

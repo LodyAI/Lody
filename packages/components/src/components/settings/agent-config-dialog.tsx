@@ -1164,6 +1164,7 @@ export type AgentConfigFormData = {
 };
 
 export type AgentConfigSubmitPayload = {
+  magpieGatewayUrl?: string;
   codexAuth?: CodexAuthProfile;
   id: AgentConfigId;
   name: string;
@@ -1882,6 +1883,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       agentType,
       customAcp: isCustom ? (parsedCustomAcp ?? undefined) : undefined,
       runtimeOverrides: formData.runtimeOverrides,
+      magpieGatewayUrl: mode.kind === 'edit' ? mode.config.magpieGatewayUrl : undefined,
       prompt: formData.prompt,
       env,
       titleGeneration,
@@ -1896,6 +1898,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     agentConfigId,
     codexAuth,
     backgroundBuiltinSetup,
+    mode,
     formData,
     isCustom,
     isPreset,

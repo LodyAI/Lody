@@ -56,7 +56,8 @@ configuration is durable, not that a model request has succeeded. Providers expo
 managed setup progress and errors. Changes to the workspace/machine/request stop
 remaining writes without undoing already durable configurations.
 
-`LODY_MAGPIE_GATEWAY` selects daemon-owned preparation. Each launch checks
+`AgentConfigMeta.magpieGatewayUrl` is validated Provider metadata, outside `env`.
+It selects daemon-owned preparation and survives storage, edits, resume and forks. Each launch checks
 `/api/hello` and reads a bounded `/v1/models` catalog with a timeout and no redirects.
 Unavailable, invalid or empty catalogs fail explicitly. The gateway origin participates
 in capability-cache identity; normal refresh starts a new live probe. Running agents

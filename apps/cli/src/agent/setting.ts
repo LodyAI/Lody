@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs';
 import { prepareMagpieRuntime } from './magpie-runtime';
-import { MAGPIE_GATEWAY_ENV } from '@lody/shared';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join, normalize, resolve } from 'node:path';
@@ -75,6 +74,7 @@ export type ResolveACPSettingInput = {
    */
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  magpieGatewayUrl?: string;
   /** Environment values that can alter an agent's advertised capabilities. */
   env?: NodeJS.ProcessEnv;
 };
@@ -267,9 +267,9 @@ export function getAcpCapabilitySourceVersion(
   input: ResolveACPSettingInput,
   managedRuntimeVersion?: string
 ): string {
-  if (input.cliType === 'builtin' && input.env?.[MAGPIE_GATEWAY_ENV]) {
-    const { [MAGPIE_GATEWAY_ENV]: gateway, ...env } = input.env;
-    const base = getAcpCapabilitySourceVersion({ ...input, env }, managedRuntimeVersion);
+  if (input.cliType === 'builtin' && input.magpieGatewayUrl) {
+    const { magpieGatewayUrl: gateway, ...nativeInput } = input;
+    const base = getAcpCapabilitySourceVersion(nativeInput, managedRuntimeVersion);
     const suffix = getBuiltinRuntimeOverrideSourceVersionSuffix(input.runtimeOverrides);
     const prefix = suffix && base.endsWith(suffix) ? base.slice(0, -suffix.length) : base;
     return `${prefix}+magpie-v1:${createHash('sha256').update(gateway).digest('hex').slice(0, 12)}${suffix}`;
@@ -759,7 +759,7 @@ export async function resolveACPProcessLaunchAsync(
 ): Promise<ResolvedACPProcessLaunch> {
   if (input.cliType === 'builtin') {
     const launch = await resolveBuiltinACPProcessLaunch(input);
-    const gateway = input.env?.[MAGPIE_GATEWAY_ENV];
+    const gateway = input.magpieGatewayUrl;
     if (!gateway) return launch;
     const magpie = await prepareMagpieRuntime(input.agentType, gateway, input.signal);
     return {

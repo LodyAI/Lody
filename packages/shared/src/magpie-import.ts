@@ -1,6 +1,5 @@
 /** Public local-gateway token: a usage label, never a vendor credential. */
 export const MAGPIE_TOKEN = 'magpie-lody';
-export const MAGPIE_GATEWAY_ENV = 'LODY_MAGPIE_GATEWAY';
 export const MAGPIE_TARGETS = ['claude', 'codex', 'pi', 'dsh'] as const;
 export type MagpieTarget = (typeof MAGPIE_TARGETS)[number];
 export type MagpieImport = { gatewayUrl: string; targets: MagpieTarget[] };
@@ -18,6 +17,15 @@ export function normalizeMagpieGateway(value: string): string {
   )
     throw new Error('Magpie requires a local HTTP gateway');
   return url.origin;
+}
+
+export function isMagpieGatewayUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    return normalizeMagpieGateway(value) === value;
+  } catch {
+    return false;
+  }
 }
 
 export function isMagpieImportLink(value: string): boolean {
@@ -125,7 +133,7 @@ export function parseMagpieImportLink(value: string): MagpieImport {
 
 export function magpieProviderSettings(target: MagpieTarget, gatewayUrl: string) {
   const gateway = normalizeMagpieGateway(gatewayUrl);
-  const env: Record<string, string> = { [MAGPIE_GATEWAY_ENV]: gateway };
+  const env: Record<string, string> = {};
   if (target === 'claude')
     Object.assign(env, { ANTHROPIC_BASE_URL: gateway, ANTHROPIC_AUTH_TOKEN: MAGPIE_TOKEN });
   if (target === 'codex')
@@ -133,6 +141,7 @@ export function magpieProviderSettings(target: MagpieTarget, gatewayUrl: string)
   if (target === 'dsh')
     Object.assign(env, { DEEPSEEK_API_KEY: MAGPIE_TOKEN, DEEPSEEK_BASE_URL: `${gateway}/v1` });
   return {
+    magpieGatewayUrl: gateway,
     name: `${{ claude: 'Claude', codex: 'Codex', pi: 'Pi', dsh: 'DSH' }[target]}-magpie`,
     cliType: 'builtin' as const,
     agentType: target === 'dsh' ? 'deepseek' : target,

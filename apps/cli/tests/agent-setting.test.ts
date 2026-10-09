@@ -168,6 +168,30 @@ describe('resolveBuiltinACPSetting', () => {
     expect(() => resolveBuiltinACPSetting('bub')).toThrow(/resolveACPProcessLaunchAsync/);
   });
 
+  it('prepares the Magpie launch from Provider metadata without a private environment switch', async () => {
+    const gateway = 'http://127.0.0.1:3425';
+    const input = { cliType: 'builtin' as const, agentType: 'deepseek', magpieGatewayUrl: gateway };
+    vi.stubGlobal('fetch', async (url: string) =>
+      Response.json(
+        url.endsWith('/api/hello') ? { name: 'magpie' } : { data: [{ id: 'synthetic/model' }] }
+      )
+    );
+    try {
+      const launch = await resolveACPProcessLaunchAsync(input);
+      expect(launch.env).toMatchObject({
+        DEEPSEEK_BASE_URL: `${gateway}/v1`,
+        DEEPSEEK_API_KEY: 'magpie-lody',
+      });
+      expect(launch.env).not.toHaveProperty('LODY_MAGPIE_GATEWAY');
+      expect(launch.capabilitySourceVersion).toBe(getAcpCapabilitySourceVersion(input));
+      expect(launch.capabilitySourceVersion).not.toBe(
+        getAcpCapabilitySourceVersion({ ...input, magpieGatewayUrl: 'http://127.0.0.1:3426' })
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('keys builtin capability versions on the bundled adapter and managed runtime', () => {
     expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'codex' })).toBe(
       BUILTIN_CODEX_CAPABILITY_SOURCE_VERSION

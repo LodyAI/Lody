@@ -3,7 +3,6 @@ import {
   parseMagpieImportLink,
   magpieProviderSettings,
   normalizeMagpieGateway,
-  MAGPIE_GATEWAY_ENV,
 } from '../src/magpie-import';
 
 const gateway = 'http://127.0.0.1:3425';
@@ -51,7 +50,9 @@ describe('Magpie import contract', () => {
     expect(configs.map((c) => c.agentType)).toEqual(['claude', 'codex', 'pi', 'deepseek']);
     expect(configs[0]?.env.ANTHROPIC_BASE_URL).toBe(gateway);
     expect(configs[1]?.env.OPENAI_BASE_URL).toBe(`${gateway}/v1`);
-    expect(configs[2]?.env[MAGPIE_GATEWAY_ENV]).toBe(gateway);
+    expect(configs[2]?.magpieGatewayUrl).toBe(gateway);
+    expect(configs[2]?.env).toEqual({});
+    expect(configs.every((c) => c.magpieGatewayUrl === gateway)).toBe(true);
     expect(configs[3]?.env.DEEPSEEK_BASE_URL).toBe(`${gateway}/v1`);
   });
   it.each([
