@@ -39,3 +39,5 @@ against the original stylesheet, confirming they detect the reported defect. Ful
 and `pnpm format` are blocked by missing workspace dependencies (`tsgo` and
 `oxfmt`). The repository docs check retains unrelated broken links from absent
 ACP submodules. Full application and touch-device verification remain unexecuted.
+
+- Pull request: [#1345](https://github.com/LodyAI/Lody/pull/1345).

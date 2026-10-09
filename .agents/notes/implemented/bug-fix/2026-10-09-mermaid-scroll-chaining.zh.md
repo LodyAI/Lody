@@ -32,3 +32,5 @@ jsdom 的事件派发不能检测 CSS 滚动传递，因此已有滚轮单测不
 完整 `pnpm check` 和 `pnpm format` 因缺少工作区依赖
 （`tsgo`、`oxfmt`）而中断。仓库文档检查仍有缺失 ACP 子模块导致的无关断链。
 尚未执行完整应用和触屏设备验证。
+
+- Pull request: [#1345](https://github.com/LodyAI/Lody/pull/1345)。
