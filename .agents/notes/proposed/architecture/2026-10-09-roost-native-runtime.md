@@ -18,8 +18,9 @@ does not establish browser-local IndexedDB replicas or offline Streams sync.
 
 ## Decision and boundaries
 
-Pin `@loro-dev/roost-node@0.1.0` as a CLI runtime dependency and exempt only that
-version from the release-age policy. Keep `@loro-dev/roost@0.1.2` for identity,
+Pin `@loro-dev/roost-node@0.1.1` as a CLI runtime dependency and exempt only that
+version and its six exact platform dependencies from the release-age policy.
+Keep `@loro-dev/roost@0.1.2` for identity,
 application JSON, and `NodeLodyHistory`. Neither Rust source nor a sibling Roost
 checkout is needed to install, build, or package Lody.
 
@@ -49,7 +50,42 @@ history, Loro control metadata, and transport authorization remain unchanged.
 
 ## Verification
 
+### Published 0.1.1 integration (2026-10-09)
+
+The user has published the complete split release. The public registry exposes
+all six platform packages and the main package at 0.1.1, with `latest` selecting
+0.1.1; the main tarball integrity matches the prepared release. Upgrade the CLI
+pin and lockfile together, preserving the existing Worker and history contracts.
+Exempt each exact platform version from pnpm's seven-day release-age policy so
+fresh resolution retains the complete optional dependency graph on every host.
+
+Adapt the existing staging fixtures to the installed split package: use the
+actual published host binding for SQLite execution and distinct synthetic bytes
+for foreign target selection. Keep adjacent-layout compatibility, exact-version
+validation and failed-fetch preservation covered without network-dependent tests
+or a legacy all-platform development dependency.
+
+Frozen installation and the complete `pnpm check` pass: CLI 3530 tests with four
+existing skips, shared components 4885 tests and Electron 214 tests. All 16 focused
+Roost history/backend regressions pass with native version enforcement enabled.
+The installed main package contains no binding and resolves only darwin-arm64.
+Actual published-package staging passes for all six targets, using installed host
+resolution and the production public npm download path for foreign targets;
+signed host SQLite reopen passes. Foreign binaries are selected on disk, not run.
+
+The first desktop build identified an outdated 0.1.0 pin in the CLI publication
+gate. It now matches the tested 0.1.1 manifest and lockfile, and the actual bundled
+runtime smoke passes.
+The latest main adds read-only Session observation and conflicts with the existing
+command imports. Merge it into the feature branch while preserving both the
+Roost backend and observation command, then validate the merged source and a
+normal macOS arm64 directory package with packaged Worker SQLite reopen probes.
+Record final results here before handoff.
+
 ### Platform package compatibility (2026-10-09)
+
+This records the earlier 0.1.0 compatibility checkpoint; the published upgrade
+above supersedes its deferred dependency step.
 
 Roost is preparing 0.1.1 as a small main package with six optional platform
 packages. Extend Electron staging to accept both an adjacent 0.1.0 prebuild and

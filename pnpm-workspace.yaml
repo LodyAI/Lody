@@ -79,7 +79,14 @@ minimumReleaseAge: 10080
 
 # Allow the exact versions listed below; later releases remain quarantined.
 minimumReleaseAgeExclude:
-  - '@loro-dev/roost-node@0.1.0'
+  # Keep the split release's complete optional platform graph available on every host.
+  - '@loro-dev/roost-node@0.1.1'
+  - '@loro-dev/roost-node-darwin-arm64@0.1.1'
+  - '@loro-dev/roost-node-darwin-x64@0.1.1'
+  - '@loro-dev/roost-node-linux-arm64-gnu@0.1.1'
+  - '@loro-dev/roost-node-linux-x64-gnu@0.1.1'
+  - '@loro-dev/roost-node-win32-arm64-msvc@0.1.1'
+  - '@loro-dev/roost-node-win32-x64-msvc@0.1.1'
   # Use the pinned npm release instead of requiring a sibling Roost checkout.
   - '@loro-dev/roost@0.1.2'
   # pnpm 10.20 uses the first rule per package; keep exact Codex versions together.

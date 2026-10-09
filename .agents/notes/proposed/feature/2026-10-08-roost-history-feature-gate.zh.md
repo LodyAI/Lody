@@ -28,8 +28,8 @@ discriminator 的会话无论偏好之后如何变化，都继续使用自己保
 
 CLI 保留 npm 发布的 `@loro-dev/roost@0.1.2`，锁文件记录 registry 校验值，不再依赖
 相邻源码目录。[原生运行时接入](../architecture/2026-10-09-roost-native-runtime.zh.md)
-使用已发布的 `@loro-dev/roost-node@0.1.0` 代替另行复制的 owner 可执行文件，并保留此会话开关。
-发布等待规则仅豁免这两个固定版本。
+使用已发布的 `@loro-dev/roost-node@0.1.1` 代替另行复制的 owner 可执行文件，并保留此会话开关。
+发布等待规则仅豁免浏览器包、原生主包及六个匹配平台包的固定版本。
 
 ## 验证
 

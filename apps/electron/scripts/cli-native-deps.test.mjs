@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, cp, copyFile, readdir, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, cp, readdir, readFile, realpath, writeFile, rm } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
@@ -11,20 +12,32 @@ const publishedSource = path.resolve(
   '../../cli/node_modules/@loro-dev/roost-node'
 )
 
-async function splitFixture(directory) {
-  const source = path.join(directory, 'split-source')
+async function packageFixture(directory, layout = 'split') {
+  const source = path.join(directory, 'source')
   const destination = path.join(directory, 'staged')
   await cp(publishedSource, source, { recursive: true, dereference: true })
   await cp(publishedSource, destination, { recursive: true, dereference: true })
   const metadata = JSON.parse(await readFile(path.join(source, 'package.json'), 'utf8'))
+  const require = createRequire(path.join(await realpath(publishedSource), 'package.json'))
+  const binaries = new Map()
   metadata.optionalDependencies = {}
   for (const platform of ['darwin', 'linux', 'win32']) {
     for (const arch of ['arm64', 'x64']) {
       const binary = roostPrebuildFileName({ platform, arch })
       const name = `@loro-dev/roost-node-${binary.slice('roost.'.length, -'.node'.length)}`
+      // Only the host binding executes. Foreign targets use distinct selection fixtures.
+      const bytes =
+        platform === process.platform && arch === process.arch
+          ? await readFile(require.resolve(name))
+          : Buffer.from(`synthetic Roost binding for ${platform}-${arch}`)
+      binaries.set(binary, bytes)
+      if (layout === 'adjacent') {
+        await writeFile(path.join(source, binary), bytes)
+        continue
+      }
       const child = path.join(source, 'node_modules', ...name.split('/'))
       await mkdir(child, { recursive: true })
-      await copyFile(path.join(source, binary), path.join(child, binary))
+      await writeFile(path.join(child, binary), bytes)
       await writeFile(
         path.join(child, 'package.json'),
         JSON.stringify({
@@ -36,26 +49,16 @@ async function splitFixture(directory) {
         })
       )
       metadata.optionalDependencies[name] = metadata.version
-      await rm(path.join(source, binary))
     }
   }
   await writeFile(path.join(source, 'package.json'), JSON.stringify(metadata))
-  return { source, destination, metadata }
+  return { source, destination, metadata, binaries }
 }
 
-test('stages all six published Roost targets, preserves relative Worker paths and reopens SQLite', async () => {
-  const source = publishedSource
+test('stages adjacent target fixtures and the installed host package, preserves Worker paths and reopens SQLite', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'lody-roost-stage-'))
-  const destination = path.join(
-    directory,
-    'resources',
-    'cli',
-    'node_modules',
-    '@loro-dev',
-    'roost-node'
-  )
   try {
-    await cp(source, destination, { recursive: true, dereference: true })
+    const { source, destination, binaries } = await packageFixture(directory, 'adjacent')
     for (const platform of ['darwin', 'linux', 'win32']) {
       for (const arch of ['arm64', 'x64']) {
         const target = { platform, arch }
@@ -64,13 +67,17 @@ test('stages all six published Roost targets, preserves relative Worker paths an
           (await readdir(destination)).filter((name) => name.endsWith('.node')),
           [roostPrebuildFileName(target)]
         )
+        assert.deepEqual(
+          await readFile(path.join(destination, roostPrebuildFileName(target))),
+          binaries.get(roostPrebuildFileName(target))
+        )
       }
     }
     const target = { platform: process.platform, arch: process.arch }
-    stageRoostBinding(source, destination, target)
+    stageRoostBinding(publishedSource, destination, target)
     await probeRoostRuntime(destination)
     assert.throws(
-      () => stageRoostBinding(source, destination, { platform: 'linux', arch: 'armv7l' }),
+      () => stageRoostBinding(publishedSource, destination, { platform: 'linux', arch: 'armv7l' }),
       /No Roost native binding/
     )
     assert.throws(() => stageRoostBinding(directory, destination, target), /is missing/)
@@ -84,7 +91,7 @@ test('stages all six published Roost targets, preserves relative Worker paths an
 test('stages installed split platform packages for all targets and retains a working runtime on version drift', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'lody-roost-split-stage-'))
   try {
-    const { source, destination } = await splitFixture(directory)
+    const { source, destination, binaries } = await packageFixture(directory)
     for (const platform of ['darwin', 'linux', 'win32']) {
       for (const arch of ['arm64', 'x64']) {
         const target = { platform, arch }
@@ -92,6 +99,10 @@ test('stages installed split platform packages for all targets and retains a wor
         assert.deepEqual(
           (await readdir(destination)).filter((file) => file.endsWith('.node')),
           [roostPrebuildFileName(target)]
+        )
+        assert.deepEqual(
+          await readFile(path.join(destination, roostPrebuildFileName(target))),
+          binaries.get(roostPrebuildFileName(target))
         )
       }
     }
@@ -113,7 +124,7 @@ test('stages installed split platform packages for all targets and retains a wor
 test('stages an exact downloaded split package and preserves the previous binding after a fetch failure', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'lody-roost-split-download-'))
   try {
-    const { source, destination, metadata } = await splitFixture(directory)
+    const { source, destination, metadata } = await packageFixture(directory)
     const target = { platform: process.platform, arch: process.arch }
     const name = `@loro-dev/roost-node-${roostPrebuildFileName(target).slice('roost.'.length, -'.node'.length)}`
     const downloaded = path.join(directory, 'downloaded')

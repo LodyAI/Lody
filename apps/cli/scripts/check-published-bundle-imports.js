@@ -41,7 +41,7 @@ const requiredPublishedRuntimeDependencies = [
 const requiredExactPublishedRuntimeDependencies = ['loro-crdt'];
 const requiredPinnedPublishedRuntimeDependencies = new Map([
   ['@lydell/node-pty', '1.2.0-beta.14'],
-  ['@loro-dev/roost-node', '0.1.0'],
+  ['@loro-dev/roost-node', '0.1.1'],
 ]);
 
 for (const block of dependencyBlocks) {

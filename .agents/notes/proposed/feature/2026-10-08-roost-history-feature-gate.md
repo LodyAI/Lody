@@ -32,10 +32,11 @@ The switch does not migrate history, rewrite session metadata, or provide a
 per-message fallback. A backend choice remains an immutable session boundary.
 
 The CLI pins the published `@loro-dev/roost@0.1.2` npm package. Its lockfile uses
-registry integrity instead of a sibling source directory. Only the two pinned Roost versions
-are exempt from the seven-day release-age policy. The [native runtime integration](../architecture/2026-10-09-roost-native-runtime.md)
+registry integrity instead of a sibling source directory. Only the pinned browser,
+native main and six matching platform package versions are exempt from the
+seven-day release-age policy. The [native runtime integration](../architecture/2026-10-09-roost-native-runtime.md)
 replaces the separately staged owner executable with the published
-`@loro-dev/roost-node@0.1.0` package, while preserving this session-selection gate.
+`@loro-dev/roost-node@0.1.1` package, while preserving this session-selection gate.
 
 ## Verification
 
