@@ -96,3 +96,17 @@ a controlled microtask boundary; collab replay uses the oldest-runnable FIFO
 rule. SIGKILL crash recovery is tested; power-loss of unflushed SQLite pages is
 not. See the
 [implementation note](../../.agents/notes/proposed/testing/2026-09-16-e2ee-adversarial-lab.md).
+
+## Central key mailbox
+
+`DemoSession.centralKeyRound(limit)` is an opt-in, finite application event hook.
+It coordinates current-key delivery, durable receive checkpoints, device-signed
+reports and repair/result recovery over `/v1/spaces/{genesis}/key-mailbox`. The host
+requires an Org-bound credential and independently refreshed verified ledger;
+SQLite mailbox/index writes are atomic within that store, not with Riverrun control.
+`key-distribution.sqlite` keeps client tasks and unconsumed results across restart.
+The old scripted `keys` stream remains available. Core's separate coordinator API
+provides explicit repair and result acknowledgement. This is a reference HTTP host,
+not a Convex deployment or enabled product E2EE. See the
+[delivery draft](../../specs/e2ee-central-key-delivery.md) and
+[acceptance tests](test/central-key-delivery.test.ts).

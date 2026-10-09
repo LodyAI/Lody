@@ -96,7 +96,10 @@ function settleCandidate(
   });
 }
 
-/** Existing candidates always win: an explicit retry never regenerates secret or signature. */
+/** Existing candidates always win: an explicit retry never regenerates secret or signature.
+ * Publication and local installation only; this does not fan out key envelopes.
+ * The application must schedule resumable centralized delivery to eligible devices.
+ */
 export function rotateEpoch(
   engine: LedgerEngine,
   signer: DeviceSigner['Service']

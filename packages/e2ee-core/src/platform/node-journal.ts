@@ -87,3 +87,4 @@ export function nodeJournalStoreLayer(input: {
 export { nodeEpochFilesLayer } from './node-epoch-files';
 export type { EpochFileIO } from './node-epoch-files';
 export * as EpochKeyringStorage from '../pure/epoch-keyring';
+export { nodeDistributionStoreLayer, nodeMailboxIndexStoreLayer } from './node-key-mailbox';

@@ -12,3 +12,10 @@ export {
   admissionClockLayer,
 } from './snapshot-admission';
 export { contentRuntimeLayer, contentAuthorityLayer, contentCryptoLayer } from './content';
+export {
+  MemoryDistributionStore,
+  MemoryEpochMailboxIndexStore,
+  memoryDistributionLayer,
+  memoryMailboxIndexLayer,
+  keyMailboxRemoteLayer,
+} from './key-mailbox';

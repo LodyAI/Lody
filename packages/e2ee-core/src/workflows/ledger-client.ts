@@ -2,6 +2,7 @@ import { Effect } from 'effect';
 import { DeviceSigner, JournalStore, LedgerTransport, SignatureVerifier } from '../ports/ledger';
 import { genesisHash, type GenesisHash, type EpochKey, type SigningPublicKey } from '../pure/bytes';
 import * as envelopes from './epoch-envelope';
+import { KeyDistributionClient } from './key-distribution';
 import type { PreparedEpochEnvelope } from '../pure/epoch-envelope';
 import type { DeliveryId } from '../pure/bytes';
 import { keyId } from '../pure/identifiers';
@@ -90,6 +91,14 @@ export class LedgerClient {
   }
   resume() {
     return this.engine.resume(this.signer.publicKey);
+  }
+
+  /** Finite, explicitly invoked mailbox coordination. No runtime or timer is started. */
+  keyDistribution() {
+    return KeyDistributionClient.make(this, this.signer);
+  }
+  currentEpochPublication() {
+    return this.engine.currentEpochPublication();
   }
 
   resumeEpochRotation() {

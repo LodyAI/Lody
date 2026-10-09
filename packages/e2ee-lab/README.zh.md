@@ -71,3 +71,14 @@ HTTP 请求上的 `Ledger.verify`/`extend`、streams-crdt 的
 请求顺序不是可控 microtask 边界；协作重放使用最早可运行 FIFO。SIGKILL 崩溃
 恢复有测试；未刷盘 SQLite 页的断电未建模。见
 [实施说明](../../.agents/notes/proposed/testing/2026-09-16-e2ee-adversarial-lab.zh.md)。
+
+## 中央密钥信箱
+
+`DemoSession.centralKeyRound(limit)` 是显式、有限一轮的应用事件入口，经
+`/v1/spaces/{genesis}/key-mailbox` 协调当前钥分发、持久接收日志、设备签名报告和
+修复/结果恢复。宿主要求 Org 绑定凭证，并独立刷新已验证账本；SQLite 信箱/索引
+同库原子，不与 Riverrun control 原子。客户端 `key-distribution.sqlite` 保留跨重启
+任务和未消费结果。旧脚本的 `keys` 流仍可用；core 协调器另提供显式修复和结果确认。
+这是参考 HTTP 宿主，不是 Convex 部署或已启用产品 E2EE。见
+[投递草案](../../specs/e2ee-central-key-delivery.zh.md)与
+[验收测试](test/central-key-delivery.test.ts)。

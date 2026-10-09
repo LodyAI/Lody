@@ -79,3 +79,28 @@ export {
   sealRecoveryBackupFrame,
 } from './pure/recovery-file';
 export type { RecoveryBackupContext } from './pure/recovery-file';
+export {
+  DistributionStore,
+  EpochMailboxIndexStore,
+  MailboxAuthority,
+  KeyMailboxRemote,
+} from './ports/key-mailbox';
+export type {
+  AtomicDocumentStore,
+  AtomicDocumentTransaction,
+  MailboxTarget,
+  MailboxEnvelope,
+} from './ports/key-mailbox';
+export { KeyDistributionClient } from './workflows/key-distribution';
+export { KeyMailboxHost } from './workflows/key-mailbox';
+export type {
+  MailboxSlot,
+  InstallationContext,
+  InstallationSource,
+  MailboxStatus,
+  MailboxPage,
+} from './pure/key-mailbox';
+export type { DistributionResult } from './pure/key-distribution';
+/** Portable codecs/reducers, never constructors of verified authority. */
+export * as KeyMailboxProtocol from './pure/key-mailbox';
+export * as KeyDistributionStorage from './pure/key-distribution';

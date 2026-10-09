@@ -14,11 +14,16 @@ import {
 import {
   Bytes,
   ContentError,
+  KeyMailboxHost,
+  MailboxAuthority,
+  TransportError,
+  type MailboxSlot,
   ValidationError,
   extendLedger,
   verifyLedger,
   type LedgerView,
 } from '@lody/e2ee-core/effect';
+import { nodeMailboxIndexStoreLayer } from '@lody/e2ee-core/effect/platform-node';
 import { signatureVerifierLayer } from '@lody/e2ee-core/effect/platform';
 import { Effect, Result, Layer } from 'effect';
 import { SqliteSnapshotPublicationStore } from '@lody/e2ee-core/node-snapshot-publication-store';
@@ -289,6 +294,40 @@ export function acquireDemoHost(options: DemoHostOptions) {
         })
       );
       return { ledger, tail: offset };
+    }
+
+    const mailboxHosts = new Map<string, Promise<KeyMailboxHost>>();
+    function mailboxHost(genesisHex: string) {
+      const existing = mailboxHosts.get(genesisHex);
+      if (existing) return existing;
+      const path = join(options.dataDir, `mailbox-${genesisHex}.sqlite`);
+      const authority = Layer.succeed(MailboxAuthority, {
+        current: Effect.tryPromise({
+          try: () => loadLedger(genesisHex),
+          catch: (e) => e,
+        }).pipe(
+          Effect.catch(
+            (e): Effect.Effect<never, ValidationError | TransportError> =>
+              e instanceof ValidationError
+                ? Effect.fail(e)
+                : Effect.fail(new TransportError({ operation: 'read' }))
+          )
+        ),
+      });
+      const pending = requestRun.run(
+        KeyMailboxHost.make.pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              nodeMailboxIndexStoreLayer({ path, mode: disk.exists(path) ? 'open' : 'create' }),
+              authority,
+              signatureVerifierLayer
+            )
+          )
+        )
+      );
+      mailboxHosts.set(genesisHex, pending);
+      void pending.catch(() => mailboxHosts.delete(genesisHex));
+      return pending;
     }
 
     function requireCredential(req: IncomingMessage, now: number): IssuedCredential {
@@ -636,6 +675,133 @@ export function acquireDemoHost(options: DemoHostOptions) {
                   }
                   meta.putNote(genesisHex, credential.deviceHex, JSON.stringify(note));
                   json(res, 200, { ok: true });
+                  return;
+                }
+
+                if (
+                  req.method === 'POST' &&
+                  parts[0] === 'v1' &&
+                  parts[1] === 'spaces' &&
+                  parts[2] &&
+                  parts[3] === 'key-mailbox'
+                ) {
+                  const genesisHex = parts[2];
+                  const credential = requireCredential(req, now);
+                  if (!/^[0-9a-f]{64}$/.test(genesisHex) || credential.genesisHex !== genesisHex) {
+                    json(res, 403, { error: 'unauthorized' });
+                    return;
+                  }
+                  const ledger = await loadLedger(genesisHex);
+                  if (
+                    !authorizeCurrentMember({
+                      state: ledger.inspectState(),
+                      deviceHex: credential.deviceHex,
+                      credentialGenesisHex: credential.genesisHex,
+                      requestGenesisHex: genesisHex,
+                    })
+                  ) {
+                    json(res, 403, { error: 'unauthorized' });
+                    return;
+                  }
+                  const payload = JSON.parse(
+                    new TextDecoder().decode(await readBody(req))
+                  ) as Record<string, unknown>;
+                  const host = await mailboxHost(genesisHex);
+                  const principal = Result.getOrThrowWith(
+                    Bytes.signingPublicKey(fromHex(credential.deviceHex)),
+                    (e) => e
+                  );
+                  const remote = host.remote(principal);
+                  const slot = (): MailboxSlot => {
+                    const s = payload.slot as MailboxSlot;
+                    if (
+                      !s ||
+                      s.genesis !== genesisHex ||
+                      !/^[0-9a-f]{64}$/.test(s.recipient) ||
+                      !Number.isSafeInteger(s.epoch) ||
+                      s.epoch < 0
+                    )
+                      throw new ValidationError({ code: 'canonical' });
+                    return s;
+                  };
+                  const cursor =
+                    payload.cursor === null
+                      ? null
+                      : typeof payload.cursor === 'string'
+                        ? payload.cursor
+                        : null;
+                  const limit = typeof payload.limit === 'number' ? payload.limit : 100;
+                  const text = (name: string) => {
+                    const v = payload[name];
+                    if (typeof v !== 'string' || v.length > 16384)
+                      throw new ValidationError({ code: 'canonical' });
+                    return v;
+                  };
+                  try {
+                    let result: unknown;
+                    switch (payload.op) {
+                      case 'status':
+                        result = await requestRun.run(remote.status(slot()));
+                        break;
+                      case 'list':
+                        if (
+                          payload.kind !== 'needsEnvelope' &&
+                          payload.kind !== 'awaitingInstallationReport'
+                        )
+                          throw new ValidationError({ code: 'canonical' });
+                        result = await requestRun.run(remote.list(payload.kind, cursor, limit));
+                        break;
+                      case 'fetch': {
+                        if (typeof payload.epoch !== 'number')
+                          throw new ValidationError({ code: 'canonical' });
+                        const page = await requestRun.run(
+                          remote.fetch(payload.epoch, cursor, limit)
+                        );
+                        result = {
+                          ...page,
+                          items: page.items.map((e) => ({ ...e, frame: toHex(e.frame) })),
+                        };
+                        break;
+                      }
+                      case 'put':
+                        await requestRun.run(remote.put(text('id'), fromHex(text('bytes'))));
+                        result = { ok: true };
+                        break;
+                      case 'read': {
+                        const frame = await requestRun.run(remote.read(text('id')));
+                        result = frame ? toHex(frame) : null;
+                        break;
+                      }
+                      case 'report':
+                        await requestRun.run(
+                          remote.report(
+                            fromHex(text('bytes')),
+                            payload.publication === null ? undefined : fromHex(text('publication'))
+                          )
+                        );
+                        result = { ok: true };
+                        break;
+                      case 'repair':
+                        await requestRun.run(
+                          remote.repair(
+                            slot(),
+                            text('requestId'),
+                            payload.rejectedDigest === undefined
+                              ? undefined
+                              : text('rejectedDigest')
+                          )
+                        );
+                        result = { ok: true };
+                        break;
+                      default:
+                        throw new ValidationError({ code: 'canonical' });
+                    }
+                    json(res, 200, result);
+                  } catch (error) {
+                    json(res, error instanceof ValidationError ? 403 : 500, {
+                      error: error instanceof ValidationError ? error.code : 'mailbox-failed',
+                    });
+                  }
                   return;
                 }
 

@@ -77,7 +77,9 @@ export function sendCurrentEpochKey(
   });
 }
 
-/** Verified open plus durable install. Returning is not a secret export. */
+/** Verified open plus durable install. Returning is not a secret export.
+ * Installed is local: no installation report is sent to the central mailbox here.
+ */
 export function installEpochEnvelope(
   client: LedgerClient,
   recipient: SigningPublicKey,
@@ -156,7 +158,7 @@ export function openEpochEnvelope(
 }
 
 /** The key together with the exact genesis/epoch whose commitment it matched. */
-function openVerifiedEnvelope(
+export function openVerifiedEnvelope(
   client: LedgerClient,
   recipient: SigningPublicKey,
   sender: SigningPublicKey,

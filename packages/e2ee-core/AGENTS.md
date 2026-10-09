@@ -1,30 +1,23 @@
 # E2EE core
 
-Experimental primitives, not enabled product E2EE.
-Contracts: [ledger spec](../../specs/e2ee-ledger.zh.md) and
-[README.md](README.md). JSON/hex control-log lives in `src/legacy.ts` for
-in-package tests only; do not re-export it.
+Experimental, not product E2EE. Contracts: [ledger](../../specs/e2ee-ledger.zh.md),
+[README](README.md). `src/legacy.ts` JSON/hex is test-only; never re-export it.
 
 ## Required source style
 
-- **Effect 4.0.2**: use the `e2eeEffect` catalog; do not change the default
-  v3 catalog or pass Effect objects between majors.
-- `pure/`: deterministic values or typed `Result`; no I/O, ambient state,
-  clocks, randomness, logging or input mutation. Only unobservable local scratch
-  mutation is allowed.
-- `workflows/`: `Effect<A, E, R>` descriptions declare Services for storage, network, crypto, entropy,
-  clocks, environment and process. No eager execution, hidden Live defaults or
-  internal runtime starts. Convert pure Results with `Effect.fromResult`.
-- `platform/`: thin Service implementations/Layers; direct external API access
-  belongs here or in composition. Concentrate complexity in pure first, workflows
-  second; keep domain policy/state transitions out of platform.
-- No expected `throw`: pure returns typed `Result`; workflows use typed Effect
-  failures. Only unexpected fatal defects may throw. Never disguise defects or
-  interruption as ordinary failure or Pending.
-- Use Effect logging/tracing and injected Services, never `console` or ambient
-  loggers. Platform/composition configures sinks; pure returns diagnostic data.
-  Never log secrets.
-- Existing bridges are explicit temporary exceptions; they do not permit more.
+- Use **Effect 4.0.2**, catalog `e2eeEffect`; keep default v3 and never mix majors.
+- `pure/`: deterministic values/typed `Result`; no I/O, ambient state, clocks,
+  randomness, logging or input mutation. Only unobservable scratch mutation.
+- `workflows/`: inert `Effect<A,E,R>`; declare Services for storage/network/crypto/
+  entropy/clocks/environment/process. No eager execution, hidden Live defaults or
+  runtime starts. Use `Effect.fromResult`.
+- `platform/`: thin Services/Layers for external APIs; policy/state transitions
+  belong in pure first, workflows second, never platform.
+- Expected failures use Result/Effect, never throw. Only fatal defects may throw;
+  never turn defects/interruption into ordinary failures or Pending.
+- Inject Effect logging/tracing; platform owns sinks, pure returns diagnostics.
+  No console, ambient loggers or secret logging. Existing temporary bridges allow
+  no additional exceptions.
 
 ## Protocol and integration invariants
 
@@ -53,12 +46,17 @@ in-package tests only; do not re-export it.
   Verify/extend live only in `workflows/verification.ts`; `./ledger` runs them
   via `ledger/compat.ts` (no own replay/cache); `check:effect-boundaries
 --complete` guards both. Malformed pages must not become Pending.
-- `openEpochEnvelope` requires `canSendEpoch`, an admitted recipient, current
-  epoch and matching `commitEpochKey`; install into the epoch it was verified
-  against. Every active personal/machine device, including Guest, may forward;
-  R only receives. Gateways admit key-stream appends only through
-  `assertEpochStreamAppend` (one envelope, authenticated sender). Recover history
-  only from a verified ledger (`recoverLedgerHistory`); installed keys never change.
+- Epoch envelopes require `canSendEpoch`, an admitted recipient, current epoch and
+  `commitEpochKey`; install into the verified slot, never a later epoch. Active
+  personal/machine devices (including Guest) forward; R only receives. Gateways
+  use `assertEpochStreamAppend` (one envelope, authenticated sender). Recover history
+  only through `recoverLedgerHistory` on a verified ledger; installed keys never change.
+- Central delivery is explicit finite rounds, never hidden timers/runtimes. Derive
+  targets from the client's verified ledger; server lists grant no authority.
+  Preserve exact outbox bytes and `Observed` = stored, not installed. Persist receive
+  context before keyring writes; reports bind exact source and repair revision.
+  Commit task termination/result together; only application acknowledgement consumes
+  results. Mailbox/index atomicity is local, never a cross-stream permission guarantee.
 - Device possession uses `possess/v2` and binds the target membership inferred
   from the actor's preceding verified state. Check during replay even with a
   worker verifier. v1 proofs are rejected, not silently migrated or re-signed.
@@ -75,9 +73,8 @@ in-package tests only; do not re-export it.
 - Signing keys must be canonical nonzero prime-subgroup Ed25519 points.
   Verification uses pinned noble-ed25519 with `zip215: false` and explicit
   subgroup checks for A and R. Only native signing handles private keys.
-- Device storage stays in Electron main. Only opt-in Streams adapters call the
-  supplied SDK; no implicit stream creation or anchor choice. Synthetic fixtures,
-  real signatures, no crypto stubs.
+- Device storage stays in Electron main. Opt-in Streams adapters use the supplied
+  SDK with explicit streams/anchors. Tests use synthetic fixtures and real crypto.
 - `content.ts`: XChaCha20-Poly1305, HKDF-SHA-256, strict Ed25519. Caller policy
   supplies authority; `inspectContent` is UNVERIFIED routing metadata;
   `authenticate` checks signatures without decryption, not publication permission.
@@ -100,11 +97,11 @@ in-package tests only; do not re-export it.
 - `streams.ts` uses the pinned SDK read/`appendCas` APIs and length framing.
   Never invent offsets, fall back to ordinary append, or auto-re-sign. HTTP
   reads can split frames; checkpoint only complete frames/pages.
-- `./ledger-node` and `node-store.ts` are Node-only; never re-export from the
-  root. Application-owned local filesystem; SQLite EXCLUSIVE; corrupt/foreign
-  journals fail closed. Experimental journal/outbox formats are not V4.
-  `./effect/platform-node` requires explicit create/open; open must never
-  initialize missing/foreign storage. Pure journal codecs preserve v0/v1 bytes.
+- Node stores (`./ledger-node`, `node-store.ts`, `./effect/platform-node`) require
+  application-owned local files and SQLite EXCLUSIVE locks; never export them from
+  root. Only explicit create initializes storage; open fails on missing/foreign/
+  corrupt journals. Experimental journal/outbox formats are not V4; pure codecs
+  preserve v0/v1 bytes.
 - Legacy JSON/hex (`team.ts`, `KeyDelivery`, `EpochPublisher`, v3 genesis):
   still reject old v1/v2 unchanged; `canManage` is explicit; machines false;
   admit/cancel consume `(identity, requestId)` permanently; expiry is checked

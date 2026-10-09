@@ -46,9 +46,13 @@ export function fromHex(value: string): Uint8Array {
   return Uint8Array.from(value.match(/../g)!.map((byte) => Number.parseInt(byte, 16)));
 }
 
-export async function signGenesis(owner: DeviceKeys, secret: Uint8Array = random(32)) {
-  const userId = random(32);
-  const membershipId = random(16);
+export async function signGenesis(
+  owner: DeviceKeys,
+  secret: Uint8Array = random(32),
+  identity?: { readonly userId: Uint8Array; readonly membershipId: Uint8Array }
+) {
+  const userId = identity?.userId ?? random(32);
+  const membershipId = identity?.membershipId ?? random(16);
   const commitment = await commitEpochKey(new Uint8Array(32), 0, secret);
   const bodyBytes = encodeGenesisBody({
     signer: owner.publicKey,

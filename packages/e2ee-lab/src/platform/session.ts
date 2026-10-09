@@ -1,3 +1,5 @@
+import { centralMailboxHttpLayer } from './key-mailbox';
+import { nodeDistributionStoreLayer } from '@lody/e2ee-core/effect/platform-node';
 import { join } from 'node:path';
 import { LoroDoc } from 'loro-crdt';
 import type { Flock } from '@loro-dev/flock-wasm';
@@ -777,6 +779,79 @@ export class DemoSession {
       }).pipe(Effect.provide(Layer.empty))
     );
     this.loadEpochs();
+  }
+
+  /** Explicit bounded application event hook for startup, verified ledger changes and reconnect.
+   * Legacy scripted sends still use the old keys stream. This opt-in path uses mailbox SQLite. */
+  async centralKeyRound(limit = 100) {
+    if (!this.device || !this.genesisHex) throw new Error('no-space');
+    if (this.credential?.genesisHex !== this.genesisHex) await this.reauth();
+    await this.readLedger();
+    this.ensureKeyring();
+    const client = await this.openLedger();
+    const files = this.epochFiles();
+    const distributionPath = join(this.clientDir, 'key-distribution.sqlite');
+    const outcome = await this.run.run(
+      Effect.gen({ self: this }, function* () {
+        const genesis = yield* Effect.fromResult(Bytes.genesisHash(fromHex(this.genesisHex!)));
+        const sender = yield* sendKeyLayer({
+          genesis,
+          candidatePath: files.candidatePath,
+          keyringPath: files.keyringPath,
+          outboxPath: files.outboxPath,
+          outboxMode: this.disk.exists(files.outboxPath) ? 'open' : 'create',
+          device: this.device,
+          entropy: this.options.entropy ?? liveEntropy,
+          streams: new StreamsClient({
+            url: this.streamUrl(KEYS_STREAM),
+            fetch: (i, n) => this.fetch(i, n),
+            retry: { maxAttempts: 0 },
+          }),
+          fs: this.options.fs,
+        });
+        const receiver = yield* receiveKeyLayer({
+          genesis,
+          candidatePath: files.candidatePath,
+          keyringPath: files.keyringPath,
+          device: this.device,
+          fs: this.options.fs,
+        });
+        const mailbox = centralMailboxHttpLayer({
+          url: `${this.baseUrl}/v1/spaces/${this.genesisHex}/key-mailbox`,
+          fetch: (i, n) => this.fetch(i, n),
+        });
+        return yield* Effect.gen(function* () {
+          const distribution = yield* client.keyDistributionEffect();
+          yield* distribution.flushRepairs(limit);
+          yield* distribution.resumeReceives(limit);
+          const received = yield* distribution.fetchAndInstall(null, limit);
+          yield* distribution.flushInstallationReports(limit);
+          const scheduled = yield* distribution.reconcileCurrentEpoch();
+          yield* distribution.resumePendingDeliveries(limit);
+          yield* distribution.flushInstallationReports(limit);
+          return {
+            scheduled: scheduled.scheduled,
+            received: received.processed,
+            next: received.next,
+            results: yield* distribution.readUnacknowledgedResults(null, limit),
+          };
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              sender,
+              receiver,
+              nodeDistributionStoreLayer({
+                path: distributionPath,
+                mode: this.disk.exists(distributionPath) ? 'open' : 'create',
+              }),
+              mailbox
+            )
+          )
+        );
+      })
+    );
+    this.loadEpochs();
+    return outcome;
   }
 
   async recoverEpochHistory(): Promise<Map<number, Uint8Array>> {

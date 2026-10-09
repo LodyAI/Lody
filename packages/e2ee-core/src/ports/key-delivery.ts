@@ -23,6 +23,10 @@ export class KeyOutbox extends Context.Service<
   }
 >()('@lody/e2ee-core/KeyOutbox') {}
 
+/** Central-mailbox integration: put stores encrypted envelopes; read observes exact
+ * stored bytes. Neither proves recipient installation. Installation reports and
+ * recipient/epoch work lists use the separate KeyMailboxRemote protocol.
+ */
 export class KeyDeliveryRemote extends Context.Service<
   KeyDeliveryRemote,
   {
