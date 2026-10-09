@@ -52,8 +52,8 @@ catalogs:
       specifier: 1.0.0
       version: 1.0.0
     '@effect/vitest':
-      specifier: 4.0.0
-      version: 4.0.0
+      specifier: 4.0.2
+      version: 4.0.2
     '@loro-dev/flock-wasm':
       specifier: ^0.4.3
       version: 0.4.3
@@ -106,8 +106,8 @@ catalogs:
       specifier: 1.0.0
       version: 1.0.0
     effect:
-      specifier: 4.0.0
-      version: 4.0.0
+      specifier: 4.0.2
+      version: 4.0.2
     jotai:
       specifier: ^2.16.0
       version: 2.17.1
@@ -282,7 +282,7 @@ importers:
         version: 0.12.5(@standard-schema/spec@1.1.0)(better-auth@1.6.33(@opentelemetry/api@1.9.0)(@prisma/client@7.4.0(prisma@7.4.0(@types/react@19.2.17)(better-sqlite3@13.0.3)(magicast@0.3.5)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(typescript@5.9.3))(typescript@5.9.3))(@tanstack/react-start@1.168.33(crossws@0.4.12(srvx@1.0.4))(esbuild@0.28.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(rollup@4.57.1)(vite@7.3.1(@types/node@24.10.12)(jiti@2.6.1)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2)))(better-sqlite3@13.0.3)(mongodb@7.1.0(socks@2.8.7))(mysql2@3.15.3)(prisma@7.4.0(@types/react@19.2.17)(better-sqlite3@13.0.3)(magicast@0.3.5)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(typescript@5.9.3))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vitest@5.0.2)(vue@3.5.28(typescript@5.9.3)))(convex@1.33.1(react@19.2.0))(hono@4.12.14)(react@19.2.0)(typescript@5.9.3)
       '@effect/vitest':
         specifier: 'catalog:'
-        version: 4.0.0(effect@4.0.0)(vitest@5.0.2)
+        version: 4.0.2(effect@4.0.2)(vitest@5.0.2)
       '@lody/cli-supervisor':
         specifier: workspace:*
         version: link:../../packages/cli-supervisor
@@ -393,7 +393,7 @@ importers:
         version: 7.0.0
       effect:
         specifier: 'catalog:'
-        version: 4.0.0
+        version: 4.0.2
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
@@ -564,7 +564,7 @@ importers:
         version: 1.0.0(@devframes/agentic@1.0.0)(cac@7.0.0)(srvx@1.0.4)
       effect:
         specifier: 'catalog:'
-        version: 4.0.0
+        version: 4.0.2
       electron-ipc-decorator:
         specifier: ^1.0.2
         version: 1.0.2(electron@43.7.6)
@@ -882,7 +882,7 @@ importers:
         version: link:../shared
       effect:
         specifier: 'catalog:'
-        version: 4.0.0
+        version: 4.0.2
       zod:
         specifier: 4.3.6
         version: 4.3.6
@@ -1230,7 +1230,7 @@ importers:
         version: 4.4.3(supports-color@11.0.0)
       effect:
         specifier: 'catalog:'
-        version: 4.0.0
+        version: 4.0.2
       emojibase-data:
         specifier: ^17.0.0
         version: 17.0.0(emojibase@17.0.0)
@@ -1531,7 +1531,7 @@ importers:
     dependencies:
       effect:
         specifier: 'catalog:'
-        version: 4.0.0
+        version: 4.0.2
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1621,7 +1621,7 @@ importers:
         version: 4.0.9
       effect:
         specifier: 'catalog:'
-        version: 4.0.0
+        version: 4.0.2
       fzstd:
         specifier: 0.1.1
         version: 0.1.1
@@ -1640,7 +1640,7 @@ importers:
     devDependencies:
       '@effect/vitest':
         specifier: 'catalog:'
-        version: 4.0.0(effect@4.0.0)(vitest@5.0.2)
+        version: 4.0.2(effect@4.0.2)(vitest@5.0.2)
       '@types/cross-spawn':
         specifier: ^6.0.6
         version: 6.0.6
@@ -2726,10 +2726,10 @@ packages:
   '@dukelib/sheets-wasm@0.1.23':
     resolution: {integrity: sha512-E/vHXR2I/EodNCpyVcFq0p8/u5qxmKxatUZvB7bsFfghUPQ2GMxg81MBFjOEQtLKXnzR7xjXOyzPzBTLbv2e1g==}
 
-  '@effect/vitest@4.0.0':
-    resolution: {integrity: sha512-kGElCPFGtP+CgMCwV/HjJWqtE3zYo6I1+8MSA54l+EI24lPU9p2Efa+TBp1jfkg9j711KKzEqgSAy3VzTsb76Q==}
+  '@effect/vitest@4.0.2':
+    resolution: {integrity: sha512-Zb72nu7iUy3rNdBp9J1Xu5oUQGwJ8cOYsUwmYgujj88aqyvASRDjOS01SjlcPViqf77csduetKdCJTVndMNfzw==}
     peerDependencies:
-      effect: ^4.0.0
+      effect: ^4.0.2
       vitest: '>=5.0.0 <6.0.0'
 
   '@electric-sql/pglite-socket@0.0.20':
@@ -8820,8 +8820,8 @@ packages:
   effect@3.18.4:
     resolution: {integrity: sha512-b1LXQJLe9D11wfnOKAk3PKxuqYshQ0Heez+y5pnkd3jLj1yx9QhM72zZ9uUrOQyNvrs2GZZd/3maL0ZV18YuDA==}
 
-  effect@4.0.0:
-    resolution: {integrity: sha512-ooc1TG5t+FfzgYnFz2ff6BBKyZ7EwBRVXC7c4RhQUAD6/TZ2gTXXMeb4WX7a19ozQo4J73/QW+S00YAIresoMQ==}
+  effect@4.0.2:
+    resolution: {integrity: sha512-YeYnLqSFrL4+tCOXRrfNP03w8FILoF/wDl+ukraJAGzXrjcS383W7LAAvGBbLatEyktmLxRq+9xJinx7QzXW5A==}
 
   ejs@3.1.10:
     resolution: {integrity: sha512-UeJmFfOrAQS8OJWPZ4qtgHyWExa088/MtK5UEyoJGFH67cDEXkZSviOiKRCZ4Xij0zxI3JECgYs3oKx+AizQBA==}
@@ -15238,9 +15238,9 @@ snapshots:
 
   '@dukelib/sheets-wasm@0.1.23': {}
 
-  '@effect/vitest@4.0.0(effect@4.0.0)(vitest@5.0.2)':
+  '@effect/vitest@4.0.2(effect@4.0.2)(vitest@5.0.2)':
     dependencies:
-      effect: 4.0.0
+      effect: 4.0.2
       vitest: 5.0.2(@opentelemetry/api@1.9.0)(@types/node@24.10.12)(@vitest/coverage-v8@5.0.2)(jsdom@26.1.0)(vite@7.3.1(@types/node@24.10.12)(jiti@2.6.1)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.7)(yaml@2.8.2))
 
   '@electric-sql/pglite-socket@0.0.20(@electric-sql/pglite@0.3.15)':
@@ -22116,7 +22116,7 @@ snapshots:
       fast-check: 3.23.2
     optional: true
 
-  effect@4.0.0: {}
+  effect@4.0.2: {}
 
   ejs@3.1.10:
     dependencies:

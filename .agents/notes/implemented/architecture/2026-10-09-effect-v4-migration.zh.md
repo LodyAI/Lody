@@ -9,7 +9,7 @@ PR: https://github.com/LodyAI/Lody/pull/1070
 ## 摘要
 
 生命周期重构需要先统一 Effect v4，再引入新服务。最底部的 PR 把工作区 Effect 和测试助手固定为
-4.0.0，并迁移 CLI、renderer 和 ignore 包中已有的调用。针对 v4 的调度与资源释放差异，保留了
+4.0.2，并迁移 CLI、renderer 和 ignore 包中已有的调用。针对 v4 的调度与资源释放差异，保留了
 缓存清理错误的上报和发送准备的原有时间语义。进程创建、sandbox 所有权和调用方重构属于后续 PR，
 不包含在本次基础迁移中。
 
@@ -18,13 +18,21 @@ PR: https://github.com/LodyAI/Lody/pull/1070
 #1070 以 main 为 base，后面依次是计划 #1057、进程基础 #1065、CLI 调用方 #1069、跨运行时调用方。
 底部 PR 保留原有进程代码；后续新服务直接使用 v4。底部合入当前 main，后续层继承这次更新，各 PR 仍只描述自己的增量。
 
-Effect 和 @effect/vitest 固定为 4.0.0，10 月 1 日发布，符合七天发布冷却期。
-4.0.2 于 10 月 7 日发布，本次没有添加冷却期例外。测试助手需要 Vitest 5，因此 CLI 与 shared
+最初固定为 4.0.0，因为它符合七天发布冷却期。用户随后授权升级到 10 月 7 日发布的 4.0.2，
+并给予发布冷却期豁免。Effect 和 @effect/vitest 现均精确固定为 4.0.2；豁免只适用于这两个包的
+4.0.2，后续版本仍等待七天。配套测试助手要求 Effect ^4.0.2 和 Vitest 5，因此 CLI 与 shared
 升级到 5.0.2，CLI 的 coverage provider 同步升级。Vitest 5 支持 Node 22.12+、24.x、26+；
 本地使用 Node 24，CI 使用 Node 22。产品运行时下限不变。
 
 @prisma/config 内部的可选传递依赖仍是 effect 3.18.4，不强行覆盖第三方的兼容约定。
-自有工作区六个直接使用方都解析到 4.0.0。
+自有工作区六个直接使用方都解析到 4.0.2。
+
+此次补丁升级包含 [4.0.1 的共享缓存取消修复](https://github.com/Effect-TS/effect/pull/8719)，
+以及 4.0.2 的 [Scope 清理中断修复](https://github.com/Effect-TS/effect/pull/8779)、
+[队列在中断时的消息投递修复](https://github.com/Effect-TS/effect/pull/8819) 和
+[重复执行与重试保留失败原因的修复](https://github.com/Effect-TS/effect/pull/8799)。
+这些原语已被工作区使用；上游复现支持升级，但不代表 Lody 已复现每个缺陷。
+版本与锁文件改动只落在最底部 PR，再逐层合入，让后续 PR 仍只承担自己的服务或调用方改动。
 
 ## 原语迁移
 
@@ -66,7 +74,11 @@ Vitest 5 用 execArgv 替代 poolOptions，内联 @effect/vitest 以共用 runne
 但这些结果不能代替中间层验证。检查只移除 authoring session 注入的 GIT_CONFIG__、GIT_EXEC_PATH
 和 LODY_GIT__，让 Git 测试使用原生夹具而非作者环境里的包装器。
 
-底部验证：类型与 lint 通过；CLI 3244 通过 / 4 跳过，shared 1258、components 4554、supervisor 49、
+最初 4.0.0 的底部验证：类型与 lint 通过；CLI 3244 通过 / 4 跳过，shared 1258、components 4554、supervisor 49、
 Electron 199。第一次完整检查到 Electron 时，发现 ignore-scripts 安装未恢复本地二进制；补齐同版本
 二进制后重跑 Electron 通过，其余静态边界检查也通过。冻结安装、格式和文档检查通过。此环境问题
 没有引入产品代码修复。
+
+4.0.2 的底部通过冻结安装、pnpm check、pnpm format:check 和 pnpm run docs check。
+逐个核对了六个直接使用方和两个测试助手使用方，均使用同一份 4.0.2 runtime。
+这些结果验证底部迁移，不能代替后续进程实现的验证。
