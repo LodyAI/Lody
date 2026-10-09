@@ -56,8 +56,7 @@ Use `ChildProcess` and `ChildProcessSpawner` from `effect/process`. The shared
 `ProcessSpawnerLive` implements the official service with Lody's bounded tree
 policy and official Node Stream/Sink adapters. `processLayer` composes it with
 `NodeProcess`; the CLI's `platformLayer` also supplies its logger. `runCommand`
-requires the official spawner, and both `spawnProcess` and its compatibility name
-`spawnScoped` require Scope. See the
+requires the official spawner, and `spawnProcess` requires Scope. See the
 [backend decision](../notes/implemented/architecture/2026-10-09-effect-official-process-service.md)
 for why the default Node spawner is not used unchanged.
 
@@ -69,7 +68,7 @@ wait for cleanup. Native Effect callers yield the service directly.
 
 A Session owns a container Scope. Each spawn uses a child Scope: failed or
 interrupted setup closes it before returning; successful setup retains it until
-Session release. Closing the container Scope terminates its trees and stops its
+whole-group exit and drained stdio. Closing the container Scope terminates its trees and stops its
 monitor fibers, then removes cgroup resources. `startProcess` is reserved for
 legacy synchronous/raw Node handles (including IPC and explicit detach), whose
 owner must await `terminate`; it is not a scoped Effect API.

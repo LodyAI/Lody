@@ -1,7 +1,7 @@
 import type * as fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { Duration, Effect, Ref, Scope, Exit, Option, Result } from 'effect';
+import { Effect, Ref, Scope, Exit, Option, Result } from 'effect';
 import { ChildProcessSpawner } from 'effect/process';
 
 import { formatErrorMessage } from '@/utils/format-error';
@@ -9,12 +9,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 import { SpawnFailed, TerminationFailed } from '@lody/shared/node/process';
 import { spawnProcess, type ProcessExit } from '@lody/shared/node/process';
 import { errnoCode, NodeProcess, type NodeProcessApi } from '@lody/shared/node/process';
-import {
-  terminateTree,
-  waitUntilGone,
-  type ProcessTree,
-  type TreeSignal,
-} from '@lody/shared/node/process';
+import { terminateTree, type ProcessTree, type TreeSignal } from '@lody/shared/node/process';
 import {
   FORCED_TERMINATION,
   SandboxIoError,
@@ -32,8 +27,6 @@ export type CgroupFs = Pick<typeof fs, 'access' | 'mkdir' | 'readFile' | 'writeF
 const SESSION_CGROUP_PARENT = 'lody-sessions';
 const DEFAULT_CPU_MAX_PERIOD_US = 100_000;
 const MIB = 1024 * 1024;
-/** How long cleanup waits for the cgroup to empty before removing it anyway. */
-const CLEANUP_DRAIN_WAIT = Duration.seconds(1);
 
 type EventCounters = Record<string, number>;
 
@@ -310,13 +303,6 @@ export const makeCgroupContainer = (options: {
         }
         const dir = yield* Ref.get(currentDir);
         if (!dir) return;
-        const drained = yield* Effect.result(waitUntilGone(tree, CLEANUP_DRAIN_WAIT));
-        if (Result.isFailure(drained) || !drained.success) {
-          yield* Effect.logWarning(
-            `Session cgroup ${dir} could not be proven empty; retaining it for retry`
-          );
-          return;
-        }
         const removed = yield* io('remove cgroup', () => options.fs.rmdir(dir)).pipe(Effect.result);
         if (removed._tag === 'Success') {
           yield* Ref.set(currentDir, null);

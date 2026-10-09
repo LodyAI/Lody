@@ -540,8 +540,7 @@ export interface ManagedProcess {
 }
 
 /**
- * Spawn a process whose termination the caller owns. Prefer `spawnScoped`;
- * this form exists for owners whose lifetime is not yet an Effect scope.
+ * Acquire the raw process for the scoped service and legacy manually owned entry point.
  */
 const acquireProcess = (spec: SpawnSpec): Effect.Effect<ManagedProcess, SpawnFailed, NodeProcess> =>
   Effect.gen(function* () {
@@ -905,9 +904,6 @@ export const spawnProcess = (
       );
     return (handle as ProcessHandleWithDetails)[processDetails];
   });
-
-/** Compatibility name for the same scoped acquisition, with an explicit release policy. */
-export const spawnScoped = spawnProcess;
 
 // ---- command --------------------------------------------------
 

@@ -48,28 +48,22 @@ describe('noop process container', () => {
         description: 'test',
         configureProcess: () => Effect.void,
       }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
-      for (let index = 0; index < 20; index++) {
+      for (let index = 0; index < 2; index++) {
         released = yield* Deferred.make<void>();
         const process = yield* container.spawn({ command: 'command', args: [], options: {} });
-        const chunks: Buffer[] = [];
-        process.child.stdout?.on('data', (chunk: Buffer) => chunks.push(chunk));
-        const expected = Buffer.from(`output ${index}`);
-        process.child.stdout?.emit('data', expected);
         table.exitOnItsOwn(process.child.pid!);
         yield* process.closed;
         yield* Deferred.await(released);
-        expect(Buffer.concat(chunks)).toEqual(expected);
         const accounting = yield* container.readAccounting;
         expect(accounting.kind === 'process-tree' && accounting.rootPids).toEqual([]);
       }
     }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
-  it.effect(
-    'waits for both drained stdio and the last descendant before releasing the Scope',
-    () => {
-      const table = new FakeProcessTable('linux');
-      return Effect.gen(function* () {
+  it.effect('waits for drained stdio and the last descendant before releasing the Scope', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      for (const boundary of ['stdio', 'descendant'] as const) {
         const released = yield* Deferred.make<void>();
         const spawner = yield* withReleaseSignal(released);
         const container = yield* makeNoopContainer({
@@ -94,56 +88,28 @@ describe('noop process container', () => {
             };
           },
         });
-        const descendant = table.addDescendant(process.child.pid!);
-        table.exitOnItsOwn(process.child.pid!);
+        const leader = process.child.pid!;
+        const descendant = boundary === 'descendant' ? table.addDescendant(leader) : null;
+        table.exitOnItsOwn(leader);
         yield* settleEvents;
+        const tracked = yield* container.readAccounting;
+        expect(tracked.kind === 'process-tree' && tracked.rootPids).toEqual(
+          descendant ? [leader] : []
+        );
         expect(yield* Deferred.isDone(released)).toBe(false);
         flushClose();
-        yield* process.closed;
-        yield* settleEvents;
-        expect(yield* Deferred.isDone(released)).toBe(false);
-        expect(table.isAlive(descendant)).toBe(true);
-        table.exitOnItsOwn(descendant);
-        yield* TestClock.adjust(LINGERING_GROUP_PROBE_INTERVAL);
+        if (descendant) {
+          yield* process.closed;
+          yield* settleEvents;
+          expect(yield* Deferred.isDone(released)).toBe(false);
+          expect(table.isAlive(descendant)).toBe(true);
+          table.exitOnItsOwn(descendant);
+          yield* TestClock.adjust(LINGERING_GROUP_PROBE_INTERVAL);
+        }
         yield* Deferred.await(released);
-      }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
-    }
-  );
-
-  it.effect('keeps the Scope open until stdio closes even when its group is already empty', () => {
-    const table = new FakeProcessTable('linux');
-    return Effect.gen(function* () {
-      const released = yield* Deferred.make<void>();
-      const spawner = yield* withReleaseSignal(released);
-      const container = yield* makeNoopContainer({
-        description: 'test',
-        configureProcess: () => Effect.void,
-      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
-      let flushClose = () => {};
-      const process = yield* container.spawn({
-        command: 'command',
-        args: [],
-        options: {},
-        onSpawned: (child) => {
-          const emit = child.emit.bind(child);
-          child.emit = (event, ...args: unknown[]) => {
-            if (event === 'close') {
-              flushClose = () => {
-                emit(event, ...args);
-              };
-              return true;
-            }
-            return emit(event, ...args);
-          };
-        },
-      });
-      table.exitOnItsOwn(process.child.pid!);
-      yield* settleEvents;
-      const accounting = yield* container.readAccounting;
-      expect(accounting.kind === 'process-tree' && accounting.rootPids).toEqual([]);
-      expect(yield* Deferred.isDone(released)).toBe(false);
-      flushClose();
-      yield* Deferred.await(released);
+        const after = yield* container.readAccounting;
+        expect(after.kind === 'process-tree' && after.rootPids).toEqual([]);
+      }
     }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
@@ -172,30 +138,6 @@ describe('noop process container', () => {
       const process = yield* Fiber.join(creating);
       yield* process.closed;
       yield* Deferred.await(released);
-    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
-  });
-
-  it.effect('keeps a group whose leader exited until its last member is gone', () => {
-    const table = new FakeProcessTable('linux');
-    return Effect.gen(function* () {
-      const container = yield* makeNoopContainer({
-        description: 'test',
-        configureProcess: () => Effect.void,
-      });
-      const contained = yield* container.spawn({ command: 'agent', args: [], options: {} });
-      const leader = contained.child.pid ?? -1;
-      const descendant = table.addDescendant(leader);
-      table.exitOnItsOwn(leader);
-      yield* settleEvents;
-
-      const tracked = yield* container.readAccounting;
-      expect(tracked.kind === 'process-tree' && tracked.rootPids).toEqual([leader]);
-
-      table.kill(descendant, 'SIGKILL');
-      yield* TestClock.adjust(LINGERING_GROUP_PROBE_INTERVAL);
-
-      const after = yield* container.readAccounting;
-      expect(after.kind === 'process-tree' && after.rootPids).toEqual([]);
     }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 

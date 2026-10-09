@@ -97,79 +97,33 @@ function createProcessHandle(terminate: SessionProcessHandle['terminate']): Sess
 }
 
 describe('Session terminate cleanup', () => {
-  it('disposes ACP terminals before closing the ACP session on graceful terminate', async () => {
-    const disposeAll = vi.fn(async () => {});
-    const closeSession = vi.fn(async () => true);
-    const session = createSession();
-    session.terminalManager = createTerminalManager({ disposeAll });
-    session.acpSessionId = 'acp-session-1' as ACPSessionId;
-    session.agentClient = {
-      isCreated: vi.fn(() => true),
-      closeSession,
-    } as never;
-
-    await session.terminate(false);
-
-    expect(disposeAll).toHaveBeenCalledTimes(1);
-    expect(disposeAll).toHaveBeenCalledWith('acp-session-1');
-    expect(closeSession).toHaveBeenCalledTimes(1);
-    expect(closeSession).toHaveBeenCalledWith('acp-session-1');
-    expect(disposeAll.mock.invocationCallOrder[0]).toBeLessThan(
-      closeSession.mock.invocationCallOrder[0]
-    );
-    expect(session.acpSessionId).toBeNull();
-    expect(session.agentClient).toBeNull();
-  });
-
-  it('continues graceful termination when terminal cleanup fails', async () => {
-    const disposeAll = vi.fn(async () => {
-      throw new Error('cleanup failed');
-    });
-    const closeSession = vi.fn(async () => true);
-    const session = createSession();
-    session.terminalManager = createTerminalManager({ disposeAll });
-    session.acpSessionId = 'acp-session-1' as ACPSessionId;
-    session.agentClient = {
-      isCreated: vi.fn(() => true),
-      closeSession,
-    } as never;
-
-    await expect(session.terminate(false)).resolves.toBeUndefined();
-    expect(disposeAll).toHaveBeenCalledTimes(1);
-    expect(closeSession).toHaveBeenCalledTimes(1);
-    expect(session.acpSessionId).toBeNull();
-  });
-
-  it('skips ACP closeSession during forced terminate', async () => {
-    const disposeAll = vi.fn(async () => {});
-    const closeSession = vi.fn(async () => true);
-    const session = createSession();
-    session.terminalManager = createTerminalManager({ disposeAll });
-    session.acpSessionId = 'acp-session-1' as ACPSessionId;
-    session.agentClient = {
-      isCreated: vi.fn(() => true),
-      closeSession,
-    } as never;
-
-    await session.terminate(true);
-
-    expect(disposeAll).toHaveBeenCalledTimes(1);
-    expect(closeSession).not.toHaveBeenCalled();
-    expect(session.acpSessionId).toBeNull();
-  });
-
-  it('uses process handle termination for tracked processes', async () => {
-    const terminateProcess = vi.fn(async () => {});
-    const session = createSession();
-    // @ts-expect-error - exercising private process handle wiring
-    session.agentProcess = createProcessHandle(terminateProcess);
-
-    await session.terminate(false);
-
-    expect(terminateProcess).toHaveBeenCalledWith(false);
-    // @ts-expect-error - exercising private process handle wiring
-    expect(session.agentProcess).toBeNull();
-  });
+  it.each([false, true])(
+    'releases graceful ACP resources when terminal cleanup fails=%s',
+    async (cleanupFails) => {
+      const terminals = new Set(['acp-session-1']);
+      const sessions = new Set(['acp-session-1']);
+      const session = createSession();
+      session.terminalManager = createTerminalManager({
+        disposeAll: async (id) => {
+          terminals.delete(id);
+          if (cleanupFails) throw new Error('cleanup failed');
+        },
+      });
+      session.acpSessionId = 'acp-session-1' as ACPSessionId;
+      session.agentClient = {
+        isCreated: () => true,
+        closeSession: async (id: string) => {
+          if (terminals.has(id)) throw new Error('terminals still own this session');
+          return sessions.delete(id);
+        },
+      } as never;
+      await session.terminate(false);
+      expect(terminals.size).toBe(0);
+      expect(sessions.size).toBe(0);
+      expect(session.acpSessionId).toBeNull();
+      expect(session.agentClient).toBeNull();
+    }
+  );
 
   it('shares one termination between concurrent callers and emits terminated once', async () => {
     const table = new FakeProcessTable('darwin');
@@ -229,6 +183,14 @@ describe('Session terminate cleanup', () => {
     const session = createSession(sandbox);
     const agent = await sandbox.spawn('agent', [], { stdio: ['pipe', 'pipe', 'pipe'] });
     const agentExited = new Promise<void>((resolve) => agent.onExit(() => resolve()));
+    let closed = false;
+    session.agentClient = {
+      isCreated: () => true,
+      closeSession: async () => {
+        closed = true;
+        return true;
+      },
+    } as never;
     // A terminal command slow to stop: disposal completes only once the agent is gone.
     session.terminalManager = createTerminalManager({ disposeAll: async () => await agentExited });
     session.acpSessionId = 'acp-session-1' as ACPSessionId;
@@ -238,6 +200,7 @@ describe('Session terminate cleanup', () => {
     await session.terminate(true);
 
     expect(table.isAlive(agent.child.pid ?? -1)).toBe(false);
+    expect(closed).toBe(false);
   });
 
   it('terminates an agent started after an earlier termination finished', async () => {

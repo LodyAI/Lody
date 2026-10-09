@@ -53,7 +53,7 @@ IPC callers retain their explicit compatibility entry point.
 
 ## Ownership and interruption
 
-Both `spawnProcess` and `spawnScoped` require Scope. The backend registers its
+`spawnProcess` requires Scope. The backend registers its
 release before awaiting start or running interruptible post-spawn work. An owner
 hook failing after OS spawn is reported only after scoped release is registered.
 Commands interrupted while collecting output release their process trees; failure
@@ -118,11 +118,19 @@ original container implementations makes the corresponding regression cases fail
 Additional deterministic tests observe actual command Scope finalizers before
 Session cleanup: sequential commands release in both containers, delayed stdio and
 remaining descendants retain ownership, and pending configuration prevents early
-release. Disabling retirement fails all five new cases. A real-process noop probe
+release. Disabling retirement fails the retained Scope-release cases. A real-process noop probe
 ran 20 commands producing 8 MiB each under an open Session Scope: disabling
 retirement retained about 160 MiB of array buffers after GC; with retirement the
 retained allocation returned to baseline before container cleanup. This is local
 process evidence, not a production memory profile.
+
+Ablation of retirement, its stdio and group barriers, failed-group retention,
+strict cgroup reads, the owner hook, and Git's graceful abandonment each fails a
+retained behavioral test. Repeated reuse uses two commands: enough to distinguish
+per-command release from Session cleanup. Duplicate release cases and mock-only
+termination tests were consolidated into resource-state assertions. The test-only
+spawnScoped alias and the redundant cgroup cleanup wait were removed; terminateAll
+already proves absence. Temporary probes and ablation scripts are not shipped.
 
 Real Windows, delegated Linux cgroups and signed desktop packaging remain outside
 local verification. Job Objects are still needed to retain Windows descendants

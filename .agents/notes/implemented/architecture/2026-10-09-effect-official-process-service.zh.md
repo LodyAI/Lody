@@ -38,7 +38,7 @@ v3 的“不升级到强杀、强制合并环境变量”不再是理由：v4 �
 
 ## 所有权与中断
 
-spawnProcess 和 spawnScoped 均要求 Scope。后端在等待启动或可中断的后续初始化之前登记释放。
+spawnProcess 要求 Scope。后端在等待启动或可中断的后续初始化之前登记释放。
 OS spawn 后的 owner hook 失败也会在释放已登记后上报。命令在收集输出时被中断，会释放整棵
 进程树；container 初始化失败或被取消，会关闭刚创建的子 Scope。初始化成功后，只有仍在运行
 或尚未确认结束的进程继续挂在 Session 的父 Scope 下。配置完成后，登记表等待整组进程退出
@@ -84,9 +84,15 @@ Node Stream，实际执行官方适配器。回归案例覆盖带存活后代的
 noop 清理失败与复用，以及 EACCES/EIO/ENOENT 成员状态读取错误。恢复原 container 实现时，
 对应回归测试都会失败。新增确定性测试在 Session 清理之前观察实际命令 Scope 的 finalizer：
 两个 container 连续执行命令后均释放；延迟 stdio、残留后代和未完成配置均保留所有权。
-禁用自动释放会使五个新案例全部失败。真实 noop 进程探针在未关闭的 Session Scope 下执行
+禁用自动释放会使保留的 Scope 释放案例失败。真实 noop 进程探针在未关闭的 Session Scope 下执行
 20 个各输出 8 MiB 的命令：禁用自动释放时，GC 后仍保留约 160 MiB 的数组缓冲；启用后，
 container 清理前已回到基线附近。这是本机进程实验，不代表生产环境内存测量。
+
+分别禁用自动释放、stdio/进程组等待、失败组保留、严格 cgroup 读取、owner hook 和 Git
+退出宽限期，七项消融都会使保留的行为测试失败。复用测试运行两个命令，足以区分逐命令
+释放和等到 Session 清理才释放。重复释放案例和只检查 mock 调用的终止测试，合并为实际
+资源状态断言。删除仅供测试的 spawnScoped 别名，以及 terminateAll 已证明退出后重复的
+cgroup 等待。临时探针和消融脚本不进入产品代码。
 
 未验证真实 Windows、Linux 委派 cgroup 和签名桌面安装包。Windows 根进程先退出后仍需
 Job Object 才能保留后代归属。Session、ACP、Turn 层仍待迁移，本次不声称已通过其 Promise

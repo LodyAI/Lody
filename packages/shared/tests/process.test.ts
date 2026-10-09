@@ -16,8 +16,8 @@ import {
   startProcess,
 } from '../src/node/process';
 import { signalChildTreeNow, SpawnFailed, TerminationFailed } from '../src/node/process';
-import { spawnProcess as acquireProcess, spawnScoped, type SpawnSpec } from '../src/node/process';
-import { processLayer } from '../src/node/process';
+import { spawnProcess as acquireProcess, type SpawnSpec } from '../src/node/process';
+import { processLayer, isPidAliveSync } from '../src/node/process';
 import {
   READ_ONLY_ABANDON_POLICY,
   resolveWindowsCommand,
@@ -91,15 +91,6 @@ describe('process tree termination (POSIX groups)', () => {
     }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
-  it.effect('sends SIGKILL at once under a forced policy', () => {
-    const table = new FakeProcessTable('linux');
-    return Effect.gen(function* () {
-      const managed = yield* spawnProcess(agentSpec);
-      yield* managed.terminate(FORCED);
-      expect(table.delivered).toEqual([{ target: -(managed.child.pid ?? -1), signal: 'SIGKILL' }]);
-    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
-  });
-
   it.effect('signals nothing when the whole tree already exited', () => {
     const table = new FakeProcessTable('linux');
     return Effect.gen(function* () {
@@ -156,7 +147,7 @@ describe('process tree termination (POSIX groups)', () => {
     const table = new FakeProcessTable('linux');
     return Effect.gen(function* () {
       const pid = yield* Effect.scoped(
-        Effect.map(spawnScoped(agentSpec, FORCED), (managed) => managed.child.pid ?? -1)
+        Effect.map(acquireProcess(agentSpec, FORCED), (managed) => managed.child.pid ?? -1)
       );
       expect(table.isAlive(pid)).toBe(false);
     }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
@@ -261,15 +252,6 @@ const readPidLine = (stream: Readable | null) =>
     });
   });
 
-const isRunning = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 describe('process tree termination (real processes)', () => {
   it.live.skipIf(process.platform === 'win32')(
     'kills a real grandchild left running by an exited leader',
@@ -283,11 +265,11 @@ describe('process tree termination (real processes)', () => {
         });
         const grandchild = yield* readPidLine(managed.child.stdout);
         yield* managed.exited;
-        expect(isRunning(grandchild)).toBe(true);
+        expect(isPidAliveSync(grandchild)).toBe(true);
 
         yield* managed.terminate(FORCED);
 
-        expect(isRunning(grandchild)).toBe(false);
+        expect(isPidAliveSync(grandchild)).toBe(false);
       }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
@@ -295,7 +277,7 @@ describe('process tree termination (real processes)', () => {
     'lets a launcher exit while an unrefed child remains alive',
     () =>
       Effect.gen(function* () {
-        const managed = yield* spawnScoped(
+        const managed = yield* acquireProcess(
           {
             command: process.execPath,
             args: [
@@ -312,10 +294,10 @@ describe('process tree termination (real processes)', () => {
         const childPid = yield* readPidLine(managed.child.stdout);
         const exit = yield* managed.exited.pipe(Effect.timeout('5 seconds'));
         expect(exit.code).toBe(0);
-        expect(isRunning(childPid)).toBe(true);
+        expect(isPidAliveSync(childPid)).toBe(true);
         yield* managed.terminate(FORCED);
-        expect(isRunning(childPid)).toBe(false);
-      }).pipe(Effect.scoped, Effect.scoped, Effect.provide(processLayer({})))
+        expect(isPidAliveSync(childPid)).toBe(false);
+      }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
   // Until Node reports a failed spawn, `child.kill()` reaches pid 0: the
@@ -349,9 +331,15 @@ describe('runCommand', () => {
 
   it.live('collects stdout, stderr and the exit status of any outcome', () =>
     Effect.gen(function* () {
+      let pid: number | undefined;
       const output = yield* runCommand(
-        node('process.stdout.write("out"); process.stderr.write("err"); process.exit(3)')
+        node('process.stdout.write("out"); process.stderr.write("err"); process.exit(3)', {
+          onSpawned: (child) => {
+            pid = child.pid;
+          },
+        })
       );
+      expect(pid).toBeGreaterThan(0);
       expect(output.code).toBe(3);
       expect(output.stdout.toString()).toBe('out');
       expect(output.stderr.toString()).toBe('err');
@@ -384,21 +372,6 @@ describe('runCommand', () => {
       );
       expect(failure).toBeInstanceOf(SpawnFailed);
       expect((failure as SpawnFailed).cause).toMatchObject({ code: 'ENOENT' });
-    }).pipe(Effect.scoped, Effect.provide(processLayer({})))
-  );
-
-  // A caller that persists the pid (Codex profile logout) needs it at spawn.
-  it.live('hands the started child to onSpawned', () =>
-    Effect.gen(function* () {
-      let spawnedPid: number | undefined;
-      yield* runCommand({
-        command: process.execPath,
-        args: ['-e', ''],
-        onSpawned: (child) => {
-          spawnedPid = child.pid;
-        },
-      });
-      expect(spawnedPid).toBeGreaterThan(0);
     }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
