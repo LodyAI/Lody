@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { Effect } from 'effect';
 import {
   applyMessageContentsBatch,
   applyNotificationOnHistory,
@@ -75,6 +76,12 @@ import {
 } from './roost-history-port';
 import { registerSessionBackendFactory } from './session-backend';
 import { RoostHistoryGeneration } from './roost-history-generation';
+import {
+  projectLatestGoal,
+  readGoalProjection,
+  writeGoalProjection,
+  type RoostGoalProjection,
+} from './roost-goal-projection';
 
 type RoostNativeOptions = {
   readonly dbPath?: string;
@@ -86,6 +93,7 @@ type RoostNativeOptions = {
 type OwnerLease = {
   readonly client: RoostNativeClient;
   readonly owner: Uint8Array;
+  readonly projectionLanes: Effect.Semaphore;
   release(): Promise<void>;
 };
 
@@ -134,6 +142,7 @@ let ownerPool:
       key: string;
       client: RoostNativeClient;
       owner: Uint8Array;
+      projectionLanes: Effect.Semaphore;
       refs: number;
       closePromise?: Promise<void>;
     }
@@ -148,6 +157,7 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
     return {
       client: ownerPool.client,
       owner: ownerPool.owner.slice(),
+      projectionLanes: ownerPool.projectionLanes,
       release: async () => releaseOwner(key),
     };
   }
@@ -167,10 +177,16 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
     await client.close().catch(() => undefined);
     throw error;
   }
-  ownerPool = { key, client, owner, refs: 1 };
+  const projectionLanes = Effect.runSync(
+    Effect.makeSemaphore(
+      Math.max(1, Math.min(8, Math.floor((options.maxQueuedRequests ?? 32) / 2)))
+    )
+  );
+  ownerPool = { key, client, owner, projectionLanes, refs: 1 };
   return {
     client,
     owner: owner.slice(),
+    projectionLanes,
     release: async () => releaseOwner(key),
   };
 };
@@ -275,6 +291,9 @@ const createNodeServicesForLease = async (
   let readGeneration = 0;
   let writeSerial: Promise<void> = Promise.resolve();
   let operationCursor: bigint | undefined;
+  let knownCursor: bigint | undefined;
+  let goalProjection: RoostGoalProjection | undefined;
+  let goalCoveredStart = 0;
   let needsRefresh = false;
   const stateCache = new Map<string, Promise<HistoryProjectedMessage | undefined>>();
   const permissionCache = new Map<string, Promise<Record<string, unknown> | undefined>>();
@@ -318,8 +337,10 @@ const createNodeServicesForLease = async (
       messages.filter((row) => row.segmentId === 'primary').map((row) => [row.businessId, row])
     );
     const result: SessionEntry[] = [];
-    // Bound native requests independently of a page's number of tool requests.
-    for (const entry of projected) {
+    // Each lane has at most one native read in flight, regardless of the
+    // page's number of permissions. Preserve row order while avoiding one
+    // worker round trip at a time for every historical state lookup.
+    const project = async (entry: SessionEntry): Promise<SessionEntry> => {
       const primary = primaries.get(entry.id);
       const state = primary ? await readState(primary) : undefined;
       let turn = state ? (toApplicationJson(state.content) as SessionEntry) : entry;
@@ -350,7 +371,23 @@ const createNodeServicesForLease = async (
         }
       }
       turn = { ...turn, items };
-      result.push(clone(turn));
+      return clone(turn);
+    };
+    for (let start = 0; start < projected.length; start += 8) {
+      result.push(
+        ...(await Promise.all(
+          projected.slice(start, start + 8).map(async (entry) => {
+            // Share permits across all sessions borrowing this Worker, leaving
+            // queue capacity for foreground history commands and branch reads.
+            await Effect.runPromise(lease.projectionLanes.take(1));
+            try {
+              return await project(entry);
+            } finally {
+              Effect.runSync(lease.projectionLanes.release(1));
+            }
+          })
+        ))
+      );
     }
     return result;
   };
@@ -360,6 +397,30 @@ const createNodeServicesForLease = async (
   const pageBodyLimit = 500;
 
   const readFullBranch = () => roostHistory.readActiveBranch(viewId);
+  const rememberGoalPage = async (
+    source: NodeLodyHistory,
+    host: typeof historyHost,
+    cursor: bigint,
+    projected: readonly SessionEntry[],
+    start: number
+  ): Promise<void> => {
+    if (
+      source !== roostHistory ||
+      cursor !== knownCursor ||
+      start > goalCoveredStart ||
+      start + projected.length < goalCoveredStart
+    )
+      return;
+    goalCoveredStart = start;
+    if (goalProjection === undefined) {
+      const latest = projectLatestGoal(projected, start);
+      if (latest || start === 0) goalProjection = latest;
+    }
+    // During an owned write the caller still has to account for all mutations;
+    // only persist once that command completes and publishes its final cursor.
+    if (goalProjection !== undefined && operationCursor === undefined)
+      await writeGoalProjection(host, cursor, goalProjection).catch(() => {});
+  };
   const storeBranchCursor = (cursor: ActiveBranchPageCursor | null): string | null => {
     if (!cursor) return null;
     const token = `${cursor.revision}:${cursor.position}:${pageSequence++}:${randomBytes(6).toString('hex')}`;
@@ -510,9 +571,10 @@ const createNodeServicesForLease = async (
   };
 
   const directoryPageFromBranch = async (
-    branch: ActiveBranchPageRead
+    branch: ActiveBranchPageRead,
+    prepared?: readonly SessionEntry[]
   ): Promise<SessionHistoryDirectoryPage> => {
-    const projected = await projectBranchPage(branch);
+    const projected = prepared ?? (await projectBranchPage(branch));
     return {
       startPosition: branch.startPosition,
       totalCount: branch.totalCount,
@@ -563,6 +625,7 @@ const createNodeServicesForLease = async (
   };
 
   const performBranchReload = async (): Promise<RoostHistoryChange | undefined> => {
+    const preservedGoal = operationCursor === undefined ? undefined : goalProjection;
     if (await historyGeneration.resolve()) {
       branchCursors.clear();
     }
@@ -577,6 +640,7 @@ const createNodeServicesForLease = async (
     const previous = rows;
     const previousEntries = entries;
     const previousStart = loadedStartPosition;
+    const cursor = await roostHistory.observedEventCursor();
     const nextBranch = await roostHistory.readActiveBranchPage(viewId, {
       latest: true,
       limit: branchPageSize,
@@ -597,6 +661,13 @@ const createNodeServicesForLease = async (
       if (changed.size) change = { kind: 'changed', businessIds: [...changed] };
     }
     installBranchWindow(nextBranch, projected);
+    knownCursor = cursor;
+    goalCoveredStart = totalHistoryCount;
+    goalProjection =
+      preservedGoal === undefined
+        ? await readGoalProjection(historyHost, cursor, totalHistoryCount).catch(() => undefined)
+        : preservedGoal;
+    await rememberGoalPage(roostHistory, historyHost, cursor, projected, loadedStartPosition);
     if (change?.kind === 'structure') {
       const movedStart = previousStart !== loadedStartPosition;
       const from = movedStart
@@ -770,9 +841,14 @@ const createNodeServicesForLease = async (
     });
   const readPage = async (input: Parameters<typeof roostHistory.readActiveBranchPage>[1]) => {
     const generation = readGeneration;
+    const source = roostHistory;
+    const host = historyHost;
+    const cursor = await source.observedEventCursor();
     const branch = await roostHistory.readActiveBranchPage(viewId, input);
     if (generation !== readGeneration || disposed) throw staleRead();
     const projected = await projectBranchPage(branch);
+    if (cursor === (await source.observedEventCursor()))
+      await rememberGoalPage(source, host, cursor, projected, branch.startPosition);
     if (input?.latest && branch.startPosition + projected.length !== branch.totalCount) {
       throw new Error(`Roost latest page for ${viewId} does not reach the active head`);
     }
@@ -841,13 +917,11 @@ const createNodeServicesForLease = async (
       return [...selected].sort(([left], [right]) => left - right).map(([, entry]) => entry);
     });
   const readLatestDirectoryPage = (limit: number): Promise<SessionHistoryDirectoryPage> =>
-    readStable(async () =>
-      directoryPageFromBranch(
-        limit === branchPageSize
-          ? currentBranch()
-          : (await readPage({ latest: true, limit })).branch
-      )
-    );
+    readStable(async () => {
+      if (limit === branchPageSize) return directoryPageFromBranch(currentBranch(), entries);
+      const page = await readPage({ latest: true, limit });
+      return directoryPageFromBranch(page.branch, page.projected);
+    });
   const history: SessionHistoryReader = {
     count: () => readStable(async () => totalHistoryCount),
     readAt: (position) =>
@@ -890,7 +964,8 @@ const createNodeServicesForLease = async (
       readStable(async () => {
         const decoded = branchCursors.get(cursor);
         if (!decoded) throw new Error('Roost history page cursor is stale or unknown');
-        return directoryPageFromBranch((await readPage({ before: decoded, limit })).branch);
+        const page = await readPage({ before: decoded, limit });
+        return directoryPageFromBranch(page.branch, page.projected);
       }),
     readAll: async () => (await readCompleteEntries()).map((entry) => clone(entry)),
     readTurnOutput: async (userTurnId) => {
@@ -942,8 +1017,29 @@ const createNodeServicesForLease = async (
 
   const pendingSeen = new Map<string, Promise<void>>();
 
-  const publishCursor = async (operationId: string): Promise<void> => {
+  const publishCursor = async (
+    operationId: string,
+    verifyGoalCursor?: (cursor: bigint) => Promise<boolean>
+  ): Promise<void> => {
     const cursor = await roostHistory.observedEventCursor();
+    const owned = verifyGoalCursor && (await verifyGoalCursor(cursor).catch(() => false));
+    if (verifyGoalCursor && !owned) {
+      // Do not label an externally changed window as current merely because
+      // its event cursor was observed while publishing our own command.
+      needsRefresh = true;
+      goalProjection = undefined;
+      await reloadBranch({ publish: true });
+    }
+    if (goalProjection !== undefined) {
+      if (owned) {
+        await writeGoalProjection(historyHost, cursor, goalProjection).catch(() => {
+          goalProjection = undefined;
+          needsRefresh = true;
+        });
+      } else {
+        goalProjection = undefined;
+      }
+    }
     const change = pendingChange;
     const previous = await sessionDoc.getRoostHistoryCursor();
     const historyRevision = (previous?.historyRevision ?? 0) + 1;
@@ -963,6 +1059,7 @@ const createNodeServicesForLease = async (
           : null
       ),
     });
+    knownCursor = cursor;
     observedHistoryRevision = Math.max(observedHistoryRevision, historyRevision);
     if (pendingChange === change) pendingChange = undefined;
     if (change) notifyHistoryChange(change);
@@ -979,18 +1076,32 @@ const createNodeServicesForLease = async (
     if (closing || disposed) throw new Error('Roost session backend is disposed');
     const next = writeSerial.then(async () => {
       for (let attempt = 0; ; attempt += 1) {
+        let evidence: ReturnType<RoostHistoryGeneration['trackWrites']> | undefined;
         try {
           await historyGeneration.resolve();
           if (needsRefresh || reloadPromise || windowHistory !== historyGeneration.history) {
             await reloadBranch({ publish: true });
             needsRefresh = false;
           }
-          operationCursor = await roostHistory.observedEventCursor();
+          let cursor = await roostHistory.observedEventCursor();
+          if (knownCursor !== undefined && knownCursor !== cursor) {
+            await reloadBranch({ publish: true });
+            cursor = await roostHistory.observedEventCursor();
+          }
+          operationCursor = cursor;
+          evidence = historyGeneration.trackWrites(cursor);
+          goalProjection =
+            totalHistoryCount === 0
+              ? null
+              : await readGoalProjection(historyHost, cursor, totalHistoryCount).catch(
+                  () => undefined
+                );
           const changed = await operation();
           if (changed !== false || pendingChange || pendingModelSummary)
-            await publishCursor(operationId);
+            await publishCursor(operationId, evidence.verify);
           return;
         } catch (error) {
+          operationCursor = undefined;
           needsRefresh = true;
           const stale = error instanceof Error && 'code' in error && error.code === 'stale';
           if (!stale || attempt >= 2) throw error;
@@ -1000,6 +1111,9 @@ const createNodeServicesForLease = async (
           }
           await reloadBranch({ publish: true });
           needsRefresh = false;
+        } finally {
+          evidence?.stop();
+          operationCursor = undefined;
         }
       }
     });
@@ -1071,6 +1185,28 @@ const createNodeServicesForLease = async (
     return (
       before ? prepareReplacement(before, after) : parseHistoryWrite(HistoryEntryWriteSchema, after)
     ) as SessionHistoryInput;
+  };
+
+  const rememberGoal = (entry: SessionHistoryInput, position: number | undefined): void => {
+    const latest = projectLatestGoal([entry], position ?? 0);
+    if (position === undefined) {
+      if (latest || goalProjection?.turnId === entry.id) {
+        goalProjection = undefined;
+        goalCoveredStart = totalHistoryCount;
+      }
+      return;
+    }
+    if (latest) {
+      if (
+        goalProjection === null ||
+        (goalProjection !== undefined && position >= goalProjection.position) ||
+        position === totalHistoryCount - 1
+      )
+        goalProjection = latest;
+    } else if (goalProjection?.turnId === entry.id) {
+      goalProjection = undefined;
+      goalCoveredStart = totalHistoryCount;
+    }
   };
 
   const planTurnWrite = async (
@@ -1163,6 +1299,17 @@ const createNodeServicesForLease = async (
     const oldById = new Map(before.map((entry) => [entry.id, entry]));
     // Preflight every authored change before creating a receipt or editing a turn.
     const prepared = next.map((entry) => prepareTurn(oldById.get(entry.id), entry));
+    const positions = new Map(
+      prepared.map((entry) => {
+        const position = positionById.get(entry.id);
+        return [
+          entry.id,
+          position === undefined
+            ? pageEntries.get(entry.id)?.position
+            : loadedStartPosition + position,
+        ];
+      })
+    );
     const commands: HistoryBatchCommand[] = [...extra];
     const changed: string[] = [];
     for (const entry of prepared) {
@@ -1177,19 +1324,19 @@ const createNodeServicesForLease = async (
     if (!commands.length) return false;
     if (commands.length > 64) {
       const replacements = new Map(prepared.map((entry) => [entry.id, entry]));
-      await historyGeneration.replace(
-        (await readAll()).map((entry) => replacements.get(entry.id) ?? entry),
-        operationId,
-        operationCursor,
-        { commands: extra }
-      );
+      const nextHistory = (await readAll()).map((entry) => replacements.get(entry.id) ?? entry);
+      await historyGeneration.replace(nextHistory, operationId, operationCursor, {
+        commands: extra,
+      });
       await reloadBranch({ publish: true });
+      goalProjection = projectLatestGoal(nextHistory);
     } else {
       await roostHistory.commitHistoryBatch(
         `${operationId}:${randomBytes(8).toString('hex')}`,
         commands
       );
       await refreshTurnProjections(changed);
+      for (const entry of prepared) rememberGoal(entry, positions.get(entry.id));
     }
     if (changed.length) recordChange({ kind: 'changed', businessIds: changed });
     pendingModelSummary = true;
@@ -1208,6 +1355,27 @@ const createNodeServicesForLease = async (
       if (equal(existing.turn, prepared)) return false;
       throw new HistoryWriteError([{ path: ['id'], code: 'duplicate_id' }]);
     }
+    const archived = await roostHistory.lookup({
+      kind: 'message',
+      businessId: prepared.id,
+      segmentId: 'primary',
+    });
+    if (archived) {
+      // SDK identities survive an internal branch replacement. Reusing a
+      // removed business id is still allowed by the shared history contract;
+      // stage only this uncommon collision through a fresh storage generation.
+      const current = await readAll();
+      const sameId = current.find((entry) => entry.id === prepared.id);
+      if (sameId) {
+        if (equal(sameId, prepared)) return false;
+        throw new HistoryWriteError([{ path: ['id'], code: 'duplicate_id' }]);
+      }
+      const next = [...current, prepared];
+      await historyGeneration.replace(next, operationId, operationCursor);
+      await reloadBranch({ publish: true });
+      goalProjection = projectLatestGoal(next);
+      return true;
+    }
     let branch = await ensureHeadSealed();
     const accepted = await roostHistory.acceptToView({
       viewId,
@@ -1224,11 +1392,37 @@ const createNodeServicesForLease = async (
     });
     await refreshProjectedMessage(accepted.turnId, accepted);
     if (prepared.finished === true) await finishIfNeeded(accepted.turnId);
+    rememberGoal(prepared, totalHistoryCount - 1);
     return accepted.created;
   };
 
-  const readAll = async (): Promise<SessionHistoryInput[]> =>
-    (await history.readAll()) as SessionHistoryInput[];
+  const readAll = async (): Promise<SessionHistoryInput[]> => {
+    const all = (await history.readAll()) as SessionHistoryInput[];
+    goalProjection = projectLatestGoal(all);
+    return all;
+  };
+
+  const readEditableWindow = async () => {
+    const branch = currentBranch();
+    let selected = [...entries];
+    let start = loadedStartPosition;
+    let cursor = branch.cursor;
+    // Include the preceding user identity as well as the provider boundary.
+    // Work grows with the editable suffix, rather than the retained prefix.
+    while (cursor && selected.filter((entry) => entry.role === 'user').length < 2) {
+      const page = await readPage({ before: cursor, limit: branchPageSize });
+      if (
+        page.branch.totalCount !== branch.totalCount ||
+        page.branch.state.revision !== branch.state.revision ||
+        page.branch.startPosition + page.projected.length !== start
+      )
+        throw staleRead();
+      selected = [...page.projected, ...selected];
+      start = page.branch.startPosition;
+      cursor = page.branch.cursor;
+    }
+    return { selected, start };
+  };
 
   const replaceActiveHistory = async (
     next: readonly SessionHistoryInput[],
@@ -1272,6 +1466,7 @@ const createNodeServicesForLease = async (
     }
     await historyGeneration.replace(prepared, operationId, operationCursor, { commands: extra });
     await reloadBranch({ publish: true });
+    goalProjection = projectLatestGoal(prepared);
     recordChange({ kind: 'structure', from: 0, to: Math.max(current.length, prepared.length) });
     return true;
   };
@@ -1366,12 +1561,71 @@ const createNodeServicesForLease = async (
       let writeAttempted = false;
       try {
         await withWrites(operationId, async () => {
-          const before = await readAll();
-          const plan = planEditableTailReplacement(before as never, input);
-          const start = plan.turns.length - 1;
+          const window =
+            goalProjection === undefined
+              ? { selected: await readAll(), start: 0 }
+              : await readEditableWindow();
+          const before = window.selected;
+          const plan = planEditableTailReplacement(before as never, {
+            ...input,
+            fallbackGoal: goalProjection?.goal ?? input.fallbackGoal,
+          });
+          const localStart = plan.turns.length - 1;
+          const start = window.start + localStart;
+          const removed = before.slice(localStart);
           const replacement = prepareTurn(undefined, input.replacement as SessionHistoryInput);
+          const previousHead = currentBranch().state.head;
+          const primary = await roostHistory.lookup({
+            kind: 'message',
+            businessId: input.expectedUserTurnId,
+            segmentId: 'primary',
+          });
+          const header =
+            primary?.kind === 'found'
+              ? await historyHost.readTurnHeader(primary.turn.turnId)
+              : undefined;
+          const parents = header?.kind === 'found' ? header.turn.parents : undefined;
+          const reusePrefix =
+            replacement.id !== input.expectedUserTurnId &&
+            parents !== undefined &&
+            parents.length === (start === 0 ? 0 : 1);
+          const expectedCursor = operationCursor;
+          if (expectedCursor === undefined) throw new Error('Roost write cursor is unavailable');
           writeAttempted = true;
-          await replaceActiveHistory([...before.slice(0, start), replacement], operationId);
+          if (reusePrefix) {
+            const branch = currentBranch();
+            const accepted = await historyGeneration.fork(
+              {
+                viewId,
+                expectedRevision: branch.state.revision,
+                expectedHead: branch.state.head,
+                operationId,
+                baseTurn: parents[0]?.id ?? null,
+                supersedes: removed.map((entry) => ({
+                  kind: 'message',
+                  businessId: entry.id,
+                  segmentId: 'primary',
+                })),
+                input: {
+                  kind: 'message',
+                  businessId: replacement.id,
+                  segmentId: 'primary',
+                  parents,
+                  content: encodeRoostContent(replacement),
+                },
+              },
+              expectedCursor
+            );
+            roostHistory = historyGeneration.history;
+            historyHost = historyGeneration.host;
+            if (replacement.finished === true) await finishIfNeeded(accepted.turnId);
+            await reloadBranch({ publish: true });
+            if (goalProjection && goalProjection.position >= start) goalProjection = undefined;
+            rememberGoal(replacement, start);
+          } else {
+            const full = window.start === 0 ? before : await readAll();
+            await replaceActiveHistory([...full.slice(0, start), replacement], operationId);
+          }
           let rolledBack = false;
           result = {
             status: 'accepted',
@@ -1383,19 +1637,34 @@ const createNodeServicesForLease = async (
                 const index = current.findIndex((entry) => entry.id === replacement.id);
                 if (
                   index !== start ||
-                  !matchesRollbackReceipt(
-                    before.slice(start),
-                    [replacement],
-                    current.slice(index, index + 1)
-                  )
+                  !matchesRollbackReceipt(removed, [replacement], current.slice(index, index + 1))
                 )
                   throw new HistoryWriteError([{ path: ['history'], code: 'rollback_conflict' }]);
-                await replaceActiveHistory(
-                  [...current.slice(0, index), ...before.slice(start), ...current.slice(index + 1)],
-                  `${operationId}:rollback`,
-                  [],
-                  { storedCopy: true }
-                );
+                if (reusePrefix && current.length === index + 1) {
+                  const branch = currentBranch();
+                  const rollbackCursor = operationCursor;
+                  if (rollbackCursor === undefined)
+                    throw new Error('Roost write cursor is unavailable');
+                  await historyGeneration.restore(
+                    {
+                      viewId,
+                      expectedRevision: branch.state.revision,
+                      expectedHead: branch.state.head,
+                      restoreHead: previousHead,
+                      operationId: `${operationId}:rollback`,
+                    },
+                    rollbackCursor
+                  );
+                  await reloadBranch({ publish: true });
+                  goalProjection = projectLatestGoal([...current.slice(0, index), ...removed]);
+                } else {
+                  await replaceActiveHistory(
+                    [...current.slice(0, index), ...removed, ...current.slice(index + 1)],
+                    `${operationId}:rollback`,
+                    [],
+                    { storedCopy: true }
+                  );
+                }
                 rolledBack = true;
                 return true;
               });

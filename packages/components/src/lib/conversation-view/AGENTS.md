@@ -21,8 +21,10 @@
   remains active; release/dispose cancels them.
 - View events are `structure` (affected positional range) or `changed` (explicit
   turn ids). Every body edit includes its id even when evicted. Derivations drop
-  those cached facts before recomputing; shallow equality cannot detect body
-  changes. Empty `changed.ids` only announces summary/cache bookkeeping.
+  those cached facts before recomputing when evicted. A hydrated edit may reuse
+  the previous small fact only after synchronously deriving and comparing its
+  new semantic value. Empty `changed.ids` announces summary/cache bookkeeping;
+  `indexIds` names changed metadata independently of body invalidation.
 - Only the reported ids invalidate a body: a directory row cannot tell whether a
   body changed, and merging sparse targets into one span re-read the whole
   conversation. Refresh those rows in contiguous runs; escalate to a structural
@@ -34,6 +36,9 @@
 - A row's send configuration projects on first read and memoizes. Do not force
   it while collecting sources; the resolver reads the newest turn or two.
 - Derivations retain small facts and weak identity hints, not evicted bodies.
+  Whole-directory business readers omit prose summaries and patch reported ids;
+  token deltas still refresh visible bodies and live outline summaries. Adjacent
+  reverse pages replace their sentinel slots, preserving retained rows and bodies.
   Structure updates prune deleted ids and restart incomplete coverage. Search
   refreshes membership/positions after structure changes. Directory leases and
   retry timers stop on release/dispose; a page failure is never complete coverage.

@@ -557,12 +557,12 @@ export function createConversationViewFromReader(
     if (!structural) {
       const toReRead: string[] = [];
       const evictedChanges: number[] = [];
-      const nextPagedDirectoryRows = new Map(pagedDirectoryRows);
+      const indexIds: string[] = [];
       let touched = false;
       for (const entry of entries) {
         const pos = entry.position;
         if (pagedReader && pos >= 0 && pos < pageTotalCount) {
-          nextPagedDirectoryRows.set(pos, entry);
+          pagedDirectoryRows.set(pos, entry);
         }
         const row = carryBodyFacts(rows[pos], rowFromDirectory(entry));
         const old = rows[pos];
@@ -593,11 +593,11 @@ export function createConversationViewFromReader(
           else evictedChanges.push(pos);
         }
         touched = true;
+        indexIds.push(row.id);
       }
       if (!touched) return;
-      if (pagedReader) pagedDirectoryRows = nextPagedDirectoryRows;
       bump();
-      emit({ kind: 'changed', ids: [] });
+      emit({ kind: 'changed', ids: [], indexIds });
       // Index notifications also occur for summary maintenance. A storage
       // content edit must separately invalidate body-derived facts even when
       // this view no longer holds the body. Otherwise an old goal/file diff
@@ -752,6 +752,36 @@ export function createConversationViewFromReader(
     ) {
       return false;
     }
+    // Revealing an adjacent older page replaces sentinel slots only. Existing
+    // positions, bodies and row identities remain valid; rebuilding the whole
+    // directory here made reverse paging quadratic in conversation length.
+    if (
+      directoryInitialized &&
+      page.totalCount === pageTotalCount &&
+      page.startPosition + page.rows.length === absoluteStart &&
+      pageOptions.clearFrom === undefined &&
+      pageOptions.refreshSurvivors !== true
+    ) {
+      const previousStart = absoluteStart;
+      for (const entry of page.rows) {
+        const position = entry.position;
+        const oldId = ids[position];
+        if (oldId && indexById.get(oldId) === position) indexById.delete(oldId);
+        const row = rowFromDirectory(entry);
+        pagedDirectoryRows.set(position, entry);
+        rows[position] = row;
+        ids[position] = row.id;
+        const existing = indexById.get(row.id);
+        if (existing === undefined || position < existing) indexById.set(row.id, position);
+      }
+      absoluteStart = page.startPosition;
+      olderCursor = page.cursor;
+      hasMoreOlder = absoluteStart > 0 && olderCursor !== null;
+      structureEpoch += 1;
+      bump();
+      emit({ kind: 'structure', from: absoluteStart, to: previousStart });
+      return true;
+    }
     const previousOlderCursor = olderCursor;
     const previousById = new Map(ids.map((id, index) => [id, rows[index]! as TurnIndexRow]));
     const previousIds = new Set(ids);
@@ -825,7 +855,11 @@ export function createConversationViewFromReader(
     emit(
       structuralSignal
         ? { kind: 'structure', from: 0, to: ids.length }
-        : { kind: 'changed', ids: touchedSurvivors }
+        : {
+            kind: 'changed',
+            ids: touchedSurvivors,
+            indexIds: page.rows.map((row) => rowFromDirectory(row).id),
+          }
     );
     scheduleIdlePass();
     return true;

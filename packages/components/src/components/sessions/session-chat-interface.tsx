@@ -3181,7 +3181,9 @@ export const SessionChatInterface = memo(
     /** The hydrated tail; every reader below that scans backwards for the latest turn uses it. */
     const sessionHistory = sessionTailHistory;
     const turnFacts = useSessionTurnFacts(conversationView);
-    const conversationIndexRows = useConversationIndexRows(conversationView);
+    const conversationIndexRows = useConversationIndexRows(conversationView, {
+      includeSummary: false,
+    });
     const [lastCompletedAssistantTarget, setLastCompletedAssistantTarget] = useState<{
       sessionId: SessionId;
       messageId: string | null;

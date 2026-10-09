@@ -27,7 +27,12 @@ export type ConversationDerivation<F> = {
   dispose(): void;
 };
 
-export type DeriveTurnFact<F> = (turn: SessionHistory, row: TurnIndexRow, index: number) => F;
+export type DeriveTurnFact<F> = (
+  turn: SessionHistory,
+  row: TurnIndexRow,
+  index: number,
+  previous?: F
+) => F;
 
 export type CreateConversationDerivationOptions = {
   /** Turns hydrated per background chunk. */
@@ -98,9 +103,11 @@ export function createConversationDerivation<F>(
       const turn = view.turn(i);
       if (turn) {
         if (derivedFrom.get(row.id)?.deref() === turn) continue;
-        facts.set(row.id, derive(turn, row, i));
+        const previous = facts.get(row.id);
+        const next = derive(turn, row, i, previous);
+        facts.set(row.id, next);
         derivedFrom.set(row.id, new WeakRef(turn));
-        changed = true;
+        changed = next !== previous || changed;
       } else if (dropStale && facts.delete(row.id)) {
         derivedFrom.delete(row.id);
         changed = true;
@@ -130,12 +137,15 @@ export function createConversationDerivation<F>(
       requestPass();
     } else {
       for (const id of change.ids) {
-        changed = facts.delete(id) || changed;
         derivedFrom.delete(id);
         const position = view.indexOf(id);
-        if (position >= 0) {
+        if (position >= 0 && view.isHydrated(position)) {
+          // Keep the previous small fact only during this synchronous derive.
+          // A derivation may reuse it when a text delta changed no business fact.
           changed = deriveRange(position, position + 1) || changed;
-          if (!view.isHydrated(position)) requestPass();
+        } else {
+          changed = facts.delete(id) || changed;
+          if (position >= 0) requestPass();
         }
       }
     }
@@ -274,7 +284,7 @@ export function createConversationDerivation<F>(
 
 const sharedDerivations = new WeakMap<
   ConversationView,
-  Map<DeriveTurnFact<unknown>, { table: ConversationDerivation<unknown>; users: number }>
+  Map<object, { table: ConversationDerivation<unknown>; users: number }>
 >();
 
 /**

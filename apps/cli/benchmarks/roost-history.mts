@@ -36,6 +36,7 @@ const samples = Number(process.env.BENCH_SAMPLES ?? 7);
 const warmups = Number(process.env.BENCH_WARMUPS ?? 2);
 const bodyBytes = Number(process.env.BENCH_BODY_BYTES ?? 4096);
 const output = process.env.BENCH_OUTPUT ?? '/tmp/lody-roost-history-bench.json';
+const structural = process.env.BENCH_STRUCTURAL === '1';
 assert.ok(sizes.every((n) => Number.isSafeInteger(n) && n >= 80 && n % 2 === 0));
 assert.ok(Number.isSafeInteger(samples) && samples > 0);
 const directory = await mkdtemp(join(tmpdir(), 'lody-roost-bench-'));
@@ -79,7 +80,9 @@ function fixture(count: number): SessionHistory[] {
     id: `turn-${i}`,
     role: i % 2 === 0 ? 'user' : 'assistant',
     timestamp: '2026-10-04T00:00:00.000Z',
-    ...(i % 2 === 0 ? { status: 'handled', read: true } : { userTurnId: `turn-${i - 1}` }),
+    ...(i % 2 === 0
+      ? { status: 'handled', read: true }
+      : { userTurnId: `turn-${i - 1}`, acpTurnId: `acp-${i}` }),
     finished: i < count - 1,
     items: [{ type: 'text', text: `${i}:` + 'x'.repeat(bodyBytes) }],
     fileDiff: [],
@@ -153,7 +156,10 @@ async function sample(
     view = createConversationViewFromReader(backend.history, {
       sessionId,
       tailKeep: 0,
-      scheduleIdle: () => () => {},
+      scheduleIdle: (task) => {
+        const timer = setTimeout(() => task({ timeRemaining: () => 8 }), 0);
+        return () => clearTimeout(timer);
+      },
     });
     if (view.turnCount !== count) {
       await new Promise<void>((resolveReady) => {
@@ -218,7 +224,51 @@ async function sample(
       trace(`${backendKind}: update ${i} visible`);
       updates.push(performance.now() - updateStart);
     }
+    const updateReads = { ...counts };
+    let structuralObservation: Record<string, unknown> = {};
+    if (structural) {
+      resetCounts();
+      const directoryStart = performance.now();
+      const lease = view.acquireDirectory?.();
+      assert.ok(lease);
+      try {
+        await lease.ready;
+      } finally {
+        lease.release();
+      }
+      const fullDirectoryMs = performance.now() - directoryStart;
+      const directoryReads = { ...counts };
+      assert.equal(view.hasMoreOlder, false);
+      assert.equal(view.index(0)?.id, 'turn-0');
+      resetCounts();
+      const editStart = performance.now();
+      const editedId = `edited-${count}-${ordinal}`;
+      const edit = await backend.replaceEditableTail({
+        expectedUserTurnId: `turn-${count - 2}`,
+        expectedForkTurnId: `acp-${count - 3}`,
+        replacement: {
+          id: editedId,
+          role: 'user',
+          timestamp: '2026-10-09T00:00:00.000Z',
+          status: 'pending',
+          read: false,
+          finished: false,
+          items: [{ type: 'text', text: 'Edited message' }],
+          fileDiff: [],
+        } as never,
+      });
+      const editableTailMs = performance.now() - editStart;
+      const editReads = { ...counts };
+      assert.equal(edit.status, 'accepted');
+      assert.equal(await backend.history.count(), count - 1);
+      assert.equal((await backend.history.readAt(count - 2)).state, 'ready');
+      structuralObservation = { fullDirectoryMs, directoryReads, editableTailMs, editReads };
+      trace(
+        `${backendKind}: directory ${fullDirectoryMs.toFixed(2)}ms, edit ${editableTailMs.toFixed(2)}ms`
+      );
+    }
     return {
+      ...structuralObservation,
       backend: backendKind,
       count,
       importMs: imported - start,
@@ -229,7 +279,7 @@ async function sample(
       updates,
       openReads,
       olderReads,
-      updateReads: { ...counts },
+      updateReads,
     };
   } finally {
     releaseRange?.();
@@ -281,6 +331,12 @@ try {
         viewMs: summarize(values.map((row) => row.viewMs)),
         olderMs: summarize(values.map((row) => row.olderMs)),
         streamingMs: summarize(values.flatMap((row) => row.updates)),
+        ...(structural
+          ? {
+              fullDirectoryMs: summarize(values.map((row) => Number(row.fullDirectoryMs))),
+              editableTailMs: summarize(values.map((row) => Number(row.editableTailMs))),
+            }
+          : {}),
         observations: values,
       });
     }
@@ -298,6 +354,7 @@ try {
           warmups,
           bodyBytes,
           pageSize,
+          structural,
           sourceHashes: {
             nativeLoader: await hash(nativeBinding),
             nativeClient: await hash(fileURLToPath(clientModule)),
@@ -315,7 +372,7 @@ try {
           boundaries: [
             'Fresh backends/views, warm OS page cache. Loro snapshot import included; Roost owner process startup included.',
             'Loro control Repo has no disk storage. Roost history writes use actual SQLite durability; Loro update timings exclude disk flush.',
-            'No renderer transport, IndexedDB, React, paint, full search, background facts or offline cache refresh.',
+            'No renderer transport, IndexedDB, React, paint, full search, background facts or offline cache refresh. BENCH_STRUCTURAL=1 separately measures the complete directory and last-user edit after streaming.',
             'Fixed 4 KiB text bodies, linear active ancestry, unsealed streaming tail; no late segments.',
           ],
           results,

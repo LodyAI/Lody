@@ -81,7 +81,8 @@ export type ConversationViewChange =
   | { kind: 'structure'; from: number; to: number }
   // Body identities to invalidate. Empty for summary-only/cache bookkeeping;
   // subscribers still receive a version change, but no body fact became stale.
-  | { kind: 'changed'; ids: readonly string[] };
+  // indexIds names refreshed metadata without prematurely invalidating a body.
+  | { kind: 'changed'; ids: readonly string[]; indexIds?: readonly string[] };
 
 export type ConversationViewListener = (change: ConversationViewChange) => void;
 

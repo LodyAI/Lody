@@ -73,7 +73,7 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Lifecycle
 
-- For Roost reads, follow [paging rules](README.md#roost-history-paging).
+- For Roost reads and writes, follow [paging rules](README.md#roost-history-paging).
 
 - `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
   protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup

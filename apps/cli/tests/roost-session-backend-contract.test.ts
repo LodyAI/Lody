@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,11 +26,13 @@ import { Identity } from '@loro-dev/roost';
 import { RoostNativeClient } from '@loro-dev/roost-node';
 import { RoostHistoryGeneration } from '../src/session/roost-history-generation';
 import { encodeRoostContent } from '../src/session/roost-history-port';
+import { readGoalProjection } from '../src/session/roost-goal-projection';
 import type { SessionBackendContractFixtureFactory } from './session-backend-contract';
 import { defineSessionBackendContract } from './session-backend-contract';
 let nativeDirectory: string;
 let ordinal = 0;
 const nativeFixtures = new Set<{ close(): Promise<void> }>();
+afterEach(() => vi.restoreAllMocks());
 beforeAll(async () => {
   nativeDirectory = await mkdtemp(join(tmpdir(), 'lody-production-roost-'));
   installRoostNodeSessionBackend({
@@ -436,6 +438,286 @@ describe('Production Roost history semantics', () => {
       state: 'ready',
       turn: { items: [{ text: 'peer edit' }] },
     });
+    const reused = await nativeFixture();
+    await reused.backend.appendHistoryTurn(nativeUser('reused-u'));
+    await reused.backend.appendHistoryTurn(nativeAssistant('reused-a'));
+    const replaced = await reused.backend.replaceEditableTail({
+      expectedUserTurnId: 'reused-u',
+      expectedForkTurnId: undefined,
+      replacement: nativeUser('reused-replacement') as never,
+    });
+    expect(replaced.status).toBe('accepted');
+    await reused.backend.appendHistoryTurn({
+      ...nativeAssistant('reused-a'),
+      items: [{ type: 'text', text: 'new use of removed identity' }],
+    });
+    expect((await reused.backend.readHistory()).map((entry) => entry.id)).toEqual([
+      'reused-replacement',
+      'reused-a',
+    ]);
+    expect(await reused.backend.readTurn('reused-a')).toMatchObject({
+      state: 'ready',
+      turn: { items: [{ text: 'new use of removed identity' }] },
+    });
+  });
+
+  it('reuses the signed prefix in the same session, restores it, and fences old writers', async () => {
+    const fixture = await nativeFixture();
+    for (let index = 0; index < 24; index += 1) {
+      await fixture.backend.appendHistoryTurn(nativeUser(`prefix-u-${index}`));
+      await fixture.backend.appendHistoryTurn({
+        ...nativeAssistant(`prefix-a-${index}`),
+        finished: true,
+        acpTurnId: `boundary-${index}`,
+      });
+    }
+    await fixture.backend.appendHistoryTurn(nativeUser('tail-u'));
+    // The nearest previous user lies outside the initial forty-row window.
+    for (let index = 0; index < 43; index += 1)
+      await fixture.backend.appendHistoryTurn({
+        ...nativeAssistant(`tail-a-${index}`),
+        finished: true,
+      });
+    const seed = new Uint8Array(32).fill(39);
+    const owner = Identity.fromSeed(seed).owner();
+    const client = new RoostNativeClient({
+      dbPath: join(nativeDirectory, 'history.db'),
+      seed,
+      allowedOwners: [owner],
+      maxQueuedRequests: 32,
+      maxQueuedBytes: 8 * 1024 * 1024,
+    });
+    try {
+      await client.ready;
+      const generation = new RoostHistoryGeneration(client, owner, fixture.doc.sessionId);
+      await generation.resolve();
+      const old = generation.history;
+      const before = await old.readActiveBranch(fixture.doc.sessionId);
+      const cursor = await old.observedEventCursor();
+      expect(await readGoalProjection(generation.host, cursor, before.messages.length)).toBeNull();
+      const all = await fixture.backend.readHistory();
+      let ownedOld: NodeLodyHistory | undefined;
+      const originalFork = RoostHistoryGeneration.prototype.fork;
+      const fork = vi.spyOn(RoostHistoryGeneration.prototype, 'fork').mockImplementation(function (
+        ...args
+      ) {
+        ownedOld = this.history;
+        return originalFork.apply(this, args);
+      });
+      const full = vi
+        .spyOn(NodeLodyHistory.prototype, 'readActiveBranch')
+        .mockRejectedValue(new Error('Bounded edit must not scan the prefix'));
+      let result: Awaited<ReturnType<typeof fixture.backend.replaceEditableTail>>;
+      try {
+        result = await fixture.backend.replaceEditableTail({
+          expectedUserTurnId: 'tail-u',
+          expectedForkTurnId: 'boundary-23',
+          replacement: nativeUser('replacement-u') as never,
+        });
+      } finally {
+        full.mockRestore();
+        fork.mockRestore();
+      }
+      expect(result.status).toBe('accepted');
+      if (result.status !== 'accepted') throw new Error('Expected bounded edit');
+      expect(result.previousUserTurnId).toBe('prefix-u-23');
+      await generation.resolve();
+      const after = await generation.history.readActiveBranch(fixture.doc.sessionId);
+      expect(after.messages.slice(0, 48).map((row) => row.turnId)).toEqual(
+        before.messages.slice(0, 48).map((row) => row.turnId)
+      );
+      expect(await fixture.backend.history.count()).toBe(49);
+      await expect(
+        old.accept({
+          kind: 'publication',
+          businessId: fixture.doc.sessionId,
+          segmentId: 'stale-prefix-writer',
+          parents: [],
+          content: encodeRoostContent(null),
+        })
+      ).rejects.toMatchObject({ code: 'stale' });
+      if (!ownedOld) throw new Error('Expected the activating writer binding');
+      await expect(
+        ownedOld.accept({
+          kind: 'publication',
+          businessId: fixture.doc.sessionId,
+          segmentId: 'same-owner-stale-writer',
+          parents: [],
+          content: encodeRoostContent(null),
+        })
+      ).rejects.toMatchObject({ code: 'stale' });
+      await result.rollback();
+      expect(await fixture.backend.readHistory()).toEqual(all);
+      const restored = await generation
+        .resolve()
+        .then(() => generation.history.readActiveBranch(fixture.doc.sessionId));
+      expect(restored.messages.map((row) => row.turnId)).toEqual(
+        before.messages.map((row) => row.turnId)
+      );
+      const id = fixture.doc.sessionId;
+      await fixture.close();
+      const reopened = await nativeFixture(id);
+      expect(reopened.doc.sessionId).toBe(id);
+      expect(await reopened.backend.readHistory()).toEqual(all);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('rejects an edit for an older active goal and rebuilds an invalid derived cache', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('goal-first-u'));
+    await fixture.backend.appendHistoryTurn({
+      ...nativeAssistant('goal-first-a'),
+      finished: true,
+      acpTurnId: 'goal-boundary',
+      items: [{ type: 'goal', threadId: 'old-goal', objective: 'Keep working', status: 'active' }],
+    });
+    await fixture.backend.appendHistoryTurn(nativeUser('goal-tail-u'));
+    for (let index = 0; index < 43; index += 1)
+      await fixture.backend.appendHistoryTurn({
+        ...nativeAssistant(`goal-tail-${index}`),
+        finished: true,
+      });
+    const input = {
+      expectedUserTurnId: 'goal-tail-u',
+      expectedForkTurnId: 'goal-boundary',
+      replacement: nativeUser('goal-replacement') as never,
+    };
+    const before = await fixture.backend.readHistory();
+    const full = vi
+      .spyOn(NodeLodyHistory.prototype, 'readActiveBranch')
+      .mockRejectedValue(new Error('Cached guard must not scan'));
+    try {
+      expect(await fixture.backend.replaceEditableTail(input)).toEqual({
+        status: 'rejected',
+        reason: { code: 'active_goal' },
+      });
+    } finally {
+      full.mockRestore();
+    }
+    const seed = new Uint8Array(32).fill(39);
+    const client = new RoostNativeClient({
+      dbPath: join(nativeDirectory, 'history.db'),
+      seed,
+      allowedOwners: [Identity.fromSeed(seed).owner()],
+      maxQueuedRequests: 32,
+      maxQueuedBytes: 8 * 1024 * 1024,
+    });
+    try {
+      await client.ready;
+      await client.stream(`lody-session:${fixture.doc.sessionId}`).writeBatch([], {
+        indexPuts: [
+          {
+            table: 'lody_goal_projection_v1',
+            key: new Uint8Array(),
+            value: new TextEncoder().encode('{invalid'),
+          },
+        ],
+      });
+      expect(await fixture.backend.replaceEditableTail(input)).toEqual({
+        status: 'rejected',
+        reason: { code: 'active_goal' },
+      });
+      expect(await fixture.backend.readHistory()).toEqual(before);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('does not advance a goal cache across a concurrent owner write', async () => {
+    const first = await nativeFixture();
+    await first.backend.appendHistoryTurn(nativeUser('concurrent-goal-u'));
+    await first.backend.appendHistoryTurn({
+      ...nativeAssistant('concurrent-goal-a'),
+      finished: true,
+      acpTurnId: 'concurrent-boundary',
+    });
+    await first.backend.appendHistoryTurn(nativeUser('concurrent-tail-u'));
+    const peer = await nativeFixture(first.doc.sessionId);
+    const original = NodeLodyHistory.prototype.commitHistoryBatch;
+    let injected = false;
+    const spy = vi
+      .spyOn(NodeLodyHistory.prototype, 'commitHistoryBatch')
+      .mockImplementation(async function (...args) {
+        const result = await original.apply(this, args);
+        if (!injected) {
+          injected = true;
+          await peer.backend.applyHistoryAction({
+            kind: 'upsert-turn',
+            turn: {
+              ...nativeAssistant('concurrent-goal-a'),
+              finished: true,
+              acpTurnId: 'concurrent-boundary',
+              items: [
+                {
+                  type: 'goal',
+                  threadId: 'concurrent-goal',
+                  objective: 'Do not discard',
+                  status: 'active',
+                },
+              ],
+            } as never,
+          });
+        }
+        return result;
+      });
+    try {
+      await first.backend.applyHistoryAction({
+        kind: 'user-status',
+        turnId: 'concurrent-tail-u',
+        status: 'handled',
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(injected).toBe(true);
+    expect(
+      await first.backend.replaceEditableTail({
+        expectedUserTurnId: 'concurrent-tail-u',
+        expectedForkTurnId: 'concurrent-boundary',
+        replacement: nativeUser('concurrent-replacement') as never,
+      })
+    ).toEqual({ status: 'rejected', reason: { code: 'active_goal' } });
+    expect((await first.backend.readHistory()).map((entry) => entry.id)).toEqual([
+      'concurrent-goal-u',
+      'concurrent-goal-a',
+      'concurrent-tail-u',
+    ]);
+  });
+
+  it('refreshes the same-session prefix edit after its committed activation loses the reply', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('lost-u'));
+    await fixture.backend.appendHistoryTurn(nativeAssistant('lost-a'));
+    const original = RoostHistoryGeneration.prototype.fork;
+    const spy = vi
+      .spyOn(RoostHistoryGeneration.prototype, 'fork')
+      .mockImplementationOnce(async function (...args) {
+        await original.apply(this, args);
+        throw new Error('Injected lost branch reply');
+      });
+    let result: Awaited<ReturnType<typeof fixture.backend.replaceEditableTail>>;
+    try {
+      result = await fixture.backend.replaceEditableTail({
+        expectedUserTurnId: 'lost-u',
+        expectedForkTurnId: undefined,
+        replacement: nativeUser('lost-replacement') as never,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(result.status).toBe('indeterminate');
+    expect(await fixture.backend.history.count()).toBe(1);
+    expect(await fixture.backend.history.readAt(0)).toMatchObject({
+      state: 'ready',
+      turn: { id: 'lost-replacement' },
+    });
+    await fixture.backend.flushLocalWrites();
+    expect(await fixture.doc.getRoostHistoryCursor()).toMatchObject({ historyCount: 1 });
+    expect((await fixture.backend.readHistory()).map((entry) => entry.id)).toEqual([
+      'lost-replacement',
+    ]);
   });
 
   it('keeps an import baseline with its native commit when the Loro cursor projection fails', async () => {

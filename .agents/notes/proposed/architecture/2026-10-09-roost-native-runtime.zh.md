@@ -12,6 +12,8 @@ PR: [#1329](https://github.com/LodyAI/Lody/pull/1329)
 此前 npm 历史适配器依赖另行构建的 Roost 可执行文件，公开 Lody 仓库无法独立构建和打包实验性后端。
 CLI 现在接入已发布的 Node-API 包，在 Worker 内运行 SQLite 实现；Electron 随包携带目标平台的原生产物。
 共享 Web 和移动客户端沿用现有历史 RPC 接口。这次接入不建立浏览器本地 IndexedDB 副本或离线 Streams 同步。
+普通末尾编辑在同一 Session 内复用签名前缀，共享 reader 避免在流式更新时重建未变的业务事实。
+完整历史覆盖和设备级响应速度仍是验收边界。
 
 ## 决策与边界
 
@@ -44,7 +46,7 @@ Loro 仍是默认后端；既有会话的后端标识、历史、Loro 控制元�
 对应 primary，读取时投影为同一业务 turn。权限回应使用 SDK 的独立 response 记录，
 reader 将结果合并到对应工具，不封存仍在输出的 assistant。普通变更只刷新受影响的正文。
 
-结构复制、编辑和导入通过公开 SDK 操作，在独立 generation 中准备完整历史；再以一次
+一般结构复制和导入编辑通过公开 SDK 操作，在独立 generation 中准备完整历史；再以一次
 原生 event-cursor CAS，在旧流中发布应用自有的签名激活记录。准备失败或旧流并发写入
 都会保留旧分支。不复制 SDK envelope/index 格式，也不重写 sealed 数据。
 串行 generation 解析及旧 handle 写入保护，避免并发读写使用被替换的视图。
@@ -63,9 +65,92 @@ RPC directory 读取按 owner count 截断，每次最多 500 行；revision 变
 Fork/Edit & Resend 保留 owner saga，不跨 RPC 传递进程内快照和补偿 handle。
 新会话偏好在任何持久写入前检查目标能力。
 
+## 保持同一对话的性能优化
+
+对 `d074e53` 的扩展基线测试表明，整体长对话目标尚未达成：最新窗口读取有界，但
+末尾用户消息的编辑仍复制保留前缀，reader 在普通文字增量时重建全量目录和事实数组。
+单次结构探测测得 1000 行编辑耗时 7881 ms，6000 行耗时 53823 ms（约 3000 组
+合成用户/助手往返）。可重复的打开基线使用七次测量、两次预热；6000 行的 Roost
+最新 40 条打开中位数为 69 ms，Loro 为 531 ms。这些结果不证明绘制、输入延迟或
+完整历史覆盖的性能。
+
+普通尾部编辑现在在同一原生 stream 和 view 中调用公开 SDK 的 fork/restore 操作，
+复用保留前缀的 Turn id 和 sealed 字节；不创建或跳转 Lody Session。封存的应用 epoch
+与激活原子写入。原生 cursor CAS 防止并发写入改变已校验的资格，绑定 epoch 的旧
+handle 不能继续向失效 suffix 写入。若编辑后没有追加，条件回滚恢复原 head；有后续
+追加时沿用整代补偿以保留这些数据。同 id 替换、任意结构编辑及导入/复制仍使用全量暂存。
+重新追加已移除的业务身份时，若旧 SDK binding 仍存在，也暂存新 generation；这样保留
+共享 append 契约，并避免旧内容重新激活。
+
+精确匹配 cursor 的本地目标 projection 避免 active-goal 校验反复物化前缀。它来自
+从尾部连续读取的分页，或一次完整权威读取。writer 记录本次原生 update receipt 和
+可能的 index event，仅当观察到的事件全部有相应证据时推进 projection。其他 writer
+的变更、损坏的缓存、不完整的覆盖或过大的事件范围都会放弃复用并刷新权威状态。
+该索引是可丢弃的派生数据，不是命令 receipt 或同步权威。旧历史可能需先执行一次完整
+目标校验以建立覆盖，不强制迁移。
+
+相邻反向页只替换 sentinel slot。状态/权限 projection 使用八条有界并行通道，目录
+响应复用已投影的页面。共享目录 hook 只更新显式报告的 metadata 身份；业务消费方
+不包含文字摘要，大纲仍读取实时摘要。已 hydration 的事实仅在重新派生并比较语义值
+后复用旧的小对象；被 evict 的修改仍先丢弃旧事实，再后台派生。可见文字、目标/权限
+结果、草稿焦点、选区和顺序继续按原契约更新。
+
+取舍仍需说明：完整事实/搜索覆盖会在有界后台块中读取未见历史，大段可编辑 suffix
+仍有工作量，归档分支尚无回收，保留后续追加的回滚可能复制 generation。浏览器/移动
+部署及设备级帧耗时、输入延迟和内存验收，需要独立证据。
+
 ## 验证
 
-### 生产适配器修复（2026-10-09）
+### 同一会话性能检查点（2026-10-09）
+
+原生历史窄化测试现在通过 27 项契约，完整检查另包含 4 项 RPC/后端测试。新增用例
+验证物理前缀 Turn id 保留、同一 Session 重开、激活方和其他实例的旧 handle 隔离、
+回滚、重新追加已移除的身份、窗口外 active goal 校验、损坏缓存恢复、其他 writer
+写入，以及 fork 确认丢失。reader/React/derivation 窄化测试通过 52 项。另将现有
+React 流式契约夹具扩展到 6,000 条：业务事实、草稿值、焦点及选区保持稳定，可见
+正文和大纲摘要正常更新，一次文字增量只观察到 25 次索引访问，没有遍历整个目录。
+这是功能证据，不是帧耗时或输入延迟测量。
+
+完整 `pnpm check` 通过：CLI 3608 项、4 项既有跳过，shared 1302 项、共享组件
+4894 项、Electron 214 项通过。`pnpm build` 通过。本机原样桌面 smoke 按系统选择
+中文，英文 Settings 选择器失败。使用隔离英文 profile 重跑后完成四条 P0 旅程，
+随后因 macOS 请求 Safe Storage 钥匙串授权而停止；本机完整桌面 smoke 不记作通过。
+两次运行均不修改产品语言行为，也不构成 Roost 桌面性能验收。
+
+最终生产基准使用已发布的真实 SQLite、每次新建 backend/view、已预热的 OS page
+cache，机器为 Apple M4 / macOS arm64 / Node 24.14.0；正文 4 KiB，预热一次，
+正式测量五次。以下是中位数，单位毫秒：
+
+| 历史条数 | Roost 最新 40 条 | Loro 最新 40 条 | Roost 向前 40 条 | Roost 最后用户回合编辑 | Roost 完整目录 |
+| --- | --- | --- | --- | --- | --- |
+| 1,000 | 49.7 | 79.4 | 32.1 | 36.9 | 725.2 |
+| 6,000 | 55.5 | 431.2 | 36.9 | 48.4 | 5,543.1 |
+| 10,000 | 58.1 | 722.1 | 38.4 | 54.1 | 9,931.6 |
+
+6,000 条（约 3,000 轮）的最新窗口 P95 为 57.3 ms，编辑 P95 为 49.4 ms；
+10,000 条分别为 65.6 ms 和 57.0 ms。全部 15 次正式 Roost 编辑都只读取一页
+40 条，没有完整历史读取。此前 53,823 ms 的编辑仅为单次基线探针，不是基线
+分布。本次编辑在完整目录覆盖建立可选 goal projection 后测量；新写会话增量维护
+该缓存，旧会话或失效缓存仍可能先读取完整权威历史执行目标校验。完整后台覆盖
+在 6,000 条时仍约需 5.5 秒，10,000 条约需 9.9 秒。
+
+在 `apps/cli` 内复现：
+
+```sh
+BENCH_STRUCTURAL=1 BENCH_SIZES=1000,6000,10000 BENCH_SAMPLES=5 BENCH_WARMUPS=1 \
+  BENCH_BODY_BYTES=4096 TSX_TSCONFIG_PATH=tsconfig.json \
+  node --import ./node_modules/tsx/dist/loader.mjs benchmarks/roost-history.mts
+```
+
+基准不覆盖 IPC/RPC、React/绘制、完整事实/搜索、IndexedDB、真实 Provider 和设备
+内存验收。Roost 流式写入包含 SQLite 持久化；本基准的 Loro 控制 Repo 无磁盘
+存储，不能把两者写入耗时视作等价持久化比较。结果和验证日志：
+`/private/tmp/lody-roost-performance-optimized.json`、
+`/private/tmp/lody-roost-performance-ui-6000-final.log`、
+`/private/tmp/lody-roost-performance-check-final.log` 及
+`/private/tmp/lody-roost-performance-desktop-build.log`。
+
+### 生产适配器修复检查点（`d074e53`，2026-10-09）
 
 最终窄化测试 27 项通过：23 项使用真实 SessionDocument、LoroRepo 和已发布原生
 SQLite 的生产历史契约，加上 4 项 RPC/后端测试。覆盖队列七个持久阶段失败、sealed

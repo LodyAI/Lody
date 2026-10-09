@@ -329,9 +329,22 @@ Content changes refresh only affected primary bodies. Sealed-turn corrections
 use mutable SDK state records anchored to their primary; permission responses
 remain independent SDK records projected onto the matching tool. Responding does
 not seal the assistant or interrupt its output.
-Structural changes prepare a complete SDK-managed generation and publish one
+Ordinary Edit & Resend reuses the sealed prefix through the SDK's branch activation
+inside the same stream/view. The Lody session id and owner saga do not change.
+An application-owned signed epoch commits in that native transaction and fences
+older handles. Immediate rollback restores the old SDK head; rollback with later
+appends retains the existing whole-generation compensation. General structural
+copy/import edits still stage a complete SDK-managed generation and publish one
 signed application-owned activation with a native event-cursor CAS. Failed staging
 retains the old stream; sealed envelopes and SDK indexes are never rewritten.
+
+The local goal projection is an optional derived index tied to an exact native
+event cursor. Incremental page coverage or a complete read establishes its value;
+commands advance it only across their own signed write receipts and index events.
+Unknown, damaged or externally invalidated projections require an authoritative
+read before the active-goal guard. This cache never accepts commands or weakens
+eligibility. Its failed CAS affects reuse only. Historical state/permission reads
+use eight concurrent lanes; a lane issues at most one native request at a time.
 Per-item ACP receipts commit with their output and remain discoverable through
 prior generations, so a lost reply or overlapping retry cannot replay a prefix.
 Count and position reads refresh after a lost activation reply. The local write
@@ -346,5 +359,6 @@ retain their owner sagas; process-local snapshot/rollback handles do not cross R
 The production SQLite regressions live in
 [`roost-session-backend-contract.test.ts`](../../tests/roost-session-backend-contract.test.ts).
 The synthetic [history benchmark](../../benchmarks/roost-history.mts) exercises
-these production backends and the shared view; its timing excludes renderer
+these production backends and the shared view; `BENCH_STRUCTURAL=1` also measures
+the complete directory and a guarded last-user edit. Its timing excludes renderer
 transport, IndexedDB and paint.

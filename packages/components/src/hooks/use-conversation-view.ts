@@ -7,11 +7,13 @@ import {
   resolveTailStart,
   subscribeOnFrame,
   isUnloadedTurnId,
+  INDEX_SCALAR_KEYS,
   type ConversationDerivation,
   type ConversationView,
   type DeriveTurnFact,
   type TurnIndexRow,
 } from '@/lib/conversation-view';
+import { jsonValueEqual } from '@/lib/json-value-equal';
 
 /**
  * React bindings for `ConversationView`.
@@ -173,39 +175,132 @@ export function useTurn(
   return index >= 0 ? view?.turn(index) : undefined;
 }
 
-/** All index rows, as one array whose identity follows the view's version. */
+type IndexRowsStore = {
+  read(): readonly TurnIndexRow[];
+  subscribe(listener: () => void): () => void;
+};
+const indexRowsStores = new WeakMap<ConversationView, Map<boolean, IndexRowsStore>>();
+
+function indexRowEqual(left: TurnIndexRow, right: TurnIndexRow, includeSummary: boolean): boolean {
+  if (INDEX_SCALAR_KEYS.some((key) => left[key] !== right[key])) return false;
+  if (left.itemCount !== right.itemCount || left.planCount !== right.planCount) return false;
+  // Compare descriptors without forcing deferred send-config projection.
+  const a = Object.getOwnPropertyDescriptor(left, 'inputConfig');
+  const b = Object.getOwnPropertyDescriptor(right, 'inputConfig');
+  if (a?.get !== b?.get || a?.value !== b?.value) return false;
+  return !includeSummary || jsonValueEqual(left.summary, right.summary);
+}
+
+function projectIndexRow(row: TurnIndexRow, includeSummary: boolean): TurnIndexRow {
+  if (includeSummary) return row;
+  const descriptors = Object.getOwnPropertyDescriptors(row);
+  delete descriptors.summary;
+  return Object.defineProperties({}, descriptors) as TurnIndexRow;
+}
+
+function indexRowsStore(view: ConversationView, includeSummary: boolean): IndexRowsStore {
+  let modes = indexRowsStores.get(view);
+  if (!modes) {
+    modes = new Map();
+    indexRowsStores.set(view, modes);
+  }
+  const existing = modes.get(includeSummary);
+  if (existing) return existing;
+  let rows: readonly TurnIndexRow[] = EMPTY_ROWS;
+  let observedVersion = -1;
+  const positions = new Map<string, number>();
+  const listeners = new Set<() => void>();
+  let unsubscribe: (() => void) | undefined;
+  const rebuild = () => {
+    const next: TurnIndexRow[] = [];
+    for (let i = 0; i < view.turnCount; i += 1) {
+      const row = view.index(i);
+      if (!row || isUnloadedTurnId(row.id)) continue;
+      const position = positions.get(row.id);
+      const previous = position === undefined ? undefined : rows[position];
+      next.push(
+        previous && indexRowEqual(previous, row, includeSummary)
+          ? previous
+          : projectIndexRow(row, includeSummary)
+      );
+    }
+    if (next.length !== rows.length || next.some((row, i) => row !== rows[i])) rows = next;
+    positions.clear();
+    rows.forEach((row, i) => positions.set(row.id, i));
+    observedVersion = view.version;
+  };
+  const read = () => {
+    // Released stores receive no events; refresh once on re-acquisition.
+    if (observedVersion !== view.version) rebuild();
+    return rows;
+  };
+  const store: IndexRowsStore = {
+    read,
+    subscribe(listener) {
+      read();
+      listeners.add(listener);
+      if (!unsubscribe) {
+        unsubscribe = view.subscribe((change) => {
+          const previous = rows;
+          if (change.kind === 'structure' || (change.ids.length === 0 && !change.indexIds)) {
+            rebuild();
+          } else {
+            let next: TurnIndexRow[] | undefined;
+            for (const id of new Set([...change.ids, ...(change.indexIds ?? [])])) {
+              const position = positions.get(id);
+              const row = view.index(view.indexOf(id));
+              const old = position === undefined ? undefined : rows[position];
+              if (!row || !old || position === undefined) {
+                rebuild();
+                next = undefined;
+                break;
+              }
+              if (indexRowEqual(old, row, includeSummary)) continue;
+              next ??= [...rows];
+              next[position] = projectIndexRow(row, includeSummary);
+            }
+            if (next) rows = next;
+            observedVersion = view.version;
+          }
+          if (previous !== rows) for (const notify of listeners) notify();
+        });
+      }
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          unsubscribe?.();
+          unsubscribe = undefined;
+        }
+      };
+    },
+  };
+  modes.set(includeSummary, store);
+  return store;
+}
+
+/**
+ * Loaded index rows, refreshed by reported identities. Business consumers can
+ * omit prose summaries so text deltas do not rebuild their history snapshot.
+ */
 export function useConversationIndexRows(
-  view: ConversationView | null | undefined
+  view: ConversationView | null | undefined,
+  options: { includeSummary?: boolean } = {}
 ): readonly TurnIndexRow[] {
-  const version = useConversationVersion(view);
+  const includeSummary = options.includeSummary !== false;
+  const store = useMemo(
+    () => (view ? indexRowsStore(view, includeSummary) : undefined),
+    [view, includeSummary]
+  );
+  const subscribe = useCallback(
+    (listener: () => void) => (store ? subscribeOnFrame(store.subscribe, listener) : () => {}),
+    [store]
+  );
+  const read = useCallback(() => store?.read() ?? EMPTY_ROWS, [store]);
   useEffect(() => {
     const directory = view?.acquireDirectory?.();
     return () => directory?.release();
   }, [view]);
-  const previousRef = useRef<readonly TurnIndexRow[]>(EMPTY_ROWS);
-  return useMemo(() => {
-    if (!view) {
-      previousRef.current = EMPTY_ROWS;
-      return EMPTY_ROWS;
-    }
-    const rows: TurnIndexRow[] = [];
-    for (let i = 0; i < view.turnCount; i += 1) {
-      const row = view.index(i);
-      if (row && !isUnloadedTurnId(row.id)) rows.push(row);
-    }
-    // The view hands back the same row object for a turn whose index facts did
-    // not change, so an array of identical rows is the previous array. Every
-    // consumer of this list recomputes on its identity, and the version bumps
-    // at token rate.
-    const previous = previousRef.current;
-    const reusable =
-      previous.length === rows.length && previous.every((row, index) => row === rows[index]);
-    const result = reusable ? previous : rows;
-    previousRef.current = result;
-    return result;
-    // `version` is the change signal for the view's contents.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, version]);
+  return useSyncExternalStore(subscribe, read, read);
 }
 
 /**

@@ -182,12 +182,21 @@ Existing sessions keep their persisted backend when the switch changes. Commands
 use the session's selected backend, with one writer for its storage. Loro-specific
 container rules above apply to that backend; Roost preserves immutable sealed
 segments and projects state corrections and independent permission outcomes into
-the same logical turn. Structural replacement prepares a complete private branch
-and atomically activates it; a failed preparation never empties the visible branch.
+the same logical turn. Structural replacement prepares a coherent branch and
+atomically activates it; a failed preparation never empties the visible branch.
 Cloud command clients read and write through the session's owning machine rather
 than selecting a database on the calling machine. Control metadata and
 delivery state remain in Loro. Local history acceptance does not establish remote
 Roost synchronization.
+
+Performance work must preserve the existing Lody conversation identity and its
+owner workflow. Edit & Resend may reuse an immutable prefix through the storage
+SDK's internal branch operations; it must not create or navigate to another Lody
+conversation. Old writers must remain fenced, lost acknowledgments must refresh
+the committed branch, and rollback must preserve later appends or refuse a
+conflicting edit. A cached goal guard is valid only for its exact history version;
+missing, invalid or concurrently changed cache evidence requires an authoritative
+check. Cache absence never establishes that no active goal exists.
 
 Opening a Roost conversation reads the latest active-branch window. Scrolling
 up loads older logical turns through a reverse cursor. Whole-history search,
@@ -200,6 +209,13 @@ and its cursor. A branch rewrite invalidates incompatible pages and refreshes th
 loaded window without displaying the superseded suffix. Unloaded rows contribute
 neither fabricated messages nor complete-history facts. Explicit export/snapshot
 operations retain an authoritative full-read capability.
+
+Text deltas update visible content and outline summaries without repeatedly
+rebuilding unchanged whole-history business facts. Goal, permission, scheduling,
+diff and status changes still invalidate their consumers. Reverse page loading
+preserves retained row/body identities when their positions and content remain
+unchanged. Optimization must not delay control updates or claim complete facts
+for an unread prefix.
 
 Previously synchronized history remains readable when its owner is unavailable,
 including reopening the conversation, searching and navigating older cached turns.

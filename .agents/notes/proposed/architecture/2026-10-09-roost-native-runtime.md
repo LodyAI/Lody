@@ -15,6 +15,9 @@ The CLI now consumes the published Node-API package with its SQLite implementati
 running in a Worker. Electron stages that package with one target prebuild; shared
 Web and mobile clients retain the existing history RPC interfaces. This change
 does not establish browser-local IndexedDB replicas or offline Streams sync.
+Normal tail edits reuse signed prefixes within the same Session, and shared
+readers avoid rebuilding unchanged business facts during streaming. Complete
+history coverage and device-level responsiveness remain validation limits.
 
 ## Decision and boundaries
 
@@ -56,7 +59,7 @@ business turn. Permission responses use the SDK's independent response record;
 readers join the outcome onto the corresponding tool without sealing an ongoing
 assistant. Ordinary changes refresh affected bodies only.
 
-For structural copy/edit/import, stage a complete history through public SDK
+For general structural copy/import edits, stage a complete history through public SDK
 operations in an independent generation. Publish a signed application-owned
 activation in the old stream with one native event-cursor CAS. Failed preparation
 or a concurrent old-stream write retains the old branch. Never reproduce SDK
@@ -83,9 +86,111 @@ limit and restart a moving revision. Fork/Edit & Resend keep their owner sagas;
 process-local snapshot/compensation handles are not sent over RPC. New-session
 preferences negotiate target capabilities before any durable write.
 
+## Same-conversation performance work
+
+The extended baseline on `d074e53` did not meet the whole long-conversation goal:
+latest-window reads were bounded, but the final-user edit copied the retained
+prefix and readers rebuilt whole-directory/fact arrays on ordinary text deltas.
+A single structural probe measured 7,881 ms for 1,000 rows and 53,823 ms for
+6,000 rows (about 3,000 synthetic user/assistant rounds). The repeatable startup
+baseline used seven samples and two warm-ups; median Roost latest-40 startup was
+69 ms at 6,000 rows versus Loro's 531 ms. Those results did not establish paint,
+input latency or complete-history coverage performance.
+
+The normal tail-edit path now calls public SDK fork/restore operations in the
+same native stream and view. Retained prefix Turn ids and sealed bytes are reused;
+no Lody Session is created or navigated. A sealed application epoch is written
+atomically with activation. Native cursor CAS fences eligibility against concurrent
+writes and epoch-bound handles prevent late writes into an inactive suffix.
+Conditional rollback restores the original head when nothing followed the edit;
+later appends retain the whole-generation compensation that preserves their data.
+Same-id replacement, arbitrary structural edits and import/copy retain full staging.
+Re-appending a removed business identity also stages a generation when its old SDK
+binding survives, preserving the shared append contract without reactivating old content.
+
+An exact-cursor local goal projection avoids repeatedly materializing the prefix
+for the active-goal guard. It is learned from contiguous tail-first pages or a
+complete authoritative read. The writer records its native update receipts and
+candidate index events; the projection advances only when observed events are
+covered by that evidence. A foreign write, damaged cache, missing coverage or
+oversized event range discards reuse and refreshes authoritative state. The index
+is optional derived data, not a command receipt or sync authority. Legacy histories
+can require one full guard scan before coverage is learned; no migration is forced.
+
+Adjacent reverse pages replace sentinel slots only. State/permission projection
+uses eight bounded lanes and directory replies reuse their already-projected page.
+Shared directory hooks patch explicit metadata identities; business readers omit
+prose summaries while outline readers retain them. Hydrated facts reuse their old
+small value only after semantic comparison; evicted edits still discard stale facts
+before background derivation. Visible text, goal/permission outcomes, draft focus,
+selection and ordering continue to update through their existing contracts.
+
+The trade-offs remain explicit: complete fact/search coverage still reads unseen
+history in bounded background chunks, large editable suffixes still cost work,
+archived branches have no reclamation, and rollback preserving later appends may
+copy a generation. Browser/mobile deployment and device-level frame/latency or
+memory acceptance require separate evidence.
+
 ## Verification
 
-### Production adapter repair (2026-10-09)
+### Same-conversation performance checkpoint (2026-10-09)
+
+The focused native history suite now passes 27 contracts, plus four RPC/backend
+cases in the complete check. Added cases prove retained physical prefix ids,
+same-Session reopen, old-handle fencing on both the activating and peer instances,
+rollback, re-append of a removed identity, off-window active-goal guards, damaged
+cache recovery, foreign writes and lost fork replies. The focused reader/React/
+derivation suites pass 52 cases. An additional 6,000-row run of the existing React
+streaming contract preserves business facts, draft value, focus and selection,
+updates visible text and outline summaries, and observes 25 index visits for the
+text delta rather than a whole-directory scan. This is functional evidence, not
+a frame-time or input-latency measurement.
+
+The complete `pnpm check` passes: CLI 3608 with four existing skips, shared 1302,
+shared components 4894 and Electron 214. `pnpm build` passes. Unmodified local
+desktop smoke selected the machine's Chinese language and failed English-only
+Settings selectors. An isolated English-profile rerun completed four P0 journeys
+before it was stopped when macOS requested Safe Storage keychain authorization;
+the complete local desktop smoke is not recorded as passing. Neither run changes
+product language behavior or establishes a Roost desktop performance acceptance.
+
+The final production benchmark uses actual published SQLite, fresh backends/views,
+warm OS page cache, Apple M4 / macOS arm64 / Node 24.14.0, 4 KiB bodies, one warm-up
+and five measured samples. Medians in milliseconds:
+
+| History rows | Roost latest 40 | Loro latest 40 | Roost older 40 | Roost final-user edit | Roost complete directory |
+| --- | --- | --- | --- | --- | --- |
+| 1,000 | 49.7 | 79.4 | 32.1 | 36.9 | 725.2 |
+| 6,000 | 55.5 | 431.2 | 36.9 | 48.4 | 5,543.1 |
+| 10,000 | 58.1 | 722.1 | 38.4 | 54.1 | 9,931.6 |
+
+At 6,000 rows (about 3,000 rounds), latest-window P95 is 57.3 ms and edit P95
+49.4 ms; at 10,000 rows they are 65.6 ms and 57.0 ms. All 15 measured Roost edits
+read one 40-row page and perform no complete-history read. The earlier 53,823 ms
+edit is a single baseline probe, not a baseline distribution. Edits are measured
+after complete directory coverage has learned the optional goal projection.
+Newly authored sessions maintain it incrementally; legacy or invalidated caches
+can still require a full authoritative guard scan. Complete background coverage
+still takes about 5.5 seconds at 6,000 rows and 9.9 seconds at 10,000 rows.
+
+Reproduce from `apps/cli`:
+
+```sh
+BENCH_STRUCTURAL=1 BENCH_SIZES=1000,6000,10000 BENCH_SAMPLES=5 BENCH_WARMUPS=1 \
+  BENCH_BODY_BYTES=4096 TSX_TSCONFIG_PATH=tsconfig.json \
+  node --import ./node_modules/tsx/dist/loader.mjs benchmarks/roost-history.mts
+```
+
+The benchmark excludes IPC/RPC, React/paint, full facts/search, IndexedDB, real
+providers and device memory acceptance. Roost streaming writes include SQLite
+durability; this benchmark's Loro control Repo has no disk storage, so its write
+timings are not an equivalent durability comparison. Results and validation logs:
+`/private/tmp/lody-roost-performance-optimized.json`,
+`/private/tmp/lody-roost-performance-ui-6000-final.log`,
+`/private/tmp/lody-roost-performance-check-final.log` and
+`/private/tmp/lody-roost-performance-desktop-build.log`.
+
+### Production adapter repair checkpoint (`d074e53`, 2026-10-09)
 
 The final focused suite passes 27 cases: 23 production-history contracts using
 actual SessionDocument, LoroRepo and published native SQLite, plus four RPC/backend
