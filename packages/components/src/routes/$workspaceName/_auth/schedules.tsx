@@ -10,5 +10,5 @@ export const Route = createFileRoute('/$workspaceName/_auth/schedules')({
 
 function SchedulesLayout() {
   const { scheduleId } = useParams({ strict: false }) as { scheduleId?: string };
-  return <SchedulesWorkspace scheduleId={scheduleId} />;
+  return <SchedulesWorkspace scheduleId={scheduleId} insetSafeArea />;
 }
