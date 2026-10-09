@@ -3,7 +3,7 @@
 How `apps/cli` code uses [Effect](https://effect.website) and how Effect code
 meets the Promise code it has not replaced yet. Binding rules live in each module's `AGENTS.md`. This guide describes the existing Effect consumers and the
 workspace v4 API choices; process ownership is implemented in a later PR.
-The catalog pins `effect` and `@effect/vitest` to 4.0.0. The [v4 migration
+The catalog pins `effect` and `@effect/vitest` to 4.0.2. The [v4 migration
 record](../notes/implemented/architecture/2026-10-09-effect-v4-migration.md)
 explains version selection and the preserved lifecycle behavior.
 
@@ -86,7 +86,7 @@ migration only updates the existing Effect consumers.
   schedule metadata, whose `input` is the failure being retried.
 - `Effect.yieldNow` is an Effect value, not a function. Use `Effect.sleep` and
   `Duration.Input` / `Duration.fromInputUnsafe` for delays.
-- ScopedCache operations are module functions. In 4.0.0 bulk disposal joins
+- ScopedCache operations are module functions. In 4.0.2 bulk disposal joins
   finalizer Exits without propagating their failures; owners that promise to
   report cleanup failures must collect them explicitly.
 

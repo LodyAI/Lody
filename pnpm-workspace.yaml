@@ -46,8 +46,8 @@ catalog:
   better-sqlite3: ^13.0.2
   convex: ^1.33.1
   devframe: 1.0.0
-  effect: 4.0.0
-  '@effect/vitest': 4.0.0
+  effect: 4.0.2
+  '@effect/vitest': 4.0.2
   jotai: ^2.16.0
   loro-adaptors: ^0.6.1
   loro-crdt: 1.16.3
@@ -78,8 +78,11 @@ managePackageManagerVersions: true
 # Delay newly published package versions for seven days before pnpm may resolve them.
 minimumReleaseAge: 10080
 
-# Grandfather versions already locked on main; later releases remain quarantined.
+# Keep approved upgrades and grandfathered versions exact; later releases remain quarantined.
 minimumReleaseAgeExclude:
+  # Approved lifecycle fixes and the matching test helper; future releases wait seven days.
+  - effect@4.0.2
+  - '@effect/vitest@4.0.2'
   # pnpm 10.20 uses the first rule per package; keep exact Codex versions together.
   - '@openai/codex@0.154.0 || 0.156.0 || 0.156.0-darwin-arm64 || 0.156.0-darwin-x64 || 0.156.0-linux-arm64 || 0.156.0-linux-x64 || 0.156.0-win32-arm64 || 0.156.0-win32-x64 || 0.159.2 || 0.159.2-darwin-arm64 || 0.159.2-darwin-x64 || 0.159.2-linux-arm64 || 0.159.2-linux-x64 || 0.159.2-win32-arm64 || 0.159.2-win32-x64'
   # Exact transitive dependencies already selected for werift.

@@ -9,7 +9,7 @@ PR: https://github.com/LodyAI/Lody/pull/1070
 ## Abstract
 
 The lifecycle refactor needs a common Effect v4 base before new services are
-introduced. This bottom PR pins the workspace runtime and test helper to 4.0.0
+introduced. This bottom PR pins the workspace runtime and test helper to 4.0.2
 and migrates the already-existing consumers in the CLI, renderer and ignore
 package. It preserves cache cleanup errors and send preparation timing despite
 v4 scheduler and disposal differences. Process creation, sandbox ownership and
@@ -24,10 +24,12 @@ in this bottom PR; each later service is introduced directly with v4 APIs.
 The bottom layer integrates current main so that the v4 baseline is mergeable;
 subsequent layers inherit that update without adding it to their own scope.
 
-Use exact catalog pins `effect: 4.0.0` and `@effect/vitest: 4.0.0`. Both were
-published on October 1 and satisfy the workspace's seven-day minimum release age.
-4.0.2 was published on October 7 and is not yet eligible. No release-age exceptions
-were added. The helper requires Vitest 5; only CLI and shared, which consume that
+The initial baseline used exact 4.0.0 pins because that release satisfied the
+workspace's seven-day minimum release age. The user subsequently authorized an
+upgrade and release-age exemption for the lifecycle fixes in 4.0.2, published on
+October 7. The catalog now pins `effect: 4.0.2` and `@effect/vitest: 4.0.2`, with
+exact-version exceptions for both packages; future releases still wait seven days.
+The matching helper requires Effect `^4.0.2` and Vitest 5; only CLI and shared, which consume that
 helper, move to Vitest 5.0.2, together with CLI's matching coverage provider. Vitest 5 supports Node 22.12+,
 24.x and 26+; validation uses Node 24, and CI uses Node 22. The production
 runtime floor is unchanged.
@@ -35,7 +37,16 @@ runtime floor is unchanged.
 An optional transitive `effect@3.18.4` remains inside `@prisma/config`. It is not an
 owned service dependency and is not overridden: forcing a third-party v3 consumer
 onto v4 would bypass its compatibility contract. All six direct workspace consumers
-resolve 4.0.0, so service contexts do not cross the two versions.
+resolve 4.0.2, so service contexts do not cross the two versions.
+
+The patch upgrade includes the [4.0.1 shared-cache cancellation fix](https://github.com/Effect-TS/effect/pull/8719)
+and the 4.0.2 fixes for [scope finalizer interruption](https://github.com/Effect-TS/effect/pull/8779),
+[queue delivery during interruption](https://github.com/Effect-TS/effect/pull/8819)
+and [repeat/retry failure preservation](https://github.com/Effect-TS/effect/pull/8799).
+These primitives are used by existing workspace consumers. Upstream reproductions
+justify the upgrade; they do not establish that Lody has reproduced every defect.
+The version and lockfile changes belong only to this bottom PR and are merged
+upward so each later PR retains its own service or consumer scope.
 
 ## Primitive changes
 
@@ -94,10 +105,15 @@ must be checked independently. Validation removes only the authoring session's
 injected `GIT_CONFIG_*`, `GIT_EXEC_PATH` and `LODY_GIT_*` settings so native Git
 fixtures do not run through the authoring wrapper.
 
-Bottom-layer validation: typecheck and lint passed; CLI 3244 passed / 4 skipped,
+Initial 4.0.0 bottom-layer validation: typecheck and lint passed; CLI 3244 passed / 4 skipped,
 shared 1258, components 4554, supervisor 49 and Electron 199. The first full
 check reached Electron with a missing locally installed binary after an
 ignore-scripts install. Restoring that pinned binary and rerunning Electron
 passed; the remaining static boundary checks also passed. Frozen installation,
 format checks and docs checks passed. No product fix was made for that local
 installation failure.
+
+The 4.0.2 bottom layer passed frozen installation, `pnpm check`,
+`pnpm format:check` and `pnpm run docs check`. Runtime resolution was checked from
+all six direct consumers and both test-helper consumers; they use the same 4.0.2
+runtime. This validates the bottom layer, not the later process implementations.
