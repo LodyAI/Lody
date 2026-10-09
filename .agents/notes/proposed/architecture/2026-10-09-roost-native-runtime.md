@@ -49,6 +49,36 @@ history, Loro control metadata, and transport authorization remain unchanged.
 
 ## Verification
 
+### Platform package compatibility (2026-10-09)
+
+Roost is preparing 0.1.1 as a small main package with six optional platform
+packages. Extend Electron staging to accept both an adjacent 0.1.0 prebuild and
+a matching installed platform package. A foreign target may download only the
+exact platform version declared by the main package, using the existing public
+npm packaging path. Copy the selected binary adjacent to the staged loader so
+the unpacked application still contains one binary and preserves Worker paths.
+
+Staging validation passes for all six targets, real host SQLite reopen, version
+mismatch and failed-fetch preservation. The existing suite adds two behavioral
+cases using real published binaries in both installed and downloaded split layouts;
+all 214 Electron tests pass. Keep the CLI dependency pinned to the
+published 0.1.0 until the user publishes the complete 0.1.1 release; this prepares
+compatibility without making public CI depend on an unpublished version.
+
+Formatting, documentation, type checks, lint and public/platform guards pass.
+A new macOS arm64 directory package through the normal wrapper passes CLI boot,
+native Worker and SQLite reopen probes, retaining exactly one 8,021,248-byte Roost
+binary. This package still uses the pinned 0.1.0; execution of the final split
+0.1.1 bundle under Electron awaits the upstream preparation artifact.
+
+The full local `pnpm check` reaches an unrelated CLI failure: the simulator
+guest-buttons descendant shutdown test raises `kill EPERM` on macOS (3529 CLI
+tests passed, four existing skips). An isolated archive of unchanged HEAD
+`6f5332f` reproduces that exact failure, with four other cases passing. No simulator
+source was changed. Logs: `/private/tmp/lody-roost-split-check.log` and
+`/private/tmp/lody-roost-split-baseline-test.log`. New branch CI is pending; the
+previous CI evidence below refers to the original integration commit.
+
 The actual published tarball integrity matches the prepared release. A clean
 consumer passes signed history batches, SQLite reopen, and encrypted Streams
 loopback tests on Node 24.14 and Electron 43.7.6. These verify the published native
