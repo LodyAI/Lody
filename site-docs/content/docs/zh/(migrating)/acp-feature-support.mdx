@@ -39,31 +39,30 @@ Lody 客户端读到的结构都一致。自定义或注册表里的 ACP Agent �
 ## 支持一览
 
 下表把标准 ACP 能力（前缀 `ACP：`）和 Lody 扩展能力（前缀 `Lody：`）放在一起。九个 provider
-都具备上文所述的 ACP 基线，只有下面这些可选能力会因 provider 而异。
+都具备上文所述的 ACP 基线，只有下面这些可选能力会因 provider 而异。Provider 名称可点击，
+会跳转到对应的运行时或适配器仓库。
 
-| Provider             | ACP：图片 | ACP：内嵌上下文 | ACP：加载/恢复 | ACP：Fork | ACP：附加目录 | ACP：MCP | ACP：登出 | ACP：提问 | Lody：子代理事件 | Lody：会话标题 | Lody：用量 | Lody：速率限制 | Lody：按轮 Fork | Lody：转向 | Lody：任务 | Lody：子代理 | Lody：持久目标 | Lody：上下文压缩 |
-| -------------------- | --------- | --------------- | -------------- | --------- | ------------- | -------- | --------- | --------- | ---------------- | -------------- | ---------- | -------------- | --------------- | ---------- | ---------- | ------------ | -------------- | ---------------- |
-| **Claude Code**      | ✓         | ✓               | ✓              | ✓         | ✓             | HTTP+SSE | ✓         | ✓         | ✓                | ✓              | ✓          | ✓              | ✓               | ✓          | ✓¹         | ◐²           | ✓              | ✓                |
-| **Codex**            | ✓         | ✓               | ✓              | ✓         | ✓             | HTTP     | ✓         | ✓         | ✓                | ✓              | ✓          | ✓              | ✓               | ✓          | ✓¹         | ◐²           | ✓              | ✓                |
-| **Grok**             | 运行时    | 运行时          | 运行时         | ✓         | 运行时        | 运行时   | 运行时    | ✓         | ✓                | ✓              | ✓          | ✓              | ✓               | —          | ✓³         | —            | —              | —                |
-| **Kimi Code**        | ✓         | ✓               | ✓              | ✓         | ✓             | HTTP+SSE | ✓         | ✓         | ✓                | ◐⁴             | ✓          | ✓              | ✓               | —          | ✓¹         | ✓            | —              | ✓                |
-| **Devin**            | 运行时    | 运行时          | 运行时         | 运行时    | 运行时        | 运行时   | 运行时    | ✓         | ✓                | —              | —          | —              | —               | —          | —          | —            | —              | ✓                |
-| **Pi**               | ✓         | ✓               | ✓              | —         | —             | —        | —         | ✓         | ✓                | —              | ✓          | —              | —               | ✓          | —          | ✓            | —              | ✓                |
-| **DeepSeek Harness** | ◐⁵        | —               | —              | —         | —             | HTTP     | —         | ✓         | ✓                | ✓              | ✓          | —              | —               | —          | —          | —            | —              | ✓                |
-| **Bub**              | 运行时    | 运行时          | 运行时         | 运行时    | 运行时        | 运行时   | 运行时    | 运行时    | 运行时           | 运行时         | 运行时     | 运行时         | 运行时          | 运行时     | 运行时     | 运行时       | 运行时         | 运行时           |
-| **Dimcode**          | 运行时    | 运行时          | 运行时         | 运行时    | 运行时        | 运行时   | 运行时    | 运行时    | 运行时           | 运行时         | 运行时     | 运行时         | 运行时          | 运行时     | 运行时     | 运行时       | 运行时         | 运行时           |
+| Provider             | ACP：图片 | ACP：内嵌上下文 | ACP：加载 | ACP：恢复 | ACP：Fork | ACP：附加目录 | ACP：MCP | ACP：登出 | ACP：提问 | Lody：子代理事件 | Lody：会话标题 | Lody：用量 | Lody：速率限制 | Lody：按轮 Fork | Lody：转向 | Lody：任务 | Lody：子代理 | Lody：持久目标 | Lody：上下文压缩 |
+| -------------------- | --------- | --------------- | --------- | --------- | --------- | ------------- | -------- | --------- | --------- | ---------------- | -------------- | ---------- | -------------- | --------------- | ---------- | ---------- | ------------ | -------------- | ---------------- |
+| <a href="https://github.com/LodyAI/acp-extension-claude" target="_blank" rel="noreferrer"><strong>Claude Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-codex" target="_blank" rel="noreferrer"><strong>Codex</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-grok" target="_blank" rel="noreferrer"><strong>Grok</strong></a> | — | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓³ | — | — | — |
+| <a href="https://github.com/LodyAI/acp-extension-kimi" target="_blank" rel="noreferrer"><strong>Kimi Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ◐⁴ | ✓ | ✓ | ✓ | — | ✓¹ | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-devin" target="_blank" rel="noreferrer"><strong>Devin</strong></a> | ✓ | ✓ | ✓ | — | — | ✓ | HTTP+SSE | — | ✓ | ✓ | — | — | — | — | — | — | — | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-pi" target="_blank" rel="noreferrer"><strong>Pi</strong></a> | ✓ | ✓ | ✓ | ✓ | — | — | — | — | ✓ | ✓ | — | ✓ | — | — | ✓ | — | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-dsh" target="_blank" rel="noreferrer"><strong>DeepSeek Harness</strong></a> | ◐⁵ | — | — | — | — | — | HTTP | — | ✓ | ✓ | ✓ | ✓ | — | — | — | — | — | — | ✓ |
+| <a href="https://github.com/bubbuild/bub" target="_blank" rel="noreferrer"><strong>Bub</strong></a> | — | — | ✓ | ✓ | — | — | HTTP+SSE | — | ✓ | — | — | — | — | — | ✓ | — | — | — | — |
+| <a href="https://github.com/arcships/dimcode" target="_blank" rel="noreferrer"><strong>Dimcode</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 图例：
 
-- **✓** —— 适配器声明了该能力（标准 ACP 能力则在 `initialize` 中声明）。
+- **✓** —— provider 声明了该能力（标准 ACP 能力则在 `initialize` 中声明）。
 - **◐** —— 只声明了部分子能力，见下方注释。
-- **—** —— 适配器未声明。
-- **运行时** —— Lody 只是代理或启动官方 / 外部运行时，自己并不添加该能力；是否可用取决于该
-  运行时的版本和配置。在扩展能力列中，`运行时` 表示 Lody 没有提供翻译该能力的适配器。
+- **—** —— provider 未声明。
 
 ### 扩展能力说明
 
-`Lody：`列描述的是 provider 适配器声明了什么。以下是每一列对应的适配器侧能力：
+`Lody：`列描述的是 provider 声明了什么。以下是每一列对应的 provider 侧能力：
 
 - **子代理事件** —— 适配器通过 `_lody/subagents/event` 推送子代理运行的快照、进度和输出。
 - **会话标题** —— 适配器生成标题，并以带 `_meta.lody.titleSource` 的标准
@@ -88,15 +87,16 @@ Lody 客户端读到的结构都一致。自定义或注册表里的 ACP Agent �
    生成标题。
 5. **DeepSeek Harness 图片输入**取决于所选模型。只有当前模型声明支持图片输入时，适配器才会
    开启该能力。
+6. **Dimcode MCP：** Dimcode 声明 Streamable HTTP 和 SSE，但报告不支持 stdio MCP。
 
-`ACP：MCP` 一列中，`HTTP+SSE` 表示适配器声明了两种传输，`HTTP` 表示只声明了 HTTP；stdio 是
-所有 provider 的 ACP 基线。`Devin` 和 `Grok` 两行的标准 ACP 能力来自其官方运行时转发；Lody
-列只显示 Lody 兼容代理额外添加的能力。`Bub` 和 `Dimcode` 是外部 ACP 服务，Lody 只负责启动、
-不为其提供 Lody 扩展适配器，因此它们的 ACP 与扩展能力都由所安装的运行时决定。
+`ACP：MCP` 一列中，`HTTP+SSE` 表示 provider 声明了两种传输，`HTTP` 表示只声明了 HTTP。stdio
+通常是 ACP 的默认 MCP 传输；Dimcode 是注释 6 中的例外。`Devin` 和 `Grok` 的标准 ACP 能力来自
+其官方运行时，Lody 列则显示 Lody 兼容代理额外添加的能力。`Bub` 和 `Dimcode` 是 Lody 启动的
+外部 ACP 服务，它们两行的结果来自这些服务自己的声明，包括它们直接实现的 Lody 扩展。
 
-上表反映 Lody 适配器随版本声明的能力。Lody 会在会话建立时读取协商结果，因此 provider 升级
-后，应用里显示的能力可能先于本页更新。若要查看标准 ACP 实现的独立、带版本的对比，见
-[ACP Wall](https://github.com/wibus-wee/acp-wall)。
+上表反映 Lody 适配器和外部 ACP 服务随版本声明的能力。Lody 会在会话建立时读取协商结果，因此
+provider 升级后，应用里显示的能力可能先于本页更新。若要查看标准 ACP 实现的独立、带版本的对比，
+见 [ACP Wall](https://github.com/wibus-wee/acp-wall)。
 
 ## 下一步
 

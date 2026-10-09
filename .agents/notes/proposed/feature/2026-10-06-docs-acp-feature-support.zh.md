@@ -9,8 +9,9 @@ Language: [English](2026-10-06-docs-acp-feature-support.md)
 从 Codex 或 Claude Code 迁移过来的读者，此前只能翻适配器源码才能知道 Lody 各内置 provider
 支持哪些能力。本提案在两种语言下新增 `(migrating)/acp-feature-support`：先简要说明 ACP 与
 `acp-extension-core` 的 `_meta.lody` 契约，再用一张 provider × 功能矩阵列出标准 ACP 可选
-能力和十项面向用户的 v1 Agent 扩展能力。矩阵来自已发布适配器的能力常量和 `InitializeResponse`，
-是文档快照而非运行时探测，因此 provider 升级后可能滞后，需要维护者重新核对。
+能力和十项面向用户的 v1 Agent 扩展能力。矩阵来自已发布适配器与外部 ACP 服务的能力常量、
+`InitializeResponse` 和源码，是文档快照而非运行时探测，因此 provider 升级后可能滞后，需要
+维护者重新核对。
 
 ## 问题
 
@@ -31,8 +32,11 @@ Language: [English](2026-10-06-docs-acp-feature-support.md)
   provider。
   Lody 行依据适配器能力常量填写（`CLAUDE_LODY_CAPABILITIES`、`CODEX_LODY_CAPABILITIES`、
   `LODY_CAPABILITIES`、`GROK_LODY_CAPABILITIES`、`LODY_EXTENSION_CAPABILITIES`、
-  `initializeResponse()` 以及 Devin 代理）。外部运行时或纯转发的运行时标为 `运行时`，不靠
-  猜测填充。
+  `initializeResponse()` 以及 Devin 代理），标准 ACP 行则依据各适配器的 `InitializeResponse`
+  或外部 ACP 服务的源码。只使用 `✓`、`◐`、`—`，并将 provider 名称链接到对应的运行时或
+  适配器仓库。
+- 把合并的加载/恢复列拆成 `ACP：加载` 和 `ACP：恢复`，避免只支持其中一项的 provider 被写成
+  两者都支持。
 - 链接 [ACP Wall](https://github.com/wibus-wee/acp-wall)，作为标准 ACP 实现的独立、带版本
   的对比。
 - 为这十项面向用户的能力增加扩展能力列说明。两个 provider 内部使用的 Codex key
@@ -43,8 +47,8 @@ Language: [English](2026-10-06-docs-acp-feature-support.md)
 
 1. 把矩阵直接放在现有迁移页里。否决：19 列的表格会把迁移清单埋掉，而且这份矩阵属于迁移
    读者的参考材料。
-2. 没有证据表明不支持时一律标为支持。否决：对于 Lody 不掌握其标准 ACP 支持的外部运行时和
-   代理，`运行时` 更准确。
+2. 对 Lody 只是代理的外部运行时保留 `运行时`。评审后否决：它没有回答该能力到底可不可用。
+   表格现在改为依据 provider 自己的 `initialize` 声明或源码填写。
 3. 构建时逐个探测 provider 生成表格。否决：静态站点构建没有 provider 凭据和运行时；已发布
    的声明是当前可得的事实来源。
 
@@ -52,5 +56,5 @@ Language: [English](2026-10-06-docs-acp-feature-support.md)
 
 - `pnpm run docs status`、`node scripts/docs/main.mjs check`、site-docs 的 `typecheck`、
   `test` 和生产构建均通过；静态浏览器套件仍只有原先两个移动端 no-js 导航超时，没有新增失败。
-- 矩阵是已发布适配器版本当时的快照。provider 升级后，实际协商结果可能在本页重新核对之前就
-  发生变化。
+- 矩阵是已发布适配器与外部 ACP 服务版本当时的快照。provider 升级后，实际协商结果可能在本页
+  重新核对之前就发生变化。

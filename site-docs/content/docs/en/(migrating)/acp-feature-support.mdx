@@ -46,33 +46,29 @@ payloads.
 
 The table combines standard ACP capabilities (prefixed `ACP:`) with Lody extension capabilities
 (prefixed `Lody:`). All nine providers share the ACP baseline described above; only the optional
-capabilities below differ by provider.
+capabilities below differ by provider. Provider names link to the runtime or adapter repository.
 
-| Provider             | ACP: image | ACP: embedded context | ACP: load / resume | ACP: fork | ACP: extra directories | ACP: MCP | ACP: logout | ACP: elicitation | Lody: subagent events | Lody: session title | Lody: usage | Lody: rate limits | Lody: fork at turn | Lody: steering | Lody: tasks | Lody: subagents | Lody: goal | Lody: compaction |
-| -------------------- | ---------- | --------------------- | ------------------ | --------- | ---------------------- | -------- | ----------- | ---------------- | --------------------- | ------------------- | ----------- | ----------------- | ------------------ | -------------- | ----------- | --------------- | ---------- | ---------------- |
-| **Claude Code**      | ✓          | ✓                     | ✓                  | ✓         | ✓                      | HTTP+SSE | ✓           | ✓                | ✓                     | ✓                   | ✓           | ✓                 | ✓                  | ✓              | ✓¹          | ◐²              | ✓          | ✓                |
-| **Codex**            | ✓          | ✓                     | ✓                  | ✓         | ✓                      | HTTP     | ✓           | ✓                | ✓                     | ✓                   | ✓           | ✓                 | ✓                  | ✓              | ✓¹          | ◐²              | ✓          | ✓                |
-| **Grok**             | Runtime    | Runtime               | Runtime            | ✓         | Runtime                | Runtime  | Runtime     | ✓                | ✓                     | ✓                   | ✓           | ✓                 | ✓                  | —              | ✓³          | —               | —          | —                |
-| **Kimi Code**        | ✓          | ✓                     | ✓                  | ✓         | ✓                      | HTTP+SSE | ✓           | ✓                | ✓                     | ◐⁴                  | ✓           | ✓                 | ✓                  | —              | ✓¹          | ✓               | —          | ✓                |
-| **Devin**            | Runtime    | Runtime               | Runtime            | Runtime   | Runtime                | Runtime  | Runtime     | ✓                | ✓                     | —                   | —           | —                 | —                  | —              | —           | —               | —          | ✓                |
-| **Pi**               | ✓          | ✓                     | ✓                  | —         | —                      | —        | —           | ✓                | ✓                     | —                   | ✓           | —                 | —                  | ✓              | —           | ✓               | —          | ✓                |
-| **DeepSeek Harness** | ◐⁵         | —                     | —                  | —         | —                      | HTTP     | —           | ✓                | ✓                     | ✓                   | ✓           | —                 | —                  | —              | —           | —               | —          | ✓                |
-| **Bub**              | Runtime    | Runtime               | Runtime            | Runtime   | Runtime                | Runtime  | Runtime     | Runtime          | Runtime               | Runtime             | Runtime     | Runtime           | Runtime            | Runtime        | Runtime     | Runtime         | Runtime    | Runtime          |
-| **Dimcode**          | Runtime    | Runtime               | Runtime            | Runtime   | Runtime                | Runtime  | Runtime     | Runtime          | Runtime               | Runtime             | Runtime     | Runtime           | Runtime            | Runtime        | Runtime     | Runtime         | Runtime    | Runtime          |
+| Provider             | ACP: image | ACP: embedded context | ACP: load | ACP: resume | ACP: fork | ACP: extra directories | ACP: MCP | ACP: logout | ACP: elicitation | Lody: subagent events | Lody: session title | Lody: usage | Lody: rate limits | Lody: fork at turn | Lody: steering | Lody: tasks | Lody: subagents | Lody: goal | Lody: compaction |
+| -------------------- | ---------- | --------------------- | --------- | ----------- | --------- | ---------------------- | -------- | ----------- | ---------------- | --------------------- | ------------------- | ----------- | ----------------- | ------------------ | -------------- | ----------- | --------------- | ---------- | ---------------- |
+| <a href="https://github.com/LodyAI/acp-extension-claude" target="_blank" rel="noreferrer"><strong>Claude Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-codex" target="_blank" rel="noreferrer"><strong>Codex</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓¹ | ◐² | ✓ | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-grok" target="_blank" rel="noreferrer"><strong>Grok</strong></a> | — | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | ✓³ | — | — | — |
+| <a href="https://github.com/LodyAI/acp-extension-kimi" target="_blank" rel="noreferrer"><strong>Kimi Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ◐⁴ | ✓ | ✓ | ✓ | — | ✓¹ | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-devin" target="_blank" rel="noreferrer"><strong>Devin</strong></a> | ✓ | ✓ | ✓ | — | — | ✓ | HTTP+SSE | — | ✓ | ✓ | — | — | — | — | — | — | — | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-pi" target="_blank" rel="noreferrer"><strong>Pi</strong></a> | ✓ | ✓ | ✓ | ✓ | — | — | — | — | ✓ | ✓ | — | ✓ | — | — | ✓ | — | ✓ | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-dsh" target="_blank" rel="noreferrer"><strong>DeepSeek Harness</strong></a> | ◐⁵ | — | — | — | — | — | HTTP | — | ✓ | ✓ | ✓ | ✓ | — | — | — | — | — | — | ✓ |
+| <a href="https://github.com/bubbuild/bub" target="_blank" rel="noreferrer"><strong>Bub</strong></a> | — | — | ✓ | ✓ | — | — | HTTP+SSE | — | ✓ | — | — | — | — | — | ✓ | — | — | — | — |
+| <a href="https://github.com/arcships/dimcode" target="_blank" rel="noreferrer"><strong>Dimcode</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 Legend:
 
-- **✓** — the adapter declares the capability (or, for standard ACP, advertises it in
-  `initialize`).
+- **✓** — the provider declares the capability (for standard ACP, it advertises it in `initialize`).
 - **◐** — partially declared; see the notes below.
-- **—** — not declared by the adapter.
-- **Runtime** — Lody proxies or launches the official/external runtime and does not add this
-  capability itself; whether it is available depends on that runtime's version and configuration.
-  In the extension columns, `Runtime` means Lody ships no adapter that translates the feature.
+- **—** — not declared by the provider.
 
 ### Extension capability reference
 
-The `Lody:` columns describe what the provider adapter declares. These are the adapter-side
+The `Lody:` columns describe what the provider declares. These are the provider-side
 capabilities behind each column:
 
 - **subagent events** — the adapter streams child-agent snapshots, progress, and output on
@@ -104,18 +100,19 @@ Notes:
    feature; otherwise Lody generates the title itself.
 5. **DeepSeek Harness image input** depends on the selected model. The adapter enables the capability
    only when the active model declares image input.
+6. **Dimcode MCP:** Dimcode advertises Streamable HTTP and SSE but reports stdio MCP as unsupported.
 
-In the `ACP: MCP` column, `HTTP+SSE` means the adapter advertises both transports and `HTTP` means
-it advertises only HTTP; stdio is the ACP baseline for every provider. The `Devin` and `Grok` rows
-cover standard ACP support forwarded from their official runtimes; the Lody columns show what the
-Lody compatibility proxy adds. `Bub` and `Dimcode` are external ACP servers that Lody launches
-without a Lody-extension adapter, so both their ACP and extension support are defined by the
-installed runtime.
+In the `ACP: MCP` column, `HTTP+SSE` means the provider advertises both transports and `HTTP` means
+it advertises only HTTP. Stdio MCP is the usual ACP baseline; Dimcode is the exception in note 6.
+The `Devin` and `Grok` standard ACP columns reflect their official runtimes, while the Lody columns
+show what the Lody compatibility proxy adds. `Bub` and `Dimcode` are external ACP servers launched by
+Lody; their rows reflect what those servers declare themselves, including the Lody extensions they
+implement.
 
-The support information above reflects the capability declarations shipped with Lody's adapters.
-Lody reads the negotiated result at session start, so a provider update can change what appears in
-the app before this page is updated. For an independent, versioned comparison of standard ACP
-implementations, see [ACP Wall](https://github.com/wibus-wee/acp-wall).
+The support information above reflects the capability declarations shipped with Lody's adapters and
+external ACP servers. Lody reads the negotiated result at session start, so a provider update can
+change what appears in the app before this page is updated. For an independent, versioned comparison
+of standard ACP implementations, see [ACP Wall](https://github.com/wibus-wee/acp-wall).
 
 ## Next
 
