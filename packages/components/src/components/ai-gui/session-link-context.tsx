@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useContext } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
+import { openSessionDeepLink } from '@/lib/session-deep-link';
 import { parseSessionLink, type SessionLink } from '@lody/shared/session-link';
 import type { SessionId } from '@lody/shared';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
@@ -20,7 +21,15 @@ const SessionLinkContext = createContext<
   ((target: SessionNavigationTarget & Pick<SessionLink, 'workspaceId'>) => void) | null
 >(null);
 
-export const SessionLinkProvider = SessionLinkContext.Provider;
+export function SessionLinkProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  // Resource links always select their exact target, including in this workspace.
+  // Ordinary related-session navigation may instead restore the last active tab.
+  return (
+    <SessionLinkContext.Provider value={enabled ? openSessionDeepLink : null}>
+      {children}
+    </SessionLinkContext.Provider>
+  );
+}
 
 export function useSessionLinkNavigator() {
   return useContext(SessionLinkContext);

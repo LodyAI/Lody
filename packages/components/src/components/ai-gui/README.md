@@ -46,9 +46,11 @@ the reasoning behind those rules.
   surface. Invariants live in
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
 - A `[Title](lody://session/<id>?workspace=<id>)` link (or legacy `session://<id>`)
-  renders as a conversation chip. `session-link-context.tsx` supplies the Session
-  navigation from `SessionChatInterface`; without it, or on a read-only share, the
-  chip is inert.
+  renders as a conversation chip. `SessionChatInterface` enables
+  `session-link-context.tsx`'s explicit-target deep-link dispatch for both same-
+  and cross-workspace links. Ordinary related-session navigation remains separate
+  so its last-active-tab restoration cannot override a resource destination.
+  Without live navigation, or on a read-only share, the chip is inert.
   Message/plan copy and UI/CLI Markdown exports normalize prose references using
   shared `session-link-export`, preserving code examples and stored history.
   Only a known source workspace supplies a missing ID; anonymous readers do not

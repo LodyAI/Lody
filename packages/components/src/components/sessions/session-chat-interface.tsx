@@ -6577,7 +6577,7 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
-        <SessionLinkProvider value={onNavigateSession ? handleOpenRelatedSession : null}>
+    <SessionLinkProvider enabled={!!onNavigateSession}>
           {isVisible &&
             !preparingWindow &&
             onOpenBrowser &&
