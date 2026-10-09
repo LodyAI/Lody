@@ -1,3 +1,4 @@
+import { memoryEnvironment } from '@/lib/memory-providers';
 import EventEmitter from 'eventemitter3';
 import { clearGitHubTokenEnv } from '@/lib/gh-token-env';
 import { applyNonOwnerShellEnv } from '@/lib/non-owner-shell-env';
@@ -426,6 +427,10 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     this.config.githubCredentialPolicy.allowLocalAuth = allowLocalAuth;
   }
 
+  getMemoryBinding(): SessionConfig['memory'] {
+    return this.config.memory;
+  }
+
   updateEnv(env: Record<string, string | undefined>): void {
     const configEnv = this.config.env ?? {};
     for (const [key, value] of Object.entries(env)) {
@@ -601,6 +606,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           ? await codexProfileSpawnEnvironment({ profile }, env)
           : { env, close: undefined };
         closeBroker = prepared.close;
+        Object.assign(prepared.env, memoryEnvironment(this.config.memory));
         if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
         const executable = resolveDeepSeekHarnessSpawn({
           command: callbacks.command,

@@ -1913,6 +1913,7 @@ export const SessionChatInputArea = memo(
             ? {
                 agentRoleId: selectedAgentRoleItemId,
                 agentRoleRevision: selectedAgentRoleItemRevision,
+                memory: selectedAgentRoleItem?.role.runConfig.memory,
                 agentRoleSnapshot: selectedAgentRoleItem
                   ? snapshotAgentRole(selectedAgentRoleItem.role)
                   : undefined,

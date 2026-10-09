@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { LocalProjectId } from '@lody/shared';
 
 import { buildPrompt } from '../src/session/session-execution-helpers';
 
@@ -9,20 +10,49 @@ describe('session execution prompt helpers', () => {
     expect(prompt).toBe(
       'inspect the UI\n\nUse the available Lody MCP tools when relevant; rely on their tool descriptions for complete, current capabilities and usage guidance.'
     );
-    expect(prompt).not.toContain('lody_upload_images');
-    expect(prompt).not.toContain('lody_session_create');
   });
 
-  it('keeps GitHub worktree instructions without detailed Lody MCP guidance', () => {
+  it('keeps GitHub guidance without opting into first-task branch naming', () => {
     const prompt = buildPrompt('fix the bug', {
       kind: 'github',
       repoFullName: 'owner/repo',
       branch: 'feature',
     });
 
-    expect(prompt).toContain('Name branches based on the task content');
+    expect(prompt).toContain("use GitHub's branch rename flow");
     expect(prompt).toContain('Use the available Lody MCP tools when relevant');
-    expect(prompt).not.toContain('The "lody" MCP server provides tools');
-    expect(prompt).not.toContain('lody_upload_images');
+    expect(prompt).not.toContain('This is the first task in a new independent Lody worktree');
+  });
+
+  it('combines first-task instructions with task references and feedback context for local worktrees', () => {
+    const prompt = buildPrompt(
+      'Fix the checkout observer',
+      { kind: 'local', localProjectId: 'local-1' as LocalProjectId, useWorktree: true },
+      [
+        {
+          type: 'issue',
+          number: 42,
+          title: ' Checkout observer ',
+          url: 'https://github.com/owner/repo/issues/42',
+        },
+      ],
+      ' feedback-1 ',
+      { newWorktree: true }
+    );
+
+    expect(prompt).toContain(
+      'Fix the checkout observer\n\n\n- issue#42: Checkout observer (https://github.com/owner/repo/issues/42)\n'
+    );
+    expect(prompt).toContain('The postId is feedback-1.');
+    expect(prompt).toContain('Before starting the task, inspect the current Git branch.');
+    expect(prompt).toContain('session/<id> or lody/<id>');
+    expect(prompt).toContain('git branch -m <name>');
+    expect(prompt).toContain('Keep an existing descriptive task branch unchanged.');
+    expect(prompt).toContain(
+      'never copy credentials, secrets, or other sensitive input into a Git ref'
+    );
+    expect(prompt).toContain('do not force-overwrite another branch');
+    expect(prompt).toContain('If renaming fails, briefly report it and continue the task.');
+    expect(prompt).not.toContain('gh pr create');
   });
 });

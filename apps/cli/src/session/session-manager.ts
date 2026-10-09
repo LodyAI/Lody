@@ -269,7 +269,8 @@ function createDeferred<T>(): Deferred<T> {
 function buildSessionPreparationCompatibility(
   launchSource: Partial<SessionLaunchConfig> | null | undefined,
   mcpServerIds: readonly McpServerId[] | undefined,
-  configOptionValues: SessionConfig['configOptionValues']
+  configOptionValues: SessionConfig['configOptionValues'],
+  memory?: SessionConfig['memory']
 ) {
   return {
     launch: buildSessionLaunchConfig({
@@ -279,6 +280,7 @@ function buildSessionPreparationCompatibility(
       env: launchSource?.env,
     }),
     runConfig: normalizeSessionPreparationRunConfigForDedup({
+      memory,
       mcpServerIds: mcpServerIds ? [...mcpServerIds] : undefined,
       configOptionValues,
     }),
@@ -313,6 +315,7 @@ export interface ISession {
   createAgent(config: CreateAgentConfig): Promise<string>;
   getAcpCapabilities?(): AcpCapabilitiesResult | null;
   getAcpCapabilitySourceVersion?(): string | null;
+  getMemoryBinding?(): SessionConfig['memory'];
   getWorkdir(): string;
   /**
    * Host-side working directory for file operations.
@@ -675,7 +678,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         buildSessionPreparationCompatibility(
           current.config,
           resource.config.mcpServerIds,
-          resource.config.configOptionValues
+          resource.config.configOptionValues,
+          resource.config.memory
         )
       )
     ) {
@@ -742,7 +746,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const compatibility = buildSessionPreparationCompatibility(
       config,
       config.mcpServerIds,
-      config.configOptionValues
+      config.configOptionValues,
+      config.memory
     );
     const claim = this.preparationService.claim({
       sessionId,
@@ -769,7 +774,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             buildSessionPreparationCompatibility(
               current.config,
               config.mcpServerIds,
-              config.configOptionValues
+              config.configOptionValues,
+              config.memory
             )
           )
         );
@@ -1013,6 +1019,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentCliType: spec.cliType,
       agentType: spec.agentType,
       configOptionValues: spec.runConfig?.configOptionValues,
+      memory: spec.runConfig?.memory,
       mcpServerIds: spec.runConfig?.mcpServerIds ?? [],
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
@@ -1032,7 +1039,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const compatibility = buildSessionPreparationCompatibility(
       config,
       config.mcpServerIds,
-      config.configOptionValues
+      config.configOptionValues,
+      config.memory
     );
     await this.prepareGitHubRepoSessionConfig(config);
     signal.throwIfAborted();
@@ -2251,6 +2259,15 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return session;
   }
 
+  /** Called only between prompts under the execution service's turn ownership. */
+  async retireSessionForReconfiguration(session: ISession): Promise<void> {
+    if (this.sessions.get(session.sessionId) !== session)
+      throw new Error('Session changed before reconfiguration');
+    // Reconfiguration is not agent death: keep the new turn's history owner alive.
+    this.detachSession(session);
+    await session.terminate(true);
+  }
+
   async terminateSession(sessionId: SessionId, force: boolean = false): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -2468,8 +2485,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   /**
    * Stop publishing a Session instance's lifecycle events and drop it from the
    * live map. Only for an instance that was registered by `createSessionInner`
-   * but never reached a caller — its creation failed, or its create was
-   * abandoned — so from the outside it never existed. Keyed by instance, not session id, because a
+   * but never reached a caller, or retired between prompts for reconfiguration.
+   * The owning execution path handles replacement and failures. Keyed by instance, not session id, because a
    * recovery path may already be creating the replacement under the same id.
    */
   private detachSession(session: ISession): void {

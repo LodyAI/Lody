@@ -4,6 +4,7 @@
  * readiness, the same Electron save/clipboard bridge, and the same failures.
  */
 import { getImagePreviewExportBridge } from './image-preview-export';
+import { isNativeAppShell } from './native-platform';
 
 function pinOrderedListValues(element: HTMLElement): () => void {
   const originals = new Map<HTMLLIElement, string | null>();
@@ -86,12 +87,13 @@ export async function copyShareImage(element: HTMLElement): Promise<void> {
  * from (a session title, a workspace name); `fallback` is the surface's own
  * stem, used when the title is empty or sanitizes away to nothing.
  *
- * Resolves `{ saved: false }` when the user dismissed the native save dialog.
+ * Resolves `{ saved: false }` when the user dismissed the native save/share dialog.
  * That is not a failure — nothing went wrong and nothing is to be reported — but
  * it is not a save either, and a caller that treats the two alike will tidy the
  * surface away under someone who was only backing out of the file picker. A
  * browser download has no cancel signal to read: the browser owns the transfer
  * from the click onward, so that path always reports a save.
+ * On native mobile, a save means completed OS handoff, not proof of an album write.
  */
 export async function exportShareImage(
   element: HTMLElement,
@@ -111,6 +113,17 @@ export async function exportShareImage(
     const result = await bridge.saveAs({ fileName, bytes: await blob.arrayBuffer() });
     if (!result.saved && !result.canceled) throw new Error(result.error || 'Image save failed');
     return { saved: result.saved === true };
+  }
+
+  if (isNativeAppShell()) {
+    // WKWebView cannot save a blob download. Give the OS an actual PNG file so
+    // its share sheet can offer image actions, including Save Image on iOS.
+    const { shareFileBytesNatively } = await import('./session-file-native-save');
+    const { shared } = await shareFileBytesNatively(
+      fileName,
+      new Uint8Array(await blob.arrayBuffer())
+    );
+    return { saved: shared };
   }
 
   const url = URL.createObjectURL(blob);

@@ -4,6 +4,12 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  editSessionRunConfigDraftAtom,
+  registerSessionRunConfigDraftLeaseAtom,
+  sessionRunConfigDraftsAtom,
+  setSessionRunConfigDraftAccountAtom,
+} from '../src/atoms/session-run-config-drafts';
 
 vi.mock('@/lib/auth-bootstrap', () => ({
   readAuthBootstrapSnapshot: () => null,
@@ -63,6 +69,21 @@ function createDeferred<T>() {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function editRunConfigDraft(store: Store, workspaceId: string, accountId = 'user-1') {
+  store.set(setSessionRunConfigDraftAccountAtom, accountId);
+  const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
+    accountId,
+    workspaceId,
+    sessionId: 'session-1',
+    targetKey: 'codex',
+  });
+  store.set(editSessionRunConfigDraftAtom, {
+    lease,
+    edit: { type: 'config', configId: 'fast', value: false },
+  });
+  return lease;
 }
 
 function OrganizationProbe({ targetSlug }: { targetSlug: string }) {
@@ -253,6 +274,8 @@ describe('useOrganization setActive dedupe', () => {
   });
 
   it('publishes the fallback after delete success when no newer writer intervenes', async () => {
+    const removed = editRunConfigDraft(store, 'workspace-old');
+    editRunConfigDraft(store, 'workspace-target');
     organizationMocks.deleteOrganization.mockResolvedValueOnce({
       data: { id: 'workspace-old' },
       error: null,
@@ -265,9 +288,15 @@ describe('useOrganization setActive dedupe', () => {
 
     expect(store.get(currentWorkspaceSlugAtom)).toBe('target-workspace');
     expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-target');
+    expect(
+      [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => scope.workspaceId)
+    ).toEqual(['workspace-target']);
+    expect(removed.active).toBe(false);
   });
 
   it('rolls back after leave failure when no newer writer intervenes', async () => {
+    const lease = editRunConfigDraft(store, 'workspace-old');
+    const drafts = store.get(sessionRunConfigDraftsAtom);
     organizationMocks.leaveOrganization.mockResolvedValueOnce({
       data: null,
       error: { message: 'leave failed' },
@@ -281,6 +310,8 @@ describe('useOrganization setActive dedupe', () => {
 
     expect(store.get(currentWorkspaceSlugAtom)).toBe('old-workspace');
     expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-old');
+    expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
+    expect(lease.active).toBe(true);
   });
 
   it('does not switch Better Auth or replace identity when delete resolves after navigation', async () => {

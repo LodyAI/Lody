@@ -48,6 +48,13 @@ Half a PNG is a corrupt file and half a JSON is a syntax error.
 
 ## Local resolution and resource IO are separate
 
+Both preview methods use MessageHandler's read-only workspace resolver. A chat
+whose runtime has been evicted resolves from its durable metadata to the existing
+`<LodyDataDir>/chats/<ownerSessionId>` directory. Child tabs share their parent's
+directory. Missing or invalid owner metadata and unavailable project/worktree
+roots never fall back to another chat directory. This neither starts an agent nor
+activates Code Collab; see the [cold-chat fix](../../../../../.agents/notes/implemented/bug-fix/2026-10-09-cold-chat-file-preview-workspace.md).
+
 `file/resolve-local` resolves the session owner and canonical file path without
 reading contents. Electron's `local-file-resource.ts` provides small full text for
 editing and opaque resource URLs for paged text or streaming images. Per-read budgets,

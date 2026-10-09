@@ -762,6 +762,11 @@ is the second part here on no rung and the one that is not a film — what it
 stands in for is opaque, so the fallback takes a **gray**, which is what the
 rules reserve the gray ramp for: a thing with no role.
 
+`ThemeRoot` binds the fallback colours to its palette. A custom product palette
+scope also applies `avatarPaletteTheme` from `@lody/ui/avatar/avatar.tokens.stylex`
+on the scope element so the fallback uses that palette rather than inherited
+colours resolved at the document root.
+
 ```tsx
 <Avatar.Root size="small">
   <Avatar.Image src={user.image} alt={user.name} />

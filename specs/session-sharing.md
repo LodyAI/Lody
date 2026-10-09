@@ -97,6 +97,18 @@ decryption. An update preserves it.
 Reset rotates it; revoke disables every deployment. Neither operation can recall
 bytes already downloaded.
 
+Sharing errors identify the failed operation and offer a next step. Known permission,
+quota, stale-revision, missing-credential, content-limit and source-loading failures
+use specific localized messages with applicable numeric size/count ceilings. Unknown failures retain the operation context;
+raw exceptions, conversation content and credentials never become error copy.
+A lost publish/reset/revoke response is an uncertain outcome, not proof that the
+operation failed. Retrying publication preserves the frozen package and request
+identity. Manual clipboard failure leaves the link available for manual copying.
+
+New and updated shares allow at most 64 images, each at most 20 MB (20,000,000 bytes).
+This image policy is independent of the 32 MiB conversation-history limit. Already
+published packages remain readable under the previous format bounds.
+
 ## Deployment consistency
 
 A client freezes the complete package before upload, and only a human action in

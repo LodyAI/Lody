@@ -367,6 +367,7 @@ describe('LodyOperationStore', () => {
               modeId: 'default',
               modelId: 'gpt-5',
               configOptionValues: { fast: true },
+              memory: { providerId: 'nowledge-mem', memoryId: 'reviewer' },
               inheritSessionDefaults: false as const,
             },
           ],
@@ -379,6 +380,7 @@ describe('LodyOperationStore', () => {
           modeId: 'default',
           modelId: 'gpt-5',
           configOptionValues: { fast: true },
+          memory: { providerId: 'nowledge-mem', memoryId: 'reviewer' },
           inheritSessionDefaults: false,
         },
       ]);

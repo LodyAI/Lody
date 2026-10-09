@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { RoleMemoryPicker } from './memory-setting';
+import { useEffect, useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +8,7 @@ import { getServerNow, type AgentRole, type AgentRoleId, type MachineId } from '
 import { userAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
+import { buildAcpSelectorOptions } from '@/components/shared/acp-selector-options';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { useDialogExitSnapshot } from '@/hooks/use-dialog-exit-snapshot';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
@@ -16,11 +18,13 @@ import {
   buildAgentRoleFormValue,
   buildAgentRoleFromForm,
   buildAgentRoleRunConfig,
+  carryAgentRoleOptionsToModel,
   findAgentRoleRunConfigIssues,
   validateAgentRoleForm,
   type AgentRoleFormValue,
 } from '@/lib/agent-role-form';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
+import { Tabs } from '@lody/ui/tabs';
 import { Dialog } from '@/ui/dialog';
 import { AgentRoleForm } from './agent-role-form';
 import { useSettingsPane } from './settings-page-header';
@@ -94,6 +98,11 @@ export function AgentRoleEditorDialog({
   // panel fades out with its form rather than emptying first.
   const { shown: editor, onOpenChangeComplete } = useDialogExitSnapshot(openEditor);
 
+  const [tab, setTab] = useState<'configuration' | 'memory' | 'team'>('configuration');
+  const editorId = openEditor?.mode === 'edit' ? openEditor.role.id : openEditor?.roleId;
+  useEffect(() => {
+    setTab('configuration');
+  }, [editorId]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -118,20 +127,23 @@ export function AgentRoleEditorDialog({
     () => machineAgentConfigs.find((config) => config.id === editor?.value.agentConfigId),
     [editor?.value.agentConfigId, machineAgentConfigs]
   );
+  const selectorTarget = selectedAgentConfig
+    ? {
+        configId: selectedAgentConfig.id,
+        cliType: selectedAgentConfig.cliType,
+        agentType: selectedAgentConfig.agentType,
+        runtimeOverrides: selectedAgentConfig.runtimeOverrides,
+        machine: selectedMachineId ? (machines.get(selectedMachineId) ?? null) : null,
+      }
+    : undefined;
   const selectorOptions = useAcpSelectorOptions(
-    selectedAgentConfig
-      ? {
-          configId: selectedAgentConfig.id,
-          cliType: selectedAgentConfig.cliType,
-          agentType: selectedAgentConfig.agentType,
-          // A Role pins its model: the effort ladder must follow the model
-          // being edited, not the probe-time current one, so the picker and
-          // the compatibility check agree on the same ladder.
-          selectedModelId: editor?.value.modelId ?? null,
-          runtimeOverrides: selectedAgentConfig.runtimeOverrides,
-          machine: selectedMachineId ? (machines.get(selectedMachineId) ?? null) : null,
-        }
-      : undefined
+    selectorTarget && {
+      ...selectorTarget,
+      // A Role pins its model: the effort ladder must follow the model
+      // being edited, not the probe-time current one, so the picker and
+      // the compatibility check agree on the same ladder.
+      selectedModelId: editor?.value.modelId ?? null,
+    }
   );
 
   // A Role pins concrete values, so as soon as an agent config's capabilities
@@ -219,6 +231,7 @@ export function AgentRoleEditorDialog({
         width={SETTINGS_EDITOR_DIALOG_WIDTH}
         centerOn={settingsPane}
         className={SETTINGS_EDITOR_DIALOG_LAYOUT}
+        style={{ height: 'min(680px, 88dvh)' }}
       >
         <Dialog.Header>
           <Dialog.Title>
@@ -228,12 +241,48 @@ export function AgentRoleEditorDialog({
           </Dialog.Title>
           <Dialog.Description>{t('settings.agentRoles.dialogDescription')}</Dialog.Description>
         </Dialog.Header>
+        <Tabs.Root
+          value={tab}
+          onValueChange={(value) => setTab(value as 'configuration' | 'memory' | 'team')}
+        >
+          <Tabs.List>
+            <Tabs.Tab value="configuration">{t('settings.agentRoles.configurationTab')}</Tabs.Tab>
+            <Tabs.Tab value="memory">{t('settings.agentRoles.form.memory')}</Tabs.Tab>
+            <Tabs.Tab value="team">{t('settings.agentRoles.teamTab')}</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
         {editor && editorValue ? (
           <AgentRoleForm
+            tab={tab}
             value={editorValue}
+            memoryPicker={
+              editorValue.machineId ? (
+                <RoleMemoryPicker
+                  key={editorValue.machineId}
+                  machineId={editorValue.machineId}
+                  value={editorValue.memory}
+                  onChange={(memory) => {
+                    if (openEditor) onChange({ ...openEditor, value: { ...editorValue, memory } });
+                  }}
+                />
+              ) : undefined
+            }
             // A panel fading out is not edited: a change there would reopen it.
             onChange={(value) => {
-              if (openEditor) onChange({ ...openEditor, value });
+              if (!openEditor) return;
+              const modelChanged =
+                value.agentConfigId === editorValue.agentConfigId &&
+                value.modelId !== editorValue.modelId;
+              const configOptionValues = modelChanged
+                ? carryAgentRoleOptionsToModel(
+                    value.configOptionValues,
+                    selectorOptions.configOptionSelectors,
+                    buildAcpSelectorOptions(
+                      selectorTarget && { ...selectorTarget, selectedModelId: value.modelId }
+                    ).configOptionSelectors
+                  )
+                : value.configOptionValues;
+              onChange({ ...openEditor, value: { ...value, configOptionValues } });
             }}
             machines={machineOptions}
             agentConfigs={machineAgentConfigs.map((config) => ({

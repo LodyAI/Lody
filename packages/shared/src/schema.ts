@@ -128,11 +128,12 @@ export const parseRateLimitEntryKey = (
  */
 export type InitializingStage = 'git-clone' | 'managed-runtime' | 'acp' | 'resuming';
 export type SessionRunningActivity = 'image_generation';
+export type SessionRunningPhase = 'finalizing';
 export type PermissionRequestKind = 'permission' | 'ask_user_question';
 
 export type SessionStatus =
   | { type: 'idle' }
-  | { type: 'running'; activity?: SessionRunningActivity }
+  | { type: 'running'; activity?: SessionRunningActivity; phase?: SessionRunningPhase }
   | { type: 'requestPermission' }
   | {
       type: 'initializing';
@@ -582,6 +583,7 @@ const acpSessionConfigSchema = schema
       /** Config option values (configId → value) for setSessionConfigOption */
       configOptionValues: schema.Any({ required: false }),
       /** Workspace MCP catalog ids selected for this session (string[]). */
+      memory: schema.Any({ required: false }),
       mcpServerIds: schema.Any({ required: false }),
       /** Agent Role selected for this Turn; null is explicit None. */
       agentRoleId: agentRoleIdSchema,

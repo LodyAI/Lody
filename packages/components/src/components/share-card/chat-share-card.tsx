@@ -1,6 +1,9 @@
 import type { CSSProperties, ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
+import { scopedConversationTheme } from '@/components/ai-gui/conversation.tokens.stylex';
+import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
 import { ensureShareThemeScopes } from '@/components/share-theme-scope';
 import lodyLogo from '@/assets/lody-icon.png';
 
@@ -304,7 +307,13 @@ export function ChatShareCard({
   const signOffOnMat = backdrop !== 'none' && matPx >= MIN_SIGN_OFF_MAT;
   // Injects the scoped theme rules before first paint; idempotent no-op after.
   ensureShareThemeScopes();
-  const themeScopeClass = theme === 'light' ? 'light-scope' : 'dark-scope';
+  const themeScopeClass = cn(
+    theme === 'light' ? 'light-scope' : 'dark-scope',
+    stylex.props(
+      theme === 'light' ? productLightPalette : productDarkPalette,
+      scopedConversationTheme
+    ).className
+  );
   const captionParams = meta?.params?.filter((param) => param.trim().length > 0) ?? [];
 
   const card = (

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+import React, { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { atom, createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -65,8 +65,30 @@ vi.mock('@/providers/create-workspace-runtime', () => ({ createWorkspaceRuntime:
 
 import { RuntimeProvider } from '../src/providers/runtime-provider';
 import { createWorkspaceRuntime } from '../src/providers/create-workspace-runtime';
-import { currentWorkspaceSlugAtom } from '../src/atoms';
+import { currentWorkspaceSlugAtom, userAtom } from '../src/atoms';
 import { runtimeAtom } from '../src/atoms/runtime';
+import {
+  editSessionRunConfigDraftAtom,
+  registerSessionRunConfigDraftLeaseAtom,
+  sessionRunConfigDraftAccountAtom,
+  sessionRunConfigDraftsAtom,
+} from '../src/atoms/session-run-config-drafts';
+import { signOutWithoutRedirect, type LodyAuthClient } from '../src/lib/auth';
+import { useSessionRunConfigDraft } from '../src/hooks/use-session-run-config-draft';
+
+function editDraft(store: ReturnType<typeof createStore>, accountId = 'local:user') {
+  const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
+    accountId,
+    workspaceId: 'local:workspace',
+    sessionId: 'session-1',
+    targetKey: 'codex',
+  });
+  store.set(editSessionRunConfigDraftAtom, {
+    lease,
+    edit: { type: 'config', configId: 'fast', value: false },
+  });
+  return lease;
+}
 
 function runtimeFixture() {
   return {
@@ -123,6 +145,47 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(prepared.disposed).toBe(false);
   });
 
+  it('establishes an editable real draft lease after StrictMode owner replay', async () => {
+    let selection!: ReturnType<typeof useSessionRunConfigDraft>;
+    function DraftProbe() {
+      selection = useSessionRunConfigDraft(
+        {
+          accountId: 'local:user',
+          workspaceId: 'local:workspace',
+          sessionId: 'strict-session',
+          targetKey: 'codex',
+        },
+        true
+      );
+      return null;
+    }
+    expect(store.get(sessionRunConfigDraftAccountAtom).accountId).toBeNull();
+    const app = (
+      <StrictMode>
+        <Provider store={store}>
+          <RuntimeProvider>
+            <DraftProbe />
+          </RuntimeProvider>
+        </Provider>
+      </StrictMode>
+    );
+    await act(async () => {
+      root.render(app);
+    });
+    await act(async () => {
+      selection.selectConfigOption('fast', false);
+    });
+    expect(selection.edits.configOptions.fast).toBe(false);
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(1);
+    await act(async () => {
+      root.render(app);
+    });
+    expect(selection.edits.configOptions.fast).toBe(false);
+    expect(selection.captureForSend({ configOptionValues: { fast: false } })).toBeTypeOf(
+      'function'
+    );
+  });
+
   it('retains initialization already in flight when claimed early', async () => {
     let complete!: (runtime: never) => void;
     vi.mocked(createWorkspaceRuntime).mockReturnValue(
@@ -143,6 +206,8 @@ describe('RuntimeProvider warm workspace preparation', () => {
 
   it('disposes the prepared runtime when the route changes scope', async () => {
     await render();
+    const lease = editDraft(store);
+    const drafts = store.get(sessionRunConfigDraftsAtom);
     const replacement = runtimeFixture();
     vi.mocked(createWorkspaceRuntime).mockResolvedValue(replacement as never);
     await act(async () => {
@@ -150,6 +215,63 @@ describe('RuntimeProvider warm workspace preparation', () => {
     });
     expect(prepared.disposed).toBe(true);
     expect(store.get(runtimeAtom)).toBe(replacement);
+    expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
+    expect(lease.active).toBe(true);
+  });
+
+  it('retires draft ownership on account change and provider termination', async () => {
+    await render();
+    const lease = editDraft(store);
+    const owner = store.get(sessionRunConfigDraftAccountAtom);
+    await render();
+    expect(store.get(sessionRunConfigDraftAccountAtom)).toBe(owner);
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(1);
+
+    await act(async () => {
+      store.set(userAtom, { id: 'another-user' } as never);
+    });
+    expect(store.get(sessionRunConfigDraftAccountAtom).accountId).toBe('another-user');
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+    expect(lease.active).toBe(false);
+    store.set(editSessionRunConfigDraftAtom, {
+      lease,
+      edit: { type: 'config', configId: 'fast', value: true },
+    });
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+
+    const replacement = editDraft(store, 'another-user');
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(1);
+    await act(async () => {
+      root.render(null);
+    });
+    expect(store.get(sessionRunConfigDraftAccountAtom).accountId).toBeNull();
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+    expect(replacement.active).toBe(false);
+  });
+
+  it('clears the owning store at logout intent before async sign-out settles', async () => {
+    await render();
+    const lease = editDraft(store);
+    let finishSignOut!: () => void;
+    const authClient = {
+      signOut: () =>
+        new Promise<void>((resolve) => {
+          finishSignOut = resolve;
+        }),
+    } as unknown as LodyAuthClient;
+    const signingOut = signOutWithoutRedirect(authClient);
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+    expect(store.get(sessionRunConfigDraftAccountAtom).accountId).toBeNull();
+    expect(lease.active).toBe(false);
+    store.set(editSessionRunConfigDraftAtom, {
+      lease,
+      edit: { type: 'config', configId: 'fast', value: true },
+    });
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(0);
+    await render();
+    expect(store.get(sessionRunConfigDraftAccountAtom).accountId).toBeNull();
+    finishSignOut();
+    await signingOut;
   });
 
   it.each(['ordinary', 'cloud', 'missing identity'])(

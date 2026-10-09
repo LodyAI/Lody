@@ -37,3 +37,17 @@ opening Settings. A conditional writer transaction fences delayed probe results
 against edits and deletion, then uses the same durability/upload split. See the
 [schema reconciliation Spec](../../specs/agent-role-schema-reconciliation.md) for
 which options may be removed and which pins remain user decisions.
+
+A Role can also carry a machine-scoped memory identity reference. The daemon's
+Provider adapter owns commands and environment mapping; neither memory contents
+nor credentials enter the workspace catalog. A new turn freezes the reference,
+and switching it retires the old ACP process without publishing an agent-death
+event against the new turn. See the [memory Spec](../../specs/agent-role-memory.md).
+
+Memory associations are machine-document rows keyed by
+`['memory', providerId, memoryId]`, separate from workspace Role references.
+They store a display name and description, not memory contents. The same writer
+durability/upload split applies. Linking is put-if-absent; editing cannot resurrect
+a deleted row. Deleting an association leaves the external identity and existing
+Role/turn references intact. See the
+[association decision](../notes/implemented/feature/2026-10-05-memory-association-catalog.md).

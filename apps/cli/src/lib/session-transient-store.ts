@@ -143,7 +143,6 @@ export interface SessionState {
   imageGenerationUploads: Map<string, Promise<void>>;
   imageGenerationUploadedCallIds: Set<string>;
   imageGenerationActiveCallIds: Set<string>;
-  imageGenerationActivityStatusChain: Promise<void>;
 
   // ── Permission timing (per-turn, accumulated) ───────────────────────────
   permissionWaitMs: number;
@@ -183,7 +182,6 @@ function createSessionState(): SessionState {
     imageGenerationUploads: new Map(),
     imageGenerationUploadedCallIds: new Set(),
     imageGenerationActiveCallIds: new Set(),
-    imageGenerationActivityStatusChain: Promise.resolve(),
     permissionWaitMs: 0,
     pendingUnread: false,
     lastActivityMs: Date.now(),

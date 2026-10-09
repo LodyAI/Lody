@@ -217,3 +217,28 @@ describe('agent role availability', () => {
     ).toEqual({ kind: 'unknown' });
   });
 });
+
+it('preserves memory references, revises identity changes, and gates older machines', () => {
+  const binding = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+  const configured = role({ runConfig: { memory: binding } });
+  expect(normalizeAgentRole(configured)?.runConfig.memory).toEqual(binding);
+  expect(
+    isAgentRoleContentEqual(
+      configured,
+      role({ runConfig: { memory: { ...binding, memoryId: 'designer' } } })
+    )
+  ).toBe(false);
+  expect(resolveAgentRoleAvailability(configured, context())).toEqual({
+    kind: 'unavailable',
+    reason: 'memory_unsupported',
+  });
+  expect(
+    resolveAgentRoleAvailability(
+      configured,
+      context({ memoryProviderMachineIds: new Set([configured.machineId]) })
+    )
+  ).toEqual({ kind: 'available' });
+  expect(
+    normalizeAgentRole({ ...configured, runConfig: { memory: { providerId: 'nowledge-mem' } } })
+  ).toBeUndefined();
+});

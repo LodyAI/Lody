@@ -11,7 +11,7 @@ import {
 import { VaulDrawerBody } from '@/components/mobile/vaul-drawer-edge-back-zone';
 import { getSessionDetailTouchIconButtonClassName } from '@/lib/session-detail-a11y';
 import { getBasename } from '@/lib';
-import { isNativeAppShell } from '@/lib/native-platform';
+import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { Button } from '@lody/ui/button';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 
@@ -36,6 +36,7 @@ export function MobileFileViewerDrawer({
 }: MobileFileViewerDrawerProps) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const isNativeIOS = isNativeIOSAppShell();
   const fileName = getBasename(filePath) || filePath;
   const menuInfoRows: MobileSessionMenuInfoRow[] = [
     {
@@ -70,8 +71,9 @@ export function MobileFileViewerDrawer({
     <>
       <Drawer
         direction="right"
-        // The shared Drawer selects live viewport insets on non-iOS native shells.
-        repositionInputs={isNativeAppShell()}
+        // iOS uses the host's keyboard inset; other shells and browsers use
+        // the live viewport. Vaul must not also cache/resize the editor height.
+        repositionInputs={!isNativeIOS}
         open={open}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setMenuOpen(false);
@@ -81,6 +83,7 @@ export function MobileFileViewerDrawer({
         <DrawerContent
           forceMount
           className="inset-0 w-full! max-w-none! rounded-none border-0 border-l-0!"
+          style={isNativeIOS ? { bottom: 'var(--native-keyboard-height, 0px)' } : undefined}
           data-sidebar-swipe-open-disabled
         >
           <DrawerTitle className="sr-only">{fileName}</DrawerTitle>

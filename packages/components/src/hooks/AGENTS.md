@@ -12,9 +12,22 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 - A cached session renders in the frame after its click: no promise tick,
   effect-only state or deferred setState before its first cycle.
 
+## Sharing errors
+
+- Keep error operation context independent of React progress state (which resets in
+  `finally`). `lib/session-share-errors.ts` maps only known codes to localized advice;
+  never display raw errors or claim a lost mutation response proves failure.
+
 ## Session, auth, and app shell
 
+- Session ACP catalogs use the bound Provider's runtime overrides.
+
 - History uses SessionData commands.
+- Existing-session run-config drafts store only edited fields, scoped to account,
+  workspace and session. Only successful local admission retires captured field
+  generations; remote Turns never consume them. Never retain history IDs or empty
+  visited-session entries. Deletion/account teardown invalidates edit callbacks;
+  navigation preserves intent. [Contract](../../../../specs/session-run-config-drafts.md).
 - Held-send config is a session/runtime-scoped input to selection, never a stored
   resolved selection. Keep its logical Turn fence across history/queue handoff;
   next-draft edits win and attachment progress does not rebuild the catalog.

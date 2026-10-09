@@ -55,11 +55,18 @@ export class SessionReadStatePage {
     await expect(this.page).toHaveURL(this.sessionRoutePattern(secondSessionId));
     const row = this.row(firstSessionId);
     const indicator = row.locator('[data-session-row-indicator]');
-    if (await indicator.isVisible()) return;
     await this.openRowMenu(row);
-    await this.page
-      .getByRole('menuitem', { name: /^(Mark as unread|标记为未读)$/u })
-      .dispatchEvent('click');
+    await expect(this.page.getByRole('menu')).toBeVisible();
+    const markUnread = this.page.getByRole('menuitem', {
+      name: /^(Mark as unread|标记为未读)$/u,
+    });
+    // The indicator also represents active work, sending, and permission state.
+    // The menu action is the observable contract for the current read state.
+    if ((await markUnread.count()) === 0) {
+      await this.page.keyboard.press('Escape');
+      return;
+    }
+    await markUnread.dispatchEvent('click');
     await expect(indicator).toBeVisible();
   }
 

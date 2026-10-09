@@ -3,6 +3,10 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 Parent [module rules](../AGENTS.md) apply.
 
+Main authentication uses `auth-fetch.ts` with Electron Chromium networking after
+app readiness. Preserve Better Auth cookie hooks and cancellation; never bypass
+certificate verification. Behavior: [login Spec](../../../../specs/desktop-browser-login.md).
+
 ## Diagnostics
 
 Main-process `console` output, lifecycle, and embedded-CLI supervision reach the

@@ -20,6 +20,19 @@ worktree directories. Their branches remain. A week later Alice restores one Ses
 its worktree is recreated from the preserved branch. She deletes the other; nothing
 further happens on disk.
 
+## Preparation handoff
+
+A user can send while a draft preparation is being cancelled, replaced, or failing.
+Before formal execution or another preparation reuses that Session's workspace,
+the daemon must finish releasing the old preparation, including resources whose
+creation returns after cancellation. Removing a preparation from the available
+pool does not mean its cleanup has completed. A late cleanup must never remove
+the workspace adopted or recreated for execution. The wait is scoped to the
+Session; unrelated Sessions need not wait for it.
+
+This handoff concerns unadopted speculative resources. It does not change the
+archive and restore retention contract below.
+
 ## Responsibilities
 
 The daemon that owns a machine is the only actor that touches that machine's disk.

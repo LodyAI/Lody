@@ -136,7 +136,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     if (config.kind() !== 'Map') return undefined;
     const configMap = config as LoroMap;
     const value = { ...configMap.getShallowValue() } as Record<string, unknown>;
-    for (const key of ['mcpServerIds', 'configOptionValues'] as const) {
+    for (const key of ['memory', 'mcpServerIds', 'configOptionValues'] as const) {
       if (value[key] === undefined) continue;
       const field = configMap.get(key);
       value[key] = isContainer(field) ? (field as LoroList).toJSON() : field;

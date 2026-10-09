@@ -152,6 +152,27 @@ class WinstonLogger implements Logger {
   private winston: winston.Logger;
   private config: LoggerConfig;
 
+  static routeToStderr(logger: Logger): () => void {
+    if (!(logger instanceof WinstonLogger)) return () => {};
+    const restore: Array<() => void> = [];
+    for (const transport of logger.winston.transports) {
+      if (!(transport instanceof winston.transports.Console)) continue;
+      const previous = transport.stderrLevels;
+      // Winston stores this as a level-keyed object despite its array declaration.
+      Reflect.set(
+        transport,
+        'stderrLevels',
+        Object.fromEntries(Object.keys(LOG_LEVELS).map((level) => [level, true]))
+      );
+      restore.push(() => {
+        transport.stderrLevels = previous;
+      });
+    }
+    return () => {
+      restore.forEach((reset) => reset());
+    };
+  }
+
   constructor(config: LoggerConfig = {}, childWinston?: winston.Logger) {
     this.config = { ...config };
     this.winston = childWinston ?? this.createWinstonLogger();
@@ -315,6 +336,10 @@ export const getDefaultLogger = (): Logger => {
 };
 
 export let rootLogger = getDefaultLogger();
+
+/** Keep a structured command's stdout parseable, including diagnostics from children. */
+export const routeLoggerToStderr = (logger: Logger = rootLogger): (() => void) =>
+  WinstonLogger.routeToStderr(logger);
 
 export const getLogger = (scope?: string, meta?: Record<string, unknown>): Logger => {
   if (!scope && !meta) {

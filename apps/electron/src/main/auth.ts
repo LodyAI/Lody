@@ -2,7 +2,7 @@ import { createAuthClient } from 'better-auth/client'
 import { electronClient } from '@better-auth/electron/client'
 import { organizationClient } from 'better-auth/client/plugins'
 import { convexClient, crossDomainClient } from '@convex-dev/better-auth/client/plugins'
-import { app, safeStorage } from 'electron'
+import { app, net, safeStorage } from 'electron'
 import Conf from 'conf'
 import { Buffer } from 'node:buffer'
 import { join, resolve } from 'node:path'
@@ -12,6 +12,7 @@ import {
   openAuthStorageBackend
 } from './auth-storage'
 import { isLocalPlatform, desktopInstallationProfile } from './platform'
+import { createDesktopAuthFetch } from './auth-fetch'
 
 const DEV_PLAINTEXT_AUTH_STORAGE_ENV = 'LODY_ELECTRON_PLAINTEXT_AUTH_STORAGE'
 const DEV_USER_DATA_DIR_ENV = 'LODY_ELECTRON_USER_DATA_DIR'
@@ -167,6 +168,12 @@ const authStorage = createRecoveringAuthStorage(
 
 export const authClient = createAuthClient({
   baseURL: authBaseURL,
+  fetchOptions: {
+    customFetchImpl: createDesktopAuthFetch({
+      whenReady: () => app.whenReady(),
+      fetch: (input, init) => net.fetch(input, init)
+    })
+  },
   plugins: [
     organizationClient(),
     convexClient(),
