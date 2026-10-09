@@ -124,17 +124,85 @@ export function buildMagpiePiCatalog(gateway: string, models: readonly MagpieMod
   };
 }
 
+// JSON string escaping is also valid for TOML basic strings. Catalog text is
+// always quoted, including table keys, so model IDs cannot inject configuration.
+const quoted = (value: string) => JSON.stringify(value).replace(/\u007f/g, '\\u007f');
+const stringArray = (values: readonly string[]) => `[${values.map(quoted).join(', ')}]`;
+
+export function buildMagpieKimiConfig(gateway: string, models: readonly MagpieModel[]): string {
+  return [
+    `default_model = ${quoted(`magpie/${models[0]!.id}`)}`,
+    '[providers.magpie]',
+    'type = "kimi"',
+    `base_url = ${quoted(`${gateway}/v1`)}`,
+    `api_key = ${quoted(MAGPIE_TOKEN)}`,
+    ...models.flatMap((m) => {
+      const efforts = (m.supported_reasoning_levels ?? [])
+        .map((l) => l.effort)
+        .filter((e) => e !== 'none');
+      return [
+        `[models.${quoted(`magpie/${m.id}`)}]`,
+        'provider = "magpie"',
+        `model = ${quoted(m.id)}`,
+        `display_name = ${quoted(m.display_name ?? m.id)}`,
+        `max_context_size = ${m.context_window ?? 128000}`,
+        `max_output_size = ${m.max_output_tokens ?? 8192}`,
+        `capabilities = ${stringArray(['tool_use', ...(m.modalities?.input.includes('image') ? ['image_in'] : []), ...(m.reasoning || efforts.length ? ['thinking'] : [])])}`,
+        ...(efforts.length
+          ? [
+              `support_efforts = ${stringArray(efforts)}`,
+              `default_effort = ${quoted(efforts.includes('medium') ? 'medium' : efforts[0]!)}`,
+            ]
+          : []),
+      ];
+    }),
+    '',
+  ].join('\n');
+}
+
+export function buildMagpieGrokConfig(gateway: string, models: readonly MagpieModel[]): string {
+  return [
+    '[models]',
+    `default = ${quoted(`magpie/${models[0]!.id}`)}`,
+    `allowed_models = ${stringArray(models.map((m) => `magpie/${m.id}`))}`,
+    `session_summary = ${quoted(`magpie/${models[0]!.id}`)}`,
+    `prompt_suggestion = ${quoted(`magpie/${models[0]!.id}`)}`,
+    `web_search = ${quoted(`magpie/${models[0]!.id}`)}`,
+    `image_description = ${quoted(`magpie/${models.find((m) => m.modalities?.input.includes('image'))?.id ?? models[0]!.id}`)}`,
+    '[features]',
+    'campaigns = false',
+    ...models.flatMap((m) => [
+      `[model.${quoted(`magpie/${m.id}`)}]`,
+      `model = ${quoted(m.id)}`,
+      `name = ${quoted(m.display_name ?? m.id)}`,
+      `base_url = ${quoted(`${gateway}/v1`)}`,
+      `api_key = ${quoted(MAGPIE_TOKEN)}`,
+      'api_backend = "chat_completions"',
+      `context_window = ${m.context_window ?? 128000}`,
+      `max_completion_tokens = ${m.max_output_tokens ?? 8192}`,
+      ...(m.supported_reasoning_levels?.length
+        ? [
+            `reasoning_efforts = ${stringArray(m.supported_reasoning_levels.map((l) => l.effort).filter((e) => e !== 'ultra'))}`,
+          ]
+        : []),
+    ]),
+    '',
+  ].join('\n');
+}
+
 async function writeAtomic(path: string, value: unknown): Promise<void> {
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
+    await writeFile(temporary, typeof value === 'string' ? value : JSON.stringify(value), {
+      mode: 0o600,
+    });
     await rename(temporary, path);
   } finally {
     await rm(temporary, { force: true });
   }
 }
 
-/** Local generated catalogs live outside the user's native Codex/Pi profiles. */
+/** Local generated catalogs live outside the user's native profiles. */
 export async function prepareMagpieRuntime(
   agentType: string,
   gateway: string,
@@ -143,7 +211,7 @@ export async function prepareMagpieRuntime(
   fetcher: typeof fetch = fetch
 ): Promise<{ env: Record<string, string>; args: string[] }> {
   const base = normalizeMagpieGateway(gateway);
-  if (!['claude', 'codex', 'pi', 'deepseek'].includes(agentType))
+  if (!['claude', 'codex', 'pi', 'deepseek', 'kimi', 'grok', 'bub'].includes(agentType))
     throw new Error('Unsupported Magpie runtime');
   const models = await readMagpieModels(base, signal, fetcher);
   signal?.throwIfAborted();
@@ -161,12 +229,50 @@ export async function prepareMagpieRuntime(
     };
   if (agentType === 'deepseek')
     return { args: [], env: { DEEPSEEK_BASE_URL: `${base}/v1`, DEEPSEEK_API_KEY: MAGPIE_TOKEN } };
+  if (agentType === 'bub') {
+    // Python HTTP clients can inherit macOS system proxies even without HTTP_PROXY.
+    const bypass = [process.env.NO_PROXY, process.env.no_proxy, '127.0.0.1,localhost,::1']
+      .filter(Boolean)
+      .join(',');
+    return {
+      args: [],
+      env: {
+        BUB_MODEL: `openai:${first.id}`,
+        BUB_MAX_TOKENS: String(first.max_output_tokens ?? 8192),
+        BUB_API_BASE: `${base}/v1`,
+        BUB_API_KEY: MAGPIE_TOKEN,
+        BUB_PROVIDERS: '{}',
+        BUB_FALLBACK_MODELS: '[]',
+        NO_PROXY: bypass,
+        no_proxy: bypass,
+      },
+    };
+  }
   const directory = join(
     root,
     createHash('sha256').update(base).digest('hex').slice(0, 24),
     agentType
   );
   await mkdir(directory, { recursive: true, mode: 0o700 });
+  if (agentType === 'kimi' || agentType === 'grok') {
+    const config =
+      agentType === 'kimi'
+        ? buildMagpieKimiConfig(base, models)
+        : buildMagpieGrokConfig(base, models);
+    await writeAtomic(join(directory, 'config.toml'), config);
+    return {
+      args: [],
+      env:
+        agentType === 'kimi'
+          ? { KIMI_CODE_HOME: directory, KIMI_MODEL_NAME: '' }
+          : {
+              GROK_HOME: directory,
+              GROK_CONFIG: '{}',
+              GROK_DEFAULT_MODEL: `magpie/${first.id}`,
+              GROK_WEB_SEARCH_MODEL: `magpie/${first.id}`,
+            },
+    };
+  }
   if (agentType === 'pi') {
     await writeAtomic(join(directory, 'models.json'), buildMagpiePiCatalog(base, models));
     return {

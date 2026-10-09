@@ -316,4 +316,6 @@ send a local project identity. See the [draft contract](../../../../specs/local-
 
 Magpie Provider launch preparation and isolated native catalogs are owned by
 `magpie-runtime.ts`; the public [import contract](../../../../specs/magpie-provider-import.md)
-defines its local-only endpoint and confirmation boundary.
+defines its local-only endpoint and confirmation boundary. Claude/Codex/Pi/DSH,
+Kimi Code and Grok use their native endpoint/catalog contracts; Bub uses its
+OpenAI environment configuration and requires a user-installed ACP plugin.

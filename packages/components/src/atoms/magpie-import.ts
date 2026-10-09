@@ -40,6 +40,9 @@ export const receiveMagpieImportAtom = atom(null, (_get, set, url: string) => {
       codex: crypto.randomUUID() as AgentConfigId,
       pi: crypto.randomUUID() as AgentConfigId,
       dsh: crypto.randomUUID() as AgentConfigId,
+      kimi: crypto.randomUUID() as AgentConfigId,
+      grok: crypto.randomUUID() as AgentConfigId,
+      bub: crypto.randomUUID() as AgentConfigId,
     },
   });
   return true;

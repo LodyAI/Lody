@@ -1,6 +1,6 @@
 /** Public local-gateway token: a usage label, never a vendor credential. */
 export const MAGPIE_TOKEN = 'magpie-lody';
-export const MAGPIE_TARGETS = ['claude', 'codex', 'pi', 'dsh'] as const;
+export const MAGPIE_TARGETS = ['claude', 'codex', 'pi', 'dsh', 'kimi', 'grok', 'bub'] as const;
 export type MagpieTarget = (typeof MAGPIE_TARGETS)[number];
 export type MagpieImport = { gatewayUrl: string; targets: MagpieTarget[] };
 
@@ -119,7 +119,7 @@ export function parseMagpieImportLink(value: string): MagpieImport {
       ? { 'claude-code': 'claude' }
       : endpoint.protocol === 'openai-responses'
         ? { codex: 'codex' }
-        : { pi: 'pi', dsh: 'dsh' };
+        : { pi: 'pi', dsh: 'dsh', 'kimi-code': 'kimi', grok: 'grok', bub: 'bub' };
     for (const target of endpoint.targets) {
       const resolved =
         typeof target === 'string' && Object.hasOwn(allowed, target) ? allowed[target] : undefined;
@@ -142,7 +142,7 @@ export function magpieProviderSettings(target: MagpieTarget, gatewayUrl: string)
     Object.assign(env, { DEEPSEEK_API_KEY: MAGPIE_TOKEN, DEEPSEEK_BASE_URL: `${gateway}/v1` });
   return {
     magpieGatewayUrl: gateway,
-    name: `${{ claude: 'Claude', codex: 'Codex', pi: 'Pi', dsh: 'DSH' }[target]}-magpie`,
+    name: `${{ claude: 'Claude', codex: 'Codex', pi: 'Pi', dsh: 'DSH', kimi: 'Kimi Code', grok: 'Grok', bub: 'Bub' }[target]}-magpie`,
     cliType: 'builtin' as const,
     agentType: target === 'dsh' ? 'deepseek' : target,
     env,

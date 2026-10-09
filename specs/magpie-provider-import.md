@@ -6,9 +6,9 @@ Translation: current
 [中文](magpie-provider-import.zh.md)
 
 Opening a Magpie import link in the desktop opens one global confirmation dialog,
-independent of the current page. Users select Claude, Codex, Pi and/or DSH with
+independent of the current page. Users select Claude, Codex, Pi, DSH, Kimi Code, Grok and/or Bub with
 checkboxes; available targets start selected. Confirmation creates new builtin
-Providers named `Claude-magpie`, `Codex-magpie`, `Pi-magpie`, and `DSH-magpie` only
+Providers named `Claude-magpie`, `Codex-magpie`, `Pi-magpie`, `DSH-magpie`, `Kimi Code-magpie`, `Grok-magpie`, and `Bub-magpie` only
 on the current desktop's local execution machine. A selected remote machine never
 participates. Existing providers, roles, account bindings and native settings stay intact.
 
@@ -25,7 +25,7 @@ participates. Existing providers, roles, account bindings and native settings st
   "endpoints": [
     { "protocol": "anthropic-messages", "baseUrl": "http://127.0.0.1:3425", "targets": ["claude-code"], "modelsUrl": "http://127.0.0.1:3425/v1/models" },
     { "protocol": "openai-responses", "baseUrl": "http://127.0.0.1:3425/v1", "targets": ["codex"], "modelsUrl": "http://127.0.0.1:3425/v1/models" },
-    { "protocol": "openai-chat", "baseUrl": "http://127.0.0.1:3425/v1", "targets": ["pi", "dsh"], "modelsUrl": "http://127.0.0.1:3425/v1/models" }
+    { "protocol": "openai-chat", "baseUrl": "http://127.0.0.1:3425/v1", "targets": ["pi", "dsh", "kimi-code", "grok", "bub"], "modelsUrl": "http://127.0.0.1:3425/v1/models" }
   ]
 }
 ```
@@ -51,7 +51,7 @@ already bound to the same gateway and runtime. No existing provider is overwritt
 
 The renderer generates only known environment mappings and persists through the
 existing Machine Flock writer. Managed runtimes use the existing background setup
-queue; DSH uses its existing non-managed creation path. Import success means the
+queue; Bub uses that queue to probe the user-installed `bub acp` (requiring its ACP plugin), without installing Bub. DSH uses its existing non-managed creation path. Import success means the
 configuration is durable, not that a model request has succeeded. Providers exposes
 managed setup progress and errors. Changes to the workspace/machine/request stop
 remaining writes without undoing already durable configurations.
@@ -68,6 +68,11 @@ are not hot-reloaded when Magpie's model catalog changes.
   Lody-owned, gateway-scoped Codex home. It does not reuse a ChatGPT account binding.
 - Pi receives a generated `models.json` in an isolated Lody-owned Pi profile, using
   OpenAI Chat Completions. Native global profile extensions/settings are not imported.
+- Kimi Code receives an isolated `KIMI_CODE_HOME/config.toml` with a provider and model catalog.
+- Grok receives an isolated `GROK_HOME/config.toml`; picker and auxiliary models are limited to Magpie models.
+- Bub receives `BUB_MODEL`, `BUB_API_BASE` and `BUB_API_KEY`, defaulting to the first
+  catalog model without automatic fallbacks. Its ACP plugin owns the model menu;
+  the full catalog is not repurposed as a fallback list.
 - DSH receives `DEEPSEEK_BASE_URL` and `DEEPSEEK_API_KEY`; its adapter discovers models.
 
 All vendor credentials stay with Magpie. Newly started runtimes default to the first

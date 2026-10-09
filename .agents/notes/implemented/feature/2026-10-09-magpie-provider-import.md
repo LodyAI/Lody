@@ -11,8 +11,9 @@ PR: [#1357](https://github.com/LodyAI/Lody/pull/1357)
 Lody could target a custom gateway, but lacked an application import action and
 runtime model-catalog preparation for Magpie. A versioned local-only link now
 stages a global checkbox dialog; confirmation creates selected builtin Providers
-through the existing Machine Flock paths. The daemon prepares Claude, Codex, Pi
-and DSH using Magpie's live catalog without editing native user profiles. This
+through the existing Machine Flock paths. The daemon prepares Claude, Codex, Pi,
+DSH, Kimi Code, Grok and Bub using Magpie's live catalog without editing native
+user profiles. This
 implements the Lody receiving side; Magpie's own application-list adapter remains
 separate, and full live-provider conversation acceptance remains unverified.
 
@@ -43,6 +44,14 @@ Managed runtimes reuse background setup; the non-managed DSH route writes its
 configuration directly and discovers the endpoint on startup. Import completion
 therefore means durable configuration, not successful upstream inference.
 
+Kimi Code and Grok load generated TOML from Lody-owned homes, with quoted model keys
+and values. Grok constrains its picker and auxiliary title/summary models to the
+Magpie catalog and disables campaign overrides. Bub uses native OpenAI environment
+configuration without editing user files; Bub and its ACP plugin must be installed
+by the user. Its current model menu derives from the default and fallback list,
+so import sets only the first default and clears fallbacks instead of enabling
+implicit model switching merely to expose the catalog.
+
 ## Evidence and validation
 
 - Magpie source inspected at `62b1c995ffaebb223ad040b4c54ebabab0078c7a`:
@@ -66,6 +75,18 @@ therefore means durable configuration, not successful upstream inference.
   and `session/prompt` reached `/v1/chat/completions` with the expected public token.
   Native `read` returned a synthetic file into the next request and the ACP turn
   finished with `end_turn`. This validates the adapter path, not commercial inference.
-- Remaining acceptance: real Magpie conversations/tool calls across all four
+- Additional ACP smoke used pinned Kimi Code `2.0.2-lody.743c6641b898`, Grok
+  `1.0.40` and the current Grok ACP adapter: generated catalog discovery, model
+  switching and Chat Completions requests passed against a synthetic loopback
+  gateway. Grok initially used its native default for title requests; auxiliary
+  model pins and a catalog allowlist corrected this and passed the repeated smoke.
+- [Bub](https://github.com/bubbuild/bub) and its
+  [ACP plugin](https://github.com/bubbuild/bub-contrib/tree/main/packages/bub-acp-server)
+  passed ACP creation, default-model completion and `end_turn` in a temporary Python
+  environment without changing the user's Bub installation. Its Python client inherits
+  macOS system proxies; launch appends loopback to existing `NO_PROXY` exclusions,
+  and the repeated smoke reached the local gateway directly. Bub is unpinned; other
+  user-installed versions still require the existing setup probe.
+- Remaining acceptance: real Magpie conversations/tool calls across all supported
   agents, packaged cold/warm launch across OSes, and a separate upstream Magpie
   adapter. Tests do not claim these have run.

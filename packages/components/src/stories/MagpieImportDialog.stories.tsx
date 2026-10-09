@@ -11,6 +11,9 @@ const NAMES: Record<MagpieTarget, string> = {
   codex: 'Codex-magpie',
   pi: 'Pi-magpie',
   dsh: 'DSH-magpie',
+  kimi: 'Kimi Code-magpie',
+  grok: 'Grok-magpie',
+  bub: 'Bub-magpie',
 };
 
 function option(id: MagpieTarget, disabledReason?: string): MagpieImportOption {
@@ -22,6 +25,9 @@ const allOptions: MagpieImportOption[] = [
   option('codex'),
   option('pi'),
   option('dsh'),
+  option('kimi'),
+  option('grok'),
+  option('bub'),
 ];
 
 const meta = {
@@ -44,7 +50,7 @@ type Story = StoryObj<typeof meta>;
 /** Every runtime on this machine can be imported. All of them start selected. */
 export const Ready: Story = {};
 
-/** The link only offers some of the four runtimes. */
+/** The link only offers some of the runtimes. */
 export const LinkSubset: Story = {
   args: {
     options: [option('claude'), option('dsh')],
@@ -75,6 +81,9 @@ export const PiUnsupported: Story = {
       option('codex'),
       option('pi', 'Pi is not supported on this machine.'),
       option('dsh'),
+      option('kimi'),
+      option('grok'),
+      option('bub'),
     ],
   },
 };

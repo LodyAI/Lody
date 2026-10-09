@@ -28,7 +28,7 @@ function payload() {
       {
         protocol: 'openai-chat',
         baseUrl: `${gateway}/v1`,
-        targets: ['pi', 'dsh'],
+        targets: ['pi', 'dsh', 'kimi-code', 'grok', 'bub'],
         modelsUrl: `${gateway}/v1/models`,
       },
     ],
@@ -37,17 +37,31 @@ function payload() {
 const link = (value: unknown) =>
   `lody://provider/import?v=1&data=${Buffer.from(JSON.stringify(value)).toString('base64url')}`;
 describe('Magpie import contract', () => {
-  it('decodes the four runtime endpoints and creates distinct builtin configurations', () => {
+  it('decodes the runtime endpoints and creates distinct builtin configurations', () => {
     const result = parseMagpieImportLink(link(payload()));
-    expect(result).toEqual({ gatewayUrl: gateway, targets: ['claude', 'codex', 'pi', 'dsh'] });
+    expect(result).toEqual({
+      gatewayUrl: gateway,
+      targets: ['claude', 'codex', 'pi', 'dsh', 'kimi', 'grok', 'bub'],
+    });
     const configs = result.targets.map((t) => magpieProviderSettings(t, result.gatewayUrl));
     expect(configs.map((c) => c.name)).toEqual([
       'Claude-magpie',
       'Codex-magpie',
       'Pi-magpie',
       'DSH-magpie',
+      'Kimi Code-magpie',
+      'Grok-magpie',
+      'Bub-magpie',
     ]);
-    expect(configs.map((c) => c.agentType)).toEqual(['claude', 'codex', 'pi', 'deepseek']);
+    expect(configs.map((c) => c.agentType)).toEqual([
+      'claude',
+      'codex',
+      'pi',
+      'deepseek',
+      'kimi',
+      'grok',
+      'bub',
+    ]);
     expect(configs[0]?.env.ANTHROPIC_BASE_URL).toBe(gateway);
     expect(configs[1]?.env.OPENAI_BASE_URL).toBe(`${gateway}/v1`);
     expect(configs[2]?.magpieGatewayUrl).toBe(gateway);

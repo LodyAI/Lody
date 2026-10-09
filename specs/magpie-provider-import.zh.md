@@ -6,9 +6,9 @@ Translation: current
 [English](magpie-provider-import.md)
 
 在桌面打开 Magpie 导入链接时，无论当前页面是什么，都展示全局确认对话框。
-用户通过 checkbox 选择 Claude、Codex、Pi、DSH，可用目标默认全选。确认后仅在
+用户通过 checkbox 选择 Claude、Codex、Pi、DSH、Kimi Code、Grok、Bub，可用目标默认全选。确认后仅在
 当前桌面的本地执行机器创建 `Claude-magpie`、`Codex-magpie`、`Pi-magpie`、
-`DSH-magpie` 内置 Provider；当前选中的远程机器不参与。保留已有 Provider、Role、
+`DSH-magpie`、`Kimi Code-magpie`、`Grok-magpie`、`Bub-magpie` 内置 Provider；当前选中的远程机器不参与。保留已有 Provider、Role、
 账号绑定和原生配置。
 
 ## 公开链接
@@ -24,7 +24,7 @@ Translation: current
   "endpoints": [
     { "protocol": "anthropic-messages", "baseUrl": "http://127.0.0.1:3425", "targets": ["claude-code"], "modelsUrl": "http://127.0.0.1:3425/v1/models" },
     { "protocol": "openai-responses", "baseUrl": "http://127.0.0.1:3425/v1", "targets": ["codex"], "modelsUrl": "http://127.0.0.1:3425/v1/models" },
-    { "protocol": "openai-chat", "baseUrl": "http://127.0.0.1:3425/v1", "targets": ["pi", "dsh"], "modelsUrl": "http://127.0.0.1:3425/v1/models" }
+    { "protocol": "openai-chat", "baseUrl": "http://127.0.0.1:3425/v1", "targets": ["pi", "dsh", "kimi-code", "grok", "bub"], "modelsUrl": "http://127.0.0.1:3425/v1/models" }
   ]
 }
 ```
@@ -45,7 +45,7 @@ Provider，不覆盖已有配置。
 ## 运行时职责
 
 渲染器只生成已知环境变量映射，经现有 Machine Flock writer 持久化。托管运行时
-沿用后台准备队列，DSH 沿用非托管创建路径。导入成功表示配置持久化，不表示模型
+沿用后台准备队列；Bub 使用现有队列探测用户已安装的 `bub acp`（需 ACP 插件），不自动安装 Bub。DSH 沿用非托管创建路径。导入成功表示配置持久化，不表示模型
 请求已成功。Providers 展示托管准备进度和错误。工作区、机器或请求变化时停止
 剩余写入，不撤销已经持久化的配置。
 
@@ -60,6 +60,10 @@ Provider，不覆盖已有配置。
   原生模型目录，不复用 ChatGPT 账号绑定。
 - Pi 在 Lody 自有隔离配置中使用生成的 `models.json` 和 OpenAI Chat Completions，
   不导入原生全局配置中的扩展和设置。
+- Kimi Code 在隔离 `KIMI_CODE_HOME/config.toml` 中生成 Provider 和模型目录。
+- Grok 在隔离 `GROK_HOME/config.toml` 中生成模型目录，选择器和辅助模型均限定为 Magpie 模型。
+- Bub 使用 `BUB_MODEL`、`BUB_API_BASE`、`BUB_API_KEY`；默认选择目录首个模型，
+  不启用自动备用模型。Bub 的模型菜单由其 ACP 插件决定，本次不将完整目录伪装成 fallback 列表。
 - DSH 接收 `DEEPSEEK_BASE_URL`、`DEEPSEEK_API_KEY`，由 adapter 发现模型。
 
 供应商密钥由 Magpie 保管。新运行时默认使用目录首个模型；明确的会话选择通过

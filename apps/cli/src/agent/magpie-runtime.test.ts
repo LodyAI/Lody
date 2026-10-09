@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parse as parseToml } from 'smol-toml';
 import { afterEach, describe, expect, it } from 'vitest';
 import { prepareMagpieRuntime, readMagpieModels } from './magpie-runtime';
 const gateway = 'http://127.0.0.1:3425';
@@ -78,6 +79,78 @@ describe('Magpie runtime preparation', () => {
       DEEPSEEK_BASE_URL: `${gateway}/v1`,
       DEEPSEEK_API_KEY: 'magpie-lody',
     });
+  });
+  it('loads isolated Kimi and Grok TOML with literal model keys and bounded model selection', async () => {
+    const directory = await root();
+    const tricky = {
+      ...models[0],
+      id: 'vendor/"quoted".model',
+      display_name: 'A "name"\n[providers.injected]\u007f',
+    };
+    const catalog: typeof fetch = async (input, init) =>
+      String(input).endsWith('/models')
+        ? Response.json({ data: [tricky, { id: 'second/model' }] })
+        : fetcher(input, init);
+    const kimi = await prepareMagpieRuntime('kimi', gateway, undefined, directory, catalog);
+    const grok = await prepareMagpieRuntime('grok', gateway, undefined, directory, catalog);
+    expect(kimi.env.KIMI_CODE_HOME?.startsWith(directory)).toBe(true);
+    expect(grok.env.GROK_HOME?.startsWith(directory)).toBe(true);
+    expect(kimi.env.KIMI_CODE_HOME).not.toBe(grok.env.GROK_HOME);
+    const k = parseToml(await readFile(join(kimi.env.KIMI_CODE_HOME!, 'config.toml'), 'utf8'));
+    const g = parseToml(await readFile(join(grok.env.GROK_HOME!, 'config.toml'), 'utf8'));
+    const selected = `magpie/${tricky.id}`;
+    expect(k).toMatchObject({
+      default_model: selected,
+      providers: { magpie: { type: 'kimi', base_url: `${gateway}/v1`, api_key: 'magpie-lody' } },
+      models: {
+        [selected]: {
+          model: tricky.id,
+          display_name: tricky.display_name,
+          max_context_size: 64000,
+          support_efforts: ['medium'],
+          capabilities: ['tool_use', 'image_in', 'thinking'],
+        },
+      },
+    });
+    expect(Object.keys(k.providers as object)).toEqual(['magpie']);
+    expect(g).toMatchObject({
+      features: { campaigns: false },
+      models: {
+        default: selected,
+        allowed_models: [selected, 'magpie/second/model'],
+        session_summary: selected,
+        prompt_suggestion: selected,
+      },
+      model: {
+        [selected]: {
+          model: tricky.id,
+          name: tricky.display_name,
+          api_backend: 'chat_completions',
+          base_url: `${gateway}/v1`,
+          api_key: 'magpie-lody',
+          reasoning_efforts: ['medium'],
+        },
+      },
+    });
+    expect(Object.keys(g.model as object)).toEqual([selected, 'magpie/second/model']);
+  });
+  it('configures Bub through its native OpenAI environment without enabling fallback models', async () => {
+    const directory = await root();
+    const bub = await prepareMagpieRuntime('bub', gateway, undefined, directory, fetcher);
+    expect(bub).toEqual({
+      args: [],
+      env: {
+        BUB_MODEL: 'openai:vendor/model',
+        BUB_MAX_TOKENS: '4096',
+        BUB_API_BASE: `${gateway}/v1`,
+        BUB_API_KEY: 'magpie-lody',
+        BUB_PROVIDERS: '{}',
+        BUB_FALLBACK_MODELS: '[]',
+        NO_PROXY: expect.stringContaining('127.0.0.1,localhost,::1'),
+        no_proxy: expect.stringContaining('127.0.0.1,localhost,::1'),
+      },
+    });
+    expect(await readdir(directory)).toEqual([]);
   });
   it('rejects other services, empty and malformed catalogs before writing profiles', async () => {
     const directory = await root();
