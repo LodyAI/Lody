@@ -29,7 +29,7 @@ repository, agent config, role) or comes out of it (diff, pull request, handoff)
 
 1. **Add a project or repository.** A [Local Project](/docs/local-project) is a directory; a
    [GitHub repository](/docs/github) adds pull requests, CI, and review sync.
-2. **Choose what runs.** An [Agent Config](/docs/agents) binds a runtime to a machine and its
+2. **Choose what runs.** An [Agent Config](/docs/quickstart) binds a runtime to a machine and its
    credentials. An [Agent Role](/docs/agent-roles) saves a repeated combination.
 3. **Open a session.** From the home-page composer, pick the project, branch, config, model, and
    permission scope. See [Sessions](/docs/session).
@@ -47,7 +47,7 @@ repository, agent config, role) or comes out of it (diff, pull request, handoff)
 | **Session** | One task with one conversation, one branch, and usually one worktree. | [Sessions](/docs/session) |
 | **Round** | One agent turn plus the file changes it produced. | [Diff Viewer](/docs/diff-viewer) |
 | **Worktree** | An isolated checkout so two sessions can edit the same repository without colliding. | [Worktrees](/docs/worktrees) |
-| **Agent Config** | A runtime (Claude Code, Codex, Kimi, ACP, and others) plus its auth and execution machine. | [Agent Config](/docs/agents) · [CLI Runtime Types](/docs/cli-runtimes) |
+| **Agent Config** | A runtime (Claude Code, Codex, Kimi, ACP, and others) plus its auth and execution machine. | [Agent Config](/docs/quickstart) · [CLI Runtime Types](/docs/cli-runtimes) |
 | **Agent Role** | A saved preset that combines a machine, Agent Config, model, reasoning, permission, and an optional instruction. | [Agent Roles](/docs/agent-roles) |
 
 ## How the pieces relate
@@ -94,7 +94,7 @@ permissions should be selected?" Roles reference configs; configs do not referen
 
 An Agent Config is a runtime plus its authentication and execution machine. An Agent Role is a
 saved preset that selects a machine, an Agent Config, a model, reasoning, and permission, plus an
-optional instruction, so you can reuse the same setup when a session starts. See [Agent Config](/docs/agents) and
+optional instruction, so you can reuse the same setup when a session starts. See [Agent Config](/docs/quickstart) and
 [Agent Roles](/docs/agent-roles).
 
 ### What is the difference between forking a session and handing it off?
@@ -118,7 +118,7 @@ In these docs, yes — one task is normally one session, one branch, and one pul
 
 <Cards>
   <Card href="/docs/session" title="Sessions" />
-  <Card href="/docs/agents" title="Agent Config" />
+  <Card href="/docs/quickstart" title="Agent Config" />
   <Card href="/docs/worktrees" title="Worktrees" />
   <Card href="/docs/first-session" title="Your First Session" />
 </Cards>

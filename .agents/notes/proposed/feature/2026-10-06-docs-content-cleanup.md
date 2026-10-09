@@ -9,11 +9,12 @@ Language: [中文](2026-10-06-docs-content-cleanup.zh.md)
 The docs still assumed a specific first-class agent or a removed setting. This
 proposal makes the multi-agent guide agent-agnostic (a primary agent coordinates
 the others, without Claude Code-specific wording), removes the Lore and SpecStory
-rows from the handoff comparison, deletes the unsupported VS Code themes pages,
-renames the Reference sidebar group to Feature List, and clarifies that session
-tabs let different agents reuse one workspace. The English and Chinese trees, the
-draft information-architecture Spec, and the docs index are updated together; the
-deleted page has no redirect because the site has no runtime redirect layer.
+rows from the handoff comparison, deletes the unsupported VS Code themes pages and
+the stale Agent Config page, renames the Reference sidebar group to Feature List,
+and clarifies that session tabs let different agents reuse one workspace. The
+English and Chinese trees, the draft information-architecture Spec, and the docs
+index are updated together; deleted pages have no redirect because the site has no
+runtime redirect layer.
 
 ## Problem
 
@@ -25,6 +26,9 @@ deleted page has no redirect because the site has no runtime redirect layer.
   session.
 - VS Code themes are no longer supported, but the page still documents the
   removed settings and stays in the sidebar.
+- `/docs/agents` still documents an older **Settings -> Agent Config** flow and
+  provider API-key snippets. Quick Start already owns agent setup, so the page
+  duplicated and contradicted the current surface.
 - The sidebar group label "参考" / "Reference" undersold a capability list; the
   requested label is "功能列表" / "Feature List".
 - The session-tabs intro described parallel surfaces but not the defining
@@ -44,6 +48,11 @@ deleted page has no redirect because the site has no runtime redirect layer.
   `(reference)/(settings-and-cli)/meta.json`, and drop the embedded terminal
   page's reference to a selected code theme. The feature is unsupported, so the
   page is removed rather than deprecated.
+- Delete `agents.mdx` in both locales, remove `agents` from
+  `(reference)/(agents-and-runtimes)/meta.json`, and retarget every inbound
+  `/docs/agents` link to `/docs/quickstart` (`/zh/docs/quickstart`). Update the
+  LLMS answer links and point the Quick Start next step at `cli-runtimes` instead
+  of the removed page.
 - Rename the `(reference)` group display title from "参考" / "Reference" to
   "功能列表" / "Feature List" in both `meta.json` files, and update the draft IA
   Spec, the IA note, and the docs index descriptions. Folder names and published
@@ -65,21 +74,28 @@ deleted page has no redirect because the site has no runtime redirect layer.
    Rejected: the two locale trees keep the same group names by contract.
 5. Keep the session-tabs wording and add a separate FAQ. Rejected: the shared
    workspace is the defining property of the feature and belongs in the intro.
+6. Keep the Agent Config page and mark it deprecated. Rejected: the old Settings
+   label and provider API-key snippets would still ship, and Quick Start already
+   covers agent setup.
 
 ## Verification and limits
 
 - `pnpm --filter @lody/site-docs generate`, `typecheck`, and `test` pass.
   `pnpm run docs check` reports no new errors.
+- The regenerated sitemap has no `/docs/agents/` entry, and no content page links
+  to `/docs/agents`.
 - A production build prerenders the site; the deleted pages are absent, and the
   sidebar group renders as Feature List / 功能列表.
-- The full static browser suite reports 307 passing cases (309 before the two
+- The earlier static browser run reported 307 passing cases (309 before the two
   VS Code themes pages were removed) and the same two baseline mobile
-  `no-js navigation` timeouts. Its internal-link pass finds no remaining link to
-  the deleted pages.
+  `no-js navigation` timeouts; its internal-link pass found no remaining links to
+  those pages. The Agent Config deletion was verified by regenerating the site,
+  typechecking, package tests, and a full build instead of rerunning the browser
+  suite.
 - English and Chinese were updated together; the changes were not reviewed by a
   native speaker.
 - Deleting a page is a URL decision. The site has no redirect layer, so
-  `/docs/vscode-themes/` and `/zh/docs/vscode-themes/` now 404; a redirect needs a
-  separate compatibility decision.
+  `/docs/vscode-themes/`, `/zh/docs/vscode-themes/`, `/docs/agents/`, and
+  `/zh/docs/agents/` now 404; a redirect needs a separate compatibility decision.
 - The IA note remains `proposed` and now records the Feature List label. A future
   rename should update both the Spec and the note.

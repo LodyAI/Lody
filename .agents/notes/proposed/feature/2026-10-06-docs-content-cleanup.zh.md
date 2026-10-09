@@ -8,10 +8,10 @@ Language: [English](2026-10-06-docs-content-cleanup.md)
 
 文档里仍残留着对某个一等 Agent 的预设，以及已移除设置的说明。本提案把多 Agent 协作
 指南改成不绑定具体 Agent（由主 Agent 协调其他 Agent，去掉 Claude Code 专属表述），
-从会话交接对比里删除 Lore 和 SpecStory，删除不再支持的 VS Code 主题页面，把侧边栏
-「参考」分组改名为「功能列表」，并说明多标签会话的关键是让不同的 Agent 复用同一个
-工作区。中英文内容、信息架构草稿 Spec 和文档简介会一起更新；由于站点没有运行时重定向
-层，被删除页面的 URL 会直接 404。
+从会话交接对比里删除 Lore 和 SpecStory，删除不再支持的 VS Code 主题页面和过时的
+Agent Config 页面，把侧边栏「参考」分组改名为「功能列表」，并说明多标签会话的关键是让
+不同的 Agent 复用同一个工作区。中英文内容、信息架构草稿 Spec 和文档简介会一起更新；
+由于站点没有运行时重定向层，被删除页面的 URL 会直接 404。
 
 ## 问题
 
@@ -20,6 +20,8 @@ Language: [English](2026-10-06-docs-content-cleanup.md)
 - 会话交接页把 Lody 和 Lore、SpecStory 两种外部产品放在一起对比，表格变长，对读者
   选择交接方式没有帮助。
 - VS Code 主题已不再支持，但页面仍在说明已移除的设置，并留在侧边栏中。
+- `/docs/agents` 仍在介绍旧的 **设置 -> Agent Config** 流程和各家 Provider 的 API
+  Key 配置片段；Agent 配置现在由「快速开始」承载，这页重复且与当前界面不一致。
 - 侧边栏「参考」分组低估了这组页面的性质；用户要求的名称是「功能列表」。
 - 多标签会话的简介描述了并行工作界面，却没有点出关键：不同的 Agent 复用同一个工作区、
   看到同一份文件。
@@ -35,6 +37,10 @@ Language: [English](2026-10-06-docs-content-cleanup.md)
 - 删除中英文的 `vscode-themes.mdx`，从 `(reference)/(settings-and-cli)/meta.json`
   中移除，并删掉内嵌终端页面对「所选代码主题」的引用。功能已不支持，因此删除页面而不是
   标记废弃。
+- 删除中英文的 `agents.mdx`，从 `(reference)/(agents-and-runtimes)/meta.json`
+  中移除 `agents`，并把所有指向 `/docs/agents` 的入链改到 `/docs/quickstart`
+  （中文 `/zh/docs/quickstart`）。同步更新 LLMS answer 入链，并让「快速开始」的
+  下一步指向 `cli-runtimes` 而不是已删除页面。
 - 把 `(reference)` 分组的显示名从「参考」/「Reference」改为「功能列表」/
   「Feature List」，并同步更新草稿 IA Spec、IA 记录和文档简介文案。目录名和已发布
   URL 保持不变。
@@ -52,18 +58,23 @@ Language: [English](2026-10-06-docs-content-cleanup.md)
 4. 只改中文侧边栏，英文继续叫 Reference。否决：中英文目录按约定保持相同的分组名。
 5. 保留多标签会话原有表述，另加一条 FAQ。否决：共享工作区是这项功能的定义性特征，
    应该放在简介里。
+6. 保留 Agent Config 页面并标记废弃。否决：旧的设置名称和 Provider API Key 片段
+   仍会发布，而「快速开始」已经覆盖 Agent 配置。
 
 ## 验证与边界
 
 - `pnpm --filter @lody/site-docs generate`、`typecheck` 和 `test` 通过；
   `pnpm run docs check` 没有新增错误。
+- 重新生成的 sitemap 不含 `/docs/agents/`，内容中也没有指向 `/docs/agents` 的链接。
 - 生产构建会预渲染站点；被删除的页面不再存在，侧边栏分组显示为 Feature List /
   功能列表。
-- 全量静态浏览器套件报告 307 个通过用例（删除两个 VS Code 主题页面前为 309 个），以及
-  变更前后相同的两个移动端 `no-js navigation` 基线超时；内部链接检查没有发现指向已删除
-  页面的链接。
+- 早先的全量静态浏览器套件报告 307 个通过用例（删除两个 VS Code 主题页面前为 309 个），
+  以及变更前后相同的两个移动端 `no-js navigation` 基线超时；内部链接检查没有发现指向
+  那些页面的链接。Agent Config 页面的删除通过重新生成、typecheck、包测试和完整构建
+  验证，没有重跑浏览器套件。
 - 中英文一起更新，但未经母语者审阅。
-- 删除页面属于 URL 决策。站点没有运行时重定向层，因此 `/docs/vscode-themes/` 和
-  `/zh/docs/vscode-themes/` 现在会返回 404；如需重定向，需要单独做兼容性决策。
+- 删除页面属于 URL 决策。站点没有运行时重定向层，因此 `/docs/vscode-themes/`、
+  `/zh/docs/vscode-themes/`、`/docs/agents/` 和 `/zh/docs/agents/` 现在会返回 404；
+  如需重定向，需要单独做兼容性决策。
 - IA 记录仍为 `proposed`，并已记录 Feature List 这个名称；未来再改名时需要同时更新
   Spec 和该记录。

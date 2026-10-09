@@ -11,7 +11,7 @@ description: 查看 Lody CLI 的登录、daemon、workspace、GitHub、project�
 - 用于管理 workspace、GitHub 仓库、session、machine、agent-config 的一次性命令行工具
 
 如果你刚开始使用 Lody，建议先阅读[快速开始](/zh/docs/quickstart)、[会话](/zh/docs/session)、
-[代理配置](/zh/docs/agents) 和 [CLI 类型支持](/zh/docs/cli-runtimes)。
+[代理配置](/zh/docs/quickstart) 和 [CLI 类型支持](/zh/docs/cli-runtimes)。
 
 ## 如何查看参数
 
@@ -275,7 +275,7 @@ lody session create --workspace my-team --agent-config codex --repo owner/repo "
 常用参数：
 
 - `--workspace <idOrSlug>`：指定目标 workspace
-- `--agent-config <idOrName>`：选择[代理配置](/zh/docs/agents)
+- `--agent-config <idOrName>`：选择[代理配置](/zh/docs/quickstart)
 - `--repo <owner/repo>`：绑定 GitHub 仓库
 - `--local-project <id|name|path>`：绑定一个已注册的本地项目
 - `--repo` 与 `--local-project` 二选一
@@ -518,7 +518,7 @@ lody machine list --help
 
 ## Agent Config 命令
 
-Agent config 命令对应 Web 端的[代理配置](/zh/docs/agents)。
+Agent config 命令对应 Web 端的[代理配置](/zh/docs/quickstart)。
 
 使用前建议先了解：
 

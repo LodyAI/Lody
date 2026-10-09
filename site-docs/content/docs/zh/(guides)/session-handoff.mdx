@@ -9,7 +9,7 @@ Lody 里的 **编程 Agent 会话交接**，指的是同事打开你已经在跑
 
 这和常见的「分享 Claude Code session」做法不同：那些多半是在发布一份对话记录。Lody 是把人请进现有会话，让对方继续聊、继续 steer Agent。
 
-另见 [会话](/zh/docs/session)、[团队功能](/zh/docs/team) 和 [Agent Config](/zh/docs/agents)。
+另见 [会话](/zh/docs/session)、[团队功能](/zh/docs/team) 和 [Agent Config](/zh/docs/quickstart)。
 
 <Callout title="这里的「接着做」指什么">
   能打开该会话的工作空间成员，可以在同一段上下文里继续对话。Lody
@@ -74,7 +74,7 @@ Lody 里的 **编程 Agent 会话交接**，指的是同事打开你已经在跑
 - 阅读 Agent 已经进行过的完整对话
 - 查看当前的 [Diff](/zh/docs/diff-viewer)
 - 在同一个 [Worktree](/zh/docs/worktrees) 和分支上继续改
-- 发送下一条提示词，steer 同一个 [Agent Config](/zh/docs/agents)
+- 发送下一条提示词，steer 同一个 [Agent Config](/zh/docs/quickstart)
 
 Fork 会话是另一件事：它会把历史复制到**新的**会话里。**当前工作区**仍共用原来的文件；出现 **新 Worktree** 时，会从已提交的 `HEAD` 隔离出去。需要自己另开一条对话线时用 Fork；要把同事请进原来的会话，不要用 Fork。见 [Fork 会话](/zh/docs/session#fork-会话)。
 
@@ -91,7 +91,7 @@ Fork 会话是另一件事：它会把历史复制到**新的**会话里。**当
 | 本地项目共享 | 机器所有者（会话使用本地项目时）             | 同事需要同时拥有项目授权和机器授权                                         |
 | 会话 URL     | 所有者始终可用；同事仅在会话对团队可见后可用 | 复制 URL 不等于 **Share with team…**                                       |
 
-加入工作空间**不会**把你的笔记本暴露出去。机器在你主动共享之前都是私有的。Agent Config 可以另外共享，让同事使用同一套 CLI 配置；见 [Agent Config](/zh/docs/agents) 和[团队功能](/zh/docs/team)。
+加入工作空间**不会**把你的笔记本暴露出去。机器在你主动共享之前都是私有的。Agent Config 可以另外共享，让同事使用同一套 CLI 配置；见 [Agent Config](/zh/docs/quickstart) 和[团队功能](/zh/docs/team)。
 
 ## 常见问题
 

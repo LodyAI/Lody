@@ -6,7 +6,7 @@ description: How Lody relates to the Codex and Claude Code CLIs — what stays t
 # Coming from Codex or Claude Code
 
 You do not have to stop using the `codex` or `claude` CLI. Lody runs those same runtimes through
-[Agent Configs](/docs/agents), then adds the workspace around them: isolated worktrees, several
+[Agent Configs](/docs/quickstart), then adds the workspace around them: isolated worktrees, several
 sessions at once, live diff review, team handoff, and mobile access.
 
 <Callout title="The short version">
@@ -20,7 +20,7 @@ sessions at once, live diff review, team handoff, and mobile access.
 - **The runtime.** Lody launches the same agent process; it does not replace the model or the CLI's
   own behavior.
 - **Your authentication.** Lody uses the subscription login or environment configuration already on
-  the machine. See [Agent Config](/docs/agents).
+  the machine. See [Agent Config](/docs/quickstart).
 - **Your repository conventions.** `AGENTS.md`, `CLAUDE.md`, and the rest of your project
   instructions keep working because the agent still runs in the project.
 - **Your terminal.** For a quick one-off task, running the CLI directly is still a good choice.
@@ -29,7 +29,7 @@ sessions at once, live diff review, team handoff, and mobile access.
 
 | You are used to | In Lody | Notes |
 | --- | --- | --- |
-| `claude` or `codex` in a terminal | A [session](/docs/session) with an [Agent Config](/docs/agents) | Same runtime, plus a GUI, mobile, and team layer |
+| `claude` or `codex` in a terminal | A [session](/docs/session) with an [Agent Config](/docs/quickstart) | Same runtime, plus a GUI, mobile, and team layer |
 | One repository checkout | One [worktree](/docs/worktrees) per session | Sessions stop colliding on the same files |
 | A prompt and its edits | A [round](/docs/diff-viewer) | Lody shows the diff after each round |
 | `--resume` or `resume` | Reopen the session from the sidebar | Conversation, branch, and worktree stay together |
@@ -138,7 +138,7 @@ supported way to work, and the same machine can use both.
 ### Do I have to move my API keys or subscription?
 
 No. In the common case, Lody uses the subscription login or environment configuration already on
-the machine. You add an [Agent Config](/docs/agents) so Lody knows which runtime to launch; you do
+the machine. You add an [Agent Config](/docs/quickstart) so Lody knows which runtime to launch; you do
 not migrate the credentials into Lody.
 
 ### Can I keep using my repository's AGENTS.md or CLAUDE.md?

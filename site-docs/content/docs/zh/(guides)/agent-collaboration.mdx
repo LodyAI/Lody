@@ -34,7 +34,7 @@ Lody 提供组织这些工作的[跨会话工具](/zh/docs/session-orchestration
 
 ## 准备工作区
 
-先[把机器连接到 Lody](/zh/docs/quickstart/)，确认机器上有需要使用的 [Agent 配置](/zh/docs/agents/)。目标机器需要在线，Agent 需要具备访问目标仓库及执行任务所需 GitHub 工具的权限。
+先[把机器连接到 Lody](/zh/docs/quickstart/)，确认机器上有需要使用的 [Agent 配置](/zh/docs/quickstart)。目标机器需要在线，Agent 需要具备访问目标仓库及执行任务所需 GitHub 工具的权限。
 
 下面以主 Agent 负责统筹、Kimi、Codex 或 Grok 执行具体任务为例。创建一条主 Agent 会话负责统筹，告诉它要处理哪些仓库、PR 或 Issue。为修改代码的任务分配独立 [Git worktree](/zh/docs/worktrees/)，让并行 Agent 使用不同的工作目录。Fork 到新 worktree 时从已提交的 `HEAD` 开始，其他目录中的未提交修改不会自动带过去。
 

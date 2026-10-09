@@ -35,7 +35,7 @@ Lody provides the [cross-session tools](/docs/session-orchestration/) used to or
 
 ## Set up the workspace
 
-[Connect a machine to Lody](/docs/quickstart/) and make sure the [agent configurations](/docs/agents/) you want to use are available there. The target machines need to be online, and the agents need access to the repositories and any GitHub tools required for their assignments.
+[Connect a machine to Lody](/docs/quickstart/) and make sure the [agent configurations](/docs/quickstart) you want to use are available there. The target machines need to be online, and the agents need access to the repositories and any GitHub tools required for their assignments.
 
 The examples below use a primary agent for coordination and Kimi, Codex, or Grok for focused work.
 Start a primary-agent session for coordination. Tell it which repositories, PRs, or issues to inspect. Give editing tasks their own [Git worktrees](/docs/worktrees/) so parallel agents have separate working directories. A new worktree fork starts from committed `HEAD`; uncommitted changes in another directory will not appear there automatically.

@@ -5,7 +5,7 @@ description: Lody 与 Codex / Claude Code CLI 的关系——哪些习惯可以�
 
 # 从 Codex 或 Claude Code 过来
 
-你不需要放弃 `codex` 或 `claude` CLI。Lody 通过 [Agent Config](/zh/docs/agents) 运行同样的运行时，
+你不需要放弃 `codex` 或 `claude` CLI。Lody 通过 [Agent Config](/zh/docs/quickstart) 运行同样的运行时，
 在它们外面加了一层工作区：隔离工作树、同时跑多个会话、实时 diff 审阅、团队交接和移动端访问。
 
 <Callout title="太长不看">
@@ -17,7 +17,7 @@ description: Lody 与 Codex / Claude Code CLI 的关系——哪些习惯可以�
 ## 哪些可以保留
 
 - **运行时。** Lody 启动的是同一个 agent 进程，不会替换模型，也不会改变 CLI 自身的行为。
-- **你的认证。** Lody 使用机器上已有的订阅登录或环境配置。见 [Agent Config](/zh/docs/agents)。
+- **你的认证。** Lody 使用机器上已有的订阅登录或环境配置。见 [Agent Config](/zh/docs/quickstart)。
 - **仓库约定。** `AGENTS.md`、`CLAUDE.md` 以及其它项目指令继续生效，因为 Agent 仍然在项目里运行。
 - **你的终端。** 临时改一小块代码时，直接跑 CLI 仍然是不错的选择。
 
@@ -25,7 +25,7 @@ description: Lody 与 Codex / Claude Code CLI 的关系——哪些习惯可以�
 
 | 你习惯的 | 在 Lody 里 | 说明 |
 | --- | --- | --- |
-| 终端里的 `claude` / `codex` | 带 [Agent Config](/zh/docs/agents) 的[会话](/zh/docs/session) | 同一个运行时，多了 GUI、移动端和团队层 |
+| 终端里的 `claude` / `codex` | 带 [Agent Config](/zh/docs/quickstart) 的[会话](/zh/docs/session) | 同一个运行时，多了 GUI、移动端和团队层 |
 | 一份仓库检出 | 每个会话一个[工作树](/zh/docs/worktrees) | 会话之间不再抢同一份文件 |
 | 一次提问和它的改动 | 一个[轮次](/zh/docs/diff-viewer) | Lody 在每轮结束后展示 diff |
 | `--resume` / `resume` | 从侧边栏重新打开会话 | 对话、分支和工作树保持在一起 |
@@ -130,7 +130,7 @@ daemon，直接用 CLI 就好。当一个任务能从工作树、可审阅的 di
 
 ### 我需要迁移 API Key 或订阅吗？
 
-不需要。常见情况下，Lody 使用机器上已有的订阅登录或环境配置。你添加 [Agent Config](/zh/docs/agents)
+不需要。常见情况下，Lody 使用机器上已有的订阅登录或环境配置。你添加 [Agent Config](/zh/docs/quickstart)
 是为了告诉 Lody 启动哪个运行时，而不是把凭据搬进 Lody。
 
 ### 还能继续使用仓库里的 AGENTS.md 或 CLAUDE.md 吗？

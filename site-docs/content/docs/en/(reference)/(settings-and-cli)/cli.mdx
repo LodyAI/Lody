@@ -11,7 +11,7 @@ description: Use the Lody CLI command reference for login, daemon mode, workspac
 - a one-shot CLI for workspace, GitHub repository, session, machine, and agent-config management
 
 If you are new to Lody, read [Quick Start](/docs/quickstart), [Sessions](/docs/session),
-[Agent Config](/docs/agents), and [CLI Runtime Types](/docs/cli-runtimes) first.
+[Agent Config](/docs/quickstart), and [CLI Runtime Types](/docs/cli-runtimes) first.
 
 ## Help and Parameter Discovery
 
@@ -296,7 +296,7 @@ lody session create --workspace my-team --agent-config codex --repo owner/repo "
 Notable parameters:
 
 - `--workspace <idOrSlug>` chooses the target workspace
-- `--agent-config <idOrName>` chooses the agent config from [Agent Config](/docs/agents)
+- `--agent-config <idOrName>` chooses the agent config from [Agent Config](/docs/quickstart)
 - `--repo <owner/repo>` attaches a GitHub repo
 - `--local-project <id|name|path>` attaches a previously registered local project
 - `--repo` and `--local-project` are mutually exclusive
@@ -547,7 +547,7 @@ lody machine list --help
 
 ## Agent Config Commands
 
-Agent config commands mirror much of the behavior from the web UI in [Agent Config](/docs/agents).
+Agent config commands mirror much of the behavior from the web UI in [Agent Config](/docs/quickstart).
 
 Before you use them:
 
