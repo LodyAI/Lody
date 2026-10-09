@@ -1,5 +1,4 @@
-import spawn from 'cross-spawn';
-import { type ChildProcess } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import os from 'os';
 import path from 'path';
 import * as fs from 'fs';
@@ -13,6 +12,9 @@ import { v4 as uuidV4 } from 'uuid';
 import { z } from 'zod';
 
 import type { Logger } from '@/utils/logger';
+import { formatErrorMessage } from '@/utils/format-error';
+import { startProcess, terminateChildTree, withSpawn } from '@/platform/promise-facade';
+import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { TerminalManager } from '@/session/terminal-manager';
 import {
   AgentClient,
@@ -166,68 +168,39 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
   return { client, acpSessionId: sessionResponse.sessionId as ACPSessionId, sessionResponse };
 };
 
-function waitForChildProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null) {
-    return Promise.resolve(true);
-  }
-
-  return new Promise<boolean>((resolve) => {
-    const onExit = () => {
-      cleanup();
-      resolve(true);
-    };
-    const onTimeout = () => {
-      cleanup();
-      resolve(child.exitCode !== null);
-    };
-    const cleanup = () => {
-      clearTimeout(timeoutHandle);
-      child.off('exit', onExit);
-    };
-
-    const timeoutHandle = setTimeout(onTimeout, timeoutMs);
-    child.once('exit', onExit);
-  });
-}
-
-function signalChildProcess(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (process.platform !== 'win32' && typeof child.pid === 'number' && child.pid > 0) {
-    process.kill(-child.pid, signal);
-    return;
-  }
-
-  child.kill(signal);
-}
-
-async function terminateChildProcess(
+/**
+ * Terminate a child from `spawnAcpProcess` together with everything it
+ * started: SIGTERM to its process group (tree on Windows), `exitTimeoutMs` of
+ * grace, SIGKILL, then a bounded wait. Rejects with `TerminationFailed` when
+ * the tree cannot be proven gone.
+ *
+ * TEMPORARY facade: auxiliary ACP agents become scoped processes once the
+ * ACP connection layer is an Effect.
+ */
+export async function terminateAcpProcessTree(
   child: ChildProcess,
-  logger: Logger,
-  sessionLabel: string,
-  exitTimeoutMs: number
+  options: {
+    logger: Logger;
+    sessionLabel: string;
+    exitTimeoutMs: number;
+    /** Skip SIGTERM: for probes whose output no longer matters. */
+    force?: boolean;
+    nodeProcess?: NodeProcessApi;
+  }
 ): Promise<void> {
-  if (child.exitCode !== null) {
-    return;
-  }
-
-  try {
-    signalChildProcess(child, 'SIGTERM');
-  } catch {
-    return;
-  }
-
-  if (await waitForChildProcessExit(child, exitTimeoutMs)) {
-    return;
-  }
-
-  logger.debug(
-    `[${sessionLabel}] ACP agent process did not exit within ${exitTimeoutMs}ms of SIGTERM; escalating to SIGKILL`
+  await terminateChildTree(
+    child,
+    {
+      graceMs: options.force ? 0 : options.exitTimeoutMs,
+      killWaitMs: options.exitTimeoutMs,
+      processGroup: true,
+    },
+    {
+      logger: options.logger,
+      logPrefix: `[${options.sessionLabel}]`,
+      nodeProcess: options.nodeProcess,
+    }
   );
-  try {
-    signalChildProcess(child, 'SIGKILL');
-  } catch {
-    return;
-  }
-  await waitForChildProcessExit(child, exitTimeoutMs);
 }
 
 export type SpawnAcpProcessOptions = {
@@ -239,7 +212,7 @@ export type SpawnAcpProcessOptions = {
   env: NodeJS.ProcessEnv;
   args?: string[];
   command?: string;
-  spawnImpl?: typeof spawn;
+  spawnImpl?: NodeProcessApi['spawn'];
 };
 
 export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess => {
@@ -259,8 +232,6 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
     command = command ?? launch.command;
     args = args ?? launch.args;
   }
-  const spawnFn = options.spawnImpl ?? spawn;
-
   const executable = resolveDeepSeekHarnessSpawn({
     command,
     args,
@@ -268,15 +239,17 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
     workdir: options.workdir,
   });
 
-  return spawnFn(executable.command, executable.args, {
-    cwd: options.workdir,
-    env: options.env,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32',
-    // On Windows the daemon has no console; without CREATE_NO_WINDOW each
-    // spawned agent CLI pops a visible console window and steals focus.
-    windowsHide: true,
-  });
+  // Its own process group on POSIX (a tree rooted at it on Windows), so
+  // `terminateAcpProcessTree` reaches everything the agent starts.
+  return startProcess(
+    {
+      command: executable.command,
+      args: executable.args,
+      options: { cwd: options.workdir, env: options.env, stdio: ['pipe', 'pipe', 'pipe'] },
+      processGroup: true,
+    },
+    withSpawn(options.spawnImpl)
+  ).child;
 };
 
 export type StartLocalAcpAgentOptions = {
@@ -299,7 +272,7 @@ export type StartLocalAcpAgentOptions = {
   onManagedRuntimeProgress?: ManagedRuntimeProgressCallback;
   signal?: AbortSignal;
   extraArgs?: string[];
-  spawnImpl?: typeof spawn;
+  spawnImpl?: NodeProcessApi['spawn'];
 };
 
 const CodexConfigOverrideSchema = z.record(z.string(), z.unknown());
@@ -621,7 +594,16 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
       if (error instanceof AcpStartupProcessExitError || error instanceof AcpStartupProcessError) {
         captureAcpSpawnFailed({ ...spawnAnalyticsProps, reason: classifyCliSpawnReason(error) });
       }
-      await terminateChildProcess(agentProcess, options.logger, 'acp-startup', 3000);
+      // Report a survivor, but keep the startup error: it is why the call failed.
+      await terminateAcpProcessTree(agentProcess, {
+        logger: options.logger,
+        sessionLabel: 'acp-startup',
+        exitTimeoutMs: 3000,
+      }).catch((terminationError: unknown) => {
+        options.logger.warn(
+          `[acp-startup] ACP agent process could not be terminated after a failed start: ${formatErrorMessage(terminationError)}`
+        );
+      });
 
       throw error;
     } finally {
@@ -663,6 +645,8 @@ export type ShutdownLocalAcpAgentOptions = {
   sessionLabel: string;
   closeSessionTimeoutMs?: number;
   exitTimeoutMs?: number;
+  /** Test seam for the OS process table. */
+  nodeProcess?: NodeProcessApi;
 };
 
 export async function shutdownLocalAcpAgent(options: ShutdownLocalAcpAgentOptions): Promise<void> {
@@ -681,12 +665,20 @@ export async function shutdownLocalAcpAgent(options: ShutdownLocalAcpAgentOption
     }
   }
 
-  await terminateChildProcess(
-    options.agentProcess,
-    options.logger,
-    options.sessionLabel,
-    exitTimeoutMs
-  );
+  try {
+    await terminateAcpProcessTree(options.agentProcess, {
+      logger: options.logger,
+      sessionLabel: options.sessionLabel,
+      exitTimeoutMs,
+      nodeProcess: options.nodeProcess,
+    });
+  } catch (error) {
+    // These probe, title, and login agents are never reused, so a survivor
+    // cannot receive new work; it is a leak to surface, not a caller failure.
+    options.logger.warn(
+      `[${options.sessionLabel}] ACP agent process could not be terminated: ${formatErrorMessage(error)}`
+    );
+  }
 }
 import {
   codexProfileEnvironment,

@@ -1097,7 +1097,16 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         }
         try {
           if (session) {
-            await session.terminate(true);
+            // A surviving tree was already reported by the Session; the
+            // unclaimed preparation is discarded either way, and a rejection
+            // here would skip the caller's cold fallback.
+            await session.terminate(true).catch((error: unknown) => {
+              this.logger.warn(
+                `[${sessionId}] Unclaimed preparation session was not fully terminated: ${formatErrorMessage(
+                  error
+                )}`
+              );
+            });
           } else if (sandbox) {
             await sandbox.terminate(true).catch((error: unknown) => {
               this.logger.debug(

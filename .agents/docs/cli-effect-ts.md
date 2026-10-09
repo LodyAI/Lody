@@ -50,11 +50,13 @@ catch })` and pass the signal on, so interruption aborts the work.
   `onSpawned` hook). A listener attached after a fiber yield can miss an event
   that already fired.
 
-## Promise entry points
+## Temporary Promise facades
 
-Existing Promise entry points may run an Effect with the runtime APIs above.
-New lifecycle services and process facades are introduced by later PRs; this
-migration only updates the existing Effect consumers.
+The process foundation is `@lody/shared/node/process`. Its Promise facades run
+v4 programs at the boundary; CLI's `platform/promise-facade.ts` adds its logger.
+`SessionSandbox`, the ACP runner and authentication probes now use this foundation.
+Other process callers migrate in the next layers. Delete each temporary facade
+when the corresponding caller itself becomes an Effect service.
 
 ## Testing
 
