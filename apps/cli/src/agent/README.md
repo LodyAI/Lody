@@ -10,13 +10,13 @@ context/acp-agent-edit-evidence.md. Adapter source repositories and builtin prov
 [apps/cli/AGENTS.md](../../AGENTS.md). Where updates go after they arrive:
 context/message-flow.md "Upstream".
 
-| Boundary           | Owner                                                                    | Responsibility                                                                   |
-| ------------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| ACP connection     | [AgentClient](agent-client.ts)                                           | Negotiates capabilities, tracks raw requests, and classifies steer evidence.     |
-| Process startup    | [Runner](acp-runner.ts)                                                  | Spawns agents under the shared startup gate.                                     |
-| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts)                             | Resolves pinned distributions and verifies their artifacts.                      |
-| Codex credentials  | [Profiles](codex-profile-store.ts), [broker](codex-credential-broker.ts) | Host-bound homes and vault generations; redirect-denying user-side API requests. |
-| Codex process uses | [Usage records](codex-profile-process-usage.ts) | Independent process records for deletion cleanup; same-profile sessions remain concurrent. |
+| Boundary           | Owner                                                                    | Responsibility                                                                             |
+| ------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| ACP connection     | [AgentClient](agent-client.ts)                                           | Negotiates capabilities, tracks raw requests, and classifies steer evidence.               |
+| Process startup    | [Runner](acp-runner.ts)                                                  | Spawns agents under the shared startup gate.                                               |
+| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts)                             | Resolves pinned distributions and verifies their artifacts.                                |
+| Codex credentials  | [Profiles](codex-profile-store.ts), [broker](codex-credential-broker.ts) | Host-bound homes and vault generations; redirect-denying user-side API requests.           |
+| Codex process uses | [Usage records](codex-profile-process-usage.ts)                          | Independent process records for deletion cleanup; same-profile sessions remain concurrent. |
 
 ## Files
 
@@ -302,3 +302,7 @@ ACP cwd remains the actual worktree. This also covers local child sessions,
 whose execution directory comes from their parent but whose project identity
 comes from the local project record. GitHub-only and projectless sessions do not
 send a local project identity. See the [draft contract](../../../../specs/local-project-acp-identity.zh.md).
+
+### Startup model selection
+
+`SessionConfig.modelId` carries the driving Turn's choice through prepared and cold creation into `AgentClient`. Core's `_meta.lody.sessionConfig` includes it before new/load/resume/fork. Codex translates the model and reasoning into native startup configuration, so resume does not transiently use a different global model. Live configuration remains necessary for reused sessions and older adapters. See the [startup contract](../../../../specs/acp-startup-model.md).
