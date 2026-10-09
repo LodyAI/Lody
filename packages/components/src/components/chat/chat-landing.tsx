@@ -104,7 +104,7 @@ import {
   focusFirstChatLandingOption,
   useChatLandingKeyboardNav,
 } from '@/hooks/use-chat-landing-keyboard-nav';
-import { useFireOnKeyChange, useFireOncePerKey } from '@/hooks/use-fire-once';
+import { useFireOncePerKey } from '@/hooks/use-fire-once';
 import {
   isArchivedLocalProjectRestoreUnavailableError,
   SessionCreateBillingError,
@@ -1152,10 +1152,7 @@ function WorkspaceChatLanding({
   });
   const landingLoadStartMsRef = useRef(getPerformanceNowMs());
   const fireLandingViewedOnce = useFireOncePerKey();
-  const fireProjectSourceReadyOnce = useFireOncePerKey();
   const previousContextTypeRef = useRef(contextType);
-  const fireProjectSelectedOnChange = useFireOnKeyChange();
-  const fireAgentConfigOnChange = useFireOnKeyChange();
   const preSelectionAppliedRef = useRef<string | null>(null);
   const previousPreSelectionKeyRef = useRef<string | null>(null);
   // False while a just-applied URL intent has not rendered yet; the selection
@@ -2278,105 +2275,6 @@ function WorkspaceChatLanding({
     userId,
     workspaceId,
   ]);
-
-  useEffect(() => {
-    if (!postHog || !userId || !workspaceId) return;
-    // Wait until the GitHub repo query has settled (undefined = still loading)
-    if (repositories === undefined) return;
-    if (visibleLocalProjectsLoading) return;
-    const githubRepoCount = repositories.length;
-    if (githubRepoCount === 0 && localProjectCount === 0) return;
-    if (!fireProjectSourceReadyOnce(`${userId}:${workspaceId}`)) return;
-    const sourceKind =
-      githubRepoCount > 0 && localProjectCount > 0
-        ? 'mixed'
-        : githubRepoCount > 0
-          ? 'github'
-          : 'local';
-    capturePostHogEvent(postHog, 'onboarding/project_source_ready', {
-      user_id: userId,
-      workspace_id: workspaceId,
-      source_kind: sourceKind,
-      github_repo_count: githubRepoCount,
-      local_project_count: localProjectCount,
-    });
-  }, [
-    fireProjectSourceReadyOnce,
-    localProjectCount,
-    postHog,
-    repositories,
-    userId,
-    visibleLocalProjectsLoading,
-    workspaceId,
-  ]);
-
-  useEffect(() => {
-    if (!postHog || !userId || !workspaceId) return;
-    if (contextType === 'chat') return;
-    if (contextType === 'github' && !selectedRepo) return;
-    if (contextType === 'local' && !selectedLocalProject) return;
-    if (
-      contextType === 'local' &&
-      selectedLocalProject &&
-      activeLocalGitState === null &&
-      !localGitStateError
-    ) {
-      return;
-    }
-
-    const selectionKey =
-      contextType === 'github'
-        ? `github:${selectedRepo}`
-        : `local:${selectedLocalProject?.machineId}:${selectedLocalProject?.localProjectId}`;
-    const analyticsKey = `${userId}:${workspaceId}:${selectionKey}`;
-    if (!fireProjectSelectedOnChange(analyticsKey)) return;
-    capturePostHogEvent(postHog, 'onboarding/project_selected', {
-      user_id: userId,
-      workspace_id: workspaceId,
-      project_kind: contextType,
-      repo_id_hash: contextType === 'github' ? hashAnalyticsId(selectedRepo) : null,
-      local_project_id:
-        contextType === 'local' ? (selectedLocalProject?.localProjectId ?? null) : null,
-      machine_id: contextType === 'local' ? (selectedLocalProject?.machineId ?? null) : null,
-      has_git_branch:
-        contextType === 'local'
-          ? localGitStateError
-            ? null
-            : (activeLocalGitState?.git ?? null)
-          : true,
-    });
-  }, [
-    activeLocalGitState,
-    contextType,
-    fireProjectSelectedOnChange,
-    localGitStateError,
-    postHog,
-    selectedLocalProject,
-    selectedRepo,
-    userId,
-    workspaceId,
-  ]);
-
-  useEffect(() => {
-    if (!postHog || !userId || !workspaceId || !selectedAgent || !selectedConfig) return;
-    const analyticsKey = [
-      userId,
-      workspaceId,
-      selectedAgent.machineId,
-      selectedAgent.agentId,
-      selectedConfig.cliType,
-      selectedConfig.agentType,
-    ].join(':');
-    if (!fireAgentConfigOnChange(analyticsKey)) return;
-    capturePostHogEvent(postHog, 'onboarding/agent_config_selected', {
-      user_id: userId,
-      workspace_id: workspaceId,
-      machine_id: selectedAgent.machineId,
-      agent_config_id: selectedAgent.agentId,
-      cli_type: selectedConfig.cliType,
-      agent_type: selectedConfig.agentType,
-    });
-  }, [fireAgentConfigOnChange, postHog, selectedAgent, selectedConfig, userId, workspaceId]);
 
   // ── GitHub branch loading ──
   useLayoutEffect(() => {
