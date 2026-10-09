@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { IPty } from '@lydell/node-pty';
+import { Duration, Effect } from 'effect';
 import {
   type SessionId,
   type TerminalDataEvent,
@@ -19,6 +20,10 @@ import { LODY_GIT_CRED_CONTEXT_TOKEN_ENV } from '@/lib/git-credential-broker';
 import { clearManagedGhTokenEnv, LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/lib/gh-token-env';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { makePlatformRunner } from '@/platform/promise-facade';
+import { NodeProcess } from '@lody/shared/node/process';
+import { posixGroupTree, terminateTree, waitUntilGone } from '@lody/shared/node/process';
+import type { TerminationPolicy } from '@lody/shared/node/process';
 
 const SCROLLBACK_MAX_CHARS = 512 * 1024;
 const TITLE_PARSE_BUFFER_MAX_CHARS = 4096;
@@ -37,6 +42,13 @@ const TERMINAL_ENV_BLOCKLIST = new Set([
   LODY_MANAGED_GH_TOKEN_SHA256_ENV,
 ]);
 const require = createRequire(import.meta.url);
+/**
+ * The hangup is the polite signal: a shell's SIGHUP path forwards the hangup to
+ * its jobs (fish sends no SIGHUP to them when SIGTERM ends it first). A shell
+ * still running after the grace is SIGKILLed.
+ */
+const PTY_HANGUP_GRACE = Duration.seconds(2);
+const PTY_KILL_POLICY: TerminationPolicy = { graceMs: 0, killWaitMs: 2_000 };
 
 // @lydell/node-pty ships its binding through per-platform optional dependencies and
 // never compiles from source, so hosts it has no prebuild for (musl, armv7, …) resolve
@@ -140,6 +152,24 @@ function extractLatestTitle(record: TerminalRecord, data: string): string | null
   }
   return latest;
 }
+
+/**
+ * TEMPORARY facade: ends a PTY's process group through the process layer.
+ * node-pty's POSIX child calls setsid(), so the shell leads its own session and
+ * process group (pgid == pid) and `posixGroupTree` reaches it plus anything
+ * running in that group. An interactive shell puts each job in a group of its
+ * own; those are reached by the hangup `end()` sends first, which the shell
+ * forwards to its jobs, and by the kernel's SIGHUP to the terminal's foreground
+ * group when the session leader exits.
+ */
+const terminatePtyProcessGroup = (pid: number, logger: Logger): Promise<void> =>
+  makePlatformRunner({ logger })(
+    Effect.gen(function* () {
+      const tree = posixGroupTree(yield* NodeProcess, pid);
+      if (yield* waitUntilGone(tree, PTY_HANGUP_GRACE)) return;
+      yield* terminateTree(tree, PTY_KILL_POLICY);
+    })
+  );
 
 class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
   private readonly logger: Logger;
@@ -262,8 +292,7 @@ class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
   }
 
   close(terminalId: string): void {
-    const record = this.requireRecord(terminalId);
-    record.pty.kill();
+    this.end(this.requireRecord(terminalId));
   }
 
   closeSession(sessionId: string): void {
@@ -299,13 +328,33 @@ class TerminalPtyServiceImpl implements TerminalPtyServiceApi {
     const record = this.records.get(terminalId);
     if (!record) return;
     try {
-      record.pty.kill();
+      this.end(record);
     } catch (error) {
       this.logger.debug(
         `[terminal] failed to close terminalId=${terminalId}: ${formatErrorMessage(error)}`
       );
       this.removeRecord(terminalId);
     }
+  }
+
+  /**
+   * Hang up the terminal, then make sure its process group is gone. The
+   * hangup is synchronous, so a daemon exiting right after `closeAll()` has
+   * still delivered it; the bounded escalation runs in the background.
+   */
+  private end(record: TerminalRecord): void {
+    // node-pty's kill() is SIGHUP on POSIX, the signal a closing terminal sends.
+    // On Windows it closes the ConPTY pseudoconsole, which ends the processes
+    // attached to it; POSIX signals and process groups do not exist there, so
+    // the process layer has no better tree to end.
+    record.pty.kill();
+    if (process.platform === 'win32') return;
+    const { pid } = record.pty;
+    void terminatePtyProcessGroup(pid, this.logger).catch((error: unknown) => {
+      this.logger.warn(
+        `[terminal] process group ${pid} of terminalId=${record.terminalId} did not exit: ${formatErrorMessage(error)}`
+      );
+    });
   }
 
   private removeRecord(terminalId: string): void {

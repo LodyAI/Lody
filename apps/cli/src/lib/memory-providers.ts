@@ -1,5 +1,4 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { runCommandText } from '@/platform/promise-facade';
 import { z } from 'zod';
 import {
   MemoryBindingSchema,
@@ -12,19 +11,22 @@ import {
 } from '@lody/shared';
 import { getLoginShellEnv } from '@/agent/login-shell-env';
 
-const execFileAsync = promisify(execFile);
 type CommandResult = { stdout: string; code?: string | number };
 export type MemoryCommandRunner = (args: string[]) => Promise<CommandResult>;
 const runNmem: MemoryCommandRunner = async (args) => {
   try {
-    const result = await execFileAsync('nmem', args, {
+    const result = await runCommandText({
+      command: 'nmem',
+      args,
+      check: 'none',
       env: { ...process.env, ...(await getLoginShellEnv()) },
       timeout: 15_000,
-      maxBuffer: 1024 * 1024,
-      encoding: 'utf8',
-      windowsHide: true,
+      maxOutputBytes: 1024 * 1024,
     });
-    return { stdout: result.stdout };
+    return {
+      stdout: result.stdout,
+      code: result.code === 0 ? undefined : (result.code ?? 'failed'),
+    };
   } catch (error) {
     const parsed = z
       .object({ code: z.union([z.string(), z.number()]).optional(), stdout: z.string().optional() })

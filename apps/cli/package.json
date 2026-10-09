@@ -130,7 +130,6 @@
     "@napi-rs/keyring": "2.1.0",
     "better-sqlite3": "catalog:",
     "loro-crdt": "1.16.3",
-    "shell-env": "^4.0.3",
     "tinypool": "^1.0.0",
     "typescript": "^5.9.3"
   }

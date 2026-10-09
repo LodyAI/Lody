@@ -1,7 +1,7 @@
-import { execFile } from 'node:child_process';
 import type { CloudGithubTokenManager, CloudGithubWriteTokenContext } from '@lody/platform';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandText } from '@/platform/promise-facade';
 
 /**
  * Per-repo GitHub credential resolution for the poller (plan §3).
@@ -39,40 +39,36 @@ type GhHarvest =
   | { outcome: 'gh-missing' }
   | { outcome: 'not-authed' };
 
-const defaultHarvestGhToken = (): Promise<GhHarvest> =>
-  new Promise((resolve) => {
-    execFile(
-      'gh',
-      ['auth', 'token', '--hostname', 'github.com'],
-      { timeout: 5000, windowsHide: true },
-      (error, stdout) => {
-        if (error) {
-          const code = (error as NodeJS.ErrnoException).code;
-          resolve({ outcome: code === 'ENOENT' ? 'gh-missing' : 'not-authed' });
-          return;
-        }
-        const token = stdout.trim();
-        resolve(token ? { outcome: 'token', token } : { outcome: 'not-authed' });
-      }
-    );
-  });
+const defaultHarvestGhToken = async (): Promise<GhHarvest> => {
+  try {
+    const { stdout } = await runCommandText({
+      command: 'gh',
+      args: ['auth', 'token', '--hostname', 'github.com'],
+      timeout: 5000,
+      check: 'exit-0',
+    });
+    const token = stdout.trim();
+    return token ? { outcome: 'token', token } : { outcome: 'not-authed' };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return { outcome: code === 'ENOENT' ? 'gh-missing' : 'not-authed' };
+  }
+};
 
-const defaultFetchGhUserId = (): Promise<string | null> =>
-  new Promise((resolve) => {
-    execFile(
-      'gh',
-      ['api', '--hostname', 'github.com', 'user', '--jq', '.id'],
-      { timeout: 5000, windowsHide: true },
-      (error, stdout) => {
-        if (error) {
-          resolve(null);
-          return;
-        }
-        const id = stdout.trim();
-        resolve(id ? id : null);
-      }
-    );
-  });
+const defaultFetchGhUserId = async (): Promise<string | null> => {
+  try {
+    const { stdout } = await runCommandText({
+      command: 'gh',
+      args: ['api', '--hostname', 'github.com', 'user', '--jq', '.id'],
+      timeout: 5000,
+      check: 'exit-0',
+    });
+    const id = stdout.trim();
+    return id ? id : null;
+  } catch {
+    return null;
+  }
+};
 
 export type GitHubCredentialResolverDeps = {
   /** Workspace-bound token manager; null disables the managed tier entirely. */

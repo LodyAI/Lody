@@ -79,7 +79,8 @@ The process foundation is `@lody/shared/node/process`. Its Promise entry points
 run v4 programs at the legacy boundary. CLI's `platform/process-options.ts` only
 composes services and logging; it executes no program and has no Promise API.
 `SessionSandbox`, the ACP runner and authentication probes use this foundation.
-Other process callers migrate in the next layers. Delete each temporary facade
+Other CLI callers use the same core, enforced by `check:cli-process-boundary`.
+Electron, supervisor and shared helpers migrate in the final layer. Delete each temporary facade
 when the corresponding caller itself becomes an Effect service.
 
 ## Testing

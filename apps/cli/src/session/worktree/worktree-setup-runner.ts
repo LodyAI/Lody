@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_WORKTREE_CLEANUP_TIMEOUT_MS,
@@ -12,9 +11,17 @@ import {
   type WorktreeSetupShell,
   type WorkspaceId,
 } from '@lody/shared';
+import { startProcess } from '@/platform/promise-facade';
+import type { TerminationPolicy } from '@lody/shared/node/process';
 import type { Logger } from '@/utils/logger';
+import { formatErrorMessage } from '@/utils/format-error';
 
 const OUTPUT_TAIL_MAX_CHARS = 16_000;
+/**
+ * How a failed or timed-out script is ended: SIGTERM to the shell's whole
+ * process group (every command the script started), then SIGKILL.
+ */
+const SCRIPT_TERMINATION_POLICY: TerminationPolicy = { graceMs: 2_000, killWaitMs: 2_000 };
 
 export type WorktreeScriptOutputStream = 'stdout' | 'stderr';
 
@@ -227,21 +234,28 @@ async function runWorktreeScript(options: {
     let childClosed = false;
     let childExitStatus: WorktreeScriptEndEvent['exitStatus'];
     let waitForCloseResolve: (() => void) | null = null;
-    const child = spawn(command, args, {
-      cwd: options.workdir,
-      windowsHide: true,
-      env: {
-        ...process.env,
-        LODY_WORKSPACE_ID: options.workspaceId,
-        LODY_SESSION_ID: options.sessionId,
-        LODY_WORKTREE_PATH: options.workdir,
-        LODY_WORKTREE_BRANCH: options.branch,
-        LODY_WORKTREE_SCRIPT_PHASE: options.phase,
-        ...(options.repoFullName ? { LODY_GITHUB_REPO: options.repoFullName } : {}),
-        ...(options.localProjectId ? { LODY_LOCAL_PROJECT_ID: options.localProjectId } : {}),
+    // The shell leads its own process group so a failure or timeout ends every
+    // command the script started, not just the shell.
+    const shellProcess = startProcess({
+      command,
+      args,
+      options: {
+        cwd: options.workdir,
+        env: {
+          ...process.env,
+          LODY_WORKSPACE_ID: options.workspaceId,
+          LODY_SESSION_ID: options.sessionId,
+          LODY_WORKTREE_PATH: options.workdir,
+          LODY_WORKTREE_BRANCH: options.branch,
+          LODY_WORKTREE_SCRIPT_PHASE: options.phase,
+          ...(options.repoFullName ? { LODY_GITHUB_REPO: options.repoFullName } : {}),
+          ...(options.localProjectId ? { LODY_LOCAL_PROJECT_ID: options.localProjectId } : {}),
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
       },
-      stdio: ['pipe', 'pipe', 'pipe'],
+      processGroup: true,
     });
+    const child = shellProcess.child;
 
     const emitOutput = (step: RunningStep, stream: WorktreeScriptOutputStream, chunk: string) => {
       if (stream === 'stdout') {
@@ -412,17 +426,24 @@ async function runWorktreeScript(options: {
       }
       settled = true;
       clearTimeout(timeout);
-      if (error && !child.killed && !childClosed) {
-        child.kill('SIGTERM');
-      }
-      void Promise.resolve(
-        options.events?.onEnd?.({
-          phase: options.phase,
-          status,
-          exitStatus,
-          error,
-        })
-      )
+      // A successful script may leave background services running on purpose;
+      // a failed one must not leave anything behind, even after its shell exited.
+      const terminated = error
+        ? shellProcess.terminate(SCRIPT_TERMINATION_POLICY).catch((terminationError: unknown) => {
+            options.logger.warn(
+              `[${options.sessionId}] Worktree ${options.phase} processes did not exit: ${formatErrorMessage(terminationError)}`
+            );
+          })
+        : Promise.resolve();
+      void terminated
+        .then(() =>
+          options.events?.onEnd?.({
+            phase: options.phase,
+            status,
+            exitStatus,
+            error,
+          })
+        )
         .then(() => {
           if (error) {
             reject(error);
@@ -461,14 +482,14 @@ async function runWorktreeScript(options: {
       settle('failed', error, { signal: 'SIGTERM' });
     }, timeoutMs);
 
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       if (!activeStep) {
         return;
       }
       consumeStepStream(activeStep, 'stdout', text);
     });
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       if (!activeStep) {
         return;

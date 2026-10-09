@@ -31,7 +31,7 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   WS control-plane listener, and serializes remote bridge attach/detach/revoke through
   `runBridgeTransition`.
 - `machine-lifecycle.ts` — remote lifecycle verification and upgrade intents; runs the
-  fixed npm install through `cross-spawn` so Windows `npm.cmd` shims use the command
+  fixed npm install through the shared process layer’s `startProcess` so Windows `npm.cmd` shims use the command
   interpreter. It resolves the installed package through that npm's global root
   and verifies its entry/version. `../commands/daemon-runner.ts` owns restart and
   handoff to that explicit entry, including matching-version readiness.

@@ -1,9 +1,6 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { PiExtensionDiscoverySchema, type PiExtensionDiscovery } from '@lody/shared';
+import { runCommandText } from '@/platform/promise-facade';
 import { getManagedAgentRuntimeManager, PI_EXTENSIONS_SUPPORTED } from './managed-agent-runtime';
-
-const execFileAsync = promisify(execFile);
 
 const SCAN_ENV_KEYS = [
   'PATH',
@@ -55,17 +52,14 @@ export async function discoverManagedPiExtensions(
     }
   }
   try {
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      [runtime.command, '--list-extensions'],
-      {
-        encoding: 'utf8',
-        timeout: 30_000,
-        maxBuffer: 2 * 1024 * 1024,
-        windowsHide: true,
-        env,
-      }
-    );
+    const { stdout } = await runCommandText({
+      command: process.execPath,
+      args: [runtime.command, '--list-extensions'],
+      timeout: 30_000,
+      maxOutputBytes: 2 * 1024 * 1024,
+      env,
+      check: 'exit-0',
+    });
     return PiExtensionDiscoverySchema.parse(JSON.parse(stdout));
   } catch {
     throw new Error(

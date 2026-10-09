@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process';
-
 import { isMissingEmail } from '@lody/shared';
+
+import { runCommandTextSync } from '@/platform/promise-facade';
 
 export const DEFAULT_AI_GIT_AUTHOR_NAME = 'LodyAI';
 export const DEFAULT_AI_GIT_AUTHOR_EMAIL = 'agent@lody.ai';
@@ -64,17 +64,19 @@ const normalizeName = (name: string | undefined, email: string): string => {
   return email;
 };
 
-// Global scope only. Lody-managed bare repositories share one config across all
-// worktrees, so a repository-level `user.*` there is whatever some earlier agent
-// wrote (e.g. a test fixture identity) and would leak into every other session.
+/** `git config` blocks the caller's event loop, so a wedged git cannot stall it for long. */
+const GIT_CONFIG_TIMEOUT_MS = 5_000;
+
+// Only global identity is a host default; shared bare-repo config belongs to agents.
 const readGitConfig = (key: 'user.name' | 'user.email'): string | undefined => {
   try {
-    const output = execFileSync('git', ['config', '--global', key], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
+    const { stdout } = runCommandTextSync({
+      command: 'git',
+      args: ['config', '--global', key],
+      timeout: GIT_CONFIG_TIMEOUT_MS,
+      check: 'exit-0',
     });
-    return trimNonEmpty(output);
+    return trimNonEmpty(stdout);
   } catch {
     return undefined;
   }

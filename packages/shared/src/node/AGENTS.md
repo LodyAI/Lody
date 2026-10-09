@@ -20,9 +20,9 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
 - New or refactored process callers use the official Effect service or shared
   legacy Promise entry points; never add raw spawn or kill paths, and never put
   an Effect through a Promise facade and wrap it back into Effect.
-  ACP callers are migrated in this layer. Existing CLI callers, Node git/lock
-  helpers, Electron and supervisor migrate in subsequent PRs; the automated
-  guard is introduced with those consumers.
+  ACP and remaining CLI callers use this layer, enforced by the CLI process guard.
+  Existing Node git/lock helpers, Electron and supervisor migrate in the next PR;
+  the guard expands with those consumers.
 - `process.ts` stays one module with no relative imports: Electron's
   `node --test` cannot resolve extensionless relative imports.
 - Missing a capability (a new spawn shape, a pid-only kill)? Add it to

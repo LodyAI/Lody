@@ -1,9 +1,10 @@
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { ChildProcessByStdio } from 'node:child_process';
+import { Effect } from 'effect';
+import { startProcess, terminateChildTree } from '@lody/shared/node/process';
 import type { Readable, Writable } from 'node:stream';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { guestButtonsSource } from './guest-buttons-source';
 
 type Button = 'home' | 'app-switcher' | 'lock';
@@ -32,31 +33,11 @@ export function createGuestButtons(signal: AbortSignal, executable = '/usr/bin/x
     const closed = childClosed;
     terminating = (async () => {
       owned.stdin.end();
-      const send = (terminationSignal: NodeJS.Signals | 0): boolean => {
-        if (owned.pid) {
-          try {
-            process.kill(-owned.pid, terminationSignal);
-            return true;
-          } catch (e) {
-            if (!(e instanceof Error && 'code' in e && e.code === 'ESRCH')) throw e;
-          }
-        }
-        return false;
-      };
-      // EOF lets the guest release an in-progress key and cancel its service.
-      const term = setTimeout(() => send('SIGTERM'), 1000);
-      const kill = setTimeout(() => send('SIGKILL'), 2000);
+      // EOF gives the guest one second to release a key and cancel its service.
+      if (closed)
+        await Effect.runPromise(Effect.raceAll([Effect.promise(() => closed), Effect.sleep(1000)]));
+      await terminateChildTree(owned, { processGroup: true, graceMs: 1000, killWaitMs: 2000 });
       await closed;
-      clearTimeout(term);
-      clearTimeout(kill);
-      // Parent close is not a join of compiler/simctl descendants with separate stdio.
-      if (send('SIGTERM')) {
-        const killAt = Date.now() + 1000;
-        while (send(0)) {
-          if (Date.now() >= killAt) send('SIGKILL');
-          await delay(25);
-        }
-      }
       if (child === owned) child = undefined;
     })();
     return terminating;
@@ -64,7 +45,13 @@ export function createGuestButtons(signal: AbortSignal, executable = '/usr/bin/x
   function launch(args: string[], protocol: boolean): Promise<void> {
     signal.throwIfAborted();
     if (failed) throw error();
-    const process = spawn(executable, args, { detached: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    const { child: started } = startProcess({
+      command: executable,
+      args,
+      processGroup: true,
+      options: { stdio: ['pipe', 'pipe', 'ignore'] },
+    });
+    const process = started as ChildProcessByStdio<Writable, Readable, null>;
     child = process;
     terminating = undefined;
     childClosed = new Promise<void>((resolve) => process.once('close', resolve));

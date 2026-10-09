@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { startProcess, type ProcessHandle } from '@lody/shared/node/process';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
@@ -68,7 +68,7 @@ const onMessage = (raw: unknown) => {
 process.on('message', onMessage);
 process.once('SIGTERM', stop);
 process.once('SIGINT', stop);
-let child: ReturnType<typeof spawn> | undefined;
+let owned: ProcessHandle | undefined;
 let exited: Promise<void> | undefined;
 try {
   if (!process.connected) throw new Error('Missing lifecycle owner');
@@ -85,12 +85,13 @@ try {
     reservation.close((error) => (error ? reject(error) : resolve()))
   );
   abort.signal.throwIfAborted();
-  child = spawn(binary, ['serve', '--host', '127.0.0.1', '--port', String(port), '--no-plugins'], {
-    // Isolate the native server and its xcrun descendants in our own process group.
-    detached: true,
-    stdio: 'ignore',
-    env: process.env,
+  owned = startProcess({
+    command: binary,
+    args: ['serve', '--host', '127.0.0.1', '--port', String(port), '--no-plugins'],
+    processGroup: true,
+    options: { stdio: 'ignore', env: process.env },
   });
+  const child = owned.child;
   exited = new Promise<void>((resolve) => {
     child?.once('error', () => {
       stop();
@@ -128,26 +129,9 @@ try {
   await buttons.close().catch(() => {
     process.exitCode = 1;
   });
-  if (child?.pid !== undefined) {
-    const group = -child.pid;
-    const signalGroup = (signal: NodeJS.Signals | 0): boolean => {
-      try {
-        process.kill(group, signal);
-        return true;
-      } catch (error) {
-        if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return false;
-        throw error;
-      }
-    };
-    // Parent exit alone is insufficient: an in-flight simctl can outlive Baguette.
-    // Keep IPC ownership until the whole group is gone, including forced cleanup.
-    if (signalGroup('SIGTERM')) {
-      const killAt = Date.now() + 3000;
-      while (signalGroup(0)) {
-        if (Date.now() >= killAt) signalGroup('SIGKILL');
-        await delay(25);
-      }
-    }
+  if (owned) {
+    // Keep IPC ownership through whole-tree cleanup, even if the leader exited.
+    await owned.terminate({ graceMs: 3000, killWaitMs: 2000 });
     await exited;
   }
   process.removeListener('disconnect', stop);

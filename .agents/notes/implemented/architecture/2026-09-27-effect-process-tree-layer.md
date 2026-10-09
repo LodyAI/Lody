@@ -84,3 +84,24 @@ The tests are local evidence. No real Windows host, Linux cgroup hierarchy or
 signed desktop installer has been tested. taskkill cannot retain descendants
 whose Windows parent has already exited; [#429](https://github.com/LodyAI/Lody/issues/429)
 remains partly addressed until the separate Job Object work.
+
+## Remaining CLI consumers (#1069)
+
+Git, worktree setup/GC, daemon commands, MCP, preview, file scanning, resource
+probes and PTY termination use the same process facades. The CLI guard rejects
+raw process APIs and process-spawning dependencies, including dynamic imports
+and direct child kill forms. Standalone generated scripts and node-pty spawning
+are named exceptions; PTY termination still uses the core.
+
+The shared login-shell probe is introduced with its CLI caller. All fallback
+shells share one deadline, printf delimiters preserve PATH, probe-only tmux and
+update variables are restored to their original values, and multiline values
+remain intact. CLI startup still unblocks after 3 seconds while the bounded
+probe finishes in the background. shell-env is removed from CLI dependencies.
+PTY hangup retains a bounded grace period before force-killing its group.
+
+Current-main integration also migrates the new Simulator worker, native server,
+guest helper, fixed xcrun commands and memory-provider CLI calls in #1069.
+IPC ownership and guest EOF release remain with their owners; shared tree
+termination replaces local signal loops. Global-only host Git identity and the
+verified upgrade-installation handoff from main are preserved.

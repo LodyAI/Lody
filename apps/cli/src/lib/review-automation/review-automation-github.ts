@@ -1,5 +1,6 @@
-import { execFile } from 'node:child_process';
 import { z } from 'zod';
+
+import { runCommandText } from '@/platform/promise-facade';
 
 /**
  * GitHub access for the review engine, over the `gh` CLI.
@@ -38,24 +39,23 @@ export const createGhRunner =
     if (!token) {
       return { stdout: 'no GitHub credential available', exitCode: 1 };
     }
-    return await new Promise((resolve) => {
-      execFile(
-        'gh',
-        [...args],
-        {
-          timeout: GH_TIMEOUT_MS,
-          env: { ...process.env, GH_TOKEN: token, GH_PROMPT: 'disabled' },
-          maxBuffer: 8 * 1024 * 1024,
-        },
-        (error, stdout, stderr) => {
-          if (error) {
-            resolve({ stdout: `${stdout}${stderr}`.trim(), exitCode: 1 });
-            return;
-          }
-          resolve({ stdout, exitCode: 0 });
-        }
-      );
-    });
+    try {
+      const result = await runCommandText({
+        command: 'gh',
+        args,
+        timeout: GH_TIMEOUT_MS,
+        env: { ...process.env, GH_TOKEN: token, GH_PROMPT: 'disabled' },
+        maxOutputBytes: 8 * 1024 * 1024,
+        check: 'none',
+      });
+      if (result.code !== 0 || result.signal !== null) {
+        return { stdout: `${result.stdout}${result.stderr}`.trim(), exitCode: 1 };
+      }
+      return { stdout: result.stdout, exitCode: 0 };
+    } catch {
+      // Spawn failure, timeout or output overflow: `gh` produced no usable output.
+      return { stdout: '', exitCode: 1 };
+    }
   };
 
 const PullRequestFactsSchema = z.object({

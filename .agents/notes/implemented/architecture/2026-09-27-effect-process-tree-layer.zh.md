@@ -61,3 +61,17 @@ daemon 级运行时留给后续会话资源阶段。此 stack 不引入 v3 进�
 这些是本地证据；未验证真实 Windows、Linux cgroup 或签名安装包。taskkill 无法保留 Windows
 父进程已退出后的后代身份，因此 [#429](https://github.com/LodyAI/Lody/issues/429) 仍待单独的
 Job Object 工作补齐。
+
+## 其余 CLI 调用方（#1069）
+
+Git、worktree setup/GC、daemon 命令、MCP、preview、文件扫描、资源探测与 PTY 终止统一使用进程
+门面。CLI 守卫拦截直接进程 API、启动进程的第三方依赖、动态导入和对子进程直接 kill。
+独立生成脚本与 node-pty 启动是写明理由的例外；PTY 终止仍使用核心。
+
+共享登录 shell 探测随 CLI 调用方引入。fallback shell 共用一个截止时间，printf 分隔符保留 PATH，
+仅供探测的 tmux/update 变量恢复原值，多行环境值保持完整。CLI 启动仍在 3 秒后先放行，后台有上限
+地完成探测。删除 CLI 的 shell-env 依赖；PTY hangup 后保留有上限的宽限再强杀进程组。
+
+合并当前 main 后，#1069 也迁移新加入的 Simulator worker、原生服务、guest helper、
+固定 xcrun 命令和 memory provider 命令。IPC 所有权及 guest EOF 释放仍由原模块负责，
+进程树终止复用共享层；保留 main 的全局 Git 身份读取和已验证升级安装路径交接。

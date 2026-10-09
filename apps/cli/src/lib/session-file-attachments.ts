@@ -1,10 +1,8 @@
 import * as crypto from 'crypto';
-import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { promisify } from 'util';
 
-const execFileAsync = promisify(execFile);
+import { runCommandText } from '@/platform/promise-facade';
 
 /**
  * Directory (relative to the session workspace root) where human→agent file
@@ -124,10 +122,11 @@ export const computeExcludeFileContent = (existingContent: string): string | nul
 export const resolveGitInfoExcludePath = async (workspaceRoot: string): Promise<string | null> => {
   try {
     // `--git-path info/exclude` resolves correctly for worktrees/submodules.
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--git-path', 'info/exclude'], {
+    const { stdout } = await runCommandText({
+      command: 'git',
+      args: ['rev-parse', '--git-path', 'info/exclude'],
       cwd: workspaceRoot,
-      encoding: 'utf8',
-      windowsHide: true,
+      check: 'exit-0',
     });
     const raw = stdout.trim();
     if (!raw) {

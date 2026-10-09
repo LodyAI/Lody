@@ -1,16 +1,14 @@
-import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
 
 import type { RepoId, SessionId, SessionMeta } from '@lody/shared';
 
+import { runCommandText } from '@/platform/promise-facade';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
 import { getWorktreeManager } from './worktree-manager';
 
-const execFileAsync = promisify(execFile);
 const GIT_PROBE_TIMEOUT_MS = 30_000;
 
 /**
@@ -248,10 +246,12 @@ export class WorktreeGarbageCollector {
   private async isInsideGitWorkTree(dir: string): Promise<boolean> {
     if (!fs.existsSync(dir)) return false;
     try {
-      const { stdout } = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
+      const { stdout } = await runCommandText({
+        command: 'git',
+        args: ['rev-parse', '--is-inside-work-tree'],
         cwd: dir,
         timeout: GIT_PROBE_TIMEOUT_MS,
-        encoding: 'utf8',
+        check: 'exit-0',
       });
       return stdout.trim() === 'true';
     } catch {

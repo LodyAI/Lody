@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { getLogger } from '@/utils/logger';
+import { startProcess } from '@/platform/promise-facade';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import {
   WorkspaceWatchCoordinator,
   buildWorkspaceWatchWorkerEnvironment,
@@ -24,9 +26,6 @@ class FakeChild extends EventEmitter {
     }
     return true;
   }
-  kill(): boolean {
-    return true;
-  }
 }
 
 describe('WorkspaceWatchCoordinator', () => {
@@ -39,7 +38,7 @@ describe('WorkspaceWatchCoordinator', () => {
       childLauncher: () => {
         const child = new FakeChild();
         children.push(child);
-        return child as never;
+        return { child: child as never, terminate: async () => {} };
       },
       restartDelayMs: () => 1_000,
     });
@@ -91,6 +90,36 @@ describe('WorkspaceWatchCoordinator', () => {
     expect(child?.sent.at(-1)).toMatchObject({ roots: ['/canonical/workspace'] });
     second?.release();
     await coordinator.dispose();
+  });
+
+  it('ends a worker that ignores the shutdown request and SIGTERM', async () => {
+    const table = new FakeProcessTable();
+    table.queueSpawn({ ignores: ['SIGTERM'] });
+    const coordinator = new WorkspaceWatchCoordinator(getLogger('workspace-watch-test'), {
+      realpath: async () => '/canonical/workspace',
+      childLauncher: () =>
+        startProcess(
+          { command: 'watch-worker', args: [], options: {}, processGroup: false },
+          { nodeProcess: table.api }
+        ),
+      gracefulShutdownMs: 0,
+      sigtermWaitMs: 10,
+    });
+    await coordinator.subscribe({
+      workspaceId: 'workspace-a',
+      ownerSessionId: 'owner-a',
+      workspaceRoot: '/workspace',
+      onDirty: () => {},
+    });
+    const workerPid = coordinator.getSnapshot().pid ?? -1;
+
+    await coordinator.dispose();
+
+    expect(table.isAlive(workerPid)).toBe(false);
+    expect(table.delivered).toEqual([
+      { target: workerPid, signal: 'SIGTERM' },
+      { target: workerPid, signal: 'SIGKILL' },
+    ]);
   });
 
   it('does not forward representative credentials or NODE_OPTIONS', () => {
