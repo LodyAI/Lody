@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1359
 
 [中文](2026-10-09-mention-file-fetch-accounting.zh.md)
 
