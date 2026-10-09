@@ -62,6 +62,9 @@ test('common legacy routes reach Stable without loops while chat/new stays in th
       assert.equal(consumed.kind, 'local');
       assert.equal(consumed.url, route.startsWith('auth/') ? forwarded.url : raw);
     }
+    const imported = 'lody://provider/import?v=1&data=synthetic';
+    assert.equal(receiver.resolveDesktopDeepLink(imported).kind, 'local');
+    assert.equal(receiver.resolveDesktopDeepLink(imported).url, imported);
     const chat = 'lody://chat/new?machine=m&project=p';
     assert.equal(receiver.resolveDesktopDeepLink(chat).url, chat);
     assert.equal(receiver.resolveDesktopDeepLink(chat).kind, 'local');

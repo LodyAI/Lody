@@ -503,6 +503,7 @@ export class SessionEditAndResendService {
         mcpServerIds,
         customAcp: agentConfig.customAcp,
         runtimeOverrides: agentConfig.runtimeOverrides,
+        magpieGatewayUrl: agentConfig.magpieGatewayUrl,
         env: agentConfig.env,
         project: meta.project,
         sessionId: meta.id,

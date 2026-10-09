@@ -314,3 +314,9 @@ send a local project identity. See the [draft contract](../../../../specs/local-
 ### Startup model selection
 
 `SessionConfig.modelId` carries the driving Turn's choice through prepared and cold creation into `AgentClient`. Core's `_meta.lody.sessionConfig` includes it before new/load/resume/fork. Codex translates the model and reasoning into native startup configuration, so resume does not transiently use a different global model. Live configuration remains necessary for reused sessions and older adapters. See the [startup contract](../../../../specs/acp-startup-model.md).
+
+Magpie Provider launch preparation and isolated native catalogs are owned by
+`magpie-runtime.ts`; the public [import contract](../../../../specs/magpie-provider-import.md)
+defines its local-only endpoint and confirmation boundary. Claude/Codex/Pi/DSH,
+Kimi Code and Grok use their native endpoint/catalog contracts; Bub uses its
+OpenAI environment configuration and requires a user-installed ACP plugin.

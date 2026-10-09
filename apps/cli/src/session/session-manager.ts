@@ -278,6 +278,7 @@ function buildSessionPreparationCompatibility(
       codexAuth: launchSource?.codexAuth,
       customAcp: launchSource?.customAcp,
       runtimeOverrides: launchSource?.runtimeOverrides,
+      magpieGatewayUrl: launchSource?.magpieGatewayUrl,
       env: launchSource?.env,
     }),
     runConfig: normalizeSessionPreparationRunConfigForDedup({
@@ -1029,6 +1030,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       mcpServerIds: spec.runConfig?.mcpServerIds ?? [],
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
+      magpieGatewayUrl: agentConfig.magpieGatewayUrl,
       project: spec.project as ProjectRef | undefined,
       assumeDocExisting: true,
       env: { ...agentConfig.env },
@@ -1056,6 +1058,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: config.agentType,
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      magpieGatewayUrl: config.magpieGatewayUrl,
       env: config.env,
     });
     signal.throwIfAborted();
@@ -1492,6 +1495,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: config.agentType,
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      magpieGatewayUrl: config.magpieGatewayUrl,
       env: config.env,
       onManagedRuntimeProgress: (event) => {
         config.onPresencePhase?.('managed-runtime', formatManagedRuntimeProgressDetail(event));
@@ -1666,6 +1670,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       env: config.env ?? {},
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      magpieGatewayUrl: config.magpieGatewayUrl,
     });
   }
 
