@@ -116,7 +116,7 @@ AbortSignal，abort 时发 ACP cancel 并立即 reject；`steerPrompt` 用 `stee
 ## 运行时修订
 
 上面的实验是历史 v3 证据，不能当作 v4 的验证。已实现的基础层现在使用
-Effect 4.0.0，见 [v4 迁移记录](../../implemented/architecture/2026-10-09-effect-v4-migration.zh.md)。
+Effect 4.0.2，见 [v4 迁移记录](../../implemented/architecture/2026-10-09-effect-v4-migration.zh.md)。
 后续代码使用 `Layer.effect`、`Scope.provide`、`Fiber.Fiber` 和
 `Effect.forkChild` / `forkIn`，测试时钟从 `effect/testing` 导入。
 
@@ -153,7 +153,8 @@ raw-work 的关闭排到协调器之前。`FiberSet` 只放在 `rawWorkScope`。
 失败返回类型化清理错误，保留拥有者并标为 `release-blocked`；不能关闭仍有原始工作的 scope，
 也不能允许替代会话。daemon 在关停预算内报告失败，不能转入无期限的 runtime dispose 重试。
 
-本次验证是 Effect 4.0.0 的合成实验，不是 ACP 实现已完成：旧顺序卡在不可中断请求，新协调器
+本次验证是最初在 Effect 4.0.0 上运行、随后在 4.0.2 上重跑的合成实验，三种结果一致；
+不是 ACP 实现已完成：旧顺序卡在不可中断请求，新协调器
 先执行终止/连接关闭，再完成请求 join 和 scope 释放。终止失败时应结束本地请求，但保留所有权、
 不报告 `released`。L3/L4/L5 还必须验证真实 SDK、孙进程持有管道、自动 dispose、并发 Stop/
 强制升级，以及禁止新请求后不会再启动请求。
@@ -167,7 +168,7 @@ raw-work 的关闭排到协调器之前。`FiberSet` 只放在 `rawWorkScope`。
 
 依据：[v4 scope 迁移文档](https://github.com/Effect-TS/effect/blob/effect@4.0.0/migration/scope.md)，
 以及锁定安装包的 `src/internal/effect.ts`（`scopeCloseFinalizers`、`forkIn`、`fiberInterrupt`）
-与 `src/FiberSet.ts`。本地包版本为 `4.0.0`。
+与 `src/FiberSet.ts`。最初查阅的包版本为 `4.0.0`，重跑实验使用本地安装的 `4.0.2`。
 
 ## 目标与非目标
 
@@ -442,7 +443,7 @@ SessionDocuments、SessionHistory、SessionPresence、CloudPort 的设计与 lor
    辅助可执行文件，并影响打包）？PR1 默认只做前者。
 2. **终止失败后的所有权**：保持 turn 持有直到原始请求结束（现状语义，L5 默认），还是隔离该
    会话资源、允许用新进程继续（行为变化，需要 Spec 草案）？
-3. ~~是否引入 `@effect/vitest`~~ 2026-10-09 修订：继承 `@effect/vitest` 4.0.0 和 Vitest 5.0.2，使用 v4 TestClock。
+3. ~~是否引入 `@effect/vitest`~~ 2026-10-09 修订：继承 `@effect/vitest` 4.0.2 和 Vitest 5.0.2，使用 v4 TestClock。
 4. `ancillary` 收尾的上限取值；当前没有测量数据。
 5. ~~ProcessService 的位置~~ 2026-10-09 修订：核心直接放 `packages/shared/src/node/process.ts`，CLI 保留适配器。
 
@@ -451,7 +452,7 @@ SessionDocuments、SessionHistory、SessionPresence、CloudPort 的设计与 lor
 初始提案基于代码阅读、仓库历史、GitHub issue 与在 effect 3.18.4 上的临时脚本实测，当时没有实现
 或 CLI 测试。v4 基线现已单独验证；后续各层记录各自的实现证据。"修复 #429"及各类缺陷"在结构上不可再现"是设计目标，不是测量结果。
 stale-ACP 重试路径的事件竞态、SDK 在孙进程持有管道时的关闭行为、Windows 行为均未验证。
-2026-10-09 的关停顺序实验只验证了已安装 Effect 4.0.0 上的合成解除阻塞→join 机制，
+2026-10-09 的关停顺序实验只验证了已安装 Effect 4.0.0 和 4.0.2 上的合成解除阻塞→join 机制，
 不代表未来 ACP close 实现已经验证，也不代表 L3/L4/L5 已交付。
 
 ## v4 基线与 PR 职责

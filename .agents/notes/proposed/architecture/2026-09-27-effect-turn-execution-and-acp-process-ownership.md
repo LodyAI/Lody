@@ -165,7 +165,7 @@ findings fix several details of the design below:
 ## Runtime revision
 
 The experiments above are historical v3 evidence, not verification of v4.
-The implemented foundation now uses Effect 4.0.0; see the [v4 migration
+The implemented foundation now uses Effect 4.0.2; see the [v4 migration
 record](../../implemented/architecture/2026-10-09-effect-v4-migration.md).
 Future code uses `Layer.effect`, `Scope.provide`, `Fiber.Fiber` and
 `Effect.forkChild` / `forkIn`; test clocks come from `effect/testing`.
@@ -212,7 +212,8 @@ has settled and required process termination is confirmed may it close scopes or
 it does not call `Scope.close` on still-live raw work or authorize a replacement. Daemon shutdown
 reports that failure within its budget and does not enter an unbounded runtime disposal retry.
 
-Verification here is a synthetic Effect 4.0.0 experiment, not a completed ACP implementation:
+Verification here is a synthetic experiment initially run on Effect 4.0.0 and repeated on
+4.0.2 with the same three outcomes, not a completed ACP implementation:
 the old ordering blocks behind an uninterruptible request; the explicit coordinator reaches
 termination/close first and then completes request joins and scope release. A failed-termination
 case must close local requests but retain ownership without reporting `released`. L3/L4/L5
@@ -230,7 +231,8 @@ no real sleeps, network, machine-load races or actual child processes were used.
 
 Sources: [v4 scope migration](https://github.com/Effect-TS/effect/blob/effect@4.0.0/migration/scope.md)
 and the locked package's `src/internal/effect.ts` (`scopeCloseFinalizers`, `forkIn`,
-`fiberInterrupt`) plus `src/FiberSet.ts`. The installed package reports version `4.0.0`.
+`fiberInterrupt`) plus `src/FiberSet.ts`. The original inspection used version `4.0.0`;
+the repeated experiment uses installed `4.0.2`.
 
 ## Goals and non-goals
 
@@ -646,7 +648,7 @@ Before implementation, map each of these to a test. No phase may change them:
    request ends (current semantics, and the L5 default)? Or should the session resource
    be quarantined so a new process can continue? The latter is a behaviour change and needs a
    Spec draft.
-3. ~~Test tooling~~ Revised (2026-10-09): inherit `@effect/vitest` 4.0.0 and Vitest 5.0.2; use v4 TestClock.
+3. ~~Test tooling~~ Revised (2026-10-09): inherit `@effect/vitest` 4.0.2 and Vitest 5.0.2; use v4 TestClock.
 4. **The `ancillary` finalization bound.** No measurements exist yet.
 5. ~~Where ProcessService lives~~ Revised (2026-10-09): introduce the core directly in `packages/shared/src/node/process.ts`; CLI keeps its adapters.
 
@@ -669,7 +671,7 @@ Not verified:
 - any Windows behaviour.
 
 The 2026-10-09 shutdown-order experiment above verifies only the synthetic unblock-before-join
-mechanism on installed Effect 4.0.0. It does not verify the future ACP close implementation or
+mechanism on installed Effect 4.0.0 and 4.0.2. It does not verify the future ACP close implementation or
 claim L3/L4/L5 have shipped.
 
 ## v4 baseline and PR ownership

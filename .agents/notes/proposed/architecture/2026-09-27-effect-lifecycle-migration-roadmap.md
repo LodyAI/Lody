@@ -34,7 +34,7 @@ needs its own detailed plan when work starts.
 ## Runtime revision
 
 The initial survey below describes the v3 baseline. The workspace now uses
-Effect 4.0.0; new layers use `Context.Service` and `Layer.effect`, and tests use
+Effect 4.0.2; new layers use `Context.Service` and `Layer.effect`, and tests use
 `TestClock` from `effect/testing`. See the [v4 migration decision](../../implemented/architecture/2026-10-09-effect-v4-migration.md).
 
 ## Basis for the ranking
@@ -197,7 +197,7 @@ reconnection under Effect, so the decision is to go inside the libraries:
     and single flock writes. Effect takes over opening, joins, reconnection, persistence
     scheduling and close.
   - `effect` is a peerDependency of both libraries. They share one copy with Lody, at an aligned
-    version (currently 4.0.0).
+    version (currently 4.0.2).
   - The Promise facade must let other consumers' existing tests pass unchanged. That is the
     acceptance condition for the library-side PRs.
 - **Order.**

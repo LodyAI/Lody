@@ -18,7 +18,7 @@ issue 分类，不是运行时测量；各单元开工时需要各自的详细�
 
 ## 运行时修订
 
-下文的初始调研描述的是 v3 基线。工作区现在使用 Effect 4.0.0；新层使用
+下文的初始调研描述的是 v3 基线。工作区现在使用 Effect 4.0.2；新层使用
 `Context.Service` 与 `Layer.effect`，测试从 `effect/testing` 导入 `TestClock`。
 见 [v4 迁移决定](../../implemented/architecture/2026-10-09-effect-v4-migration.zh.md)。
 
@@ -134,7 +134,7 @@ Lody 这一层的缺陷（#4 unload/invalidate 顺序、#774 join 永久停在 c
 - **约束**：
   - 热路径（CRDT update 导入导出、按 token 流入的更新写入、单次 flock 写入）保持同步函数，
     Effect 只接管打开、join、重连、持久化调度与关闭。
-  - `effect` 作为两个库的 peerDependency，与 Lody 共用同一份并对齐版本（当前 4.0.0）。
+  - `effect` 作为两个库的 peerDependency，与 Lody 共用同一份并对齐版本（当前 4.0.2）。
   - Promise 门面必须让其他使用方的现有测试不改即通过，作为库侧 PR 的验收条件。
 - **顺序**：先完成 [loro-repo Flock 持久化迁移](../../implemented/architecture/2026-09-27-loro-repo-flock-persistence-migration.zh.md)，
   再开始库的 Effect 改造，避免两项工作同时改写持久化层。库的改造在各自仓库立项、各自出计划。
