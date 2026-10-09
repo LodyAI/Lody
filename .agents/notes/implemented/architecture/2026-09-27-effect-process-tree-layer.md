@@ -145,3 +145,9 @@ layer passed CLI 3567 / 4 skipped, shared 1330, components 4888, supervisor 52 a
 Electron 211 tests. Frozen installs were also checked for the reconstructed layers.
 The CLI production build and published-bundle import guard passed after the
 main integration, including the migrated Simulator worker.
+
+Supervisor escalation and whole-group termination now share one behavioral case:
+the accepted IPC request keeps the root alive during grace, then force-kill ends
+both root and descendant and publishes stopped state. Removing group termination
+fails that retained case. The duplicate group test and the assertion that a
+previously awaited Promise resolved were removed.

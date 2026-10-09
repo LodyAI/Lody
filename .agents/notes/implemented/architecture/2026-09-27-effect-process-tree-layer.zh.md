@@ -103,3 +103,7 @@ Simulator 和 memory provider 新增调用的迁移属于 #1069，不放进这�
 最终层 CLI 3567 通过 / 4 跳过、shared 1330、components 4888、supervisor 52、Electron 211；
 重建的各层也检查了冻结安装。
 集成 main 后的 CLI 生产构建及发布包导入守卫也通过，包含迁移后的 Simulator worker。
+
+supervisor 的升级终止与整组清理合为一个行为案例：IPC 请求被接受后，根进程在宽限期内
+仍存活，之后强杀结束根进程与后代并发布 stopped 状态。禁用整组终止会使该案例失败。
+删除重复的整组测试，以及 await 已完成 Promise 后再断言它已完成的冗余检查。

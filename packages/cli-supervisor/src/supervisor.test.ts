@@ -422,7 +422,8 @@ describe('CliSupervisor lifecycle actor', () => {
 
   it('escalates an unanswered graceful shutdown to SIGKILL and waits for the real exit', async () => {
     const table = new FakeProcessTable();
-    const run = spawnTableRun(table);
+    const run = spawnTableRun(table, { ignores: ['SIGTERM'], processGroup: true });
+    const descendant = table.addDescendant(run.pid, { ignores: ['SIGTERM'] });
     const supervisor = createSupervisor(async () => ({ spawn: () => run.handle }), {
       terminationGraceMs: 1_000,
       forceKillWaitMs: 500,
@@ -430,10 +431,7 @@ describe('CliSupervisor lifecycle actor', () => {
     });
 
     await supervisor.start();
-    let resolved = false;
-    const stopped = supervisor.stop().then(() => {
-      resolved = true;
-    });
+    const stopped = supervisor.stop();
     await vi.advanceTimersByTimeAsync(999);
     // The shutdown request was accepted, so no signal preempts the drain.
     expect(run.requestShutdown).toHaveBeenCalledOnce();
@@ -442,9 +440,9 @@ describe('CliSupervisor lifecycle actor', () => {
 
     await vi.advanceTimersByTimeAsync(1);
     expect(table.isAlive(run.pid)).toBe(false);
+    expect(table.isAlive(descendant)).toBe(false);
     await vi.advanceTimersByTimeAsync(20);
     await stopped;
-    expect(resolved).toBe(true);
     expect(supervisor.getState()).toMatchObject({ phase: 'stopped', lastExitCode: null });
   });
 
@@ -467,25 +465,6 @@ describe('CliSupervisor lifecycle actor', () => {
 
     expect(table.delivered).toEqual([{ target: run.pid, signal: 'SIGTERM' }]);
     expect(supervisor.getState().phase).toBe('stopped');
-  });
-
-  it('ends the whole process group of a child started as a group leader', async () => {
-    const table = new FakeProcessTable();
-    const run = spawnTableRun(table, { ignores: ['SIGTERM'], processGroup: true });
-    const descendant = table.addDescendant(run.pid, { ignores: ['SIGTERM'] });
-    const supervisor = createSupervisor(async () => ({ spawn: () => run.handle }), {
-      terminationGraceMs: 1_000,
-      forceKillWaitMs: 500,
-      processOptions: { nodeProcess: table.api },
-    });
-
-    await supervisor.start();
-    const stopped = supervisor.stop();
-    await vi.advanceTimersByTimeAsync(1_020);
-    await stopped;
-
-    expect(table.isAlive(run.pid)).toBe(false);
-    expect(table.isAlive(descendant)).toBe(false);
   });
 
   it('turns fatal and keeps the run when the child survives SIGKILL', async () => {
