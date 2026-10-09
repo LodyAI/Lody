@@ -3560,17 +3560,53 @@ describe('SessionExecutionService', () => {
     expect(refreshCodeCollabSharedState).toHaveBeenCalledWith('session-1');
   });
 
-  it.each([true, false])(
-    'starts a local project session with title capability %s',
-    async (sessionTitle) => {
+  it.each(
+    (
+      [
+        // name, project kind, worktree, child, prior ACP, resume, rename expected
+        ['direct local', 'local', false, false, false, false, false],
+        ['new local worktree', 'local', true, false, false, false, true],
+        ['new GitHub worktree', 'github', true, false, false, false, true],
+        ['local child Tab', 'local', true, true, false, false, false],
+        ['GitHub child Tab', 'github', true, true, false, false, false],
+        ['previous local worktree', 'local', true, false, true, false, false],
+        ['previous GitHub worktree', 'github', true, false, true, false, false],
+        ['explicit local resume', 'local', true, false, false, true, false],
+        ['explicit GitHub resume', 'github', true, false, false, true, false],
+      ] as const
+    ).flatMap(([name, kind, worktree, child, prior, resume, rename]) =>
+      [true, false].map((sessionTitle) => ({
+        name,
+        kind,
+        worktree,
+        child,
+        prior,
+        resume,
+        rename,
+        sessionTitle,
+      }))
+    )
+  )(
+    'starts $name with title capability $sessionTitle and the appropriate first-task prompt',
+    async ({ kind, worktree, child, prior, resume, rename, sessionTitle }) => {
       const generatedTitles: string[] = [];
       let checkoutBranch = 'feature/local-start';
       let publishedBranch: string | undefined;
       let branchAtPrompt: string | undefined;
+      let deliveredPrompt: ContentBlock[] = [];
       const localProjectId = 'local-project-1' as LocalProjectId;
       const machineId = 'machine-1' as MachineId;
+      const parentSessionId = child ? ('parent-session' as SessionId) : undefined;
+      const project =
+        kind === 'github'
+          ? { kind: 'github' as const, repoFullName: 'owner/repo' }
+          : { kind: 'local' as const, localProjectId, useWorktree: worktree };
+      const existingAcpSessionId = prior ? ('acp-previous' as ACPSessionId) : undefined;
       const sessionDoc = withHistoryPort({
-        getMetaState: vi.fn(async () => ({ agentConfigId: capabilityConfigId })),
+        getMetaState: vi.fn(async () => ({
+          agentConfigId: capabilityConfigId,
+          acpSessionId: existingAcpSessionId,
+        })),
         getHistory: vi.fn(() => []),
         setStatus: vi.fn(async () => {}),
         setProject: vi.fn(async () => {}),
@@ -3581,7 +3617,8 @@ describe('SessionExecutionService', () => {
       const agentClient = {
         isCreated: vi.fn(() => true),
         cancel: vi.fn(async () => {}),
-        prompt: vi.fn(async () => {
+        prompt: vi.fn(async (_sessionId: string, blocks: ContentBlock[]) => {
+          deliveredPrompt = blocks;
           branchAtPrompt = publishedBranch;
           checkoutBranch = 'feature/local-finished';
           return {};
@@ -3613,17 +3650,21 @@ describe('SessionExecutionService', () => {
         terminalManager: {} as unknown,
         getWorkdir: () => '/local/repo',
         getHostWorkdir: () => '/local/repo',
-        getParentSessionId: () => undefined,
+        getParentSessionId: () => parentSessionId,
         exec: vi.fn(async () => ''),
         terminate: vi.fn(async () => {}),
         updateGitIdentity: vi.fn(),
         createAgent: vi.fn(async () => 'acp-local-code-collab'),
         applyExecutionPlaneLimits: vi.fn(async () => {}),
       };
+      let sessionStarted = false;
       const sessionManager = {
-        getSession: vi.fn(() => null),
+        getSession: vi.fn(() => (sessionStarted ? createdSession : null)),
         getPendingSession: vi.fn(() => null),
-        createSession: vi.fn(async () => createdSession as unknown),
+        createSession: vi.fn(async () => {
+          sessionStarted = true;
+          return createdSession as unknown;
+        }),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
         refreshGhTokenForSession: vi.fn(async () => {}),
@@ -3663,7 +3704,10 @@ describe('SessionExecutionService', () => {
           getAcpCapabilities: vi.fn(async () => undefined),
           updateAcpCapabilities,
         } as unknown as LoroDocumentManager,
-        buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'built prompt' }] as any),
+        buildAcpPromptBlocks: async ({ inputBlocks }) =>
+          inputBlocks.flatMap((block): ContentBlock[] =>
+            block.type === 'text' ? [{ type: 'text', text: block.text }] : []
+          ),
       });
 
       const service = new SessionExecutionService(deps);
@@ -3672,21 +3716,36 @@ describe('SessionExecutionService', () => {
         sessionId: 'session-local-code-collab' as SessionId,
         machineId,
         workspaceId: 'workspace-1' as WorkspaceId,
-        project: { kind: 'local', localProjectId },
-        acpSessionConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
+        project,
+        parentSessionId,
+        acpSessionConfig: {
+          prompt: 'hello',
+          cliType: 'builtin',
+          agentType: 'codex',
+          ...(resume ? { resume: 'acp-requested' } : {}),
+        },
         userTurnId: 'turn-local-code-collab',
         userId: 'user-2',
         userName: 'User 2',
         userEmail: 'user2@example.com',
       });
 
+      const text = deliveredPrompt
+        .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+        .join('');
+      expect(text.startsWith('hello')).toBe(true);
+      expect(text.includes('This is the first task in a new independent Lody worktree')).toBe(
+        rename
+      );
+      expect(text.includes('gh pr create')).toBe(kind === 'github');
+      expect(text).toContain('Use the available Lody MCP tools when relevant');
       expect(branchAtPrompt).toBe('feature/local-start');
       expect(publishedBranch).toBe('feature/local-finished');
       expect(generatedTitles).toEqual(sessionTitle ? [] : ['Local title']);
       expect(sessionManager.createSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          workdir: '/local/repo',
-          project: { kind: 'local', localProjectId },
+          ...(kind === 'local' ? { workdir: '/local/repo' } : {}),
+          project,
         })
       );
       await vi.waitFor(() =>
@@ -3719,6 +3778,21 @@ describe('SessionExecutionService', () => {
           { sessionTitle }
         )
       );
+      if (rename) {
+        await service.continueSession({
+          type: 'session/chat',
+          sessionId: 'session-local-code-collab' as SessionId,
+          machineId,
+          workspaceId: 'workspace-1' as WorkspaceId,
+          project,
+          acpSessionConfig: { prompt: 'Continue the task', cliType: 'builtin', agentType: 'codex' },
+          userTurnId: 'turn-local-followup',
+          userId: 'user-2',
+          userName: 'User 2',
+          userEmail: 'user2@example.com',
+        });
+        expect(deliveredPrompt).toEqual([{ type: 'text', text: 'Continue the task' }]);
+      }
     }
   );
 
@@ -3932,6 +4006,126 @@ describe('SessionExecutionService', () => {
       [{ type: 'text', text: 'built prompt' }],
       { signal: expect.any(AbortSignal) }
     );
+  });
+
+  it('delivers attachments and first-task instructions together to a new worktree agent', async () => {
+    let history: Array<Record<string, unknown>> = [
+      {
+        id: 'turn-user-file',
+        role: 'user',
+        status: 'pending',
+        read: false,
+      },
+    ];
+    const sessionDoc = withHistoryPort({
+      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      setStatus: vi.fn(async () => {}),
+      setProject: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      getHistory: vi.fn(() => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+      roomId: 'session-session-file-create',
+    });
+    let deliveredPrompt: ContentBlock[] = [];
+    const agentClient = {
+      isCreated: vi.fn(() => true),
+      cancel: vi.fn(async () => {}),
+      prompt: vi.fn(async (_sessionId: string, blocks: ContentBlock[]) => {
+        deliveredPrompt = blocks;
+        return {};
+      }),
+      currentModel: undefined,
+    };
+    const createdSession = {
+      sessionId: 'session-file-create' as SessionId,
+      acpSessionId: 'acp-file-create' as ACPSessionId,
+      agentClient,
+      terminalManager: {} as unknown,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: vi.fn(async () => ''),
+      terminate: vi.fn(async () => {}),
+      updateGitIdentity: vi.fn(),
+      createAgent: vi.fn(async () => 'acp-file-create'),
+      applyExecutionPlaneLimits: vi.fn(async () => {}),
+    };
+    const fileBlock = {
+      type: 'file',
+      fileId: 'file-12345678',
+      fileName: 'trace.json',
+      mimeType: 'application/json',
+      sizeBytes: 1024,
+      sha256: 'a'.repeat(64),
+      textPreview: true,
+      transport: 'r2',
+      uploadedAt: 123,
+    } satisfies Extract<SessionInputBlock, { type: 'file' }>;
+    const buildAcpPromptBlocks: SessionExecutionServiceDeps['buildAcpPromptBlocks'] = async ({
+      inputBlocks,
+    }) =>
+      inputBlocks.flatMap((block): ContentBlock[] => {
+        if (block.type === 'text') return [{ type: 'text', text: block.text }];
+        if (block.type === 'file')
+          return [{ type: 'text', text: `Attached file: ${block.fileName}` }];
+        return [];
+      });
+    const deps = createBaseDeps({
+      sessionManager: {
+        getSession: vi.fn(() => null),
+        getPendingSession: vi.fn(() => null),
+        createSession: vi.fn(async () => createdSession as unknown),
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        refreshGhTokenForSession: vi.fn(async () => {}),
+      } as unknown as SessionManager,
+      workspaceDocument: {
+        repo: {
+          upsertDocMeta: vi.fn(async () => {}),
+          getDocMeta: vi.fn(async () => undefined),
+        },
+        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+        updateAcpCapabilities: vi.fn(async () => {}),
+      } as unknown as LoroDocumentManager,
+      buildAcpPromptBlocks,
+    });
+
+    const service = new SessionExecutionService(deps);
+    await service.startSession({
+      type: 'session/create',
+      sessionId: 'session-file-create' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      project: { kind: 'github', repoFullName: 'owner/repo' },
+      acpSessionConfig: {
+        prompt: 'CONFIG_INSTRUCTION\n\nROLE_INSTRUCTION\n\ninspect the attached trace',
+        inputBlocks: [{ type: 'text', text: 'inspect the attached trace' }, fileBlock],
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+      userTurnId: 'turn-user-file',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    });
+
+    expect(deliveredPrompt).toEqual([
+      { type: 'text', text: 'Attached file: trace.json' },
+      { type: 'text', text: expect.stringContaining('inspect the attached trace') },
+    ]);
+    expect(deliveredPrompt[1]).toMatchObject({
+      text: expect.stringContaining('This is the first task in a new independent Lody worktree'),
+    });
+    const executionText = (deliveredPrompt[1] as Extract<ContentBlock, { type: 'text' }>).text;
+    for (const instruction of [
+      'CONFIG_INSTRUCTION',
+      'ROLE_INSTRUCTION',
+      'inspect the attached trace',
+    ]) {
+      expect(executionText.split(instruction)).toHaveLength(2);
+    }
   });
 
   it.each(['create', 'continue', 'restore'] as const)(

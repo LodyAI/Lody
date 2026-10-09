@@ -5621,6 +5621,13 @@ export class SessionExecutionService {
     const shouldPrepareWorktree =
       (project?.kind === 'github' && !!githubRepoFullName) ||
       (project?.kind === 'local' && project.useWorktree === true);
+    // Logical first use also covers adoption of a speculatively prepared worktree.
+    // Shared child workspaces and restored ACP sessions retain their branch identity.
+    const newWorktree =
+      shouldPrepareWorktree &&
+      !message.parentSessionId &&
+      !hasPriorAcpSession &&
+      !acpSessionConfig.resume;
     let branch = project?.branch?.trim() || undefined;
     const fromFeedbackPostId =
       message.meta?.fromFeedbackPostId?.trim() ||
@@ -5831,7 +5838,8 @@ export class SessionExecutionService {
               agentConfig.prompt,
               project,
               agentConfig.issuePRMentions,
-              fromFeedbackPostId
+              fromFeedbackPostId,
+              { newWorktree }
             ),
           });
           const startPromptBlocksBuild = () => {
