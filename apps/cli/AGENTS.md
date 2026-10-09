@@ -77,8 +77,8 @@ execution/consent rules. These rules also bind CLI callers outside that director
   `getModelEffortChoices` (the stored per-model declaration first, then
   `modelReasoningEfforts`) and skip the resulting `validatedConfigIds` in
   `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
-  runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
-  never become visible `agent_warning` notices, while other rejections still do. Claude Fable
+  runtime rejections in debug diagnostics. Codex/Claude effort, Fast and Plan rejections stay hidden;
+  model rejections always emit `agent_warning` in the GUI. Claude Fable
   models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.
 - INVARIANT: `SessionManager` publishes `exit`/`terminated` only for `Session` instances a caller
   received. `MessageHandler` treats them as "the live turn's agent died" and finalizes the turn, so
