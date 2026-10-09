@@ -14,9 +14,10 @@ initialization, and Windows descendants left running. They share one root cause:
 wait lifetimes are not bound to an owner, and are held together by about fifteen boolean
 flags, a dozen per-session registries, and five different kill implementations. This proposal
 moves ownership into three Effect scopes (daemon → session resource → turn): the session
-resource scope acquires and releases the process and ACP connection; the turn scope owns raw
-ACP requests, steers, configuration calls and finalization; stop reasons reach finalizers as
-typed values; and every wait is bounded with explicit escalation. Delivery follows the bottom-up layering
+resource scope acquires and releases the process and ACP connection; each turn holds ownership
+of its raw requests until they settle. An explicit shutdown coordinator drains requests, and
+on overrun terminates the process and closes the connection before joining request fibers or
+closing scopes. Stop reasons are typed values and every wait has an explicit bound. Delivery follows the bottom-up layering
 rule of the [migration roadmap](2026-09-27-effect-lifecycle-migration-roadmap.md): platform and
 process leaf first, then the ACP connection and the session resource. The turn layer finishes
 last, after the state layer it depends on. Stop/steer semantics, history format and dispatch
@@ -137,7 +138,8 @@ findings fix several details of the design below:
     reason wins.
 - **`Effect.forkIn(effect, scope)` fibers are interrupted and awaited when the scope closes.**
   For uninterruptible work, the close waits for the work to actually end. That is the
-  structural form of "do not release ownership before the raw request ends".
+  structural form of "do not release ownership before the raw request ends". It does not
+  establish a safe shutdown order; the v4 correction below supersedes that inference.
 - **Bounding a wait means putting the timeout on the waiter.** `Effect.timeout` applied to
   uninterruptible work waits for that work to finish. Use
   `Fiber.await(raw).pipe(Effect.timeoutTo(...))` instead.
@@ -168,12 +170,75 @@ record](../../implemented/architecture/2026-10-09-effect-v4-migration.md).
 Future code uses `Layer.effect`, `Scope.provide`, `Fiber.Fiber` and
 `Effect.forkChild` / `forkIn`; test clocks come from `effect/testing`.
 
+### Shutdown-order correction (2026-10-09, Effect 4.0.0)
+
+The earlier proposal incorrectly relied on closing the session scope to terminate the process
+and thereby settle raw requests. Default sequential scope finalizers run in reverse registration
+order. A later `forkIn` or `FiberSet` finalizer first interrupts and awaits request fibers; an
+uninterruptible request cannot finish until the earlier process finalizer runs. Neither parallel
+finalizers nor a timeout around `Scope.close` supplies the required dependency order.
+
+The replacement is an explicit coordinator with two separately owned scopes: `rawWorkScope`
+for the connection's requests, and `resourceScope` for process/connection/terminal resources.
+Create them with `Scope.make`, retain them in the session owner, and install the coordinator's
+outer finalizer before acquisition or requests begin. Do not auto-register raw-work scope
+closure ahead of that coordinator through `Scope.fork`, `forkIn` on the resource/daemon scope,
+or an outer scoped `FiberSet`. `FiberSet` belongs in `rawWorkScope`. Turn scopes are also closed
+only through this coordinator; body finalizers must not drain or join raw requests ahead of it.
+The same coordinator handles normal stop, interrupted creation, acquisition failure, agent exit
+and runtime disposal.
+
+```text
+seal stopping turn's request admission + record stop reason
+  → bounded ACP cancel and drain (normal Stop: 5 seconds)
+  → on timeout/discard/shutdown: bounded terminateTree + explicit connection close
+  → bounded await of raw requests and turn body
+  → reason-specific writes → close turn/raw-work/resource scopes → released
+```
+
+After a successful normal drain, a reusable connection can admit the next turn only after
+its old owner is released. Discard/escalation seals the entire session permanently.
+`close(reason)` must synchronously seal admission and settle every local request wrapper through
+a connection-close signal, independently of stdout EOF or SDK Promise completion; late responses
+cannot reach a released turn. Settling wrappers alone is not proof that the remote process died.
+Process termination and connection close are attempted independently: capture termination failure
+and still close the connection. An exit watcher only publishes a signal; it never awaits the
+coordinator that will join that watcher. No join may precede the operation that can unblock it.
+
+The coordinator's finalizer uses clock/deferred-bounded waits that terminate even in an
+uninterruptible region, not a timeout around an uninterruptible join. Only after all relevant work
+has settled and required process termination is confirmed may it close scopes or complete
+`released`. Failure returns a typed cleanup error and retains the owner as `release-blocked`;
+it does not call `Scope.close` on still-live raw work or authorize a replacement. Daemon shutdown
+reports that failure within its budget and does not enter an unbounded runtime disposal retry.
+
+Verification here is a synthetic Effect 4.0.0 experiment, not a completed ACP implementation:
+the old ordering blocks behind an uninterruptible request; the explicit coordinator reaches
+termination/close first and then completes request joins and scope release. A failed-termination
+case must close local requests but retain ownership without reporting `released`. L3/L4/L5
+must additionally validate the real SDK, descendant-held pipes, automatic disposal, concurrent
+stop/forced escalation and no request admission after sealing.
+
+The synthetic check used an uninterruptible `Deferred.await` as the raw request. With the old
+single scope, starting `Scope.close` immediately left its fiber pending and did not reach the
+process finalizer; explicitly completing the Deferred allowed teardown afterward. In the new
+model, an outer finalizer invoked the coordinator owning the two private scopes: the observed
+order was seal → termination attempt → connection-close Deferred → request ended → resource
+release → `released`. Simulated termination failure still completed the close Deferred, but
+retained the resource scope and left `released` incomplete. Readiness was signaled explicitly;
+no real sleeps, network, machine-load races or actual child processes were used.
+
+Sources: [v4 scope migration](https://github.com/Effect-TS/effect/blob/effect@4.0.0/migration/scope.md)
+and the locked package's `src/internal/effect.ts` (`scopeCloseFinalizers`, `forkIn`,
+`fiberInterrupt`) plus `src/FiberSet.ts`. The installed package reports version `4.0.0`.
+
 ## Goals and non-goals
 
 Goals:
 
-1. Every resource and async task a turn owns lives in the turn scope. Closing the scope
-   releases it, so no work keeps running after release.
+1. Every resource and async task has an explicit owner. A turn retains its raw-request leases
+   until the shutdown coordinator settles work and then closes scopes; release is never reported
+   while work remains live.
 2. Every ACP process and its connection live in the session resource scope. An unexpected exit
    reaches the owning turn as a typed signal.
 3. The stop reason is a typed value that finalizers dispatch on, replacing the boolean flags.
@@ -201,9 +266,11 @@ Non-goals:
 
 ```mermaid
 flowchart TD
-    D["DaemonRuntime<br/>ManagedRuntime + root Scope"] --> R["SessionResource scope (per Session instance)<br/>AgentProcess · ACP connection · terminals · sandbox"]
+    D["DaemonRuntime<br/>ManagedRuntime + root Scope"] --> R["SessionResource owner (per Session instance)<br/>private resource/raw-work/turn scopes"]
     R --> T["Turn scope (per visible turn)<br/>presence · replay suppression · update write target · registration"]
-    T --> W["rawWork: raw prompt / steer / set_config_option"]
+    R --> C["Shutdown coordinator<br/>unblock → await → close scopes"]
+    C --> W["rawWorkScope: connection FiberSet<br/>raw prompt / steer / set_config_option"]
+    T -.request ownership lease.-> W
     T --> A["ancillary: yielded-turn finalization"]
     R -.exited: Deferred.-> T
 ```
@@ -213,16 +280,21 @@ flowchart TD
 - One `ManagedRuntime` is created at daemon start. Its initial `Layer` holds only the Logger
   and the clock. It is injected into `SessionExecutionService` and `SessionManager` through
   deps; tests supply `TestClock.layer()` from `effect/testing`.
-- Every turn starts with `runtime.runFork(program, { scope: daemonScope })`.
+- Start turn bodies via `runtime.runPromise(Effect.forkIn(program, daemonScope))`; v4 run options
+  do not accept a `scope`. Bodies and their local waits remain interruptible; raw requests are
+  owned separately as described above. Runtime disposal reaches each session coordinator,
+  never a raw-work join before its unblock step.
 - Shutdown runs in this order, preserving the two-phase `cleanUp` rule in `session/AGENTS.md`:
   1. stop every turn with `DaemonShutdown`, within a deadline;
-  2. close session resources;
+  2. invoke each session shutdown coordinator: terminate/close before joining raw work, then
+     close drained resources; a blocked owner is reported rather than treated as released;
   3. run MessageHandler's final flush;
   4. tear down documents.
 
 ### SessionResource
 
-- **Scope and acquisition.** `Session` holds a `CloseableScope`. Inside it, `createAgent`
+- **Scope and acquisition.** `Session` owns separate `Scope.Closeable` resource and raw-work
+  scopes through the shutdown coordinator above. Inside the resource scope, `createAgent`
   acquires, in order:
   - the start-gate permit, covering spawn + initialize + newSession, with the default
     concurrency of 2 and `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS` unchanged;
@@ -236,9 +308,11 @@ flowchart TD
   the watcher:
   - explicitly calls `connection.close(AgentExited)`, instead of relying on stdout EOF;
   - marks the client disconnected, so `isCreated()` returns false;
-  - stops the turn that owns the session with `AgentExited`.
-- **`terminate` is memoized.**
-  - Concurrent calls share one close.
+  - publishes `AgentExited` to the owning turn; it does not await that turn's stop or its own
+    scope close. The coordinator handles descendant cleanup and raw-work drain.
+- **`terminate` delegates to the coordinator.**
+  - Concurrent calls share one in-flight shutdown; a forced call can escalate it immediately.
+  - Completed results are not reused. The first stop reason wins without blocking escalation.
   - `terminated` is emitted exactly once, with the agent's exit information.
   - A termination failure emits a typed `terminationFailed` instead of pretending to succeed.
 - **`SessionManager` subscribes per instance.** Each subscription is itself a resource in the
@@ -246,7 +320,8 @@ flowchart TD
 - **Session creation becomes interruptible.** `pendingSessionCreates` becomes an
   interruptible create fiber:
   - abandoning a create interrupts that fiber;
-  - the scope releases any process it had already acquired;
+  - the coordinator terminates any acquired process and closes the connection before joining
+    initialization requests and closing its scopes;
   - the reaper and the 300-second sentinel from the bounded-initialization note are removed.
 
 ### Turn scope and TurnSupervisor
@@ -267,7 +342,7 @@ type TurnPhase = 'preparing' | 'prompting' | 'finalizing';
 
 interface TurnHandle {
   readonly turnId: string;
-  readonly scope: Scope.CloseableScope;
+  readonly scope: Scope.Closeable;
   readonly phase: Ref<TurnPhase>;
   readonly stopReason: Deferred<TurnStopReason>; // first reason wins
   readonly released: Deferred<void>; // replaces turnReleaseWaiters
@@ -279,21 +354,23 @@ interface TurnHandle {
 `stop(reason)` does two things: it records the reason in `stopReason`, then acts according to
 the current phase:
 
-| Phase                                                | Effect of Stop                                                                                                                                         | Replaces                                                         |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| `preparing` (create, restore, configure, open entry) | Interrupt and await `body`. A create in progress is interrupted; an already acquired process is released or kept per `prePromptSession`                | `requestTurnInterrupt` + `terminateSessionOnCancel`              |
-| `prompting`                                          | Send the ACP cancel. Every local wait (steer waits, handoff verdict waits) races `stopReason` and ends. `body` keeps waiting for the raw prompt to end | `requestAgentCancelInBackground` + `steerWaitController.abort()` |
-| `finalizing`                                         | Interrupt `body`. Each post-processing stage is an interruption point, so the completion notification needs no flag check                              | the `finalizeStarted` branch + `stopIfTurnCancelled`             |
+| Phase                                                | Effect of Stop                                                                                                                                                          | Replaces                                                         |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `preparing` (create, restore, configure, open entry) | Signal interruption; bound the wait through the coordinator. Release or keep the prepared session per `prePromptSession`; pending ACP setup is unblocked before joining | `requestTurnInterrupt` + `terminateSessionOnCancel`              |
+| `prompting`                                          | Send the ACP cancel. Every local wait (steer waits, handoff verdict waits) races `stopReason` and ends. `body` keeps waiting for the raw prompt to end                  | `requestAgentCancelInBackground` + `steerWaitController.abort()` |
+| `finalizing`                                         | Interrupt `body`. Each post-processing stage is an interruption point, so the completion notification needs no flag check                                               | the `finalizeStarted` branch + `stopIfTurnCancelled`             |
 
-When the turn scope closes, its release dispatches on the reason carried in the `Exit`. This
-replaces `finalizeCancelledTurnEffect`, `finalizeStalledInitializationEffect`, and the
-inference in `awaitTurnFiber`:
+Before closing the turn scope, the stop coordinator dispatches on the recorded reason, also
+passed in the final `Exit`. Drain does not run behind request-joining finalizers. This replaces
+`finalizeCancelledTurnEffect`, `finalizeStalledInitializationEffect`, and the inference in
+`awaitTurnFiber`:
 
 1. **Drain.** Run `agentClient.awaitIdle` with a five-second bound, placing the bound on the
    waiter. If the bound is exceeded:
-   - close the session resource with `DrainTimeout`, which terminates the process, makes the
-     SDK reject pending requests, and empties rawWork;
-   - wait once more, with a bound.
+   - seal the session and invoke its coordinator with `DrainTimeout`; explicitly attempt
+     bounded process termination and connection close before any raw-work or body join;
+   - await local raw-request wrappers and `body` once more, with clock/deferred bounds;
+   - close drained scopes only after successful required termination and settled work.
 2. **Termination failure.** The existing rule that a failed termination is not permission to
    reuse stays. The default keeps the turn as owner, but in an observable `release-blocked`
    state with logs and diagnostics, rather than as an unbounded await in a finalizer.
@@ -315,7 +392,10 @@ inference in `awaitTurnFiber`:
 - A connection-level `FiberSet` holds every raw request: prompt, steer extension request, and
   `set_config_option`.
 - Each request is wrapped in `Effect.uninterruptible`. Only an ACP response or a connection
-  close can end it; a local interrupt cannot cancel it.
+  close signal can end the local wrapper; a local interrupt cannot cancel it. The close signal
+  is independent of EOF and the SDK Promise. Its `FiberSet` finalizer lives only in the private
+  `rawWorkScope`, closed by the coordinator after drain. A turn holds an ownership lease, not
+  a request-joining finalizer ahead of session termination.
 - It exposes `awaitIdle(): Effect<void>` and `isIdle`.
 - `pendingPrompts`, `pendingPromptCompletion`, `pendingSteerConfig` and `cancellationDrain` are
   deleted.
@@ -335,7 +415,9 @@ inference in `awaitTurnFiber`:
 **Other turn work:**
 
 - The `yieldedFinalization` promise chain becomes an `ancillary` `FiberSet` in the turn scope.
-  Release joins it with a bound; exceeding the bound is logged and does not block release.
+  The coordinator interrupts and joins it with a clock/deferred bound before scope close.
+  An uncooperative ancillary task enters `release-blocked`; logging a timeout is not permission
+  to run its unbounded `FiberSet` finalizer or report successful release.
 - The watchdog calls `stop(InitStalled)` directly, which removes `raceFirst` and the
   `initializationStalled` flag.
 
@@ -423,8 +505,9 @@ in its version on the temporary `LoroRepo` Layer.
 - **AcpConnection:**
   - A connection-level `FiberSet` holds every raw request: prompt, steer extension request, and
     `set_config_option`.
-  - Each request is wrapped in `Effect.uninterruptible`. Only an ACP response or a connection
-    close can end it.
+  - Each request wrapper is uninterruptible to local Stop, but an explicit connection-close
+    signal settles it independently of SDK/EOF. Its FiberSet lives in the coordinator-owned
+    raw-work scope; local settlement does not authorize remote process reuse.
   - It exposes `awaitIdle` and `isIdle`.
   - A `closed: Deferred` and a notification `Stream` replace callbacks.
   - The SDK is the only third-party boundary wrapped in this layer.
@@ -433,7 +516,8 @@ in its version on the temporary `LoroRepo` Layer.
   semantics unchanged.
 - **Verify first:**
   - how the current SDK rejects prompts and extension requests after `connection.close(error)`;
-  - what happens when an adapter grandchild holds stdout.
+  - explicit local close settlement while an adapter grandchild holds stdout;
+  - late responses and concurrent requests after admission is sealed.
 
 ### L4: AgentSession and AgentSessionPool
 
@@ -444,15 +528,17 @@ in its version on the temporary `LoroRepo` Layer.
   - ACP terminals;
   - the sandbox.
 
-  An `exited` watcher fiber closes the connection explicitly and notifies the owning turn with
-  `AgentExited`.
+  The coordinator owns separate raw-work and resource scopes and is installed before requests
+  begin. An `exited` watcher closes the connection and publishes `AgentExited` without awaiting
+  the coordinator. Every disposal path runs unblock → await → scope close.
 
 - **`AgentSessionPool`** replaces `SessionManager`'s `sessions`, `pendingSessionCreates` and
   `pendingTerminationPromises`.
   - It is a per-sessionId `RcMap`, or a `FiberMap` with explicit interrupt-and-await, because
     `FiberMap` replacement does not await the old fiber.
-  - Creation is interruptible. Abandoning a create interrupts it, and the scope releases any
-    process already acquired. This removes the reaper and the 300-second sentinel.
+  - Creation is interruptible. Abandoning it invokes the same coordinator to terminate an
+    acquired process and close the connection before joining setup requests and releasing scopes.
+    Remove the reaper and the 300-second sentinel only after this path is verified.
   - Lifecycle events are subscribed per instance and never deleted by id.
 - **Dependencies:** managed runtime download and ACP login, and worktrees/file locks, must
   first be finished per the roadmap.
@@ -462,10 +548,11 @@ in its version on the temporary `LoroRepo` Layer.
 
 - Introduce `TurnHandle`, `TurnStopReason` and `TurnPhase`, and delete the flags and promise
   chains listed above.
-- **Drain moves into the turn scope's release:**
-  - run `AcpConnection.awaitIdle` with a five-second bound, placing the bound on the waiter;
-  - on overrun, close the AgentSession with `DrainTimeout`, then wait once more, with a bound;
-  - a termination failure enters an observable `release-blocked` state.
+- **Drain precedes scope release:**
+  - seal request admission and run `AcpConnection.awaitIdle` with a five-second waiter bound;
+  - on overrun, explicitly terminate/close via the session coordinator with `DrainTimeout`;
+  - await raw work/body with clock/deferred bounds, then close scopes;
+  - failed termination or unsettled work retains an observable `release-blocked` owner.
 - **Finalization stages:** each `finalizeTurn` stage becomes an Effect step over L1 Git and L2
   SessionHistory. Write sequences that must be atomic go through
   `SessionHistory.commit(batch)`.
@@ -482,6 +569,8 @@ in its version on the temporary `LoroRepo` Layer.
   - a phase × reason matrix: Stop in `preparing`, `prompting` and `finalizing`; a steer already
     submitted; a lagging handoff verdict; a drain timeout with successful or failed termination;
     agent exit;
+  - automatic disposal and aborted creation with an uninterruptible pending request: unblock
+    executes before join, and a failed termination never completes `released`;
   - ablation for each new mechanism.
 
 ### In parallel: extract machine-level ACP operations
@@ -527,8 +616,9 @@ Before implementation, map each of these to a test. No phase may change them:
   - map explicitly at the boundary with `runPromiseExit` or `Fiber.await`;
   - never call `run*` inside an Effect;
   - always use `tryPromise({ try: (signal) => ... })` for promises that can reject.
-- **Waits inside finalizers.** Finalizers are uninterruptible, so any unbounded wait there can
-  hang shutdown. Every wait inside a release must be bounded.
+- **Waits inside finalizers.** Finalizers are uninterruptible. Use the coordinator before
+  any automatic request join, and clock/deferred bounds inside release; `timeout` around
+  uninterruptible work is not a bound. Do not close a scope containing unsettled raw work.
 - **Adapter differences.** Handoff (built-in Claude), same-turn steer (Codex) and synthetic
   compaction tool calls can only be fully verified against real adapters. Deterministic tests
   prove only the execution service's side of the ordering.
@@ -577,6 +667,10 @@ Not verified:
 - the event race on the stale-ACP retry path;
 - SDK close behaviour while a grandchild holds the pipe;
 - any Windows behaviour.
+
+The 2026-10-09 shutdown-order experiment above verifies only the synthetic unblock-before-join
+mechanism on installed Effect 4.0.0. It does not verify the future ACP close implementation or
+claim L3/L4/L5 have shipped.
 
 ## v4 baseline and PR ownership
 

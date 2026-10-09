@@ -79,11 +79,14 @@ issue 分类，不是运行时测量；各单元开工时需要各自的详细�
 - 当依赖属于另一个仓库且尚未完成时，允许在本仓库先定义与其未来 Effect 接口一致的 Tag，
   用临时 Layer 适配现有 Promise 版本；上游完成后只替换该 Layer。
 
-### 边界规则（落到 `.agents/docs/cli-effect-ts.md`，由 Turn 提案第一个 PR 恢复该文档）
+### 边界规则（使用指南已由基础 PR #1070 提供，生命周期层补充以下要求）
 
 不在 Effect 内调用 `run*`；可拒绝的 promise 用带 signal 的 `tryPromise`；中断必须被某个作用域
 持有或被等待；超时放在等待者上；finalizer 内的等待必须有上限；`FiberMap` 替换不等待旧 fiber；
-作用域关闭必须记忆化，因为第二次 `Scope.close` 不等待第一次的 finalizer。
+作用域关闭必须记忆化，因为第二次 `Scope.close` 不等待第一次的 finalizer。finalizer 内采用在
+不可中断区域也能结束的时钟/Deferred 上限；ACP 关停由协调器先显式终止/关闭、再 join 原始
+工作和关闭 scope。仍被阻塞的资源保留拥有者，不能报告释放。详见
+[关停顺序修正](2026-09-27-effect-turn-execution-and-acp-process-ownership.zh.md#关停顺序修正2026-10-09effect-400)。
 
 ## L2 与 Loro 同步栈
 

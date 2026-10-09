@@ -12,8 +12,8 @@ CLI 的 Turn 执行运行时与 ACP 子进程关停是近两个月生命周期�
 进程。它们同属一类根因——资源或等待的生命周期没有绑定到拥有者，只能靠约 15 个布尔标志、
 十余个按会话登记的 Map 和五份各不相同的 kill 实现维持。本提案把所有权改为三层 Effect
 作用域（守护进程 → 会话资源 → turn）：进程与 ACP 连接由会话资源作用域获取和释放，原始 ACP
-请求、steer、配置调用与收尾归 turn 作用域，停止原因以类型化值传给 finalizer，所有等待都有
-上限并显式升级。交付遵循[迁移路线图](2026-09-27-effect-lifecycle-migration-roadmap.zh.md)的
+请求的所有权保留到请求真正结束。关停协调器先 drain，超限后显式终止进程并关闭连接，再等待
+请求 fiber 和关闭作用域；停止原因是类型化值，所有等待都有上限并显式升级。交付遵循[迁移路线图](2026-09-27-effect-lifecycle-migration-roadmap.zh.md)的
 自底向上分层原则：先做平台层与进程叶子层，再做 ACP 连接、会话资源，Turn 层在其依赖的状态层
 完成后最后完成；不改变 Stop/steer 的用户语义、历史格式与 dispatch 指针规则。各阶段的预期收益
 尚未验证，Windows 进程树与"终止失败后是否隔离会话"两项需要人工决定。
@@ -98,7 +98,7 @@ AbortSignal，abort 时发 ACP cancel 并立即 reject；`steerPrompt` 用 `stee
   关闭即可把类型化原因交给 finalizer。第二次 `Scope.close` 立即返回、不等第一次的 finalizer，
   因此"关闭"必须是一个被记忆化的共享操作，先到的原因胜出。
 - `Effect.forkIn(effect, scope)` 的 fiber 在作用域关闭时被中断**并等待**；对不可中断的工作，
-  关闭会等它真正结束。这正是"原始请求结束前不释放所有权"的结构化表达。
+  关闭会等它真正结束。这能保住请求所有权，却不能保证关停顺序；下文的 v4 修正取代这条推论。
 - `Effect.timeout` 作用在不可中断的工作上时会等工作结束；要"有上限地等"，必须把 timeout
   放在等待者上：`Fiber.await(raw).pipe(Effect.timeoutTo(...))`。
 - `Fiber.interrupt` 等待 finalizer，`Fiber.interruptFork` 不等；`Effect.disconnect` 让工作
@@ -120,12 +120,61 @@ Effect 4.0.0，见 [v4 迁移记录](../../implemented/architecture/2026-10-09-e
 后续代码使用 `Layer.effect`、`Scope.provide`、`Fiber.Fiber` 和
 `Effect.forkChild` / `forkIn`，测试时钟从 `effect/testing` 导入。
 
+### 关停顺序修正（2026-10-09，Effect 4.0.0）
+
+原提案错误地依赖“关闭会话作用域”来终止进程、从而结束请求。默认串行 finalizer 按注册反序
+运行：后注册的 `forkIn` 或 `FiberSet` 会先中断并等待请求 fiber；不可中断的请求却要等前面注册
+的进程 finalizer 执行才能结束。改成并行 finalizer，或在 `Scope.close` 外套 timeout，都不能
+保证所需的先后顺序。
+
+改为显式协调器，分别持有请求的 `rawWorkScope` 和进程/连接/终端的 `resourceScope`。用
+`Scope.make` 创建并由会话拥有者保留；在获取资源或启动请求之前，先注册协调器的外层 finalizer。
+不能通过 `Scope.fork`、在资源/daemon scope 上 `forkIn`，或外层 scoped `FiberSet`，自动把
+raw-work 的关闭排到协调器之前。`FiberSet` 只放在 `rawWorkScope`。turn scope 也只能经协调器
+关闭；body finalizer 不能先于协调器 drain 或 join 原始请求。普通 Stop、创建中断、
+获取失败、agent 退出、运行时 dispose 全部走同一协调器。
+
+```text
+禁止正在停止的 turn 发新请求 + 记录停止原因
+  → 有上限地 ACP cancel、drain（普通 Stop：5 秒）
+  → 超限/丢弃/关停：有上限地 terminateTree + 显式关闭连接
+  → 有上限地等原始请求和 turn body
+  → 按原因写入 → 关闭 turn/raw-work/resource scope → released
+```
+
+普通 drain 成功且旧拥有者已释放后，可复用连接才能接收下一 turn；丢弃或升级终止会永久
+禁止整个会话接收请求。`close(reason)` 必须同步禁止新请求，通过连接关闭信号结束所有本地请求
+包装，不依赖 stdout EOF 或 SDK Promise 完成；迟到响应不能写入已释放的 turn。本地包装结束不等于远端进程已死。
+终止进程与关闭连接分别尝试：捕获终止失败之后仍要关闭连接。退出 watcher 只发布信号，不能
+等待之后要 join 它自己的协调器。任何 join 都不能排在能够解除它阻塞的操作之前。
+
+协调器的 finalizer 采用在不可中断区域也能结束的时钟/Deferred 上限，不能只给不可中断 join
+套 timeout。只有相关工作全部结束，且所需进程终止已确认，才能关闭 scope、完成 `released`。
+失败返回类型化清理错误，保留拥有者并标为 `release-blocked`；不能关闭仍有原始工作的 scope，
+也不能允许替代会话。daemon 在关停预算内报告失败，不能转入无期限的 runtime dispose 重试。
+
+本次验证是 Effect 4.0.0 的合成实验，不是 ACP 实现已完成：旧顺序卡在不可中断请求，新协调器
+先执行终止/连接关闭，再完成请求 join 和 scope 释放。终止失败时应结束本地请求，但保留所有权、
+不报告 `released`。L3/L4/L5 还必须验证真实 SDK、孙进程持有管道、自动 dispose、并发 Stop/
+强制升级，以及禁止新请求后不会再启动请求。
+
+合成实验以不可中断的 `Deferred.await` 模拟原始请求。旧的单一 scope 一开始 `Scope.close`，
+关闭 fiber 就保持未完成，进程 finalizer 没执行；显式完成 Deferred 后才清理完实验。新模型由
+外层 finalizer 调用持有两个独立 scope 的协调器，实际顺序为：禁止新请求 → 尝试终止 → 完成
+连接关闭 Deferred → 请求结束 → 资源释放 → `released`。模拟终止失败时仍完成关闭 Deferred，
+但保留资源 scope，`released` 仍未完成。就绪通过显式信号确认；没有真实 sleep、网络、机器
+负载竞态或实际子进程。
+
+依据：[v4 scope 迁移文档](https://github.com/Effect-TS/effect/blob/effect@4.0.0/migration/scope.md)，
+以及锁定安装包的 `src/internal/effect.ts`（`scopeCloseFinalizers`、`forkIn`、`fiberInterrupt`）
+与 `src/FiberSet.ts`。本地包版本为 `4.0.0`。
+
 ## 目标与非目标
 
 目标：
 
-1. 每个 turn 拥有的资源和异步工作都挂在 turn 作用域上；关闭作用域即释放，不存在"释放后仍在跑"
-   的工作。
+1. 每个资源和异步工作都有明确拥有者。turn 持有原始请求租约，协调器先结束工作再关闭作用域；
+   工作仍在运行时不能报告释放。
 2. 每个 ACP 进程及其连接挂在会话资源作用域上；进程意外退出以类型化信号通知拥有它的 turn。
 3. 停止原因（用户 Stop、Edit & Resend、访问撤销、初始化停滞、agent 退出、守护进程关停、
    已知失败）是一个类型化值，finalizer 按值分派，替代布尔标志。
@@ -146,9 +195,11 @@ Effect 4.0.0，见 [v4 迁移记录](../../implemented/architecture/2026-10-09-e
 
 ```mermaid
 flowchart TD
-    D["DaemonRuntime<br/>ManagedRuntime + 根 Scope"] --> R["SessionResource 作用域（每个 Session 实例）<br/>AgentProcess · ACP 连接 · 终端 · sandbox"]
+    D["DaemonRuntime<br/>ManagedRuntime + 根 Scope"] --> R["SessionResource 拥有者（每个 Session 实例）<br/>独立资源/raw-work/turn 作用域"]
     R --> T["Turn 作用域（每个可见 turn）<br/>presence · replay 抑制 · 更新写入目标 · 注册"]
-    T --> W["rawWork：原始 prompt / steer / set_config_option"]
+    R --> C["关停协调器<br/>解除阻塞 → 等待 → 关闭作用域"]
+    C --> W["rawWorkScope：连接级 FiberSet<br/>原始 prompt / steer / set_config_option"]
+    T -.请求所有权租约.-> W
     T --> A["ancillary：yielded turn 的收尾"]
     R -.exited: Deferred.-> T
 ```
@@ -157,25 +208,31 @@ flowchart TD
 
 - 守护进程启动时创建一个 `ManagedRuntime`（初期 `Layer` 只含 Logger 与时钟），通过 deps
   注入 `SessionExecutionService`、`SessionManager`；测试通过 `effect/testing` 的 `TestClock.layer()` 注入时钟。
-- 所有 turn 以 `runtime.runFork(program, { scope: daemonScope })` 启动；关停按
-  "所有 turn 以 `DaemonShutdown` 停止（有期限）→ 关闭会话资源 → MessageHandler 最终 flush →
-  文档拆除"的顺序进行，保持 `session/AGENTS.md` 规定的两阶段 `cleanUp`。
+- turn body 用 `runtime.runPromise(Effect.forkIn(program, daemonScope))` 启动；v4 的 run 选项不接收
+  `scope`。body 与本地等待保持可中断，原始请求由独立作用域持有。runtime dispose 也经由会话
+  协调器，不能先 join 原始工作再解除阻塞。
+- 关停按“所有 turn 以 `DaemonShutdown` 停止（有期限）→ 会话协调器先终止/关闭，再等待原始
+  工作并释放 → MessageHandler 最终 flush → 文档拆除”执行，保持两阶段 `cleanUp`。
+  被阻塞的拥有者报告失败，不能当作已经释放。
 
 ### SessionResource
 
-- `Session` 持有一个 `CloseableScope`。`createAgent` 在其中依次获取：start gate 许可
+- `Session` 通过协调器分别持有 `Scope.Closeable` 的资源和 raw-work 作用域。`createAgent`
+  在资源作用域中依次获取：start gate 许可
   （包住 spawn + initialize + newSession，保持默认并发 2 与 `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`）、
   `AgentProcess`、ACP 连接。
 - `AgentProcess.acquire(spec)` = `Effect.acquireRelease(spawn, (proc, exit) => terminateTree(proc, policy(exit)))`，
   并提供 `exited: Deferred<ProcessExit>`（同时看 `exitCode` 与 `signalCode`，监听前先检查已退出）。
 - 一个挂在会话资源作用域上的监视 fiber 等 `exited`：一旦完成，显式 `connection.close(AgentExited)`
   （不依赖 stdout EOF）、把客户端标为断开（`isCreated()` 为 false），并以 `AgentExited` 停止
-  当前拥有该会话的 turn。
-- `terminate` 被记忆化：并发调用共享同一次关闭，`terminated` 恰好发出一次，载荷取 agent 的退出信息；
+  当前拥有该会话的 turn（只发布信号，不等待 turn 的 stop 或自己的 scope close）；后代清理与
+  raw-work drain 由协调器执行。
+- `terminate` 委托协调器：并发调用共享进行中的关停，强制调用能立即升级，不复用已经结束的结果；
+  停止原因仍先到者胜出。`terminated` 每次终止恰好发出一次，载荷取 agent 的退出信息；
   终止失败发出类型化的 `terminationFailed`，不再伪装成功。
 - `SessionManager` 按实例订阅（订阅本身是会话资源作用域上的一个资源），不再按 id 删除。
-  `pendingSessionCreates` 改为可中断的创建 fiber：放弃即中断，已获取的进程由作用域释放，
-  bounded-init 记录里的"reaper"与 300 秒哨兵随之移除。
+  `pendingSessionCreates` 改为可中断的创建 fiber：放弃即中断，协调器先终止已获取的进程并关闭
+  连接，再等待初始化请求、关闭作用域；验证这条路径后移除 reaper 与 300 秒哨兵。
 
 ### Turn 作用域与 TurnSupervisor
 
@@ -195,7 +252,7 @@ type TurnPhase = 'preparing' | 'prompting' | 'finalizing';
 
 interface TurnHandle {
   readonly turnId: string;
-  readonly scope: Scope.CloseableScope;
+  readonly scope: Scope.Closeable;
   readonly phase: Ref<TurnPhase>;
   readonly stopReason: Deferred<TurnStopReason>; // 先到者胜出
   readonly released: Deferred<void>; // 取代 turnReleaseWaiters
@@ -208,15 +265,17 @@ interface TurnHandle {
 
 | 阶段                                      | Stop 的效果                                                                                                            | 对应现状                                                         |
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `preparing`（创建、恢复、配置、打开条目） | 中断 `body` 并等待；创建中的 fiber 被中断，已获取的进程按 `prePromptSession` 决定是否释放                              | `requestTurnInterrupt` + `terminateSessionOnCancel`              |
+| `preparing`（创建、恢复、配置、打开条目） | 发出中断信号，通过协调器有上限地等待；按 `prePromptSession` 释放或保留会话，先解除 ACP 准备请求的阻塞再 join           | `requestTurnInterrupt` + `terminateSessionOnCancel`              |
 | `prompting`                               | 发送 ACP cancel；所有本地等待（steer 等待、handoff 裁决等待）与 `stopReason` 竞速后结束；`body` 继续等原始 prompt 结束 | `requestAgentCancelInBackground` + `steerWaitController.abort()` |
 | `finalizing`                              | 中断 `body`；后处理的每个阶段都是中断点，完成通知无需再查标志                                                          | `finalizeStarted` 分支 + `stopIfTurnCancelled`                   |
 
-turn 作用域关闭时的 release 按 `Exit` 中的原因分派，取代 `finalizeCancelledTurnEffect`、
-`finalizeStalledInitializationEffect` 与 `awaitTurnFiber` 里的推断：
+关闭 turn 作用域之前，停止协调器按已记录的原因分派，并把原因传给最终 `Exit`；drain 不能排在
+请求 join finalizer 之后。它取代 `finalizeCancelledTurnEffect`、`finalizeStalledInitializationEffect`
+与 `awaitTurnFiber` 里的推断：
 
-1. **drain**：`agentClient.awaitIdle` 带 5 秒上限（上限放在等待者上）；超限则以
-   `DrainTimeout` 关闭会话资源（终止进程 → SDK reject 挂起请求 → rawWork 清空），再有上限地等一次。
+1. **drain**：`agentClient.awaitIdle` 带 5 秒等待上限；超限后禁止新请求，以 `DrainTimeout`
+   调用会话协调器，先显式尝试有上限的进程终止和连接关闭，再用时钟/Deferred 上限等待本地
+   请求包装及 `body`。所需终止已确认、工作已结束后才关闭作用域。
 2. **终止失败**：保持"终止失败不等于可复用"的现有规则。默认方案是 turn 继续持有所有权，
    但以可观测的 `release-blocked` 状态存在（有日志和诊断），而不是 finalizer 里的无上限 await；
    备选方案见"待决问题"。
@@ -229,7 +288,9 @@ turn 作用域关闭时的 release 按 `Exit` 中的原因分派，取代 `final
 
 原始 ACP 工作：`AgentClient` 成为唯一的底层占用边界，内部用连接级 `FiberSet` 持有每个原始
 请求（prompt、steer 扩展请求、`set_config_option`），以 `Effect.uninterruptible` 包住请求本身——
-它只能由 ACP 响应或连接关闭结束，不能被本地中断取消。对外提供 `awaitIdle(): Effect<void>`
+它只能由 ACP 响应或独立的连接关闭信号结束，不能被本地中断取消。关闭信号不依赖 EOF 或
+SDK Promise。`FiberSet` 的 finalizer 只挂在独立的 `rawWorkScope`，由协调器 drain 后关闭；
+turn 持有请求租约，不能在会话终止之前自动 join 请求。对外提供 `awaitIdle(): Effect<void>`
 与 `isIdle`。`pendingPrompts`、`pendingPromptCompletion`、`pendingSteerConfig`、
 `cancellationDrain` 删除。
 
@@ -243,8 +304,9 @@ steer：
 - `steerMutationQueue` 与 `steerStatusQueue` 先保留 `ConcurrentQueue`，L5 再改为
   TurnSupervisor 内每会话一个 `Semaphore(1)`。
 
-`yieldedFinalization` promise 链改为 turn 作用域上的 `ancillary` `FiberSet`；release 时有上限地
-join（超限记录日志、不阻塞释放）。初始化停滞由 watchdog 直接调用 `stop(InitStalled)`，
+`yieldedFinalization` promise 链改为 turn 作用域上的 `ancillary` `FiberSet`；协调器在关闭之前
+中断并用时钟/Deferred 上限 join。不合作的任务进入 `release-blocked`，不能只记日志后调用
+无上限的 `FiberSet` finalizer 或报告释放。初始化停滞由 watchdog 直接调用 `stop(InitStalled)`，
 移除 `raceFirst` 与 `initializationStalled` 标志。
 
 ## 分层交付
@@ -295,31 +357,33 @@ SessionDocuments、SessionHistory、SessionPresence、CloudPort 的设计与 lor
 
 - `AgentClient` 拆成协议连接与领域操作。AcpConnection 以连接级 `FiberSet` 持有每个原始请求
   （prompt、steer 扩展请求、`set_config_option`），请求本身以 `Effect.uninterruptible` 包住，
-  只能由 ACP 响应或连接关闭结束；提供 `awaitIdle` 与 `isIdle`；`closed: Deferred` 与通知 `Stream`
+  本地包装由 ACP 响应或显式关闭信号结束，不依赖 SDK/EOF；FiberSet 只放在协调器拥有的
+  raw-work 作用域。本地包装结束不等于远端进程可复用。提供 `awaitIdle` 与 `isIdle`；`closed: Deferred` 与通知 `Stream`
   取代回调；SDK 是此层唯一包装的第三方边界。
 - 删除 `pendingPrompts`、`pendingPromptCompletion`、`steerApplicationWaiters` 的 promise 维护；
   steer 裁决改为 `Deferred<SteerOutcome>`，三态语义不变。
 - 先验证：当前 SDK 在 `connection.close(error)` 后对 prompt 与扩展请求的 reject 行为，以及适配器
-  孙进程持有 stdout 时的表现。
+  孙进程持有 stdout 时仍能显式结束本地包装，以及迟到响应、禁止新请求后的并发调用。
 
 ### L4：AgentSession 与 AgentSessionPool
 
 - `AgentSession` 是一个作用域：启动闸门许可（`Semaphore(2)`，保持
   `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`）、ProcessService 进程、AcpConnection、ACP 终端与
-  sandbox 依次获取；`exited` 监视 fiber 显式关闭连接并以 `AgentExited` 通知拥有它的 turn。
+  sandbox 依次获取。协调器在请求启动前安装，独立持有 raw-work 和资源作用域；所有释放路径
+  都先解除阻塞、再等待、最后关闭。`exited` watcher 显式关闭连接并发布 `AgentExited`，不等待协调器。
 - `AgentSessionPool` 以按 sessionId 的 `RcMap`（或显式中断并等待的 `FiberMap`，因为 `FiberMap`
   替换不等待旧 fiber）取代 `SessionManager` 的 `sessions`、`pendingSessionCreates`、
-  `pendingTerminationPromises`；创建可中断，放弃即中断并由作用域释放已获取的进程，移除 reaper
-  与 300 秒哨兵；生命周期事件按实例订阅，不再按 id 删除。
+  `pendingTerminationPromises`；创建可中断，放弃时经同一协调器先终止已获取进程、关闭连接，
+  再等准备请求并释放作用域。验证后移除 reaper 与 300 秒哨兵；生命周期事件按实例订阅，不按 id 删除。
 - 依赖：托管 runtime 下载与 ACP 登录、worktree 与文件锁须先按路线图完成。
 - 删除 PR1 在 `Session` 上留下的门面。
 
 ### L5：Turn 作用域与 TurnSupervisor（核心）
 
 - 引入 `TurnHandle`、`TurnStopReason`、`TurnPhase`，删除上文列出的布尔标志与 promise 链。
-- drain 进入 turn 作用域的 release：`AcpConnection.awaitIdle` 带 5 秒上限（上限放在等待者上），
-  超限以 `DrainTimeout` 关闭 AgentSession，再有上限地等一次；终止失败进入可观测的
-  `release-blocked` 状态。
+- drain 在作用域释放之前执行：禁止新请求，`AcpConnection.awaitIdle` 带 5 秒等待上限；
+  超限以 `DrainTimeout` 经会话协调器显式终止/关闭，用时钟/Deferred 上限等待原始工作及 body，
+  再关闭作用域。终止失败或工作未结束，保留拥有者并进入可观测的 `release-blocked` 状态。
 - `finalizeTurn` 各阶段改为依赖 L1 Git 与 L2 SessionHistory 的 Effect 步骤；必须原子的写入序列
   通过 `SessionHistory.commit(batch)` 完成。
 - 初始化停滞、agent 退出、守护进程关停都经由 `stop(reason)`；presence 由 `SessionPresence.hold`
@@ -329,7 +393,8 @@ SessionDocuments、SessionHistory、SessionPresence、CloudPort 的设计与 lor
   "子任务控制分支 → 查注册表 → `handle.stop(UserStop{...})`"，保留显式的孤儿 turn 修复路径；
   steer 队列改为每会话 `Semaphore(1)`。
 - 测试：原有套件；按阶段 × 原因的矩阵（Stop 在 preparing/prompting/finalizing，遇到已提交
-  steer、滞后的 handoff 裁决、drain 超时且终止成功/失败、agent 退出）；每个新机制做消融。
+  steer、滞后的 handoff 裁决、drain 超时且终止成功/失败、agent 退出）；自动 dispose 与创建中断
+  遇到不可中断请求时，必须先解除阻塞再 join，终止失败不能完成 `released`；每个新机制做消融。
 
 ### 可并行：拆出机器级 ACP 操作
 
@@ -358,8 +423,8 @@ SessionDocuments、SessionHistory、SessionPresence、CloudPort 的设计与 lor
 - **混合期边界**：Promise 与 Effect 共存期间，`runPromise` 会把中断变成 `FiberFailure` 拒绝。
   规则：边界统一用 `runPromiseExit` 或 `Fiber.await` 显式映射；禁止在 Effect 内调用 `run*`；
   可拒绝的 promise 一律 `tryPromise({ try: (signal) => ... })`。
-- **finalizer 中的等待**：finalizer 不可中断，任何无上限等待都会让关停卡死。所有 release 内的
-  等待都必须带上限。
+- **finalizer 中的等待**：finalizer 不可中断，必须在自动 join 请求之前运行协调器，release 内
+  用时钟/Deferred 上限；不可中断工作外面的 timeout 不是上限。仍有原始工作时不能关闭其 scope。
 - **适配器差异**：handoff（内建 Claude）、同 turn steer（Codex）、合成压缩工具调用只能在真实
   适配器上完全验证；确定性测试只证明执行服务一侧的顺序。
 - **两个最大文件同时修改**：L4 需要 MessageHandler（9762 行）与执行服务一起改，评审成本高；
@@ -386,6 +451,8 @@ SessionDocuments、SessionHistory、SessionPresence、CloudPort 的设计与 lor
 初始提案基于代码阅读、仓库历史、GitHub issue 与在 effect 3.18.4 上的临时脚本实测，当时没有实现
 或 CLI 测试。v4 基线现已单独验证；后续各层记录各自的实现证据。"修复 #429"及各类缺陷"在结构上不可再现"是设计目标，不是测量结果。
 stale-ACP 重试路径的事件竞态、SDK 在孙进程持有管道时的关闭行为、Windows 行为均未验证。
+2026-10-09 的关停顺序实验只验证了已安装 Effect 4.0.0 上的合成解除阻塞→join 机制，
+不代表未来 ACP close 实现已经验证，也不代表 L3/L4/L5 已交付。
 
 ## v4 基线与 PR 职责
 

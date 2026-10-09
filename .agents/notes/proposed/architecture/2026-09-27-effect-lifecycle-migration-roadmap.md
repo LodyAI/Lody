@@ -118,13 +118,17 @@ A module is fully Effect-ified only when every one of these holds:
 
 ### Boundary rules
 
-These rules go into `.agents/docs/cli-effect-ts.md`, which the turn proposal's first PR restores:
+The base PR #1070 provides `.agents/docs/cli-effect-ts.md`; the proposed lifecycle layers
+add these boundary requirements:
 
 - never call `run*` inside an Effect;
 - use `tryPromise` with the signal for any promise that can reject;
 - every interrupt is owned by a scope or awaited;
 - timeouts go on the waiter;
-- every wait inside a finalizer is bounded;
+- every wait inside a finalizer has a clock/deferred bound that works while uninterruptible;
+- ACP shutdown explicitly terminates/closes before raw-work joins or scope close; an ownership
+  coordinator retains blocked resources rather than reporting release. See the
+  [shutdown-order correction](2026-09-27-effect-turn-execution-and-acp-process-ownership.md#shutdown-order-correction-2026-10-09-effect-400);
 - `FiberMap` replacement does not await the old fiber;
 - scope close is memoized, because a second `Scope.close` does not wait for the first close's
   finalizers.
