@@ -59,3 +59,5 @@ Agent 检查当前引用是否仍为 Lody 分配的 `session/<id>` 或 `lody/<id
 该次执行早于最终基线刷新；刷新后重跑了受影响的执行／准备／文件预览套件、
 CLI 类型及静态／边界检查。确定性测试不能证明模型遵循要求。
 本次未调用真实 Claude／Codex，也未进行桌面界面冒烟测试。
+
+后续由 [守护进程分支资格判断](../simplification/2026-10-09-daemon-branch-naming-eligibility.zh.md) 细化 Agent 检查职责。

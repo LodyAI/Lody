@@ -3575,22 +3575,52 @@ describe('SessionExecutionService', () => {
         ['explicit GitHub resume', 'github', true, false, false, true, false],
       ] as const
     ).flatMap(([name, kind, worktree, child, prior, resume, rename]) =>
-      [true, false].map((sessionTitle) => ({
-        name,
-        kind,
-        worktree,
-        child,
-        prior,
-        resume,
-        rename,
-        sessionTitle,
-      }))
+      (rename
+        ? [
+            'allocated',
+            'collision',
+            'namespace collision',
+            'descriptive',
+            'reserved-prefix descriptive',
+            'other session',
+            'detached',
+            'probe failure',
+          ]
+        : ['allocated']
+      ).flatMap((branchState) =>
+        [true, false].map((sessionTitle) => ({
+          name,
+          kind,
+          worktree,
+          child,
+          prior,
+          resume,
+          rename: rename && ['allocated', 'collision', 'namespace collision'].includes(branchState),
+          branchState,
+          sessionTitle,
+        }))
+      )
     )
   )(
-    'starts $name with title capability $sessionTitle and the appropriate first-task prompt',
-    async ({ kind, worktree, child, prior, resume, rename, sessionTitle }) => {
+    'starts $name on $branchState with title capability $sessionTitle and the appropriate first-task prompt',
+    async ({ kind, worktree, child, prior, resume, rename, branchState, sessionTitle }) => {
       const generatedTitles: string[] = [];
-      let checkoutBranch = 'feature/local-start';
+      const allocatedBranch = kind === 'github' ? 'session/session-' : 'lody/session-loca';
+      const initialBranch =
+        branchState === 'collision'
+          ? `${allocatedBranch}-2`
+          : branchState === 'namespace collision'
+            ? allocatedBranch.replace('/', '-2/')
+            : branchState === 'descriptive'
+              ? 'feature/local-start'
+              : branchState === 'reserved-prefix descriptive'
+                ? 'lody/fix-checkout'
+                : branchState === 'other session'
+                  ? 'session/87654321'
+                  : branchState === 'detached'
+                    ? ''
+                    : allocatedBranch;
+      let checkoutBranch = initialBranch;
       let publishedBranch: string | undefined;
       let branchAtPrompt: string | undefined;
       let deliveredPrompt: ContentBlock[] = [];
@@ -3651,7 +3681,13 @@ describe('SessionExecutionService', () => {
         getWorkdir: () => '/local/repo',
         getHostWorkdir: () => '/local/repo',
         getParentSessionId: () => parentSessionId,
-        exec: vi.fn(async () => ''),
+        exec: vi.fn(async (_command: string, args: string[]) => {
+          if (args.join(' ') === 'branch --show-current') {
+            if (branchState === 'probe failure') throw new Error('synthetic Git probe failure');
+            return checkoutBranch;
+          }
+          return '';
+        }),
         terminate: vi.fn(async () => {}),
         updateGitIdentity: vi.fn(),
         createAgent: vi.fn(async () => 'acp-local-code-collab'),
@@ -3734,12 +3770,11 @@ describe('SessionExecutionService', () => {
         .flatMap((block) => (block.type === 'text' ? [block.text] : []))
         .join('');
       expect(text.startsWith('hello')).toBe(true);
-      expect(text.includes('This is the first task in a new independent Lody worktree')).toBe(
-        rename
-      );
+      expect(text.includes('Before starting this task, rename the branch')).toBe(rename);
       expect(text.includes('gh pr create')).toBe(kind === 'github');
       expect(text).toContain('Use the available Lody MCP tools when relevant');
-      expect(branchAtPrompt).toBe('feature/local-start');
+      expect(branchAtPrompt).toBe(initialBranch);
+      if (rename) expect(text).toContain(`git branch -m ${initialBranch} <name>`);
       expect(publishedBranch).toBe('feature/local-finished');
       expect(generatedTitles).toEqual(sessionTitle ? [] : ['Local title']);
       expect(sessionManager.createSession).toHaveBeenCalledWith(
@@ -4046,7 +4081,9 @@ describe('SessionExecutionService', () => {
       getWorkdir: () => '/tmp',
       getHostWorkdir: () => '/tmp',
       getParentSessionId: () => undefined,
-      exec: vi.fn(async () => ''),
+      exec: vi.fn(async (_command: string, args: string[]) =>
+        args.join(' ') === 'branch --show-current' ? 'session/session-' : ''
+      ),
       terminate: vi.fn(async () => {}),
       updateGitIdentity: vi.fn(),
       createAgent: vi.fn(async () => 'acp-file-create'),
@@ -4116,7 +4153,9 @@ describe('SessionExecutionService', () => {
       { type: 'text', text: expect.stringContaining('inspect the attached trace') },
     ]);
     expect(deliveredPrompt[1]).toMatchObject({
-      text: expect.stringContaining('This is the first task in a new independent Lody worktree'),
+      text: expect.stringContaining(
+        'Before starting this task, rename the branch session/session-'
+      ),
     });
     const executionText = (deliveredPrompt[1] as Extract<ContentBlock, { type: 'text' }>).text;
     for (const instruction of [

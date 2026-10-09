@@ -11,7 +11,10 @@ import { getCredentialHelperHostPath } from '@/lib/git-credential-helper-script'
 import { formatErrorMessage } from '@/utils/format-error';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { mapGitSpawnError } from './git-process-error';
-import { resolveAvailableBranchName } from './branch-name-allocation';
+import {
+  getAllocatedSessionBranchName,
+  resolveAvailableBranchName,
+} from './branch-name-allocation';
 
 const SAFE_SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const LODY_LOCAL_BRANCH_PREFIX = 'lody/';
@@ -1112,14 +1115,7 @@ export class WorktreeManager {
   }
 
   private getDefaultSessionBranchName(sessionId: SessionId): string {
-    if (this.isLocalSharedSource()) {
-      const shortId = sessionId
-        .slice(0, 12)
-        .replace(/[^A-Za-z0-9_-]/g, '')
-        .slice(0, 12);
-      return `${LODY_LOCAL_BRANCH_PREFIX}${shortId || sessionId.slice(0, 8)}`;
-    }
-    return `session/${sessionId.slice(0, 8)}`;
+    return getAllocatedSessionBranchName(sessionId, this.isLocalSharedSource());
   }
 
   private isLodyManagedLocalBranch(branchName: string): boolean {

@@ -31,7 +31,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 - `session-execution-service.ts` — runs one turn end-to-end: ACP prompt, turn ids,
   lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
 - `session-execution-helpers.ts` — composes first-task prompt context, with branch-naming
-  guidance only for ordinary new independent GitHub/local worktree Sessions.
+  guidance only after execution verifies this Session's temporary branch in an ordinary
+  new independent GitHub/local worktree.
 - `acp-error-classification.ts` — JSON-RPC/transport error string matching for the above.
 - `session-manager.ts` / `session.ts` / `session-sandbox.ts` / `terminal-manager.ts` —
   session and process lifecycle, workdirs, worktrees, sandboxed spawning, ACP terminals.

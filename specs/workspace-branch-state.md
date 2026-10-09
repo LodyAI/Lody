@@ -33,14 +33,19 @@ watching. The existing mobile layout still omits branch text in its bottom bar.
 
 ## First-task branch naming
 
-Ordinary new independent worktree Sessions, for both GitHub and local projects,
-ask the agent in the first task prompt to inspect its branch and rename Lody's
-allocated temporary ref (`session/<id>` or `lody/<id>`, including collision
-suffixes) before starting work, committing, or pushing. The agent preserves an
-already descriptive task branch, summarizes the task without copying sensitive
-input into a ref, and never force-overwrites an existing branch. A conflicting
-name gets another descriptive name; rename failure is reported without blocking
-the task.
+For an ordinary new independent GitHub/local worktree Session, the daemon reads
+the actual checkout after workspace preparation and setup. It requests naming only
+when the branch matches this Session's allocated temporary ref, including numeric
+name or namespace collision suffixes. Descriptive branches, another Session's refs,
+detached HEAD and failed probes receive no naming request; cached metadata and the
+base ref do not substitute for that read.
+
+The first prompt directly asks the agent to rename the verified branch to a short
+task name before starting work. The command names the verified old ref, so a
+checkout change does not silently redirect the rename to another branch. The agent
+avoids sensitive input and force-overwrites, chooses another name on collision,
+and reports rename failure while continuing the task. It need not inspect the
+checkout to decide whether naming is appropriate.
 
 Eligibility follows first use of the Session, including adoption of a prepared
 worktree. Direct local directories, shared child Tabs, Sessions with a prior ACP

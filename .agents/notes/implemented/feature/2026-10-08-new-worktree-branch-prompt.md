@@ -71,3 +71,5 @@ complete. This run preceded the final base refresh; affected execution/preparati
 file-preview suites, CLI types and static/boundary checks were rerun afterward.
 Model compliance is not proven by deterministic tests. No live Claude/Codex
 invocation or desktop UI smoke test is included.
+
+Later agent-inspection ownership is refined in [daemon branch eligibility](../simplification/2026-10-09-daemon-branch-naming-eligibility.md).

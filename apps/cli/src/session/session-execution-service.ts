@@ -116,6 +116,7 @@ import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { subscribeSessionChanges } from '@/lib/loro/doc';
 import { createSessionBackend, getSteerOperationId, type SessionBackend } from './session-backend';
 import { buildPrompt } from './session-execution-helpers';
+import { isAllocatedSessionBranchName } from './worktree/branch-name-allocation';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import {
   resolveDispatchAcpSessionId,
@@ -5832,25 +5833,42 @@ export class SessionExecutionService {
             self.captureStatusChanged(sessionId, 'initializing', 'git-clone', 'session_create');
           }
 
-          const sessionInputBlocks = resolveSessionExecutionInputBlocks({
-            ...agentConfig,
-            prompt: buildPrompt(
-              agentConfig.prompt,
-              project,
-              agentConfig.issuePRMentions,
-              fromFeedbackPostId,
-              { newWorktree }
-            ),
-          });
-          const startPromptBlocksBuild = () => {
-            const promise = traceAsync(
+          const startPromptBlocksBuild = async (session: ISession) => {
+            let branchToRename: string | undefined;
+            if (newWorktree) {
+              try {
+                // Setup may have changed the checkout, including on prepared adoption.
+                const currentBranch = (
+                  await session.exec(
+                    'git',
+                    ['branch', '--show-current'],
+                    session.getWorkdir(),
+                    false
+                  )
+                ).trim();
+                if (isAllocatedSessionBranchName(currentBranch, sessionId)) {
+                  branchToRename = currentBranch;
+                }
+              } catch (error) {
+                self.deps.logger.debug(
+                  `[${sessionId}] Skipping branch naming after Git probe failure: ${formatErrorMessage(error)}`
+                );
+              }
+            }
+            const sessionInputBlocks = resolveSessionExecutionInputBlocks({
+              ...agentConfig,
+              prompt: buildPrompt(
+                agentConfig.prompt,
+                project,
+                agentConfig.issuePRMentions,
+                fromFeedbackPostId,
+                { branchToRename }
+              ),
+            });
+            return traceAsync(
               self.deps.logger,
               'execution.build_acp_prompt_blocks',
-              {
-                sessionId,
-                turnId,
-                inputBlocks: sessionInputBlocks.length,
-              },
+              { sessionId, turnId, inputBlocks: sessionInputBlocks.length },
               async () =>
                 await self.deps.buildAcpPromptBlocks({
                   workspaceId,
@@ -5858,8 +5876,6 @@ export class SessionExecutionService {
                   inputBlocks: sessionInputBlocks,
                 })
             );
-            void promise.catch(() => undefined);
-            return promise;
           };
 
           sessionConfig.worktreeScriptHistoryInsertBeforeEntryId = turnId;
@@ -5885,7 +5901,8 @@ export class SessionExecutionService {
           // First-turn attachments are materialized under the session workspace.
           // Start this as soon as createSession has registered the workspace, but
           // do not start it earlier or attachments fall back to "unavailable".
-          const promptBlocksPromise = startPromptBlocksBuild();
+          const promptBlocksPromise = startPromptBlocksBuild(session);
+          void promptBlocksPromise.catch(() => undefined);
 
           self.deps.setSessionActivePresencePhase(sessionId, 'thinking');
           yield* self.tryPromise(() => sessionDoc.setStatus(SessionStatusFactory.running()));
