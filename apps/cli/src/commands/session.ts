@@ -25,6 +25,7 @@ import { z } from 'zod';
 import { v4 as uuidV4 } from 'uuid';
 import {
   createLoroStreamsJsonStreamClient,
+  DEFAULT_LORO_STREAMS_RPC_CONNECT_TIMEOUT_MS,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
   LoroStreamsMachineRpcClient,
@@ -2074,7 +2075,10 @@ async function createMachineRpcClient(args: {
     shardUrls: getLoroStreamsShardUrls(baseUrl, streamsTokenProvider.getShardHostSuffix()),
     fetchImpl: cliHttpFetch,
     timeout: {
-      connectTimeoutMs: readPositiveIntEnv('LODY_LORO_RPC_CONNECT_TIMEOUT_MS', 30_000),
+      connectTimeoutMs: readPositiveIntEnv(
+        'LODY_LORO_RPC_CONNECT_TIMEOUT_MS',
+        DEFAULT_LORO_STREAMS_RPC_CONNECT_TIMEOUT_MS
+      ),
     },
   });
   const client = new LoroStreamsMachineRpcClient({

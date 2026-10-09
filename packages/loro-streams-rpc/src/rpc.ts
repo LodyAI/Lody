@@ -163,6 +163,7 @@ export const LORO_STREAMS_RPC_RETENTION_SECONDS = 86400;
 // for this long. Firing here means the connection stalled; we reconnect. See
 // `liveIdleTimeoutMs` on `createLoroStreamsJsonStreamClient`.
 export const DEFAULT_LIVE_IDLE_TIMEOUT_MS = 120_000;
+export const DEFAULT_LORO_STREAMS_RPC_CONNECT_TIMEOUT_MS = 30_000;
 
 // Wire-protocol error codes shared between server and clients. Treat as a
 // stable contract: clients pattern-match `code` to render localized messages
@@ -1101,7 +1102,11 @@ export function createLoroStreamsJsonStreamClient(options: {
         url,
         auth: async () => await options.getToken(),
         fetch: fetchImpl as typeof fetch,
-        timeout: options.timeout,
+        timeout: {
+          ...options.timeout,
+          connectTimeoutMs:
+            options.timeout?.connectTimeoutMs ?? DEFAULT_LORO_STREAMS_RPC_CONNECT_TIMEOUT_MS,
+        },
       }),
       context: {
         operation: `json.${operation}`,
