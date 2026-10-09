@@ -82,8 +82,30 @@ backend installation and the new read-only observation command. The Codex
 submodule is checked out at main's recorded commit. Frozen installation, complete
 `pnpm check`, formatting and documentation checks pass on the merged worktree:
 CLI 3590 tests with four existing skips, shared components 4890 tests and Electron
-214 tests. Public/platform guards pass. Desktop build and the normal macOS arm64
-directory-package probes remain to be completed before handoff.
+214 tests. Public/platform guards pass.
+
+The merged CLI build passes with a 2 GiB heap, including actual publication
+runtime smoke and native staging. Applying that limit to the renderer as well
+caused an out-of-memory abort; rerunning only `build:app` with the normal renderer
+configuration passes, without changing build source or raising the CLI heap.
+Renderer output contains no native Roost imports.
+
+The normal packaging wrapper produces a macOS arm64 Lody OSS 0.104.0 directory
+package with publishing and release signing disabled. Actual packaged CLI boot,
+native bindings and Worker signed SQLite write/reopen probes pass. The application
+contains `@loro-dev/roost-node@0.1.1` and exactly one 8,021,248-byte darwin-arm64
+binding, SHA-256 `1d0e23d144491d5e566de679a6a9e2477332027a98e86af74849a4c60a983d93`,
+matching the installed published artifact. The packaged executable also passes an
+explicit repeat of the Worker probe with native version enforcement. Temporary
+synthetic databases are removed; user history is not used for validation.
+
+Source `8b1073e0ceef32829b0230ab64801f6a34e36c01` is pushed to the existing PR.
+[CI](https://github.com/LodyAI/Lody/actions/runs/37889429418) and
+[Desktop E2E](https://github.com/LodyAI/Lody/actions/runs/37889429365) pass on that
+source commit.
+Local logs: `/private/tmp/lody-roost-011-check-merged.log`,
+`/private/tmp/lody-roost-011-package.log` and
+`/private/tmp/lody-roost-011-platforms.log`.
 
 ### Platform package compatibility (2026-10-09)
 

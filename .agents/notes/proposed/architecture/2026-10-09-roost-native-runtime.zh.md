@@ -64,8 +64,27 @@ Loro 仍是默认后端；既有会话的后端标识、历史、Loro 控制元�
 是相邻的 Session 命令 import，已保留 Roost 后端安装和新增只读观察命令。
 Codex 子模块已检出 main 记录的提交。合并后的冻结安装、完整 `pnpm check`、
 格式和文档检查通过：CLI 3590 项通过、4 项既有跳过，共享组件 4890 项通过，
-Electron 214 项通过，公开仓库/平台边界检查通过。桌面构建和正常 macOS arm64
-目录包探针仍需完成，交接前在此补充结果。
+Electron 214 项通过，公开仓库/平台边界检查通过。
+
+合并后的 CLI 构建在 2 GiB 堆限制下通过，包括实际发布运行时 smoke 和原生暂存。
+把该限制同时带给 renderer 曾导致内存不足；仅以正常 renderer 配置重跑
+`build:app` 后通过，没有修改构建源码或提高 CLI 堆限制。renderer 产物没有原生
+Roost 导入。
+
+正常打包 wrapper 已生成 macOS arm64 的 Lody OSS 0.104.0 目录包，禁用发布和
+发行签名。实际应用内 CLI 启动、原生绑定及 Worker 的签名 SQLite 写入/重开探针
+通过。应用内是 `@loro-dev/roost-node@0.1.1`，只含一份 8,021,248 字节的
+darwin-arm64 绑定，SHA-256 为
+`1d0e23d144491d5e566de679a6a9e2477332027a98e86af74849a4c60a983d93`，与实际安装的
+发布产物一致。启用原生版本检查后，打包可执行程序再次通过 Worker 探针。
+验证使用已清理的临时合成数据库，没有使用用户历史。
+
+源码 `8b1073e0ceef32829b0230ab64801f6a34e36c01` 已推到既有 PR。
+该源码提交的[CI](https://github.com/LodyAI/Lody/actions/runs/37889429418)和
+[桌面 E2E](https://github.com/LodyAI/Lody/actions/runs/37889429365)均已通过。
+本机日志：`/private/tmp/lody-roost-011-check-merged.log`、
+`/private/tmp/lody-roost-011-package.log` 和
+`/private/tmp/lody-roost-011-platforms.log`。
 
 ### 平台包兼容（2026-10-09）
 
