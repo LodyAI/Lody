@@ -74,6 +74,7 @@ export type ResolveACPSettingInput = {
    */
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  agentConfigId?: string;
   magpieGatewayUrl?: string;
   /** Environment values that can alter an agent's advertised capabilities. */
   env?: NodeJS.ProcessEnv;
@@ -559,6 +560,7 @@ async function resolveBuiltinACPProcessLaunch(
     const [adapterPath] = resolveCliAdapterEntry('deepseek-acp');
     const launch = await resolveDeepSeekHarnessProcessLaunch({
       adapterPath,
+      providerId: input.agentConfigId,
       extraArgs: input.extraArgs,
     });
     return {

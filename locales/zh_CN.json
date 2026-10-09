@@ -1,4 +1,6 @@
 {
+  "settings.magpieImport.independentConfig": "独立配置",
+  "settings.agent.dialog.deepseek.configPath": "配置路径: {{path}}",
   "deepLink.archived": "请先恢复此已归档会话，再打开链接。",
   "deepLink.openHere": "使用此应用打开",
   "deepLink.workspaceUnavailable": "此版本的 Lody 无法访问该工作区，请在拥有此工作区的安装版本中打开链接。",

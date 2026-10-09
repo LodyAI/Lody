@@ -42,6 +42,23 @@ Bub 使用原生 OpenAI 环境配置，不改用户文件；需要用户先安�
 当前 Bub 的模型菜单从默认模型与 fallback 列表构造，因此只配置首个默认模型并清空
 fallback，避免为了展示目录而引入隐式模型切换。
 
+## DSH Provider 隔离
+
+覆盖复现确认，每次启动都会重写 Magpie 也会编辑的生成 profile。现已将 Provider ID
+贯穿会话创建/预热、能力探测、认证、历史读取与标题生成；每个 Provider 在 Lody 数据目录
+有固定 home 和可编辑 patch，生成的默认配置放在带版本指纹的本地 bundle。
+最后的宿主层保持 ACP、历史路径及禁用遥测，不重置模型路由。用户 patch 使用排他创建，
+重复/并发启动及适配器升级不覆盖修改。详情页通过机器发布的数据目录推导 YAML 路径，
+并以 `dshProviderIsolation: 1` 能力门控。
+
+原会话文件及查询库路径保留。旧设置/profile 原样保留，不自动任选一个或复制给全部
+Provider；所需自定义项由用户迁入显示的路径。独立 Magpie 默认 DSH 扫描不会发现这些
+隔离 home；Lody 导入仍用 Provider 环境变量设置 Magpie 地址和公开 token。
+
+验证覆盖并发启动、两个 Provider、适配器路径升级、YAML/settings/历史保留，以及固定
+DSH 0.1.5-rc.2 原生组合：基础 bundle → 生成宿主 bundle → 用户 patch → 宿主约束层。
+合成自定义模型得到保留，遥测仍被禁用，ACP 入口更新到新路径。
+
 ## 证据与验证
 
 - 检查了 Magpie 提交 `62b1c995ffaebb223ad040b4c54ebabab0078c7a`：

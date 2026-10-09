@@ -7,8 +7,25 @@ Translation: current
 
 ## Behavior
 
-Users can configure settings-aware Harness plugins in `settings.yaml` under
-`DSH_HOME`, defaulting to `~/.dsh`. Lody's built-in DeepSeek ACP composition must
+Each Lody DSH Provider uses `<Lody data root>/dsh/providers/<encoded Provider ID>`
+as its `DSH_HOME`. Renaming it keeps that directory; another Provider gets a different
+directory. Users can configure settings-aware plugins in its `settings.yaml`.
+The Provider details show `Configuration path: <absolute YAML path>` for
+`profiles/lody-acp/cordis.patch.yml`, using the owning machine's published data root
+and `dshProviderIsolation: 1` capability. Older machines show no inferred path.
+
+Lody creates this user patch only when missing. Startup, concurrent launches and
+adapter upgrades preserve it and `settings.yaml`; generated host layers update
+separately. The final host layer enforces the ACP entry, session storage paths and
+disabled product/telemetry services without resetting user model routes. Existing
+native sessions and the query database remain in the previous DSH session root.
+Old global settings and fingerprinted profiles stay untouched; no ambiguous legacy
+profile is automatically selected or copied into all Providers. Users move desired
+customizations to the displayed path. Magpie's default global DSH scan does not
+automatically discover these private homes. Lody import still configures its
+Provider environment directly.
+
+Lody's built-in DeepSeek ACP composition must
 mount the upstream file settings provider and preserve the user's document.
 Absent settings retain composition defaults. Malformed documents fail startup with
 an error; the host must not silently overwrite or discard them.

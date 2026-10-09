@@ -322,6 +322,11 @@ export function MagpieImportDialog({
               {rows.map((option, index) => {
                 const disabled = Boolean(option.disabledReason) || active.submitting;
                 const checked = selected.includes(option.id);
+                const subtitle =
+                  option.disabledReason ||
+                  (['kimi', 'grok', 'bub'].includes(option.id)
+                    ? t('settings.magpieImport.independentConfig')
+                    : '');
                 return (
                   <label
                     key={option.id}
@@ -359,9 +364,7 @@ export function MagpieImportDialog({
                       >
                         {option.name}
                       </span>
-                      {option.disabledReason ? (
-                        <span {...stylex.props(styles.reason)}>{option.disabledReason}</span>
-                      ) : null}
+                      {subtitle ? <span {...stylex.props(styles.reason)}>{subtitle}</span> : null}
                     </span>
                   </label>
                 );

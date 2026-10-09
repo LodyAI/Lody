@@ -186,6 +186,7 @@ describe('MessageHandler machine registration', () => {
     const hostCapabilities = getHostMachineProtocolCapabilities();
     expect(registeredMeta.protocolCapabilities).toEqual({
       magpieImport: 1,
+      dshProviderIsolation: 1,
       memoryProviders: 1,
       mcpToolDiscovery: 1,
       codexAuthProfiles: 1,

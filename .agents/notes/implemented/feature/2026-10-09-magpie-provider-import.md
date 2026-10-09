@@ -52,6 +52,29 @@ by the user. Its current model menu derives from the default and fallback list,
 so import sets only the first default and clears fallbacks instead of enabling
 implicit model switching merely to expose the catalog.
 
+## DSH Provider isolation
+
+The overwrite reproduction showed that each launch rewrote the generated profile
+that Magpie also edited. The implemented fix threads Provider identity through
+session creation/preparation, capability probes, authentication, history replay and
+title generation. Each Provider now has a stable home and editable patch under the
+Lody data root; generated defaults live in a versioned local bundle. A final
+route-neutral host layer preserves ACP, history paths and disabled telemetry.
+User patch creation uses exclusive creation, so repeated/concurrent launches and
+adapter upgrades do not replace edits. Provider details derive the YAML path from
+the machine's published data root, gated by `dshProviderIsolation: 1`.
+
+Existing session artifacts and query paths are retained. Old settings/profiles are
+left untouched and are not automatically selected or cloned into every Provider;
+users migrate desired customizations to the displayed path. Standalone Magpie's
+default DSH scan does not discover these isolated homes. The Lody import environment
+continues to supply the Magpie endpoint and public token.
+
+Validation includes concurrent launches, two Providers, adapter relocation, preserved
+YAML/settings/history, and the installed pinned DSH 0.1.5-rc.2 native composition:
+base bundle → generated host bundle → user patch → host guard. A synthetic edited
+model survived while telemetry remained disabled and the ACP entry upgraded.
+
 ## Evidence and validation
 
 - Magpie source inspected at `62b1c995ffaebb223ad040b4c54ebabab0078c7a`:

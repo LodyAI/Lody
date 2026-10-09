@@ -1054,6 +1054,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     await this.prepareGitHubRepoSessionConfig(config);
     signal.throwIfAborted();
     const launch = await resolveACPProcessLaunchAsync({
+      agentConfigId: config.agentConfigId,
       cliType: config.agentCliType,
       agentType: config.agentType,
       customAcp: config.customAcp,
@@ -1491,6 +1492,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const launchResolutionStartedAt = performance.now();
     let managedRuntimeReadyLogged = false;
     const launch = await resolveACPProcessLaunchAsync({
+      agentConfigId: config.agentConfigId,
       cliType: config.agentCliType,
       agentType: config.agentType,
       customAcp: config.customAcp,

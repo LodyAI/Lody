@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { getDeepSeekHarnessProviderHome } from '@lody/shared';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { pathToFileURL } from 'node:url';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -9,7 +12,6 @@ import {
   ACP_EXTENSION_DSH_QUERY_PATH_ENV,
   ACP_EXTENSION_DSH_SESSION_ROOT_ENV,
   DEEPSEEK_HARNESS_DEFAULT_SESSION_COMPRESSION,
-  DEEPSEEK_HARNESS_PROFILE_FILENAMES,
   DEEPSEEK_HARNESS_PROFILE_NAME,
   DEEPSEEK_HARNESS_VERSION,
   createDeepSeekHarnessNpxSpecifiers,
@@ -18,8 +20,7 @@ import {
 } from 'acp-extension-dsh/profile';
 
 export { DEEPSEEK_HARNESS_VERSION, createDeepSeekHarnessProfileFiles };
-export const DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION =
-  ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION;
+export const DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION = `${ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION}:provider-home-v1`;
 export const DEEPSEEK_HARNESS_HOME_ENV = 'DSH_HOME';
 
 const RAW_SESSION_ARTIFACT = 'session.jsonl';
@@ -287,21 +288,24 @@ async function publishFileAtomically(filePath: string, contents: string): Promis
   try {
     await rename(temporaryPath, filePath);
   } catch (error) {
-    // On Windows rename cannot replace an existing destination. The profile
-    // directory is content-addressed, so a racing writer can only have
-    // published the same immutable files.
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     await rm(temporaryPath, { force: true });
+    throw error;
   }
 }
 
 export async function resolveDeepSeekHarnessProcessLaunch(options: {
   adapterPath: string;
   rootDir?: string;
+  providerId?: string;
+  dataRoot?: string;
   extraArgs?: string[];
 }) {
-  const rootDir = options.rootDir ?? resolveDeepSeekHarnessHome();
-  const sessionsRoot = join(rootDir, 'sessions');
+  const legacyHome = options.rootDir ?? resolveDeepSeekHarnessHome();
+  const rootDir = options.providerId
+    ? getDeepSeekHarnessProviderHome(options.dataRoot ?? getLodyDataDir(), options.providerId)
+    : legacyHome;
+  // Existing native session IDs still resolve to the same artifacts and query database.
+  const sessionsRoot = join(legacyHome, 'sessions');
   const presetRoot = join(dirname(options.adapterPath), 'deepseek-agent-presets');
   const sessionCompression = await resolveDeepSeekHarnessSessionCompression(sessionsRoot);
   const profileFiles = createDeepSeekHarnessProfileFiles({
@@ -311,35 +315,63 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
     reasoningEffort: 'max',
   });
   await mkdir(sessionsRoot, { recursive: true });
-  // The adapter lives next to the installed CLI, so its absolute path can
-  // change across app upgrades. Content-address the profile directory so
-  // Windows never has to replace in-use files with a stale path.
+  // Host machinery is a generated bundle; the final profile patch belongs to the user.
+  // Bundle identity changes with the installed adapter, but the editable path never does.
+  // A last, route-neutral layer keeps the public host boundary and native history roots.
+  const guardPatch = `- id: session-telemetry-otel
+  disabled: true
+- id: plugin-package-inventory-deepseek
+  disabled: true
+- id: session-log-deepseek
+  disabled: true
+- id: session-persistence-jsonl
+  config:
+    root: !!js process.env.${ACP_EXTENSION_DSH_SESSION_ROOT_ENV}
+    compression: ${sessionCompression}
+- id: session-query-sqlite
+  config:
+    path: !!js process.env.${ACP_EXTENSION_DSH_QUERY_PATH_ENV}
+    openAt: never
+- id: acp-agent
+  disabled: false
+  name: ${JSON.stringify(options.adapterPath.startsWith('file:') ? options.adapterPath : pathToFileURL(options.adapterPath).href)}
+  inject: [settings]
+`;
   const fingerprint = createHash('sha256')
-    .update(profileFiles.packageJson)
-    .update(profileFiles.cordisYml)
     .update(profileFiles.cordisPatchYml)
-    .update(profileFiles.pnpmWorkspaceYaml)
+    .update(guardPatch)
     .digest('hex')
-    .slice(0, 12);
-  const profileName = `${DEEPSEEK_HARNESS_PROFILE_NAME}-${fingerprint}`;
+    .slice(0, 16);
+  const bundleName = `@lody/dsh-host-${fingerprint}`;
+  const profileName = DEEPSEEK_HARNESS_PROFILE_NAME;
   const profileDir = join(rootDir, 'profiles', profileName);
-  await mkdir(profileDir, { recursive: true });
+  const bundleDir = join(profileDir, 'node_modules', bundleName);
+  await mkdir(bundleDir, { recursive: true });
   await Promise.all([
     publishFileAtomically(
-      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.packageJson),
-      profileFiles.packageJson
+      join(bundleDir, 'package.json'),
+      JSON.stringify({
+        name: bundleName,
+        private: true,
+        dsh: { bundle: { patch: './cordis.patch.yml' } },
+      }) + '\n'
     ),
+    publishFileAtomically(join(bundleDir, 'cordis.patch.yml'), profileFiles.cordisPatchYml),
+    publishFileAtomically(join(bundleDir, 'host.patch.yml'), guardPatch),
+  ]);
+  const manifest = JSON.parse(profileFiles.packageJson);
+  manifest.dsh.profile.bundles.push(bundleName);
+  await Promise.all([
     publishFileAtomically(
-      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.cordisYml),
-      profileFiles.cordisYml
+      join(profileDir, 'package.json'),
+      JSON.stringify(manifest, null, 2) + '\n'
     ),
-    publishFileAtomically(
-      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.cordisPatchYml),
-      profileFiles.cordisPatchYml
-    ),
-    publishFileAtomically(
-      join(profileDir, DEEPSEEK_HARNESS_PROFILE_FILENAMES.pnpmWorkspaceYaml),
-      profileFiles.pnpmWorkspaceYaml
+    publishFileAtomically(join(profileDir, 'cordis.yml'), profileFiles.cordisYml),
+    publishFileAtomically(join(profileDir, 'pnpm-workspace.yaml'), profileFiles.pnpmWorkspaceYaml),
+    writeFile(join(profileDir, 'cordis.patch.yml'), '[]\n', { flag: 'wx', mode: 0o600 }).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EEXIST') throw error;
+      }
     ),
   ]);
 
@@ -350,6 +382,8 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
     '--',
     '--profile',
     profileName,
+    '--patch',
+    join(bundleDir, 'host.patch.yml'),
     ...(options.extraArgs ?? []),
   ];
 

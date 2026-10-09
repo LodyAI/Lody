@@ -6517,6 +6517,7 @@ export class SessionExecutionService {
       });
     };
     const result = await this.acpAuthenticationManager.authenticate({
+      agentConfigId: config.id,
       requestId: message.requestId,
       cliType: config.cliType,
       agentType: config.agentType,
@@ -6900,6 +6901,7 @@ export class SessionExecutionService {
         message.customAcp,
         message.runtimeOverrides,
         {
+          agentConfigId: message.configId,
           magpieGatewayUrl: message.magpieGatewayUrl,
           signal: options.signal,
           codexProfile: codexProfile ? { profile: codexProfile } : undefined,

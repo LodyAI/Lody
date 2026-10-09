@@ -1,3 +1,4 @@
+import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import {
   useCallback,
   useEffect,
@@ -25,6 +26,9 @@ import {
   hasBuiltinRuntimeOverrideValues,
   machineSupportsProviderSetupProtocol,
   machineSupportsProtocolCapability,
+  getDeepSeekHarnessProviderConfigPath,
+  getMachineFlockDotlodyPath,
+  MACHINE_PROTOCOL_CAPABILITIES,
   CodexAuthProfileSchema,
   type CodexAuthProfile,
   machineSupportsPiExtensions,
@@ -392,6 +396,7 @@ const styles = stylex.create({
     fontSize: '12px',
     color: colors.success,
   },
+  configPath: { overflowWrap: 'anywhere' },
   hint: { margin: 0, fontSize: '11px', lineHeight: 1.375, color: colors.secondaryLabel },
   note: { margin: 0, fontSize: '12px', lineHeight: 1.375, color: colors.secondaryLabel },
   /** A status inside the form: the region rung's fill, copy at the caption step. */
@@ -1792,6 +1797,15 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // that don't change the parsed argv (extra whitespace) don't re-probe.
   const customAcpKey = parsedCustomAcp ? formatCustomAcpCommandLine(parsedCustomAcp) : '';
 
+  const pathRows = useMachineFlockRows(machine.id, { families: ['dotlodyPath'] });
+  const machineDataRoot = getMachineFlockDotlodyPath(pathRows);
+  const dshConfigPath =
+    isDeepSeekBuiltin &&
+    machineDataRoot &&
+    machineSupportsProtocolCapability(machine, MACHINE_PROTOCOL_CAPABILITIES.dshProviderIsolation)
+      ? getDeepSeekHarnessProviderConfigPath(machineDataRoot, agentConfigId)
+      : undefined;
+
   const cacheKey = getAcpCapabilityCacheKey(agentConfigId);
   const configCapability = machine.acpCapabilities?.[cacheKey];
   const cachedCapabilityAuthority = getAcpCapabilityCacheEntryAuthority(
@@ -2938,6 +2952,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             </Field>
           ) : null}
 
+          {dshConfigPath ? (
+            <p {...stylex.props(styles.hint, styles.configPath)}>
+              {t('settings.agent.dialog.deepseek.configPath', { path: dshConfigPath })}
+            </p>
+          ) : null}
+
           {isDeepSeekBuiltin ? (
             <DeepSeekHarnessPanel
               endpointMode={deepseekEndpointMode}
@@ -3031,7 +3051,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                                   '/path/to/grok'
                                 )
                               : formData.agentType === 'pi'
-                                ? t('settings.agent.dialog.runtimeOverride.piPlaceholder', '/path/to/pi')
+                                ? t(
+                                    'settings.agent.dialog.runtimeOverride.piPlaceholder',
+                                    '/path/to/pi'
+                                  )
                                 : t(
                                     'settings.agent.dialog.runtimeOverride.claudePlaceholder',
                                     '/path/to/claude'

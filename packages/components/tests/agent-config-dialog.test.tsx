@@ -1102,6 +1102,49 @@ describe('AgentConfigDialog', () => {
     });
   });
 
+  it('shows the owning machine DSH YAML path per Provider and hides it for old daemons', async () => {
+    const workspaceId = 'dsh-path-workspace' as WorkspaceId;
+    const pathKey = machineFlockKeys.dotlodyPath();
+    const rows = [{ key: pathKey, value: '/remote/lody-data' }];
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug: 'dsh-path-workspace',
+      repo: { openFlockDoc: async () => ({ flock: { scan: () => rows.values() } }) },
+      getMachineAcpBinaryProgress: () => null,
+      subscribeMachineAcpBinaryProgress: () => () => {},
+    } as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, 'dsh-path-workspace');
+    store.set(setMachineFlockRowsForMachineAtom, {
+      workspaceId,
+      machineId,
+      rows: { [serializeMachineFlockKey(pathKey)]: rows[0]! },
+    });
+    const mode = (id: string): AgentConfigDialogMode => ({
+      kind: 'edit',
+      config: {
+        id: id as AgentConfigId,
+        machineId,
+        name: 'Same DSH name',
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        env: {},
+      },
+    });
+    const machine = createMachine('Remote machine', { dshProviderIsolation: 1 });
+    await renderDialog(mode('provider-a'), machine);
+    expect(document.body.textContent).toContain(
+      'Configuration path: /remote/lody-data/dsh/providers/provider-a/profiles/lody-acp/cordis.patch.yml'
+    );
+    await renderDialog(mode('provider-b'), machine);
+    expect(document.body.textContent).toContain(
+      '/remote/lody-data/dsh/providers/provider-b/profiles/lody-acp/cordis.patch.yml'
+    );
+    expect(document.body.textContent).not.toContain('/providers/provider-a/');
+    await renderDialog(mode('provider-b'), createMachine('Old daemon'));
+    expect(document.body.textContent).not.toContain('Configuration path:');
+  });
+
   it('requires a valid custom DeepSeek endpoint and saves the trimmed URL as-is', async () => {
     const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
     await renderDeepSeekCreate(onSubmit);

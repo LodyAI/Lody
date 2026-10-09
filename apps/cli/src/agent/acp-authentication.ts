@@ -191,6 +191,7 @@ type ProbeBuiltinAuthenticationOptions = {
   cliType: AgentConfigCliType;
   agentType: string;
   runtimeOverrides?: BuiltinRuntimeOverrides;
+  agentConfigId?: string;
   magpieGatewayUrl?: string;
   env?: NodeJS.ProcessEnv;
   onManagedRuntimeProgress?: Parameters<
@@ -417,6 +418,7 @@ export async function probeBuiltinAuthentication(
     cliType: options.cliType,
     agentType: options.agentType,
     runtimeOverrides: options.runtimeOverrides,
+    agentConfigId: options.agentConfigId,
     magpieGatewayUrl: options.magpieGatewayUrl,
     action: 'status',
     onManagedRuntimeProgress: options.onManagedRuntimeProgress,
@@ -542,6 +544,7 @@ export class AcpAuthenticationManager {
     agentType: string;
     customAcp?: CustomAcpLaunchSpec;
     runtimeOverrides?: BuiltinRuntimeOverrides;
+    agentConfigId?: string;
     magpieGatewayUrl?: string;
     env?: Record<string, string>;
     codexProfile?: ResolvedCodexProfile;
@@ -655,6 +658,7 @@ export class AcpAuthenticationManager {
         cliType: options.cliType,
         agentType: options.agentType,
         runtimeOverrides: options.runtimeOverrides,
+        agentConfigId: options.agentConfigId,
         magpieGatewayUrl: options.magpieGatewayUrl,
         action: 'login',
         signal: running.abortController.signal,
@@ -914,6 +918,7 @@ export class AcpAuthenticationManager {
       agentType: string;
       customAcp?: CustomAcpLaunchSpec;
       runtimeOverrides?: BuiltinRuntimeOverrides;
+      agentConfigId?: string;
       magpieGatewayUrl?: string;
       env?: Record<string, string>;
       onProgress?: (event: AcpAuthenticationProgressEvent) => void;
@@ -925,6 +930,7 @@ export class AcpAuthenticationManager {
       agentType: options.agentType,
       customAcp: options.customAcp,
       runtimeOverrides: options.runtimeOverrides,
+      agentConfigId: options.agentConfigId,
       magpieGatewayUrl: options.magpieGatewayUrl,
       signal: running.abortController.signal,
     });
@@ -963,6 +969,7 @@ export class AcpAuthenticationManager {
               agentType: options.agentType,
               customAcp: options.customAcp,
               runtimeOverrides: options.runtimeOverrides,
+              agentConfigId: options.agentConfigId,
               magpieGatewayUrl: options.magpieGatewayUrl,
               workdir: process.cwd(),
               env,

@@ -247,10 +247,12 @@ describe('resolveBuiltinACPSetting', () => {
   it('launches DeepSeek Harness through the pinned profile launcher', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'lody-deepseek-harness-test-'));
     vi.stubEnv(DEEPSEEK_HARNESS_HOME_ENV, dshHome);
+    vi.stubEnv('LODY_DATA_DIR', dshHome);
     try {
       const launch = await resolveACPProcessLaunchAsync({
         cliType: 'builtin',
         agentType: 'deepseek',
+        agentConfigId: 'synthetic-provider',
       });
 
       expect(launch.command).toBe('npx');
@@ -282,7 +284,9 @@ describe('resolveBuiltinACPSetting', () => {
       expect(launch.env?.[ACP_EXTENSION_DSH_QUERY_PATH_ENV]).toBe(
         join(dshHome, 'sessions', 'session-query.db')
       );
-      expect(launch.env?.[DEEPSEEK_HARNESS_HOME_ENV]).toBe(dshHome);
+      expect(launch.env?.[DEEPSEEK_HARNESS_HOME_ENV]).toBe(
+        join(dshHome, 'dsh', 'providers', 'synthetic-provider')
+      );
 
       const runtimeArgs: unknown = JSON.parse(
         Buffer.from(launch.env?.LODY_DSH_NODE_ARGS ?? '', 'base64').toString()
@@ -292,9 +296,14 @@ describe('resolveBuiltinACPSetting', () => {
       const profileFlag = runtimeArgs.indexOf('--profile');
       const profileName = runtimeArgs[profileFlag + 1];
       expect(profileName).toBeTruthy();
-      const profileDir = join(dshHome, 'profiles', profileName!);
+      const profileDir = join(launch.env![DEEPSEEK_HARNESS_HOME_ENV]!, 'profiles', profileName!);
       const packageJson = await readFile(join(profileDir, 'package.json'), 'utf8');
-      const patch = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8');
+      expect(await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8')).toBe('[]\n');
+      const bundle = JSON.parse(packageJson).dsh.profile.bundles.at(-1);
+      const patch = await readFile(
+        join(profileDir, 'node_modules', bundle, 'cordis.patch.yml'),
+        'utf8'
+      );
       expect(packageJson).toContain('@deepseek-ai/dsh-base');
       expect(patch).toContain('deepseek-acp.js');
       expect(patch).not.toContain("name: '@deepseek-ai/dsh-agent-spine-demo'");

@@ -48,17 +48,18 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtins use `setting.ts`'s `resolveACPProcessLaunchAsync()`. [Codex profiles](../../../../specs/codex-account-profiles.md)
   forbid upstream keys in shared/child env. Process records delay deletion, never
   restrict same-profile concurrency.
-- `deepseek-harness-runtime.ts` is NOT managed: no download, prefetch, override, or
-  auth integration. Preserve logical npx argv for recovery; Windows uses npm's JS
-  entry without cmd.exe. Keep npm, the forwarder, DSH and native Job children
-  windowless without changing stdio, environment or containment. npx installs the
-  closure; `dsh --profile` uses `process.execPath` with inherited `ELECTRON_RUN_AS_NODE`.
-  Credentials stay in env, never config. Model/reasoning use the Agent request
-  waterfall; permissions use Harness presets; `agent_preset` uses
-  `AgentPresets.mount/recompose`, never UI-only state.
-  Presets change only before the first prompt. Per-Agent ACP stdio/HTTP MCP
-  belongs in the adapter, not host composition. JSONL encoding detection
-  is READ-ONLY: fail mixed roots naming both paths; never modify artifacts.
+- `deepseek-harness-runtime.ts` is not managed: no download/prefetch/override/auth.
+  Keep npx argv for recovery. Windows uses npm JS without cmd.exe;
+  npm, forwarder, DSH and Job children stay windowless, preserving stdio/env/containment.
+  npx installs the closure; DSH uses `process.execPath` and `ELECTRON_RUN_AS_NODE`.
+  Pass Provider ID for its isolated home. Preserve user YAML/settings and legacy
+  history roots; update generated bundles separately:
+  [contract](../../../../specs/deepseek-harness-settings.md).
+  Credentials stay in env. Models/reasoning use the Agent request waterfall;
+  permissions use Harness presets. `agent_preset` uses `AgentPresets.mount/recompose`
+  only before the first prompt. Per-Agent ACP stdio/HTTP MCP belongs in the adapter.
+  JSONL detection is read-only: fail mixed roots naming both paths;
+  never modify artifacts.
 - `managed-agent-runtime.ts`: Codex/Claude/Grok/Devin pins come only from their
   `<name>-runtime-manifest.json`; reject dependency/manifest version mismatches and never
   duplicate pins beside the manager. Do not loosen the metadata

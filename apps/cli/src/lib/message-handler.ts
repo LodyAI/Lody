@@ -9178,6 +9178,7 @@ export class MessageHandler {
         ? await getCodexProfileStore().resolve(this.workspaceId, provider)
         : undefined;
       const title = await generateTitleIsolated({
+        agentConfigId: provider?.id,
         magpieGatewayUrl: provider?.magpieGatewayUrl,
         codexProfile: codexProfile ? { profile: codexProfile } : undefined,
         cliType,

@@ -1,4 +1,6 @@
 {
+  "settings.magpieImport.independentConfig": "Independent configuration",
+  "settings.agent.dialog.deepseek.configPath": "Configuration path: {{path}}",
   "deepLink.archived": "Restore this archived conversation before opening it.",
   "deepLink.openHere": "Open with this app",
   "deepLink.workspaceUnavailable": "This workspace is unavailable in this version of Lody. Open the link in the installation that owns it.",

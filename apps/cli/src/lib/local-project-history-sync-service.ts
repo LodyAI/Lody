@@ -463,6 +463,8 @@ export class LocalProjectHistorySyncService {
     return config
       ? {
           ...this.provider,
+          agentConfigId: config.id,
+          magpieGatewayUrl: config.magpieGatewayUrl,
           customAcp: config.customAcp,
           runtimeOverrides: config.runtimeOverrides,
           env: config.env,
