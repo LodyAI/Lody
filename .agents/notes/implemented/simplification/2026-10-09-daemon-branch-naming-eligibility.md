@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1347](https://github.com/LodyAI/Lody/pull/1347)
 
 [中文](2026-10-09-daemon-branch-naming-eligibility.zh.md)
 
