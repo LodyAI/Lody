@@ -176,7 +176,6 @@ describe('history session catalog client', () => {
 
 describe('requestHistorySessionReplay', () => {
   const acpSessionId = 'session-1' as ACPSessionId;
-  const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 
   function initializeResponse(
     overrides: Partial<acp.InitializeResponse> = {}
@@ -189,54 +188,60 @@ describe('requestHistorySessionReplay', () => {
     };
   }
 
-  it('uses the advertised Lody read-only method for builtin Codex', async () => {
-    const request = vi.fn(async () => ({}));
-    const loadSession = vi.fn(async () => ({}));
+  it.each(['codex', 'deepseek'] as const)(
+    'uses advertised read-only history for %s',
+    async (agentType) => {
+      const request = vi.fn(async () => ({}));
+      const loadSession = vi.fn(async () => ({}));
 
-    const runtimeConfig = await requestHistorySessionReplay({
-      provider: codexProvider,
-      acpSessionId,
-      cwd: '/repo/project',
-      connection: { request, loadSession } as never,
-      initResponse: initializeResponse({
-        agentCapabilities: {
-          _meta: {
-            lody: {
-              sessionHistory: {
-                version: 1,
-                method: '_lody/session/history/read',
-              },
-            },
-          },
-        },
-      }),
-    });
-
-    expect(request).toHaveBeenCalledWith('_lody/session/history/read', {
-      sessionId: acpSessionId,
-    });
-    expect(loadSession).not.toHaveBeenCalled();
-    expect(runtimeConfig).toBeUndefined();
-  });
-
-  it('fails closed when builtin Codex does not advertise the read-only method', async () => {
-    const request = vi.fn(async () => ({}));
-    const loadSession = vi.fn(async () => ({}));
-
-    await expect(
-      requestHistorySessionReplay({
-        provider: codexProvider,
+      const runtimeConfig = await requestHistorySessionReplay({
+        provider: { cliType: 'builtin', agentType },
         acpSessionId,
         cwd: '/repo/project',
         connection: { request, loadSession } as never,
         initResponse: initializeResponse({
-          agentCapabilities: { loadSession: true },
+          agentCapabilities: {
+            _meta: {
+              lody: {
+                sessionHistory: {
+                  version: 1,
+                  method: '_lody/session/history/read',
+                },
+              },
+            },
+          },
         }),
-      })
-    ).rejects.toThrow('agentCapabilities._meta.lody.sessionHistory version 1');
-    expect(request).not.toHaveBeenCalled();
-    expect(loadSession).not.toHaveBeenCalled();
-  });
+      });
+
+      expect(request).toHaveBeenCalledWith('_lody/session/history/read', {
+        sessionId: acpSessionId,
+      });
+      expect(loadSession).not.toHaveBeenCalled();
+      expect(runtimeConfig).toBeUndefined();
+    }
+  );
+
+  it.each(['codex', 'deepseek'] as const)(
+    'fails closed when %s lacks read-only history',
+    async (agentType) => {
+      const request = vi.fn(async () => ({}));
+      const loadSession = vi.fn(async () => ({}));
+
+      await expect(
+        requestHistorySessionReplay({
+          provider: { cliType: 'builtin', agentType },
+          acpSessionId,
+          cwd: '/repo/project',
+          connection: { request, loadSession } as never,
+          initResponse: initializeResponse({
+            agentCapabilities: { loadSession: true },
+          }),
+        })
+      ).rejects.toThrow('agentCapabilities._meta.lody.sessionHistory version 1');
+      expect(request).not.toHaveBeenCalled();
+      expect(loadSession).not.toHaveBeenCalled();
+    }
+  );
 
   it("keeps loadSession for non-Codex providers and returns the session's runtime selection", async () => {
     const request = vi.fn(async () => ({}));
