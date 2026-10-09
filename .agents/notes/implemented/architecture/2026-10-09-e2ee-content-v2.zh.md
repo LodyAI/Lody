@@ -65,4 +65,4 @@ AAD 后续验收：core 68 项、Lab 77 项通过，覆盖外部 AAD 缺失/改�
 - core HTTP 快照使用已有 `LORO_STREAMS_CRDT` source override 指向相邻 SDK 源码，因为已发布 0.15.1 缺 continuationOffset；Lab 保持已有 vendored SDK。不改 manifest/lockfile，不宣称发布版 SDK 已支持快照。
 - 最终集中验收 71/71 通过，包括用途绑定改动后的真实本地 HTTP update/snapshot 检查。两个包的类型检查、完整 Effect 边界检查、改动文件格式和带类型 lint 通过（lint 有 warning，无 error）。隔离 worktree 未初始化 ACP 子模块，根 public-boundary 检查无法解析这些 workspace 包；docs check 报告 20 个指向同一批缺失子模块的链接，改动文档没有 error。其 manifest 和依赖关系没有改。没有已登记的 SHA 保护主题，不伪造审阅记录或 Spec 批准。
 
-未创建 PR、提交或部署生产，未做形式安全证明或穷尽外部数据盘点。持续实现分支从 `35bfca7e` 起步，保护原 checkout 未提交工作，也不改另一个会话的中央信箱协议。
+初版实现基于 `35bfca7e`。合入 `feat-e2ee-core` 时保留中央信箱实现与优化后的 SDK 格式：update POST body 在 batch 外增加 156B，没有密文内 AAD 副本。SDK 行为测试与测量程序断言实际编码开销，防止此前 209B 修订静默回归。已尝试根 `pnpm check`，但 worktree 缺少完整工作区工具/依赖，无法完成；根 `pnpm format` 已运行，并恢复其范围外格式变更。合并集成验收 core 85 项、Lab 79 项（共 164 项）通过，覆盖中央信箱及实际 SDK 156B 开销；两个包类型检查和完整 Effect 边界检查通过。这些集成范围检查与此前全量结果分别记录。不声称创建 PR、推送、部署生产、提供形式化安全证明或穷举外部旧数据。

@@ -241,6 +241,15 @@ export class LedgerClient {
     ).pipe(Effect.flatMap(legacyResult), Effect.mapError(legacyError));
   }
 
+  /** Finite central-mailbox coordinator; application owns invocation and persistence. */
+  keyDistributionEffect() {
+    return this.withEngine((engine) =>
+      Effect.flatMap(DeviceSigner, (signer) =>
+        EffectLedgerClient.fromEngine(engine, signer).keyDistribution()
+      )
+    );
+  }
+
   /** Transitional consumer bridge; rotation behavior lives only in the native workflow. */
   rotateEpochEffect() {
     return this.withEngine((engine) =>

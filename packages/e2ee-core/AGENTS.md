@@ -1,28 +1,23 @@
 # E2EE core
 
-Experimental; product E2EE off.
-Contracts: [content v2](../../specs/e2ee-content.md), [ledger](../../specs/e2ee-ledger.zh.md),
-[README](README.md). JSON/hex control-log: `src/legacy.ts`, in-package tests only;
-do not re-export it.
+Experimental, not product E2EE. Contracts: [content v2](../../specs/e2ee-content.md), [ledger](../../specs/e2ee-ledger.zh.md),
+[README](README.md). `src/legacy.ts` JSON/hex is test-only; never re-export it.
 
 ## Required source style
 
-- **Effect 4.0.2**: use the `e2eeEffect` catalog; do not change the default
-  v3 catalog or pass Effect objects between majors.
-- `pure/`: deterministic values or typed `Result`; no I/O, ambient state,
-  clocks, randomness, logging or input mutation. Only unobservable local scratch
-  mutation is allowed.
-- `workflows/`: `Effect<A, E, R>` descriptions declare Services for storage, network, crypto, entropy,
-  clocks, environment and process. No eager I/O, hidden Live defaults or runtime starts. Convert pure Results with `Effect.fromResult`.
-- `platform/`: thin Service implementations/Layers; direct external API access
-  belongs here or in composition. Concentrate complexity in pure first, workflows
-  second; keep domain policy/state transitions out of platform.
-- Expected failures use typed `Result` in pure and Effect failures in workflows.
-  Only fatal defects may throw. Never disguise defects/interruption as failure or Pending.
-- Use Effect logging/tracing and injected Services, never `console` or ambient
-  loggers. Platform/composition configures sinks; pure returns diagnostic data.
-  Never log secrets.
-- Existing bridges are explicit temporary exceptions; they do not permit more.
+- Use **Effect 4.0.2**, catalog `e2eeEffect`; keep default v3 and never mix majors.
+- `pure/`: deterministic values/typed `Result`; no I/O, ambient state, clocks,
+  randomness, logging or input mutation. Only unobservable scratch mutation.
+- `workflows/`: inert `Effect<A,E,R>`; declare Services for storage/network/crypto/
+  entropy/clocks/environment/process. No eager execution, hidden Live defaults or
+  runtime starts. Use `Effect.fromResult`.
+- `platform/`: thin Services/Layers for external APIs; policy/state transitions
+  belong in pure first, workflows second, never platform.
+- Expected failures use Result/Effect, never throw. Only fatal defects may throw;
+  never turn defects/interruption into ordinary failures or Pending.
+- Inject Effect logging/tracing; platform owns sinks, pure returns diagnostics.
+  No console, ambient loggers or secret logging. Existing temporary bridges allow
+  no additional exceptions.
 
 ## Protocol and integration invariants
 
@@ -51,18 +46,22 @@ do not re-export it.
   Verify/extend live only in `workflows/verification.ts`; `./ledger` runs them
   via `ledger/compat.ts` (no own replay/cache); `check:effect-boundaries
 --complete` guards both. Malformed pages must not become Pending.
-- `openEpochEnvelope` requires `canSendEpoch`, an admitted recipient, current
-  epoch and matching `commitEpochKey`; install into the epoch it was verified
-  against. Every active personal/machine device, including Guest, may forward;
-  R only receives. Gateways admit key-stream appends only through
-  `assertEpochStreamAppend` (one envelope, authenticated sender). Recover history
-  only from a verified ledger (`recoverLedgerHistory`); installed keys never change.
-- Device possession uses `possess/v2` and binds the target membership inferred
-  from the actor's preceding verified state. Check during replay even with a
-  worker verifier. v1 proofs are rejected, not silently migrated or re-signed.
-  Devices carry no management flag: management = active personal device ∩
-  current Owner/Admin role, so role changes apply to all personal devices at
-  once. Old 6-element admitDevice and 5-element snapshot device rows fail.
+- Epoch envelopes require `canSendEpoch`, an admitted recipient, current epoch and
+  `commitEpochKey`; install into the verified slot, never a later epoch. Active
+  personal/machine devices (including Guest) forward; R only receives. Gateways
+  use `assertEpochStreamAppend` (one envelope, authenticated sender). Recover history
+  only through `recoverLedgerHistory` on a verified ledger; installed keys never change.
+- Central delivery is explicit finite rounds, never hidden timers/runtimes. Derive
+  targets from the client's verified ledger; server lists grant no authority.
+  Preserve exact outbox bytes and `Observed` = stored, not installed. Persist receive
+  context before keyring writes; reports bind exact source and repair revision.
+  Commit task termination/result together; only application acknowledgement consumes
+  results. Mailbox/index atomicity is local, never a cross-stream permission guarantee.
+- `possess/v2` binds target membership from the actor's preceding verified state;
+  check during replay even with workers. Reject v1; no migration/re-signing.
+  No device management flag: management = active personal ∩ current Owner/Admin;
+  roles apply to all personal devices. Reject old 6-element admitDevice and
+  5-element snapshot device rows.
 - Roles owner/admin/member/guest; guest read-only; machines have no Org
   management. Device revoke is this-Org and the named device only. Owner
   transfer is unilateral `[6, successorMembershipId]`; predecessor becomes
@@ -73,15 +72,14 @@ do not re-export it.
 - Signing keys must be canonical nonzero prime-subgroup Ed25519 points.
   Verification uses pinned noble-ed25519 with `zip215: false` and explicit
   subgroup checks for A and R. Only native signing handles private keys.
-- Device storage stays in Electron main. Only opt-in Streams adapters call the
-  supplied SDK; no implicit stream creation or anchor choice. Synthetic fixtures,
-  real signatures, no crypto stubs.
-- `content.ts`: XChaCha20-Poly1305, HKDF-SHA-256, strict Ed25519. Caller policy
-  uses verified ledger keys; `inspectContent` is UNVERIFIED. v2 authentication
-  needs independent scope. History preserves original identity or returns device-only when missing; never reattribute keys.
-  `streams-content.ts` uses existing streams-crdt `seal`/`open` for updates and
-  snapshots. SDK AAD binds AEAD/signature externally; header 3/4 rejects old 1/2.
-  Only personal/machine writers may write, never Guest/R; honest
+- Device storage stays in Electron main. Opt-in Streams adapters use the supplied
+  SDK with explicit streams/anchors. Tests use synthetic fixtures and real crypto.
+- Content uses XChaCha20-Poly1305, HKDF-SHA-256 and strict Ed25519 with verified
+  Org keys and independent scope. `inspectContent` is UNVERIFIED. Preserve original
+  history identity or return device-only when missing; never reattribute keys.
+  `streams-content.ts` uses SDK `seal`/`open`; external AAD binds AEAD/signature,
+  never plaintext. Header 3/4 rejects old 1/2. Only active personal/machine writers
+  may write, never Guest/R; honest
   seals need `maySealNewContent` (none while `rotationRequired`). Bind genesis, resource,
   kind/model, epoch and opaque continuation offset. `./snapshot-admission`
   requires current write permission, submitter/signing-device binding and the
@@ -98,11 +96,11 @@ do not re-export it.
 - `streams.ts` uses the pinned SDK read/`appendCas` APIs and length framing.
   Never invent offsets, fall back to ordinary append, or auto-re-sign. HTTP
   reads can split frames; checkpoint only complete frames/pages.
-- `./ledger-node` and `node-store.ts` are Node-only; never re-export from the
-  root. Application-owned local filesystem; SQLite EXCLUSIVE; corrupt/foreign
-  journals fail closed. Experimental journal/outbox formats are not V4.
-  `./effect/platform-node` requires explicit create/open; open must never
-  initialize missing/foreign storage. Pure journal codecs preserve v0/v1 bytes.
+- Node stores (`./ledger-node`, `node-store.ts`, `./effect/platform-node`) require
+  application-owned local files and SQLite EXCLUSIVE locks; never export them from
+  root. Only explicit create initializes storage; open fails on missing/foreign/
+  corrupt journals. Experimental journal/outbox formats are not V4; pure codecs
+  preserve v0/v1 bytes.
 - Legacy JSON/hex (`team.ts`, `KeyDelivery`, `EpochPublisher`, v3 genesis):
   still reject old v1/v2 unchanged; `canManage` is explicit; machines false;
   admit/cancel consume `(identity, requestId)` permanently; expiry is checked

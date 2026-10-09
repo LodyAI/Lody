@@ -235,6 +235,64 @@ its tests enable production E2EE.
 Track scope, remaining gates and evidence in the
 [migration note](../../.agents/notes/proposed/architecture/2026-09-22-e2ee-effect-api.md).
 
+## Centralized key-delivery integration
+
+`LedgerClient.keyDistribution()` binds a finite coordinator to the client's device
+and verified Org. Compose `DistributionStore`, `KeyMailboxRemote`, `EpochKeyring`,
+HPKE/signature Services and the existing `KeyOutbox` / `KeyDeliveryRemote` explicitly.
+Applications call these operations on startup, verified ledger changes and reconnect:
+
+- `reconcileCurrentEpoch()` discovers publication-before-scheduling crashes and
+  same-epoch admissions using **the client's verified device set**; helpers may send,
+  R only receives. `resumePendingDeliveries(limit)` reuses exact signed outbox bytes.
+- `fetchAndInstall(cursor, limit)` / `receiveAndInstall(sender, frame)` save receive
+  context, verify/decrypt/check commitment, checkpoint, then persist the key.
+  `resumeReceives(limit)` closes the installed-before-report crash window.
+- `flushInstallationReports(limit)` retries the exact device-signed report.
+  Sources are `Envelope { sender, frameDigest }` or `LocalPublication { recordHash }`;
+  `recordLocalInstallation(record)` requires the exact verified genesis/publication.
+- `requestRepair(requestId, rejectedDigest?)` and `flushRepairs(limit)` persist repair
+  episodes. Lost-key repair keeps usable ciphertext; bad-envelope repair excludes its
+  digest. A signed repair revision prevents delayed older reports from closing it.
+- `readUnacknowledgedResults(cursor, limit)` and `acknowledgeResult(id)` expose durable
+  `Revoked` / `Obsolete` / `Failed` outcomes without the original Promise/handler.
+
+`rotateEpoch()` remains publication/local installation; it starts no background work.
+Reconciliation checks the current durable key against the verified commitment before
+scheduling. `Observed` remains exact remote ciphertext readback, never installation.
+A report claims past installation, not continued possession. Missing reports do not
+regenerate envelopes for offline devices or R. A rejected sender's immutable outbox
+frame needs another eligible helper; the coordinator records that failure explicitly.
+
+`KeyMailboxHost` supplies signature/authority admission and recipient/epoch projection
+recovery. `EpochMailboxIndexStore` atomically saves ciphertext/index or report/index;
+`MailboxAuthority` explicitly supplies refreshed verified ledger authority. Query
+pages are limited to 100; reference cursors are offsets, so callers restart discovery
+when ledger/index state changes. Memory stores are non-durable; Node Layers require
+explicit `create` / `open` and use SQLite. Receive journals and keyring are separate
+stores, with ordered checkpoints rather than a fictitious cross-store transaction.
+The reference stores serialize one bounded document (16 MiB); they are not a scalable
+hosted schema or an unlimited history store. Applications must handle capacity errors.
+
+Lab's opt-in `centralKeyRound()` uses authenticated HTTP and SQLite mailbox/index
+stores. Existing scripted sends and the Loro Streams adapter remain available.
+Public core imports no Convex SDK/private routes. See the bilingual
+[delivery draft](../../specs/e2ee-central-key-delivery.md) for Convex table/mutation
+mapping, projection freshness and runtime verification gates, and the
+[owning note](../../.agents/notes/proposed/architecture/2026-10-09-e2ee-central-key-delivery.md).
+Production integration and formal security proof remain outside this implementation.
+
+### 中心化接入摘要
+
+`keyDistribution()` 提供显式、有限一轮的分发、接收、报告、修复和结果消费操作。
+应用在启动、已验证账本变化和联网恢复时调用；core 没有后台运行时或隐藏定时器。
+初始目标来自自己的已验证账本，准备/发送/恢复都重新验权；R 只接收。
+接收日志先于 keyring 写入，已安装未报告可重启恢复；任务终态与结果同一次保存，
+应用通过 `acknowledgeResult` 确认消费。报告不证明持续持钥；缺报告不反复加密。
+修复轮次绑定报告，避免旧报告覆盖修复；坏信封的原发送者不替换已保存精确字节，
+由其他合格持钥设备补齐。内存、Node SQLite 和 Lab HTTP 已实现，Convex 表/接口、
+账本投影同步、新鲜度策略与运行时验签仍须由宿主接线验收；没有生产上线或安全证明。
+
 ## Existing protocol and compatibility API
 
 **2026-09-21 protocol revision:** `possessionSigningBytes` now requires

@@ -473,6 +473,31 @@ export class LedgerEngine {
     ).pipe(Effect.withSpan('LedgerEngine.refresh'));
   }
 
+  /** Exact already-verified current publication, when retained in this journal.
+   * An endorsed snapshot may not retain that record; never invent provenance. */
+  currentEpochPublication() {
+    return this.transaction((tx) =>
+      Effect.gen({ self: this }, function* () {
+        yield* this.synchronize(tx);
+        const { journal, ledger } = yield* Ref.get(tx.session);
+        const epoch = ledger.inspectState().epoch.number;
+        for (const bytes of journal.records) {
+          const record = yield* Effect.fromResult(decodeRecord(bytes));
+          const b = record.body;
+          if (
+            (b.type === 'genesis' && epoch === 0) ||
+            (b.type === 'ordinary' &&
+              b.fields.operation.type === 'publishEpoch' &&
+              b.fields.operation.epoch === epoch)
+          ) {
+            if (ledger.hasRecordHash(hashRecordBytes(bytes))) return new Uint8Array(bytes);
+          }
+        }
+        return null;
+      })
+    );
+  }
+
   /** Internal recovery guard: absence of the separate candidate is not permission to rotate. */
   hasPendingEpochPublication(): Effect.Effect<boolean, ClientError> {
     return this.transaction((tx) =>
