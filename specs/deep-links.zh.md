@@ -21,7 +21,7 @@ workspace 使用稳定 ID；UI 解析为当前 slug。复制、mention 和 Markd
 
 系统只选择一个默认资源处理应用。设置 → 关于提供“设为默认”；启动不能覆盖已有公共处理程序。Windows 安装包启动就绪后仅在没有处理程序时注册公共协议；这修复首次启动后的状态，不保证首次启动前可分发。安装包声明公共协议和所属版本专属协议，首次安装与用户选择的最终效果由 OS 决定。AppImage 的桌面文件声明两者，只有用户明确选择才更新公共默认项。
 
-认证不走资源路由。新 Stable 登录显式传 stable channel 并返回 `ai.lody.stable`；Nightly 仍返回 `ai.lody.nightly`。未带 channel 的旧浏览器调用仍生成旧 `lody` 回调，Stable 保留接收兼容。非 Stable 版本把公共协议的旧认证、邀请、GitHub 安装、checkout 和 machine-connect 路由转发到 Stable 专属别名，不在本版本交换凭据。没有处理程序、交接失败或未知路由时显示不含敏感信息的错误。`chat/new` 留在系统选择的安装中。OSS 保留 `lody-oss` 私有入口，不启动云认证。
+认证不走资源路由。新 Stable 登录显式传 stable channel 并返回 `ai.lody.stable`；Nightly 仍返回 `ai.lody.nightly`。未带 channel 的旧浏览器调用仍生成旧 `lody` 回调，Stable 保留接收兼容。非 Stable 版本把公共协议的旧认证、邀请、GitHub 安装、checkout 和 machine-connect 路由转发到 Stable 专属别名，不在本版本交换凭据。没有处理程序、交接失败或未知路由时显示不含敏感信息的错误。`chat/new` 和 [Magpie Provider 导入](magpie-provider-import.zh.md) 留在系统选择的安装中。Provider 导入只暂存待确认的请求，不授予写入权限。OSS 保留 `lody-oss` 私有入口，不启动云认证。
 
 ## 分发与访问
 

@@ -1,3 +1,4 @@
+import { MagpieImportDialogContainer } from './settings/magpie-import-dialog-container';
 import { useWorkspaceBadge } from '@/hooks/use-workspace-badge';
 import { useAgentRoleSchemaReconciliation } from '@/hooks/use-agent-role-schema-reconciliation';
 import { currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
@@ -93,6 +94,7 @@ export function MainLayout({
           <JoinCommunityDialogContainer />
           <StuckConnectionBannerContainer />
           {workspaceReady ? <DesktopSettingsModal /> : null}
+          {workspaceReady ? <MagpieImportDialogContainer /> : null}
         </WorkspaceRuntimeShell>
       </PromptShortcutProvider>
     </WorkspaceWindowOwnerContext>
