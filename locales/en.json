@@ -1,4 +1,7 @@
 {
+  "sessions.videoPreview.label": "Video preview",
+  "sessions.videoPreview.failedTitle": "Video unavailable",
+  "sessions.videoPreview.failedMessage": "This video could not be played. Its format may not be supported on this device, or the file could not be read.",
   "deepLink.archived": "Restore this archived conversation before opening it.",
   "deepLink.openHere": "Open with this app",
   "deepLink.workspaceUnavailable": "This workspace is unavailable in this version of Lody. Open the link in the installation that owns it.",

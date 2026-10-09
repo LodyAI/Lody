@@ -32,6 +32,15 @@ sessions never open a path on the
 viewer's machine. Clicking the assistant link itself only opens the preview;
 opening the OS application requires a separate user click.
 
+Session and mobile project file previews offer native video controls for WebM,
+MP4/M4V, MOV, and OGV when the browser can decode the file. Playback is inline on
+mobile and starts only after a user action. Hiding or closing the viewer stops
+playback and releases its source; returning does not automatically resume it.
+Backgrounding the app pauses playback. Read/decode failures show a localized
+notice with the file actions available on that surface. File authorization and
+provider transfer limits remain unchanged, including the 5 MiB remote binary
+limit. This does not promise transcoding or playback of every codec in a container.
+
 Session PDFs open in a paged viewer at fit-width zoom. The toolbar supports direct
 page entry, previous/next page, a toggleable thumbnail sidebar, quarter-turn
 rotation that retains the current page, fit-page/fit-width/automatic and percentage

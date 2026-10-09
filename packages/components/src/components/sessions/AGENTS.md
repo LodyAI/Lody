@@ -133,7 +133,7 @@ Read parent rules and each heading's linked context before edits.
   genuinely workspace-relative path; `lib/session-local-file-path.ts` rejects
   absolute and `..` paths.
 - Keep viewer shells static; load Office engines on activation/idle only.
-  Local PDFs use 64 KiB ranges and 8 MP canvases.
+  Stop hidden video; local PDFs use 64 KiB ranges and 8 MP canvases.
 
 ## [Stories](../../../../../.agents/docs/sessions-stories.md)
 

@@ -1,4 +1,7 @@
 {
+  "sessions.videoPreview.label": "视频预览",
+  "sessions.videoPreview.failedTitle": "无法播放视频",
+  "sessions.videoPreview.failedMessage": "无法播放此视频。当前设备可能不支持该格式，或无法读取文件。",
   "deepLink.archived": "请先恢复此已归档会话，再打开链接。",
   "deepLink.openHere": "使用此应用打开",
   "deepLink.workspaceUnavailable": "此版本的 Lody 无法访问该工作区，请在拥有此工作区的安装版本中打开链接。",
