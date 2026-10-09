@@ -1,4 +1,5 @@
 import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
 import {
@@ -7,6 +8,7 @@ import {
   CloudOff,
   ExternalLink,
   History,
+  PanelLeft,
   Pause,
   Play,
   Plus,
@@ -20,8 +22,19 @@ import { ContextMenu } from '@lody/ui/context-menu';
 import { Input } from '@lody/ui/input';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Tooltip } from '@lody/ui/tooltip';
+import { navigationSidebarVisibleAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import { isNativeAppShell } from '@/lib/native-platform';
+import { withClassName } from '@/lib/stylex';
 import { cn } from '@/lib/utils';
-import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
+import {
+  WINDOW_DRAG_EXEMPT_CLASS,
+  useMacTrafficLightRowPadClass,
+  useWindowDragRegionClass,
+  useWindowsCaptionPadClass,
+  useWindowsCaptionRowPadClass,
+} from '@/ui/window-drag-region';
 import {
   describeDestination,
   describeStatus,
@@ -292,15 +305,20 @@ const styles = stylex.create({
     overflow: 'hidden',
   },
   listHeader: {
+    boxSizing: 'border-box',
     display: 'flex',
     flexShrink: 0,
     alignItems: 'center',
     columnGap: '8px',
+    height: '44px',
     paddingLeft: '16px',
     paddingRight: '16px',
-    paddingTop: '12px',
-    paddingBottom: '12px',
   },
+  // The show-sidebar button's -4px lands its left edge at 96px, matching Chat
+  // Landing and clearing the traffic lights by 24px.
+  headerBesideTrafficLights: { paddingLeft: '100px' },
+  sidebarToggle: { marginInlineStart: '-4px' },
+  glyph: { width: '16px', height: '16px' },
   pageTitle: {
     marginRight: 'auto',
     flexShrink: 0,
@@ -768,7 +786,25 @@ export function ScheduleListView({
   now?: number;
 }) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
+  const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
+  const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
+  const isElectronFullscreen = useElectronFullscreen();
   const windowDrag = useWindowDragRegionClass();
+  const windowsCaptionPadClass = useWindowsCaptionPadClass();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const windowsCaptionRowPadClass = useWindowsCaptionRowPadClass();
+  const hasMacOSTitlebarInset =
+    !isNativeAppShell() && isMacOSElectronRenderer() && !isElectronFullscreen;
+  const showSidebarToggle = !isMobile && isLeftSidebarHidden;
+  const headerChromeClassName = [
+    windowDrag,
+    windowsCaptionPadClass,
+    windowsCaptionRowPadClass,
+    macTrafficLightRowPadClass,
+  ]
+    .filter(Boolean)
+    .join(' ');
   const [query, setQuery] = useState('');
   const [localWidths, setLocalWidths] = useState(DEFAULT_COLUMN_WIDTHS);
   const widths = controlledWidths ?? localWidths;
@@ -801,7 +837,29 @@ export function ScheduleListView({
       >
         {/* Joins the Electron window's drag strip, which would otherwise swallow
             clicks on the search and New button under it. */}
-        <header className={cn(stylex.props(styles.listHeader).className, windowDrag)}>
+        <header
+          {...withClassName(
+            stylex.props(
+              styles.listHeader,
+              showSidebarToggle && hasMacOSTitlebarInset && styles.headerBesideTrafficLights
+            ),
+            headerChromeClassName
+          )}
+          data-beside-traffic-lights={showSidebarToggle && hasMacOSTitlebarInset ? '' : undefined}
+        >
+          {showSidebarToggle ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              icon
+              onClick={() => showNavigationSidebar()}
+              aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
+              className={cn(stylex.props(styles.sidebarToggle).className, WINDOW_DRAG_EXEMPT_CLASS)}
+            >
+              <PanelLeft {...stylex.props(styles.glyph)} />
+            </Button>
+          ) : null}
           <h1 {...stylex.props(styles.pageTitle)}>{t('schedules.title', 'Schedules')}</h1>
           <Input
             size="small"

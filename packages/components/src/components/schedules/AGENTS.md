@@ -33,7 +33,8 @@
   (`ScheduleDetailToolbar`) is close plus compact icon actions; run history is
   the panel's last section, under the editor (no second drawer). Top-of-pane headers join the Electron drag strip
   (`useWindowDragRegionClass`) with buttons `WINDOW_DRAG_EXEMPT_CLASS`, or the
-  strip swallows their clicks. Saving and closing return to the full list.
+  strip swallows their clicks. Saving and closing return to the full list. Hidden
+  desktop nav: PanelLeft expand at 96px on macOS Electron (Chat Landing/Archive).
 - The editor reuses the composer's parts: one box holds name, a hairline, the
   prompt and, along its bottom, the composer's own Agent controls
   (`ScheduleAgentControls` = `DesktopRunConfigMenu` + `DesktopPermissionModeButton`).
