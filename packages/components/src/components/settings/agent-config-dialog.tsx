@@ -607,6 +607,7 @@ const styles = stylex.create({
     flexDirection: 'column',
     gap: space[2],
     paddingInline: space[3],
+    paddingBlockStart: focus.ringWidth,
     paddingBottom: space[3],
   },
   sectionHint: {
