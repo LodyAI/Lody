@@ -11,7 +11,7 @@ import {
 } from '@lody/shared';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { SystemCodexCredentialVault, type CodexCredentialVault } from './codex-credential-vault';
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { resolveBuiltinAuthenticationProcessLaunch } from './setting';
 import {
@@ -359,7 +359,7 @@ async function logoutNativeProfile(
       delete env[key];
   env.CODEX_HOME = profile.home;
   try {
-    await runCommandText(
+    await runCommandTextLegacy(
       {
         command: launch.command,
         args: [

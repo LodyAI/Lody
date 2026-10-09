@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { startProcess, type ProcessHandle } from '@lody/shared/node/process';
+import { startProcessLegacy, type ProcessHandleLegacy } from '@lody/shared/node/process';
 
 import {
   parseWorkspaceWatchChildMessage,
@@ -62,7 +62,7 @@ type ChildLike = Pick<ChildProcess, 'connected' | 'exitCode' | 'pid' | 'send' | 
 /** A launched watch worker: its IPC channel plus whole-tree termination. */
 export type WorkspaceWatchChild = {
   readonly child: ChildLike;
-  readonly terminate: ProcessHandle['terminate'];
+  readonly terminate: ProcessHandleLegacy['terminate'];
 };
 
 export type WorkspaceWatchCoordinatorOptions = {
@@ -469,7 +469,7 @@ function launchWorkspaceWatchChild(_generation: number): WorkspaceWatchChild {
   const productionEntry = path.join(moduleDirectory, 'code-collab-watch-worker.js');
   const env = buildWorkspaceWatchWorkerEnvironment();
   if (existsSync(productionEntry)) {
-    return startProcess(
+    return startProcessLegacy(
       {
         command: process.execPath,
         args: [productionEntry],

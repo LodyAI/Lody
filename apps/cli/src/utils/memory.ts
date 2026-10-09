@@ -4,7 +4,7 @@ import os from 'os';
 
 import { READ_ONLY_ABANDON_POLICY } from '@lody/shared/node/process';
 
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 const DARWIN_MEMORY_PROBE_TIMEOUT_MS = 1_000;
 
@@ -262,7 +262,7 @@ async function probeWindowsMemoryStatus(): Promise<WindowsMemoryStatus | null> {
   ].join('; ');
 
   try {
-    const { stdout } = await runCommandText(
+    const { stdout } = await runCommandTextLegacy(
       {
         command: 'powershell.exe',
         args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
@@ -526,7 +526,7 @@ async function getDarwinMemoryPressureLevel(): Promise<DarwinMemoryPressureLevel
   }
 
   try {
-    const { stdout } = await runCommandText(
+    const { stdout } = await runCommandTextLegacy(
       {
         command: 'sysctl',
         args: ['-n', 'kern.memorystatus_vm_pressure_level'],
@@ -575,7 +575,7 @@ async function getDarwinAvailableMemoryBytes(): Promise<number | null> {
   }
 
   try {
-    const { stdout } = await runCommandText(
+    const { stdout } = await runCommandTextLegacy(
       {
         command: 'vm_stat',
         args: [],

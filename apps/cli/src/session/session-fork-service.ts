@@ -25,7 +25,7 @@ import {
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
@@ -964,7 +964,7 @@ export class SessionForkService {
   }
 
   private async inspectGitWorkdir(workdir: string): Promise<{ dirty: boolean; headSha: string }> {
-    const status = await runCommandText(
+    const status = await runCommandTextLegacy(
       {
         command: 'git',
         args: ['status', '--porcelain'],
@@ -974,7 +974,7 @@ export class SessionForkService {
       },
       toShared()
     );
-    const head = await runCommandText(
+    const head = await runCommandTextLegacy(
       {
         command: 'git',
         args: ['rev-parse', '--verify', 'HEAD^{commit}'],
@@ -1048,7 +1048,7 @@ export class SessionForkService {
       const resolvedBranch = this.deps.resolveGitBranch
         ? await this.deps.resolveGitBranch(sessionWorkdir)
         : (
-            await runCommandText(
+            await runCommandTextLegacy(
               {
                 command: 'git',
                 args: ['branch', '--show-current'],

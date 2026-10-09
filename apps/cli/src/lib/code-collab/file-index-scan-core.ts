@@ -8,7 +8,7 @@ import type {
 } from '@lody/shared';
 
 // The shared facade directly: the CLI one loads the daemon's winston logger.
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { countTextLines } from './diff-line-counts';
 import { gitDiffBaseRefCandidates } from '../git/git-diff-base';
@@ -57,7 +57,7 @@ async function runGitLsFiles(
 ): Promise<{ readonly ok: true; readonly paths: readonly string[] } | { readonly ok: false }> {
   try {
     const [{ stdout }, deleted] = await Promise.all([
-      runCommandText({
+      runCommandTextLegacy({
         command: 'git',
         args: [
           '-C',
@@ -246,7 +246,7 @@ async function runGit(
   args: readonly string[]
 ): Promise<{ readonly ok: true; readonly stdout: string } | { readonly ok: false }> {
   try {
-    const { stdout } = await runCommandText({
+    const { stdout } = await runCommandTextLegacy({
       command: 'git',
       args: ['-C', cwd, ...args],
       maxOutputBytes: GIT_MAX_BUFFER_BYTES,

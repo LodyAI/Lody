@@ -10,7 +10,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { requestSessionShare } from '@/lib/session-share-delivery';
-import { startProcess } from '@lody/shared/node/process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import {
@@ -1133,7 +1133,7 @@ const runLodyCli = async (
 ): Promise<{ stdout: string; stderr: string }> => {
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
-  const cli = startProcess(
+  const cli = startProcessLegacy(
     {
       command: process.execPath,
       args: [resolveCliEntrypoint(), ...args],

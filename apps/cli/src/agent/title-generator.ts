@@ -28,7 +28,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { extractTextFromAgentResponse } from './response-utils';
 import { formatErrorMessage } from '@/utils/format-error';
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { normalizeConfigOptions } from './acp-capabilities';
 import { readLegacySessionModelState } from './acp-capability-normalization';
@@ -235,7 +235,7 @@ export const sanitizeGeneratedTitle = (candidate?: string | null): string | null
 const ensureWorkdirIsGitRepo = async (workdir: string, logger: Logger): Promise<boolean> => {
   const isGitRepo = async (): Promise<boolean> => {
     try {
-      const result = await runCommandText(
+      const result = await runCommandTextLegacy(
         {
           command: 'git',
           args: ['rev-parse', '--is-inside-work-tree'],
@@ -256,7 +256,7 @@ const ensureWorkdirIsGitRepo = async (workdir: string, logger: Logger): Promise<
   }
 
   try {
-    await runCommandText(
+    await runCommandTextLegacy(
       {
         command: 'git',
         args: ['init', '--quiet'],

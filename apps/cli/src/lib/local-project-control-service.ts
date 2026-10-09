@@ -40,7 +40,7 @@ import {
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 const DEFAULT_LOCAL_PROJECT_MAX_FILES = 80_000;
 const HARD_LOCAL_PROJECT_MAX_FILES = 200_000;
@@ -255,7 +255,7 @@ type GitCommandResult = {
 
 async function runGitCommand(rootPath: string, args: string[]): Promise<GitCommandResult> {
   try {
-    const result = await runCommandText(
+    const result = await runCommandTextLegacy(
       {
         command: 'git',
         args,

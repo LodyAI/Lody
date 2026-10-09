@@ -13,7 +13,7 @@ import { Duration } from 'effect';
 import {
   CommandTimedOut,
   READ_ONLY_ABANDON_POLICY,
-  runCommandText,
+  runCommandTextLegacy,
   type ProcessFacadeOptions,
 } from './process';
 
@@ -116,7 +116,7 @@ export const probeLoginShellEnv = async (
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) return null;
     try {
-      const output = await runCommandText(
+      const output = await runCommandTextLegacy(
         {
           command: shell,
           args: ['-ilc', probeScript(shell)],

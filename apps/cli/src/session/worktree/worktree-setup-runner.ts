@@ -12,7 +12,7 @@ import {
   type WorktreeSetupShell,
   type WorkspaceId,
 } from '@lody/shared';
-import { startProcess } from '@lody/shared/node/process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 
 import type { TerminationPolicy } from '@lody/shared/node/process';
 import type { Logger } from '@/utils/logger';
@@ -238,7 +238,7 @@ async function runWorktreeScript(options: {
     let waitForCloseResolve: (() => void) | null = null;
     // The shell leads its own process group so a failure or timeout ends every
     // command the script started, not just the shell.
-    const shellProcess = startProcess(
+    const shellProcess = startProcessLegacy(
       {
         command,
         args,

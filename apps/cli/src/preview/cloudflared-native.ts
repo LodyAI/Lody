@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { startProcess, type ProcessHandle } from '@lody/shared/node/process';
+import { startProcessLegacy, type ProcessHandleLegacy } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { TerminationPolicy } from '@lody/shared/node/process';
@@ -104,11 +104,11 @@ export async function startCloudflaredNative(options: {
   }
   const configDir = await mkdtemp(join(tmpdir(), 'lody-cloudflared-'));
   const configFile = join(configDir, 'config.yaml');
-  let native: ProcessHandle;
+  let native: ProcessHandleLegacy;
   try {
     await writeFile(configFile, '{}\n', { mode: 0o600 });
     options.signal.throwIfAborted();
-    native = startProcess(
+    native = startProcessLegacy(
       {
         command: options.binary,
         args: [

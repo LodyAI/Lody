@@ -1,6 +1,6 @@
 import type { ChildProcessByStdio } from 'node:child_process';
 import { Effect } from 'effect';
-import { startProcess, terminateChildTree } from '@lody/shared/node/process';
+import { startProcessLegacy, terminateChildTreeLegacy } from '@lody/shared/node/process';
 import type { Readable, Writable } from 'node:stream';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -36,7 +36,11 @@ export function createGuestButtons(signal: AbortSignal, executable = '/usr/bin/x
       // EOF gives the guest one second to release a key and cancel its service.
       if (closed)
         await Effect.runPromise(Effect.raceAll([Effect.promise(() => closed), Effect.sleep(1000)]));
-      await terminateChildTree(owned, { processGroup: true, graceMs: 1000, killWaitMs: 2000 });
+      await terminateChildTreeLegacy(owned, {
+        processGroup: true,
+        graceMs: 1000,
+        killWaitMs: 2000,
+      });
       await closed;
       if (child === owned) child = undefined;
     })();
@@ -45,7 +49,7 @@ export function createGuestButtons(signal: AbortSignal, executable = '/usr/bin/x
   function launch(args: string[], protocol: boolean): Promise<void> {
     signal.throwIfAborted();
     if (failed) throw error();
-    const { child: started } = startProcess({
+    const { child: started } = startProcessLegacy({
       command: executable,
       args,
       processGroup: true,

@@ -2,7 +2,7 @@ import { toShared } from '@/platform/process-options';
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { getLogger } from '@/utils/logger';
-import { startProcess } from '@lody/shared/node/process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import {
@@ -100,7 +100,7 @@ describe('WorkspaceWatchCoordinator', () => {
     const coordinator = new WorkspaceWatchCoordinator(getLogger('workspace-watch-test'), {
       realpath: async () => '/canonical/workspace',
       childLauncher: () =>
-        startProcess(
+        startProcessLegacy(
           { command: 'watch-worker', args: [], options: {}, processGroup: false },
           toShared({ nodeProcess: table.api })
         ),

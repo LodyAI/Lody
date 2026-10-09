@@ -1,5 +1,5 @@
 import { toShared } from '@/platform/process-options';
-import { startProcess } from '@lody/shared/node/process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 
 type OpenCommand = { readonly command: string; readonly args: readonly string[] };
 
@@ -25,7 +25,7 @@ function buildOpenBrowserCommand(url: string, platform: NodeJS.Platform): OpenCo
  */
 export async function openBrowser(url: string): Promise<void> {
   const { command, args } = buildOpenBrowserCommand(url, process.platform);
-  const handle = startProcess(
+  const handle = startProcessLegacy(
     {
       command,
       args,

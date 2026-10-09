@@ -1018,19 +1018,17 @@ export const runCommand = (
         spec.abandonPolicy ?? ABANDONED_COMMAND_POLICY,
         true
       );
-      const handle = yield* spawner
-        .spawn(command)
-        .pipe(
-          Effect.mapError((error) =>
-            error.cause instanceof SpawnFailed
-              ? error.cause
-              : new SpawnFailed({
-                  command: spec.command,
-                  message: error.message,
-                  cause: error.cause,
-                })
-          )
-        );
+      const handle = yield* spawner.spawn(command).pipe(
+        Effect.mapError((error) =>
+          error.cause instanceof SpawnFailed
+            ? error.cause
+            : new SpawnFailed({
+                command: spec.command,
+                message: error.message,
+                cause: error.cause,
+              })
+        )
+      );
       const collect = (stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>) =>
         Effect.gen(function* () {
           let bytes = 0;
@@ -1238,7 +1236,8 @@ export interface ProcessFacadeOptions {
   readonly signal?: AbortSignal;
 }
 
-export type ProcessRunner = <A, E>(
+/** @deprecated The temporary legacy execution contract; native Effect callers use the core API. */
+export type ProcessRunnerLegacy = <A, E>(
   effect: Effect.Effect<A, E, NodeProcess | ChildProcessSpawner.ChildProcessSpawner>
 ) => Promise<A>;
 
@@ -1253,7 +1252,11 @@ export const processLayer = (
     )
   );
 
-export const runPromiseSquashed = <A, E>(
+/**
+ * @deprecated Only for unmigrated Promise callers. New Effect workflows compose
+ * core Effects and leave execution to their owning application entry point.
+ */
+export const runPromiseSquashedLegacy = <A, E>(
   effect: Effect.Effect<A, E>,
   options?: Effect.RunOptions
 ): Promise<A> =>
@@ -1272,9 +1275,14 @@ const runSyncSquashed = <A, E>(effect: Effect.Effect<A, E>): A => {
 export const unwrapSpawnFailure = (error: unknown): unknown =>
   error instanceof SpawnFailed && error.cause instanceof Error ? error.cause : error;
 
-export const makeProcessRunner = (options: ProcessFacadeOptions): ProcessRunner => {
+/**
+ * @deprecated Only for unmigrated Promise callers. New Effect workflows compose
+ * core process APIs and leave execution to their owning application entry point.
+ */
+export const makeProcessRunnerLegacy = (options: ProcessFacadeOptions): ProcessRunnerLegacy => {
   const layer = processLayer(options);
-  return (effect) => runPromiseSquashed(Effect.provide(effect, layer), { signal: options.signal });
+  return (effect) =>
+    runPromiseSquashedLegacy(Effect.provide(effect, layer), { signal: options.signal });
 };
 
 export interface CommandText {
@@ -1295,12 +1303,14 @@ const toText = (output: CommandOutput): CommandText => ({
  * `runCommand` / `runCommandOk` for Promise callers. `check: 'exit-0'` rejects
  * with `CommandFailed` on a non-zero exit, like `execFile`; `check: 'none'`
  * resolves with any exit status.
+ * @deprecated Only for unmigrated Promise callers. Compose runCommand/runCommandOk
+ * in new Effect workflows and execute once at the owning application entry point.
  */
-export const runCommandText = async (
+export const runCommandTextLegacy = async (
   spec: CommandSpec & { readonly check: 'exit-0' | 'none' },
   options: ProcessFacadeOptions = {}
 ): Promise<CommandText> => {
-  const run = makeProcessRunner(options);
+  const run = makeProcessRunnerLegacy(options);
   try {
     return toText(await run(spec.check === 'exit-0' ? runCommandOk(spec) : runCommand(spec)));
   } catch (error) {
@@ -1308,8 +1318,12 @@ export const runCommandText = async (
   }
 };
 
-/** `runCommandSync` for synchronous callers; blocks the event loop. */
-export const runCommandTextSync = (
+/**
+ * `runCommandSync` for synchronous callers; blocks the event loop.
+ * @deprecated Only for unmigrated synchronous callers. Compose runCommandSync
+ * or runCommandSyncOk in new Effect workflows; execution belongs at the entry point.
+ */
+export const runCommandTextSyncLegacy = (
   spec: CommandSpec & {
     readonly timeout: Duration.Input;
     readonly check: 'exit-0' | 'none';
@@ -1324,7 +1338,8 @@ export const runCommandTextSync = (
   }
 };
 
-export interface ProcessHandle {
+/** @deprecated The temporary legacy execution contract; native Effect callers use the core API. */
+export interface ProcessHandleLegacy {
   readonly child: ChildProcess;
   /** Resolves with the root's exit; never rejects. */
   readonly exited: Promise<ProcessExit>;
@@ -1336,11 +1351,13 @@ export interface ProcessHandle {
  * `spawnProcess` for long-lived children owned by Promise code. Synchronous
  * like `spawn`: an asynchronous start failure arrives on `child`'s `error`
  * event, and `exited` then resolves with nulls.
+ * @deprecated Only for unmigrated callers that manually own raw Node handles.
+ * New Effect workflows acquire spawnProcess in Scope and run at their entry point.
  */
-export const startProcess = (
+export const startProcessLegacy = (
   spec: SpawnSpec,
   options: ProcessFacadeOptions = {}
-): ProcessHandle => {
+): ProcessHandleLegacy => {
   options.signal?.throwIfAborted();
   let managed: ManagedProcess;
   try {
@@ -1349,7 +1366,7 @@ export const startProcess = (
     throw unwrapSpawnFailure(error);
   }
   // Cleanup must still run after the caller's cancellation signal is aborted.
-  const run = makeProcessRunner({ ...options, signal: undefined });
+  const run = makeProcessRunnerLegacy({ ...options, signal: undefined });
   const abort = () => {
     void run(managed.terminate(READ_ONLY_ABANDON_POLICY)).catch((error) =>
       run(
@@ -1360,14 +1377,19 @@ export const startProcess = (
     );
   };
   if (managed.setupFailure) {
-    signalChildTreeNow(managed.child, 'SIGKILL', { processGroup: spec.processGroup }, options);
+    signalChildTreeNowLegacy(
+      managed.child,
+      'SIGKILL',
+      { processGroup: spec.processGroup },
+      options
+    );
     throw unwrapSpawnFailure(managed.setupFailure);
   }
   options.signal?.addEventListener('abort', abort, { once: true });
   if (options.signal?.aborted) abort();
   return {
     child: managed.child,
-    exited: runPromiseSquashed(managed.exited),
+    exited: runPromiseSquashedLegacy(managed.exited),
     terminate: (policy) =>
       run(managed.terminate(policy)).then(() => {
         options.signal?.removeEventListener('abort', abort);
@@ -1375,13 +1397,17 @@ export const startProcess = (
   };
 };
 
-/** End an existing child's whole tree (its group when it was started detached). */
-export const terminateChildTree = (
+/**
+ * End an existing child's whole tree (its group when it was started detached).
+ * @deprecated Only for unmigrated Promise callers. Compose childProcessTree and
+ * terminateTree in new Effect workflows and execute at the owning entry point.
+ */
+export const terminateChildTreeLegacy = (
   child: ChildProcess,
   policy: TerminationPolicy & { readonly processGroup: boolean },
   options: ProcessFacadeOptions = {}
 ): Promise<void> =>
-  makeProcessRunner(options)(
+  makeProcessRunnerLegacy(options)(
     Effect.flatMap(childProcessTree(child, { processGroup: policy.processGroup }), (tree) =>
       terminateTree(tree, policy)
     )
@@ -1391,9 +1417,11 @@ export const terminateChildTree = (
  * Send one signal to a child's tree without waiting, for `process.on('exit')`
  * handlers that cannot await. The signal (and a Windows `taskkill`) starts
  * before this returns; nothing confirms the tree is gone, so prefer
- * `terminateChildTree` wherever the caller can wait.
+ * `terminateChildTreeLegacy` wherever the caller can wait.
+ * @deprecated Only for existing synchronous exit hooks that cannot await.
+ * New Effect workflows compose tree termination under their owning Scope.
  */
-export const signalChildTreeNow = (
+export const signalChildTreeNowLegacy = (
   child: ChildProcess,
   signal: TreeSignal,
   target: { readonly processGroup: boolean },
@@ -1412,8 +1440,16 @@ export const signalChildTreeNow = (
   );
 };
 
-export const isPidAliveSync = (pid: number, options: ProcessFacadeOptions = {}): boolean =>
+/**
+ * @deprecated Only for unmigrated synchronous callers. Compose isPidAlive in
+ * new Effect workflows and execute at the owning application entry point.
+ */
+export const isPidAliveSyncLegacy = (pid: number, options: ProcessFacadeOptions = {}): boolean =>
   runSyncSquashed(Effect.provide(isPidAlive(pid), processLayer(options)));
 
-export const probePidSync = (pid: number, options: ProcessFacadeOptions = {}): PidState =>
+/**
+ * @deprecated Only for unmigrated synchronous callers. Compose probePid in
+ * new Effect workflows and execute at the owning application entry point.
+ */
+export const probePidSyncLegacy = (pid: number, options: ProcessFacadeOptions = {}): PidState =>
   runSyncSquashed(Effect.provide(probePid(pid), processLayer(options)));

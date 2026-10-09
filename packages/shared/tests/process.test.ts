@@ -12,12 +12,12 @@ import {
   runCommand,
   runCommandOk,
   type CommandSpec,
-  runCommandText,
-  startProcess,
+  runCommandTextLegacy,
+  startProcessLegacy,
 } from '../src/node/process';
-import { signalChildTreeNow, SpawnFailed, TerminationFailed } from '../src/node/process';
+import { signalChildTreeNowLegacy, SpawnFailed, TerminationFailed } from '../src/node/process';
 import { spawnProcess as acquireProcess, type SpawnSpec } from '../src/node/process';
-import { processLayer, isPidAliveSync } from '../src/node/process';
+import { processLayer, isPidAliveSyncLegacy } from '../src/node/process';
 import {
   READ_ONLY_ABANDON_POLICY,
   resolveWindowsCommand,
@@ -220,7 +220,7 @@ describe('process tree termination (Windows)', () => {
     const child = table.api.spawn('cli', [], {});
     table.exitOnItsOwn(child.pid ?? -1);
 
-    signalChildTreeNow(child, 'SIGKILL', { processGroup: false }, { nodeProcess: table.api });
+    signalChildTreeNowLegacy(child, 'SIGKILL', { processGroup: false }, { nodeProcess: table.api });
 
     expect(table.spawned.filter((call) => call.command === 'taskkill')).toEqual([]);
   });
@@ -265,11 +265,11 @@ describe('process tree termination (real processes)', () => {
         });
         const grandchild = yield* readPidLine(managed.child.stdout);
         yield* managed.exited;
-        expect(isPidAliveSync(grandchild)).toBe(true);
+        expect(isPidAliveSyncLegacy(grandchild)).toBe(true);
 
         yield* managed.terminate(FORCED);
 
-        expect(isPidAliveSync(grandchild)).toBe(false);
+        expect(isPidAliveSyncLegacy(grandchild)).toBe(false);
       }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
@@ -294,9 +294,9 @@ describe('process tree termination (real processes)', () => {
         const childPid = yield* readPidLine(managed.child.stdout);
         const exit = yield* managed.exited.pipe(Effect.timeout('5 seconds'));
         expect(exit.code).toBe(0);
-        expect(isPidAliveSync(childPid)).toBe(true);
+        expect(isPidAliveSyncLegacy(childPid)).toBe(true);
         yield* managed.terminate(FORCED);
-        expect(isPidAliveSync(childPid)).toBe(false);
+        expect(isPidAliveSyncLegacy(childPid)).toBe(false);
       }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
@@ -468,14 +468,14 @@ describe('runCommand process-tree ownership', () => {
   });
 });
 
-describe('signalChildTreeNow', () => {
+describe('signalChildTreeNowLegacy', () => {
   it('signals the whole group before returning, for exit handlers that cannot wait', () => {
     const table = new FakeProcessTable('linux');
     const child = table.api.spawn('cli', [], { detached: true });
     const leader = child.pid ?? -1;
     const descendant = table.addDescendant(leader);
 
-    signalChildTreeNow(child, 'SIGTERM', { processGroup: true }, { nodeProcess: table.api });
+    signalChildTreeNowLegacy(child, 'SIGTERM', { processGroup: true }, { nodeProcess: table.api });
 
     expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGTERM' }]);
     expect(table.isAlive(descendant)).toBe(false);
@@ -608,7 +608,10 @@ describe('official process service and interruption', () => {
     const table = new FakeProcessTable('linux');
     return Effect.gen(function* () {
       const controller = new AbortController();
-      const handle = startProcess(agentSpec, { nodeProcess: table.api, signal: controller.signal });
+      const handle = startProcessLegacy(agentSpec, {
+        nodeProcess: table.api,
+        signal: controller.signal,
+      });
       const descendant = table.addDescendant(1000);
       controller.abort();
       yield* Effect.promise(() => handle.terminate({ graceMs: 0, killWaitMs: 0 }));
@@ -622,7 +625,7 @@ describe('official process service and interruption', () => {
     return Effect.gen(function* () {
       const ready = yield* Deferred.make<void>();
       const controller = new AbortController();
-      const result = runCommandText(
+      const result = runCommandTextLegacy(
         {
           command: 'git',
           args: [],

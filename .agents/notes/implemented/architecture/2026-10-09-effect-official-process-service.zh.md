@@ -61,7 +61,7 @@ cgroup.events 成为初始化必需能力。best-effort cleanup 记录失败，�
 
 shared Promise runner 把明确的 AbortSignal 交给 runPromiseExit，但仍启动独立根 fiber。
 用 tryPromise 包装且不传递信号，无法传播取消；即使传递信号，也不会自动让外层 Promise
-包装等待内层 finalizer 完成。Effect 调用方应直接 yield 服务。同步兼容 startProcess 仍由
+包装等待内层 finalizer 完成。Effect 调用方应直接 yield 服务。同步兼容 startProcessLegacy 仍由
 旧调用方手动持有，支持明确的取消信号；需要证明终止的调用方等待 terminate。它不被描述为
 具有 Scope 所有权的 Effect 获取。
 
@@ -74,6 +74,15 @@ container 和 Scope；已删除的 cgroup 不会自动重建。
 现有 Promise 调用方直接导入 shared 兼容 API，并传入这些选项。进程核心、ACP 调用方、
 container 和这份决定属于 #1065；其它 CLI 调用方的导入调整及守卫指引属于 #1069；
 跨运行时调用方通过 #1348 继承服务，不增加另一份实现。
+
+#1065 合入后，[#1069](https://github.com/LodyAI/Lody/pull/1069) 为九个 shared 执行兼容入口
+统一加上 Legacy 后缀和 deprecated 标记，runner 与手动持有的 handle 类型也带此后缀。
+Text/Sync 仍表达输出和阻塞方式，Legacy 表明临时兼容用途，不代表另一套进程实现。
+删除旧导出，调用方使用完整名称，不通过别名隐藏后缀。新 Effect 工作流组合核心 API，
+由所属入口统一执行；Layer 构造器、纯转换函数和返回 Effect 的核心 API 保持原名。
+进程守卫拒绝旧入口名称及隐藏 Legacy 的别名，跨运行时调用方在 #1348 同步。
+此次只改命名和说明：显式取消、有类型的错误、有界进程树终止和 Scope 释放保持原实现，
+继续使用已有行为测试验证。
 
 ## 验证与限制
 

@@ -37,7 +37,7 @@ import { normalizeCurrentProcessResourceProfile } from '@/utils/process-resource
 import { flushTelemetry } from '@/instrument';
 import { captureSupervisorEvent } from './analytics-events';
 import { getRuntimeDiagnostics } from '@/utils/runtime-diagnostics';
-import { startProcess } from '@lody/shared/node/process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 
 import {
   EXIT_CODE_REMOTE_RESTART,
@@ -79,7 +79,7 @@ function launchLodyStart(
   delete env[DAEMON_RUNNER_READY_FD_ENV];
   // The Worker stays in the watchdog's process group: the Supervisor owns its
   // shutdown through `requestShutdown` and signals to the exact child.
-  const { child } = startProcess(
+  const { child } = startProcessLegacy(
     {
       command: process.execPath,
       args,

@@ -6,7 +6,7 @@ import {
   CommandTimedOut,
   READ_ONLY_ABANDON_POLICY,
 } from '@lody/shared/node/process';
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 const PROCESS_TABLE_TIMEOUT_MS = 2_000;
 const MAX_PROCESS_TABLE_BYTES = 8 * 1024 * 1024;
@@ -185,9 +185,9 @@ function parseDarwinMemoryBytes(value: string | undefined): number | null {
 }
 
 async function runProbe(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<string> {
-  let result: Awaited<ReturnType<typeof runCommandText>>;
+  let result: Awaited<ReturnType<typeof runCommandTextLegacy>>;
   try {
-    result = await runCommandText(
+    result = await runCommandTextLegacy(
       {
         command,
         args,

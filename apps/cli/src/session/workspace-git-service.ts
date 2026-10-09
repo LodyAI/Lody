@@ -3,7 +3,7 @@ import { getLocalProjectGitHubRepoAtRootPath } from '@lody/shared/node/local-pro
 import type { SessionId } from '@lody/shared';
 import { resolveGitBranch, type SessionExec } from '@/lib/git/resolve-git-branch-name';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
@@ -40,7 +40,7 @@ export class WorkspaceGitService {
       ownerSessionId,
       workspaceRoot,
       async (command, args, cwd) => {
-        const { stdout } = await runCommandText(
+        const { stdout } = await runCommandTextLegacy(
           {
             command,
             args,

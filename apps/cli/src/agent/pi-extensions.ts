@@ -1,6 +1,6 @@
 import { toShared } from '@/platform/process-options';
 import { PiExtensionDiscoverySchema, type PiExtensionDiscovery } from '@lody/shared';
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { getManagedAgentRuntimeManager, PI_EXTENSIONS_SUPPORTED } from './managed-agent-runtime';
 
@@ -54,7 +54,7 @@ export async function discoverManagedPiExtensions(
     }
   }
   try {
-    const { stdout } = await runCommandText(
+    const { stdout } = await runCommandTextLegacy(
       {
         command: process.execPath,
         args: [runtime.command, '--list-extensions'],

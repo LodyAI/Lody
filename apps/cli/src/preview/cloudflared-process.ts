@@ -1,7 +1,7 @@
 import { toShared } from '@/platform/process-options';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { startProcess } from '@lody/shared/node/process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 
 import { CloudflaredError, type CloudflaredProcess } from './cloudflared-native';
 
@@ -59,7 +59,7 @@ export async function startCloudflaredProcess(options: {
   options.signal.throwIfAborted();
   // Never terminated from here: IPC stop/disconnect is its only shutdown path,
   // so the worker can reap cloudflared and remove its config first.
-  const worker = startProcess(
+  const worker = startProcessLegacy(
     {
       command: process.execPath,
       args: [

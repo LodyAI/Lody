@@ -18,7 +18,7 @@ import {
 } from '@lody/shared/node/local-cli-supervisor';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { startProcess } from '@lody/shared/node/process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { TerminationPolicy } from '@lody/shared/node/process';
@@ -253,7 +253,7 @@ const runCommand = async (args: {
   let stderr = '';
   const append = (current: string, chunk: Buffer): string =>
     `${current}${chunk.toString()}`.slice(-64 * 1024);
-  const install = startProcess(
+  const install = startProcessLegacy(
     {
       command: args.command,
       args: args.commandArgs,

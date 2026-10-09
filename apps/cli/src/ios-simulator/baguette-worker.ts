@@ -1,4 +1,4 @@
-import { startProcess, type ProcessHandle } from '@lody/shared/node/process';
+import { startProcessLegacy, type ProcessHandleLegacy } from '@lody/shared/node/process';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
@@ -68,7 +68,7 @@ const onMessage = (raw: unknown) => {
 process.on('message', onMessage);
 process.once('SIGTERM', stop);
 process.once('SIGINT', stop);
-let owned: ProcessHandle | undefined;
+let owned: ProcessHandleLegacy | undefined;
 let exited: Promise<void> | undefined;
 try {
   if (!process.connected) throw new Error('Missing lifecycle owner');
@@ -85,7 +85,7 @@ try {
     reservation.close((error) => (error ? reject(error) : resolve()))
   );
   abort.signal.throwIfAborted();
-  owned = startProcess({
+  owned = startProcessLegacy({
     command: binary,
     args: ['serve', '--host', '127.0.0.1', '--port', String(port), '--no-plugins'],
     processGroup: true,

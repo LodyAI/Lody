@@ -69,7 +69,7 @@ wait for cleanup. Native Effect callers yield the service directly.
 A Session owns a container Scope. Each spawn uses a child Scope: failed or
 interrupted setup closes it before returning; successful setup retains it until
 whole-group exit and drained stdio. Closing the container Scope terminates its trees and stops its
-monitor fibers, then removes cgroup resources. `startProcess` is reserved for
+monitor fibers, then removes cgroup resources. `startProcessLegacy` is reserved for
 legacy synchronous/raw Node handles (including IPC and explicit detach), whose
 owner must await `terminate`; it is not a scoped Effect API.
 
@@ -82,6 +82,26 @@ composes services and logging; it executes no program and has no Promise API.
 Other CLI callers use the same core, enforced by `check:cli-process-boundary`.
 Electron, supervisor and shared helpers migrate in the final layer. Delete each temporary facade
 when the corresponding caller itself becomes an Effect service.
+
+Execution facades carry a `Legacy` suffix and `@deprecated`; keep that suffix
+visible in imports and calls. New Effect workflows compose core APIs and leave
+execution to their owning application entry point. Layer builders and pure error
+conversions retain their names because they do not execute a program. Current
+shared execution facades are:
+
+- `runCommandTextLegacy` and `runCommandTextSyncLegacy`: text output for Promise
+  and blocking callers, respectively.
+- `startProcessLegacy`: raw Node handle with manual ownership
+  (`ProcessHandleLegacy`).
+- `terminateChildTreeLegacy` and `signalChildTreeNowLegacy`: awaited tree cleanup
+  and synchronous exit-hook signalling, respectively.
+- `isPidAliveSyncLegacy` and `probePidSyncLegacy`: synchronous process probes.
+- `makeProcessRunnerLegacy` (`ProcessRunnerLegacy`) and `runPromiseSquashedLegacy`:
+  temporary execution and error conversion for Promise entry points.
+
+`runCommand`, `runCommandOk`, their Effect-returning Sync variants, `spawnProcess`,
+`terminateTree`, `childProcessTree`, `isPidAlive` and `probePid` retain their names.
+The guard rejects retired facade imports/exports and aliases that hide Legacy.
 
 ## Testing
 

@@ -15,7 +15,7 @@ import {
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { requestLocalCliHostShutdown } from '@lody/shared/node/local-cli-host-lease';
 import { calculateWorkerMaxOldSpaceMiB } from '@lody/cli-supervisor';
-import { startProcess, type ProcessHandle } from '@lody/shared/node/process';
+import { startProcessLegacy, type ProcessHandleLegacy } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
 export { LODY_LOG_DIR } from '@/utils/log-retention';
@@ -237,7 +237,7 @@ function isChildProcessRunning(child: ChildProcess): boolean {
 }
 
 /** Whether the runner's root process exited within `timeoutMs`. */
-async function waitForRunnerExit(runner: ProcessHandle, timeoutMs: number): Promise<boolean> {
+async function waitForRunnerExit(runner: ProcessHandleLegacy, timeoutMs: number): Promise<boolean> {
   if (!isChildProcessRunning(runner.child)) return true;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -259,7 +259,7 @@ async function waitForRunnerExit(runner: ProcessHandle, timeoutMs: number): Prom
  * and force-stop authority.
  */
 export async function terminateSpawnedDaemonRunner(
-  runner: ProcessHandle,
+  runner: ProcessHandleLegacy,
   runnerPid: number,
   options: { shutdownGraceMs?: number; forceKillWaitMs?: number; pidFilePath?: string } = {}
 ): Promise<boolean> {
@@ -323,7 +323,7 @@ export async function spawnDaemonRunnerAndAwaitReady(
 
   // Detached everywhere: its own process group on POSIX, its own console on
   // Windows, so the runner outlives the terminal that started it.
-  const runner = startProcess(
+  const runner = startProcessLegacy(
     {
       command: process.execPath,
       args: [

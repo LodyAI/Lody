@@ -5,7 +5,7 @@ import path from 'node:path';
 import { diffLines } from 'diff';
 
 // The shared facade directly: the CLI one loads the daemon's winston logger.
-import { runCommandTextSync } from '@lody/shared/node/process';
+import { runCommandTextSyncLegacy } from '@lody/shared/node/process';
 
 /**
  * Added/deleted line counts for a single file change, as `[add, del]`.
@@ -121,7 +121,7 @@ function isGitAvailable(): boolean {
   if (gitAvailable === undefined) {
     try {
       gitAvailable =
-        runCommandTextSync({
+        runCommandTextSyncLegacy({
           command: 'git',
           args: ['--version'],
           timeout: GIT_VERSION_TIMEOUT_MS,
@@ -151,7 +151,7 @@ function gitNumstatLineCounts(oldText: string, newText: string): [number, number
     const newPath = path.join(dir, 'new');
     writeFileSync(oldPath, oldText);
     writeFileSync(newPath, newText);
-    const result = runCommandTextSync({
+    const result = runCommandTextSyncLegacy({
       command: 'git',
       args: ['diff', '--no-index', '--numstat', '--', oldPath, newPath],
       maxOutputBytes: GIT_NUMSTAT_MAX_BUFFER,

@@ -4,7 +4,7 @@ import path from 'path';
 
 import type { RepoId, SessionId, SessionMeta } from '@lody/shared';
 
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
@@ -248,7 +248,7 @@ export class WorktreeGarbageCollector {
   private async isInsideGitWorkTree(dir: string): Promise<boolean> {
     if (!fs.existsSync(dir)) return false;
     try {
-      const { stdout } = await runCommandText(
+      const { stdout } = await runCommandTextLegacy(
         {
           command: 'git',
           args: ['rev-parse', '--is-inside-work-tree'],

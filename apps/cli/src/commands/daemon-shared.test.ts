@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { startProcess } from '@lody/shared/node/process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
@@ -199,7 +199,7 @@ describe('daemon runner launch cleanup', () => {
   it('force-kills the runner tree when graceful shutdown does not finish', async () => {
     const table = new FakeProcessTable();
     table.queueSpawn({ ignores: ['SIGTERM'] });
-    const runner = startProcess(
+    const runner = startProcessLegacy(
       { command: 'runner', args: [], options: {}, processGroup: true },
       toShared({ nodeProcess: table.api })
     );
@@ -222,7 +222,7 @@ describe('daemon runner launch cleanup', () => {
   it('reports a runner tree that survives SIGKILL instead of claiming it stopped', async () => {
     const table = new FakeProcessTable();
     table.queueSpawn({ ignores: ['SIGTERM', 'SIGKILL'] });
-    const runner = startProcess(
+    const runner = startProcessLegacy(
       { command: 'runner', args: [], options: {}, processGroup: true },
       toShared({ nodeProcess: table.api })
     );

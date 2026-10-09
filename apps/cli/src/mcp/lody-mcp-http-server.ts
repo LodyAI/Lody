@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { startProcess, type ProcessHandle } from '@lody/shared/node/process';
+import { startProcessLegacy, type ProcessHandleLegacy } from '@lody/shared/node/process';
 
 import {
   MCP_HTTP_PREFERRED_PORT_ENV,
@@ -49,7 +49,7 @@ const PERMANENT_EXIT_CODES = new Set([2, 3]);
 
 class McpHttpHostSupervisor {
   private readonly token = randomBytes(32).toString('base64url');
-  private host: ProcessHandle | null = null;
+  private host: ProcessHandleLegacy | null = null;
   private endpoint: LodyMcpHttpEndpoint | null = null;
   private lastPort = 0;
   private attempts = 0;
@@ -148,13 +148,13 @@ class McpHttpHostSupervisor {
     await this.endHost(host, { graceMs: SIGTERM_GRACE_MS, killWaitMs: SIGKILL_WAIT_MS });
   }
 
-  private async forceStop(host: ProcessHandle): Promise<void> {
+  private async forceStop(host: ProcessHandleLegacy): Promise<void> {
     await this.endHost(host, { graceMs: 0, killWaitMs: SIGKILL_WAIT_MS });
   }
 
   private async endHost(
-    host: ProcessHandle,
-    policy: Parameters<ProcessHandle['terminate']>[0]
+    host: ProcessHandleLegacy,
+    policy: Parameters<ProcessHandleLegacy['terminate']>[0]
   ): Promise<void> {
     try {
       await host.terminate(policy);
@@ -165,8 +165,8 @@ class McpHttpHostSupervisor {
     }
   }
 
-  private spawnHost(cliEntrypoint: string): ProcessHandle {
-    return startProcess(
+  private spawnHost(cliEntrypoint: string): ProcessHandleLegacy {
+    return startProcessLegacy(
       {
         command: process.execPath,
         args: [cliEntrypoint, '__internal', 'lody-mcp-http-host'],

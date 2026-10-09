@@ -5,10 +5,7 @@ import * as fs from 'fs/promises';
 import { Effect, Exit, Scope } from 'effect';
 import { type SessionId } from '@lody/shared';
 
-import {
-  makeProcessRunner as makePlatformRunner,
-  type ProcessRunner as PlatformRunner,
-} from '@lody/shared/node/process';
+import { makeProcessRunnerLegacy, type ProcessRunnerLegacy } from '@lody/shared/node/process';
 import { platformLayer } from '@/platform/process-options';
 
 import { unwrapSpawnFailure } from '@lody/shared/node/process';
@@ -191,7 +188,7 @@ export function createSessionSandboxFactory(
     ...(options.deps ?? {}),
   };
   const facade = { logger: options.logger, nodeProcess: toNodeProcess(deps) };
-  const run = makePlatformRunner(toShared(facade));
+  const run = makeProcessRunnerLegacy(toShared(facade));
   let warnedUnsupportedPlatform = false;
 
   return async (sessionId: SessionId): Promise<SessionSandbox> => {
@@ -242,12 +239,12 @@ export function createNoopSessionSandbox(
 ): SessionSandbox {
   const deps: SessionSandboxDeps = { ...defaultSandboxDeps(), spawnProcess };
   const facade = { nodeProcess: toNodeProcess(deps) };
-  return createNoopSandbox(facade, makePlatformRunner(toShared(facade)), deps, description);
+  return createNoopSandbox(facade, makeProcessRunnerLegacy(toShared(facade)), deps, description);
 }
 
 function createNoopSandbox(
   facade: { logger?: Logger; nodeProcess: NodeProcessApi },
-  run: PlatformRunner,
+  run: ProcessRunnerLegacy,
   deps: SessionSandboxDeps,
   description: string
 ): SessionSandbox {
@@ -273,7 +270,7 @@ class ContainerSessionSandbox implements SessionSandbox {
   constructor(
     private container: ProcessContainer,
     private scope: Scope.Closeable,
-    private readonly run: PlatformRunner,
+    private readonly run: ProcessRunnerLegacy,
     private readonly logger: Logger | undefined,
     // The legacy noop sandbox is reusable; each new generation gets a fresh
     // Scope. A removed cgroup remains closed and never reopens implicitly.

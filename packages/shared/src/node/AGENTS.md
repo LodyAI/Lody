@@ -15,6 +15,9 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
 - Effect callers use `effect/process` commands and `ChildProcessSpawner`,
   provided by `ProcessSpawnerLive` with Lody's bounded backend. Process acquisition
   requires Scope; only legacy Promise entry points use raw handle compatibility.
+  Temporary execution entry points carry the `Legacy` suffix and `@deprecated`;
+  keep it visible in imports and calls. New Effect workflows compose core APIs
+  and execute once at their owning application entry point.
   Use the workspace Effect v4 catalog and `Context.Service` / `Layer.effect`;
   follow the pinned-version APIs in cli-effect-ts, not v3 compatibility helpers.
 - New or refactored process callers use the official Effect service or shared

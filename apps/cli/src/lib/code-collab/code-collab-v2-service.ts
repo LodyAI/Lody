@@ -56,7 +56,7 @@ import {
 import { formatErrorMessage } from '@/utils/format-error';
 import { getLogger } from '@/utils/logger';
 import { runCommandOk } from '@lody/shared/node/process';
-import { makeProcessRunner as makePlatformRunner, runCommandText } from '@lody/shared/node/process';
+import { makeProcessRunnerLegacy, runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import { CodeCollabFileIndexChangedPublishError } from './code-collab-flock-publish';
@@ -2986,7 +2986,7 @@ async function runGit(
   args: readonly string[]
 ): Promise<{ ok: true; stdout: string } | { ok: false }> {
   try {
-    const { stdout } = await runCommandText(
+    const { stdout } = await runCommandTextLegacy(
       {
         command: 'git',
         args: ['-C', cwd, ...args],
@@ -3001,7 +3001,7 @@ async function runGit(
   }
 }
 
-const runPlatformCommand = makePlatformRunner(toShared({}));
+const runPlatformCommand = makeProcessRunnerLegacy(toShared({}));
 
 async function runGitBuffer(
   cwd: string,

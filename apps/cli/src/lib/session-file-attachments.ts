@@ -3,7 +3,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 /**
  * Directory (relative to the session workspace root) where human→agent file
@@ -123,7 +123,7 @@ export const computeExcludeFileContent = (existingContent: string): string | nul
 export const resolveGitInfoExcludePath = async (workspaceRoot: string): Promise<string | null> => {
   try {
     // `--git-path info/exclude` resolves correctly for worktrees/submodules.
-    const { stdout } = await runCommandText(
+    const { stdout } = await runCommandTextLegacy(
       {
         command: 'git',
         args: ['rev-parse', '--git-path', 'info/exclude'],

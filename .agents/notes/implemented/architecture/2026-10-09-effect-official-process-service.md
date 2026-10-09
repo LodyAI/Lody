@@ -91,7 +91,7 @@ The shared Promise runner forwards an explicit AbortSignal to runPromiseExit.
 It still starts a separate root fiber: wrapping it in tryPromise without forwarding
 that signal cannot propagate cancellation, and even forwarding a signal does not
 make an outer Promise wrapper await the nested finalizers automatically. Effect
-callers must yield the service. Synchronous legacy startProcess remains manually
+callers must yield the service. Synchronous legacy startProcessLegacy remains manually
 owned and supports an explicit signal; callers needing proof of termination await
 its terminate method. It is not represented as a scoped Effect acquisition.
 
@@ -103,6 +103,19 @@ import shared compatibility APIs directly with these options. The process core,
 ACP callers, containers and this decision belong to #1065. Remaining CLI import
 changes and guard guidance belong to #1069; cross-runtime consumers inherit the
 service through #1348 without another implementation.
+
+After #1065 merged, [#1069](https://github.com/LodyAI/Lody/pull/1069) names all
+nine shared execution facades with a Legacy suffix and marks them deprecated.
+The runner and manually owned handle types also carry that suffix. Text and Sync
+still describe output and blocking behavior; Legacy identifies temporary
+compatibility, not another process implementation. Old exports are removed and
+callers use the full names without aliases hiding the suffix. New Effect programs
+compose the core and leave execution to their owning entry point. Layer builders,
+pure conversion helpers and Effect-returning core APIs keep their names. The
+process guard rejects retired entry names and aliases hiding Legacy. Cross-runtime
+consumers are updated in #1348. This changes names and documentation only; explicit
+cancellation, typed failures, bounded tree termination and Scope retirement retain
+the existing implementation and behavioral tests.
 
 ## Validation and limits
 

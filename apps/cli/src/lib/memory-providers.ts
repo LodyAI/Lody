@@ -1,5 +1,5 @@
 import { toShared } from '@/platform/process-options';
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { z } from 'zod';
 import {
@@ -17,7 +17,7 @@ type CommandResult = { stdout: string; code?: string | number };
 export type MemoryCommandRunner = (args: string[]) => Promise<CommandResult>;
 const runNmem: MemoryCommandRunner = async (args) => {
   try {
-    const result = await runCommandText(
+    const result = await runCommandTextLegacy(
       {
         command: 'nmem',
         args,

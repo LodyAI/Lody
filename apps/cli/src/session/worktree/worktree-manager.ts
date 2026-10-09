@@ -9,7 +9,7 @@ import { withFileLock } from '@/utils/file-lock';
 import { redactUrlAuth } from '@/utils/github';
 import { getCredentialHelperHostPath } from '@/lib/git-credential-helper-script';
 import { formatErrorMessage } from '@/utils/format-error';
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { CommandTimedOut } from '@lody/shared/node/process';
 import type { NodeProcessApi } from '@lody/shared/node/process';
@@ -362,7 +362,7 @@ export class WorktreeManager {
       // hung fetch/clone would pin the per-repo worktree lock until the file-lock
       // staleness window frees it. The timeout ends git's whole process tree
       // (remote helpers, credential helpers), not just git itself.
-      result = await runCommandText(
+      result = await runCommandTextLegacy(
         {
           command: 'git',
           args,
@@ -599,7 +599,7 @@ export class WorktreeManager {
     env: NodeJS.ProcessEnv;
   }): Promise<{ exitCode: number | null; returnedCredentials: boolean; stderrNonEmpty: boolean }> {
     const input = `protocol=https\nhost=${options.host}\npath=/${options.repoFullName}.git\n\n`;
-    const { code, stdout, stderr } = await runCommandText(
+    const { code, stdout, stderr } = await runCommandTextLegacy(
       {
         command: 'node',
         args: [options.helperPath, 'get'],

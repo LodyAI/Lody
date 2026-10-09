@@ -1,7 +1,7 @@
 import { toShared } from '@/platform/process-options';
 import { z } from 'zod';
 
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 /**
  * GitHub access for the review engine, over the `gh` CLI.
@@ -41,7 +41,7 @@ export const createGhRunner =
       return { stdout: 'no GitHub credential available', exitCode: 1 };
     }
     try {
-      const result = await runCommandText(
+      const result = await runCommandTextLegacy(
         {
           command: 'gh',
           args,

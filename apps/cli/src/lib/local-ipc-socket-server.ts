@@ -20,7 +20,7 @@ import {
   type LocalSessionControlConfig,
 } from '@/lib/local-session-control';
 import { removeStaleUnixSocket } from '@/lib/stale-unix-socket';
-import { isPidAliveSync } from '@lody/shared/node/process';
+import { isPidAliveSyncLegacy } from '@lody/shared/node/process';
 
 type LocalIpcSocketServerPaths = {
   probeSocketPath?: string;
@@ -88,7 +88,7 @@ function acquireStartupLock(lockFilePath: string): number {
     }
 
     const ownerPid = readLockOwnerPid(lockFilePath);
-    if (ownerPid !== null && isPidAliveSync(ownerPid, toShared())) {
+    if (ownerPid !== null && isPidAliveSyncLegacy(ownerPid, toShared())) {
       throw new Error(`local_ipc_lock_in_use:${lockFilePath}`, { cause: error });
     }
 

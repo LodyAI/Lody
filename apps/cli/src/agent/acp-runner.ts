@@ -14,7 +14,7 @@ import { z } from 'zod';
 
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { startProcess, terminateChildTree } from '@lody/shared/node/process';
+import { startProcessLegacy, terminateChildTreeLegacy } from '@lody/shared/node/process';
 import { withSpawn } from '@/platform/process-options';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
@@ -191,7 +191,7 @@ export async function terminateAcpProcessTree(
     nodeProcess?: NodeProcessApi;
   }
 ): Promise<void> {
-  await terminateChildTree(
+  await terminateChildTreeLegacy(
     child,
     {
       graceMs: options.force ? 0 : options.exitTimeoutMs,
@@ -244,7 +244,7 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
 
   // Its own process group on POSIX (a tree rooted at it on Windows), so
   // `terminateAcpProcessTree` reaches everything the agent starts.
-  return startProcess(
+  return startProcessLegacy(
     {
       command: executable.command,
       args: executable.args,

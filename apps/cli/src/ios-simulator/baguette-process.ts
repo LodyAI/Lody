@@ -1,4 +1,4 @@
-import { startProcess } from '@lody/shared/node/process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import type { SimulatorHostControl } from './host-controls';
@@ -18,7 +18,7 @@ export async function startBaguetteProcess(
   const env: NodeJS.ProcessEnv = {};
   for (const key of ['HOME', 'PATH', 'TMPDIR', 'DEVELOPER_DIR', 'ELECTRON_RUN_AS_NODE'])
     if (process.env[key]) env[key] = process.env[key];
-  const { child: worker } = startProcess({
+  const { child: worker } = startProcessLegacy({
     command: process.execPath,
     args: [workerPath, binary],
     processGroup: false,

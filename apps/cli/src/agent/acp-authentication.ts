@@ -36,7 +36,7 @@ import {
   BuiltinAuthenticationOutputParser,
 } from './acp-authentication-output';
 import { shutdownLocalAcpAgent, spawnAcpProcess, terminateAcpProcessTree } from './acp-runner';
-import { startProcess } from '@lody/shared/node/process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { ManagedRuntimeProgressEvent } from './managed-agent-runtime';
@@ -440,7 +440,7 @@ export async function probeBuiltinAuthentication(
   }
   // Its own group, so a timeout or cancel ends whatever the status command
   // started, not just the command itself.
-  const { child } = startProcess(
+  const { child } = startProcessLegacy(
     {
       command: launch.command,
       args: launch.args,
@@ -699,7 +699,7 @@ export class AcpAuthenticationManager {
       if (preparationInterruption) return preparationInterruption;
 
       options.onProgress?.({ status: 'starting' });
-      const { child } = startProcess(
+      const { child } = startProcessLegacy(
         {
           command: launch.command,
           args: options.codexProfile
