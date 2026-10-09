@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { parseLoginShellEnvOutput, probeLoginShellEnv } from '../src/node/login-shell-env';
-import { isPidAliveSync } from '../src/node/process';
+import { FakeProcessTable } from '../src/node/process-testing';
 
 // Real shells under a throwaway HOME: the probe's contract is what a login
 // shell's rc files leave in its environment.
@@ -28,7 +28,11 @@ describe.skipIf(process.platform === 'win32')('probeLoginShellEnv', () => {
       'echo "welcome banner"\nexport LODY_PROBE_VALUE="$(printf \'one\\ntwo=three\')"\n'
     );
 
-    const result = await probeLoginShellEnv({ shell: '/bin/sh', env: env(), timeout: '10 seconds' });
+    const result = await probeLoginShellEnv({
+      shell: '/bin/sh',
+      env: env(),
+      timeout: '10 seconds',
+    });
 
     expect(result?.LODY_PROBE_VALUE).toBe('one\ntwo=three');
     expect(result?.HOME).toBe(home);
@@ -54,14 +58,44 @@ describe.skipIf(process.platform === 'win32')('probeLoginShellEnv', () => {
 
   // shell-env could not reap a hung shell; the daemon kept it until exit.
   it('ends a shell whose profile hangs and reports no environment', async () => {
-    const pidFile = path.join(home, 'shell.pid');
-    await writeFile(path.join(home, '.profile'), `echo $$ > "${pidFile}"\nsleep 30\n`);
-
-    const result = await probeLoginShellEnv({ shell: '/bin/sh', env: env(), timeout: '1 second' });
-
-    expect(result).toBeNull();
-    const pid = Number((await readFile(pidFile, 'utf8')).trim());
-    expect(isPidAliveSync(pid)).toBe(false);
+    vi.useFakeTimers();
+    try {
+      const table = new FakeProcessTable();
+      table.queueSpawn({ ignores: ['SIGTERM'] });
+      let started!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let pid = -1;
+      let descendant = -1;
+      const result = probeLoginShellEnv({
+        shell: '/bin/sh',
+        env: env(),
+        timeout: '1 second',
+        processOptions: {
+          nodeProcess: {
+            ...table.api,
+            spawn: (command, args, options) => {
+              const child = table.api.spawn(command, args, options);
+              pid = child.pid!;
+              descendant = table.addDescendant(pid, { ignores: ['SIGTERM'] });
+              started();
+              return child;
+            },
+          },
+        },
+      });
+      await ready;
+      await vi.advanceTimersByTimeAsync(999);
+      expect(table.isAlive(pid)).toBe(true);
+      expect(table.isAlive(descendant)).toBe(true);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toBeNull();
+      expect(table.isAlive(pid)).toBe(false);
+      expect(table.isAlive(descendant)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.skipIf(!existsSync('/bin/zsh') && !existsSync('/bin/bash'))(

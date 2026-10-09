@@ -105,3 +105,10 @@ guest helper, fixed xcrun commands and memory-provider CLI calls in #1069.
 IPC ownership and guest EOF release remain with their owners; shared tree
 termination replaces local signal loops. Global-only host Git identity and the
 verified upgrade-installation handoff from main are preserved.
+
+The timeout regressions for the login shell and daemon runner now wait for explicit
+startup and advance virtual time. They still assert that roots and descendants
+stop, and that a survivor reports failure. Disabling command grouping fails the
+shell timeout case. The browser command-builder test only repeated its literal
+mapping; it and the test-only export were removed. Platform opener behavior and
+URL argument passing remain unchanged.

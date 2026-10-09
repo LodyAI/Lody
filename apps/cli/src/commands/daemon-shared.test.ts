@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startProcess } from '@lody/shared/node/process';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
@@ -82,6 +82,8 @@ describe('daemon PID ownership', () => {
 });
 
 describe('daemon runner launch cleanup', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
   it.each(['1.2.2', undefined])(
     'rejects and drains a replacement reporting version %s',
     (cliVersion) => {
@@ -204,13 +206,13 @@ describe('daemon runner launch cleanup', () => {
     const runnerPid = runner.child.pid ?? -1;
     const workerPid = table.addDescendant(runnerPid, { ignores: ['SIGTERM'] });
 
-    await expect(
-      terminateSpawnedDaemonRunner(runner, runnerPid, {
-        shutdownGraceMs: 10,
-        forceKillWaitMs: 1_000,
-        pidFilePath: createPidPath(),
-      })
-    ).resolves.toBe(true);
+    const stopped = terminateSpawnedDaemonRunner(runner, runnerPid, {
+      shutdownGraceMs: 10,
+      forceKillWaitMs: 1_000,
+      pidFilePath: createPidPath(),
+    });
+    await vi.advanceTimersByTimeAsync(1_020);
+    expect(await stopped).toBe(true);
 
     expect(table.isAlive(runnerPid)).toBe(false);
     expect(table.isAlive(workerPid)).toBe(false);
@@ -225,12 +227,12 @@ describe('daemon runner launch cleanup', () => {
       toShared({ nodeProcess: table.api })
     );
 
-    await expect(
-      terminateSpawnedDaemonRunner(runner, runner.child.pid ?? -1, {
-        shutdownGraceMs: 0,
-        forceKillWaitMs: 10,
-        pidFilePath: createPidPath(),
-      })
-    ).resolves.toBe(false);
+    const stopped = terminateSpawnedDaemonRunner(runner, runner.child.pid ?? -1, {
+      shutdownGraceMs: 0,
+      forceKillWaitMs: 10,
+      pidFilePath: createPidPath(),
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(await stopped).toBe(false);
   });
 });

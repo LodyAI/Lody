@@ -8,7 +8,7 @@ type OpenCommand = { readonly command: string; readonly args: readonly string[] 
  * protocol handler directly (as Go's `pkg/browser` does) instead of cmd's
  * `start`, so the URL never passes through cmd's metacharacter parsing.
  */
-export function buildOpenBrowserCommand(url: string, platform: NodeJS.Platform): OpenCommand {
+function buildOpenBrowserCommand(url: string, platform: NodeJS.Platform): OpenCommand {
   switch (platform) {
     case 'darwin':
       return { command: 'open', args: [url] };

@@ -75,3 +75,8 @@ Git、worktree setup/GC、daemon 命令、MCP、preview、文件扫描、资源�
 合并当前 main 后，#1069 也迁移新加入的 Simulator worker、原生服务、guest helper、
 固定 xcrun 命令和 memory provider 命令。IPC 所有权及 guest EOF 释放仍由原模块负责，
 进程树终止复用共享层；保留 main 的全局 Git 身份读取和已验证升级安装路径交接。
+
+登录 shell 和 daemon runner 的超时回归测试改为确认启动后推进虚拟时钟，继续检查根进程与
+后代退出，以及幸存进程必须报告失败。禁用命令进程组会使 shell 超时案例失败。
+浏览器命令构造器测试仅重复其字面量映射，已连同仅供测试的导出删除；平台打开方式与 URL
+参数传递不变。
