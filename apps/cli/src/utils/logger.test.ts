@@ -4,7 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import winston from 'winston';
-import { createFileTransport, createLogger, resolveFileLogLevel } from './logger';
+import { Console } from 'node:console';
+import { Writable } from 'node:stream';
+import {
+  createFileTransport,
+  createLogger,
+  resolveFileLogLevel,
+  routeLoggerToStderr,
+} from './logger';
 import {
   FILE_LOG_FAILURE_REPORT_INTERVAL_MS,
   FILE_LOG_RETRY_INTERVAL_MS,
@@ -12,6 +19,39 @@ import {
 } from './resilient-file-transport';
 
 describe('WinstonLogger', () => {
+  it('routes root and child diagnostics to stderr while preserving structured stdout', async () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const stdout = new Writable({
+      write(chunk, _encoding, done) {
+        out.push(String(chunk));
+        done();
+      },
+    });
+    const stderr = new Writable({
+      write(chunk, _encoding, done) {
+        err.push(String(chunk));
+        done();
+      },
+    });
+    vi.stubGlobal('console', new Console({ stdout, stderr }));
+    const logger = createLogger({ level: 'debug' });
+    const restore = routeLoggerToStderr(logger);
+    try {
+      logger.info('root diagnostic');
+      logger.child({ scope: 'child' }).debug('child diagnostic');
+      expect(out.join('')).toBe('');
+      expect(err.join('')).toContain('root diagnostic');
+      expect(err.join('')).toContain('child diagnostic');
+      restore();
+      logger.info('normal console');
+      expect(out.join('')).toContain('normal console');
+    } finally {
+      restore();
+      vi.unstubAllGlobals();
+      await logger.close();
+    }
+  });
   it('keeps nested child logger methods bound when passed as callbacks', () => {
     const rootLogger = createLogger({ transports: 'console', level: 'silent' });
     const createChild = rootLogger.child;

@@ -274,11 +274,18 @@ the new capability. Only legacy Claude/Grok titles are trusted without a tag.
 See the [contract](../../../../specs/acp-session-titles.md) and
 [original compatibility decision](../../../../.agents/notes/implemented/architecture/2026-09-08-acp-owned-session-titles.md).
 
-The daemon does not name branches. A worktree session stays on the `session/<id>` branch
-`worktree-manager.ts` created for it. [WorkspaceGitService](../session/workspace-git-service.ts)
+The daemon does not name branches. A worktree session starts on the temporary branch
+`worktree-manager.ts` created for it (`session/<id>` for GitHub, `lody/<id>` for shared-local
+projects, with collision suffixes). [WorkspaceGitService](../session/workspace-git-service.ts)
 observes branch changes independently of GitHub; its lifecycle and activation triggers are
-defined by the [checkout branch contract](../../../../specs/workspace-branch-state.md). For GitHub projects the agent is asked to do exactly that — see
-`GITHUB_WORKTREE_SYSTEM_COMMANDS` in `session/session-execution-helpers.ts`.
+defined by the [checkout branch contract](../../../../specs/workspace-branch-state.md).
+`NEW_WORKTREE_SYSTEM_COMMANDS` in `session/session-execution-helpers.ts` asks the agent to
+rename that temporary ref before starting the first task in an ordinary new independent
+GitHub or local worktree. Execution selects this guidance by logical first use, including
+prepared-worktree adoption; direct local directories, child Tabs, prior/resumed ACP
+Sessions, later turns, and the separate Fork path are excluded. Existing descriptive
+branches are preserved, and rename failures do not block work. This prompt is guidance,
+not a daemon-enforced rename; title notifications do not trigger it.
 
 This used to be an automatic prompt-to-branch rename, removed because it could not be made
 safe. A branch name is a ref: it reaches the remote as soon as the session opens a PR, so

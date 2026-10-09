@@ -1228,7 +1228,7 @@ export class LoroDocumentManager {
 
   async getOrCreateSessionDoc(
     sessionId: SessionId,
-    options: { historyBackend?: SessionHistoryBackendKind } = {}
+    options: { historyBackend?: SessionHistoryBackendKind; skipAutoRead?: boolean } = {}
   ): Promise<SessionDocument> {
     const docId = getSessionRoomId(sessionId);
     // An activated SessionDocument owns the live cloud room from here on. Stop
@@ -1269,7 +1269,10 @@ export class LoroDocumentManager {
         (!isLoroRepoDocDeleted(meta)
           ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
           : undefined);
-      await sessionDoc.init(historyBackend ? { historyBackend } : undefined);
+      // Observation commands own an isolated manager and must not arm execution's
+      // auto-seen/model-summary writers. This option applies to a new open only;
+      // it never changes the policies of an already-owned cached document.
+      await sessionDoc.init({ historyBackend, skipAutoRead: options.skipAutoRead });
       // If cleanup ran while we were initializing, destroy the orphaned doc
       // instead of registering it (cleanUp/cleanSessionDoc only sees this.sessions).
       if (sessionDoc.isDestroyed) {

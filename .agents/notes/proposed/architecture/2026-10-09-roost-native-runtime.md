@@ -76,11 +76,14 @@ signed host SQLite reopen passes. Foreign binaries are selected on disk, not run
 The first desktop build identified an outdated 0.1.0 pin in the CLI publication
 gate. It now matches the tested 0.1.1 manifest and lockfile, and the actual bundled
 runtime smoke passes.
-The latest main adds read-only Session observation and conflicts with the existing
-command imports. Merge it into the feature branch while preserving both the
-Roost backend and observation command, then validate the merged source and a
-normal macOS arm64 directory package with packaged Worker SQLite reopen probes.
-Record final results here before handoff.
+Merged main `5fc401b5ca46eb62d85449b1d8ea19308d58eadf` into the feature branch.
+The only conflict was adjacent Session command imports; retain both the Roost
+backend installation and the new read-only observation command. The Codex
+submodule is checked out at main's recorded commit. Frozen installation, complete
+`pnpm check`, formatting and documentation checks pass on the merged worktree:
+CLI 3590 tests with four existing skips, shared components 4890 tests and Electron
+214 tests. Public/platform guards pass. Desktop build and the normal macOS arm64
+directory-package probes remain to be completed before handoff.
 
 ### Platform package compatibility (2026-10-09)
 

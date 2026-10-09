@@ -217,10 +217,10 @@ lody project delete --help
 
 ## 桌面端命令
 
-| 命令                   | 作用                                     | 帮助命令                      |
-| ---------------------- | ---------------------------------------- | ----------------------------- |
-| `lody app [path]`      | 打开桌面端，并在新会话中选中指定目录     | `lody app --help`             |
-| `lody app reset-cache` | 让桌面端在下次启动时清空本地缓存         | `lody app reset-cache --help` |
+| 命令                   | 作用                                 | 帮助命令                      |
+| ---------------------- | ------------------------------------ | ----------------------------- |
+| `lody app [path]`      | 打开桌面端，并在新会话中选中指定目录 | `lody app --help`             |
+| `lody app reset-cache` | 让桌面端在下次启动时清空本地缓存     | `lody app reset-cache --help` |
 
 ### 桌面端窗口卡死后的恢复方式
 
@@ -246,7 +246,7 @@ Session 命令是 CLI 中最核心的一组工作流命令。
 使用前建议先了解：
 
 - `session create`、`session chat`、`session cancel` 需要当前机器上有 `lody start` 或 `lody daemon start` 正在运行
-- `session list`、`history`、`show`、`rename`、`archive`、`restore`、`delete` 只要求已登录且有 workspace 访问权限
+- `session list`、`history`、`observe`、`show`、`rename`、`archive`、`restore`、`delete` 只要求已登录且有 workspace 访问权限
 - 如果你还不知道 workspace ID 或 slug，可以先执行 [`lody workspace list`](#workspace-命令)
 - `sessionId` 可以显式传入，也可以通过环境变量 `LODY_SESSION_ID` 提供
 
@@ -257,6 +257,7 @@ Session 命令是 CLI 中最核心的一组工作流命令。
 | `lody session cancel`  | 取消当前机器上某个 session 正在运行的 turn | 是                   | `lody session cancel --help`  |
 | `lody session list`    | 列出某个 workspace 下的 session            | 否                   | `lody session list --help`    |
 | `lody session history` | 读取用户可见的对话 transcript              | 否                   | `lody session history --help` |
+| `lody session observe` | 查询并持续观察持久化 Session 状态          | 否                   | `lody session observe --help` |
 | `lody session show`    | 查看 session 元数据                        | 否                   | `lody session show --help`    |
 | `lody session rename`  | 重命名 session                             | 否                   | `lody session rename --help`  |
 | `lody session archive` | 归档 session                               | 否                   | `lody session archive --help` |
@@ -368,6 +369,43 @@ lody session history <sessionId> --jsonl
 
 ```bash
 lody session history --help
+```
+
+### session observe
+
+附着到已有 Session，不发送任务、不改写消息已读状态。
+当前需要 Cloud 登录与 Workspace 访问权限，尚不支持仅通过本地 daemon 附着。
+
+```bash
+lody session observe <sessionId> --json
+lody session observe <sessionId> --jsonl --follow
+lody session observe --workspace my-team --all --jsonl --follow
+```
+
+不传 `--follow` 时输出快照后退出。Follow 必须配合 `--jsonl`，会保持附着并观察后续任务，
+与输出已有历史后退出的 `history --jsonl` 不同。
+Workspace 模式同时要求 `--workspace` 与 `--all`，拒绝位置参数 Session ID，
+并忽略 `LODY_SESSION_ID`。
+
+JSONL 事件包括 `snapshot`、`ready`、`session.changed`、`turn.started`、
+`turn.finished`、`session.removed`。每条成功事件含 `version: 1`、`streamId`、
+`sequence`、`observedAt`（Unix 毫秒）与 `workspaceId`。
+`turn.finished` 包含 User/可选 Assistant ID 和 `outcome: completed | failed | canceled`。
+初始快照包含 `latestTurn`，快速任务完成后仍能读取结果，但不会将旧任务重放为事件。
+
+Session 快照区分 `source: persisted | metadata` 和 `freshness: synced | unavailable`。
+Workspace `ready` 只表示目录枚举完成，不表示每个历史房间都已打开；
+仅元数据来源的 Session 为 `state: unknown`。
+历史 idle 房间保持关闭，其仅历史变化不属于 Workspace follow 范围，需要时单独附着。
+完成需要持久化任务证据，不能依据元数据 idle 或 Presence 消失。
+新鲜度表示同步确认的读取，不证明 Agent 当前在线。
+
+Sequence 仅排序当前进程，不支持跨进程恢复或保证重放。
+重启后需核对快照与历史。普通流式正文不输出，结构化诊断写 stderr，
+命令错误沿用既有 CLI 格式。Ctrl+C 停止观察，不取消任务。
+
+```bash
+lody session observe --help
 ```
 
 ### session show
