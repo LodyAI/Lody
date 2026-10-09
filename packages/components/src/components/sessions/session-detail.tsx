@@ -3195,13 +3195,9 @@ const SessionDetail = ({
     }
     const activeChatRef = chatRefsMap.current.get(activeTabSessionId);
     if (activeChatRef && 'openSearch' in activeChatRef) {
-      captureSessionDetailEvent('session/search_open_requested', {
-        tab_session_id: activeTabSessionId,
-        source: 'session_detail_menu',
-      });
       activeChatRef.openSearch();
     }
-  }, [activeDraftTab, activeTabSessionId, captureSessionDetailEvent]);
+  }, [activeDraftTab, activeTabSessionId]);
 
   // Single fork entry point for every launcher: the header/footer action forks
   // into a top tab, the side-panel launcher forks into a right-hand panel.

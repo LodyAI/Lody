@@ -5766,15 +5766,20 @@ export const SessionChatInterface = memo(
         cancel_turn_id: turnIdToCancel,
         goal_thread_id: goalToPause?.threadId ?? null,
       };
-      captureSessionEvent('session/stop_requested', stopAnalyticsProperties);
+      const stopStartedAtMs = getPerformanceNowMs();
       try {
         await requestSessionCancel(session.id, turnIdToCancel);
-        captureSessionEvent('session/stop_request_succeeded', stopAnalyticsProperties);
+        // The request helper resolved; this does not acknowledge a stopped turn.
+        captureSessionEvent('session/stop_request_succeeded', {
+          ...stopAnalyticsProperties,
+          duration_ms: getDurationSinceMs(stopStartedAtMs),
+        });
       } catch (error) {
         console.error('Failed to request session cancel', error);
         pendingUserInterruptRef.current = false;
         captureSessionEvent('session/stop_request_failed', {
           ...stopAnalyticsProperties,
+          duration_ms: getDurationSinceMs(stopStartedAtMs),
           error_name: error instanceof Error ? error.name : typeof error,
           error_message: getErrorMessage(error),
         });
@@ -5943,19 +5948,18 @@ export const SessionChatInterface = memo(
 
     const handleReorderQueueItem = useCallback(
       async (activeCid: string, overCid: string) => {
+        const startedAtMs = getPerformanceNowMs();
         try {
-          captureSessionEvent('session/queue_item_reorder_requested', {
-            queue_item_id: activeCid,
-            over_queue_item_id: overCid,
-          });
           await reorderMessageQueueItem(activeCid, overCid);
           captureSessionEvent('session/queue_item_reordered', {
+            duration_ms: getDurationSinceMs(startedAtMs),
             queue_item_id: activeCid,
             over_queue_item_id: overCid,
           });
         } catch (error) {
           console.error('Failed to reorder queued message', error);
           captureSessionEvent('session/queue_item_reorder_failed', {
+            duration_ms: getDurationSinceMs(startedAtMs),
             queue_item_id: activeCid,
             over_queue_item_id: overCid,
             error_name: error instanceof Error ? error.name : typeof error,
