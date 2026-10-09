@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { Duration, Effect, TestClock, TestContext } from 'effect';
+import { Duration, Effect } from 'effect';
+import { TestClock } from 'effect/testing';
 import {
   createLocalReconnectLoop,
   type LocalReconnectLoop,
@@ -38,7 +39,7 @@ const withTestLoop = (
 ): Promise<void> =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const runtime = yield* Effect.runtime<never>();
+      const services = yield* Effect.context<never>();
       const calls: Array<{ force: boolean; triggerReason?: LocalReconnectTriggerReason }> = [];
       let hasProblem = false;
       let canRun = true;
@@ -53,7 +54,7 @@ const withTestLoop = (
         },
       };
       harness.loop = createLocalReconnectLoop({
-        runtime,
+        services,
         canRun: () => canRun,
         hasProblem: () => hasProblem,
         reconnect: async (context) => {
@@ -66,7 +67,7 @@ const withTestLoop = (
       });
       yield* body(harness);
       harness.loop.stop();
-    }).pipe(Effect.provide(TestContext.TestContext))
+    }).pipe(Effect.provide(TestClock.layer()))
   );
 
 describe('createLocalReconnectLoop', () => {

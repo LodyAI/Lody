@@ -316,7 +316,7 @@ type TurnRuntimeState = {
    * which would otherwise read as a user cancellation.
    */
   initializationStalled: boolean;
-  fiber?: Fiber.RuntimeFiber<unknown, unknown>;
+  fiber?: Fiber.Fiber<unknown, unknown>;
 };
 
 export type PendingInputCancellationPolicy = 'promote' | 'preserve';
@@ -2227,7 +2227,7 @@ export class SessionExecutionService {
   ): Effect.Effect<void, never, never> {
     return effect.pipe(
       Effect.asVoid,
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.sync(() => {
           this.deps.logger.warn(`[${sessionId}] ${description}: ${formatErrorMessage(error)}`);
         })
@@ -2236,7 +2236,7 @@ export class SessionExecutionService {
   }
 
   private async awaitTurnFiber<T>(
-    fiber: Fiber.RuntimeFiber<T, unknown>,
+    fiber: Fiber.Fiber<T, unknown>,
     sessionId: SessionId,
     turnId: string
   ): Promise<T> {
@@ -2244,11 +2244,11 @@ export class SessionExecutionService {
     if (Exit.isSuccess(exit)) {
       return exit.value;
     }
-    const failure = Cause.failureOption(exit.cause);
+    const failure = Cause.findErrorOption(exit.cause);
     if (failure._tag === 'Some') {
       throw failure.value;
     }
-    if (Cause.isInterrupted(exit.cause)) {
+    if (Cause.hasInterrupts(exit.cause)) {
       throw new SessionTurnCancelled({ sessionId, turnId });
     }
     throw new Error(Cause.pretty(exit.cause));
@@ -2469,7 +2469,7 @@ export class SessionExecutionService {
     sessionDoc: SessionDocument,
     runtime: TurnRuntimeState
   ): Effect.Effect<never, unknown, never> {
-    return Effect.async<SessionInitializationStall, never>((resume) => {
+    return Effect.callback<SessionInitializationStall, never>((resume) => {
       const waiter = (stall: SessionInitializationStall): void => {
         resume(Effect.succeed(stall));
       };
@@ -2623,7 +2623,7 @@ export class SessionExecutionService {
           self.clearCurrentTurn(options.sessionId, options.turnId);
         })
       ),
-      Effect.catchAll((error) =>
+      Effect.catch((error) =>
         Effect.sync(() => {
           self.deps.logger.warn(
             `[${options.sessionId}] Failed to finalize cancelled turn ${options.turnId}: ${formatErrorMessage(error)}`
@@ -3387,7 +3387,7 @@ export class SessionExecutionService {
       Effect.acquireRelease(Effect.succeed(runtime), (turnRuntime, exit) =>
         Effect.gen(function* () {
           yield* Effect.promise(() => turnRuntime.yieldedFinalization);
-          const wasInterrupted = Exit.isFailure(exit) && Cause.isInterrupted(exit.cause);
+          const wasInterrupted = Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause);
           const wasCancelled =
             turnRuntime.cancelRequested ||
             self.isTurnCancelled(sessionId, turnRuntime.turnId) ||
@@ -3627,7 +3627,7 @@ export class SessionExecutionService {
                         )
                       )
                       .pipe(
-                        Effect.catchAll((error) =>
+                        Effect.catch((error) =>
                           Effect.sync(() => {
                             runtime.promptFailed = true;
                           }).pipe(Effect.flatMap(() => Effect.fail(error)))
@@ -4512,7 +4512,7 @@ export class SessionExecutionService {
         });
 
         return yield* restoreAttempt.pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.gen(function* () {
               yield* ctx.abortIfCancelled();
               const errMessage = formatErrorMessage(error);
@@ -4600,7 +4600,7 @@ export class SessionExecutionService {
                 });
 
                 return yield* fallbackAttempt.pipe(
-                  Effect.catchAll((fallbackError) =>
+                  Effect.catch((fallbackError) =>
                     Effect.gen(function* () {
                       yield* ctx.abortIfCancelled();
                       const fallbackErrMessage = formatErrorMessage(fallbackError);
@@ -4817,7 +4817,7 @@ export class SessionExecutionService {
           promptBlocks: ContentBlock[]
         ): Effect.Effect<void, unknown, Scope.Scope> =>
           prompt(promptBlocks).pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.gen(function* () {
                 const hasPromptOutput =
                   self.deps.hasPromptOutputForTurn?.(sessionId, runtime.turnId) ?? false;
@@ -5001,7 +5001,7 @@ export class SessionExecutionService {
             )
           )
           .pipe(
-            Effect.catchAll((error) =>
+            Effect.catch((error) =>
               Effect.sync(() => {
                 self.deps.logger.error(
                   `[${sessionId}] Failed to process message queue after chat completion: ${formatErrorMessage(error)}`
@@ -5078,7 +5078,7 @@ export class SessionExecutionService {
                 `[${sessionId}] Session is still initializing; waiting for readiness`
               );
               readySession = yield* ctx.trackPendingSession(pending).pipe(
-                Effect.catchAll((error: unknown) =>
+                Effect.catch((error: unknown) =>
                   Effect.gen(function* () {
                     yield* ctx.abortIfCancelled();
                     const errMessage = formatErrorMessage(error);

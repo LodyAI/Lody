@@ -1630,10 +1630,12 @@ describe('SessionDispatchWatcher', () => {
       { timeout: 3_000 }
     );
     expect(h.startSession).not.toHaveBeenCalled();
-    expect(recordChatFailure).toHaveBeenCalledWith(
-      expect.anything(),
-      'machine_access_denied',
-      expect.any(String)
+    await vi.waitFor(() =>
+      expect(recordChatFailure).toHaveBeenCalledWith(
+        expect.anything(),
+        'machine_access_denied',
+        expect.any(String)
+      )
     );
 
     h.watcher.stop();
@@ -1952,9 +1954,9 @@ describe('SessionDispatchWatcher', () => {
       },
       updateHistory,
     });
-    await expect(
-      promoteNextQueuedMessage(failingDoc, failingMeta, [])
-    ).rejects.toThrow('synthetic-write-rejected');
+    await expect(promoteNextQueuedMessage(failingDoc, failingMeta, [])).rejects.toThrow(
+      'synthetic-write-rejected'
+    );
     expect(remainingQueue).toHaveLength(1);
     expect(remainingQueue[0]?.userTurnId).toBe(turnId);
   });

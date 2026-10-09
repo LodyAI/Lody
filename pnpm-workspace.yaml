@@ -46,7 +46,8 @@ catalog:
   better-sqlite3: ^13.0.2
   convex: ^1.33.1
   devframe: 1.0.0
-  effect: 3.18.4
+  effect: 4.0.0
+  '@effect/vitest': 4.0.0
   jotai: ^2.16.0
   loro-adaptors: ^0.6.1
   loro-crdt: 1.16.3

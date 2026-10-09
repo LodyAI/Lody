@@ -3585,10 +3585,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
               },
               { timeoutMs: SESSION_CONTROL_TIMEOUT_MS }
             )
-            .pipe(Effect.either)
+            .pipe(Effect.result)
         );
-        if (outcome._tag === 'Left') throw classifyLocalDaemonIpcError(outcome.left);
-        const response = outcome.right;
+        if (outcome._tag === 'Failure') throw classifyLocalDaemonIpcError(outcome.failure);
+        const response = outcome.success;
         if (!response.ok) throw new Error(response.error);
         if (!('type' in response.result) || response.result.type !== 'session/tool-result')
           throw new Error('Unexpected Session tool response');

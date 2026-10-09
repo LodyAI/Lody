@@ -384,22 +384,22 @@ export async function ensureDaemonReachable(options: LocalIpcDiscoveryOptions = 
   // A 2xx whose body fails health validation still means the daemon is serving
   // the probe (e.g. CLI/daemon version skew), so we must not report it as down.
   const outcome = await Effect.runPromise(
-    Effect.either(
+    Effect.result(
       makeLocalProbeClientAuto(options).health({
         timeoutMs: DAEMON_HEALTH_PROBE_TIMEOUT_MS,
       })
     )
   );
-  if (outcome._tag === 'Left') {
+  if (outcome._tag === 'Failure') {
     if (
-      outcome.left instanceof IpcProtocolError &&
-      typeof outcome.left.status === 'number' &&
-      outcome.left.status >= 200 &&
-      outcome.left.status < 300
+      outcome.failure instanceof IpcProtocolError &&
+      typeof outcome.failure.status === 'number' &&
+      outcome.failure.status >= 200 &&
+      outcome.failure.status < 300
     ) {
       return;
     }
-    throw classifyLocalDaemonIpcError(outcome.left);
+    throw classifyLocalDaemonIpcError(outcome.failure);
   }
 }
 
@@ -410,16 +410,16 @@ export async function dispatchLocalControl(
   // Send the real request once. A health preflight doubles local IPC traffic and
   // cannot distinguish a daemon that exits between the probe and the request.
   const outcome = await Effect.runPromise(
-    Effect.either(
+    Effect.result(
       makeLocalControlClientAuto(options).sessionControl(message, {
         timeoutMs: readLocalControlTimeoutMs(),
       })
     )
   );
-  if (outcome._tag === 'Left') {
-    throw classifyLocalDaemonIpcError(outcome.left);
+  if (outcome._tag === 'Failure') {
+    throw classifyLocalDaemonIpcError(outcome.failure);
   }
-  return outcome.right;
+  return outcome.success;
 }
 
 export function resolveStructuredOutputMode(

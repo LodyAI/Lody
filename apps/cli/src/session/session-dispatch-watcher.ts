@@ -122,7 +122,7 @@ type SessionDispatchWatcherDeps = {
 /** A running verify-with-retry fiber for a transient access failure on `turnId`. */
 type AccessRetryHandle = {
   turnId: string;
-  fiber: Fiber.RuntimeFiber<void, never>;
+  fiber: Fiber.Fiber<void, never>;
 };
 
 type WatchedSession = {
