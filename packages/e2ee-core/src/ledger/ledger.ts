@@ -1,3 +1,4 @@
+import { historicalContentIdentity } from '../pure/content-policy';
 /** Promise/throw facade over the native verification workflows.
  * It owns no replay, signature or policy logic: every state transition runs
  * `workflows/verification.ts`, and every rule lives in pure/. */
@@ -167,6 +168,11 @@ export class Ledger {
   /** Whether this signing key was ever admitted as a device here, including revoked ones. */
   wasDeviceAdmitted(deviceIdHex: string): boolean {
     return this.#internal.usedSigningKeys.has(deviceIdHex);
+  }
+
+  /** Original membership from verified replay; snapshots may retain device evidence only. */
+  contentIdentity(deviceIdHex: string) {
+    return historicalContentIdentity(this.#internal, deviceIdHex);
   }
 
   hasRecordHash(digest: Hash): boolean {

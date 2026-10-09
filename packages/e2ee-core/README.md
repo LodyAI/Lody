@@ -207,6 +207,22 @@ facts it was verified with, shared only by the `Ledger` values derived from it.
 `check:effect-boundaries --complete` requires zero workflow imports of `../ledger/`
 and rejects replay-policy imports, module-level mutable state and runtime starts
 outside `ledger/compat.ts` in `ledger/`.
+
+Content packets now use compact v2: 1B version, u32be epoch, raw 32B signing
+public key, 24B nonce, ciphertext with one 16B tag, and 64B signature. Fixed
+inner overhead is 141B. Caller-owned Org/document/purpose bind key derivation,
+AAD and signatures; `authenticate(scope, frame, additionalData?)` requires independent scope and binding.
+`inspectContent` returns only unverified version/epoch/device, not identity claims.
+`Ledger.contentIdentity` / `LedgerView.contentIdentity` recover original authors
+from verified replay; snapshot-only missing mappings return device-only explicitly.
+New writes/readers are v2-only; retain v1 experiments with a pinned old reader and
+use new Lab directories. Ledger/envelope/72B-history formats are unchanged.
+See the bilingual [content spec](../../specs/e2ee-content.md) and
+[decision with measurements](../../.agents/notes/implemented/architecture/2026-10-09-e2ee-content-v2.md).
+Measure encoded bodies (not network traffic) with
+`pnpm --filter @lody/e2ee-core exec node --import tsx bench/content-packet-size.ts`;
+optionally pass the pristine v1 `src` path archived from `35bfca7e` for comparison.
+
 `pure/content-frame.ts` and `workflows/content.ts` own content parse/seal/open;
 `ContentCipher` is the Promise unwrap (`ContentError` → `ControlLogError`).
 Policy callback throws stay defects. Listed Promise SDK/app boundaries:
@@ -628,8 +644,8 @@ native/JS string copies and initially exportable generation handles are not guar
 Three additional tests restore real signatures/DH through the recovery-file cipher,
 reject authenticated-but-mismatched key material, and capture input before async crypto.
 
-`ContentCipher` provides `seal({ scope, author, epochKey, signingKey, plaintext })`,
-`authenticate(frame)`, and `open(scope, epochKey, frame)`. The caller supplies a
+`ContentCipher` provides `seal({ scope, author, epochKey, signingKey, plaintext, additionalData? })`,
+`authenticate(scope, frame, additionalData?)`, and `open(scope, epochKey, frame, additionalData?)`. The caller supplies a
 mandatory `ContentPolicy.authorize(header)` that returns a verified signing key or
 throws. It must select the appropriate current/historical authorization and epoch
 eligibility; this package never trusts a header's identity claims or installs an
@@ -642,10 +658,11 @@ Scope binds Org genesis, epoch, logical resource ID and purpose. Purposes distin
 Loro/Flock updates and snapshots, blobs, presence, RPC requests and responses. Keys are
 derived with native HKDF-SHA-256; payloads use pinned
 [@noble/ciphers 2.1.1 XChaCha20-Poly1305](https://github.com/paulmillr/noble-ciphers/tree/2.1.1),
-with a fresh random 24-byte nonce and 16-byte message ID for every encryption. No caller-supplied
+with a fresh random 24-byte nonce for every encryption. No caller-supplied
 nonce is accepted. Retry an existing transmission with the original signed bytes.
-The complete header is authenticated as AAD; strict Ed25519 covers the header, nonce,
-ciphertext and tag. Native signing can retain a non-extractable device private key.
+Trusted scope and the fixed prefix are authenticated as AAD; strict Ed25519 covers
+scope, header, nonce, ciphertext and tag. Optional external AAD (at most 1024B) binds
+both AEAD and signature without being copied into plaintext or the packet. Native signing can retain a non-extractable device private key.
 
 `inspectContent(frame)` only exposes **unverified** metadata to locate a known epoch key.
 Successful inspection, decryption or signature verification alone does not authorize a
@@ -654,8 +671,7 @@ source evidence, application runtime wiring, key distribution and production
 admission are still pending. Tests relay genuine Loro updates and Loro/Flock snapshots;
 they do not establish original authorship of every operation inside a merged snapshot.
 
-The experimental frame accepts at most 16 MiB of plaintext and a 4096-byte canonical
-header, with no plaintext/version fallback. This is an in-memory primitive, not large-file
+The experimental v2 frame accepts at most 16 MiB of plaintext with 141B fixed overhead, with no plaintext/version fallback. This is an in-memory primitive, not large-file
 chunking or a whole-application attachment size guarantee. It copies mutable inputs before
 awaiting and clears temporary raw key/plaintext buffers on completion; JavaScript/Web Crypto
 do not guarantee erasure of all runtime copies. See the protocol draft for exact framing.
@@ -802,13 +818,16 @@ one logical resource, CRDT model, author and write epoch; historical keys come f
 a caller-owned local lookup. Drain and replace the room session for an epoch change.
 No Org, bucket or server URL is added to the synchronization library's abstraction.
 
-The opaque provider header is one byte (`1` update, `2` snapshot). The complete
-content frame is the sealed body. Inside its authenticated ciphertext is
-`u16be(aad.length) || aad ||` optional snapshot `u16be(offset.length) || offset ||`
-originalPayload, binding the exact SDK-supplied AAD (bounded to 1024 bytes) and,
-for snapshots, the opaque continuation offset. The provider invokes the SDK's AAD
-builder once, checks the binding before returning plaintext, and declares its
-outgoing overhead within the SDK's 4096-byte cap. Existing update framing is
+The opaque provider header is one byte (`3` update, `4` snapshot); earlier `1`/`2`
+AAD-copy headers are rejected. The complete content frame is the sealed body.
+The provider invokes the SDK's AAD builder once and passes its exact bytes as
+external `additionalData` to AEAD and signing, without embedding them in plaintext.
+Update plaintext is the original batch. Snapshot plaintext retains
+`u16be(offsetUtf8.length) || offsetUtf8 || originalPayload` and checks the bound
+continuation offset before returning plaintext. The host reconstructs the same
+51B SDK AAD from the validated envelope before signature verification. Provider
+max overhead is 1168B including a maximum snapshot offset; an update POST body is
+`batch + 156B`, saving 53B per encrypted batch. The SDK's 4096-byte cap remains. Existing update framing is
 unchanged; no alternate crypto suite.
 
 Honest clients require `mayWriteDocument` to **seal** updates and snapshots. That does not

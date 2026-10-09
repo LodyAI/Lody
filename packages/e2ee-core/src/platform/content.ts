@@ -5,7 +5,7 @@ import {
   checkContentSigningKey,
   contentKeyInfo,
   CONTENT_HKDF_SALT,
-  type ContentHeader,
+  type ContentScope,
   type ContentPolicy,
 } from '../pure/content-frame';
 import { ContentError, CryptoError } from '../pure/errors';
@@ -45,7 +45,7 @@ export function contentAuthorityLayer(policy: ContentPolicy): Layer.Layer<Conten
         Effect.flatMap((key) =>
           Effect.gen(function* () {
             yield* Effect.fromResult(checkContentSigningKey(key));
-            if (expected !== undefined && key !== expected)
+            if (key !== header.device || (expected !== undefined && key !== expected))
               return yield* Effect.fail(new ContentError({ code: 'content-authority-changed' }));
             return key;
           })
@@ -67,9 +67,9 @@ export function contentCryptoLayer(
         },
         catch: (error) => error,
       }).pipe(Effect.catch(contentFailure)),
-    derive: (epochKey, header: ContentHeader) => {
+    derive: (epochKey, scope: ContentScope) => {
       const snapshot = new Uint8Array(epochKey);
-      const info = contentKeyInfo(header);
+      const info = contentKeyInfo(scope);
       if (Result.isFailure(info)) {
         snapshot.fill(0);
         return Effect.fail(info.failure);

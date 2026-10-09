@@ -82,7 +82,7 @@ function providerFor(
   return createStreamsContentProvider({
     cipher: new ContentCipher({
       authorize(header) {
-        if (header.actor !== author.actor) throw new Error('unauthorized');
+        if (header.device !== signingPublic) throw new Error('unauthorized');
         return signingPublic;
       },
     }),
@@ -90,7 +90,7 @@ function providerFor(
     resource,
     model: 'loro',
     writeEpoch,
-    author,
+    author: { ...author, device: signingPublic },
     signingKey,
     readKey,
     mayWriteDocument: () => true,
@@ -166,7 +166,7 @@ it('catchup decrypts a Loro update with keys recovered from the public ledger AP
     createStreamsContentProvider({
       cipher: new ContentCipher({
         authorize(header) {
-          if (header.actor !== docAuthor.actor) throw new Error('unauthorized');
+          if (header.device !== signingPublic) throw new Error('unauthorized');
           return signingPublic;
         },
       }),
@@ -174,7 +174,7 @@ it('catchup decrypts a Loro update with keys recovered from the public ledger AP
       resource: 'doc-1',
       model: 'loro',
       writeEpoch: 1,
-      author: docAuthor,
+      author: { ...docAuthor, device: signingPublic },
       signingKey: pair.privateKey,
       readKey: (epoch) => recovered.get(epoch),
     });
@@ -265,7 +265,7 @@ it('catchup decrypts a Loro update with keys recovered from the public ledger AP
         resource: 'doc-1',
         model: 'loro',
         writeEpoch: 1,
-        author,
+        author: { ...author, device: signingPublic },
         signingKey: pair.privateKey,
         readKey: () => random(32),
       }),
@@ -530,7 +530,7 @@ describe('C1 public-export catchup variants', () => {
     const provider = createStreamsContentProvider({
       cipher: new ContentCipher({
         authorize(header) {
-          if (header.actor !== author.actor) throw new Error('unauthorized');
+          if (header.device !== signingPublic) throw new Error('unauthorized');
           return signingPublic;
         },
       }),
@@ -538,7 +538,7 @@ describe('C1 public-export catchup variants', () => {
       resource: 'flock-1',
       model: 'flock',
       writeEpoch: 1,
-      author,
+      author: { ...author, device: signingPublic },
       signingKey: pair.privateKey,
       readKey: (epoch) => recovered.get(epoch),
     });
@@ -618,4 +618,117 @@ describe('C1 public-export catchup variants', () => {
       })
     ).rejects.toThrow(/invalid-snapshot-offset/);
   });
+});
+
+it('restores original author membership from verified history and reports missing snapshot history explicitly', async () => {
+  const { Ledger } = await import('../src/ledger');
+  const { signJoin } = await import('./ledger-fixtures');
+  const { joinRequestSigningBytes } = await import('../src/ledger/schema');
+  const { contentAuthorKey } = await import('../src/streams-content');
+  const { Result } = await import('effect');
+  const owner = await ed25519();
+  const created = await signGenesis(owner);
+  const oldPair = await crypto.subtle.generateKey('Ed25519', false, ['sign', 'verify']);
+  const oldDevice = {
+    publicKey: new Uint8Array(await crypto.subtle.exportKey('raw', oldPair.publicKey)),
+    enc: (await ed25519()).enc,
+    sign: async (bytes: Uint8Array) =>
+      new Uint8Array(
+        await crypto.subtle.sign('Ed25519', oldPair.privateKey, new Uint8Array(bytes))
+      ),
+  };
+  const join = await signJoin(created.anchor, oldDevice);
+  const firstMembership = random(16);
+  const records = [created.record];
+  let ledger = created.ledger;
+  async function step(signer: typeof owner, operation: Parameters<typeof append>[2]) {
+    const next = await append(ledger, signer, operation);
+    ledger = next.ledger;
+    records.push(next.record);
+  }
+  await step(owner, { type: 'admitMember', membershipId: firstMembership, request: join });
+  const oldAuthor = {
+    device: hex(oldDevice.publicKey),
+    actor: hex(join.userId),
+    memberInstance: hex(firstMembership),
+  };
+  const scope = {
+    genesis: hex(created.anchor),
+    epoch: 0,
+    resource: 'history-doc',
+    purpose: 'doc-update' as const,
+  };
+  const key = random(32);
+  const cipher = new ContentCipher({
+    authorize: (header) =>
+      Result.getOrThrowWith(
+        contentAuthorKey(ledger.state, header, (id) => ledger.wasDeviceAdmitted(id)),
+        (e) => e
+      ),
+  });
+  const frame = await cipher.seal({
+    scope,
+    author: oldAuthor,
+    epochKey: key,
+    signingKey: oldPair.privateKey,
+    plaintext: new Uint8Array([1, 2, 3]),
+  });
+  await step(owner, { type: 'removeMember', membershipId: firstMembership });
+  const replacement = await ed25519();
+  const fresh = { ...(await signJoin(created.anchor, replacement)), userId: join.userId };
+  fresh.signature = await replacement.sign(joinRequestSigningBytes(created.anchor, fresh));
+  const secondMembership = random(16);
+  await step(owner, { type: 'admitMember', membershipId: secondMembership, request: fresh });
+  expect(ledger.contentIdentity(oldAuthor.device)).toEqual({ kind: 'member', ...oldAuthor });
+  expect(ledger.contentIdentity(hex(replacement.publicKey))).toMatchObject({
+    kind: 'member',
+    actor: oldAuthor.actor,
+    memberInstance: hex(secondMembership),
+  });
+  const restored = await Ledger.verify({ anchor: created.anchor, records });
+  expect(restored.contentIdentity(oldAuthor.device)).toEqual(
+    ledger.contentIdentity(oldAuthor.device)
+  );
+  expect((await cipher.open(scope, key, frame)).plaintext).toEqual(new Uint8Array([1, 2, 3]));
+  const proposal = ledger.prepareSnapshot(owner.publicKey);
+  const snapshot = await Ledger.finalizeSnapshot(proposal, await owner.sign(proposal.signingBytes));
+  const joined = await Ledger.verifySnapshot({
+    snapshot,
+    trust: {
+      genesis: created.anchor,
+      endorser: owner.publicKey,
+      head: proposal.head,
+      headSignature: await owner.sign(proposal.headAttestationSigningBytes),
+    },
+  });
+  expect(joined.contentIdentity(oldAuthor.device)).toEqual({
+    kind: 'device-only',
+    device: oldAuthor.device,
+    reason: 'missing-history-context',
+  });
+  expect(joined.contentIdentity(hex(replacement.publicKey))).toMatchObject({
+    kind: 'member',
+    memberInstance: hex(secondMembership),
+  });
+  const snapshotReader = new ContentCipher({
+    authorize: (header) =>
+      Result.getOrThrowWith(
+        contentAuthorKey(joined.state, header, (id) => joined.wasDeviceAdmitted(id)),
+        (e) => e
+      ),
+  });
+  expect((await snapshotReader.open(scope, key, frame)).header).toEqual({
+    ...scope,
+    device: oldAuthor.device,
+  });
+  expect(joined.contentIdentity(hex((await ed25519()).publicKey))).toBeUndefined();
+  await expect(
+    step(replacement, {
+      type: 'admitDevice',
+      kind: 'personal',
+      signingPublicKey: oldDevice.publicKey,
+      encryptionPublicKey: oldDevice.enc,
+      possessionSignature: random(64),
+    })
+  ).rejects.toThrow();
 });

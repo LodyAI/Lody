@@ -803,6 +803,8 @@ export function acquireDemoHost(options: DemoHostOptions) {
                         leaseExpiresAt: credential.expiresAt,
                         expectedGenesis: genesisHex,
                         expectedResource: resource,
+                        expectedPurpose:
+                          stream === FLOCK_STREAM ? 'flock-snapshot' : 'doc-snapshot',
                       })
                     );
                     // An idempotent retry of an older snapshot must not move Riverrun's current back.

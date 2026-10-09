@@ -31,45 +31,48 @@ export interface ContentAuthor {
   readonly device: string;
 }
 
-export interface ContentHeader extends ContentScope, ContentAuthor {
-  readonly messageId: string;
+/** Verified context plus the signing device. No claimed user/member identity. */
+export interface ContentHeader extends ContentScope {
+  readonly device: string;
 }
-
+export interface ContentMetadata {
+  readonly version: 2;
+  readonly epoch: number;
+  readonly device: string;
+}
 export interface ContentPolicy {
-  /** Return a key from verified authority or throw. Called again after async crypto.
-   * The caller owns freshness, historical-author rules and epoch eligibility.
-   * This is NOT command execution authorization or durable replay protection. */
+  /** Resolve only through this Org's verified authority; rechecked after crypto.
+   * Historical signature validity is separate from publication permission. */
   authorize(header: Readonly<ContentHeader>): string;
 }
-
 export interface SealContent {
   readonly scope: ContentScope;
+  /** Local caller identity only; actor/memberInstance are never encoded or trusted. */
   readonly author: ContentAuthor;
   readonly epochKey: Uint8Array;
   readonly signingKey: CryptoKey;
   readonly plaintext: Uint8Array;
+  /** Independent authenticated bytes; never embedded in the content frame. */
+  readonly additionalData?: Uint8Array;
 }
-
 export interface ParsedContentFrame {
-  readonly header: ContentHeader;
-  readonly aad: Uint8Array;
+  readonly header: ContentMetadata;
   readonly nonce: Uint8Array;
+  /** ciphertext || 16-byte AEAD tag. */
   readonly ciphertext: Uint8Array;
   readonly unsigned: Uint8Array;
   readonly signatureHex: string;
 }
-
 export const MAX_CONTENT_BYTES = 16 * 1024 * 1024;
-export const MAX_CONTENT_HEADER_BYTES = 4096;
 export const CONTENT_NONCE_BYTES = 24;
 export const CONTENT_TAG_BYTES = 16;
 export const CONTENT_SIGNATURE_BYTES = 64;
 export const CONTENT_KEY_BYTES = 32;
-export const CONTENT_DOMAIN = 'lody-content/v1';
-export const CONTENT_SIGNATURE_DOMAIN = new TextEncoder().encode('lody-content-signature/v1\0');
-
+export const CONTENT_PREFIX_BYTES = 37;
+export const CONTENT_OVERHEAD_BYTES = 141;
+export const CONTENT_VERSION = 2;
+export const MAX_CONTENT_ADDITIONAL_DATA_BYTES = 1024;
 const encoder = new TextEncoder();
-const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const PURPOSES: readonly ContentPurpose[] = [
   'doc-update',
   'doc-snapshot',
@@ -82,166 +85,150 @@ const PURPOSES: readonly ContentPurpose[] = [
   'rpc-response',
 ];
 const fail = (code: string) => Result.fail(new ContentError({ code }));
-
-export function contentSigningBytes(unsigned: Uint8Array): Uint8Array<ArrayBuffer> {
-  return concat([CONTENT_SIGNATURE_DOMAIN, unsigned]);
+const domain = (name: string) => encoder.encode(`lody-content-${name}/v2\0`);
+export const CONTENT_HKDF_SALT = domain('hkdf');
+function u32(value: number): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, value, false);
+  return bytes;
 }
-
+function fromHex(value: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(value.match(/../g)!, (byte) => Number.parseInt(byte, 16));
+}
 export function copyContentKey(
   key: Uint8Array
 ): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
-  if (!(key instanceof Uint8Array) || key.byteLength !== CONTENT_KEY_BYTES)
-    return fail('invalid-content-key');
-  return Result.succeed(copyBytes(key));
+  return key instanceof Uint8Array && key.byteLength === CONTENT_KEY_BYTES
+    ? Result.succeed(copyBytes(key))
+    : fail('invalid-content-key');
 }
-
 export function checkContentSigningKey(value: unknown): Result.Result<string, ContentError> {
-  if (typeof value !== 'string' || !/^(?:[0-9a-f]{2})*$/.test(value)) return fail('invalid-hex');
-  if (value.length !== 64) return fail('invalid-length');
-  const bytes = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) bytes[i] = Number.parseInt(value.slice(i * 2, i * 2 + 2), 16);
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value))
+    return fail('invalid-signing-key');
   return Result.map(
     Result.mapError(
-      signingPublicKey(bytes),
+      signingPublicKey(fromHex(value)),
       () => new ContentError({ code: 'invalid-signing-key' })
     ),
     () => value
   );
 }
-
-export function contentScopeParts(scope: ContentScope): Result.Result<string[], ContentError> {
-  if (typeof scope.genesis !== 'string' || !/^(?:[0-9a-f]{2})*$/.test(scope.genesis))
-    return fail('invalid-hex');
-  if (scope.genesis.length !== 64) return fail('invalid-length');
-  if (!Number.isSafeInteger(scope.epoch) || scope.epoch < 0) return fail('invalid-content-epoch');
+/** Canonical context: raw genesis(32), u32be epoch, u16be ASCII resource length,
+ * resource(1..1024 printable ASCII), purpose code(1..9). Never a transport URL. */
+export function encodeContentContext(
+  scope: ContentScope
+): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
+  if (typeof scope.genesis !== 'string' || !/^[0-9a-f]{64}$/.test(scope.genesis))
+    return fail('invalid-content-genesis');
+  if (!Number.isInteger(scope.epoch) || scope.epoch < 0 || scope.epoch > 0xffffffff)
+    return fail('invalid-content-epoch');
   if (typeof scope.resource !== 'string' || !/^[\x21-\x7e]{1,1024}$/.test(scope.resource))
     return fail('invalid-content-resource');
-  if (!PURPOSES.includes(scope.purpose)) return fail('invalid-content-purpose');
-  return Result.succeed([scope.genesis, String(scope.epoch), scope.resource, scope.purpose]);
+  const purpose = PURPOSES.indexOf(scope.purpose);
+  if (purpose < 0) return fail('invalid-content-purpose');
+  const resource = encoder.encode(scope.resource);
+  const length = new Uint8Array(2);
+  new DataView(length.buffer).setUint16(0, resource.byteLength, false);
+  return Result.succeed(
+    concat([
+      fromHex(scope.genesis),
+      u32(scope.epoch),
+      length,
+      resource,
+      new Uint8Array([purpose + 1]),
+    ])
+  );
 }
-
 export function encodeContentHeader(
   header: ContentHeader
 ): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
   return Result.gen(function* () {
-    const scope = yield* contentScopeParts(header);
-    for (const id of [header.actor, header.memberInstance, header.device]) {
-      if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(id))
-        return yield* fail('invalid-content-author');
-    }
-    if (typeof header.messageId !== 'string' || !/^(?:[0-9a-f]{2})*$/.test(header.messageId))
-      return yield* fail('invalid-hex');
-    if (header.messageId.length !== 32) return yield* fail('invalid-length');
-    const encoded = encoder.encode(
-      JSON.stringify([
-        CONTENT_DOMAIN,
-        ...scope,
-        header.actor,
-        header.memberInstance,
-        header.device,
-        header.messageId,
-      ])
-    );
-    if (encoded.byteLength > MAX_CONTENT_HEADER_BYTES)
-      return yield* fail('content-header-too-large');
-    return encoded;
+    yield* encodeContentContext(header);
+    yield* checkContentSigningKey(header.device);
+    return concat([new Uint8Array([CONTENT_VERSION]), u32(header.epoch), fromHex(header.device)]);
   });
 }
-
 export function contentKeyInfo(
-  header: ContentHeader
+  scope: ContentScope
 ): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
-  return Result.map(contentScopeParts(header), (scope) =>
-    encoder.encode(JSON.stringify(['lody-content-key/v1', ...scope]))
-  );
+  return Result.map(encodeContentContext(scope), (context) => concat([domain('key'), context]));
+}
+export function copyContentAdditionalData(
+  value: Uint8Array | undefined
+): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
+  if (value === undefined) return Result.succeed(new Uint8Array());
+  return value instanceof Uint8Array && value.byteLength <= MAX_CONTENT_ADDITIONAL_DATA_BYTES
+    ? Result.succeed(copyBytes(value))
+    : fail('invalid-content-additional-data');
 }
 
-export const CONTENT_HKDF_SALT = encoder.encode('lody-content-hkdf/v1');
-
+function authenticatedBytes(
+  name: 'aad' | 'signature',
+  scope: ContentScope,
+  bytes: Uint8Array,
+  additionalData: Uint8Array | undefined
+): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
+  return Result.gen(function* () {
+    const context = yield* encodeContentContext(scope);
+    const binding = yield* copyContentAdditionalData(additionalData);
+    // Empty binding retains generic v2. A separate domain and length avoid
+    // ambiguity between unbound content and SDK-bound content.
+    if (binding.byteLength === 0) return concat([domain(name), context, bytes]);
+    const length = new Uint8Array(2);
+    new DataView(length.buffer).setUint16(0, binding.byteLength, false);
+    return concat([domain(`${name}-bound`), context, length, binding, bytes]);
+  });
+}
+export function contentAad(
+  scope: ContentScope,
+  prefix: Uint8Array,
+  additionalData?: Uint8Array
+): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
+  return authenticatedBytes('aad', scope, prefix, additionalData);
+}
+export function contentSigningBytes(
+  scope: ContentScope,
+  unsigned: Uint8Array,
+  additionalData?: Uint8Array
+): Result.Result<Uint8Array<ArrayBuffer>, ContentError> {
+  return authenticatedBytes('signature', scope, unsigned, additionalData);
+}
 export function parseContentFrame(
   frame: Uint8Array
 ): Result.Result<ParsedContentFrame, ContentError> {
-  const min = 2 + CONTENT_NONCE_BYTES + CONTENT_TAG_BYTES + CONTENT_SIGNATURE_BYTES;
-  const max =
-    MAX_CONTENT_BYTES +
-    MAX_CONTENT_HEADER_BYTES +
-    2 +
-    CONTENT_NONCE_BYTES +
-    CONTENT_TAG_BYTES +
-    CONTENT_SIGNATURE_BYTES;
-  if (!(frame instanceof Uint8Array) || frame.byteLength < min || frame.byteLength > max)
+  if (
+    !(frame instanceof Uint8Array) ||
+    frame.byteLength < CONTENT_OVERHEAD_BYTES ||
+    frame.byteLength > MAX_CONTENT_BYTES + CONTENT_OVERHEAD_BYTES
+  )
     return fail('invalid-content-frame');
+  if (frame[0] !== CONTENT_VERSION) return fail('unsupported-content-version');
   const wire = copyBytes(frame);
-  const size = new DataView(wire.buffer).getUint16(0);
-  const start = 2 + size;
-  if (
-    size <= 0 ||
-    size > MAX_CONTENT_HEADER_BYTES ||
-    wire.byteLength < start + CONTENT_NONCE_BYTES + CONTENT_TAG_BYTES + CONTENT_SIGNATURE_BYTES
-  )
-    return fail('invalid-content-frame');
-  if (
-    wire.byteLength - start - CONTENT_NONCE_BYTES - CONTENT_TAG_BYTES - CONTENT_SIGNATURE_BYTES >
-    MAX_CONTENT_BYTES
-  )
-    return fail('content-too-large');
-  const aad = wire.subarray(2, start);
-  let text: string;
-  let fields: unknown;
-  try {
-    text = decoder.decode(aad);
-    fields = JSON.parse(text);
-  } catch {
-    return fail('invalid-content-header');
-  }
-  if (
-    !Array.isArray(fields) ||
-    fields.length !== 9 ||
-    !fields.every((field) => typeof field === 'string')
-  )
-    return fail('invalid-content-header');
-  const values = fields as string[];
-  if (values[0] !== CONTENT_DOMAIN) return fail('unsupported-content-version');
-  if (!/^(0|[1-9][0-9]*)$/.test(values[2]!)) return fail('invalid-content-epoch');
-  const purpose = values[4];
-  if (!PURPOSES.includes(purpose as ContentPurpose)) return fail('invalid-content-purpose');
-  const header: ContentHeader = Object.freeze({
-    genesis: values[1]!,
-    epoch: Number(values[2]),
-    resource: values[3]!,
-    purpose: purpose as ContentPurpose,
-    actor: values[5]!,
-    memberInstance: values[6]!,
-    device: values[7]!,
-    messageId: values[8]!,
-  });
-  return Result.flatMap(encodeContentHeader(header), (canonical) => {
-    if (decoder.decode(canonical) !== text) return fail('noncanonical-content-header');
-    return Result.succeed({
-      header,
-      aad,
-      nonce: wire.subarray(start, start + CONTENT_NONCE_BYTES),
-      ciphertext: wire.subarray(start + CONTENT_NONCE_BYTES, -CONTENT_SIGNATURE_BYTES),
-      unsigned: wire.subarray(0, -CONTENT_SIGNATURE_BYTES),
-      signatureHex: keyId(wire.subarray(-CONTENT_SIGNATURE_BYTES)),
-    });
-  });
+  const device = keyId(wire.subarray(5, CONTENT_PREFIX_BYTES));
+  return Result.map(checkContentSigningKey(device), () => ({
+    header: Object.freeze({
+      version: CONTENT_VERSION,
+      epoch: new DataView(wire.buffer).getUint32(1, false),
+      device,
+    }),
+    nonce: wire.subarray(CONTENT_PREFIX_BYTES, CONTENT_PREFIX_BYTES + CONTENT_NONCE_BYTES),
+    ciphertext: wire.subarray(CONTENT_PREFIX_BYTES + CONTENT_NONCE_BYTES, -CONTENT_SIGNATURE_BYTES),
+    unsigned: wire.subarray(0, -CONTENT_SIGNATURE_BYTES),
+    signatureHex: keyId(wire.subarray(-CONTENT_SIGNATURE_BYTES)),
+  }));
 }
-
-export function inspectContentFrame(frame: Uint8Array): Result.Result<ContentHeader, ContentError> {
+export function inspectContentFrame(
+  frame: Uint8Array
+): Result.Result<ContentMetadata, ContentError> {
   return Result.map(parseContentFrame(frame), (parsed) => parsed.header);
 }
-
 export function assembleUnsignedContent(
-  aad: Uint8Array,
+  prefix: Uint8Array,
   nonce: Uint8Array,
   ciphertext: Uint8Array
 ): Uint8Array<ArrayBuffer> {
-  const length = new Uint8Array(2);
-  new DataView(length.buffer).setUint16(0, aad.byteLength);
-  return concat([length, aad, nonce, ciphertext]);
+  return concat([prefix, nonce, ciphertext]);
 }
-
 export function assembleContentFrame(
   unsigned: Uint8Array,
   signature: Uint8Array
@@ -271,10 +258,6 @@ export function decryptContent(
     try: () => xchacha20poly1305(key, nonce, aad).decrypt(ciphertext),
     catch: () => new ContentError({ code: 'content-authentication-failed' }),
   });
-}
-
-export function contentScopeBinding(scope: ContentScope): Result.Result<string, ContentError> {
-  return Result.map(contentScopeParts(scope), (parts) => JSON.stringify(parts));
 }
 
 export function hexBytes(bytes: Uint8Array): string {

@@ -3,10 +3,16 @@ import {
   ContentCipher,
   inspectContent,
   MAX_CONTENT_BYTES,
+  CONTENT_OVERHEAD_BYTES,
   type ContentAuthor,
   type ContentPurpose,
 } from './content';
 import { invariant } from './wire';
+import {
+  STREAMS_UPDATE_HEADER as UPDATE_HEADER,
+  STREAMS_SNAPSHOT_HEADER as SNAPSHOT_HEADER,
+} from './pure/streams-content';
+export { streamsContentAdditionalData } from './pure/streams-content';
 export { contentAuthorKey, deviceMayWriteDocument, maySealNewContent } from './pure/content-policy';
 
 export interface StreamsContentOptions {
@@ -32,8 +38,6 @@ export interface StreamsContentOptions {
 
 const MAX_AAD = 1024;
 const MAX_OFFSET = 1024;
-const UPDATE_HEADER = 1;
-const SNAPSHOT_HEADER = 2;
 const encoder = new TextEncoder();
 
 function continuationOffset(context: PayloadProtectionContext): string {
@@ -59,21 +63,7 @@ export function createStreamsContentProvider(
   invariant(model === 'loro' || model === 'flock', 'invalid-content-model');
   const updatePurpose: ContentPurpose = model === 'loro' ? 'doc-update' : 'flock-update';
   const snapshotPurpose: ContentPurpose = model === 'loro' ? 'doc-snapshot' : 'flock-snapshot';
-  const headerBound = new TextEncoder().encode(
-    JSON.stringify([
-      'lody-content/v1',
-      genesis,
-      String(Number.MAX_SAFE_INTEGER),
-      resource,
-      snapshotPurpose,
-      author.actor,
-      author.memberInstance,
-      author.device,
-      '0'.repeat(32),
-    ])
-  ).byteLength;
-  const overhead = 1 + headerBound + 2 + 24 + 16 + 64 + 2 + MAX_AAD + 2 + MAX_OFFSET;
-  invariant(overhead <= 4096, 'streams-content-overhead-too-large');
+  const overhead = 1 + CONTENT_OVERHEAD_BYTES + 2 + MAX_OFFSET;
   function context(value: PayloadProtectionContext): 'update_batch' | 'snapshot' {
     invariant(
       value.protocol === 'loro-streams-crdt-payload-protection' && value.version === 2,
@@ -101,12 +91,13 @@ export function createStreamsContentProvider(
     return kind === 'snapshot' ? snapshotPurpose : updatePurpose;
   }
   return {
-    // Provider header + content header/length/nonce/tag/signature + inner AAD/offset framing.
+    // Provider header + content frame + snapshot offset framing; AAD stays external.
     maxSealOverheadBytes: overhead,
     async seal(input) {
       const kind = context(input.context);
       const isSnapshot = kind === 'snapshot';
       const offset = isSnapshot ? encoder.encode(continuationOffset(input.context)) : null;
+      invariant(offset === null || offset.byteLength <= MAX_OFFSET, 'invalid-snapshot-offset');
       if (isSnapshot) {
         invariant(mayWriteDocument?.(author) === true, 'unauthorized');
       } else if (mayWriteDocument) {
@@ -116,22 +107,15 @@ export function createStreamsContentProvider(
       }
       const header = new Uint8Array([isSnapshot ? SNAPSHOT_HEADER : UPDATE_HEADER]);
       const binding = aad(input.additionalData(header));
-      const offsetBytes = 2 + (offset === null ? 0 : 2 + offset.byteLength);
+      const offsetBytes = offset === null ? 0 : 2 + offset.byteLength;
       invariant(
         input.plaintext instanceof Uint8Array &&
-          input.plaintext.byteLength <= MAX_CONTENT_BYTES - offsetBytes - binding.byteLength,
+          input.plaintext.byteLength <= MAX_CONTENT_BYTES - offsetBytes,
         'content-too-large'
       );
-      const payload = new Uint8Array(
-        2 +
-          binding.byteLength +
-          (offset === null ? 0 : 2 + offset.byteLength) +
-          input.plaintext.byteLength
-      );
+      const payload = new Uint8Array(offsetBytes + input.plaintext.byteLength);
       const view = new DataView(payload.buffer);
-      view.setUint16(0, binding.byteLength);
-      payload.set(binding, 2);
-      let cursor = 2 + binding.byteLength;
+      let cursor = 0;
       if (offset !== null) {
         view.setUint16(cursor, offset.byteLength);
         payload.set(offset, cursor + 2);
@@ -145,6 +129,7 @@ export function createStreamsContentProvider(
           signingKey,
           epochKey: key(writeEpoch),
           plaintext: payload,
+          additionalData: binding,
         });
         return { header, sealed };
       } finally {
@@ -163,27 +148,15 @@ export function createStreamsContentProvider(
       // Inspect bounds before copying; copy before calling the key resolver.
       const metadata = inspectContent(input.sealed);
       const frame = new Uint8Array(input.sealed);
-      invariant(
-        metadata.genesis === genesis &&
-          metadata.resource === resource &&
-          metadata.purpose === purposeFor(kind),
-        'content-context-mismatch'
-      );
       const opened = await cipher.open(
         { genesis, resource, purpose: purposeFor(kind), epoch: metadata.epoch },
         key(metadata.epoch),
-        frame
+        frame,
+        binding
       );
       try {
         const bytes = opened.plaintext;
-        invariant(
-          bytes.byteLength >= 2 + binding.byteLength &&
-            new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint16(0) ===
-              binding.byteLength &&
-            binding.every((byte, i) => bytes[2 + i] === byte),
-          'streams-aad-mismatch'
-        );
-        let cursor = 2 + binding.byteLength;
+        let cursor = 0;
         if (expectedOffset !== null) {
           invariant(bytes.byteLength >= cursor + 2, 'invalid-snapshot-offset');
           const offsetLength = new DataView(

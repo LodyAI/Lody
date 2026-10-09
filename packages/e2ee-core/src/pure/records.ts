@@ -1,3 +1,4 @@
+import { historicalContentIdentity } from './content-policy';
 import { Result } from 'effect';
 import type { GenesisHash, RecordHash, SigningPublicKey } from './bytes';
 import { bytesEqual } from './cbor';
@@ -49,6 +50,9 @@ class ViewValue {
   }
   get length(): number {
     return this.#state.hashes.length;
+  }
+  contentIdentity(deviceIdHex: string) {
+    return historicalContentIdentity(this.#state, deviceIdHex);
   }
   get deviceCount(): number {
     return this.#state.devices.size;

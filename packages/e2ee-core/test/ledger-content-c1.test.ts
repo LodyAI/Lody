@@ -142,7 +142,7 @@ function providerFor(
   return createStreamsContentProvider({
     cipher: new ContentCipher({
       authorize(header) {
-        if (header.actor !== author.actor) throw new Error('unauthorized');
+        if (header.device !== signingPublic) throw new Error('unauthorized');
         return signingPublic;
       },
     }),
@@ -150,7 +150,7 @@ function providerFor(
     resource,
     model: resource.startsWith('flock') ? 'flock' : 'loro',
     writeEpoch,
-    author,
+    author: { ...author, device: signingPublic },
     signingKey,
     readKey,
     mayWriteDocument: () => true,
@@ -518,11 +518,11 @@ describe('C1 public-API streams-crdt over a real Durable Streams peer', () => {
     const publication = createContentSnapshotPublication({
       cipher: new ContentCipher({
         authorize(header) {
-          if (header.actor !== author.actor) throw new Error('unauthorized');
+          if (header.device !== signingPublic) throw new Error('unauthorized');
           return signingPublic;
         },
       }),
-      mayWriteDocument: (who) => who.device === author.device,
+      mayWriteDocument: (who) => who.device === signingPublic,
       now: () => clock.now,
     });
     const { server, streamUrl } = await listenDurableContent(undefined, {
@@ -531,6 +531,7 @@ describe('C1 public-API streams-crdt over a real Durable Streams peer', () => {
           ...input,
           expectedGenesis: hex(anchor),
           expectedResource: 'doc-snap-ok',
+          expectedPurpose: 'doc-snapshot' as const,
         }),
     });
     servers.push({ close: () => closeHttp(server) });
@@ -548,7 +549,7 @@ describe('C1 public-API streams-crdt over a real Durable Streams peer', () => {
       const method = (init?.method ?? 'GET').toUpperCase();
       if (method === 'PUT' && target.pathname.includes('/snapshot/')) {
         const headers = new Headers(init?.headers);
-        headers.set(SNAPSHOT_ADMISSION_DEVICE_HEADER, author.device);
+        headers.set(SNAPSHOT_ADMISSION_DEVICE_HEADER, signingPublic);
         headers.set(SNAPSHOT_ADMISSION_LEASE_ISSUED_HEADER, String(clock.now));
         headers.set(
           SNAPSHOT_ADMISSION_LEASE_EXPIRES_HEADER,

@@ -43,6 +43,16 @@ export function genesisState(
         keyCommitment: copyBytes(fields.epochCommitment),
         rotationRequired: false,
       },
+      contentAuthors: new Map([
+        [
+          signerId,
+          Object.freeze({
+            device: signerId,
+            actor: keyId(userId),
+            memberInstance: keyId(membershipId),
+          }),
+        ],
+      ]),
       usedSigningKeys: new Set([signerId]),
       usedEncKeys: new Set([encId]),
       usedMembershipIds: new Set([keyId(membershipId)]),
@@ -326,7 +336,19 @@ export function applyPolicyChanges(state: InternalState, changes: PolicyChanges)
   }
   for (const [key, value] of changes.devices ?? []) {
     if (value === null) state.devices.delete(key);
-    else state.devices.set(key, value);
+    else {
+      state.devices.set(key, value);
+      const member = state.members.get(keyId(value.membershipId));
+      if (member)
+        state.contentAuthors.set(
+          key,
+          Object.freeze({
+            device: key,
+            actor: keyId(member.userId),
+            memberInstance: keyId(value.membershipId),
+          })
+        );
+    }
   }
   for (const [key, value] of changes.userIndex ?? []) {
     if (value === null) state.userIndex.delete(key);

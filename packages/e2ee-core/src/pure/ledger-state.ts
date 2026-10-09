@@ -33,7 +33,15 @@ export interface HistoryPacketRow {
   packet: Uint8Array;
 }
 
+export interface HistoricalContentAuthor {
+  readonly actor: string;
+  readonly memberInstance: string;
+  readonly device: string;
+}
+
 export interface InternalState {
+  /** Rebuilt by verified replay; never serialized into the ledger/snapshot wire. */
+  contentAuthors: Map<string, HistoricalContentAuthor>;
   genesis: Hash;
   owner: Uint8Array;
   members: Map<string, Member>;
@@ -67,6 +75,7 @@ export function cloneState(state: InternalState): InternalState {
     userIndex: new Map(state.userIndex),
     devices: new Map(Array.from(state.devices, ([id, device]) => [id, freezeDevice(device)])),
     epoch: { ...state.epoch, keyCommitment: copyBytes(state.epoch.keyCommitment) },
+    contentAuthors: new Map(state.contentAuthors),
     usedSigningKeys: new Set(state.usedSigningKeys),
     usedEncKeys: new Set(state.usedEncKeys),
     usedMembershipIds: new Set(state.usedMembershipIds),

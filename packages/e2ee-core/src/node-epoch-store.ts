@@ -65,13 +65,7 @@ function checkHistory(expected: LocalEpochContext, history: string | null): void
   invariant(typeof history === 'string' && history.length <= 8468, 'missing-epoch-history');
   checkHex(history);
   const header = inspectContent(fromHex(history));
-  invariant(
-    header.genesis === expected.genesis &&
-      header.epoch === expected.epoch &&
-      header.resource === 'previous-epoch-key' &&
-      header.purpose === 'epoch-history',
-    'epoch-history-scope-mismatch'
-  );
+  invariant(header.epoch === expected.epoch, 'epoch-history-scope-mismatch');
   // Routing checks only; the publisher verifies keys before sealing and the
   // history uploader verifies signature/plaintext again before remote release.
 }

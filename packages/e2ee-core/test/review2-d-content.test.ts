@@ -35,8 +35,7 @@ function provider(input: {
   return createStreamsContentProvider({
     cipher: new ContentCipher({
       authorize(header) {
-        if (header.actor !== 'A' || header.memberInstance !== 'A1' || header.device !== 'D')
-          throw new Error('unauthorized');
+        if (header.device !== publicKey) throw new Error('unauthorized');
         return publicKey;
       },
     }),
@@ -44,7 +43,7 @@ function provider(input: {
     resource: input.resource ?? 'doc-1',
     model: input.model,
     writeEpoch: input.writeEpoch ?? 0,
-    author: { actor: 'A', memberInstance: 'A1', device: 'D' },
+    author: { actor: 'A', memberInstance: 'A1', device: publicKey },
     signingKey: pair.privateKey,
     readKey: (epoch) => keys[epoch],
     mayWriteDocument: () => true,
@@ -64,7 +63,7 @@ describe('R2-D Flock provider binding', () => {
     ] as const) {
       const u = await writer.seal({ plaintext, context: update, additionalData: () => binding });
       await expect(reader.open({ ...u, context: update, additionalData: binding })).rejects.toThrow(
-        'content-context-mismatch'
+        'bad-content-signature'
       );
       const s = await writer.seal({
         plaintext,
@@ -73,14 +72,14 @@ describe('R2-D Flock provider binding', () => {
       });
       await expect(
         reader.open({ ...s, context: snapshot('00000000000000000042'), additionalData: binding })
-      ).rejects.toThrow('content-context-mismatch');
+      ).rejects.toThrow('bad-content-signature');
     }
   });
 
   it('SAFE: a Flock update relabelled as a snapshot (or the reverse) is refused', async () => {
     const flock = provider({ model: 'flock' });
     const u = await flock.seal({ plaintext, context: update, additionalData: () => binding });
-    expect(inspectContent(u.sealed).purpose).toBe('flock-update');
+    expect(inspectContent(u.sealed)).toEqual({ version: 2, epoch: 0, device: publicKey });
     // Relabel the one-byte provider header too, so only the content purpose can catch it.
     await expect(
       flock.open({
@@ -89,7 +88,7 @@ describe('R2-D Flock provider binding', () => {
         context: snapshot('00000000000000000001'),
         additionalData: binding,
       })
-    ).rejects.toThrow('content-context-mismatch');
+    ).rejects.toThrow('bad-content-signature');
     const s = await flock.seal({
       plaintext,
       context: snapshot('00000000000000000001'),
@@ -102,7 +101,7 @@ describe('R2-D Flock provider binding', () => {
         context: update,
         additionalData: binding,
       })
-    ).rejects.toThrow('content-context-mismatch');
+    ).rejects.toThrow('bad-content-signature');
   });
 
   it('SAFE: Flock cross-resource substitution and wrong-epoch key are refused', async () => {
@@ -115,7 +114,7 @@ describe('R2-D Flock provider binding', () => {
         context: update,
         additionalData: binding,
       })
-    ).rejects.toThrow('content-context-mismatch');
+    ).rejects.toThrow('bad-content-signature');
     // Reader whose slot 1 holds K_0 (e.g. mis-installed): HKDF binds epoch, AEAD fails.
     await expect(
       provider({ model: 'flock', keys: { 1: K0 } }).open({

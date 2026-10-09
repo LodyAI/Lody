@@ -67,8 +67,10 @@ Local deterministic collaboration plus one attack Agent. Not product E2EE.
   Harness clock/failpoints apply only in test mode. Snapshot offsets must be
   within the stream tail; a non-current idempotent retry is not republished.
 - Content signing keys come from the session's verified ledger
-  (`contentAuthorKey`), never from header claims; writers use ledger `userId` and
-  membership as author fields. Sealing checks the key against the commitment.
+  (`contentAuthorKey`), never from packet key possession. v2 carries no author
+  claims; host/session supply independent Org, resource, purpose and exact SDK AAD. Derive original
+  authors with `contentIdentity`; missing snapshot history stays device-only.
+  Sealing checks the key against the commitment.
 - Content seal uses the authenticated ledger epoch, not `max(local keys)`.
   Honest writers refuse to seal while `rotationRequired` (`maySealNewContent`);
   tests that revoke/remove then write must `publishEpoch` first.

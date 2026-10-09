@@ -101,7 +101,7 @@ async function main() {
   const provider = createStreamsContentProvider({
     cipher: new ContentCipher({
       authorize(header) {
-        if (header.actor !== author.actor) throw new Error('unauthorized');
+        if (header.device !== signingPublic) throw new Error('unauthorized');
         return signingPublic;
       },
     }),
@@ -109,7 +109,7 @@ async function main() {
     resource: 'doc-1',
     model: 'loro',
     writeEpoch: 0,
-    author,
+    author: { ...author, device: signingPublic },
     signingKey: pair.privateKey,
     readKey: (epoch) => (epoch === 0 ? k0 : undefined),
   });
@@ -178,7 +178,7 @@ async function main() {
     resource: 'doc-OTHER',
     model: 'loro',
     writeEpoch: 0,
-    author,
+    author: { ...author, device: signingPublic },
     signingKey: pair.privateKey,
     readKey: () => k0,
   });
@@ -205,7 +205,7 @@ async function main() {
     resource: 'doc-1',
     model: 'loro',
     writeEpoch: 0,
-    author,
+    author: { ...author, device: signingPublic },
     signingKey: pair.privateKey,
     readKey: () => random(32),
   });

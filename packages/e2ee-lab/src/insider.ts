@@ -1,5 +1,6 @@
 import { Effect } from 'effect';
 import { ContentCipher } from '@lody/e2ee-core';
+import { streamsContentAdditionalData } from '@lody/e2ee-core/streams-content';
 import { FLOCK_STREAM, LORO_STREAM } from './platform/protocol';
 import { LabHttp, LiveLabHttp, runLabPromise } from './services';
 
@@ -20,63 +21,69 @@ export interface InsiderFrame {
   readonly text: string;
 }
 
-const MARKER = new TextEncoder().encode('["lody-content/v1",');
-const NONCE_TAG_SIGNATURE = 24 + 16 + 64;
 const decoder = new TextDecoder('utf-8', { fatal: false });
-
-/** Opens any well-signed frame: the insider ignores ledger authority entirely. */
+/** Attack-only: deliberately ignores ledger eligibility, never used by honest clients. */
 const permissive = new ContentCipher({ authorize: (header) => header.device });
-
-function markerPositions(bytes: Uint8Array): number[] {
-  const hits: number[] = [];
-  outer: for (let i = 2; i + MARKER.byteLength <= bytes.byteLength; i++) {
-    for (let j = 0; j < MARKER.byteLength; j++) {
-      if (bytes[i + j] !== MARKER[j]) continue outer;
-    }
-    hits.push(i);
-  }
-  return hits;
-}
-
-function headerAt(bytes: Uint8Array, at: number): { epoch: number; aadEnd: number } | null {
-  const size = new DataView(bytes.buffer, bytes.byteOffset + at - 2, 2).getUint16(0);
-  if (at + size > bytes.byteLength) return null;
-  try {
-    const fields = JSON.parse(decoder.decode(bytes.subarray(at, at + size))) as unknown;
-    if (!Array.isArray(fields) || typeof fields[2] !== 'string') return null;
-    const epoch = Number(fields[2]);
-    return Number.isSafeInteger(epoch) ? { epoch, aadEnd: at + size } : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Frames carry no total length and sit inside streams-crdt framing, so the
- * insider tries each end position up to the next header; the AEAD tag and
- * signature reject every wrong boundary.
- */
-async function openAt(
+function contentFrames(
   bytes: Uint8Array,
-  at: number,
-  limit: number,
-  aadEnd: number,
+  snapshot = false
+): { epoch: number; kind: number; frame: Uint8Array; additionalData: Uint8Array }[] {
+  const frames: { epoch: number; kind: number; frame: Uint8Array; additionalData: Uint8Array }[] =
+    [];
+  // LSCE occurs inside the SDK batch framing as well as standalone snapshots.
+  for (let at = 0; at + 10 <= bytes.byteLength; at++) {
+    if (
+      bytes[at] !== 0x4c ||
+      bytes[at + 1] !== 0x53 ||
+      bytes[at + 2] !== 0x43 ||
+      bytes[at + 3] !== 0x45 ||
+      bytes[at + 4] !== 2
+    )
+      continue;
+    const view = new DataView(bytes.buffer, bytes.byteOffset + at, bytes.byteLength - at);
+    const headerLength = view.getUint16(6);
+    if (headerLength !== 1) continue;
+    const start = at + 10 + headerLength;
+    if (start + 141 > bytes.byteLength || bytes[start] !== 2) continue;
+    // Update payloads use the SDK's u32be length framing. Snapshot HTTP bodies
+    // have their own complete boundary; neither requires guessing ciphertext ends.
+    if (!snapshot && at < 4) continue;
+    const end = snapshot
+      ? bytes.byteLength
+      : at + new DataView(bytes.buffer, bytes.byteOffset + at - 4, 4).getUint32(0);
+    if (end < start + 141 || end > bytes.byteLength) continue;
+    frames.push({
+      epoch: new DataView(bytes.buffer, bytes.byteOffset + start).getUint32(1),
+      kind: bytes[at + 5]!,
+      frame: bytes.subarray(start, end),
+      additionalData: streamsContentAdditionalData(bytes.subarray(at, start)),
+    });
+    if (snapshot) break;
+  }
+  return frames;
+}
+async function openFrame(
+  candidate: { epoch: number; kind: number; frame: Uint8Array; additionalData: Uint8Array },
+  genesis: string,
+  stream: string,
   key: Uint8Array
-): Promise<Uint8Array | null> {
-  const header = JSON.parse(decoder.decode(bytes.subarray(at, aadEnd))) as string[];
+) {
   const scope = {
-    genesis: header[1]!,
-    epoch: Number(header[2]),
-    resource: header[3]!,
-    purpose: header[4] as 'doc-update',
+    genesis,
+    epoch: candidate.epoch,
+    resource: stream === FLOCK_STREAM ? 'flock' : 'loro',
+    purpose: (stream === FLOCK_STREAM
+      ? candidate.kind === 2
+        ? 'flock-snapshot'
+        : 'flock-update'
+      : candidate.kind === 2
+        ? 'doc-snapshot'
+        : 'doc-update') as import('@lody/e2ee-core').ContentPurpose,
   };
-  for (let end = aadEnd + NONCE_TAG_SIGNATURE; end <= limit; end++) {
-    try {
-      const opened = await permissive.open(scope, key, bytes.subarray(at - 2, end));
-      return opened.plaintext;
-    } catch {
-      /* wrong boundary or wrong key */
-    }
+  try {
+    return (await permissive.open(scope, key, candidate.frame, candidate.additionalData)).plaintext;
+  } catch {
+    /* unavailable retained key, malformed frame or invalid signature */
   }
   return null;
 }
@@ -110,23 +117,25 @@ function readStreamEffect(
   riverrunUrl: string,
   genesisHex: string,
   stream: string
-): Effect.Effect<Uint8Array | null, never, LabHttp> {
+): Effect.Effect<{ updates: Uint8Array; snapshot: Uint8Array | null } | null, never, LabHttp> {
   return Effect.gen(function* () {
     const http = yield* LabHttp;
     const base = `${riverrunUrl.replace(/\/$/, '')}/ds/${genesisHex}/${stream}`;
     const chunks: Uint8Array[] = [];
+    let snapshot: Uint8Array | null = null;
     let offset = '-1';
     for (let page = 0; page < 256; page++) {
       const response = yield* Effect.tryPromise(() =>
         http.fetch(`${base}?offset=${encodeURIComponent(offset)}`)
       ).pipe(Effect.catch(() => Effect.succeed(null)));
       // A stream that was never created is empty, not unreadable.
-      if (response?.status === 404 && page === 0) return new Uint8Array();
+      if (response?.status === 404 && page === 0)
+        return { updates: new Uint8Array(), snapshot: null };
       if (response?.status === 410 && page === 0) {
         // Compacted: the snapshot replaces the trimmed prefix.
         const compacted = yield* compactedStartEffect(base);
         if (!compacted) return null;
-        if (compacted.snapshot) chunks.push(compacted.snapshot);
+        snapshot = compacted.snapshot;
         offset = compacted.earliest;
         continue;
       }
@@ -155,7 +164,7 @@ function readStreamEffect(
       out.set(chunk, cursor);
       cursor += chunk.byteLength;
     }
-    return out;
+    return { updates: out, snapshot };
   });
 }
 
@@ -176,18 +185,18 @@ export function insiderDecryptEffect(input: {
     for (const stream of input.streams ?? [LORO_STREAM, FLOCK_STREAM]) {
       const bytes = yield* readStreamEffect(input.riverrunUrl, input.genesisHex, stream);
       if (bytes === null) return null;
-      const hits = markerPositions(bytes);
-      for (const [index, at] of hits.entries()) {
-        const header = headerAt(bytes, at);
-        if (!header) continue;
-        const limit = (hits[index + 1] ?? bytes.byteLength + 2) - 2;
-        const key = input.insider.epochKeys.get(header.epoch);
+      const candidates = [
+        ...contentFrames(bytes.updates),
+        ...(bytes.snapshot ? contentFrames(bytes.snapshot, true) : []),
+      ];
+      for (const candidate of candidates) {
+        const key = input.insider.epochKeys.get(candidate.epoch);
         const plaintext = key
-          ? yield* Effect.promise(() => openAt(bytes, at, limit, header.aadEnd, key))
+          ? yield* Effect.promise(() => openFrame(candidate, input.genesisHex, stream, key))
           : null;
         frames.push({
           stream,
-          epoch: header.epoch,
+          epoch: candidate.epoch,
           decrypted: plaintext !== null,
           text: plaintext ? decoder.decode(plaintext) : '',
         });

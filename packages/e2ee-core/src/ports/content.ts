@@ -1,6 +1,6 @@
 import { Context, type Effect } from 'effect';
 import type { ContentError, CryptoError } from '../pure/errors';
-import type { ContentHeader } from '../pure/content-frame';
+import type { ContentHeader, ContentScope } from '../pure/content-frame';
 
 /** Caller-owned authority lookup. Policy throws remain defects at the Promise boundary. */
 export class ContentAuthority extends Context.Service<
@@ -22,7 +22,7 @@ export class ContentCrypto extends Context.Service<
     ) => Effect.Effect<Uint8Array<ArrayBuffer>, CryptoError | ContentError>;
     readonly derive: (
       epochKey: Uint8Array<ArrayBuffer>,
-      header: ContentHeader
+      scope: ContentScope
     ) => Effect.Effect<Uint8Array<ArrayBuffer>, CryptoError | ContentError>;
     readonly sign: (
       signingKey: CryptoKey,

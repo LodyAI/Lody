@@ -190,8 +190,6 @@ describe('design probes: binding, host cache, guest content', () => {
           removed.state,
           {
             genesis: alice.genesisHex!,
-            actor: 'ab'.repeat(32),
-            memberInstance: 'cd'.repeat(32),
             device: toHex(bob.device.publicKey),
           },
           (id) => removed.wasDeviceAdmitted(id)

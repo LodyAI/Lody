@@ -16,15 +16,16 @@ import {
 } from '../src/snapshot-admission';
 import { createStreamsContentProvider, deviceMayWriteDocument } from '../src/streams-content';
 import { toHex } from '../src/wire';
+import { streamsContentAdditionalData } from '../src/streams-content';
 import { listenDurableContent } from '../bench/ds-cas-server';
 import { admitDeviceOp, append, ed25519, hex, signGenesis } from './ledger-fixtures';
 
 const genesis = 'ab'.repeat(32);
 const resource = 'doc-1';
 const epochKey = new Uint8Array(32).fill(9);
-const writerAuthor = { actor: 'A', memberInstance: 'A1', device: 'writer' };
-const guestAuthor = { actor: 'A', memberInstance: 'A1', device: 'guest' };
-const strangerAuthor = { actor: 'B', memberInstance: 'B1', device: 'stranger' };
+const writerAuthor = { actor: 'A', memberInstance: 'A1', device: '' };
+const guestAuthor = { actor: 'A', memberInstance: 'A1', device: '' };
+const strangerAuthor = { actor: 'B', memberInstance: 'B1', device: '' };
 
 let writerPair: CryptoKeyPair;
 let guestPair: CryptoKeyPair;
@@ -46,9 +47,12 @@ beforeAll(async () => {
   strangerPair = await crypto.subtle.generateKey('Ed25519', false, ['sign', 'verify']);
   writerPublic = toHex(new Uint8Array(await crypto.subtle.exportKey('raw', writerPair.publicKey)));
   guestPublic = toHex(new Uint8Array(await crypto.subtle.exportKey('raw', guestPair.publicKey)));
+  writerAuthor.device = writerPublic;
+  guestAuthor.device = guestPublic;
   strangerPublic = toHex(
     new Uint8Array(await crypto.subtle.exportKey('raw', strangerPair.publicKey))
   );
+  strangerAuthor.device = strangerPublic;
 });
 
 afterEach(async () => {
@@ -56,16 +60,16 @@ afterEach(async () => {
 });
 
 function keys(device: string): { pair: CryptoKeyPair; publicKey: string } {
-  if (device === 'writer') return { pair: writerPair, publicKey: writerPublic };
-  if (device === 'guest') return { pair: guestPair, publicKey: guestPublic };
+  if (device === writerPublic) return { pair: writerPair, publicKey: writerPublic };
+  if (device === guestPublic) return { pair: guestPair, publicKey: guestPublic };
   return { pair: strangerPair, publicKey: strangerPublic };
 }
 
 function cipher() {
   return new ContentCipher({
     authorize(header) {
-      if (header.device === 'writer') return writerPublic;
-      if (header.device === 'guest') return guestPublic;
+      if (header.device === writerPublic) return writerPublic;
+      if (header.device === guestPublic) return guestPublic;
       throw new Error('unauthorized');
     },
   });
@@ -116,7 +120,8 @@ async function attackerSnapshot(
       kind: 'snapshot',
       continuationOffset: offset,
     } as PayloadProtectionContext,
-    additionalData: () => new Uint8Array([1, 2, 3]),
+    additionalData: (header) =>
+      streamsContentAdditionalData(wrapSnapshotEnvelope(header, new Uint8Array())),
   });
   return wrapSnapshotEnvelope(sealed.header, sealed.sealed);
 }
@@ -145,36 +150,43 @@ function put(
     leaseExpiresAt: extras.expires ?? clock.now + CONTENT_SNAPSHOT_ADMISSION_WINDOW_MS,
     expectedGenesis: extras.genesis ?? genesis,
     expectedResource: extras.resource ?? resource,
+    expectedPurpose: 'doc-snapshot' as const,
   };
 }
 
 it('admits a writer snapshot and rejects guest, stranger, and submitter/signer mismatch', async () => {
   const clock = { now: 1_000 };
-  const writable = new Set(['writer']);
+  const writable = new Set([writerPublic]);
   const host = publication(writable, clock);
   const writerBody = await attackerSnapshot(writerAuthor, '10');
-  const accepted = await host.admit(put('10', writerBody, 'writer', clock));
+  const accepted = await host.admit(put('10', writerBody, writerPublic, clock));
   expect(accepted.status).toBe('accepted');
-  expect(accepted.header?.device).toBe('writer');
+  expect(accepted.header?.device).toBe(writerPublic);
   const tampered = writerBody.slice();
   tampered[tampered.length - 1]! ^= 1;
-  await expect(host.admit(put('20', tampered, 'writer', clock))).rejects.toThrow();
+  await expect(host.admit(put('20', tampered, writerPublic, clock))).rejects.toThrow();
   await expect(
-    host.admit(put('20', writerBody, 'writer', clock, { genesis: 'cd'.repeat(32) }))
-  ).rejects.toMatchObject({ message: 'content-context-mismatch' });
+    host.admit(put('20', writerBody, writerPublic, clock, { genesis: 'cd'.repeat(32) }))
+  ).rejects.toMatchObject({ message: 'bad-content-signature' });
   await expect(
-    host.admit(put('20', writerBody, 'writer', clock, { resource: 'other' }))
-  ).rejects.toMatchObject({ message: 'content-context-mismatch' });
+    host.admit(put('20', writerBody, writerPublic, clock, { resource: 'other' }))
+  ).rejects.toMatchObject({ message: 'bad-content-signature' });
+  await expect(
+    host.admit({
+      ...put('20', writerBody, writerPublic, clock),
+      expectedPurpose: 'flock-snapshot',
+    })
+  ).rejects.toMatchObject({ message: 'bad-content-signature' });
 
   const guestBody = await attackerSnapshot(guestAuthor, '20');
-  await expect(host.admit(put('20', guestBody, 'guest', clock))).rejects.toMatchObject({
+  await expect(host.admit(put('20', guestBody, guestPublic, clock))).rejects.toMatchObject({
     message: 'unauthorized',
   });
 
   const strangerBody = await attackerSnapshot(strangerAuthor, '20');
-  await expect(host.admit(put('20', strangerBody, 'stranger', clock))).rejects.toThrow();
+  await expect(host.admit(put('20', strangerBody, strangerPublic, clock))).rejects.toThrow();
 
-  await expect(host.admit(put('20', writerBody, 'guest', clock))).rejects.toMatchObject({
+  await expect(host.admit(put('20', writerBody, guestPublic, clock))).rejects.toMatchObject({
     message: 'snapshot-device-mismatch',
   });
   expect(host.current('docs/doc-1')?.offset).toBe('10');
@@ -182,19 +194,19 @@ it('admits a writer snapshot and rejects guest, stranger, and submitter/signer m
 
 it('rejects expired and delayed submissions without extending the original lease', async () => {
   const clock = { now: 1_000 };
-  const host = publication(new Set(['writer']), clock);
+  const host = publication(new Set([writerPublic]), clock);
   const body = await attackerSnapshot(writerAuthor, '10');
   const issued = 1_000;
   const expires = issued + 60_000;
   clock.now = expires;
   await expect(
-    host.admit(put('10', body, 'writer', clock, { issued, expires }))
+    host.admit(put('10', body, writerPublic, clock, { issued, expires }))
   ).rejects.toMatchObject({ message: 'snapshot-lease-expired' });
   expect(host.current('docs/doc-1')).toBeUndefined();
   clock.now = issued;
   await expect(
     host.admit(
-      put('10', body, 'writer', clock, {
+      put('10', body, writerPublic, clock, {
         issued,
         expires: issued + CONTENT_SNAPSHOT_ADMISSION_WINDOW_MS + 1,
       })
@@ -209,7 +221,7 @@ it('review: lease expiring during real signature verification must not publish',
   const host = createContentSnapshotPublication({
     cipher: new ContentCipher({
       authorize(header) {
-        if (header.device !== 'writer') throw new Error('unauthorized');
+        if (header.device !== writerPublic) throw new Error('unauthorized');
         // Deterministic elapsed time during authenticate; real Ed25519 verification follows.
         clock.now = expires;
         return writerPublic;
@@ -220,7 +232,7 @@ it('review: lease expiring during real signature verification must not publish',
   });
   await expect(
     host.admit(
-      put('10', body, 'writer', clock, {
+      put('10', body, writerPublic, clock, {
         issued: 1_000,
         expires,
       })
@@ -231,20 +243,20 @@ it('review: lease expiring during real signature verification must not publish',
 
 it('rejects when write is revoked during real signature verification', async () => {
   const clock = { now: 1_000 };
-  const writable = new Set(['writer']);
+  const writable = new Set([writerPublic]);
   const body = await attackerSnapshot(writerAuthor, '10');
   const host = createContentSnapshotPublication({
     cipher: new ContentCipher({
       authorize(header) {
-        if (header.device !== 'writer') throw new Error('unauthorized');
-        writable.delete('writer');
+        if (header.device !== writerPublic) throw new Error('unauthorized');
+        writable.delete(writerPublic);
         return writerPublic;
       },
     }),
     mayWriteDocument: (author) => writable.has(author.device),
     now: () => clock.now,
   });
-  await expect(host.admit(put('10', body, 'writer', clock))).rejects.toMatchObject({
+  await expect(host.admit(put('10', body, writerPublic, clock))).rejects.toMatchObject({
     message: 'unauthorized',
   });
   expect(host.current('docs/doc-1')).toBeUndefined();
@@ -258,7 +270,7 @@ it('keeps the original lease while queued and ignores later mutation of the requ
   const host = createContentSnapshotPublication({
     cipher: new ContentCipher({
       authorize(header) {
-        if (header.device !== 'writer') throw new Error('unauthorized');
+        if (header.device !== writerPublic) throw new Error('unauthorized');
         clock.now = expires;
         return writerPublic;
       },
@@ -266,8 +278,8 @@ it('keeps the original lease while queued and ignores later mutation of the requ
     mayWriteDocument: () => true,
     now: () => clock.now,
   });
-  const first = put('10', firstBody, 'writer', clock, { issued: 1_000, expires });
-  const second = put('20', secondBody, 'writer', clock, { issued: 1_000, expires });
+  const first = put('10', firstBody, writerPublic, clock, { issued: 1_000, expires });
+  const second = put('20', secondBody, writerPublic, clock, { issued: 1_000, expires });
   const firstAdmit = host.admit(first);
   const queued = host.admit(second);
   second.leaseExpiresAt = expires + 60_000;
@@ -280,29 +292,29 @@ it('keeps the original lease while queued and ignores later mutation of the requ
 
 it('keeps content identity: identical retries are idempotent and different bytes cannot replace an offset', async () => {
   const clock = { now: 1_000 };
-  const host = publication(new Set(['writer']), clock);
+  const host = publication(new Set([writerPublic]), clock);
   const first = await attackerSnapshot(writerAuthor, '10', 'one');
   const second = await attackerSnapshot(writerAuthor, '10', 'two');
-  expect((await host.admit(put('10', first, 'writer', clock))).status).toBe('accepted');
-  expect((await host.admit(put('10', first, 'writer', clock))).status).toBe('idempotent');
+  expect((await host.admit(put('10', first, writerPublic, clock))).status).toBe('accepted');
+  expect((await host.admit(put('10', first, writerPublic, clock))).status).toBe('idempotent');
   clock.now += CONTENT_SNAPSHOT_ADMISSION_WINDOW_MS;
-  expect((await host.admit(put('10', first, 'writer', clock))).status).toBe('idempotent');
+  expect((await host.admit(put('10', first, writerPublic, clock))).status).toBe('idempotent');
   clock.now = 1_000;
-  await expect(host.admit(put('10', second, 'writer', clock))).rejects.toMatchObject({
+  await expect(host.admit(put('10', second, writerPublic, clock))).rejects.toMatchObject({
     message: 'snapshot-identity-conflict',
   });
   const later = await attackerSnapshot(writerAuthor, '20', 'later');
-  expect((await host.admit(put('20', later, 'writer', clock))).status).toBe('accepted');
-  expect((await host.admit(put('10', first, 'writer', clock))).status).toBe('idempotent');
+  expect((await host.admit(put('20', later, writerPublic, clock))).status).toBe('accepted');
+  expect((await host.admit(put('10', first, writerPublic, clock))).status).toBe('idempotent');
   expect(host.current('docs/doc-1')?.offset).toBe('20');
-  await expect(host.admit(put('5', first, 'writer', clock))).rejects.toMatchObject({
+  await expect(host.admit(put('5', first, writerPublic, clock))).rejects.toMatchObject({
     message: 'snapshot-offset-regression',
   });
 });
 
 it('rejects a revoked device from publishing new bytes but still opens the admitted historical snapshot', async () => {
   const clock = { now: 1_000 };
-  const writable = new Set(['writer']);
+  const writable = new Set([writerPublic]);
   const host = publication(writable, clock);
   const offset = '10';
   const plaintext = new TextEncoder().encode('historical');
@@ -313,17 +325,20 @@ it('rejects a revoked device from publishing new bytes but still opens the admit
     kind: 'snapshot',
     continuationOffset: offset,
   } as PayloadProtectionContext;
-  const binding = new Uint8Array([1, 2, 3]);
+  let binding = new Uint8Array();
   const sealed = await provider.seal({
     plaintext,
     context,
-    additionalData: () => binding,
+    additionalData: (header) => {
+      binding = streamsContentAdditionalData(wrapSnapshotEnvelope(header, new Uint8Array()));
+      return binding;
+    },
   });
   const body = wrapSnapshotEnvelope(sealed.header, sealed.sealed);
-  await host.admit(put(offset, body, 'writer', clock));
-  writable.delete('writer');
+  await host.admit(put(offset, body, writerPublic, clock));
+  writable.delete(writerPublic);
   const newer = await attackerSnapshot(writerAuthor, '20', 'forged');
-  await expect(host.admit(put('20', newer, 'writer', clock))).rejects.toMatchObject({
+  await expect(host.admit(put('20', newer, writerPublic, clock))).rejects.toMatchObject({
     message: 'unauthorized',
   });
   expect(await provider.open({ ...sealed, context, additionalData: binding })).toEqual(plaintext);
@@ -388,7 +403,8 @@ it('rejects recovery-device snapshots through ledger-backed host admission', asy
       kind: 'snapshot',
       continuationOffset: '10',
     } as PayloadProtectionContext,
-    additionalData: () => new Uint8Array([1, 2, 3]),
+    additionalData: (header) =>
+      streamsContentAdditionalData(wrapSnapshotEnvelope(header, new Uint8Array())),
   });
   const host = createContentSnapshotPublication({
     cipher: contentCipher,
@@ -419,13 +435,14 @@ it('fail-closes snapshot PUT until a host admission port is supplied', async () 
 
 it('HTTP-admits an encrypted snapshot, rejects replacement, and leaves cursor unchanged on verify failure', async () => {
   const clock = { now: 5_000 };
-  const host = publication(new Set(['writer']), clock);
+  const host = publication(new Set([writerPublic]), clock);
   const { server, streamUrl } = await listenDurableContent(undefined, {
     admitSnapshot: (input) =>
       host.admit({
         ...input,
         expectedGenesis: genesis,
         expectedResource: resource,
+        expectedPurpose: 'doc-snapshot' as const,
       }),
   });
   servers.push({ close: () => closeHttp(server) });
@@ -443,7 +460,7 @@ it('HTTP-admits an encrypted snapshot, rejects replacement, and leaves cursor un
     const method = (init?.method ?? 'GET').toUpperCase();
     if (method === 'PUT' && target.pathname.includes('/snapshot/')) {
       const headers = new Headers(init?.headers);
-      for (const [key, value] of Object.entries(headersFor('writer'))) headers.set(key, value);
+      for (const [key, value] of Object.entries(headersFor(writerPublic))) headers.set(key, value);
       return await globalThis.fetch(input, { ...init, headers });
     }
     return await globalThis.fetch(input, init);
@@ -462,14 +479,14 @@ it('HTTP-admits an encrypted snapshot, rejects replacement, and leaves cursor un
   writerDoc.commit();
   expect((await writer.appendWriteOnly()).ok).toBe(true);
   const uploaded = await writer.uploadSnapshotForTesting();
-  expect(uploaded.ok).toBe(true);
+  expect(uploaded).toMatchObject({ ok: true });
   const head = await fetch(url, { method: 'HEAD' });
   const offset = head.headers.get('Stream-Snapshot-Offset');
   expect(offset && offset !== '-1').toBe(true);
   const forged = await attackerSnapshot(writerAuthor, offset!, 'forged');
   const replace = await fetch(`${url}/snapshot/${offset}`, {
     method: 'PUT',
-    headers: headersFor('writer'),
+    headers: headersFor(writerPublic),
     body: Buffer.from(forged),
   });
   expect(replace.status).toBe(409);
@@ -498,7 +515,7 @@ it('HTTP-admits an encrypted snapshot, rejects replacement, and leaves cursor un
       persisted = readerDoc.export({ mode: 'snapshot' });
     },
     e2ee: {
-      provider: attackerProvider({ ...writerAuthor, device: 'guest' }),
+      provider: attackerProvider({ ...writerAuthor, device: guestPublic }),
       readPolicy: 'encrypted-only',
       writePolicy: 'encrypt',
     },
@@ -511,4 +528,33 @@ it('HTTP-admits an encrypted snapshot, rejects replacement, and leaves cursor un
   await reader.close();
   writerDoc.free();
   readerDoc.free();
+});
+
+it('host reconstructs exact SDK AAD and rejects old binding revisions before storing a snapshot', async () => {
+  const clock = { now: 1000 };
+  const host = publication(new Set([writerPublic]), clock);
+  const provider = attackerProvider(writerAuthor);
+  const sealed = await provider.seal({
+    plaintext: new TextEncoder().encode('untrusted binding'),
+    context: {
+      protocol: 'loro-streams-crdt-payload-protection',
+      version: 2,
+      kind: 'snapshot',
+      continuationOffset: '10',
+    } as PayloadProtectionContext,
+    additionalData: () => new Uint8Array([1, 2, 3]),
+  });
+  const body = wrapSnapshotEnvelope(sealed.header, sealed.sealed);
+  await expect(host.admit(put('10', body, writerPublic, clock))).rejects.toMatchObject({
+    message: 'bad-content-signature',
+  });
+  expect(host.current('docs/doc-1')).toBeUndefined();
+  const old = await attackerSnapshot(writerAuthor, '10');
+  old[10] = 2;
+  await expect(host.admit(put('10', old, writerPublic, clock))).rejects.toMatchObject({
+    message: 'invalid-snapshot-envelope',
+  });
+  expect(host.current('docs/doc-1')).toBeUndefined();
+  const valid = await attackerSnapshot(writerAuthor, '10');
+  expect((await host.admit(put('10', valid, writerPublic, clock))).status).toBe('accepted');
 });

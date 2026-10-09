@@ -398,9 +398,10 @@ async function historyFixture() {
   await keys.install(1, secret);
   const cipher = new ContentCipher({
     authorize(header) {
-      const member = f.anchor.state.members.get(header.actor);
-      const device = member?.devices.get(header.device);
-      if (member?.instance !== header.memberInstance || !device) throw new Error('unknown-author');
+      const device = Array.from(f.anchor.state.members.values())
+        .flatMap((m) => Array.from(m.devices.values()))
+        .find((d) => d.signingKey === header.device);
+      if (!device) throw new Error('unknown-author');
       return device.signingKey;
     },
   });
@@ -410,7 +411,11 @@ async function historyFixture() {
       epoch: 1,
       epochKey: secret,
       previousKey,
-      author: f.author,
+      author: {
+        ...f.author,
+        device: f.anchor.state.members.get(f.author.actor)!.devices.get(f.author.device)!
+          .signingKey,
+      },
       signingKey: f.author.signingKey,
     });
   const path = location();
@@ -775,7 +780,10 @@ it('a competing publication clears pending, cannot install the losing key or reu
     epoch: 1,
     epochKey: f.key,
     previousKey: randomBytes(32),
-    author: f.author,
+    author: {
+      ...f.author,
+      device: f.anchor.state.members.get(f.author.actor)!.devices.get(f.author.device)!.signingKey,
+    },
     signingKey: f.author.signingKey,
   });
   const reusedStore = await store.withCandidate(reused, f.key, bridge);

@@ -1,9 +1,9 @@
 # E2EE core
 
-Experimental primitives, not enabled product E2EE.
-Contracts: [ledger spec](../../specs/e2ee-ledger.zh.md) and
-[README.md](README.md). JSON/hex control-log lives in `src/legacy.ts` for
-in-package tests only; do not re-export it.
+Experimental; product E2EE off.
+Contracts: [content v2](../../specs/e2ee-content.md), [ledger](../../specs/e2ee-ledger.zh.md),
+[README](README.md). JSON/hex control-log: `src/legacy.ts`, in-package tests only;
+do not re-export it.
 
 ## Required source style
 
@@ -13,14 +13,12 @@ in-package tests only; do not re-export it.
   clocks, randomness, logging or input mutation. Only unobservable local scratch
   mutation is allowed.
 - `workflows/`: `Effect<A, E, R>` descriptions declare Services for storage, network, crypto, entropy,
-  clocks, environment and process. No eager execution, hidden Live defaults or
-  internal runtime starts. Convert pure Results with `Effect.fromResult`.
+  clocks, environment and process. No eager I/O, hidden Live defaults or runtime starts. Convert pure Results with `Effect.fromResult`.
 - `platform/`: thin Service implementations/Layers; direct external API access
   belongs here or in composition. Concentrate complexity in pure first, workflows
   second; keep domain policy/state transitions out of platform.
-- No expected `throw`: pure returns typed `Result`; workflows use typed Effect
-  failures. Only unexpected fatal defects may throw. Never disguise defects or
-  interruption as ordinary failure or Pending.
+- Expected failures use typed `Result` in pure and Effect failures in workflows.
+  Only fatal defects may throw. Never disguise defects/interruption as failure or Pending.
 - Use Effect logging/tracing and injected Services, never `console` or ambient
   loggers. Platform/composition configures sinks; pure returns diagnostic data.
   Never log secrets.
@@ -79,11 +77,11 @@ in-package tests only; do not re-export it.
   supplied SDK; no implicit stream creation or anchor choice. Synthetic fixtures,
   real signatures, no crypto stubs.
 - `content.ts`: XChaCha20-Poly1305, HKDF-SHA-256, strict Ed25519. Caller policy
-  supplies authority; `inspectContent` is UNVERIFIED routing metadata;
-  `authenticate` checks signatures without decryption, not publication permission.
-  Resolve signing keys only from verified ledger authority (`contentAuthorKey`).
+  uses verified ledger keys; `inspectContent` is UNVERIFIED. v2 authentication
+  needs independent scope. History preserves original identity or returns device-only when missing; never reattribute keys.
   `streams-content.ts` uses existing streams-crdt `seal`/`open` for updates and
-  snapshots. Only active personal/machine writers may write, never Guest/R; honest
+  snapshots. SDK AAD binds AEAD/signature externally; header 3/4 rejects old 1/2.
+  Only personal/machine writers may write, never Guest/R; honest
   seals need `maySealNewContent` (none while `rotationRequired`). Bind genesis, resource,
   kind/model, epoch and opaque continuation offset. `./snapshot-admission`
   requires current write permission, submitter/signing-device binding and the

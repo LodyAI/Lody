@@ -1,5 +1,7 @@
 # @lody/e2ee-lab
 
+Content uses compact v2 (141B inner overhead). Sessions and hosts supply trusted Org/document/purpose; packet signing keys are candidates resolved through the verified ledger. SDK AAD is external to ciphertext and covered by AEAD/signature; provider headers 3/4 reject old 1/2. Old v1 or pre-optimization v2 content/repro directories require their pinned old reader; use a new directory for this revision. See the [content spec](../../specs/e2ee-content.md).
+
 The E2EE catalog pins Effect **4.0.2**. `LabRun` builds services once per owner,
 keeps a persistent Scope, and interrupts active fibers before awaiting finalizers.
 Host startup acquires SQLite/Riverrun/HTTP resources in that scope, including cleanup

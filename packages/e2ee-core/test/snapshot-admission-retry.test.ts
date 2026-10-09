@@ -1,3 +1,4 @@
+import { streamsContentAdditionalData } from '../src/streams-content';
 /**
  * Snapshot admission retry/offset semantics with real
  * Ed25519, HKDF, XChaCha20-Poly1305 and the real streams-content provider.
@@ -28,7 +29,7 @@ beforeAll(async () => {
 function policy() {
   return {
     authorize(header: { device: string }) {
-      const known = pairs.get(header.device);
+      const known = Array.from(pairs.values()).find((row) => row.publicKey === header.device);
       if (!known) throw new Error('unauthorized');
       return known.publicKey;
     },
@@ -36,7 +37,11 @@ function policy() {
 }
 
 function author(device: string): ContentAuthor {
-  return { actor: device.toUpperCase(), memberInstance: `${device}-m`, device };
+  return {
+    actor: device.toUpperCase(),
+    memberInstance: `${device}-m`,
+    device: pairs.get(device)!.publicKey,
+  };
 }
 
 async function seal(
@@ -68,14 +73,29 @@ async function seal(
   const sealed = await provider.seal({
     plaintext: new TextEncoder().encode(plaintext),
     context: context as PayloadProtectionContext,
-    additionalData: () => new Uint8Array([1, 2, 3]),
+    additionalData: (header) => {
+      const prefix = new Uint8Array([
+        0x4c,
+        0x53,
+        0x43,
+        0x45,
+        2,
+        kind === 'snapshot' ? 2 : 1,
+        0,
+        1,
+        0,
+        0,
+        header[0]!,
+      ]);
+      return streamsContentAdditionalData(prefix);
+    },
   });
   // Always use the snapshot LSCE kind byte so only the inner purpose differs.
   const prefix = new Uint8Array(10 + sealed.header.byteLength);
   prefix.set([0x4c, 0x53, 0x43, 0x45, 2, 2]);
   new DataView(prefix.buffer).setUint16(6, sealed.header.byteLength);
   prefix.set(sealed.header, 10);
-  prefix[10] = 2;
+  prefix[10] = 4;
   const body = new Uint8Array(prefix.byteLength + sealed.sealed.byteLength);
   body.set(prefix);
   body.set(sealed.sealed, prefix.byteLength);
@@ -85,7 +105,8 @@ async function seal(
 function host(writable: Set<string>, clock: { now: number }) {
   return createContentSnapshotPublication({
     cipher: new ContentCipher(policy()),
-    mayWriteDocument: (who) => writable.has(who.device),
+    mayWriteDocument: (who) =>
+      Array.from(writable).some((id) => pairs.get(id)?.publicKey === who.device),
     now: () => clock.now,
   });
 }
@@ -100,11 +121,12 @@ function put(
     streamKey: 'g/loro',
     offset,
     body,
-    submittingDevice: device,
+    submittingDevice: pairs.get(device)!.publicKey,
     leaseIssuedAt: lease.issued,
     leaseExpiresAt: lease.expires,
     expectedGenesis: genesis,
     expectedResource: resource,
+    expectedPurpose: 'doc-snapshot' as const,
   };
 }
 
@@ -151,7 +173,7 @@ describe('SAFE: identity, purpose and alias checks in core admission', () => {
     });
     const update = await seal('writer', 'update_batch', '20', 'update-not-snapshot');
     await expect(publication.admit(put('20', update, 'writer', lease))).rejects.toMatchObject({
-      message: 'invalid-content-purpose',
+      message: 'bad-content-signature',
     });
     expect(publication.current('g/loro')?.offset).toBe('00000000000000000010');
   });

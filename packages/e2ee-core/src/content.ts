@@ -4,8 +4,10 @@ import { contentRuntimeLayer } from './platform/content';
 import {
   inspectContentFrame,
   MAX_CONTENT_BYTES,
+  CONTENT_OVERHEAD_BYTES,
   type ContentAuthor,
   type ContentHeader,
+  type ContentMetadata,
   type ContentPolicy,
   type ContentPurpose,
   type ContentScope,
@@ -18,15 +20,16 @@ import { authenticateContent, openContent, sealContent } from './workflows/conte
 export type {
   ContentAuthor,
   ContentHeader,
+  ContentMetadata,
   ContentPolicy,
   ContentPurpose,
   ContentScope,
   SealContent,
 };
-export { MAX_CONTENT_BYTES };
+export { MAX_CONTENT_BYTES, CONTENT_OVERHEAD_BYTES };
 
 /** Unverified metadata for selecting a known epoch key; never an identity/permission assertion. */
-export function inspectContent(frame: Uint8Array): Readonly<ContentHeader> {
+export function inspectContent(frame: Uint8Array): Readonly<ContentMetadata> {
   const parsed = inspectContentFrame(frame);
   if (Result.isFailure(parsed)) throw new ControlLogError(parsed.failure.code);
   return parsed.success;
@@ -56,16 +59,25 @@ export class ContentCipher {
     return unwrap(sealContent(input).pipe(Effect.provide(this.layer)));
   }
 
-  /** Verify the signature and return the header. Does not decrypt and is not publication admission. */
-  async authenticate(frame: Uint8Array): Promise<Readonly<ContentHeader>> {
-    return unwrap(authenticateContent(frame).pipe(Effect.provide(this.layer)));
+  /** Verify against independently trusted scope and return bound metadata. Does not decrypt and is not publication admission. */
+  async authenticate(
+    scope: ContentScope,
+    frame: Uint8Array,
+    additionalData?: Uint8Array
+  ): Promise<Readonly<ContentHeader>> {
+    return unwrap(
+      authenticateContent(scope, frame, additionalData).pipe(Effect.provide(this.layer))
+    );
   }
 
   async open(
     scope: ContentScope,
     epochKey: Uint8Array,
-    frame: Uint8Array
+    frame: Uint8Array,
+    additionalData?: Uint8Array
   ): Promise<{ header: Readonly<ContentHeader>; plaintext: Uint8Array }> {
-    return unwrap(openContent(scope, epochKey, frame).pipe(Effect.provide(this.layer)));
+    return unwrap(
+      openContent(scope, epochKey, frame, additionalData).pipe(Effect.provide(this.layer))
+    );
   }
 }

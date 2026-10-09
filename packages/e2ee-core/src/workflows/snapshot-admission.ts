@@ -1,3 +1,6 @@
+import { inspectContentFrame } from '../pure/content-frame';
+import { SnapshotAdmissionError } from '../pure/errors';
+import { Result } from 'effect';
 import { Effect } from 'effect';
 import {
   AdmissionClock,
@@ -16,9 +19,9 @@ import {
 
 /** Verify outside the lock; re-check lease, identity and write rights inside it. */
 export function admitSnapshot(input: SnapshotPut) {
-  const captured = { ...input, body: new Uint8Array(input.body) };
+  const captured = checkSnapshotPut(input);
   return Effect.gen(function* () {
-    const checked = yield* Effect.fromResult(checkSnapshotPut(captured));
+    const checked = yield* Effect.fromResult(captured);
     const store = yield* SnapshotStore;
     // Early rejection of different bytes at an admitted offset. Exact retries still
     // authenticate below: only the signing device may retry.
@@ -30,9 +33,24 @@ export function admitSnapshot(input: SnapshotPut) {
       yield* Effect.fromResult(
         checkSnapshotLease(clock.now(), checked.leaseIssuedAt, checked.leaseExpiresAt)
       );
-    const inner = yield* Effect.fromResult(parseLsceSnapshot(checked.body));
+    const { inner, additionalData } = yield* Effect.fromResult(parseLsceSnapshot(checked.body));
     const authenticator = yield* SnapshotAuthenticator;
-    const header = yield* authenticator.authenticate(inner);
+    const metadata = yield* Effect.fromResult(
+      Result.mapError(
+        inspectContentFrame(inner),
+        (e) => new SnapshotAdmissionError({ code: e.code })
+      )
+    );
+    const header = yield* authenticator.authenticate(
+      {
+        genesis: checked.expectedGenesis,
+        resource: checked.expectedResource,
+        epoch: metadata.epoch,
+        purpose: checked.expectedPurpose,
+      },
+      inner,
+      additionalData
+    );
     const gate = yield* SnapshotWriteGate;
     return yield* store
       .exclusive(checked.streamKey, (tx) =>
@@ -43,6 +61,7 @@ export function admitSnapshot(input: SnapshotPut) {
           submittingDevice: checked.submittingDevice,
           expectedGenesis: checked.expectedGenesis,
           expectedResource: checked.expectedResource,
+          expectedPurpose: checked.expectedPurpose,
           mayWrite: gate.mayWrite(header),
           time: clock.now(),
           leaseIssuedAt: checked.leaseIssuedAt,

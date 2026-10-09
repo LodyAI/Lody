@@ -15,7 +15,7 @@ import {
   type SnapshotPublicationTransaction,
 } from '../src/snapshot-admission';
 import { SqliteSnapshotPublicationStore } from '../src/node-snapshot-publication-store';
-import { createStreamsContentProvider } from '../src/streams-content';
+import { createStreamsContentProvider, streamsContentAdditionalData } from '../src/streams-content';
 import { toHex } from '../src/wire';
 
 const directories: string[] = [];
@@ -77,10 +77,13 @@ async function fixture() {
         kind: 'snapshot',
         continuationOffset: offset,
       } as PayloadProtectionContext,
-      additionalData: () => new Uint8Array([1, 2, 3]),
+      additionalData: (header) =>
+        streamsContentAdditionalData(
+          new Uint8Array([0x4c, 0x53, 0x43, 0x45, 2, 2, 0, 1, 0, 0, header[0]!])
+        ),
     });
     const body = new Uint8Array(11 + sealed.sealed.length);
-    body.set([0x4c, 0x53, 0x43, 0x45, 2, 2, 0, 1, 0, 0, 2]);
+    body.set([0x4c, 0x53, 0x43, 0x45, 2, 2, 0, 1, 0, 0, 4]);
     body.set(sealed.sealed, 11);
     return {
       streamKey: 'room',
@@ -91,13 +94,14 @@ async function fixture() {
       leaseExpiresAt: 61000,
       expectedGenesis: genesis,
       expectedResource: resource,
+      expectedPurpose: 'doc-snapshot' as const,
     };
   }
   const open = (snapshot: { offset: string; body: Uint8Array }) =>
     provider.open({
       header: snapshot.body.slice(10, 11),
       sealed: snapshot.body.slice(11),
-      additionalData: new Uint8Array([1, 2, 3]),
+      additionalData: streamsContentAdditionalData(snapshot.body.subarray(0, 11)),
       context: {
         protocol: 'loro-streams-crdt-payload-protection',
         version: 2,

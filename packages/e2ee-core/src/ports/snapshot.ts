@@ -16,7 +16,9 @@ export class SnapshotAuthenticator extends Context.Service<
   SnapshotAuthenticator,
   {
     readonly authenticate: (
-      inner: Uint8Array
+      scope: import('../content').ContentScope,
+      inner: Uint8Array,
+      additionalData: Uint8Array
     ) => Effect.Effect<SnapshotHeader, SnapshotAdmissionError>;
   }
 >()('@lody/e2ee-core/SnapshotAuthenticator') {}
@@ -24,11 +26,7 @@ export class SnapshotAuthenticator extends Context.Service<
 export class SnapshotWriteGate extends Context.Service<
   SnapshotWriteGate,
   {
-    readonly mayWrite: (author: {
-      readonly actor: string;
-      readonly memberInstance: string;
-      readonly device: string;
-    }) => boolean;
+    readonly mayWrite: (author: { readonly device: string }) => boolean;
   }
 >()('@lody/e2ee-core/SnapshotWriteGate') {}
 

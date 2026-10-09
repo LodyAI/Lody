@@ -76,10 +76,10 @@ async function forgedIdentityClient(
   };
 }
 
-async function rawLoroLog(client: HonestClient): Promise<string> {
+async function rawLoroLog(client: HonestClient): Promise<Uint8Array> {
   const response = await client.fetch(`/ds/${client.genesisHex}/${LORO_STREAM}?offset=-1`);
   expect(response.ok).toBe(true);
-  return new TextDecoder().decode(new Uint8Array(await response.arrayBuffer()));
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 async function currentSnapshot(client: HonestClient) {
@@ -102,18 +102,27 @@ describe('content author identity comes from the verified ledger', () => {
     expect((await alice.readLedger()).state.devices.has(deviceHex(ghost))).toBe(false);
 
     await writeLoro(await forgedIdentityClient(bob, alice, ghost), 'forged-as-alice');
-    expect(await rawLoroLog(alice)).toContain(deviceHex(ghost));
+    expect(Buffer.from(await rawLoroLog(alice)).includes(Buffer.from(ghost.publicKey))).toBe(true);
     expect(await readLoro(alice).catch(() => 'refused')).not.toContain('forged-as-alice');
   });
 
-  it('refuses to admit a snapshot whose actor/memberInstance claim another member', async () => {
+  it('derives snapshot authors from the verified signer even when local caller identity lies', async () => {
     const { alice, members } = await orgWithWriters(['bob']);
     const bob = members['bob']!;
     const forged = await forgedIdentityClient(bob, alice, bob.device);
-    await expect(uploadLoroSnapshot(forged, 'snapshot-claimed-by-alice')).rejects.toThrow(
-      /unauthorized/
+    await uploadLoroSnapshot(forged, 'snapshot-from-bob');
+    expect(await currentSnapshot(alice)).not.toBeNull();
+    const ledger = await alice.readLedger();
+    expect(ledger.contentIdentity(deviceHex(bob.device))).toMatchObject({
+      kind: 'member',
+      device: deviceHex(bob.device),
+      memberInstance: Buffer.from(
+        ledger.state.devices.get(deviceHex(bob.device))!.membershipId
+      ).toString('hex'),
+    });
+    expect(ledger.contentIdentity(deviceHex(bob.device))).not.toEqual(
+      ledger.contentIdentity(deviceHex(alice.device))
     );
-    expect(await currentSnapshot(alice)).toBeNull();
   });
 
   it('keeps honest authors, including a later-revoked device, readable', async () => {

@@ -36,10 +36,11 @@ export function snapshotAuthenticatorLayer(
   cipher: ContentCipher
 ): Layer.Layer<SnapshotAuthenticator> {
   return Layer.succeed(SnapshotAuthenticator, {
-    authenticate: (inner) => {
+    authenticate: (scope, inner, additionalData) => {
       const owned = new Uint8Array(inner);
+      const binding = new Uint8Array(additionalData);
       return Effect.tryPromise({
-        try: () => cipher.authenticate(owned) as Promise<ContentHeader>,
+        try: () => cipher.authenticate(scope, owned, binding) as Promise<ContentHeader>,
         catch: (error) => error,
       }).pipe(Effect.catch(snapshotFailure));
     },
@@ -47,7 +48,7 @@ export function snapshotAuthenticatorLayer(
 }
 
 export function snapshotWriteGateLayer(
-  mayWriteDocument: (author: ContentAuthor) => boolean
+  mayWriteDocument: (author: Pick<ContentAuthor, 'device'>) => boolean
 ): Layer.Layer<SnapshotWriteGate> {
   return Layer.succeed(SnapshotWriteGate, { mayWrite: mayWriteDocument });
 }

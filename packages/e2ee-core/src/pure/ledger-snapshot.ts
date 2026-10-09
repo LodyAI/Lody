@@ -422,6 +422,16 @@ function importAuthState(
         keyCommitment: copyBytes(epochCommitment),
         rotationRequired,
       },
+      contentAuthors: new Map(
+        Array.from(devices, ([device, row]) => [
+          device,
+          Object.freeze({
+            device,
+            actor: keyId(members.get(keyId(row.membershipId))!.userId),
+            memberInstance: keyId(row.membershipId),
+          }),
+        ])
+      ),
       usedSigningKeys,
       usedEncKeys,
       usedMembershipIds,

@@ -22,28 +22,42 @@ export function maySealNewContent(state: OrgState, deviceIdHex: string): boolean
   return !state.epoch.rotationRequired && deviceMayWriteDocument(state, deviceIdHex);
 }
 
-/**
- * The signing key for a content header, taken only from verified ledger authority.
- * A current device must match the header's Org, member instance and user. A device
- * admitted earlier and since revoked (`wasAdmitted`) still verifies as a historical
- * author, but its identity claims cannot be checked against current state. Keys never
- * admitted to this Org are refused. Current write permission is a separate check.
- */
+/** Signing keys are globally single-use within this Org's verified history.
+ * Revoked devices authenticate history only; this never grants new write rights. */
 export function contentAuthorKey(
   state: OrgState,
-  header: Pick<ContentHeader, 'genesis' | 'actor' | 'memberInstance' | 'device'>,
+  header: Pick<ContentHeader, 'genesis' | 'device'>,
   wasAdmitted: (deviceIdHex: string) => boolean = () => false
 ): Result.Result<string, ContentError> {
-  const refuse = Result.fail(new ContentError({ code: 'unauthorized' }));
-  if (header.genesis !== keyId(state.genesis)) return refuse;
+  if (header.genesis !== keyId(state.genesis))
+    return Result.fail(new ContentError({ code: 'unauthorized' }));
   const device = state.devices.get(header.device);
-  if (!device) return wasAdmitted(header.device) ? Result.succeed(header.device) : refuse;
-  const member = state.members.get(keyId(device.membershipId));
-  if (
-    !member ||
-    header.memberInstance !== keyId(device.membershipId) ||
-    header.actor !== keyId(member.userId)
-  )
-    return refuse;
-  return Result.succeed(header.device);
+  return (device && state.members.has(keyId(device.membershipId))) || wasAdmitted(header.device)
+    ? Result.succeed(header.device)
+    : Result.fail(new ContentError({ code: 'unauthorized' }));
+}
+
+export type ContentIdentity =
+  | {
+      readonly kind: 'member';
+      readonly device: string;
+      readonly actor: string;
+      readonly memberInstance: string;
+    }
+  | {
+      readonly kind: 'device-only';
+      readonly device: string;
+      readonly reason: 'missing-history-context';
+    };
+
+/** Only call with privately retained verified replay state. */
+export function historicalContentIdentity(
+  state: import('./ledger-state').InternalState,
+  device: string
+): ContentIdentity | undefined {
+  const author = state.contentAuthors.get(device);
+  if (author) return Object.freeze({ kind: 'member', ...author });
+  return state.usedSigningKeys.has(device)
+    ? Object.freeze({ kind: 'device-only', device, reason: 'missing-history-context' })
+    : undefined;
 }

@@ -34,7 +34,12 @@ export { encodeTeamAction, decodeTeamAction, encodeTeamGenesis } from './team-co
 export type { TeamAction, TeamGenesis, TeamMemberInput, TeamDeviceInput } from './team-codec';
 export { deriveTeamAnchor, ownerManagedTeamPolicy, listTeamRecipients } from './team';
 export type { TeamState, TeamMember, TeamDevice, TeamRecipient } from './team';
-export { ContentCipher, inspectContent, MAX_CONTENT_BYTES } from './content';
+export {
+  ContentCipher,
+  inspectContent,
+  MAX_CONTENT_BYTES,
+  CONTENT_OVERHEAD_BYTES,
+} from './content';
 export { KeyEnvelopeCipher } from './key-envelope';
 export { KeyDelivery } from './key-delivery';
 export type { KeyDeliveryStore, KeyDeliveryRemote } from './key-delivery';

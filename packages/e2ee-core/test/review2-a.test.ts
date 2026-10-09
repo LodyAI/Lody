@@ -49,7 +49,13 @@ describe('R2-A1 contentAuthorKey for revoked devices', () => {
     };
     const resolved = contentAuthorKey(state, header, (id) => ledger.wasDeviceAdmitted(id));
     // The ledger history knows the spare belonged to carol, not to the Owner.
-    expect(Result.isFailure(resolved), 'revoked spare accepted as the Owner').toBe(true);
+    expect(Result.isSuccess(resolved)).toBe(true);
+    expect(ledger.contentIdentity(hex(spare.publicKey))).toEqual({
+      kind: 'member',
+      device: hex(spare.publicKey),
+      actor: hex(join.userId),
+      memberInstance: hex(carolMembership),
+    });
     void findMembership;
   });
 });

@@ -14,7 +14,11 @@ import { ContentCipher } from '@lody/e2ee-core';
 import { Result } from 'effect';
 import { ContentError } from '@lody/e2ee-core/effect';
 import type { OrgState } from '@lody/e2ee-core/ledger';
-import { contentAuthorKey, createStreamsContentProvider } from '@lody/e2ee-core/streams-content';
+import {
+  contentAuthorKey,
+  createStreamsContentProvider,
+  streamsContentAdditionalData,
+} from '@lody/e2ee-core/streams-content';
 import { asArrayBuffer, toHex } from './bytes';
 import { FLOCK_STREAM, LORO_STREAM } from './protocol';
 import type { DemoDevice } from './device';
@@ -623,7 +627,8 @@ export async function sealLoroSnapshot(
       kind: 'snapshot',
       continuationOffset: offset,
     } as PayloadProtectionContext,
-    additionalData: () => new Uint8Array([1, 2, 3]),
+    additionalData: (header) =>
+      streamsContentAdditionalData(wrapSnapshotEnvelope(header, new Uint8Array())),
   });
   return wrapSnapshotEnvelope(sealed.header, sealed.sealed);
 }

@@ -1,6 +1,8 @@
 import { Result } from 'effect';
+import { MAX_CONTENT_BYTES, CONTENT_OVERHEAD_BYTES } from './content-frame';
 import { bytesEqual } from './cbor';
 import { SnapshotAdmissionError } from './errors';
+import { STREAMS_SNAPSHOT_HEADER, streamsContentAdditionalData } from './streams-content';
 
 /** Structural view of the host store. Not evidence of authenticity. */
 export interface SnapshotTxView {
@@ -15,12 +17,11 @@ const LSCE = new Uint8Array([0x4c, 0x53, 0x43, 0x45]);
 const PROVIDER_ENVELOPE_VERSION = 2;
 const SNAPSHOT_KIND = 2;
 const PROVIDER_PREFIX_BYTES = 10;
-const MAX_PROVIDER_HEADER_BYTES = 512;
+const MAX_SNAPSHOT_BODY_BYTES =
+  PROVIDER_PREFIX_BYTES + 1 + MAX_CONTENT_BYTES + CONTENT_OVERHEAD_BYTES;
 const SNAPSHOT_PURPOSES = new Set(['doc-snapshot', 'flock-snapshot']);
 
 export interface SnapshotAuthor {
-  readonly actor: string;
-  readonly memberInstance: string;
   readonly device: string;
 }
 
@@ -40,6 +41,7 @@ export interface SnapshotPut {
   readonly leaseExpiresAt: number;
   readonly expectedGenesis: string;
   readonly expectedResource: string;
+  readonly expectedPurpose: 'doc-snapshot' | 'flock-snapshot';
 }
 
 export type SnapshotAdmitResult =
@@ -135,6 +137,7 @@ export function commitSnapshotAdmission(
     readonly submittingDevice: string;
     readonly expectedGenesis: string;
     readonly expectedResource: string;
+    readonly expectedPurpose: 'doc-snapshot' | 'flock-snapshot';
     readonly mayWrite: boolean;
     readonly time: number;
     readonly leaseIssuedAt: number;
@@ -149,7 +152,8 @@ export function commitSnapshotAdmission(
       return yield* fail('snapshot-device-mismatch');
     if (
       input.header.genesis !== input.expectedGenesis ||
-      input.header.resource !== input.expectedResource
+      input.header.resource !== input.expectedResource ||
+      input.header.purpose !== input.expectedPurpose
     )
       return yield* fail('content-context-mismatch');
     if (!SNAPSHOT_PURPOSES.has(input.header.purpose)) return yield* fail('invalid-content-purpose');
@@ -176,23 +180,32 @@ export function commitSnapshotAdmission(
 /** Framing only. Does not authenticate the inner content signature. */
 export function parseLsceSnapshot(payload: Uint8Array) {
   return Result.gen(function* () {
-    if (payload.byteLength < PROVIDER_PREFIX_BYTES || !LSCE.every((byte, i) => payload[i] === byte))
+    if (
+      payload.byteLength > MAX_SNAPSHOT_BODY_BYTES ||
+      payload.byteLength < PROVIDER_PREFIX_BYTES ||
+      !LSCE.every((byte, i) => payload[i] === byte)
+    )
       return yield* fail('invalid-snapshot-envelope');
     const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
     const headerLength = view.getUint16(6, false);
     if (
       payload[4] !== PROVIDER_ENVELOPE_VERSION ||
       payload[5] !== SNAPSHOT_KIND ||
-      headerLength <= 0 ||
-      headerLength > MAX_PROVIDER_HEADER_BYTES ||
+      headerLength !== 1 ||
       payload[8] !== 0 ||
       payload[9] !== 0
     )
       return yield* fail('invalid-snapshot-envelope');
     const headerEnd = PROVIDER_PREFIX_BYTES + headerLength;
-    if (payload.byteLength <= headerEnd || payload[PROVIDER_PREFIX_BYTES] !== SNAPSHOT_KIND)
+    if (
+      payload.byteLength <= headerEnd ||
+      payload[PROVIDER_PREFIX_BYTES] !== STREAMS_SNAPSHOT_HEADER
+    )
       return yield* fail('invalid-snapshot-envelope');
-    return new Uint8Array(payload.subarray(headerEnd));
+    return {
+      inner: new Uint8Array(payload.subarray(headerEnd)),
+      additionalData: streamsContentAdditionalData(payload.subarray(0, headerEnd)),
+    };
   });
 }
 
@@ -201,7 +214,11 @@ export function checkSnapshotPut(input: SnapshotPut) {
     if (typeof input.streamKey !== 'string' || input.streamKey.length === 0)
       return yield* fail('invalid-snapshot-stream');
     const offset = yield* checkSnapshotOffset(input.offset);
-    if (!(input.body instanceof Uint8Array) || input.body.byteLength === 0)
+    if (
+      !(input.body instanceof Uint8Array) ||
+      input.body.byteLength === 0 ||
+      input.body.byteLength > MAX_SNAPSHOT_BODY_BYTES
+    )
       return yield* fail('invalid-snapshot-body');
     return {
       streamKey: input.streamKey,
@@ -212,6 +229,7 @@ export function checkSnapshotPut(input: SnapshotPut) {
       leaseExpiresAt: input.leaseExpiresAt,
       expectedGenesis: input.expectedGenesis,
       expectedResource: input.expectedResource,
+      expectedPurpose: input.expectedPurpose,
     };
   });
 }

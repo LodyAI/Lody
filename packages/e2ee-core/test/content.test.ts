@@ -12,7 +12,14 @@ import {
 } from '../src/content';
 import { contentRuntimeLayer } from '../src/platform/content';
 import { ContentCrypto } from '../src/ports/content';
-import { inspectContentFrame } from '../src/pure/content-frame';
+import {
+  contentAad,
+  contentKeyInfo,
+  contentSigningBytes,
+  CONTENT_HKDF_SALT,
+  encodeContentContext,
+  inspectContentFrame,
+} from '../src/pure/content-frame';
 import { openContent, sealContent } from '../src/workflows/content';
 import { fromHex, toHex } from '../src/wire';
 import { deferred } from './control-fixtures';
@@ -26,7 +33,7 @@ const scope: ContentScope = {
   resource: 'doc-1',
   purpose: 'doc-update',
 };
-const author = { actor: 'A', memberInstance: 'A1', device: 'desktop' };
+const author = { actor: 'A', memberInstance: 'A1', device: '' };
 let alice: CryptoKeyPair;
 let bob: CryptoKeyPair;
 let alicePublic: string;
@@ -34,12 +41,12 @@ beforeAll(async () => {
   alice = (await crypto.subtle.generateKey('Ed25519', false, ['sign', 'verify'])) as CryptoKeyPair;
   bob = (await crypto.subtle.generateKey('Ed25519', false, ['sign', 'verify'])) as CryptoKeyPair;
   alicePublic = toHex(new Uint8Array(await crypto.subtle.exportKey('raw', alice.publicKey)));
+  author.device = alicePublic;
 });
 function cipher() {
   return new ContentCipher({
     authorize(header) {
-      if (header.actor !== 'A' || header.memberInstance !== 'A1' || header.device !== 'desktop')
-        throw new Error('unauthorized-author');
+      if (header.device !== alicePublic) throw new Error('unauthorized-author');
       return alicePublic;
     },
   });
@@ -54,15 +61,18 @@ function seal(plaintext: Uint8Array, context = scope) {
   });
 }
 function parts(wire: Uint8Array) {
-  const length = new DataView(wire.buffer, wire.byteOffset, wire.byteLength).getUint16(0);
   return {
-    length,
-    header: wire.slice(2, 2 + length),
-    nonce: wire.slice(2 + length, 26 + length),
-    ciphertext: wire.slice(26 + length, -64),
+    length: 37,
+    header: wire.slice(0, 37),
+    nonce: wire.slice(37, 61),
+    ciphertext: wire.slice(61, -64),
   };
 }
-
+function keyFor(context: ContentScope) {
+  return new Uint8Array(
+    hkdfSync('sha256', epochKey, CONTENT_HKDF_SALT, Result.getOrThrow(contentKeyInfo(context)), 32)
+  );
+}
 describe('signed content envelope', () => {
   it('matches the published XChaCha AEAD vector (not an IETF standard or protocol proof)', () => {
     // https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-xchacha-03#appendix-A.3.1
@@ -79,64 +89,46 @@ describe('signed content envelope', () => {
     expect(xchacha20poly1305(key, nonce, aad).decrypt(expected)).toEqual(plaintext);
   });
 
-  it('uses independently reproducible HKDF context and fresh nonce/message ID for each new encryption', async () => {
-    const plaintext = encoder.encode('private content');
-    const first = await seal(plaintext);
-    const second = await seal(plaintext);
+  it('uses canonical binary context, one AEAD tag and fresh nonce for each seal', async () => {
+    const plain = encoder.encode('private content');
+    const first = await seal(plain);
+    const second = await seal(plain);
     const a = parts(first);
-    const b = parts(second);
-    expect(a.nonce).not.toEqual(b.nonce);
-    const header = JSON.parse(decoder.decode(a.header)) as string[];
-    expect(header.slice(0, 8)).toEqual([
-      'lody-content/v1',
-      scope.genesis,
-      '0',
-      'doc-1',
-      'doc-update',
-      'A',
-      'A1',
-      'desktop',
-    ]);
-    expect(header[8]).not.toBe((JSON.parse(decoder.decode(b.header)) as string[])[8]);
-    const key = new Uint8Array(
-      hkdfSync(
-        'sha256',
-        epochKey,
-        encoder.encode('lody-content-hkdf/v1'),
-        encoder.encode(
-          JSON.stringify(['lody-content-key/v1', scope.genesis, '0', 'doc-1', 'doc-update'])
-        ),
-        32
-      )
-    );
-    expect(xchacha20poly1305(key, a.nonce, a.header).decrypt(a.ciphertext)).toEqual(plaintext);
-    expect((await cipher().open(scope, epochKey, first)).plaintext).toEqual(plaintext);
+    expect(a.nonce).not.toEqual(parts(second).nonce);
+    expect(first.byteLength).toBe(plain.byteLength + 141);
+    expect(a.header[0]).toBe(2);
+    expect(new DataView(a.header.buffer).getUint32(1)).toBe(0);
+    expect(toHex(a.header.subarray(5))).toBe(alicePublic);
+    const context = Result.getOrThrow(encodeContentContext(scope));
+    expect(toHex(context)).toBe(scope.genesis + '000000000005646f632d3101');
+    expect(
+      xchacha20poly1305(
+        keyFor(scope),
+        a.nonce,
+        Result.getOrThrow(contentAad(scope, a.header))
+      ).decrypt(a.ciphertext)
+    ).toEqual(plain);
+    expect((await cipher().open(scope, epochKey, first)).plaintext).toEqual(plain);
     await expect(cipher().open(scope, new Uint8Array(32).fill(8), first)).rejects.toThrow(
       'content-authentication-failed'
     );
   });
 
-  it('reproduces messageId and nonce from an injected random platform', async () => {
-    function scripted(messageId: Uint8Array, nonce: Uint8Array) {
-      const queue = [messageId, nonce];
+  it('reproduces bytes from an injected nonce source without a message ID', async () => {
+    function scripted() {
       return new ContentCipher(
         { authorize: () => alicePublic },
         {
           subtle: crypto.subtle,
           getRandomValues(array) {
-            const next = queue.shift();
             const view = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
-            if (!next || next.byteLength !== view.byteLength) {
-              throw new Error('entropy-mismatch');
-            }
-            view.set(next);
+            expect(view.byteLength).toBe(24);
+            view.fill(4);
             return array;
           },
         }
       );
     }
-    const messageId = new Uint8Array(16).fill(3);
-    const nonce = new Uint8Array(24).fill(4);
     const input = {
       scope,
       author,
@@ -144,111 +136,68 @@ describe('signed content envelope', () => {
       signingKey: alice.privateKey,
       plaintext: encoder.encode('replay-me'),
     };
-    const first = await scripted(new Uint8Array(messageId), new Uint8Array(nonce)).seal(input);
-    const second = await scripted(new Uint8Array(messageId), new Uint8Array(nonce)).seal(input);
-    expect(first).toEqual(second);
-    expect(decoder.decode((await cipher().open(scope, epochKey, first)).plaintext)).toBe(
-      'replay-me'
-    );
+    expect(await scripted().seal(input)).toEqual(await scripted().seal(input));
   });
 
-  it('binds Org, epoch, resource and purpose to the caller expectation and derived key', async () => {
+  it('binds independently supplied Org, epoch, document and purpose in signature, AAD and key derivation', async () => {
     const wire = await seal(encoder.encode('secret'));
     const alternatives: ContentScope[] = [
       { ...scope, genesis: '02'.repeat(32) },
       { ...scope, epoch: 1 },
       { ...scope, resource: 'doc-2' },
-      { ...scope, purpose: 'doc-snapshot' as const },
+      { ...scope, purpose: 'doc-snapshot' },
     ];
-    for (const context of alternatives)
-      await expect(cipher().open(context, epochKey, wire)).rejects.toThrow(
-        'content-context-mismatch'
-      );
     const { nonce, header, ciphertext } = parts(wire);
     for (const context of alternatives) {
-      const key = new Uint8Array(
-        hkdfSync(
-          'sha256',
-          epochKey,
-          encoder.encode('lody-content-hkdf/v1'),
-          encoder.encode(
-            JSON.stringify([
-              'lody-content-key/v1',
-              context.genesis,
-              String(context.epoch),
-              context.resource,
-              context.purpose,
-            ])
-          ),
-          32
+      await expect(cipher().open(context, epochKey, wire)).rejects.toThrow();
+      await expect(cipher().authenticate(context, wire)).rejects.toThrow();
+      expect(() =>
+        xchacha20poly1305(
+          keyFor(context),
+          nonce,
+          Result.getOrThrow(contentAad(context, header))
+        ).decrypt(ciphertext)
+      ).toThrow();
+      // Even the genuine signer cannot rebind existing ciphertext by signing a new context.
+      const unsigned = wire.slice(0, -64);
+      if (context.epoch !== scope.epoch) new DataView(unsigned.buffer).setUint32(1, context.epoch);
+      const signature = new Uint8Array(
+        await crypto.subtle.sign(
+          'Ed25519',
+          alice.privateKey,
+          Result.getOrThrow(contentSigningBytes(context, unsigned))
         )
       );
-      expect(() => xchacha20poly1305(key, nonce, header).decrypt(ciphertext)).toThrow();
+      await expect(
+        cipher().open(context, epochKey, Buffer.concat([unsigned, signature]))
+      ).rejects.toThrow('content-authentication-failed');
     }
   });
 
-  it('authenticates the full header with AEAD even when a signer re-signs modified metadata', async () => {
+  it('rejects unknown versions and unregistered or mismatched signing keys', async () => {
     const wire = await seal(encoder.encode('secret'));
-    const parsed = parts(wire);
-    const header = JSON.parse(decoder.decode(parsed.header)) as string[];
-    header[8] = 'ff'.repeat(16);
-    const changed = wire.slice(0, -64);
-    changed.set(encoder.encode(JSON.stringify(header)), 2);
-    const signature = new Uint8Array(
-      await crypto.subtle.sign(
-        'Ed25519',
-        alice.privateKey,
-        Buffer.concat([encoder.encode('lody-content-signature/v1\0'), changed])
-      )
-    );
-    await expect(
-      cipher().open(scope, epochKey, Buffer.concat([changed, signature]))
-    ).rejects.toThrow('content-authentication-failed');
-  });
-
-  it('rejects unknown versions, extra fields, aliases and noncanonical headers before treating metadata as usable', async () => {
-    const wire = await seal(encoder.encode('secret'));
-    const parsed = parts(wire);
-    const text = decoder.decode(parsed.header);
-    for (const [header, error] of [
-      ['private plaintext must not appear in parse errors', 'invalid-content-header'],
-      [text.replace('lody-content/v1', 'lody-content/v9'), 'unsupported-content-version'],
-      [' ' + text, 'noncanonical-content-header'],
-      [text.replace('"0"', '"00"'), 'invalid-content-epoch'],
-      [text.replace('"doc-1"', '"\\u0064oc-1"'), 'noncanonical-content-header'],
-      [text.replace('"doc-update"', '"unknown"'), 'invalid-content-purpose'],
-      [text.slice(0, -1) + ',"extra"]', 'invalid-content-header'],
-    ]) {
-      const bytes = encoder.encode(header!);
-      const length = new Uint8Array(2);
-      new DataView(length.buffer).setUint16(0, bytes.byteLength);
-      const changed = Buffer.concat([length, bytes, wire.subarray(2 + parsed.length)]);
-      expect(() => inspectContent(changed)).toThrow(error);
-      const inspected = inspectContentFrame(changed);
-      expect(Result.isFailure(inspected) && inspected.failure.code).toBe(error);
-      await expect(cipher().open(scope, epochKey, changed)).rejects.toMatchObject({
-        message: error,
-      });
+    for (const version of [0, 1, 3, 255]) {
+      const changed = wire.slice();
+      changed[0] = version;
+      expect(() => inspectContent(changed)).toThrow('unsupported-content-version');
+      expect(Result.isFailure(inspectContentFrame(changed))).toBe(true);
     }
-    const untrusted = inspectContent(wire);
-    expect(untrusted).toMatchObject({ ...scope, ...author });
-    expect(Object.isFrozen(untrusted)).toBe(true);
-    const rejecting = new ContentCipher({
+    expect(inspectContent(wire)).toEqual({ version: 2, epoch: 0, device: alicePublic });
+    expect(await cipher().authenticate(scope, wire)).toEqual({ ...scope, device: alicePublic });
+    const refusing = new ContentCipher({
       authorize: () => {
         throw new Error('not-admitted');
       },
     });
-    await expect(rejecting.open(scope, epochKey, wire)).rejects.toThrow('not-admitted');
+    await expect(refusing.authenticate(scope, wire)).rejects.toThrow('not-admitted');
     const weak = new ContentCipher({ authorize: () => '01' + '00'.repeat(31) });
     await expect(weak.open(scope, epochKey, wire)).rejects.toThrow('invalid-signing-key');
-    expect(await cipher().authenticate(wire)).toMatchObject({ ...scope, ...author });
-    await expect(rejecting.authenticate(wire)).rejects.toThrow('not-admitted');
   });
 
   it('rejects tampering in header, nonce, body, tag or signature without releasing plaintext', async () => {
     const wire = await seal(encoder.encode('secret'));
     const { length } = parts(wire);
-    for (const position of [2, 2 + length, 26 + length, wire.length - 65, wire.length - 1]) {
+    for (const position of [0, 1, 5, length, 24 + length, wire.length - 65, wire.length - 1]) {
       const changed = wire.slice();
       changed[position] = changed[position]! ^ 1;
       await expect(cipher().open(scope, epochKey, changed)).rejects.toThrow();
@@ -265,7 +214,10 @@ describe('signed content envelope', () => {
     await expect(
       cipher().seal({
         scope,
-        author: { ...author, actor: 'B' },
+        author: {
+          ...author,
+          device: toHex(new Uint8Array(await crypto.subtle.exportKey('raw', bob.publicKey))),
+        },
         epochKey,
         signingKey: alice.privateKey,
         plaintext: encoder.encode('secret'),
@@ -378,10 +330,8 @@ describe('signed content envelope', () => {
     const bobPublic = toHex(new Uint8Array(await crypto.subtle.exportKey('raw', bob.publicKey)));
     const peers = new ContentCipher({
       authorize(header) {
-        if (header.actor === 'A' && header.memberInstance === 'A1' && header.device === 'desktop')
-          return alicePublic;
-        if (header.actor === 'B' && header.memberInstance === 'B1' && header.device === 'phone')
-          return bobPublic;
+        if (header.device === alicePublic) return alicePublic;
+        if (header.device === bobPublic) return bobPublic;
         throw new Error('unknown-peer');
       },
     });
@@ -394,7 +344,7 @@ describe('signed content envelope', () => {
     const aWire = await seal(a.export({ mode: 'update' }));
     const bWire = await peers.seal({
       scope,
-      author: { actor: 'B', memberInstance: 'B1', device: 'phone' },
+      author: { actor: 'B', memberInstance: 'B1', device: bobPublic },
       epochKey,
       signingKey: bob.privateKey,
       plaintext: b.export({ mode: 'update' }),
@@ -433,8 +383,7 @@ describe('signed content envelope', () => {
     const layer = contentRuntimeLayer(
       {
         authorize(header) {
-          if (header.actor !== 'A' || header.memberInstance !== 'A1' || header.device !== 'desktop')
-            throw new Error('unauthorized-author');
+          if (header.device !== alicePublic) throw new Error('unauthorized-author');
           return alicePublic;
         },
       },
@@ -465,7 +414,7 @@ describe('signed content envelope', () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const service = yield* ContentCrypto;
-        const header = { ...scope, ...author, messageId: '01'.repeat(16) };
+        const header = { ...scope };
         const input = new Uint8Array(epochKey);
         const task = service.derive(input, header);
         input.fill(0);
@@ -531,4 +480,239 @@ describe('signed content envelope', () => {
     const wire = await Effect.runPromise(sealing);
     expect(decoder.decode((await cipher().open(scope, epochKey, wire)).plaintext)).toBe('hello');
   });
+});
+
+it('bounds canonical epoch/context/frame lengths and separates every content purpose', async () => {
+  for (const epoch of [-1, 0x100000000, 1.5, NaN])
+    await expect(seal(new Uint8Array(), { ...scope, epoch })).rejects.toThrow(
+      'invalid-content-epoch'
+    );
+  const last = await seal(new Uint8Array(), { ...scope, epoch: 0xffffffff });
+  expect(inspectContent(last).epoch).toBe(0xffffffff);
+  expect(
+    (await cipher().open({ ...scope, epoch: 0xffffffff }, epochKey, last)).plaintext.byteLength
+  ).toBe(0);
+  for (const resource of ['', 'x'.repeat(1025), '文档', 'has space'])
+    await expect(seal(new Uint8Array(), { ...scope, resource })).rejects.toThrow(
+      'invalid-content-resource'
+    );
+  for (let size = 0; size < 141; size++)
+    expect(Result.isFailure(inspectContentFrame(new Uint8Array(size)))).toBe(true);
+  expect(Result.isFailure(inspectContentFrame(new Uint8Array(MAX_CONTENT_BYTES + 142)))).toBe(true);
+  const purposes = [
+    'doc-update',
+    'doc-snapshot',
+    'flock-update',
+    'flock-snapshot',
+    'blob',
+    'epoch-history',
+    'presence',
+    'rpc-request',
+    'rpc-response',
+  ] as const;
+  for (const purpose of purposes) {
+    const bound = { ...scope, purpose };
+    const frame = await seal(encoder.encode(purpose), bound);
+    expect(decoder.decode((await cipher().open(bound, epochKey, frame)).plaintext)).toBe(purpose);
+    for (const other of purposes)
+      if (other !== purpose)
+        await expect(cipher().open({ ...scope, purpose: other }, epochKey, frame)).rejects.toThrow(
+          'bad-content-signature'
+        );
+  }
+});
+
+it('wipes run-owned epoch and derived keys on successful seal/open and failed signing', async () => {
+  const { contentCryptoLayer, contentAuthorityLayer } = await import('../src/platform/content');
+  const { CryptoError } = await import('../src/pure/errors');
+  const { Layer } = await import('effect');
+  const owned: Uint8Array[] = [];
+  let failSigning = true;
+  const instrumented = Layer.effect(
+    ContentCrypto,
+    Effect.gen(function* () {
+      const cryptoService = yield* ContentCrypto;
+      return {
+        ...cryptoService,
+        derive: (input: Uint8Array<ArrayBuffer>, header: ContentScope) => {
+          owned.push(input);
+          return cryptoService.derive(input, header).pipe(
+            Effect.tap((key) =>
+              Effect.sync(() => {
+                owned.push(key);
+              })
+            )
+          );
+        },
+        sign: (key: CryptoKey, message: Uint8Array) =>
+          failSigning
+            ? Effect.fail(new CryptoError({ operation: 'sign' }))
+            : cryptoService.sign(key, message),
+      };
+    })
+  ).pipe(Layer.provide(contentCryptoLayer(globalThis.crypto)));
+  const layer = Layer.merge(contentAuthorityLayer({ authorize: () => alicePublic }), instrumented);
+  const inputKey = epochKey.slice();
+  const task = sealContent({
+    scope,
+    author,
+    epochKey: inputKey,
+    signingKey: alice.privateKey,
+    plaintext: encoder.encode('cleanup'),
+  }).pipe(Effect.provide(layer));
+  const failure = await Effect.runPromise(Effect.result(task));
+  expect(Result.isFailure(failure) && failure.failure._tag).toBe('CryptoError');
+  expect(owned.length).toBeGreaterThan(0);
+  for (const key of owned) expect(key.every((b) => b === 0)).toBe(true);
+  failSigning = false;
+  const frame = await Effect.runPromise(task);
+  for (const key of owned) expect(key.every((b) => b === 0)).toBe(true);
+  const opened = await Effect.runPromise(
+    openContent(scope, inputKey, frame).pipe(Effect.provide(layer))
+  );
+  expect(decoder.decode(opened.plaintext)).toBe('cleanup');
+  for (const key of owned) expect(key.every((b) => b === 0)).toBe(true);
+  expect(inputKey).toEqual(epochKey);
+});
+
+it('wipes acquired secrets when interrupted during signing, without sharing caller buffers', async () => {
+  const { Deferred, Fiber, Layer } = await import('effect');
+  const { contentCryptoLayer, contentAuthorityLayer } = await import('../src/platform/content');
+  const owned: Uint8Array[] = [];
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const signing = yield* Deferred.make<void>();
+      const instrumented = Layer.effect(
+        ContentCrypto,
+        Effect.gen(function* () {
+          const service = yield* ContentCrypto;
+          return {
+            ...service,
+            derive: (input: Uint8Array<ArrayBuffer>, header: ContentScope) => {
+              owned.push(input);
+              return service.derive(input, header).pipe(
+                Effect.tap((key) =>
+                  Effect.sync(() => {
+                    owned.push(key);
+                  })
+                )
+              );
+            },
+            sign: () => Deferred.succeed(signing, undefined).pipe(Effect.andThen(Effect.never)),
+          };
+        })
+      ).pipe(Layer.provide(contentCryptoLayer(globalThis.crypto)));
+      const layer = Layer.merge(
+        contentAuthorityLayer({ authorize: () => alicePublic }),
+        instrumented
+      );
+      const child = yield* Effect.forkChild(
+        sealContent({
+          scope,
+          author,
+          epochKey,
+          signingKey: alice.privateKey,
+          plaintext: encoder.encode('interruption'),
+        }).pipe(Effect.provide(layer))
+      );
+      yield* Deferred.await(signing);
+      yield* Fiber.interrupt(child);
+      expect(owned.length).toBeGreaterThan(0);
+      for (const key of owned) expect(key.every((b) => b === 0)).toBe(true);
+      expect(epochKey).toEqual(new Uint8Array(32).fill(7));
+    })
+  );
+});
+
+it('authenticates external AAD without storing it and rejects re-signed ciphertext under another AAD', async () => {
+  const plaintext = encoder.encode('small update');
+  const binding = new Uint8Array([6, 7, 8]);
+  const other = new Uint8Array([6, 7, 9]);
+  const c = cipher();
+  const frame = await c.seal({
+    scope,
+    author,
+    epochKey,
+    signingKey: alice.privateKey,
+    plaintext,
+    additionalData: binding,
+  });
+  expect(frame.byteLength).toBe(plaintext.byteLength + 141);
+  expect((await c.open(scope, epochKey, frame, binding)).plaintext).toEqual(plaintext);
+  expect((await c.authenticate(scope, frame, binding)).device).toBe(alicePublic);
+  for (const wrong of [undefined, new Uint8Array(), other, new Uint8Array([6, 7])]) {
+    await expect(c.open(scope, epochKey, frame, wrong)).rejects.toThrow('bad-content-signature');
+    await expect(c.authenticate(scope, frame, wrong)).rejects.toThrow('bad-content-signature');
+  }
+  const unsigned = frame.slice(0, -64);
+  const signature = new Uint8Array(
+    await crypto.subtle.sign(
+      'Ed25519',
+      alice.privateKey,
+      new Uint8Array(Result.getOrThrow(contentSigningBytes(scope, unsigned, other)))
+    )
+  );
+  const rebound = frame.slice();
+  rebound.set(signature, unsigned.byteLength);
+  // The legitimate signer can re-sign, but changing external AAD still cannot
+  // make the original AEAD ciphertext valid under the replacement context.
+  await expect(c.authenticate(scope, rebound, other)).resolves.toMatchObject({
+    device: alicePublic,
+  });
+  await expect(c.open(scope, epochKey, rebound, other)).rejects.toThrow(
+    'content-authentication-failed'
+  );
+  const invalid = new Uint8Array(1025);
+  await expect(
+    c.seal({
+      scope,
+      author,
+      epochKey,
+      signingKey: alice.privateKey,
+      plaintext,
+      additionalData: invalid,
+    })
+  ).rejects.toThrow('invalid-content-additional-data');
+  await expect(c.open(scope, epochKey, frame, invalid)).rejects.toThrow(
+    'invalid-content-additional-data'
+  );
+  await expect(c.authenticate(scope, frame, invalid)).rejects.toThrow(
+    'invalid-content-additional-data'
+  );
+  const maximum = new Uint8Array(1024).fill(1);
+  const largeAadFrame = await c.seal({
+    scope,
+    author,
+    epochKey,
+    signingKey: alice.privateKey,
+    plaintext,
+    additionalData: maximum,
+  });
+  expect(largeAadFrame.byteLength).toBe(frame.byteLength);
+  expect((await c.open(scope, epochKey, largeAadFrame, maximum)).plaintext).toEqual(plaintext);
+});
+
+it('captures external AAD before execution and keeps repeat/concurrent Effects independent', async () => {
+  const layer = contentRuntimeLayer({ authorize: () => alicePublic }, globalThis.crypto);
+  const binding = new Uint8Array([6, 7, 8]);
+  const expected = binding.slice();
+  const task = sealContent({
+    scope,
+    author,
+    epochKey,
+    signingKey: alice.privateKey,
+    plaintext: encoder.encode('captured AAD'),
+    additionalData: binding,
+  }).pipe(Effect.provide(layer));
+  binding.fill(0);
+  const frames = await Effect.runPromise(Effect.all([task, task], { concurrency: 'unbounded' }));
+  const opening = openContent(scope, epochKey, frames[0]!, expected).pipe(Effect.provide(layer));
+  expected.fill(0);
+  for (let run = 0; run < 2; run++)
+    expect(decoder.decode((await Effect.runPromise(opening)).plaintext)).toBe('captured AAD');
+  expect(
+    decoder.decode(
+      (await cipher().open(scope, epochKey, frames[1]!, new Uint8Array([6, 7, 8]))).plaintext
+    )
+  ).toBe('captured AAD');
 });

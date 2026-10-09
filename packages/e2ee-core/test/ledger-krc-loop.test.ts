@@ -439,7 +439,7 @@ describe('P3 public-export K/R/C loop', () => {
       createStreamsContentProvider({
         cipher: new ContentCipher({
           authorize(header) {
-            if (header.actor !== author.actor) throw new Error('unauthorized');
+            if (header.device !== signingPublic) throw new Error('unauthorized');
             return signingPublic;
           },
         }),
@@ -447,7 +447,7 @@ describe('P3 public-export K/R/C loop', () => {
         resource: 'doc-1',
         model: 'loro',
         writeEpoch,
-        author,
+        author: { ...author, device: signingPublic },
         signingKey: pair.privateKey,
         readKey,
       });
@@ -787,7 +787,7 @@ describe('P3 public-export K/R/C loop', () => {
       createStreamsContentProvider({
         cipher: new ContentCipher({
           authorize(header) {
-            if (header.actor !== author.actor) throw new Error('unauthorized');
+            if (header.device !== signingPublic) throw new Error('unauthorized');
             return signingPublic;
           },
         }),
@@ -795,7 +795,7 @@ describe('P3 public-export K/R/C loop', () => {
         resource,
         model: 'loro',
         writeEpoch,
-        author,
+        author: { ...author, device: signingPublic },
         signingKey: pair.privateKey,
         readKey,
       });

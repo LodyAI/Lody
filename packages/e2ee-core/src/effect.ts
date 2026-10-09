@@ -63,10 +63,16 @@ export { DeviceIdentityStore, UserIdentityStore } from './ports/identity';
 export type { DeviceIdentityHandles, UserIdentityHandles } from './ports/identity';
 export { ContentAuthority, ContentCrypto } from './ports/content';
 export { sealContent, openContent, authenticateContent } from './workflows/content';
-export { parseContentFrame, inspectContentFrame, MAX_CONTENT_BYTES } from './pure/content-frame';
+export {
+  parseContentFrame,
+  inspectContentFrame,
+  MAX_CONTENT_BYTES,
+  CONTENT_OVERHEAD_BYTES,
+} from './pure/content-frame';
 export type {
   ContentAuthor,
   ContentHeader,
+  ContentMetadata,
   ContentPolicy,
   ContentPurpose,
   ContentScope,

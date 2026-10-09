@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { expect, it } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
-import { ContentCipher, inspectContent } from '../src/content';
+import { ContentCipher } from '../src/content';
 import { commitEpochKey, VerifiedEpochKeys, sealEpochHistory } from '../src/epoch-keys';
 import { fromHex, toHex } from '../src/wire';
 
@@ -11,15 +11,10 @@ const secret = new Uint8Array(32).fill(15);
 async function historyFixture() {
   const signing = await crypto.subtle.generateKey('Ed25519', false, ['sign', 'verify']);
   const publicKey = toHex(new Uint8Array(await crypto.subtle.exportKey('raw', signing.publicKey)));
-  const author = { actor: 'owner', memberInstance: 'owner1', device: 'desktop' };
+  const author = { actor: 'owner', memberInstance: 'owner1', device: publicKey };
   const cipher = new ContentCipher({
     authorize(header) {
-      if (
-        header.actor !== author.actor ||
-        header.memberInstance !== author.memberInstance ||
-        header.device !== author.device
-      )
-        throw new Error('unauthorized-history-author');
+      if (header.device !== author.device) throw new Error('unauthorized-history-author');
       return publicKey;
     },
   });
@@ -101,9 +96,13 @@ it('rejects swapped, wrong-direction, forged, oversized or incorrect-key history
   try {
     await f.keys.install(2, f.secrets[2]!);
     const bridge = await f.wrap(2);
-    await expect(f.cipher.open(inspectContent(bridge), f.secrets[1]!, bridge)).rejects.toThrow(
-      'content-authentication-failed'
-    );
+    await expect(
+      f.cipher.open(
+        { genesis, epoch: 2, resource: 'previous-epoch-key', purpose: 'epoch-history' },
+        f.secrets[1]!,
+        bridge
+      )
+    ).rejects.toThrow('content-authentication-failed');
     await expect(f.keys.importHistory(f.cipher, 2, await f.wrap(1))).rejects.toThrow(
       'content-context-mismatch'
     );

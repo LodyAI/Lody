@@ -39,6 +39,7 @@ export interface ContentSnapshotPut {
   readonly leaseExpiresAt: number;
   readonly expectedGenesis: string;
   readonly expectedResource: string;
+  readonly expectedPurpose: 'doc-snapshot' | 'flock-snapshot';
 }
 
 export interface ContentSnapshotAdmissionResult {
@@ -53,7 +54,7 @@ export interface ContentSnapshotAdmissionOptions {
   readonly store?: SnapshotPublicationStore;
   readonly cipher: ContentCipher;
   /** Current document-write capability at admit time. Not historical acceptance. */
-  readonly mayWriteDocument: (author: ContentAuthor) => boolean;
+  readonly mayWriteDocument: (author: Pick<ContentAuthor, 'device'>) => boolean;
   /** Injected Unix milliseconds. Queue delay must not extend leaseExpiresAt. */
   readonly now: () => number;
 }

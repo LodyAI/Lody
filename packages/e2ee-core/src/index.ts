@@ -10,11 +10,17 @@ export type {
 } from './capabilities';
 export { ControlFreshnessLease } from './control-freshness';
 export type { TrustedControlObservation } from './control-freshness';
-export { ContentCipher, inspectContent, MAX_CONTENT_BYTES } from './content';
+export {
+  ContentCipher,
+  inspectContent,
+  MAX_CONTENT_BYTES,
+  CONTENT_OVERHEAD_BYTES,
+} from './content';
 export type {
   ContentScope,
   ContentAuthor,
   ContentHeader,
+  ContentMetadata,
   ContentPurpose,
   ContentPolicy,
   SealContent,

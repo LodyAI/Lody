@@ -45,8 +45,7 @@ function provider(
   return createStreamsContentProvider({
     cipher: new ContentCipher({
       authorize(header) {
-        if (header.actor !== 'A' || header.memberInstance !== 'A1' || header.device !== 'D')
-          throw new Error('unauthorized');
+        if (header.device !== publicKey) throw new Error('unauthorized');
         return publicKey;
       },
     }),
@@ -54,7 +53,7 @@ function provider(
     resource,
     model: 'loro',
     writeEpoch: 0,
-    author: { actor: 'A', memberInstance: 'A1', device: 'D' },
+    author: { actor: 'A', memberInstance: 'A1', device: publicKey },
     signingKey: pair.privateKey,
     readKey,
     mayWriteDocument,
@@ -71,10 +70,22 @@ function response(body: Uint8Array, nextOffset = 'tail') {
 }
 async function upload(doc: LoroDoc, text = 'secret') {
   let body = new Uint8Array();
+  let batchBytes = 0;
+  const protection = provider();
   const transport = new StreamsCrdt({
     streamUrl: url,
     adapter: createLoroDocAdapter(doc),
-    e2ee: { provider: provider(), readPolicy: 'encrypted-only', writePolicy: 'encrypt' },
+    e2ee: {
+      provider: {
+        ...protection,
+        async seal(input) {
+          batchBytes = input.plaintext.byteLength;
+          return protection.seal(input);
+        },
+      },
+      readPolicy: 'encrypted-only',
+      writePolicy: 'encrypt',
+    },
     fetch: async (_url, init) => {
       if (init?.method !== 'POST') throw new Error('unexpected-read');
       body = new Uint8Array(await new Response(init.body).arrayBuffer());
@@ -86,7 +97,7 @@ async function upload(doc: LoroDoc, text = 'secret') {
   const result = await transport.appendWriteOnly();
   expect(result.ok).toBe(true);
   if (result.ok) expect(result.value.appended).toBe(true);
-  expect(body.byteLength).toBeGreaterThan(0);
+  expect(body.byteLength).toBe(batchBytes + 156);
   return body;
 }
 async function download(
@@ -139,31 +150,35 @@ async function download(
 it('authenticates the exact SDK AAD and checks the declared overhead', async () => {
   const p = provider();
   const plaintext = new TextEncoder().encode('private');
-  let calls = 0;
   const binding = new Uint8Array([6, 7, 8]);
   const sealed = await p.seal({
     plaintext,
     context,
     additionalData(header) {
-      calls++;
-      expect(header).toEqual(new Uint8Array([1]));
+      expect(header).toEqual(new Uint8Array([3]));
       return binding;
     },
   });
-  expect(calls).toBe(1);
   expect(sealed.header.length + sealed.sealed.length - plaintext.length).toBeLessThanOrEqual(
     p.maxSealOverheadBytes
   );
+  expect(sealed.sealed.byteLength).toBe(plaintext.byteLength + 141);
   expect(await p.open({ ...sealed, context, additionalData: binding })).toEqual(plaintext);
+  await expect(p.open({ ...sealed, context, additionalData: new Uint8Array() })).rejects.toThrow(
+    'invalid-streams-aad'
+  );
+  await expect(
+    p.open({ ...sealed, header: new Uint8Array([1]), context, additionalData: binding })
+  ).rejects.toThrow('unsupported-streams-header');
   await expect(
     p.open({ ...sealed, context, additionalData: new Uint8Array([6, 7, 9]) })
-  ).rejects.toThrow('streams-aad-mismatch');
+  ).rejects.toThrow('bad-content-signature');
   await expect(
     p.open({ ...sealed, header: new Uint8Array([2]), context, additionalData: binding })
   ).rejects.toThrow('unsupported-streams-header');
   await expect(
     provider('other').open({ ...sealed, context, additionalData: binding })
-  ).rejects.toThrow('content-context-mismatch');
+  ).rejects.toThrow('bad-content-signature');
   await expect(
     provider('doc-1', () => new Uint8Array(32)).open({
       ...sealed,
@@ -282,7 +297,13 @@ it('round-trips an encrypted content snapshot bound to the continuation offset',
     context: snapshotContext,
     additionalData: () => binding,
   });
-  expect(sealed.header).toEqual(new Uint8Array([2]));
+  expect(sealed.header).toEqual(new Uint8Array([4]));
+  expect(sealed.sealed.byteLength).toBe(
+    plaintext.byteLength +
+      141 +
+      2 +
+      new TextEncoder().encode(snapshotContext.continuationOffset).byteLength
+  );
   expect(new TextDecoder().decode(sealed.sealed)).not.toContain('snapshot-secret');
   expect(await p.open({ ...sealed, context: snapshotContext, additionalData: binding })).toEqual(
     plaintext
@@ -334,7 +355,7 @@ it('rejects cross-document snapshots, tampering, wrong epoch keys, and offset sw
   });
   await expect(
     provider('other').open({ ...sealed, context: snapshotContext, additionalData: binding })
-  ).rejects.toThrow('content-context-mismatch');
+  ).rejects.toThrow('bad-content-signature');
   const tampered = { ...sealed, sealed: sealed.sealed.slice() };
   tampered.sealed[tampered.sealed.length - 1]! ^= 1;
   await expect(

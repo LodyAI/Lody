@@ -137,9 +137,7 @@ export class EpochPublisher {
               new ContentCipher({
                 authorize: (header) => {
                   invariant(
-                    header.actor === identity.actor &&
-                      header.memberInstance === identity.memberInstance &&
-                      header.device === identity.device,
+                    header.device === member.devices.get(identity.device)!.signingKey,
                     'history-author-mismatch'
                   );
                   return member.devices.get(identity.device)!.signingKey;
@@ -150,7 +148,7 @@ export class EpochPublisher {
                 epoch,
                 epochKey: secret,
                 previousKey,
-                author: identity,
+                author: { ...identity, device: member.devices.get(identity.device)!.signingKey },
                 signingKey: identity.signingKey,
               }
             );
