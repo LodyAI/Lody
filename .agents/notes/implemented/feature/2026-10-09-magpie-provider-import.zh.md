@@ -59,6 +59,19 @@ Provider；所需自定义项由用户迁入显示的路径。独立 Magpie 默�
 DSH 0.1.5-rc.2 原生组合：基础 bundle → 生成宿主 bundle → 用户 patch → 宿主约束层。
 合成自定义模型得到保留，遥测仍被禁用，ACP 入口更新到新路径。
 
+## 基于消融实验的清理
+
+固定 DSH 0.1.5-rc.2 的 `prepareProfile` 会在启动前重建 `cordis.yml`。
+删除 Lody 的重复写入后，ACP 入口、用户模型修改及遥测约束仍一致，因此空 include
+根文件改由 DSH 单独写入。Provider ID 继续传入异步 DSH 启动；原生登录/状态及
+同步 spawn 回退中没有消费方的重复传参，在启动/认证测试验证后删除。
+Bub 用现有 `mergeLoopbackNoProxy` 替代自己的逗号列表合并，但保留无条件调用：
+没有代理环境变量时 `withLoopbackNoProxy` 不处理，Python 却仍可能继承 macOS 系统代理。
+
+对照实验否决两项删除：移除最终约束层会让用户 patch 重新启用遥测；移除生成的宿主
+bundle 会失去 ACP 入口。这两层职责不同，应保留。清理由已有运行时测试覆盖，
+没有仅凭正常路径测试通过便删除兼容性或输入校验边界。
+
 ## 证据与验证
 
 - 检查了 Magpie 提交 `62b1c995ffaebb223ad040b4c54ebabab0078c7a`：

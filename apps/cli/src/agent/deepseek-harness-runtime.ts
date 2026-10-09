@@ -366,7 +366,6 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
       join(profileDir, 'package.json'),
       JSON.stringify(manifest, null, 2) + '\n'
     ),
-    publishFileAtomically(join(profileDir, 'cordis.yml'), profileFiles.cordisYml),
     publishFileAtomically(join(profileDir, 'pnpm-workspace.yaml'), profileFiles.pnpmWorkspaceYaml),
     writeFile(join(profileDir, 'cordis.patch.yml'), '[]\n', { flag: 'wx', mode: 0o600 }).catch(
       (error: NodeJS.ErrnoException) => {

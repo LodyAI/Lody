@@ -3,6 +3,7 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { MAGPIE_TOKEN, normalizeMagpieGateway } from '@lody/shared';
+import { mergeLoopbackNoProxy } from '@lody/shared/proxy-env';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 const modelSchema = z.object({
@@ -231,9 +232,7 @@ export async function prepareMagpieRuntime(
     return { args: [], env: { DEEPSEEK_BASE_URL: `${base}/v1`, DEEPSEEK_API_KEY: MAGPIE_TOKEN } };
   if (agentType === 'bub') {
     // Python HTTP clients can inherit macOS system proxies even without HTTP_PROXY.
-    const bypass = [process.env.NO_PROXY, process.env.no_proxy, '127.0.0.1,localhost,::1']
-      .filter(Boolean)
-      .join(',');
+    const bypass = mergeLoopbackNoProxy(process.env.NO_PROXY, process.env.no_proxy);
     return {
       args: [],
       env: {

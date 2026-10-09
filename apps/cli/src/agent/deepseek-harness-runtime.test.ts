@@ -56,9 +56,8 @@ async function readGeneratedProfile(
     throw new Error('DeepSeek Harness launch did not include a profile name');
   }
   const profileDir = join(rootDir, 'profiles', profileName);
-  const [packageJson, cordisYml, cordisPatchYml, pnpmWorkspaceYaml] = await Promise.all([
+  const [packageJson, cordisPatchYml, pnpmWorkspaceYaml] = await Promise.all([
     readFile(join(profileDir, 'package.json'), 'utf8'),
-    readFile(join(profileDir, 'cordis.yml'), 'utf8'),
     readFile(join(profileDir, 'cordis.patch.yml'), 'utf8'),
     readFile(join(profileDir, 'pnpm-workspace.yaml'), 'utf8'),
   ]);
@@ -71,7 +70,6 @@ async function readGeneratedProfile(
     profileName,
     profileDir,
     packageJson,
-    cordisYml,
     cordisPatchYml,
     generatedPatchYml,
     pnpmWorkspaceYaml,
@@ -198,7 +196,6 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     expect(profile.profileName).toBe('lody-acp');
     expect(profile.cordisPatchYml).toBe('[]\n');
     expect(profile.profileDir).toBe(join(rootDir, 'profiles', profile.profileName));
-    expect(profile.cordisYml).toBe('[]\n');
     expect(profile.packageJson).toContain('"@deepseek-ai/dsh-base"');
     expect(profile.generatedPatchYml).toContain('compression: zstd');
     expect(launch.args).toContain('node');

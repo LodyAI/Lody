@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { prepareMagpieRuntime, readMagpieModels } from './magpie-runtime';
 const gateway = 'http://127.0.0.1:3425';
 const models = [
@@ -18,6 +18,7 @@ const models = [
 ];
 const directories: string[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(directories.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 const fetcher: typeof fetch = async (input, init) => {
@@ -136,6 +137,8 @@ describe('Magpie runtime preparation', () => {
   });
   it('configures Bub through its native OpenAI environment without enabling fallback models', async () => {
     const directory = await root();
+    vi.stubEnv('NO_PROXY', 'corp.internal');
+    vi.stubEnv('no_proxy', 'other.internal,corp.internal');
     const bub = await prepareMagpieRuntime('bub', gateway, undefined, directory, fetcher);
     expect(bub).toEqual({
       args: [],
@@ -146,8 +149,8 @@ describe('Magpie runtime preparation', () => {
         BUB_API_KEY: 'magpie-lody',
         BUB_PROVIDERS: '{}',
         BUB_FALLBACK_MODELS: '[]',
-        NO_PROXY: expect.stringContaining('127.0.0.1,localhost,::1'),
-        no_proxy: expect.stringContaining('127.0.0.1,localhost,::1'),
+        NO_PROXY: 'corp.internal,other.internal,localhost,127.0.0.1,::1',
+        no_proxy: 'corp.internal,other.internal,localhost,127.0.0.1,::1',
       },
     });
     expect(await readdir(directory)).toEqual([]);

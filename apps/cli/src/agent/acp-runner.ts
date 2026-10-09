@@ -235,7 +235,6 @@ export type SpawnAcpProcessOptions = {
   agentType: string;
   customAcp?: CustomAcpLaunchSpec;
   runtimeOverrides?: BuiltinRuntimeOverrides;
-  agentConfigId?: string;
   magpieGatewayUrl?: string;
   workdir: string;
   env: NodeJS.ProcessEnv;
@@ -257,7 +256,6 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
       agentType: options.agentType,
       customAcp: options.customAcp,
       runtimeOverrides: options.runtimeOverrides,
-      agentConfigId: options.agentConfigId,
       magpieGatewayUrl: options.magpieGatewayUrl,
     });
     command = command ?? launch.command;

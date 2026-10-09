@@ -75,6 +75,23 @@ YAML/settings/history, and the installed pinned DSH 0.1.5-rc.2 native compositio
 base bundle → generated host bundle → user patch → host guard. A synthetic edited
 model survived while telemetry remained disabled and the ACP entry upgraded.
 
+## Ablation-backed cleanup
+
+Pinned DSH 0.1.5-rc.2 `prepareProfile` recreates `cordis.yml` before boot.
+Removing Lody's duplicate write preserves the composed ACP entry, edited user
+model and telemetry guard, so only DSH now writes that empty include root.
+Provider IDs remain on async DSH launches; unused copies on native login/status
+and the synchronous spawn fallback were removed after startup/authentication tests.
+Bub now reuses `mergeLoopbackNoProxy` instead of its own comma-list merger.
+The unconditional call stays: `withLoopbackNoProxy` alone does nothing when proxy
+environment variables are absent, while Python can still inherit macOS system proxies.
+
+Negative controls rejected two tempting deletions: removing the final guard lets
+a user patch re-enable telemetry; removing the generated host bundle loses the ACP
+entry. These layers have distinct responsibilities and are retained. Existing
+runtime suites cover the cleanup; no compatibility or input-validation boundary
+was removed merely because a happy-path test passed.
+
 ## Evidence and validation
 
 - Magpie source inspected at `62b1c995ffaebb223ad040b4c54ebabab0078c7a`:
