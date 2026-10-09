@@ -93,4 +93,26 @@ answering, raw-history export, external request IDs and a persisted event log ar
 outside this change. Cross-tool memory search was attempted,
 but Nowledge Mem was unreachable.
 
+## Review correction and simplification (2026-10-09)
+
+Metadata can activate B while history still contains completed A. Projection and
+workspace release now share `hasSettledSessionTurn`: both activation pointers
+must agree with the latest durable terminal turn (or all are absent in an empty
+Session). Missing next-turn history projects unknown and keeps the room held.
+Remove the separate retirement queue and release/re-enqueue workaround; the
+existing dirty queue reconciles state and resource release together.
+
+Workspace owns one idempotent removal path for metadata deletion and child
+notifications. Child deletion queues that path instead of awaiting its own close;
+this avoids self-wait and emits removal once. Single and workspace callers now
+use one asynchronous `{observer, close}` acquisition interface with Effect scope
+finalizers. The directory indexes, revision fence and isolated read-only manager
+remain necessary boundaries.
+
+Real Loro history fixtures cover A/B synchronization order, exactly one held room
+until B's persisted completion, and child-first deletion without deadlock or a
+retained handle. A separate guard regression protects against a stale idle child
+projection. These deterministic tests do not establish authenticated Cloud sync
+or external Connector interoperability.
+
 PR: [LodyAI/Lody #1335](https://github.com/LodyAI/Lody/pull/1335).

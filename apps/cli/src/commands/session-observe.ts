@@ -84,6 +84,19 @@ export function resolveObserveSelection(
 const isTerminal = (state: ObservedTurn['state']): state is SessionTurnOutcome =>
   state === 'completed' || state === 'failed' || state === 'canceled';
 
+/** Metadata can activate the next turn before its history arrives. */
+export function hasSettledSessionTurn(
+  meta: Pick<SessionMeta, 'latestUserMsgId' | 'processingUserMsgId'>,
+  latestTurn: ObservedTurn | undefined
+): boolean {
+  return (
+    (!latestTurn || isTerminal(latestTurn.state)) &&
+    [meta.latestUserMsgId, meta.processingUserMsgId].every(
+      (id) => !id || id === latestTurn?.userTurnId
+    )
+  );
+}
+
 function projectTurn(
   user: SessionDirectoryScalars,
   assistant?: SessionDirectoryScalars
@@ -376,7 +389,7 @@ export class SessionObserver {
           : 'running'
         : activeTurns.length > 0
           ? 'pending'
-          : (latestTurn && isTerminal(latestTurn.state)) || (!latestUser && !meta.latestUserMsgId)
+          : hasSettledSessionTurn(meta, latestTurn)
             ? 'idle'
             : 'unknown';
       const snapshot: ObservedSession = {

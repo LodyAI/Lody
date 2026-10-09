@@ -17,6 +17,7 @@ import {
 import type { ObservedSession } from './session-observe';
 import {
   SessionObserver,
+  hasSettledSessionTurn,
   createSessionObserveWriter,
   resolveObserveSelection,
   type SessionObserveEvent,
@@ -203,6 +204,30 @@ describe('Session observation', () => {
     ]);
     expect(f.observer.current?.state).toBe('idle');
   });
+
+  it.each(['latestUserMsgId', 'processingUserMsgId'] as const)(
+    'does not settle the previous turn while %s points to missing history',
+    async (pointer) => {
+      const f = await fixture([
+        entry('u1', { status: 'handled' }),
+        entry('a1', { role: 'assistant', userTurnId: 'u1', finished: true }),
+      ]);
+      await f.metadata({ [pointer]: 'u2', status: { type: 'idle' } });
+      expect(f.observer.current).toMatchObject({
+        state: 'unknown',
+        latestTurn: { userTurnId: 'u1', state: 'completed' },
+      });
+      expect(hasSettledSessionTurn(f.meta, f.observer.current?.latestTurn)).toBe(false);
+      f.writer.append(entry('u2', { status: 'processing' }));
+      await f.observer.flush();
+      expect(f.observer.current?.state).toBe('running');
+      await f.update('u2', { status: 'canceled' });
+      expect(f.observer.current?.state).toBe('idle');
+      expect(f.events.filter((e) => e.type === 'turn.finished')).toEqual([
+        { type: 'turn.finished', sessionId: 's', userTurnId: 'u2', outcome: 'canceled' },
+      ]);
+    }
+  );
 
   it('continues across turns, including failure and cancellation without an Assistant', async () => {
     const f = await fixture([]);
@@ -629,6 +654,146 @@ describe('Workspace Session observation', () => {
     expect(f.reader.current.find((s) => s.sessionId === 'active')?.latestTurn?.state).toBe(
       'completed'
     );
+    expect(f.errors).toEqual([]);
+  });
+
+  it('holds one real history observer while the next activation precedes its history', async () => {
+    let child: Awaited<ReturnType<typeof fixture>> | undefined;
+    const held = new Set<SessionId>();
+    let opens = 0;
+    let closes = 0;
+    const f = workspaceFixture(
+      [meta('s', { latestUserMsgId: 'u2', lastHandledUserMsgId: 'u1', status: { type: 'idle' } })],
+      {
+        async open(id, emit) {
+          opens += 1;
+          held.add(id);
+          child = await fixture(
+            [
+              entry('u1', { status: 'handled' }),
+              entry('a1', { role: 'assistant', userTurnId: 'u1', finished: true }),
+            ],
+            { readMeta: async () => f.catalog.get(id) ?? null, emit }
+          );
+          const observer = child.observer;
+          return {
+            observer,
+            async close() {
+              await observer.close();
+              held.delete(id);
+              closes += 1;
+            },
+          };
+        },
+      }
+    );
+    await f.reader.start();
+    await f.reader.flush();
+    expect(f.reader.current[0]).toMatchObject({
+      state: 'unknown',
+      latestTurn: { userTurnId: 'u1', state: 'completed' },
+    });
+    // Repeated metadata notifications must not release/reopen the previous result.
+    for (let i = 0; i < 3; i++) {
+      f.reader.refresh('s' as SessionId);
+      await f.reader.flush();
+    }
+    expect([...held]).toEqual(['s']);
+    expect({ opens, closes }).toEqual({ opens: 1, closes: 0 });
+    expect(
+      f.events.filter((e) => e.type === 'snapshot' && e.session.source === 'persisted')
+    ).toHaveLength(1);
+    if (!child) throw new Error('Missing history observer');
+    child.writer.append(entry('u2', { status: 'processing' }));
+    child.writer.append(entry('a2', { role: 'assistant', userTurnId: 'u2', finished: false }));
+    await f.reader.flush();
+    expect(f.reader.current[0]?.state).toBe('running');
+    expect(held.size).toBe(1);
+    await child.update('u2', { status: 'handled' });
+    await child.update('a2', { finished: true });
+    await f.reader.flush();
+    expect(f.reader.current[0]).toMatchObject({
+      state: 'idle',
+      latestTurn: { userTurnId: 'u2', state: 'completed' },
+    });
+    expect(f.events.filter((e) => e.type === 'turn.finished')).toEqual([
+      {
+        type: 'turn.finished',
+        sessionId: 's',
+        userTurnId: 'u2',
+        assistantTurnId: 'a2',
+        outcome: 'completed',
+        durationMs: 0,
+      },
+    ]);
+    expect(held.size).toBe(0);
+    expect({ opens, closes }).toEqual({ opens: 1, closes: 1 });
+    expect(f.errors).toEqual([]);
+  });
+
+  it('checks activation identities before releasing a stale idle child projection', async () => {
+    const f = workspaceFixture([meta('s', { latestUserMsgId: 'u2' })]);
+    await f.reader.start();
+    await f.reader.flush();
+    const child = f.opened.get('s' as SessionId);
+    if (!child) throw new Error('Missing observer');
+    child.current = {
+      ...child.current,
+      state: 'idle',
+      latestTurn: { userTurnId: 'u1', state: 'completed' },
+    };
+    await child.emit({
+      type: 'session.changed',
+      sessionId: 's' as SessionId,
+      session: child.current,
+    });
+    await f.reader.flush();
+    expect([...f.held]).toEqual(['s']);
+    child.current = { ...child.current, latestTurn: { userTurnId: 'u2', state: 'completed' } };
+    await child.emit({
+      type: 'session.changed',
+      sessionId: 's' as SessionId,
+      session: child.current,
+    });
+    await f.reader.flush();
+    expect(f.held.size).toBe(0);
+  });
+
+  it('releases a real child that sees deletion before the workspace watch', async () => {
+    let child: Awaited<ReturnType<typeof fixture>> | undefined;
+    const held = new Set<SessionId>();
+    const f = workspaceFixture([meta('s', { latestUserMsgId: 'u' })], {
+      async open(id, emit) {
+        held.add(id);
+        child = await fixture([entry('u', { status: 'processing' })], {
+          readMeta: async () => f.catalog.get(id) ?? null,
+          emit,
+        });
+        const observer = child.observer;
+        return {
+          observer,
+          async close() {
+            await observer.close();
+            held.delete(id);
+          },
+        };
+      },
+    });
+    await f.reader.start();
+    await f.reader.flush();
+    expect(held.size).toBe(1);
+    if (!child) throw new Error('Missing history observer');
+    f.catalog.delete('s' as SessionId);
+    child.observer.refresh();
+    await child.observer.flush();
+    await f.reader.flush();
+    expect(held.size).toBe(0);
+    expect(f.reader.current).toEqual([]);
+    f.reader.refresh('s' as SessionId);
+    await f.reader.flush();
+    expect(f.events.filter((e) => e.type === 'session.removed')).toEqual([
+      { type: 'session.removed', sessionId: 's' },
+    ]);
     expect(f.errors).toEqual([]);
   });
 

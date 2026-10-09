@@ -145,7 +145,7 @@ import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retr
 import { createSessionBackend } from '@/session/session-backend';
 import { Effect } from 'effect';
 import { createSessionObserveWriter, resolveObserveSelection } from './session-observe';
-import { openSessionObservation, acquireSessionObservation } from './session-observe-runtime';
+import { acquireSessionObservation } from './session-observe-runtime';
 import { WorkspaceSessionObserver } from './session-observe-workspace';
 
 type CommonOptions = CommonCommandOptions;
@@ -4657,15 +4657,24 @@ const sessionObserveCommand = new Command('observe')
                     if (options.follow) yield* Effect.promise(() => stopped);
                   } else {
                     if (!sessionId) throw new Error('Missing Session ID.');
-                    const observer = yield* openSessionObservation({
-                      manager,
-                      sessionId,
-                      signal: stop.signal,
-                      emit,
-                      onError: fail,
-                      onRemoved: resolveStopped,
-                    });
-                    if (!observer) return;
+                    const handle = yield* Effect.acquireRelease(
+                      attempt(() =>
+                        acquireSessionObservation({
+                          manager,
+                          sessionId,
+                          signal: stop.signal,
+                          emit,
+                          onError: fail,
+                          onRemoved: resolveStopped,
+                        })
+                      ),
+                      (owned) =>
+                        Effect.promise(async () => {
+                          await owned?.close();
+                        })
+                    );
+                    if (!handle) return;
+                    const { observer } = handle;
                     yield* Effect.acquireRelease(
                       Effect.sync(() =>
                         manager.repo.watch(

@@ -84,6 +84,8 @@ JSONL `{type: "error", error: "..."}` 不带版本化 envelope，
 完成需要 User 为 `handled`，且关联 Assistant 为 `finished: true` 或含数值 `endedAt`。
 User 的 `failed`、`canceled` 分别独立证明对应终态，支持尚无 Assistant 的失败。
 元数据 idle、取消 ACK、Presence 消失或机器断线都不能证明一轮任务结束。
+当元数据的 `latestUserMsgId` 或 `processingUserMsgId` 指向尚未在历史中确认终态的任务，
+上一轮结果不能使 Session 变为 idle，也不能释放其 Workspace 订阅。
 `waiting` 表示运行中的任务存在持久化权限等待状态，不输出或回答权限载荷。
 
 `source: persisted` 表示读取了历史目录标量与控制状态。

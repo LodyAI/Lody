@@ -1,5 +1,10 @@
 import { hasPendingUserTurnActivation, type SessionId, type SessionMeta } from '@lody/shared';
-import type { ObservedSession, SessionObserveEvent, SessionObserver } from './session-observe';
+import {
+  hasSettledSessionTurn,
+  type ObservedSession,
+  type SessionObserveEvent,
+  type SessionObserver,
+} from './session-observe';
 
 export type WorkspaceObservedSession = {
   observer: Pick<SessionObserver, 'current' | 'refresh' | 'flush'>;
@@ -35,8 +40,7 @@ export class WorkspaceSessionObserver {
   private readonly opening = new Map<SessionId, Promise<void>>();
   private readonly candidates = new Set<SessionId>();
   private readonly admitted = new Map<SessionId, string>();
-  private readonly dirty = new Set<SessionId>();
-  private readonly retiring = new Set<SessionId>();
+  private readonly dirty = new Map<SessionId, 'refresh' | 'remove'>();
   private initialized = false;
   private rescan = false;
   private closed = false;
@@ -62,8 +66,9 @@ export class WorkspaceSessionObserver {
 
   refresh(id?: SessionId): void {
     if (this.closed) return;
-    if (id) this.dirty.add(id);
-    else this.rescan = true;
+    if (id) {
+      if (this.dirty.get(id) !== 'remove') this.dirty.set(id, 'refresh');
+    } else this.rescan = true;
     if (this.initialized) this.run();
   }
 
@@ -105,40 +110,35 @@ export class WorkspaceSessionObserver {
   private run(): void {
     if (this.running || this.closed) return;
     this.running = (async () => {
-      while ((this.dirty.size || this.retiring.size || this.rescan) && !this.closed) {
+      while ((this.dirty.size || this.rescan) && !this.closed) {
         if (this.rescan) {
           this.rescan = false;
-          for (const meta of await this.options.listMetas()) this.dirty.add(meta.id as SessionId);
+          for (const meta of await this.options.listMetas()) this.refresh(meta.id as SessionId);
           // Recheck known identities too: absence from a partial listing is not deletion.
-          for (const id of this.catalog.keys()) this.dirty.add(id);
+          for (const id of this.catalog.keys()) this.refresh(id);
         }
-        const ids = new Set([...this.dirty, ...this.retiring]);
+        const changes = [...this.dirty];
         this.dirty.clear();
-        for (const id of ids) {
+        for (const [id, change] of changes) {
           if (this.closed) break;
+          if (change === 'remove') {
+            await this.remove(id);
+            continue;
+          }
           const meta = await this.options.readMeta(id);
           if (this.closed) break;
           await this.reconcile(id, meta, false);
-          if (this.retiring.delete(id)) {
-            const handle = this.active.get(id);
-            await handle?.observer.flush();
-            if (
-              handle &&
-              handle.observer.current?.state === 'idle' &&
-              handle.observer.current.freshness === 'synced'
-            ) {
-              this.active.delete(id);
-              await handle.close();
-              if (meta) {
-                this.admitted.set(id, activityKey(meta));
-                const userTurnId = handle.observer.current.latestTurn?.userTurnId;
-                if (
-                  (meta.latestUserMsgId && meta.latestUserMsgId !== userTurnId) ||
-                  (meta.processingUserMsgId && meta.processingUserMsgId !== userTurnId)
-                )
-                  this.candidates.add(id);
-              }
-            }
+          const handle = this.active.get(id);
+          await handle?.observer.flush();
+          const session = handle?.observer.current;
+          if (
+            meta &&
+            session?.state === 'idle' &&
+            session.freshness === 'synced' &&
+            hasSettledSessionTurn(meta, session.latestTurn)
+          ) {
+            this.admitted.set(id, activityKey(meta));
+            await this.release(id);
           }
         }
       }
@@ -149,9 +149,24 @@ export class WorkspaceSessionObserver {
       })
       .finally(() => {
         this.running = undefined;
-        if (!this.closed && (this.dirty.size || this.retiring.size || this.rescan)) this.run();
+        if (!this.closed && (this.dirty.size || this.rescan)) this.run();
         this.openCandidates();
       });
+  }
+
+  private async release(id: SessionId): Promise<void> {
+    const handle = this.active.get(id);
+    this.active.delete(id);
+    await handle?.close();
+  }
+
+  private async remove(id: SessionId): Promise<void> {
+    const existed = this.catalog.delete(id);
+    this.snapshots.delete(id);
+    this.admitted.delete(id);
+    this.candidates.delete(id);
+    await this.release(id);
+    if (existed) await this.options.emit({ type: 'session.removed', sessionId: id });
   }
 
   private async reconcile(
@@ -160,15 +175,7 @@ export class WorkspaceSessionObserver {
     initial: boolean
   ): Promise<void> {
     if (meta === null) {
-      if (!this.catalog.has(id)) return;
-      this.catalog.delete(id);
-      this.snapshots.delete(id);
-      this.admitted.delete(id);
-      this.candidates.delete(id);
-      const handle = this.active.get(id);
-      this.active.delete(id);
-      await handle?.close();
-      await this.options.emit({ type: 'session.removed', sessionId: id });
+      await this.remove(id);
       return;
     }
     const previous = this.catalog.get(id);
@@ -222,15 +229,15 @@ export class WorkspaceSessionObserver {
           if (this.closed) return;
           if (event.type === 'snapshot' || event.type === 'session.changed') {
             this.snapshots.set(id, event.session);
-            if (event.session.state === 'idle' && event.session.freshness === 'synced')
-              this.retiring.add(id);
-          } else if (event.type === 'session.removed') {
-            this.catalog.delete(id);
-            this.snapshots.delete(id);
-            this.candidates.delete(id);
           }
+          if (event.type === 'session.removed') {
+            // Queue cleanup: close() waits for this child's emit callback to finish.
+            this.dirty.set(id, 'remove');
+            this.run();
+            return;
+          }
+          this.refresh(id);
           await this.options.emit(event);
-          this.run();
         })
         .then(async (handle) => {
           if (!handle) return;
@@ -239,10 +246,7 @@ export class WorkspaceSessionObserver {
             return;
           }
           this.active.set(id, handle);
-          if (handle.observer.current?.state === 'idle') {
-            this.retiring.add(id);
-            this.run();
-          } else handle.observer.refresh();
+          this.refresh(id);
         })
         .catch((error: unknown) => {
           this.closed = true;

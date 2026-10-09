@@ -48,10 +48,11 @@ CLI/MCP commands and daemon dispatch.
 
 ## Session observation
 
-Before changing `session-observe*.ts` or its command wiring, read the
-[observe Spec](../../../../specs/cli-session-observe.md). Use isolated read-only
-scopes, scalar subscriptions and bounded candidate opens; preserve status on
-release. Metadata idle/Presence loss never proves completion; sequence is local.
+Read the [observe Spec](../../../../specs/cli-session-observe.md).
+Use isolated read-only scopes, scalar reads and bounded opens; preserve status.
+Projection/release share terminal proof for metadata's latest/processing User.
+Workspace queues child removal/close outside child emit callbacks.
+Metadata idle/Presence loss is not completion; sequence is local.
 
 ## `lody app`
 

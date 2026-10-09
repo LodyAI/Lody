@@ -74,4 +74,20 @@ Cloud bundle 与发布导入检查在 4 GB 堆下通过；2 GB 构建耗尽内�
 权限回答、原生历史导出、外部请求 ID 和持久化事件日志不在本次范围。
 已尝试跨工具记忆检索，但 Nowledge Mem 无法连接。
 
+## 审查修正与简化（2026-10-09）
+
+元数据可能已经激活 B，而历史仍只有完成的 A。状态投影和 Workspace 释放现在共用
+`hasSettledSessionTurn`：两个激活指针都必须对应最新持久化终态任务；空 Session
+则要求没有激活指针。下一轮历史尚未到达时投影为 unknown，继续持有房间。
+删除独立的退休队列及释放后重新入队补丁，由已有 dirty 队列统一核对状态与资源释放。
+
+Workspace 为元数据删除和子 Observer 通知提供同一个幂等移除流程。子删除通知
+将移除放入队列，不等待自身 close，避免自等待且只输出一次删除事件。单 Session
+与 Workspace 都使用同一个异步 `{observer, close}` 获取接口，内部保留 Effect
+作用域 finalizer。目录索引、revision fence 和独立只读 manager 仍是必要边界。
+
+真实 Loro 历史 fixture 覆盖 A/B 同步顺序、B 持久化完成前只持有一个房间，以及
+子 Observer 先发现删除时不死锁、不遗留 handle。另一个释放 guard 回归测试保护
+过时的 idle 子投影。这些确定性测试不能证明真实认证 Cloud 同步或外部 Connector 联通。
+
 PR：[LodyAI/Lody #1335](https://github.com/LodyAI/Lody/pull/1335)。

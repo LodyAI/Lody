@@ -88,7 +88,10 @@ Completion requires User `handled` and a linked Assistant with `finished: true`
 or numeric `endedAt`. User `failed` or `canceled` independently proves those
 outcomes, including failure before an Assistant exists. An idle metadata status,
 cancel acknowledgement, missing Presence or disconnected machine proves no turn
-outcome. `waiting` means persisted permission-wait status while a turn is running;
+outcome. When metadata's `latestUserMsgId` or `processingUserMsgId` points to a
+turn not yet confirmed terminal in history, the previous turn's result cannot
+make the Session idle or release its workspace subscription.
+`waiting` means persisted permission-wait status while a turn is running;
 it does not expose permission payloads or answer them.
 
 `source: persisted` means history directory scalars and control state were read.
