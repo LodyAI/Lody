@@ -51,8 +51,9 @@ Lody Light 与 Vesper deep-sea 调色板（含 VS Code alias 与 `@lody/ui` 产�
 - 已有 landing replica 与当前组件一致时直接复用（`ReplicaDiffViewer`、
   `ReplicaChangesList`、composer controls、`ReplicaBrowserToolbar`）；只补文件树、
   mention/斜杠弹层、图片气泡、Agent 配置、配额和用量等缺失的展示 markup。
-- 替换中英文 `(reference)` 树里的全部 `_docs-assets` 图片引用。浏览器权限和 iOS
-  通知预览明确是站点自有的外部界面模拟，不引用产品组件。
+- 替换中英文 `(reference)` 树里的全部 `_docs-assets` 图片引用。image-output 预览
+  作为生成图片示例使用已跟踪的品牌标志 `/_docs-assets/logo-180.png`；浏览器权限和
+  iOS 通知预览明确是站点自有的外部界面模拟，不引用产品组件。
 - 保留归档与删除截图；它们仍然相符，不在 Feature List 范围内。
 
 ## 考虑过的替代方案
@@ -74,8 +75,9 @@ Lody Light 与 Vesper deep-sea 调色板（含 VS Code alias 与 `@lody/ui` 产�
 - `pnpm --filter @lody/site-docs generate`、`typecheck` 和 `test` 通过；测试包含
   `scripts/app-boundary.test.mjs` 的 3 个子测试。`node scripts/docs/main.mjs check`
   报告 0 errors 和原有的 64 个 warnings。
-- 生产构建预渲染 257 个 HTML 文件。中英文 Feature List 页面包含预览 markup，
-  `(reference)` 树中不再引用任何 `_docs-assets` 图片。
+- 生产构建预渲染 257 个 HTML 文件。中英文 Feature List 页面包含预览 markup。
+  两个 `(reference)` 树中唯一的 `_docs-assets` 引用是 image-output 预览作为生成
+  图片示例使用的品牌标志 `/_docs-assets/logo-180.png`，没有任何产品截图引用。
 - 新预览已在静态渲染页面中按中英文、明暗主题、桌面和移动宽度做过目视检查；
   `.lody-app-preview` 调色板也已刷新到当前 Lody Light/Vesper 运行时颜色并再次
   检查两种主题。

@@ -16,8 +16,9 @@ import { cn } from '../landing-replica/utils';
    `ui/diff-viewer/diff-viewer.tsx`, `sessions/session-changes-sidebar.tsx`,
    `sessions/components/file-tree-view.tsx`, `chat/chat-composer.tsx`,
    `ai-gui/view.tsx`, and `sessions/session-browser-panel.tsx`) but never import
-   the app. Images are inline SVG data URIs so no screenshot or binary asset
-   ships from this module. */
+   the app. Screenshot-like attachments are inline SVG data URIs; the image-output
+   sample points at the tracked brand mark (`/_docs-assets/logo-180.png`) so it
+   never ships a captured product screenshot. */
 
 const svgDataUri = (markup: string): string =>
   `data:image/svg+xml;utf8,${encodeURIComponent(markup)}`;
@@ -41,39 +42,6 @@ const ATTACHMENT_PREVIEW_IMAGE = svgDataUri(`
   <text x="52" y="210" fill="#eff6ff" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18">Claude</text>
   <text x="272" y="211" fill="#93c5fd" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" text-anchor="end">✓</text>
   <text x="52" y="252" fill="#c7d2fe" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18">Codex</text>
-</svg>
-`);
-
-const GENERATED_PREVIEW_IMAGE = svgDataUri(`
-<svg xmlns="http://www.w3.org/2000/svg" width="420" height="560" viewBox="0 0 420 560" fill="none">
-  <defs>
-    <radialGradient id="water" cx="50%" cy="28%" r="82%">
-      <stop stop-color="#0b2b52" />
-      <stop offset="1" stop-color="#020713" />
-    </radialGradient>
-    <linearGradient id="bell" x1="88" y1="122" x2="334" y2="318" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#a5d8ff" stop-opacity="0.82" />
-      <stop offset="1" stop-color="#5b8cc7" stop-opacity="0.32" />
-    </linearGradient>
-    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="16" />
-    </filter>
-  </defs>
-  <rect width="420" height="560" fill="url(#water)" />
-  <circle cx="210" cy="184" r="132" fill="#4f9cf9" opacity="0.18" filter="url(#glow)" />
-  <path d="M94 204c0-82 52-132 116-132s116 50 116 132c0 38-28 65-64 65H158c-36 0-64-27-64-65Z" fill="url(#bell)" stroke="#c7e4ff" stroke-opacity="0.55" stroke-width="2" />
-  <path d="M124 224c18 35 42 54 86 54s68-19 86-54" fill="none" stroke="#dbeafe" stroke-opacity="0.42" stroke-width="2" />
-  <path d="M151 264c-15 54-24 105-16 172" fill="none" stroke="#8ec5ff" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round" />
-  <path d="M179 274c-8 58-13 112-8 180" fill="none" stroke="#a9d5ff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round" />
-  <path d="M210 278v182" fill="none" stroke="#dbeafe" stroke-opacity="0.48" stroke-width="3" stroke-linecap="round" />
-  <path d="M241 274c8 58 13 112 8 180" fill="none" stroke="#a9d5ff" stroke-opacity="0.5" stroke-width="3" stroke-linecap="round" />
-  <path d="M269 264c15 54 24 105 16 172" fill="none" stroke="#8ec5ff" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round" />
-  <g fill="#dbeafe" opacity="0.7">
-    <circle cx="162" cy="220" r="5" />
-    <circle cx="188" cy="232" r="4" />
-    <circle cx="232" cy="232" r="4" />
-    <circle cx="258" cy="220" r="5" />
-  </g>
 </svg>
 `);
 
@@ -514,12 +482,12 @@ const IMAGE_OUTPUT_COPY: Record<
   { alt: string; metadata: string; duration: string }
 > = {
   en: {
-    alt: 'Synthetic generated jellyfish image',
+    alt: 'Lody logo used as the generated-image sample',
     metadata: 'Generated with gpt-5.4',
     duration: '21m 14s',
   },
   zh: {
-    alt: '模拟生成的水母图片',
+    alt: '作为生成图片示例的 Lody 标志',
     metadata: '由 gpt-5.4 生成',
     duration: '21m 14s',
   },
@@ -546,11 +514,13 @@ export function ImageOutputPreview({ locale = 'en' }: { locale?: ReplicaLocale }
             </div>
             <div className="inline-flex max-w-full flex-col overflow-hidden rounded-xl border border-border/70 bg-muted/20">
               <div className="inline-flex max-w-full">
+                {/* Use the tracked brand mark instead of a synthetic screenshot as the
+                    representative generated image. */}
                 <img
-                  src={GENERATED_PREVIEW_IMAGE}
+                  src="/_docs-assets/logo-180.png"
                   alt={copy.alt}
-                  width={210}
-                  height={280}
+                  width={180}
+                  height={180}
                   className="block max-h-[280px] max-w-full object-contain"
                 />
               </div>

@@ -68,8 +68,10 @@ changes materially.
   `ReplicaBrowserToolbar`); add only the missing display markup for file trees,
   mention/slash popups, image bubbles, Agent Config, quota, and usage.
 - Replace every `_docs-assets` image reference in the English and Chinese
-  `(reference)` trees. The browser-permission and iOS-notification previews are
-  explicitly site-owned mocks of external chrome, not imports of app components.
+  `(reference)` trees. The image-output preview points at the tracked
+  `/_docs-assets/logo-180.png` brand mark as its representative generated image,
+  and the browser-permission and iOS-notification previews are explicitly
+  site-owned mocks of external chrome, not imports of app components.
 - Keep the archive and delete screenshots; they still match and are outside the
   Feature List scope.
 
@@ -101,8 +103,10 @@ changes materially.
   `node scripts/docs/main.mjs check` reports 0 errors and the existing 64
   warnings.
 - A production build prerenders 257 HTML files. The Feature List English and
-  Chinese pages contain the preview markup, and no `_docs-assets` image is
-  referenced from either `(reference)` tree.
+  Chinese pages contain the preview markup. The only `_docs-assets` reference
+  under either `(reference)` tree is the tracked `/_docs-assets/logo-180.png`
+  brand mark used as the image-output preview's representative generated image;
+  no captured product screenshot is referenced.
 - The new previews were checked visually in the rendered static pages in English
   and Chinese, light and dark themes, at desktop and mobile widths. The
   `.lody-app-preview` palette was refreshed to the current Lody Light/Vesper
