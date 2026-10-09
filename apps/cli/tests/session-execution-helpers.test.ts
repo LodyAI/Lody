@@ -21,7 +21,7 @@ describe('session execution prompt helpers', () => {
 
     expect(prompt).toContain("use GitHub's branch rename flow");
     expect(prompt).toContain('Use the available Lody MCP tools when relevant');
-    expect(prompt).not.toContain('This is the first task in a new independent Lody worktree');
+    expect(prompt).not.toContain('Before starting this task, rename the branch');
   });
 
   it('combines first-task instructions with task references and feedback context for local worktrees', () => {
@@ -37,22 +37,19 @@ describe('session execution prompt helpers', () => {
         },
       ],
       ' feedback-1 ',
-      { newWorktree: true }
+      { branchToRename: 'lody/12345678-abc-2' }
     );
 
     expect(prompt).toContain(
       'Fix the checkout observer\n\n\n- issue#42: Checkout observer (https://github.com/owner/repo/issues/42)\n'
     );
     expect(prompt).toContain('The postId is feedback-1.');
-    expect(prompt).toContain('Before starting the task, inspect the current Git branch.');
-    expect(prompt).toContain('session/<id> or lody/<id>');
-    expect(prompt).toContain('git branch -m <name>');
-    expect(prompt).toContain('Keep an existing descriptive task branch unchanged.');
+    expect(prompt).toContain('git branch -m lody/12345678-abc-2 <name>');
+    expect(prompt).not.toContain('inspect');
     expect(prompt).toContain(
-      'never copy credentials, secrets, or other sensitive input into a Git ref'
+      'Do not use main, master, or dev, include sensitive input, or force-overwrite an existing branch.'
     );
-    expect(prompt).toContain('do not force-overwrite another branch');
-    expect(prompt).toContain('If renaming fails, briefly report it and continue the task.');
+    expect(prompt).toContain('if renaming fails, report it briefly and continue the task.');
     expect(prompt).not.toContain('gh pr create');
   });
 });

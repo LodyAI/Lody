@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { Effect } from 'effect';
+import { Effect, Semaphore } from 'effect';
 import {
   applyMessageContentsBatch,
   applyNotificationOnHistory,
@@ -93,7 +93,7 @@ type RoostNativeOptions = {
 type OwnerLease = {
   readonly client: RoostNativeClient;
   readonly owner: Uint8Array;
-  readonly projectionLanes: Effect.Semaphore;
+  readonly projectionLanes: Semaphore.Semaphore;
   release(): Promise<void>;
 };
 
@@ -142,7 +142,7 @@ let ownerPool:
       key: string;
       client: RoostNativeClient;
       owner: Uint8Array;
-      projectionLanes: Effect.Semaphore;
+      projectionLanes: Semaphore.Semaphore;
       refs: number;
       closePromise?: Promise<void>;
     }
@@ -178,9 +178,7 @@ const acquireOwnerUnlocked = async (options: RoostNativeOptions): Promise<OwnerL
     throw error;
   }
   const projectionLanes = Effect.runSync(
-    Effect.makeSemaphore(
-      Math.max(1, Math.min(8, Math.floor((options.maxQueuedRequests ?? 32) / 2)))
-    )
+    Semaphore.make(Math.max(1, Math.min(8, Math.floor((options.maxQueuedRequests ?? 32) / 2))))
   );
   ownerPool = { key, client, owner, projectionLanes, refs: 1 };
   return {
@@ -379,11 +377,11 @@ const createNodeServicesForLease = async (
           projected.slice(start, start + 8).map(async (entry) => {
             // Share permits across all sessions borrowing this Worker, leaving
             // queue capacity for foreground history commands and branch reads.
-            await Effect.runPromise(lease.projectionLanes.take(1));
+            await Effect.runPromise(Semaphore.take(lease.projectionLanes, 1));
             try {
               return await project(entry);
             } finally {
-              Effect.runSync(lease.projectionLanes.release(1));
+              Effect.runSync(Semaphore.release(lease.projectionLanes, 1));
             }
           })
         ))

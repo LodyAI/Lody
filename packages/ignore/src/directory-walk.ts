@@ -103,13 +103,13 @@ export function listNonIgnoredWorkspaceDirectoriesEffect(
       directories.push(current.relativePath);
 
       const localRules = yield* readGitignoreRulesEffect(workspaceRoot, current.dir).pipe(
-        Effect.catchAll(() => Effect.succeed({ rules: [], sources: [] }))
+        Effect.catch(() => Effect.succeed({ rules: [], sources: [] }))
       );
       const activeRules = [...current.activeRules, ...localRules.rules];
 
-      const entriesResult = yield* Effect.either(readDirectoryEntriesEffect(current.dir));
-      if (entriesResult._tag === 'Left') continue;
-      for (const entry of entriesResult.right) {
+      const entriesResult = yield* Effect.result(readDirectoryEntriesEffect(current.dir));
+      if (entriesResult._tag === 'Failure') continue;
+      for (const entry of entriesResult.success) {
         if (!entry.isDirectory()) continue;
         if (ignored.has(entry.name)) continue;
         const absolutePath = path.join(current.dir, entry.name);
@@ -174,7 +174,7 @@ export function readGitignoreRulesEffect(
         sources: [source],
       };
     }),
-    Effect.catchAll((error) => {
+    Effect.catch((error) => {
       if (isMissingPathError(error)) {
         return Effect.succeed({ rules: [], sources: [] });
       }
@@ -188,7 +188,7 @@ export function readDirectoryEntriesEffect(dir: string): Effect.Effect<readonly 
     Effect.gen(function* () {
       const directory = yield* Effect.acquireRelease(
         promiseEffect(() => opendir(dir)),
-        (handle) => promiseEffect(() => handle.close()).pipe(Effect.catchAll(() => Effect.void))
+        (handle) => promiseEffect(() => handle.close()).pipe(Effect.catch(() => Effect.void))
       );
       const entries = yield* readAllDirectoryEntriesEffect(directory);
       entries.sort((a, b) => a.name.localeCompare(b.name));

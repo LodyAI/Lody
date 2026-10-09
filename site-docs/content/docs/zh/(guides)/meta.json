@@ -1,0 +1,16 @@
+{
+  "title": "实战指南",
+  "pages": [
+    "workflow",
+    "parallel-agents",
+    "agent-collaboration",
+    "session-orchestration",
+    "agent-roles",
+    "session-handoff",
+    "diff-comments",
+    "mobile",
+    "scheduled-tasks",
+    "team",
+    "lody-review"
+  ]
+}

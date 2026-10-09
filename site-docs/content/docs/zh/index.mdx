@@ -1,27 +1,48 @@
 ---
 title: 简介
-description: Lody 使用文档，涵盖桌面端与移动端使用、Agent 配置、会话协作与工作流说明。
+description: Lody 文档地图——从安装、第一次会话，到从 Codex / Claude Code 迁移，以及实战指南和功能列表。
 ---
 
 # Lody
 
-Lody 可以让你在手机或电脑上和团队一起使用 coding agents。如果你现在在使用 codex、claude code、deepseek harness 等等将很容易理解。你可以在[下载](https://lody.ai/download)桌面端、移动端或者直接使用 web 端。Lody 会使用你自己设备上的各种 Agents，当前内置支持 
+Lody.ai 让你在桌面端、移动端和浏览器里并行运行 coding agents，并与团队共享上下文。你可以使用
+Lody 内置的全部 Provider：Claude Code、Codex、Grok、Kimi Code、Devin、Pi、DeepSeek Harness、
+Bub、Dimcode；也可以使用自定义 ACP Agent 和
+[ACP Registry](https://agentclientprotocol.com/get-started/registry) 中的任意 CLI。
 
-- codex
-- claude code
-- grok build
-- kimi code
-- deepseek harness
-- Pi
-- Dimcode
-- Bub
+Lody 从第一天起就是面向团队的 local-first 架构：不仅让 coding agent 随时随地更好用，也让数据、
+context 和协作过程在团队里真正流动起来。
 
-这意味着你在 Lody 中使用这些 Agent 的时候有着最完整的功能集。除此以外，Lody 通过 [ACP](https://agentclientprotocol.com/get-started/registry) 将最大程度兼容市面上各类 Agent。
+## 从这里开始
 
-Lody 是基于 [Loro](https://loro.dev) 的整个技术栈构建的，我们的团队一直专注于 local-first 的基础建设，致力于解决本地优先场景下的多端同步和多人协作的体验问题。依托于前几年的技术积累，我们有着当下最稳定和快速的同步服务。打开移动端就会在几秒内同步完成你在桌面端的对话历史。在同步的流畅和丝滑上面，我们有着大量的好评。
+<Cards>
+  <Card href="/zh/docs/quickstart" title="安装并登录">
+    桌面端、移动端、浏览器，或在远程机器上使用 CLI。
+  </Card>
+  <Card href="/zh/docs/first-session" title="跑通第一次会话">
+    用一个小任务走完从提问到审阅结果的全过程——不需要 GitHub，也不需要并行。
+  </Card>
+  <Card href="/zh/docs/concepts" title="建立心智模型">
+    理解每个界面背后那几个对象，并附一份大白话术语表。
+  </Card>
+  <Card href="/zh/docs/from-codex-claude-code" title="从 Codex 或 Claude Code 过来">
+    哪些习惯可以保留、Lody 多了什么，以及一份迁移清单。
+  </Card>
+</Cards>
 
-Lody 第一天的架构就是面向团队的 local-first 架构，所以我们不单单是想解决怎么让 coding agent 随时随地更好用的问题。我们更想解决的是 AI 能力足够的这样的背景下，我们该怎么让数据、让 context 让 human 加倍地发挥作用的问题。
+## Lody 擅长什么
 
-现在大家使用 vibe coding 几乎都是每个人处理着各自自己的对话，整体团队只有最终的代码、最终的 artifacts 会通过 PR 文档等工具进行共享，实现得怎么样，实现过程的思考，spec 的边界范围都是隐藏在最终产物之外的。语言和代码的关系在如今也是已经颠倒了，code is cheap, show me chat!  我们就希望能够通过 Lody 这样的工具来为团队解决 项目进度管理、Context 共享、Agent 间协作等问题。
+- **并行推进工作。** 每个会话都有自己的 Git 工作树，Agent 之间不会互相覆盖文件。见[并行 Coding Agents](/zh/docs/parallel-agents)。
+- **使用你信任的 Agent。** Lody 内置多种 Provider，不止 Claude Code 和 Codex；ACP Registry 中的运行时和自定义 ACP 命令也都能用。见 [Agent Config](/zh/docs/quickstart) 和 [CLI 运行时类型](/zh/docs/cli-runtimes)。
+- **边跑边审阅。** 当轮 diff、行级评论，以及 GitHub PR review 同步。见[差异查看](/zh/docs/diff-viewer)和 [Diff 行评论](/zh/docs/diff-comments)。
+- **让一个 Agent 协调其他 Agent。** 用 [Agent 对话控制](/zh/docs/session-orchestration)和[多 Agent 协作](/zh/docs/agent-collaboration)拆分任务、委派工作并收集结果。
+- **让团队保持同步。** 用[会话交接](/zh/docs/session-handoff)把同事请进实时会话，而不是发一份聊天记录；团队能力见[团队功能](/zh/docs/team)。
+- **离开工位也能工作。** 在 iOS、Android 或任意浏览器里查看和指挥会话，见[移动端](/zh/docs/mobile)。
 
+## 下一步
 
+<Cards>
+  <Card href="/zh/docs/quickstart" title="安装 Lody" />
+  <Card href="/zh/docs/first-session" title="跑通第一次会话" />
+  <Card href="/zh/docs/concepts" title="阅读概念与术语表" />
+</Cards>

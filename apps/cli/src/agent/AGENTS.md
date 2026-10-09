@@ -15,7 +15,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtin Grok must default `clientCapabilities.terminal` to false.
 - ACP file reads map native `ENOENT` to `RequestError.resourceNotFound`; preserve
   other failures and session validation rather than returning empty content.
-- Send the driving turn's config on every session establishment as `_meta.lody.sessionConfig`;
+- Send the driving turn's model/config on session establishment as `_meta.lody.sessionConfig`;
   provider-specific startup translation belongs in the ACP adapter. `session/set_config_option`
   stays the live-session switch, and a successful selection becomes a later replacement's
   startup state.

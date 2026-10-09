@@ -46,7 +46,8 @@ catalog:
   better-sqlite3: ^13.0.2
   convex: ^1.33.1
   devframe: 1.0.0
-  effect: 3.18.4
+  effect: 4.0.2
+  '@effect/vitest': 4.0.2
   jotai: ^2.16.0
   loro-adaptors: ^0.6.1
   loro-crdt: 1.16.3
@@ -77,8 +78,11 @@ managePackageManagerVersions: true
 # Delay newly published package versions for seven days before pnpm may resolve them.
 minimumReleaseAge: 10080
 
-# Allow the exact versions listed below; later releases remain quarantined.
+# Keep approved upgrades and grandfathered versions exact; later releases remain quarantined.
 minimumReleaseAgeExclude:
+  # Approved lifecycle fixes and the matching test helper; future releases wait seven days.
+  - effect@4.0.2
+  - '@effect/vitest@4.0.2'
   # Keep the split release's complete optional platform graph available on every host.
   - '@loro-dev/roost-node@0.1.1'
   - '@loro-dev/roost-node-darwin-arm64@0.1.1'

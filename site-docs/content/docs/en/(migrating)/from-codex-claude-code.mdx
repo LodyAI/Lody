@@ -1,0 +1,169 @@
+---
+title: Coming from Codex or Claude Code
+description: How Lody relates to the Codex and Claude Code CLIs — what stays the same, what Lody adds, a concept mapping, and a migration checklist.
+---
+
+# Coming from Codex or Claude Code
+
+You do not have to stop using the `codex` or `claude` CLI. Lody runs those same runtimes through
+[Agent Configs](/docs/quickstart), then adds the workspace around them: isolated worktrees, several
+sessions at once, live diff review, team handoff, and mobile access.
+
+<Callout title="The short version">
+- Your subscriptions, API keys, and machine-side logins stay where they are.
+- A session is the Lody equivalent of one CLI conversation; an Agent Config is the runtime behind it.
+- Lody's additions are the workspace layer: parallel worktrees, review, sharing, and orchestration.
+</Callout>
+
+## What stays the same
+
+- **The runtime.** Lody launches the same agent process; it does not replace the model or the CLI's
+  own behavior.
+- **Your authentication.** Lody uses the subscription login or environment configuration already on
+  the machine. See [Agent Config](/docs/quickstart).
+- **Your repository conventions.** `AGENTS.md`, `CLAUDE.md`, and the rest of your project
+  instructions keep working because the agent still runs in the project.
+- **Your terminal.** For a quick one-off task, running the CLI directly is still a good choice.
+
+## Concept mapping
+
+| You are used to | In Lody | Notes |
+| --- | --- | --- |
+| `claude` or `codex` in a terminal | A [session](/docs/session) with an [Agent Config](/docs/quickstart) | Same runtime, plus a GUI, mobile, and team layer |
+| One repository checkout | One [worktree](/docs/worktrees) per session | Sessions stop colliding on the same files |
+| A prompt and its edits | A [round](/docs/diff-viewer) | Lody shows the diff after each round |
+| `--resume` or `resume` | Reopen the session from the sidebar | Conversation, branch, and worktree stay together |
+| Manual `git diff` review | [Diff Viewer](/docs/diff-viewer) and [Diff Comments](/docs/diff-comments) | Comment on lines and sync to the GitHub PR |
+| One terminal at a time | Several [parallel sessions](/docs/parallel-agents) | Each task gets its own branch and worktree |
+| Slash commands and modes | Runtime-exposed [slash commands](/docs/slash-commands) | Lody discovers what the runtime supports |
+| Team screenshots or transcripts | [Session handoff](/docs/session-handoff) | Invite a teammate into the live session |
+
+Which optional ACP and Lody extension capabilities each built-in provider supports is in the
+[ACP and Extension Feature Support](/docs/acp-feature-support) matrix.
+
+## What Lody adds on top
+
+<Cards>
+  <Card href="/docs/parallel-agents" title="Parallel work">
+    Run several sessions on separate tasks without files colliding.
+  </Card>
+  <Card href="/docs/agent-collaboration" title="Multi-agent collaboration">
+    Let Claude Code, Codex, Kimi, or Grok delegate and review each other's work.
+  </Card>
+  <Card href="/docs/diff-comments" title="Review loop">
+    Comment on changed lines and send the thread back to the agent.
+  </Card>
+  <Card href="/docs/session-handoff" title="Team handoff">
+    Put a teammate inside the same live session instead of sending a transcript.
+  </Card>
+  <Card href="/docs/mobile" title="Mobile and remote">
+    Steer sessions running on a shared machine from your phone.
+  </Card>
+  <Card href="/docs/scheduled-tasks" title="Scheduled tasks">
+    Run recurring agent work on a machine that is online.
+  </Card>
+</Cards>
+
+## Migration checklist
+
+<Steps>
+<Step>
+
+### 1. Install Lody and sign in
+
+Follow [Quick Start](/docs/quickstart). You can start from the desktop app, the mobile app, or the
+CLI on a remote machine.
+
+</Step>
+<Step>
+
+### 2. Keep your existing login
+
+Open **Settings** -> **Agent Config** and add a config for each runtime you use. In most cases you
+do not need new credentials: Lody uses the subscription login or environment configuration already
+present on the machine.
+
+</Step>
+<Step>
+
+### 3. Add your projects
+
+Add a [local project](/docs/local-project) for a directory you already work in, or connect a
+[GitHub repository](/docs/github) for pull requests and CI. If you have been running Codex or
+Claude Code on that local project, Lody can import and continue the existing history. See
+[Sync Code Agent History](/docs/local-project#sync-code-agent-history-codex-claude-code-and-more).
+
+</Step>
+<Step>
+
+### 4. Run one small session
+
+Use [Your First Session](/docs/first-session) with a task you could finish in one CLI sitting.
+Confirm that the project, Agent Config, and model are what you expect.
+
+</Step>
+<Step>
+
+### 5. Save the setup you repeat
+
+If you always start the same kind of task with the same machine, config, model, and instructions,
+save it as an [Agent Role](/docs/agent-roles) instead of choosing everything each time.
+
+</Step>
+<Step>
+
+### 6. Add the workspace layer when you need it
+
+Connect GitHub for PRs and CI, try [parallel sessions](/docs/parallel-agents) on two small tasks, or
+invite a teammate with [session handoff](/docs/session-handoff). You can adopt these one at a time.
+
+</Step>
+</Steps>
+
+## When the CLI is still the better tool
+
+<Callout type="info" title="Keep the terminal for the right jobs">
+Use the CLI directly when you want a single quick edit and no review trail, when you are debugging
+the agent itself, or on a machine where you do not want to run the Lody daemon. Lody is most useful
+when a task benefits from a worktree, a reviewable diff, a teammate, or a second device.
+</Callout>
+
+## FAQ
+
+### Does Lody replace the Codex or Claude Code CLI?
+
+No. Lody launches those runtimes, and others, and adds a workspace around them. The CLI remains a
+supported way to work, and the same machine can use both.
+
+### Do I have to move my API keys or subscription?
+
+No. In the common case, Lody uses the subscription login or environment configuration already on
+the machine. You add an [Agent Config](/docs/quickstart) so Lody knows which runtime to launch; you do
+not migrate the credentials into Lody.
+
+### Can I keep using my repository's AGENTS.md or CLAUDE.md?
+
+Yes. The agent still runs inside your repository, so the instruction files it already reads keep
+working.
+
+### How do I resume a conversation like `codex resume` or `claude --resume`?
+
+Open the session from the sidebar. Lody keeps the conversation, branch, and worktree together. When
+the runtime supports native forking, you can also create a
+[fork](/docs/session#fork-a-session) to continue in a new direction without changing the original.
+See [Sessions](/docs/session).
+
+### Can I use Lody from my phone with the same session?
+
+Yes. The execution machine needs to be online and signed into the same Lody workspace. See
+[Mobile Access](/docs/mobile).
+
+## Next
+
+<Cards>
+  <Card href="/docs/first-session" title="Your First Session" />
+  <Card href="/docs/concepts" title="Concepts & Glossary" />
+  <Card href="/docs/workflow" title="Recommended Workflow" />
+  <Card href="/docs/parallel-agents" title="Parallel Coding Agents" />
+  <Card href="/docs/acp-feature-support" title="ACP and Extension Feature Support" />
+</Cards>

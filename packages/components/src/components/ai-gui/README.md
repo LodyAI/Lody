@@ -45,10 +45,16 @@ the reasoning behind those rules.
   pure zoom/pan geometry, and `mermaid-diagram-viewer.tsx` the full-screen
   surface. Invariants live in
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
-- A `[Title](session://<id>)` link (the form session mentions reach the agent in)
-  renders as a conversation chip. `session-link-context.tsx` supplies the Session
-  navigation from `SessionChatInterface`; without it, or on a read-only share, the
-  chip is inert.
+- A `[Title](lody://session/<id>?workspace=<id>)` link (or legacy `session://<id>`)
+  renders as a conversation chip. `SessionChatInterface` enables
+  `session-link-context.tsx`'s explicit-target deep-link dispatch for both same-
+  and cross-workspace links. Ordinary related-session navigation remains separate
+  so its last-active-tab restoration cannot override a resource destination.
+  Without live navigation, or on a read-only share, the chip is inert.
+  Message/plan copy and UI/CLI Markdown exports normalize prose references using
+  shared `session-link-export`, preserving code examples and stored history.
+  Only a known source workspace supplies a missing ID; anonymous readers do not
+  borrow the viewer's workspace.
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
 - `markdown-file-image.tsx` binds live file Markdown to its owning provider. Local
   resources load automatically; remote file images show a one-line recessed slot
@@ -155,6 +161,12 @@ defines locale-specific spacing for these labels.
   ([note](../../../../../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md)).
   `bufferSize` is a trade between blank space during a fast scroll and keeping
   resizing rows mounted.
+- **Touch input before scroll delivery.** The adapter releases following on a single
+  upward conversation pan, including its final touch position when no move was
+  delivered. The controller adopts post-touch momentum as reader movement even if
+  a resize samples it before the scroll event. Taps, pinches, horizontal gestures,
+  cancelled touches and nested scrolling do not leave momentum evidence. Model and
+  adapter tests cover these orderings; iOS device behavior still needs verification.
 - **`buildChatStreamItems()` filtering.** An empty assistant entry renders `null`,
   which Virtua cannot measure, and a duplicate history id produces a duplicate key
   that desyncs the list.

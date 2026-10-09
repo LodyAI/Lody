@@ -187,7 +187,8 @@ import { format, formatDistanceToNow } from 'date-fns';
 import type { Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
-import { getAppShareUrl } from '@/lib/app-location';
+import { buildSessionLink } from '@lody/shared/session-link';
+import { openSessionDeepLink } from '@/lib/session-deep-link';
 import { resolveSessionOpenInIdePathTarget } from '@/lib/session-open-in-ide-path';
 import {
   buildPathLauncherLaunchInput,
@@ -3952,6 +3953,7 @@ export const SessionChatInterface = memo(
           const history = conversationCopyRange(await conversationView.readAll(), throughMessageId);
           const last = history.at(-1);
           const { markdown, stats } = buildConversationMarkdown({
+            workspaceId: workspaceId ?? undefined,
             history: history as Parameters<typeof buildConversationMarkdown>[0]['history'],
             title: session.title ?? undefined,
             source: conversationCopySource,
@@ -3999,6 +4001,7 @@ export const SessionChatInterface = memo(
         captureSessionEvent,
         conversationCopyParticipants,
         conversationCopySource,
+        workspaceId,
         session.title,
         conversationView,
         postHog,
@@ -5296,10 +5299,14 @@ export const SessionChatInterface = memo(
       [docMetaCacheReady, openerRootSessionMeta, openerSessionMeta, session]
     );
     const handleOpenRelatedSession = useCallback(
-      (target: SessionNavigationTarget) => {
+      (target: SessionNavigationTarget & { workspaceId?: string }) => {
+        if (target.workspaceId && target.workspaceId !== workspaceId) {
+          openSessionDeepLink(target);
+          return;
+        }
         onNavigateSession?.(target);
       },
-      [onNavigateSession]
+      [onNavigateSession, workspaceId]
     );
     const openedByRelations = useMemo<SessionOpenedByMenuState | undefined>(() => {
       const opened = openedSessions.map((item) => ({
@@ -6390,14 +6397,17 @@ export const SessionChatInterface = memo(
 
     const handleCopySessionLink = useCallback(async () => {
       try {
-        await navigator.clipboard.writeText(getAppShareUrl());
+        if (!workspaceId) throw new Error('Workspace is not ready');
+        await navigator.clipboard.writeText(
+          buildSessionLink({ sessionId: session.id, workspaceId })
+        );
         captureSessionEvent('session/share_link_copied');
         toast.success(t('sessions.urlCopied', 'Session URL copied to clipboard'));
       } catch {
         captureSessionEvent('session/share_link_copy_failed');
         toast.error(t('sessions.shareFailed', 'Unable to share link'));
       }
-    }, [captureSessionEvent, t]);
+    }, [captureSessionEvent, t, session.id, workspaceId]);
 
     const headerGitHubActions = headerActionsSlot !== undefined ? headerActionsSlot : prBadge;
 
@@ -6569,7 +6579,7 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
-        <SessionLinkProvider value={onNavigateSession ? handleOpenRelatedSession : null}>
+    <SessionLinkProvider enabled={!!onNavigateSession}>
           {isVisible &&
             !preparingWindow &&
             onOpenBrowser &&

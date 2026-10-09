@@ -270,7 +270,8 @@ function buildSessionPreparationCompatibility(
   launchSource: Partial<SessionLaunchConfig> | null | undefined,
   mcpServerIds: readonly McpServerId[] | undefined,
   configOptionValues: SessionConfig['configOptionValues'],
-  memory?: SessionConfig['memory']
+  memory?: SessionConfig['memory'],
+  modelId?: SessionConfig['modelId']
 ) {
   return {
     launch: buildSessionLaunchConfig({
@@ -280,6 +281,7 @@ function buildSessionPreparationCompatibility(
       env: launchSource?.env,
     }),
     runConfig: normalizeSessionPreparationRunConfigForDedup({
+      modelId,
       memory,
       mcpServerIds: mcpServerIds ? [...mcpServerIds] : undefined,
       configOptionValues,
@@ -679,7 +681,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           current.config,
           resource.config.mcpServerIds,
           resource.config.configOptionValues,
-          resource.config.memory
+          resource.config.memory,
+          resource.config.modelId
         )
       )
     ) {
@@ -747,7 +750,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       config,
       config.mcpServerIds,
       config.configOptionValues,
-      config.memory
+      config.memory,
+      config.modelId
     );
     const claim = this.preparationService.claim({
       sessionId,
@@ -775,7 +779,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
               current.config,
               config.mcpServerIds,
               config.configOptionValues,
-              config.memory
+              config.memory,
+              config.modelId
             )
           )
         );
@@ -1018,6 +1023,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentConfigId: spec.agentConfigId as AgentConfigId,
       agentCliType: spec.cliType,
       agentType: spec.agentType,
+      modelId: spec.runConfig?.modelId,
       configOptionValues: spec.runConfig?.configOptionValues,
       memory: spec.runConfig?.memory,
       mcpServerIds: spec.runConfig?.mcpServerIds ?? [],
@@ -1040,7 +1046,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       config,
       config.mcpServerIds,
       config.configOptionValues,
-      config.memory
+      config.memory,
+      config.modelId
     );
     await this.prepareGitHubRepoSessionConfig(config);
     signal.throwIfAborted();

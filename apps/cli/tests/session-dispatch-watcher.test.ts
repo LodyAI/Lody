@@ -1723,10 +1723,12 @@ describe('SessionDispatchWatcher', () => {
       { timeout: 3_000 }
     );
     expect(h.startSession).not.toHaveBeenCalled();
-    expect(recordChatFailure).toHaveBeenCalledWith(
-      expect.anything(),
-      'machine_access_denied',
-      expect.any(String)
+    await vi.waitFor(() =>
+      expect(recordChatFailure).toHaveBeenCalledWith(
+        expect.anything(),
+        'machine_access_denied',
+        expect.any(String)
+      )
     );
 
     h.watcher.stop();

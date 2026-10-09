@@ -41,7 +41,9 @@ and file responsibilities: [../README.md](../README.md).
 ## Worktrees, branches, and setup
 
 - First-task branch naming is agent guidance for ordinary new independent GitHub/local
-  worktree Sessions, including prepared-worktree adoption. Exclude direct folders, child Tabs,
+  worktree Sessions, including prepared-worktree adoption. The daemon verifies the actual branch
+  after setup against this Session's allocation (numeric collisions included); unknown or
+  descriptive refs receive no rename instruction. Exclude direct folders, child Tabs,
   prior/resumed ACP Sessions, later turns, and Fork; never restore a host prompt-to-ref
   generator. Contract: [workspace branches](../../../../../specs/workspace-branch-state.md).
 - Turn finalization NEVER commits or pushes on the session's behalf, in any project shape.

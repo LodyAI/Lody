@@ -111,8 +111,9 @@ React 流式契约夹具扩展到 6,000 条：业务事实、草稿值、焦点�
 正文和大纲摘要正常更新，一次文字增量只观察到 25 次索引访问，没有遍历整个目录。
 这是功能证据，不是帧耗时或输入延迟测量。
 
-完整 `pnpm check` 通过：CLI 3608 项、4 项既有跳过，shared 1302 项、共享组件
-4894 项、Electron 214 项通过。`pnpm build` 通过。本机原样桌面 smoke 按系统选择
+同步 main 的 `668b0e5` 后，有界 projection 使用 Effect 4.0.2 的公开 Semaphore
+API。冻结安装和完整 `pnpm check` 通过：CLI 3641 项、4 项既有跳过，shared 1331 项、
+共享组件 4920 项、Electron 214 项通过。`pnpm build` 通过。本机原样桌面 smoke 按系统选择
 中文，英文 Settings 选择器失败。使用隔离英文 profile 重跑后完成四条 P0 旅程，
 随后因 macOS 请求 Safe Storage 钥匙串授权而停止；本机完整桌面 smoke 不记作通过。
 两次运行均不修改产品语言行为，也不构成 Roost 桌面性能验收。
@@ -123,16 +124,16 @@ cache，机器为 Apple M4 / macOS arm64 / Node 24.14.0；正文 4 KiB，预热�
 
 | 历史条数 | Roost 最新 40 条 | Loro 最新 40 条 | Roost 向前 40 条 | Roost 最后用户回合编辑 | Roost 完整目录 |
 | --- | --- | --- | --- | --- | --- |
-| 1,000 | 49.7 | 79.4 | 32.1 | 36.9 | 725.2 |
-| 6,000 | 55.5 | 431.2 | 36.9 | 48.4 | 5,543.1 |
-| 10,000 | 58.1 | 722.1 | 38.4 | 54.1 | 9,931.6 |
+| 1,000 | 63.0 | 88.1 | 36.2 | 39.8 | 910.2 |
+| 6,000 | 68.9 | 550.3 | 44.7 | 60.8 | 5,721.3 |
+| 10,000 | 58.4 | 820.3 | 42.3 | 56.5 | 9,374.9 |
 
-6,000 条（约 3,000 轮）的最新窗口 P95 为 57.3 ms，编辑 P95 为 49.4 ms；
-10,000 条分别为 65.6 ms 和 57.0 ms。全部 15 次正式 Roost 编辑都只读取一页
+6,000 条（约 3,000 轮）的最新窗口 P95 为 74.2 ms，编辑 P95 为 61.4 ms；
+10,000 条分别为 60.7 ms 和 58.7 ms。全部 15 次正式 Roost 编辑都只读取一页
 40 条，没有完整历史读取。此前 53,823 ms 的编辑仅为单次基线探针，不是基线
 分布。本次编辑在完整目录覆盖建立可选 goal projection 后测量；新写会话增量维护
 该缓存，旧会话或失效缓存仍可能先读取完整权威历史执行目标校验。完整后台覆盖
-在 6,000 条时仍约需 5.5 秒，10,000 条约需 9.9 秒。
+在 6,000 条时仍约需 5.7 秒，10,000 条约需 9.4 秒。
 
 在 `apps/cli` 内复现：
 
@@ -145,10 +146,10 @@ BENCH_STRUCTURAL=1 BENCH_SIZES=1000,6000,10000 BENCH_SAMPLES=5 BENCH_WARMUPS=1 \
 基准不覆盖 IPC/RPC、React/绘制、完整事实/搜索、IndexedDB、真实 Provider 和设备
 内存验收。Roost 流式写入包含 SQLite 持久化；本基准的 Loro 控制 Repo 无磁盘
 存储，不能把两者写入耗时视作等价持久化比较。结果和验证日志：
-`/private/tmp/lody-roost-performance-optimized.json`、
+`/private/tmp/lody-roost-performance-main-optimized.json`、
 `/private/tmp/lody-roost-performance-ui-6000-final.log`、
-`/private/tmp/lody-roost-performance-check-final.log` 及
-`/private/tmp/lody-roost-performance-desktop-build.log`。
+`/private/tmp/lody-roost-performance-main-check.log` 及
+`/private/tmp/lody-roost-performance-main-desktop-build.log`。
 
 ### 生产适配器修复检查点（`d074e53`，2026-10-09）
 

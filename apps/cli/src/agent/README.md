@@ -10,13 +10,13 @@ context/acp-agent-edit-evidence.md. Adapter source repositories and builtin prov
 [apps/cli/AGENTS.md](../../AGENTS.md). Where updates go after they arrive:
 context/message-flow.md "Upstream".
 
-| Boundary           | Owner                                                                    | Responsibility                                                                   |
-| ------------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| ACP connection     | [AgentClient](agent-client.ts)                                           | Negotiates capabilities, tracks raw requests, and classifies steer evidence.     |
-| Process startup    | [Runner](acp-runner.ts)                                                  | Spawns agents under the shared startup gate.                                     |
-| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts)                             | Resolves pinned distributions and verifies their artifacts.                      |
-| Codex credentials  | [Profiles](codex-profile-store.ts), [broker](codex-credential-broker.ts) | Host-bound homes and vault generations; redirect-denying user-side API requests. |
-| Codex process uses | [Usage records](codex-profile-process-usage.ts) | Independent process records for deletion cleanup; same-profile sessions remain concurrent. |
+| Boundary           | Owner                                                                    | Responsibility                                                                             |
+| ------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| ACP connection     | [AgentClient](agent-client.ts)                                           | Negotiates capabilities, tracks raw requests, and classifies steer evidence.               |
+| Process startup    | [Runner](acp-runner.ts)                                                  | Spawns agents under the shared startup gate.                                               |
+| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts)                             | Resolves pinned distributions and verifies their artifacts.                                |
+| Codex credentials  | [Profiles](codex-profile-store.ts), [broker](codex-credential-broker.ts) | Host-bound homes and vault generations; redirect-denying user-side API requests.           |
+| Codex process uses | [Usage records](codex-profile-process-usage.ts)                          | Independent process records for deletion cleanup; same-profile sessions remain concurrent. |
 
 ## Files
 
@@ -279,10 +279,11 @@ The daemon does not name branches. A worktree session starts on the temporary br
 projects, with collision suffixes). [WorkspaceGitService](../session/workspace-git-service.ts)
 observes branch changes independently of GitHub; its lifecycle and activation triggers are
 defined by the [checkout branch contract](../../../../specs/workspace-branch-state.md).
-`NEW_WORKTREE_SYSTEM_COMMANDS` in `session/session-execution-helpers.ts` asks the agent to
+`newWorktreeSystemCommands` in `session/session-execution-helpers.ts` asks the agent to
 rename that temporary ref before starting the first task in an ordinary new independent
-GitHub or local worktree. Execution selects this guidance by logical first use, including
-prepared-worktree adoption; direct local directories, child Tabs, prior/resumed ACP
+GitHub or local worktree. Execution verifies the actual checkout after setup against this
+Session's allocation, then directly requests renaming that ref without an agent inspection.
+It applies only on logical first use, including prepared-worktree adoption; direct local directories, child Tabs, prior/resumed ACP
 Sessions, later turns, and the separate Fork path are excluded. Existing descriptive
 branches are preserved, and rename failures do not block work. This prompt is guidance,
 not a daemon-enforced rename; title notifications do not trigger it.
@@ -309,3 +310,7 @@ ACP cwd remains the actual worktree. This also covers local child sessions,
 whose execution directory comes from their parent but whose project identity
 comes from the local project record. GitHub-only and projectless sessions do not
 send a local project identity. See the [draft contract](../../../../specs/local-project-acp-identity.zh.md).
+
+### Startup model selection
+
+`SessionConfig.modelId` carries the driving Turn's choice through prepared and cold creation into `AgentClient`. Core's `_meta.lody.sessionConfig` includes it before new/load/resume/fork. Codex translates the model and reasoning into native startup configuration, so resume does not transiently use a different global model. Live configuration remains necessary for reused sessions and older adapters. See the [startup contract](../../../../specs/acp-startup-model.md).

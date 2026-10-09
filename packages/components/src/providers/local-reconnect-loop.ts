@@ -1,4 +1,4 @@
-import { Clock, Duration, Effect, Fiber, Runtime } from 'effect';
+import { Context, Duration, Effect, Fiber } from 'effect';
 
 const LOCAL_RECONNECT_BASE_DELAY_MS = 1_000;
 const LOCAL_RECONNECT_MAX_DELAY_MS = 30_000;
@@ -37,7 +37,7 @@ export const waitForLocalReconnectDelayEffect = (options: {
   const computeDelayMs = options.computeDelayMs ?? computeLocalReconnectDelayMs;
   const delayMs = computeDelayMs(options.attempt, options.random);
 
-  return Effect.as(Clock.sleep(Duration.millis(delayMs)), delayMs);
+  return Effect.as(Effect.sleep(Duration.millis(delayMs)), delayMs);
 };
 
 type LocalReconnectLoopOptions = {
@@ -57,12 +57,12 @@ type LocalReconnectLoopOptions = {
   onError?: (error: unknown) => void;
   computeDelayMs?: (attempt: number) => number;
   /**
-   * Effect runtime used for the retry waits (Clock.sleep + fiber interrupt).
-   * Production omits it (default runtime, live clock — compatible with vi
-   * fake timers); tests inject a TestClock-backed runtime via
-   * `Effect.runtime()` under `TestContext` for deterministic virtual time.
+   * Effect services used for the retry waits (Effect.sleep + fiber interrupt).
+   * Production omits them (live clock, compatible with vi fake timers);
+   * tests capture services backed by TestClock via
+   * `Effect.context()` under `TestClock.layer()` for deterministic virtual time.
    */
-  runtime?: Runtime.Runtime<never>;
+  services?: Context.Context<never>;
 };
 
 export type LocalReconnectLoop = {
@@ -79,12 +79,12 @@ export type LocalReconnectLoop = {
  * so the continuation and cancelers consult the token instead of the fiber.
  */
 type PendingWait = {
-  fiber: Fiber.RuntimeFiber<void> | null;
+  fiber: Fiber.Fiber<void> | null;
   settled: boolean;
 };
 
 export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): LocalReconnectLoop {
-  const runFork = Runtime.runFork(options.runtime ?? Runtime.defaultRuntime);
+  const runFork = Effect.runForkWith(options.services ?? Context.empty());
   let pendingWait: PendingWait | null = null;
   let backoffResetWait: PendingWait | null = null;
   let retryAttempt = 0;
@@ -149,7 +149,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
     backoffResetWait = current;
     const fiber = runFork(
       Effect.andThen(
-        Clock.sleep(Duration.millis(LOCAL_RECONNECT_HEALTHY_RESET_MS)),
+        Effect.sleep(Duration.millis(LOCAL_RECONNECT_HEALTHY_RESET_MS)),
         Effect.sync(() => {
           if (current.settled) {
             return;
@@ -193,7 +193,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
     pendingWait = current;
     const fiber = runFork(
       Effect.andThen(
-        Clock.sleep(Duration.millis(delayMs)),
+        Effect.sleep(Duration.millis(delayMs)),
         Effect.sync(() => {
           if (current.settled) {
             return;

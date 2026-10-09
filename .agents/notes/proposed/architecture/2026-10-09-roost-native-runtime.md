@@ -146,8 +146,10 @@ updates visible text and outline summaries, and observes 25 index visits for the
 text delta rather than a whole-directory scan. This is functional evidence, not
 a frame-time or input-latency measurement.
 
-The complete `pnpm check` passes: CLI 3608 with four existing skips, shared 1302,
-shared components 4894 and Electron 214. `pnpm build` passes. Unmodified local
+After syncing main at `668b0e5`, the bounded projection uses Effect 4.0.2's public
+Semaphore API. Frozen installation and the complete `pnpm check` pass: CLI 3641
+with four existing skips, shared 1331, shared components 4920 and Electron 214.
+`pnpm build` passes. Unmodified local
 desktop smoke selected the machine's Chinese language and failed English-only
 Settings selectors. An isolated English-profile rerun completed four P0 journeys
 before it was stopped when macOS requested Safe Storage keychain authorization;
@@ -160,18 +162,18 @@ and five measured samples. Medians in milliseconds:
 
 | History rows | Roost latest 40 | Loro latest 40 | Roost older 40 | Roost final-user edit | Roost complete directory |
 | --- | --- | --- | --- | --- | --- |
-| 1,000 | 49.7 | 79.4 | 32.1 | 36.9 | 725.2 |
-| 6,000 | 55.5 | 431.2 | 36.9 | 48.4 | 5,543.1 |
-| 10,000 | 58.1 | 722.1 | 38.4 | 54.1 | 9,931.6 |
+| 1,000 | 63.0 | 88.1 | 36.2 | 39.8 | 910.2 |
+| 6,000 | 68.9 | 550.3 | 44.7 | 60.8 | 5,721.3 |
+| 10,000 | 58.4 | 820.3 | 42.3 | 56.5 | 9,374.9 |
 
-At 6,000 rows (about 3,000 rounds), latest-window P95 is 57.3 ms and edit P95
-49.4 ms; at 10,000 rows they are 65.6 ms and 57.0 ms. All 15 measured Roost edits
+At 6,000 rows (about 3,000 rounds), latest-window P95 is 74.2 ms and edit P95
+61.4 ms; at 10,000 rows they are 60.7 ms and 58.7 ms. All 15 measured Roost edits
 read one 40-row page and perform no complete-history read. The earlier 53,823 ms
 edit is a single baseline probe, not a baseline distribution. Edits are measured
 after complete directory coverage has learned the optional goal projection.
 Newly authored sessions maintain it incrementally; legacy or invalidated caches
 can still require a full authoritative guard scan. Complete background coverage
-still takes about 5.5 seconds at 6,000 rows and 9.9 seconds at 10,000 rows.
+still takes about 5.7 seconds at 6,000 rows and 9.4 seconds at 10,000 rows.
 
 Reproduce from `apps/cli`:
 
@@ -185,10 +187,10 @@ The benchmark excludes IPC/RPC, React/paint, full facts/search, IndexedDB, real
 providers and device memory acceptance. Roost streaming writes include SQLite
 durability; this benchmark's Loro control Repo has no disk storage, so its write
 timings are not an equivalent durability comparison. Results and validation logs:
-`/private/tmp/lody-roost-performance-optimized.json`,
+`/private/tmp/lody-roost-performance-main-optimized.json`,
 `/private/tmp/lody-roost-performance-ui-6000-final.log`,
-`/private/tmp/lody-roost-performance-check-final.log` and
-`/private/tmp/lody-roost-performance-desktop-build.log`.
+`/private/tmp/lody-roost-performance-main-check.log` and
+`/private/tmp/lody-roost-performance-main-desktop-build.log`.
 
 ### Production adapter repair checkpoint (`d074e53`, 2026-10-09)
 

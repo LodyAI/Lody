@@ -44,8 +44,7 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 ## Coding rules
 
-- Prefer Effect TS idioms for new/refactored CLI code — services via `Context.Tag` + `Layer`,
-  typed errors, structured concurrency, `Schedule` retries: context/cli-effect-ts.md.
+- Prefer Effect v4 for new/refactored CLI code; follow the [Effect guide](../../.agents/docs/cli-effect-ts.md).
 - Keep the strict tsconfig, no `any` or non-null assertions, and Zod at every foreign boundary:
   context/cli-type-safety.md.
 - After a remote prompt arrives, only correctness-critical setup may block before ACP

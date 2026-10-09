@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { LODY_PROTOCOLS } from '@lody/shared/session-link'
 
 type ProtocolRegistrationLogger = (message: string, meta?: Record<string, unknown>) => void
 
@@ -12,6 +13,8 @@ interface RegisterProtocolClientOptions {
   desktopFileName: string
   iconPath: string
   log: ProtocolRegistrationLogger
+  /** Only an explicit user action may change the common resource handler. */
+  makeDefault?: boolean
 }
 
 interface DesktopIntegrationCommandResult {
@@ -167,7 +170,8 @@ function registerLinuxAppImageProtocolHandler({
   productName,
   desktopFileName,
   iconPath,
-  log
+  log,
+  makeDefault = false
 }: RegisterProtocolClientOptions): void {
   if (process.platform !== 'linux' || !app.isPackaged) {
     return
@@ -206,7 +210,7 @@ function registerLinuxAppImageProtocolHandler({
     'Type=Application',
     `Icon=${sanitizeDesktopEntryValue(installedIconPath)}`,
     `StartupWMClass=${sanitizeDesktopEntryValue(desktopAppId)}`,
-    `MimeType=x-scheme-handler/${protocol};`,
+    `MimeType=${[...new Set([protocol, 'lody'])].map((scheme) => `x-scheme-handler/${scheme};`).join('')}`,
     'Categories=Utility;',
     ''
   ].join('\n')
@@ -234,17 +238,20 @@ function registerLinuxAppImageProtocolHandler({
     return
   }
 
-  runDesktopIntegrationCommand(
-    'xdg-mime',
-    ['default', desktopFileId, `x-scheme-handler/${protocol}`],
-    (mimeResult) => {
-      log('linux AppImage xdg-mime protocol registration finished', {
-        protocol,
-        desktopFileId,
-        ...mimeResult
-      })
-    }
-  )
+  for (const scheme of [...new Set(makeDefault ? [protocol, 'lody'] : [protocol])]) {
+    if (scheme === 'lody' && !makeDefault) continue
+    runDesktopIntegrationCommand(
+      'xdg-mime',
+      ['default', desktopFileId, `x-scheme-handler/${scheme}`],
+      (mimeResult) => {
+        log('linux AppImage xdg-mime protocol registration finished', {
+          protocol,
+          desktopFileId,
+          ...mimeResult
+        })
+      }
+    )
+  }
 
   if (!didWriteDesktopFile && !didWriteIcon) {
     return
@@ -262,7 +269,28 @@ function registerLinuxAppImageProtocolHandler({
   })
 }
 
+let installationOptions: RegisterProtocolClientOptions | null = null
+
+export function setDefaultLodyProtocolClient(): boolean {
+  const appEntry = resolveDefaultAppEntryPath()
+  const result =
+    !app.isPackaged && appEntry
+      ? app.setAsDefaultProtocolClient('lody', process.execPath, [appEntry])
+      : app.setAsDefaultProtocolClient('lody')
+  if (installationOptions)
+    registerLinuxAppImageProtocolHandler({ ...installationOptions, makeDefault: true })
+  return result
+}
+
+export function isDefaultLodyProtocolClient(): boolean {
+  const appEntry = resolveDefaultAppEntryPath()
+  return !app.isPackaged && appEntry
+    ? app.isDefaultProtocolClient('lody', process.execPath, [appEntry])
+    : app.isDefaultProtocolClient('lody')
+}
+
 export function registerLodyProtocolClient(options: RegisterProtocolClientOptions): void {
+  installationOptions = options
   const { protocol, log } = options
   if (!app.isPackaged && process.env.LODY_E2E === '1') {
     log('registerLodyProtocolClient skipped for E2E', { protocol })
@@ -270,6 +298,20 @@ export function registerLodyProtocolClient(options: RegisterProtocolClientOption
   }
   const appEntry = resolveDefaultAppEntryPath()
   let registrationResult = false
+
+  // NSIS protocol declarations are not a Windows registration guarantee. Repair
+  // first-launch registration only when there is no handler; never reclaim one.
+  if (process.platform === 'win32' && app.isPackaged) {
+    void app
+      .whenReady()
+      .then(() => {
+        if (!app.getApplicationNameForProtocol(`${LODY_PROTOCOLS.resource}://`)) {
+          const registered = app.setAsDefaultProtocolClient(LODY_PROTOCOLS.resource)
+          log('registered previously unhandled resource scheme', { registered })
+        }
+      })
+      .catch(() => log('unable to check resource scheme registration'))
+  }
 
   if (!app.isPackaged && appEntry) {
     registrationResult = app.setAsDefaultProtocolClient(protocol, process.execPath, [appEntry])

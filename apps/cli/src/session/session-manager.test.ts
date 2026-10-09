@@ -154,10 +154,12 @@ const createSessionConfig = (
 const createPreparedTestCompatibility = (
   launchSource: Partial<SessionLaunchConfig>,
   mcpServerIds: SessionConfig['mcpServerIds'] = [],
-  configOptionValues?: SessionConfig['configOptionValues']
+  configOptionValues?: SessionConfig['configOptionValues'],
+  modelId?: SessionConfig['modelId']
 ) => ({
   launch: buildSessionLaunchConfig(launchSource),
   runConfig: normalizeSessionPreparationRunConfigForDedup({
+    modelId,
     mcpServerIds,
     configOptionValues,
   }),
@@ -1427,77 +1429,81 @@ describe('SessionManager preparation compatibility', () => {
     expect(coldCreate).toHaveBeenCalledWith(config, undefined);
   });
 
-  it('waits for an incompatible published preparation to release its worktree before cold start', async () => {
-    const manager = new SessionManager(
-      createLogger(),
-      'token',
-      'machine-1' as MachineId,
-      'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(new Map()),
-      {
-        sessionSandboxFactory: async () => createNoopSessionSandbox(),
-        cloudPort: createTestCloudPort(),
-      }
-    );
-    const sessionId = 'changed-project-cold-fallback' as SessionId;
-    const agentConfigId = 'agent-1' as AgentConfigId;
-    const cleanup = deferred<void>();
-    const prepared = {
-      config: { mcpServerIds: [] },
-      compatibility: createPreparedTestCompatibility({}),
-      initialized: Promise.resolve(),
-      sessionReady: Promise.resolve(),
-      dispose: vi.fn(async () => await cleanup.promise),
-    } satisfies PreparedTestResource;
-    const preparedIdentity = {
-      requestedByUserId: 'user-1',
-      agentConfigId,
-      cliType: 'builtin' as const,
-      agentType: 'codex',
-      project: {
-        kind: 'github' as const,
-        repoFullName: 'loro-dev/old-project',
-        branch: 'main',
-      },
-    };
-    const internals = manager as unknown as {
-      preparationService: SessionPreparationService<PreparedTestResource>;
-      createSessionFromPreparationOrCold(config: SessionConfig): Promise<ISession>;
-      createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
-    };
-    internals.preparationService.start({
-      preparationId: 'prepare-old-project',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: buildSessionPreparationRequestKey(preparedIdentity),
-      claimKey: buildSessionPreparationClaimKey(preparedIdentity),
-      create: async () => prepared,
-    });
-    await vi.waitFor(() =>
-      expect(internals.preparationService.getState(sessionId)).toBe('session-ready')
-    );
-    const coldSession = { sessionId } as ISession;
-    const coldCreate = vi
-      .spyOn(internals, 'createSessionInnerWithAgent')
-      .mockResolvedValue(coldSession);
-    const durableConfig = createSessionConfig({
-      sessionId,
-      agentConfigId,
-      project: {
-        kind: 'github',
-        repoFullName: 'loro-dev/new-project',
-        branch: 'main',
-      },
-    });
+  it.each(['project', 'model'] as const)(
+    'releases a preparation with a changed %s before cold start',
+    async (changed) => {
+      const manager = new SessionManager(
+        createLogger(),
+        'token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        createWorkspaceDocument(new Map()),
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const sessionId = 'changed-project-cold-fallback' as SessionId;
+      const agentConfigId = 'agent-1' as AgentConfigId;
+      const cleanup = deferred<void>();
+      const prepared = {
+        config: { mcpServerIds: [], modelId: 'original-model' },
+        compatibility: createPreparedTestCompatibility({}, [], undefined, 'original-model'),
+        initialized: Promise.resolve(),
+        sessionReady: Promise.resolve(),
+        dispose: vi.fn(async () => await cleanup.promise),
+      } satisfies PreparedTestResource;
+      const preparedIdentity = {
+        requestedByUserId: 'user-1',
+        agentConfigId,
+        cliType: 'builtin' as const,
+        agentType: 'codex',
+        project: {
+          kind: 'github' as const,
+          repoFullName: 'loro-dev/old-project',
+          branch: 'main',
+        },
+      };
+      const internals = manager as unknown as {
+        preparationService: SessionPreparationService<PreparedTestResource>;
+        createSessionFromPreparationOrCold(config: SessionConfig): Promise<ISession>;
+        createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
+      };
+      internals.preparationService.start({
+        preparationId: 'prepare-old-project',
+        sessionId,
+        requesterUserId: 'user-1',
+        requestKey: buildSessionPreparationRequestKey(preparedIdentity),
+        claimKey: buildSessionPreparationClaimKey(preparedIdentity),
+        create: async () => prepared,
+      });
+      await vi.waitFor(() =>
+        expect(internals.preparationService.getState(sessionId)).toBe('session-ready')
+      );
+      const coldSession = { sessionId } as ISession;
+      const coldCreate = vi
+        .spyOn(internals, 'createSessionInnerWithAgent')
+        .mockResolvedValue(coldSession);
+      const durableConfig = createSessionConfig({
+        sessionId,
+        agentConfigId,
+        modelId: changed === 'model' ? 'selected-model' : 'original-model',
+        project: {
+          kind: 'github',
+          repoFullName: changed === 'project' ? 'loro-dev/new-project' : 'loro-dev/old-project',
+          branch: 'main',
+        },
+      });
 
-    const result = internals.createSessionFromPreparationOrCold(durableConfig);
-    await vi.waitFor(() => expect(prepared.dispose).toHaveBeenCalledTimes(1));
-    expect(coldCreate).not.toHaveBeenCalled();
+      const result = internals.createSessionFromPreparationOrCold(durableConfig);
+      await vi.waitFor(() => expect(prepared.dispose).toHaveBeenCalledTimes(1));
+      expect(coldCreate).not.toHaveBeenCalled();
 
-    cleanup.resolve(undefined);
-    await expect(result).resolves.toBe(coldSession);
-    expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined);
-  });
+      cleanup.resolve(undefined);
+      await expect(result).resolves.toBe(coldSession);
+      expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined);
+    }
+  );
 
   it('claims a preparation when empty launch settings are omitted by durable dispatch', async () => {
     const manager = new SessionManager(
