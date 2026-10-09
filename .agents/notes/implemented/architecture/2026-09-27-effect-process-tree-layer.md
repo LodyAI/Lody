@@ -15,6 +15,9 @@ containers consume that one implementation; other callers migrate in later
 stack layers. Windows orphan descendants still require Job Objects, and real
 Windows and cgroup hosts remain outside local verification.
 
+The native process API and container ownership in this record are refined by
+[the official process service decision](2026-10-09-effect-official-process-service.md).
+
 ## Scope and stack ownership
 
 This note is revised with the unmerged stack to match the v4-first delivery order.
@@ -32,7 +35,8 @@ consumers without moving or copying the implementation.
 and `Layer.effect`. Listeners are installed in the spawn step. `Deferred` values
 separately track start, exit, stdio close and output overflow. `spawnScoped` uses
 `acquireRelease`; facades expose the temporary Promise door to unmigrated callers.
-The CLI adapter only adds its logger.
+The CLI composition module only supplies its logger and services; legacy Promise
+entry points live in shared.
 
 `ProcessTree` separates signalling from whole-tree liveness. POSIX groups remain
 tracked after the leader exits; cgroup containers preserve limits and accounting.

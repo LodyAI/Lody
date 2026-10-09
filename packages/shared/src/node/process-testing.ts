@@ -3,6 +3,7 @@
  * table. Import it only from tests.
  */
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 
 import type { NodeProcessApi } from './process';
@@ -26,8 +27,9 @@ export type DeliveredSignal = { target: number; signal: NodeJS.Signals };
 export class FakeChildProcess extends EventEmitter {
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
-  readonly stdout = new EventEmitter();
-  readonly stderr = new EventEmitter();
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  readonly stdin = new PassThrough();
 
   readonly pid: number | undefined;
   private readonly table: FakeProcessTable;
@@ -205,8 +207,8 @@ export class FakeProcessTable {
         ? Array.from(this.processes.values()).filter((p) => p.alive && p.pgid === -target)
         : [this.processes.get(target)].filter((p): p is FakeProcess => p?.alive === true);
     if (members.length === 0) {
-      const zombie = Array.from(this.processes.values()).some((p) =>
-        p.zombie === true && (target < 0 ? p.pgid === -target : p.pid === target)
+      const zombie = Array.from(this.processes.values()).some(
+        (p) => p.zombie === true && (target < 0 ? p.pgid === -target : p.pid === target)
       );
       if (zombie && target < 0) {
         if (signal !== 0) this.refused.push({ target, signal });
@@ -231,6 +233,8 @@ export class FakeProcessTable {
     child.exitCode = code;
     child.signalCode = signal;
     queueMicrotask(() => {
+      child.stdout.end();
+      child.stderr.end();
       child.emit('exit', code, signal);
       child.emit('close', code, signal);
     });

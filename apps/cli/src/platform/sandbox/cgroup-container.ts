@@ -1,7 +1,8 @@
 import type * as fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { Duration, Effect, Ref, type Scope } from 'effect';
+import { Duration, Effect, Ref, Scope, Exit } from 'effect';
+import { ChildProcessSpawner } from 'effect/process';
 
 import { formatErrorMessage } from '@/utils/format-error';
 
@@ -45,9 +46,15 @@ export const makeCgroupContainer = (options: {
   readonly fs: CgroupFs;
   readonly readSelfCgroupPath: () => Promise<string>;
   readonly configureProcess: (pid: number) => Effect.Effect<void>;
-}): Effect.Effect<ProcessContainer, SandboxUnavailable, NodeProcess | Scope.Scope> =>
+}): Effect.Effect<
+  ProcessContainer,
+  SandboxUnavailable,
+  NodeProcess | ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
+> =>
   Effect.gen(function* () {
     const np = yield* NodeProcess;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const scope = yield* Effect.scope;
     const io = <A>(operation: string, run: () => Promise<A>) =>
       Effect.tryPromise({
         try: run,
@@ -111,59 +118,88 @@ export const makeCgroupContainer = (options: {
       enabled: true,
       description: 'linux-cgroup-v2',
       spawn: (spec) =>
-        Effect.gen(function* () {
-          // After cleanup removed the cgroup, a spawn would run outside every limit.
-          yield* requireDir.pipe(
-            Effect.mapError(
-              (error) =>
-                new SpawnFailed({ command: spec.command, message: error.message, cause: error })
-            )
-          );
-          const baseline = {
-            memory: yield* readEvents('memory.events'),
-            pids: yield* readEvents('pids.events'),
-          };
-          const limitsAtSpawn = yield* Ref.get(limits);
-          const managed = yield* spawnProcess({ ...spec, processGroup: true }).pipe(
-            Effect.provideService(NodeProcess, np)
-          );
-          const attached = yield* managed.started.pipe(
-            Effect.tap((pid) => options.configureProcess(pid)),
-            Effect.flatMap((pid) =>
-              io('attach process', () =>
-                options.fs.writeFile(path.join(cgroupDir, 'cgroup.procs'), `${pid}\n`)
-              )
-            ),
-            Effect.result
-          );
-          if (attached._tag === 'Failure') {
-            const cause =
-              attached.failure instanceof SandboxIoError || attached.failure instanceof SpawnFailed
-                ? attached.failure.cause
-                : attached.failure;
-            // The child exited before it could join; nothing escaped the limits.
-            if (errnoCode(cause) !== 'ESRCH') {
-              // It may already have started children outside the limits: end the tree.
-              yield* managed.terminate(FORCED_TERMINATION).pipe(Effect.ignore);
-              return yield* Effect.fail(
+        Effect.suspend(() =>
+          scope.state._tag === 'Closed'
+            ? Effect.fail(
                 new SpawnFailed({
                   command: spec.command,
-                  message: `Failed to start ${spec.command} in the session sandbox: ${formatErrorMessage(cause)}`,
-                  cause,
+                  message: 'Session sandbox is not initialized',
+                  cause: null,
                 })
-              );
-            }
-          }
-          return {
-            ...managed,
-            inspectExit: (exit: ProcessExit) =>
-              Effect.gen(function* () {
-                const memory = yield* readEvents('memory.events');
-                const pids = yield* readEvents('pids.events');
-                return detectLimitViolation(baseline, { memory, pids }, exit, limitsAtSpawn);
-              }),
-          };
-        }),
+              )
+            : Effect.acquireUseRelease(
+                Scope.fork(scope),
+                (childScope) =>
+                  Scope.provide(
+                    Effect.gen(function* () {
+                      // After cleanup removed the cgroup, a spawn would run outside every limit.
+                      yield* requireDir.pipe(
+                        Effect.mapError(
+                          (error) =>
+                            new SpawnFailed({
+                              command: spec.command,
+                              message: error.message,
+                              cause: error,
+                            })
+                        )
+                      );
+                      const baseline = {
+                        memory: yield* readEvents('memory.events'),
+                        pids: yield* readEvents('pids.events'),
+                      };
+                      const limitsAtSpawn = yield* Ref.get(limits);
+                      const managed = yield* spawnProcess({ ...spec, processGroup: true }).pipe(
+                        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+                      );
+                      const attached = yield* managed.started.pipe(
+                        Effect.tap((pid) => options.configureProcess(pid)),
+                        Effect.flatMap((pid) =>
+                          io('attach process', () =>
+                            options.fs.writeFile(path.join(cgroupDir, 'cgroup.procs'), `${pid}\n`)
+                          )
+                        ),
+                        Effect.result
+                      );
+                      if (attached._tag === 'Failure') {
+                        const cause =
+                          attached.failure instanceof SandboxIoError ||
+                          attached.failure instanceof SpawnFailed
+                            ? attached.failure.cause
+                            : attached.failure;
+                        // The child exited before it could join; nothing escaped the limits.
+                        if (errnoCode(cause) !== 'ESRCH') {
+                          // It may already have started children outside the limits: end the tree.
+                          yield* managed.terminate(FORCED_TERMINATION).pipe(Effect.ignore);
+                          return yield* Effect.fail(
+                            new SpawnFailed({
+                              command: spec.command,
+                              message: `Failed to start ${spec.command} in the session sandbox: ${formatErrorMessage(cause)}`,
+                              cause,
+                            })
+                          );
+                        }
+                      }
+                      return {
+                        ...managed,
+                        inspectExit: (exit: ProcessExit) =>
+                          Effect.gen(function* () {
+                            const memory = yield* readEvents('memory.events');
+                            const pids = yield* readEvents('pids.events');
+                            return detectLimitViolation(
+                              baseline,
+                              { memory, pids },
+                              exit,
+                              limitsAtSpawn
+                            );
+                          }),
+                      };
+                    }),
+                    childScope
+                  ),
+                (childScope, exit) =>
+                  Exit.isFailure(exit) ? Scope.close(childScope, exit) : Effect.void
+              )
+        ),
       terminateAll: (policy) => terminateTree(tree, policy),
       applyLimits: (next) =>
         Effect.gen(function* () {
@@ -223,6 +259,9 @@ export const makeCgroupContainer = (options: {
         } satisfies SessionResourceAccounting;
       }),
       cleanup: Effect.gen(function* () {
+        yield* container
+          .terminateAll(FORCED_TERMINATION)
+          .pipe(Effect.catch((error) => Effect.logWarning(error.message)));
         const dir = yield* Ref.get(currentDir);
         if (!dir) return;
         yield* waitUntilGone(tree, CLEANUP_DRAIN_WAIT).pipe(Effect.ignore);
@@ -236,6 +275,7 @@ export const makeCgroupContainer = (options: {
         }
       }),
     };
+    yield* Effect.addFinalizer(() => container.cleanup);
     return container;
   });
 

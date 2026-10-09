@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@effect/vitest';
-import { Effect } from 'effect';
+import { Deferred, Effect, Fiber } from 'effect';
 import { TestClock } from 'effect/testing';
-import { NodeProcess } from '@lody/shared/node/process';
+import { processLayer } from '@lody/shared/node/process';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
 
 import {
@@ -39,7 +39,7 @@ describe('noop process container', () => {
 
       const after = yield* container.readAccounting;
       expect(after.kind === 'process-tree' && after.rootPids).toEqual([]);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   it.effect('terminates a lingering group left by an exited leader', () => {
@@ -58,6 +58,49 @@ describe('noop process container', () => {
       yield* container.terminateAll(FORCED);
 
       expect(table.isAlive(descendant)).toBe(false);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
+
+  it.effect(
+    'closing the owner scope terminates groups even when their leaders exited first',
+    () => {
+      const table = new FakeProcessTable('linux');
+      return Effect.gen(function* () {
+        let descendant = 0;
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const container = yield* makeNoopContainer({
+              description: 'test',
+              configureProcess: () => Effect.void,
+            });
+            const child = yield* container.spawn({ command: 'agent', args: [], options: {} });
+            descendant = table.addDescendant(child.child.pid!);
+            table.exitOnItsOwn(child.child.pid!);
+          })
+        );
+        expect(table.isAlive(descendant)).toBe(false);
+      }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+    }
+  );
+
+  it.effect(
+    'interrupting process configuration reclaims the acquired process before returning',
+    () => {
+      const table = new FakeProcessTable('linux');
+      return Effect.gen(function* () {
+        const configuring = yield* Deferred.make<void>();
+        const container = yield* makeNoopContainer({
+          description: 'test',
+          configureProcess: () =>
+            Effect.andThen(Deferred.succeed(configuring, undefined), Effect.never),
+        });
+        const creating = yield* Effect.forkChild(
+          container.spawn({ command: 'agent', args: [], options: {} })
+        );
+        yield* Deferred.await(configuring);
+        yield* Fiber.interrupt(creating);
+        expect(table.isAlive(1000)).toBe(false);
+      }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+    }
+  );
 });

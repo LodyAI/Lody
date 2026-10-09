@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import type { ChildProcess } from 'child_process';
 import os from 'os';
 import path from 'path';
@@ -13,7 +14,9 @@ import { z } from 'zod';
 
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { startProcess, terminateChildTree, withSpawn } from '@/platform/promise-facade';
+import { startProcess, terminateChildTree } from '@lody/shared/node/process';
+import { withSpawn } from '@/platform/process-options';
+
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { TerminalManager } from '@/session/terminal-manager';
 import {
@@ -195,11 +198,11 @@ export async function terminateAcpProcessTree(
       killWaitMs: options.exitTimeoutMs,
       processGroup: true,
     },
-    {
+    toShared({
       logger: options.logger,
       logPrefix: `[${options.sessionLabel}]`,
       nodeProcess: options.nodeProcess,
-    }
+    })
   );
 }
 
@@ -248,7 +251,7 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
       options: { cwd: options.workdir, env: options.env, stdio: ['pipe', 'pipe', 'pipe'] },
       processGroup: true,
     },
-    withSpawn(options.spawnImpl)
+    toShared(withSpawn(options.spawnImpl))
   ).child;
 };
 

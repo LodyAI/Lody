@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import type { ChildProcess } from 'child_process';
 import os from 'os';
 import { randomUUID } from 'node:crypto';
@@ -35,7 +36,8 @@ import {
   BuiltinAuthenticationOutputParser,
 } from './acp-authentication-output';
 import { shutdownLocalAcpAgent, spawnAcpProcess, terminateAcpProcessTree } from './acp-runner';
-import { startProcess } from '@/platform/promise-facade';
+import { startProcess } from '@lody/shared/node/process';
+
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { ManagedRuntimeProgressEvent } from './managed-agent-runtime';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
@@ -445,7 +447,7 @@ export async function probeBuiltinAuthentication(
       options: { cwd: os.homedir(), env, stdio: 'ignore' },
       processGroup: true,
     },
-    { nodeProcess: options.nodeProcess }
+    toShared({ nodeProcess: options.nodeProcess })
   );
   let termination: Promise<void> | undefined;
   const terminateProbe = (): void => {
@@ -706,7 +708,7 @@ export class AcpAuthenticationManager {
           options: { cwd: os.homedir(), env, stdio: ['pipe', 'pipe', 'pipe'] },
           processGroup: true,
         },
-        { nodeProcess: this.nodeProcess }
+        toShared({ nodeProcess: this.nodeProcess })
       );
       running.child = child;
       releaseProfile?.recordNativePid(child.pid);

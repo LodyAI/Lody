@@ -182,7 +182,8 @@
     "@agentclientprotocol/sdk": "catalog:",
     "acp-extension-core": "workspace:*",
     "zod": "catalog:",
-    "croner": "10.0.1"
+    "croner": "10.0.1",
+    "@effect/platform-node-shared": "catalog:"
   },
   "peerDependencies": {
     "loro-crdt": "catalog:",

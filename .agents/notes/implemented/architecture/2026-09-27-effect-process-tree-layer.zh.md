@@ -12,6 +12,9 @@ PR: https://github.com/LodyAI/Lody/pull/1065
 用 Effect v4 的服务、作用域和有上限的终止过程管理生命周期。ACP agent 与会话容器使用同一实现，
 其余调用方在后续层迁移。Windows 的孤儿后代仍需要 Job Object；真实 Windows 与 cgroup 主机尚未验证。
 
+本文的进程接口与 container 所有权已由
+[官方进程服务决定](2026-10-09-effect-official-process-service.zh.md)进一步完善。
+
 ## 范围与 PR 归属
 
 这份记录随尚未合并的 stack 重排，反映 v4 优先的交付顺序。
@@ -25,7 +28,7 @@ PR: https://github.com/LodyAI/Lody/pull/1065
 
 NodeProcess 是同步 OS 边界，通过 Context.Service 和 Layer.effect 提供。spawn 同一步挂好监听器，
 Deferred 分别记录启动、退出、stdio 关闭与输出溢出。spawnScoped 通过 acquireRelease 管理资源，
-门面给尚未迁移的 Promise 调用方使用；CLI 适配器只接入日志。
+shared 门面给尚未迁移的 Promise 调用方使用；CLI 的组合模块只提供日志和服务，不执行程序。
 
 ProcessTree 区分发信号与整棵树是否存活。POSIX 进程组在首进程退出后继续跟踪，cgroup 容器保留
 限制与统计。terminateTree 依次 SIGTERM、有上限的宽限、SIGKILL、有上限的退出确认；仍存活就返回

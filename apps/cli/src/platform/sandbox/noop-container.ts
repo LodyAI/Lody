@@ -1,11 +1,11 @@
-import { Duration, Effect, Result, HashMap, Option, Ref, type Scope } from 'effect';
+import { Duration, Effect, Result, HashMap, Option, Ref, Scope, Exit } from 'effect';
+import { ChildProcessSpawner } from 'effect/process';
 
-import type { TerminationFailed } from '@lody/shared/node/process';
+import { SpawnFailed, type TerminationFailed } from '@lody/shared/node/process';
 import { spawnProcess } from '@lody/shared/node/process';
-import { NodeProcess } from '@lody/shared/node/process';
 import { terminateTree, type ProcessTree } from '@lody/shared/node/process';
 
-import type { ProcessContainer } from './types';
+import { FORCED_TERMINATION, type ProcessContainer } from './types';
 
 /**
  * How often a process group whose leader already exited is re-checked. The
@@ -23,9 +23,9 @@ export const LINGERING_GROUP_PROBE_INTERVAL = Duration.seconds(5);
 export const makeNoopContainer = (options: {
   readonly description: string;
   readonly configureProcess: (pid: number) => Effect.Effect<void>;
-}): Effect.Effect<ProcessContainer, never, NodeProcess | Scope.Scope> =>
+}): Effect.Effect<ProcessContainer, never, ChildProcessSpawner.ChildProcessSpawner | Scope.Scope> =>
   Effect.gen(function* () {
-    const np = yield* NodeProcess;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const scope = yield* Effect.scope;
     const tracked = yield* Ref.make(HashMap.empty<number, ProcessTree>());
 
@@ -56,21 +56,40 @@ export const makeNoopContainer = (options: {
       enabled: false,
       description: options.description,
       spawn: (spec) =>
-        Effect.gen(function* () {
-          const managed = yield* spawnProcess({ ...spec, processGroup: true }).pipe(
-            Effect.provideService(NodeProcess, np)
-          );
-          const pid = managed.child.pid;
-          if (typeof pid === 'number' && pid > 0) {
-            yield* Ref.update(tracked, HashMap.set(pid, managed.tree));
-            yield* managed.exited.pipe(
-              Effect.andThen(forgetWhenGone(pid, managed.tree)),
-              Effect.forkIn(scope)
-            );
-            yield* options.configureProcess(pid);
-          }
-          return { ...managed, inspectExit: () => Effect.succeed(null) };
-        }),
+        Effect.suspend(() =>
+          scope.state._tag === 'Closed'
+            ? Effect.fail(
+                new SpawnFailed({
+                  command: spec.command,
+                  message: 'The process container is closed',
+                  cause: null,
+                })
+              )
+            : Effect.acquireUseRelease(
+                Scope.fork(scope),
+                (childScope) =>
+                  Scope.provide(
+                    Effect.gen(function* () {
+                      const managed = yield* spawnProcess({ ...spec, processGroup: true }).pipe(
+                        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+                      );
+                      const pid = managed.child.pid;
+                      if (typeof pid === 'number' && pid > 0) {
+                        yield* Ref.update(tracked, HashMap.set(pid, managed.tree));
+                        yield* managed.exited.pipe(
+                          Effect.andThen(forgetWhenGone(pid, managed.tree)),
+                          Effect.forkIn(scope)
+                        );
+                        yield* options.configureProcess(pid);
+                      }
+                      return { ...managed, inspectExit: () => Effect.succeed(null) };
+                    }),
+                    childScope
+                  ),
+                (childScope, exit) =>
+                  Exit.isFailure(exit) ? Scope.close(childScope, exit) : Effect.void
+              )
+        ),
       terminateAll: (policy) =>
         Effect.gen(function* () {
           const trees = Array.from(HashMap.values(yield* Ref.get(tracked)));
@@ -92,7 +111,13 @@ export const makeNoopContainer = (options: {
         cpuLimitCores: null,
         pidsLimit: null,
       })),
-      cleanup: Ref.set(tracked, HashMap.empty()),
+      cleanup: Effect.suspend(() =>
+        container.terminateAll(FORCED_TERMINATION).pipe(
+          Effect.catch((error) => Effect.logWarning(error.message)),
+          Effect.andThen(Ref.set(tracked, HashMap.empty()))
+        )
+      ),
     };
+    yield* Effect.addFinalizer(() => container.cleanup);
     return container;
   });

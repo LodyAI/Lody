@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@effect/vitest';
-import { Cause, Effect, Exit, Fiber, Option } from 'effect';
+import { Cause, Deferred, Effect, Exit, Fiber, Option } from 'effect';
+import { ChildProcess, ChildProcessSpawner } from 'effect/process';
 import { TestClock } from 'effect/testing';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -11,16 +12,20 @@ import {
   runCommand,
   runCommandOk,
   type CommandSpec,
+  runCommandText,
+  startProcess,
 } from '../src/node/process';
 import { signalChildTreeNow, SpawnFailed, TerminationFailed } from '../src/node/process';
-import { spawnProcess, spawnScoped, type SpawnSpec } from '../src/node/process';
-import { NodeProcess, NodeProcessLive } from '../src/node/process';
+import { spawnProcess as acquireProcess, spawnScoped, type SpawnSpec } from '../src/node/process';
+import { processLayer } from '../src/node/process';
 import {
   READ_ONLY_ABANDON_POLICY,
   resolveWindowsCommand,
   TREE_POLL_INTERVAL,
 } from '../src/node/process';
 import { FakeProcessTable } from '../src/node/process-testing';
+
+const spawnProcess = (spec: SpawnSpec) => acquireProcess(spec, { graceMs: 0, killWaitMs: 0 });
 
 const GRACEFUL = { graceMs: 5_000, killWaitMs: 5_000 };
 const FORCED = { graceMs: 0, killWaitMs: 5_000 };
@@ -47,7 +52,7 @@ describe('process tree termination (POSIX groups)', () => {
 
       expect(table.isAlive(descendant)).toBe(false);
       expect(table.delivered).toEqual([{ target: -leader, signal: 'SIGTERM' }]);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   it.effect('escalates to SIGKILL only after the grace period runs out', () => {
@@ -68,7 +73,7 @@ describe('process tree termination (POSIX groups)', () => {
         { target: -leader, signal: 'SIGKILL' },
       ]);
       expect(table.isAlive(leader)).toBe(false);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   it.effect('fails instead of hanging when the tree survives SIGKILL', () => {
@@ -83,7 +88,7 @@ describe('process tree termination (POSIX groups)', () => {
 
       expect(failure).toBeInstanceOf(TerminationFailed);
       expect(failure?.reason).toBe('still-alive');
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   it.effect('sends SIGKILL at once under a forced policy', () => {
@@ -92,7 +97,7 @@ describe('process tree termination (POSIX groups)', () => {
       const managed = yield* spawnProcess(agentSpec);
       yield* managed.terminate(FORCED);
       expect(table.delivered).toEqual([{ target: -(managed.child.pid ?? -1), signal: 'SIGKILL' }]);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   it.effect('signals nothing when the whole tree already exited', () => {
@@ -102,7 +107,7 @@ describe('process tree termination (POSIX groups)', () => {
       table.exitOnItsOwn(managed.child.pid ?? -1);
       yield* managed.terminate(GRACEFUL);
       expect(table.delivered).toEqual([]);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   it.effect('escalates at once when a forced termination joins a graceful one', () => {
@@ -125,7 +130,7 @@ describe('process tree termination (POSIX groups)', () => {
       // The graceful call sees the tree gone at its next poll.
       yield* TestClock.adjust(TREE_POLL_INTERVAL);
       yield* Fiber.join(graceful);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   // macOS: kill(-pgid) fails with EPERM while the group's only member is an
@@ -144,7 +149,7 @@ describe('process tree termination (POSIX groups)', () => {
       yield* TestClock.adjust(TREE_POLL_INTERVAL);
 
       expect(Exit.isSuccess(yield* Fiber.await(termination))).toBe(true);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   it.effect('terminates a scoped process when its scope closes', () => {
@@ -154,7 +159,7 @@ describe('process tree termination (POSIX groups)', () => {
         Effect.map(spawnScoped(agentSpec, FORCED), (managed) => managed.child.pid ?? -1)
       );
       expect(table.isAlive(pid)).toBe(false);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 });
 
@@ -179,7 +184,7 @@ describe('process tree termination (Windows)', () => {
         ['/PID', String(root), '/T'],
         ['/PID', String(root), '/T', '/F'],
       ]);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   it.effect('fails the termination when taskkill never finishes', () => {
@@ -194,7 +199,8 @@ describe('process tree termination (Windows)', () => {
 
       expect(failure).toBeInstanceOf(TerminationFailed);
       expect(failure?.reason).toBe('signal-failed');
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+      table.taskkillHangs = false;
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   it.effect('detaches a daemon from its console only when asked, and still ends its tree', () => {
@@ -213,7 +219,7 @@ describe('process tree termination (Windows)', () => {
       ).toEqual([false, true]);
       expect(table.isAlive(root)).toBe(false);
       expect(table.isAlive(attached.child.pid ?? -1)).toBe(true);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   // Windows reuses pids quickly; an exit handler must not taskkill whatever
@@ -233,7 +239,7 @@ describe('process tree termination (Windows)', () => {
     return Effect.gen(function* () {
       yield* spawnProcess({ ...agentSpec, processGroup: false, windowsDetached: true });
       expect(table.spawned.map((call) => call.options.detached)).toEqual([false]);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 });
 
@@ -282,7 +288,7 @@ describe('process tree termination (real processes)', () => {
         yield* managed.terminate(FORCED);
 
         expect(isRunning(grandchild)).toBe(false);
-      }).pipe(Effect.provide(NodeProcessLive))
+      }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
   it.live.skipIf(process.platform === 'win32')(
@@ -309,7 +315,7 @@ describe('process tree termination (real processes)', () => {
         expect(isRunning(childPid)).toBe(true);
         yield* managed.terminate(FORCED);
         expect(isRunning(childPid)).toBe(false);
-      }).pipe(Effect.scoped, Effect.provide(NodeProcessLive))
+      }).pipe(Effect.scoped, Effect.scoped, Effect.provide(processLayer({})))
   );
 
   // Until Node reports a failed spawn, `child.kill()` reaches pid 0: the
@@ -330,7 +336,7 @@ describe('process tree termination (real processes)', () => {
         });
         expect(output.stdout.toString('utf8').trim()).toBe('survived');
         expect(output.code).toBe(0);
-      }).pipe(Effect.provide(NodeProcessLive))
+      }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 });
 
@@ -349,7 +355,7 @@ describe('runCommand', () => {
       expect(output.code).toBe(3);
       expect(output.stdout.toString()).toBe('out');
       expect(output.stderr.toString()).toBe('err');
-    }).pipe(Effect.provide(NodeProcessLive))
+    }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
   it.live('pipes input to stdin', () =>
@@ -358,7 +364,7 @@ describe('runCommand', () => {
         node('process.stdin.pipe(process.stdout)', { input: 'hello' })
       );
       expect(output.stdout.toString()).toBe('hello');
-    }).pipe(Effect.provide(NodeProcessLive))
+    }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
   it.live('fails with CommandFailed carrying stderr on a non-zero exit', () =>
@@ -368,7 +374,7 @@ describe('runCommand', () => {
       );
       expect(failure).toBeInstanceOf(CommandFailed);
       expect(failure instanceof CommandFailed && failure.stderr).toBe('bad ref');
-    }).pipe(Effect.provide(NodeProcessLive))
+    }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
   it.live('fails with SpawnFailed carrying the OS error for a missing executable', () =>
@@ -378,7 +384,7 @@ describe('runCommand', () => {
       );
       expect(failure).toBeInstanceOf(SpawnFailed);
       expect((failure as SpawnFailed).cause).toMatchObject({ code: 'ENOENT' });
-    }).pipe(Effect.provide(NodeProcessLive))
+    }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
   // A caller that persists the pid (Codex profile logout) needs it at spawn.
@@ -393,7 +399,7 @@ describe('runCommand', () => {
         },
       });
       expect(spawnedPid).toBeGreaterThan(0);
-    }).pipe(Effect.provide(NodeProcessLive))
+    }).pipe(Effect.scoped, Effect.provide(processLayer({})))
   );
 
   it.effect('ends the command tree and fails when it outlives its timeout', () => {
@@ -410,7 +416,7 @@ describe('runCommand', () => {
       expect(table.isAlive(pid)).toBe(false);
       // SIGTERM first: a git killed outright leaves its index.lock behind.
       expect(table.delivered).toEqual([{ target: -pid, signal: 'SIGTERM' }]);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   // A read-only probe's caller should not wait out a grace period it has no use for.
@@ -431,7 +437,7 @@ describe('runCommand', () => {
 
       expect(failure).toBeInstanceOf(CommandTimedOut);
       expect(table.delivered.map((delivery) => delivery.signal)).toEqual(['SIGKILL']);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   // The abandoned tree is ended in a scope finalizer, where nothing can be
@@ -449,7 +455,7 @@ describe('runCommand', () => {
 
       expect(failure).toBeInstanceOf(CommandTimedOut);
       expect(table.delivered.map((delivery) => delivery.signal)).toEqual(['SIGTERM', 'SIGKILL']);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 });
 
@@ -467,7 +473,7 @@ describe('runCommand process-tree ownership', () => {
 
       expect(table.isAlive(daemon)).toBe(true);
       expect(table.delivered).toEqual([]);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
   it.effect('fails at once and ends the tree when output exceeds its limit', () => {
@@ -479,13 +485,13 @@ describe('runCommand process-tree ownership', () => {
       while (table.spawned.length === 0) yield* Effect.yieldNow;
       const leader = 1000;
       const child = table.childOf(leader);
-      child?.stdout.emit('data', Buffer.from('more than four bytes'));
+      child?.stdout.write(Buffer.from('more than four bytes'));
 
       const failure = failureOf(yield* Fiber.await(command));
 
       expect(failure).toBeInstanceOf(CommandOutputTooLarge);
       expect(table.isAlive(leader)).toBe(false);
-    }).pipe(Effect.provideService(NodeProcess, table.api));
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 });
 
@@ -546,4 +552,143 @@ describe('resolveWindowsCommand', () => {
       )
     ).toBeNull();
   });
+});
+
+describe('official process service and interruption', () => {
+  it.live('runs the official output helper and preserves an explicitly replaced environment', () =>
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const output = yield* spawner.string(
+        ChildProcess.make(
+          process.execPath,
+          ['-e', 'process.stdout.write(JSON.stringify(process.env))'],
+          { env: { LODY_TEST_ENV: 'only' }, extendEnv: false }
+        )
+      );
+      const env = JSON.parse(output);
+      expect(env.LODY_TEST_ENV).toBe('only');
+      expect(env.PATH).toBeUndefined();
+      expect(env.HOME).toBeUndefined();
+    }).pipe(Effect.provide(processLayer({})))
+  );
+
+  it.live('runs an official command pipeline without leaving either process running', () =>
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const output = yield* spawner.string(
+        ChildProcess.make(process.execPath, ['-e', 'process.stdout.write("hello")']).pipe(
+          ChildProcess.pipeTo(
+            ChildProcess.make(process.execPath, [
+              '-e',
+              'process.stdin.on("data", b => process.stdout.write(b.toString().toUpperCase()))',
+            ])
+          )
+        )
+      );
+      expect(output).toBe('HELLO');
+    }).pipe(Effect.provide(processLayer({})))
+  );
+
+  it.effect('interrupting a command waits for its root and orphaned descendant to be gone', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      const fiber = yield* Effect.forkChild(
+        runCommand({
+          command: 'git',
+          args: [],
+          abandonPolicy: { graceMs: 0, killWaitMs: 0 },
+          onSpawned: () => Deferred.doneUnsafe(ready, Effect.void),
+        })
+      );
+      yield* Deferred.await(ready);
+      const descendant = table.addDescendant(1000);
+      table.exitOnItsOwn(1000);
+      yield* Fiber.interrupt(fiber);
+      expect(table.isAlive(descendant)).toBe(false);
+    }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+  });
+
+  it.effect(
+    'interrupting an owner releases the process acquired through the scoped spawn API',
+    () => {
+      const table = new FakeProcessTable('linux');
+      return Effect.gen(function* () {
+        const ready = yield* Deferred.make<void>();
+        const owner = yield* Effect.forkChild(
+          Effect.gen(function* () {
+            yield* spawnProcess(agentSpec);
+            yield* Deferred.succeed(ready, undefined);
+            yield* Effect.never;
+          }).pipe(Effect.scoped)
+        );
+        yield* Deferred.await(ready);
+        const descendant = table.addDescendant(1000);
+        yield* Fiber.interrupt(owner);
+        expect(table.isAlive(1000)).toBe(false);
+        expect(table.isAlive(descendant)).toBe(false);
+      }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+    }
+  );
+
+  it.effect('a legacy started process can finish cleanup after its signal is aborted', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      const controller = new AbortController();
+      const handle = startProcess(agentSpec, { nodeProcess: table.api, signal: controller.signal });
+      const descendant = table.addDescendant(1000);
+      controller.abort();
+      yield* Effect.promise(() => handle.terminate({ graceMs: 0, killWaitMs: 0 }));
+      expect(table.isAlive(1000)).toBe(false);
+      expect(table.isAlive(descendant)).toBe(false);
+    });
+  });
+
+  it.effect('the legacy Promise command honors its entry point cancellation signal', () => {
+    const table = new FakeProcessTable('linux');
+    return Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      const controller = new AbortController();
+      const result = runCommandText(
+        {
+          command: 'git',
+          args: [],
+          check: 'none',
+          abandonPolicy: { graceMs: 0, killWaitMs: 0 },
+          onSpawned: () => Deferred.doneUnsafe(ready, Effect.void),
+        },
+        { nodeProcess: table.api, signal: controller.signal }
+      ).then(
+        () => false,
+        () => true
+      );
+      yield* Deferred.await(ready);
+      const descendant = table.addDescendant(1000);
+      controller.abort();
+      expect(yield* Effect.promise(() => result)).toBe(true);
+      expect(table.isAlive(1000)).toBe(false);
+      expect(table.isAlive(descendant)).toBe(false);
+    });
+  });
+  it.effect(
+    'a failing synchronous owner hook releases the process acquired before the hook',
+    () => {
+      const table = new FakeProcessTable('linux');
+      return Effect.gen(function* () {
+        const failure = yield* Effect.exit(
+          acquireProcess(
+            {
+              ...agentSpec,
+              onSpawned: () => {
+                throw new Error('owner setup failed');
+              },
+            },
+            { graceMs: 0, killWaitMs: 0 }
+          )
+        );
+        expect(Exit.isFailure(failure)).toBe(true);
+        expect(table.isAlive(1000)).toBe(false);
+      }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+    }
+  );
 });

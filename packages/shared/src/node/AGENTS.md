@@ -12,17 +12,22 @@ Electron main, the CLI supervisor and these helpers. Effect usage and boundary
 rules: [cli-effect-ts](../../../../.agents/docs/cli-effect-ts.md). Decision
 record: [process tree layer](../../../../.agents/notes/implemented/architecture/2026-09-27-effect-process-tree-layer.md).
 
-- Use the workspace Effect v4 catalog and `Context.Service` / `Layer.effect`;
+- Effect callers use `effect/process` commands and `ChildProcessSpawner`,
+  provided by `ProcessSpawnerLive` with Lody's bounded backend. Process acquisition
+  requires Scope; only legacy Promise entry points use raw handle compatibility.
+  Use the workspace Effect v4 catalog and `Context.Service` / `Layer.effect`;
   follow the pinned-version APIs in cli-effect-ts, not v3 compatibility helpers.
-- New or refactored process callers use `process.ts` services or Promise facades;
-  never add raw spawn or kill paths. ACP callers are migrated in this layer.
-  Existing CLI callers, Node git/lock helpers, Electron and supervisor are migrated
-  by subsequent PRs; the automated guard is introduced with those consumers.
+- New or refactored process callers use the official Effect service or shared
+  legacy Promise entry points; never add raw spawn or kill paths, and never put
+  an Effect through a Promise facade and wrap it back into Effect.
+  ACP callers are migrated in this layer. Existing CLI callers, Node git/lock
+  helpers, Electron and supervisor migrate in subsequent PRs; the automated
+  guard is introduced with those consumers.
 - `process.ts` stays one module with no relative imports: Electron's
   `node --test` cannot resolve extensionless relative imports.
 - Missing a capability (a new spawn shape, a pid-only kill)? Add it to
   `process.ts` with a test and a facade; never work around the layer in a caller.
-- End processes only through `terminateTree`; never add another
+- End processes through the official Effect handle or `terminateTree`; never add another
   SIGTERM→wait→SIGKILL loop. Every wait is bounded, and a tree that cannot be
   proven gone fails with `TerminationFailed`, never success. A caller that
   cannot act on it logs it at `warn`, naming the tree.
@@ -33,6 +38,8 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
 - Liveness covers the whole tree (process group, cgroup), not just the root.
 - A command that exits on its own keeps what it deliberately left running; only
   a caller that stops waiting (timeout, interruption, output limit) ends the tree.
+- Scope owns process acquisition before configuration or other interruptible
+  post-spawn work. Failed owner hooks also release the acquired process.
 - Subscribe to a child's events in the same synchronous step as the spawn
   (`SpawnSpec.onSpawned`, an `Effect.callback` register).
 - The Effect core has no Promise APIs, timers, `AbortController`s or mutable

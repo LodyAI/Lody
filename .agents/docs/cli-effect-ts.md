@@ -50,11 +50,36 @@ catch })` and pass the signal on, so interruption aborts the work.
   `onSpawned` hook). A listener attached after a fiber yield can miss an event
   that already fired.
 
+## Process service and resource ownership
+
+Use `ChildProcess` and `ChildProcessSpawner` from `effect/process`. The shared
+`ProcessSpawnerLive` implements the official service with Lody's bounded tree
+policy and official Node Stream/Sink adapters. `processLayer` composes it with
+`NodeProcess`; the CLI's `platformLayer` also supplies its logger. `runCommand`
+requires the official spawner, and both `spawnProcess` and its compatibility name
+`spawnScoped` require Scope. See the
+[backend decision](../notes/implemented/architecture/2026-10-09-effect-official-process-service.md)
+for why the default Node spawner is not used unchanged.
+
+Never wrap the shared Promise functions back into an Effect. A runner creates a
+separate root fiber. For an unmigrated entry point, the shared facade accepts an
+explicit AbortSignal; pass it when the entry point supports cancellation. This
+neither supplies structured Effect ownership nor automatically makes its parent
+wait for cleanup. Native Effect callers yield the service directly.
+
+A Session owns a container Scope. Each spawn uses a child Scope: failed or
+interrupted setup closes it before returning; successful setup retains it until
+Session release. Closing the container Scope terminates its trees and stops its
+monitor fibers, then removes cgroup resources. `startProcess` is reserved for
+legacy synchronous/raw Node handles (including IPC and explicit detach), whose
+owner must await `terminate`; it is not a scoped Effect API.
+
 ## Temporary Promise facades
 
-The process foundation is `@lody/shared/node/process`. Its Promise facades run
-v4 programs at the boundary; CLI's `platform/promise-facade.ts` adds its logger.
-`SessionSandbox`, the ACP runner and authentication probes now use this foundation.
+The process foundation is `@lody/shared/node/process`. Its Promise entry points
+run v4 programs at the legacy boundary. CLI's `platform/process-options.ts` only
+composes services and logging; it executes no program and has no Promise API.
+`SessionSandbox`, the ACP runner and authentication probes use this foundation.
 Other process callers migrate in the next layers. Delete each temporary facade
 when the corresponding caller itself becomes an Effect service.
 

@@ -11,9 +11,11 @@ CLI-specific Effect platform pieces over the shared process layer. File map:
 
 - Code here is Effect-only: no Promise-returning APIs, no `setTimeout`/`setInterval`,
   `AbortController`, lifecycle `EventEmitter`s or module-level mutable state, and
-  no `Effect.run*`. The exception is `promise-facade.ts`, the CLI's temporary
-  door to the shared facades (it only adds the CLI logger); list every facade
-  in cli-effect-ts.
+  no `Effect.run*`. `process-options.ts` only composes the process Layer and
+  logger; it never executes an Effect. Legacy Promise entry points call the
+  shared compatibility functions directly; list them in cli-effect-ts.
 - Session process containers (`sandbox/`) spawn and end processes only through
   `@lody/shared/node/process`; they add containment (groups, cgroups), limits and
-  accounting, never another termination path.
+  accounting, never another termination path. Capture the official process
+  spawner and Session Scope; a failed or interrupted spawn closes its child
+  Scope before returning, and successful acquisition remains Session-owned.
