@@ -29,10 +29,7 @@
   table keeps every column, scrolling sideways; the boundary is a drag handle
   (`scheduleSplitListWidthAtom`). A click on blank page space closes it
   (`onBlankClick`; rows, controls, the panel and portalled popups excluded).
-  Mobile pushes a page. On a phone the `/schedules` route is edge-to-edge, so
-  its list header includes `--safe-area-top` (closing the editor returns to
-  that list). The home tab does not: it already sits under the home header.
-  The header
+  Mobile pushes a page. The header
   (`ScheduleDetailToolbar`) is close plus compact icon actions; run history is
   the panel's last section, under the editor (no second drawer). Top-of-pane headers join the Electron drag strip
   (`useWindowDragRegionClass`) with buttons `WINDOW_DRAG_EXEMPT_CLASS`, or the
