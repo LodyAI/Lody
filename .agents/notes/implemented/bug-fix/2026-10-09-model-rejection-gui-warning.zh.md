@@ -31,8 +31,8 @@ effort、Fast 和 Plan 不匹配仍保持隐藏。
 
 现有 applier 测试覆盖各 provider 的两种传参方式、标量优先级，以及拒绝后保留
 实际模型。现有 MessageHandler history-gate 测试验证真实 SessionDocument 在
-发起的用户 Turn 后收到 GUI 警告。两套测试在本地通过，共 21 项；定向 Oxfmt 和
-Oxlint 检查也通过。临时 runner 复用相邻 checkout 的依赖，并禁用未使用的 Roost
-导入，验证的仍是真实 Loro 历史路径。完整 CLI 类型检查受缺失的 adapter 子模块和
-借用的 workspace 依赖版本不兼容阻塞。不声称已完成打包 GUI 验收。
+发起的用户 Turn 后收到 GUI 警告。合入 `main` 后两套测试再次通过，共 21 项；
+定向 Oxfmt 和 Oxlint 检查也通过。临时 runner 复用相邻 checkout 的依赖和 adapter
+manifest，验证当前 CLI/shared 源码及真实 Loro 历史路径。全仓检查和格式化仍受
+未安装的 workspace 依赖阻塞。不声称已完成打包 GUI 验收。
 `withTransportRetry` 吞掉 transport 错误仍是另一条未解决的失败路径。

@@ -65,7 +65,6 @@ import {
   type SessionChatResponse,
   type SessionId,
   type SessionHistoryBackendKind,
-  type RoostStreamsConnection,
   type MachineId,
   type MachineStatusResponse,
   type MachinePingResponse,
@@ -155,10 +154,6 @@ import { createWorkspaceMachineRpcFacade } from './workspace-machine-rpc-facade'
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { createCodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { getIpcServices, onIpcEvent, sendLocalSessionControl } from '@/lib/electron-ipc-client';
-import {
-  createLocalRoostSessionDataFactory,
-  createRemoteRoostSessionDataFactory,
-} from '@/lib/roost-session-bridge';
 
 declare global {
   interface Window {
@@ -645,8 +640,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // Slow reconcile interval for the reconnect-loop backstop tick.
   const RECONNECT_BACKSTOP_INTERVAL_MS = 60_000;
   let disposePromise: Promise<void> | null = null;
-  const roostReadLifetime = new AbortController();
-  let roostReadConnection: RoostStreamsConnection | undefined;
   let reconnectingStatusTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectingStatusVisible = false;
   let localReconnectLoop: LocalReconnectLoop | null = null;
@@ -1686,20 +1679,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     return { provider, streamsBaseUrl };
   };
 
-  const prepareRoostStreamsRead = async (): Promise<RoostStreamsConnection> => {
-    const { provider, streamsBaseUrl } = await prepareStreamsAccess();
-    if (disposePromise || roostReadLifetime.signal.aborted)
-      throw new Error('Workspace runtime is disposed');
-    if (!roostReadConnection || roostReadConnection.baseUrl !== streamsBaseUrl) {
-      roostReadConnection = {
-        baseUrl: streamsBaseUrl,
-        auth: provider.createAuthCallback(),
-        signal: roostReadLifetime.signal,
-      };
-    }
-    return roostReadConnection;
-  };
-
   const createMachineRpcJsonStreamClient = (
     provider: LoroStreamsTokenProvider,
     streamsBaseUrl: string
@@ -1829,7 +1808,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionDispatchTurn,
     requestSessionPrepare,
     requestSessionPrepareCancel,
-    requestSessionHistoryWrite,
     requestFilePreview,
     requestLocalCodeCollabFileIndex,
     requestCodeCollabOpenText,
@@ -4101,57 +4079,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     // session can be composed with the legacy Loro reader before its catalog
     // row becomes visible in this Repo instance.
     const sessionMeta = (await repo.getDocMeta(roomId))?.meta as
-      | { historyBackend?: SessionHistoryBackendKind; machineId?: MachineId }
+      | { historyBackend?: SessionHistoryBackendKind }
       | undefined;
 
-    const backendKind = resolveSessionHistoryBackendKind(sessionMeta);
-    let rendererSessionDataFactory = deps.createSessionData;
     let conversation: ReturnType<typeof createConversationSession>;
     try {
-      if (!rendererSessionDataFactory && backendKind === 'roost') {
-        const machineId = sessionMeta?.machineId;
-        if (!machineId) {
-          throw new Error(`Roost session ${sessionId} has no owning machine`);
-        }
-        const plane = await targetRouter.resolvePlaneForMachine(machineId, {
-          timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
-        });
-        if (plane === 'local') {
-          if (!getIpcServices()) {
-            throw new Error(
-              `Roost session ${sessionId} is local, but the Electron session-control bridge is unavailable`
-            );
-          }
-          rendererSessionDataFactory = createLocalRoostSessionDataFactory({
-            accountId: deps.accountId,
-            workspaceId,
-            machineId,
-          });
-        } else {
-          rendererSessionDataFactory = createRemoteRoostSessionDataFactory({
-            accountId: deps.accountId,
-            workspaceId,
-            machineId,
-            replicaNamespace: cacheIdentity.namespace,
-            getConnection: prepareRoostStreamsRead,
-            requestHistoryWrite: async ({
-              machineId: targetMachineId,
-              sessionId: targetSessionId,
-              operation,
-              payload,
-            }) =>
-              await requestSessionHistoryWrite(targetMachineId, {
-                sessionId: targetSessionId,
-                operation,
-                payload,
-              }),
-          });
-        }
-      }
       conversation = createConversationSession(sessionDoc, {
         sessionId,
-        backendKind,
-        ...(rendererSessionDataFactory ? { createSessionData: rendererSessionDataFactory } : {}),
+        backendKind: resolveSessionHistoryBackendKind(sessionMeta),
+        ...(deps.createSessionData ? { createSessionData: deps.createSessionData } : {}),
       });
     } catch (error) {
       // A Roost session without its renderer adapter fails closed. Release the
@@ -4782,7 +4718,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     windowBootstrap?.close();
     sharedWindowDocuments.clear();
     disposePromise = (async () => {
-      roostReadLifetime.abort();
       // Held sends are in memory only: closing the workspace drops them.
       pendingSends.dispose();
       // Cancel and join send I/O while its cache, transport and repo still exist.

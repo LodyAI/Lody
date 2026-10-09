@@ -33,9 +33,9 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   captures only the changed range, retains untouched/later rows, and rejects row identity/order
   edits in that range, except pending-to-seen on newly inserted user rows.
   External ACP imports remain new input.
-- History and Roost sync obey [session-data contracts](src/session-data/AGENTS.md).
-  UI/CLI uses `SessionData` with explicit set/clear and shared validation, never
-  a second history writer.
+- Session data ports (`src/session-data`): UI/CLI business depends on `SessionData`
+  (explicit set/clear and shared writer validation), never a second history writer.
+  Invariants: [session-data scope](src/session-data/AGENTS.md).
 - Tool fields other than type/toolCallId are independent
   edits: derive their parsers from the tool message schema and validate changed fields,
   not untouched stored payloads. Content-list edits retain unchanged blocks and parse
@@ -109,11 +109,10 @@ Exact deletion bypasses discovery: [relations](../../specs/session-relations.md)
   button but retain warning-tone markings. No Role-level auto-approval policy.
   Settings/mentions use `canReadAgentRole`/`canManageAgentRole`; explicit MCP
   lookup needs no mention grant.
-- Roles bind exact `machineId + agentConfigId` without fallback. Unavailable
-  machine/config/model/mode stays listed with reasons but cannot be mentioned.
-  MCP freezes the current Role's Prompt, target, revision and dispatch config
-  before acceptance; edits/deletion cannot change retries/recovery.
-  Session Role metadata is creation provenance only.
+- Roles bind `machineId + agentConfigId`; no fallback. Unavailable machine/config/model/mode
+  stays listed with reasons, unmentionable. Freeze Role prompt/target/revision/config
+  at acceptance; retries/recovery ignore edits/deletion. Session Role metadata:
+  provenance only. `resolveSessionExecutionInputBlocks` owns text; raw blocks supply attachments.
 - Memory stores provider/id references, frozen per turn. Daemon commands and env
   mapping follow the [memory contract](../../specs/agent-role-memory.md).
 - Keep `author`, human `userId`, and recipient execution config separate.

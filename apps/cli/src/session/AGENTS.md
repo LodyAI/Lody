@@ -2,8 +2,9 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Module map and contracts: [README.md](README.md).
-Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
+Rules only; rationale: [README.md](README.md). Worktrees and git
+credentials: [worktree/AGENTS.md](worktree/AGENTS.md). Architecture: context/message-flow.md.
+Contract: specs/session-orchestration.md.
 
 ## Authorization and identity
 
@@ -73,8 +74,6 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Lifecycle
 
-- For Roost reads, follow [paging rules](README.md#roost-history-paging).
-
 - `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
   protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup
   retries once after process cleanup, delay, and live Provider recheck; other auth errors do not.
@@ -87,11 +86,11 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Sagas
 
-- Preparation peek/claim never delay cold fallback; peek never transfers ownership. Publish the
-  resource BEFORE `start()`. It may create the marked final worktree and complete `newSession`, but cannot
-  create a session doc, run setup, append history, or publish events before adoption.
-- Dispatch and claim rescan the current row and reject changed compatibility under canonical
-  `buildSessionLaunchConfig` semantics; a published incompatible resource cleans up first.
+- Preparation peek/claim are synchronous; peek never transfers ownership. Cold/replacement starts
+  await same-session cleanup, even after lease removal or late creation. Publish before `start()`.
+  Before adoption: marked worktree creation and `newSession` only; no doc, setup, history or events.
+- Dispatch/claim rescan current config using canonical `buildSessionLaunchConfig`; reject changed
+  compatibility and await incompatible-resource cleanup.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
 - Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder

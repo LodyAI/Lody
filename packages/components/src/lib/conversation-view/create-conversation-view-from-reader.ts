@@ -2,7 +2,6 @@ import type { SessionHistory, SessionId } from '@lody/shared';
 import type {
   SessionDataChange,
   SessionDirectoryRow,
-  SessionHistoryDirectoryPage,
   SessionHistoryReader,
   SessionTurnRead,
 } from '@lody/shared/session-data';
@@ -16,8 +15,6 @@ import {
   type ConversationViewChange,
   type ConversationViewListener,
   type TurnIndexRow,
-  UNLOADED_TURN_PREFIX,
-  isUnloadedTurnId,
 } from './types';
 
 // # Reader-backed ConversationView
@@ -66,8 +63,6 @@ export type CreateConversationViewFromReaderOptions = {
 
 /** Item budget for deferred tail hydration. */
 const IDLE_CHUNK_ITEMS = 1_200;
-const DIRECTORY_PAGE_SIZE = 40;
-const unloadedTurnId = (position: number): string => `${UNLOADED_TURN_PREFIX}${position}`;
 
 /** Sentinel: the change carried no `to`, so the whole directory is re-read. */
 
@@ -91,27 +86,6 @@ const phantomRow = (position: number): TurnIndexRow => ({
   planCount: 0,
 });
 
-const unloadedRow = (position: number): TurnIndexRow => ({
-  ...phantomRow(position),
-  id: unloadedTurnId(position),
-});
-
-const validatePage = (page: SessionHistoryDirectoryPage, latest = false): void => {
-  if (
-    !Number.isSafeInteger(page.startPosition) ||
-    !Number.isSafeInteger(page.totalCount) ||
-    page.startPosition < 0 ||
-    page.totalCount < page.startPosition + page.rows.length ||
-    page.rows.some((row, index) => row.position !== page.startPosition + index) ||
-    page.hasMoreOlder !== page.startPosition > 0 ||
-    page.hasMoreOlder !== (typeof page.cursor === 'string' && page.cursor.length > 0) ||
-    (page.rows.length === 0 && page.totalCount !== 0) ||
-    (latest && page.startPosition + page.rows.length !== page.totalCount)
-  ) {
-    throw new Error('History directory page is incomplete or inconsistent');
-  }
-};
-
 export function createConversationViewFromReader(
   reader: SessionHistoryReader,
   options: CreateConversationViewFromReaderOptions
@@ -126,20 +100,6 @@ export function createConversationViewFromReader(
   /** Position-aligned with the raw directory; every row owns an id. */
   let rows: TurnIndexRow[] = [];
   let ids: string[] = [];
-  const pagedReader =
-    reader.readLatestDirectoryPage && reader.readOlderDirectoryPage
-      ? {
-          readLatest: reader.readLatestDirectoryPage.bind(reader),
-          readOlder: reader.readOlderDirectoryPage.bind(reader),
-        }
-      : undefined;
-  let absoluteStart = 0;
-  let pageTotalCount = 0;
-  let olderCursor: string | null = null;
-  let hasMoreOlder = false;
-  let olderPageRequest: Promise<boolean> | undefined;
-  let directoryInitialized = false;
-  const directoryLeases = new Set<() => void>();
   const indexById = new Map<string, number>();
   /** Insertion order is LRU order: `touch` moves a turn to the end. */
   const hydrated = new Map<string, SessionHistory>();
@@ -198,9 +158,6 @@ export function createConversationViewFromReader(
    */
   const dirtyIds = new Set<string>();
   let flushRunning = false;
-  let flushRetryTimer: ReturnType<typeof setTimeout> | undefined;
-  let flushRetryPending = false;
-  let flushRetryDelayMs = 50;
 
   const tailStart = () => conversationTailStart(ids.length, tailKeep);
 
@@ -354,7 +311,7 @@ export function createConversationViewFromReader(
     emitEvents: boolean,
     cancelled?: () => boolean
   ): Promise<void> => {
-    let pending = [...new Set(targets)].filter((id) => !isUnloadedTurnId(id));
+    let pending = [...new Set(targets)];
     let pass = 0;
     while (pending.length > 0) {
       if (disposed || cancelled?.()) return;
@@ -420,7 +377,6 @@ export function createConversationViewFromReader(
     const targets: string[] = [];
     for (let i = ids.length - 1; i >= tailStart(); i -= 1) {
       const id = ids[i]!;
-      if (isUnloadedTurnId(id)) continue;
       if (hydrated.has(id)) continue;
       const weight = Math.max(1, rows[i]?.itemCount ?? 0);
       // The newest turn is always admitted; a turn that alone exceeds what is
@@ -474,8 +430,6 @@ export function createConversationViewFromReader(
         try {
           read = await reader.readTurn(id);
         } catch {
-          if (indexById.has(id)) dirtyIds.add(id);
-          scheduleFlushRetry();
           continue;
         }
         if (!acceptsToken(id, token)) {
@@ -548,22 +502,13 @@ export function createConversationViewFromReader(
       structuralFrom = Math.min(structuralFrom, Math.min(from, ids.length));
     }
     const structural = Number.isFinite(structuralFrom);
-    if (structural && pagedReader) {
-      structureEpoch += 1;
-      mergeDirty(structuralFrom, Math.max(authoritativeCount, ids.length));
-      return;
-    }
 
     if (!structural) {
       const toReRead: string[] = [];
       const evictedChanges: number[] = [];
-      const nextPagedDirectoryRows = new Map(pagedDirectoryRows);
       let touched = false;
       for (const entry of entries) {
         const pos = entry.position;
-        if (pagedReader && pos >= 0 && pos < pageTotalCount) {
-          nextPagedDirectoryRows.set(pos, entry);
-        }
         const row = carryBodyFacts(rows[pos], rowFromDirectory(entry));
         const old = rows[pos];
         // A turn the notification did not name kept its body: re-reading it
@@ -595,7 +540,6 @@ export function createConversationViewFromReader(
         touched = true;
       }
       if (!touched) return;
-      if (pagedReader) pagedDirectoryRows = nextPagedDirectoryRows;
       bump();
       emit({ kind: 'changed', ids: [] });
       // Index notifications also occur for summary maintenance. A storage
@@ -657,28 +601,6 @@ export function createConversationViewFromReader(
   };
 
   /**
-   * A backend read failure must leave the notification dirty without spinning
-   * the flush loop.  The observer remains live, so a later change can also
-   * wake the flush; the bounded retry covers a quiet backend that recovers
-   * without another notification.
-   */
-  const scheduleFlushRetry = () => {
-    if (disposed || flushRetryTimer) return;
-    flushRetryPending = true;
-    const delay = flushRetryDelayMs;
-    flushRetryDelayMs = Math.min(1_000, flushRetryDelayMs * 2);
-    flushRetryTimer = setTimeout(() => {
-      flushRetryTimer = undefined;
-      flushRetryPending = false;
-      void flushDirty();
-    }, delay);
-  };
-
-  const noteFlushSuccess = () => {
-    if (!flushRetryPending) flushRetryDelayMs = 50;
-  };
-
-  /**
    * Contiguous `[lo, hi)` runs covering `positions`, so scattered targets still
    * read in as few directory calls as they have runs — and never read the rows
    * between two distant runs.
@@ -694,170 +616,7 @@ export function createConversationViewFromReader(
     return runs;
   };
 
-  let pagedDirectoryRows = new Map<number, SessionDirectoryRow>();
-
-  const readPagedWindow = async (
-    targetCount: number,
-    throughPosition?: number
-  ): Promise<SessionHistoryDirectoryPage> => {
-    if (!pagedReader) throw new Error('History reader does not support older pages');
-    const first = await pagedReader.readLatest(Math.min(500, Math.max(1, targetCount)));
-    validatePage(first, true);
-    const pages: SessionHistoryDirectoryPage[] = [first];
-    const desiredStart = Math.max(
-      0,
-      throughPosition === undefined
-        ? first.totalCount - Math.max(1, targetCount)
-        : Math.min(throughPosition, first.totalCount)
-    );
-    let cursor = first.cursor;
-    while (pages[0]!.startPosition > desiredStart && cursor) {
-      const older = await pagedReader.readOlder(
-        cursor,
-        Math.min(500, pages[0]!.startPosition - desiredStart)
-      );
-      validatePage(older);
-      const newer = pages[0]!;
-      if (
-        older.totalCount !== first.totalCount ||
-        older.startPosition + older.rows.length !== newer.startPosition
-      ) {
-        throw new Error('History directory pages are not contiguous');
-      }
-      pages.unshift(older);
-      cursor = older.cursor;
-    }
-    const oldest = pages[0]!;
-    return {
-      ...first,
-      startPosition: oldest.startPosition,
-      rows: pages.flatMap((page) => page.rows),
-      hasMoreOlder: oldest.hasMoreOlder,
-      cursor: oldest.cursor,
-    };
-  };
-
-  const applyPagedWindow = async (
-    page: SessionHistoryDirectoryPage,
-    pageOptions: {
-      readonly refreshSurvivors?: boolean;
-      readonly clearFrom?: number;
-      /** Membership epoch captured when the page read started. */
-      readonly expectedStructureEpoch?: number;
-    } = {}
-  ): Promise<boolean> => {
-    if (
-      pageOptions.expectedStructureEpoch !== undefined &&
-      structureEpoch !== pageOptions.expectedStructureEpoch
-    ) {
-      return false;
-    }
-    const previousOlderCursor = olderCursor;
-    const previousById = new Map(ids.map((id, index) => [id, rows[index]! as TurnIndexRow]));
-    const previousIds = new Set(ids);
-    if (pageOptions.clearFrom !== undefined) {
-      for (const position of [...pagedDirectoryRows.keys()]) {
-        if (position >= pageOptions.clearFrom) pagedDirectoryRows.delete(position);
-      }
-    }
-    for (const position of [...pagedDirectoryRows.keys()]) {
-      if (position >= page.totalCount) pagedDirectoryRows.delete(position);
-    }
-    for (const entry of page.rows) pagedDirectoryRows.set(entry.position, entry);
-    let nextAbsoluteStart = page.startPosition;
-    for (const position of pagedDirectoryRows.keys()) {
-      nextAbsoluteStart = Math.min(nextAbsoluteStart, position);
-    }
-    // A latest-page refresh can overlap a window whose older prefix was already
-    // retained.  Its cursor points immediately before `page.startPosition`,
-    // which is inside that retained prefix, so replacing the old cursor would
-    // make the next reverse read overlap the prefix and fail its continuity
-    // check.  Keep the cursor that belongs to the actual retained boundary;
-    // if that boundary was loaded from position zero, the old null cursor wins.
-    const retainedOlderPrefix = nextAbsoluteStart < page.startPosition;
-    const nextOlderCursor = retainedOlderPrefix ? previousOlderCursor : page.cursor;
-    const nextRows = Array.from({ length: page.totalCount }, (_, position) => {
-      const entry = pagedDirectoryRows.get(position);
-      if (!entry) return unloadedRow(position);
-      const row = rowFromDirectory(entry);
-      return carryBodyFacts(previousById.get(row.id), row);
-    });
-    const nextIds = nextRows.map((row) => row.id);
-    const nextIdSet = new Set(nextIds);
-    const structureChanged =
-      absoluteStart !== nextAbsoluteStart ||
-      ids.length !== nextIds.length ||
-      ids.some((id, index) => id !== nextIds[index]);
-    const structuralSignal = structureChanged || pageOptions.refreshSurvivors === true;
-    const touchedSurvivors: string[] = [];
-    for (let index = 0; index < nextRows.length; index += 1) {
-      const row = nextRows[index]!;
-      const old = previousById.get(row.id);
-      if (rowChanged(old, row) || (pageOptions.refreshSurvivors === true && old !== undefined)) {
-        bumpTurn(row.id);
-        if (hydrated.has(row.id)) touchedSurvivors.push(row.id);
-        else row.summary = undefined;
-      }
-    }
-    for (const id of previousIds) {
-      if (nextIdSet.has(id)) continue;
-      hydrated.delete(id);
-      pins.delete(id);
-      bumpTurn(id);
-    }
-
-    rows = nextRows;
-    ids = nextIds;
-    directoryInitialized = true;
-    absoluteStart = nextAbsoluteStart;
-    pageTotalCount = page.totalCount;
-    olderCursor = nextOlderCursor;
-    hasMoreOlder = nextAbsoluteStart > 0 && nextOlderCursor !== null;
-    rebuildLookups(0);
-    evict();
-    if (structuralSignal) structureEpoch += 1;
-    const appliedStructureEpoch = structureEpoch;
-    if (structuralSignal) await ensureTailHydrated(hydrateItemBudget, false);
-    if (disposed || structureEpoch !== appliedStructureEpoch) return false;
-    if (touchedSurvivors.length > 0) await applyHydratedReplacement(touchedSurvivors);
-    if (disposed || structureEpoch !== appliedStructureEpoch) return false;
-    bump();
-    emit(
-      structuralSignal
-        ? { kind: 'structure', from: 0, to: ids.length }
-        : { kind: 'changed', ids: touchedSurvivors }
-    );
-    scheduleIdlePass();
-    return true;
-  };
-
   const flushStructural = async (from: number, to: number): Promise<void> => {
-    if (pagedReader) {
-      const structureBefore = structureEpoch;
-      try {
-        // A missed notification or branch rewrite invalidates loaded rows, not
-        // the unloaded prefix. Rebuild only as far back as the retained window.
-        const page = await readPagedWindow(
-          DIRECTORY_PAGE_SIZE,
-          pagedDirectoryRows.size > 0 ? Math.max(absoluteStart, from) : undefined
-        );
-        if (disposed) return;
-        if (structureEpoch !== structureBefore) {
-          mergeDirty(0, Math.max(ids.length, DIRECTORY_PAGE_SIZE));
-          return;
-        }
-        const applied = await applyPagedWindow(page, {
-          refreshSurvivors: true,
-          clearFrom: Math.max(0, from),
-          expectedStructureEpoch: structureBefore,
-        });
-        if (applied) noteFlushSuccess();
-      } catch {
-        mergeDirty(0, Math.max(ids.length, DIRECTORY_PAGE_SIZE));
-        scheduleFlushRetry();
-      }
-      return;
-    }
     // A structural refresh re-reads and re-keys the whole range, which subsumes
     // any content target inside it.
     for (const id of [...dirtyIds]) {
@@ -875,8 +634,6 @@ export function createConversationViewFromReader(
       entries = await reader.readDirectory(from, to);
       count = await reader.count();
     } catch {
-      mergeDirty(from, to);
-      scheduleFlushRetry();
       return;
     }
     if (disposed) return;
@@ -885,7 +642,6 @@ export function createConversationViewFromReader(
       return;
     }
     await applyChange(from, entries, count);
-    noteFlushSuccess();
   };
 
   const flushContent = async (): Promise<void> => {
@@ -905,15 +661,13 @@ export function createConversationViewFromReader(
     try {
       count = await reader.count();
     } catch {
-      for (const id of reported) dirtyIds.add(id);
-      scheduleFlushRetry();
       return;
     }
     if (disposed) return;
     // A content notification must not move membership. If the length changed
     // anyway, re-key structurally rather than splicing rows from a sparse read.
-    if (count !== (pagedReader ? pageTotalCount : ids.length)) {
-      mergeDirty(pagedReader ? 0 : lowest, pagedReader ? ids.length : Math.max(count, ids.length));
+    if (count !== ids.length) {
+      mergeDirty(lowest, Math.max(count, ids.length));
       return;
     }
     for (const [lo, hi] of runsOf(positions)) {
@@ -922,18 +676,15 @@ export function createConversationViewFromReader(
       try {
         entries = await reader.readDirectory(lo, hi);
       } catch {
-        for (const id of reported) dirtyIds.add(id);
-        scheduleFlushRetry();
-        return;
+        continue;
       }
       if (disposed) return;
       if (structureEpoch !== structureBefore) {
         mergeDirty(lo, ids.length);
         return;
       }
-      await applyChange(lo, entries, pagedReader ? ids.length : count, reported);
+      await applyChange(lo, entries, count, reported);
     }
-    noteFlushSuccess();
   };
 
   const flushDirty = async () => {
@@ -942,7 +693,6 @@ export function createConversationViewFromReader(
     try {
       while (dirtyFrom <= dirtyTo || dirtyIds.size > 0) {
         if (disposed) break;
-        if (flushRetryPending) return;
         if (dirtyFrom <= dirtyTo) {
           const from = dirtyFrom;
           const to = dirtyTo;
@@ -980,13 +730,6 @@ export function createConversationViewFromReader(
   };
 
   const buildInitial = (entries: readonly SessionDirectoryRow[]) => {
-    if (pagedReader) {
-      pagedDirectoryRows.clear();
-      for (const entry of entries) pagedDirectoryRows.set(entry.position, entry);
-      rows = Array.from({ length: pageTotalCount }, (_, position) => unloadedRow(position));
-      ids = rows.map((row) => row.id);
-      absoluteStart = entries[0]?.position ?? pageTotalCount;
-    }
     for (const entry of entries) {
       const row = rowFromDirectory(entry);
       rows[entry.position] = row;
@@ -1002,28 +745,11 @@ export function createConversationViewFromReader(
   // ---- observation (the only subscription) -------------------------------------
 
   const observation = reader.observe((change) => onDataChange(change));
-  // Both promises share the backend read. The paged path consumes initialPage;
-  // observe the companion rejection too so it cannot become unhandled.
-  if (pagedReader && observation.initialPage) void observation.initial.catch(() => {});
   void (async () => {
     try {
-      const initialPage =
-        pagedReader && observation.initialPage
-          ? await observation.initialPage
-          : pagedReader
-            ? await reader.readLatestDirectoryPage!(DIRECTORY_PAGE_SIZE)
-            : undefined;
-      const entries = initialPage?.rows ?? (await observation.initial);
+      const entries = await observation.initial;
       if (disposed) return;
-      if (initialPage) {
-        validatePage(initialPage, true);
-        absoluteStart = initialPage.startPosition;
-        pageTotalCount = initialPage.totalCount;
-        hasMoreOlder = initialPage.hasMoreOlder;
-        olderCursor = initialPage.cursor;
-      }
       buildInitial(entries);
-      directoryInitialized = true;
       initialApplied = true;
       // Queue the background pass before the eager tail hydration, so a
       // scheduled-idle consumer can drain everything from one queue.
@@ -1033,12 +759,8 @@ export function createConversationViewFromReader(
       const queued = pendingChanges.splice(0);
       for (const change of queued) onDataChange(change);
     } catch {
-      if (!disposed) {
-        initialApplied = true;
-        mergeDirty(0, Math.max(ids.length, DIRECTORY_PAGE_SIZE));
-        scheduleFlushRetry();
-        for (const change of pendingChanges.splice(0)) onDataChange(change);
-      }
+      // The port's initial directory is synchronous snapshots today; keep the
+      // contract resolvable rather than hanging consumers on a failed read.
       resolveReady();
     }
   })();
@@ -1053,93 +775,6 @@ export function createConversationViewFromReader(
     }
   };
 
-  const loadOlder = (): Promise<boolean> => {
-    if (!pagedReader || !hasMoreOlder || !olderCursor || disposed) return Promise.resolve(false);
-    if (olderPageRequest) return olderPageRequest;
-    const cursor = olderCursor;
-    const structureBefore = structureEpoch;
-    const request = (async () => {
-      let page: SessionHistoryDirectoryPage;
-      try {
-        page = await pagedReader.readOlder(cursor, DIRECTORY_PAGE_SIZE);
-        validatePage(page);
-      } catch (error) {
-        if (disposed || structureEpoch !== structureBefore) return false;
-        // Rebase the loaded window and its cursor after a fork, expired cursor,
-        // or recoverable read failure. Never recover by fetching the full prefix.
-        mergeDirty(0, Math.max(ids.length, DIRECTORY_PAGE_SIZE));
-        scheduleFlushRetry();
-        throw error;
-      }
-      if (disposed || structureEpoch !== structureBefore) return false;
-      if (
-        page.totalCount !== pageTotalCount ||
-        page.startPosition + page.rows.length !== absoluteStart
-      ) {
-        mergeDirty(0, Math.max(ids.length, DIRECTORY_PAGE_SIZE));
-        void flushDirty();
-        return false;
-      }
-      return await applyPagedWindow(page, { expectedStructureEpoch: structureBefore });
-    })();
-    let wrapped: Promise<boolean>;
-    wrapped = request.finally(() => {
-      if (olderPageRequest === wrapped) olderPageRequest = undefined;
-    });
-    olderPageRequest = wrapped;
-    return wrapped;
-  };
-
-  const acquireDirectory = (throughTurnId?: string) => {
-    let released = false;
-    let wake: (() => void) | undefined;
-    const release = () => {
-      released = true;
-      wake?.();
-      directoryLeases.delete(release);
-    };
-    directoryLeases.add(release);
-    const pause = (delay: number) =>
-      new Promise<void>((resolve) => {
-        const timer = setTimeout(done, delay);
-        function done() {
-          clearTimeout(timer);
-          wake = undefined;
-          resolve();
-        }
-        wake = done;
-      });
-    const loading = (async () => {
-      await ready;
-      let retryDelay = 50;
-      for (;;) {
-        if (released || disposed) return;
-        if (
-          directoryInitialized &&
-          (!hasMoreOlder || (throughTurnId !== undefined && indexById.has(throughTurnId)))
-        )
-          return;
-        try {
-          const progressed = directoryInitialized && (await loadOlder());
-          if (released || disposed) return;
-          if (progressed) {
-            retryDelay = 50;
-            await yieldToEventLoop();
-            continue;
-          }
-        } catch {
-          // The page loader rebases a stale cursor. Keep an active directory
-          // request alive through reconnects, without treating partial coverage
-          // as a completed search or a missing saved anchor.
-        }
-        if (released || disposed) return;
-        await pause(retryDelay);
-        retryDelay = Math.min(2_000, retryDelay * 2);
-      }
-    })().finally(() => directoryLeases.delete(release));
-    return { ready: loading, release };
-  };
-
   const view: ConversationView = {
     sessionId: options.sessionId,
     get turnCount() {
@@ -1150,9 +785,6 @@ export function createConversationViewFromReader(
     },
     get structureVersion() {
       return structureEpoch;
-    },
-    get hasMoreOlder() {
-      return hasMoreOlder;
     },
     ready,
     index: (i) => rows[i],
@@ -1175,7 +807,7 @@ export function createConversationViewFromReader(
       if (disposed) return { ready: Promise.resolve(), release: () => {} };
       const a = Math.max(0, Math.min(from, ids.length));
       const b = Math.max(a, Math.min(to, ids.length));
-      const capturedIds = ids.slice(a, b).filter((id) => !isUnloadedTurnId(id));
+      const capturedIds = ids.slice(a, b);
       let released = false;
       const release = () => {
         if (released) return;
@@ -1190,7 +822,6 @@ export function createConversationViewFromReader(
       let weight = 0;
       for (let i = a; i < b; i += 1) {
         const id = ids[i]!;
-        if (isUnloadedTurnId(id)) continue;
         if (hydrated.has(id)) continue;
         const turnWeight = Math.max(1, rows[i]?.itemCount ?? 0);
         if (
@@ -1220,8 +851,6 @@ export function createConversationViewFromReader(
       })();
       return { ready: hydrationReady, release };
     },
-    loadOlder,
-    acquireDirectory,
     subscribe: (listener: ConversationViewListener) => {
       listeners.add(listener);
       return () => {
@@ -1231,19 +860,13 @@ export function createConversationViewFromReader(
     dispose: () => {
       if (disposed) return;
       disposed = true;
-      for (const release of directoryLeases) release();
       structureEpoch += 1;
       observation.unsubscribe();
       idleCancel?.();
       idleCancel = null;
-      if (flushRetryTimer) clearTimeout(flushRetryTimer);
-      flushRetryTimer = undefined;
-      flushRetryPending = false;
       rows.length = 0;
       ids.length = 0;
       indexById.clear();
-      pagedDirectoryRows.clear();
-      turnEpoch.clear();
       hydrated.clear();
       pins.clear();
       listeners.clear();

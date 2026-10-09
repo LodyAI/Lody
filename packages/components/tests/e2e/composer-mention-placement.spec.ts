@@ -290,6 +290,68 @@ test('inline editor keeps a floating menu and focus through category selection',
   await expect(input).toHaveValue(/@Fix-flaky-scroll-tests /);
 });
 
+for (const width of [960, 650]) {
+  test(`Role previews retain list height through hover and scrolling at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 720 });
+    await page.goto(
+      '/iframe.html?id=mentions-mentiontwolevelmenu--main-composer-role-catalog-at-caret&viewMode=story'
+    );
+    const input = page.getByRole('combobox', { name: 'composer' });
+    await input.fill('@role:');
+    const menu = page.getByRole('listbox');
+    await expect(page.getByRole('option')).toHaveCount(23);
+    await expect.poll(() => menu.evaluate((node) => getComputedStyle(node).opacity)).toBe('1');
+    const initialHeight = (await menu.boundingBox())!.height;
+
+    async function expectStableHeight() {
+      const heights = await menu.evaluate(
+        (node) =>
+          new Promise<number[]>((resolve) => {
+            const frameHeights: number[] = [];
+            const sample = () => {
+              frameHeights.push(node.getBoundingClientRect().height);
+              if (frameHeights.length === 8) resolve(frameHeights);
+              else requestAnimationFrame(sample);
+            };
+            requestAnimationFrame(sample);
+          })
+      );
+      for (const height of heights) expect(Math.abs(height - initialHeight)).toBeLessThan(0.5);
+    }
+
+    for (const name of ['Release Notes', 'Code Reviewer', 'Reviewer 1', 'Reviewer 2']) {
+      const row = page.getByRole('option', { name: new RegExp(`^${name} Codex`) });
+      await row.hover();
+      await expect(row).toHaveAttribute('data-highlighted');
+      if (width === 960)
+        await expect(menu.locator('header').getByText(name, { exact: true })).toBeVisible();
+      await expectStableHeight();
+    }
+
+    const last = page.getByRole('option', { name: /^Reviewer 16 Codex/ });
+    await last.scrollIntoViewIfNeeded();
+    await last.hover();
+    await expect(last).toHaveAttribute('data-highlighted');
+    await expectStableHeight();
+    await input.press('ArrowDown');
+    await expect(input).toHaveValue('@role:');
+    await expectStableHeight();
+
+    await input.fill('@role:Offline');
+    await expect(page.getByRole('option')).toHaveCount(1);
+    await expect(page.getByRole('option')).toHaveAttribute('aria-disabled', 'true');
+    await input.press('Enter');
+    await expect(input).toHaveValue('@role:Offline');
+
+    await input.fill('@role:Release');
+    await expect(page.getByRole('option')).toHaveCount(1);
+    await page.getByRole('option').click();
+    await expect(input).toHaveValue('@Release-Notes ');
+  });
+}
+
 test.describe('prepared shortcut touch selection', () => {
   test.use({ isMobile: true, hasTouch: true });
 

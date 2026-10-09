@@ -25,8 +25,6 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   authorized or executed. Its extensive header comment
   is the authoritative doc for edge cases (stale pointers, history/meta sync races).
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
-- `roost-node-session.ts` — owns Roost history reads/writes and its bounded active-branch
-  page cache; `roost-session-backend.ts` joins it to the existing Loro control plane.
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns. Created in
   message-handler's `beginConversationTurn`, stored/disposed via `SessionTransientStore` turn
   state; it creates the assistant entry when it opens.
@@ -67,6 +65,16 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   [specs/session-worktree-lifecycle.md](../../../../specs/session-worktree-lifecycle.md).
 
 ## Background
+
+### Frozen execution input
+
+Create, continue and steer resolve effective input through shared
+`resolveSessionExecutionInputBlocks`: the accepted turn's `prompt` owns text,
+while `inputBlocks` provide structured attachments and retain authored text for
+editing. Dispatch preserves both fields and supplies legacy history fallback.
+Execution never reconstructs instructions from the current Role catalog. Runtime
+context and attachment materialization remain daemon responsibilities. See the
+[decision and regression evidence](../../../../.agents/notes/implemented/architecture/2026-10-08-frozen-turn-execution-input.md).
 
 ### Why turn activation has its own predicate
 
@@ -272,51 +280,11 @@ identity propagation into adapter-owned Git commands remains unresolved.
 Peek and claim are synchronous published-resource snapshots. A prepared resource may reuse its
 open target-machine Flock to synchronously resolve launch config, but dispatch and claim
 rescan the current row. Durable creation claims the marker only when repo, source, and base
-branch target identity match, runs setup, then permits the first prompt.
-
-## Roost history paging
-
-Renderer read replies bind logical page bodies, count and history revision to
-one durable observation. The RPC waits for local writes before and after the
-read and retries a moving revision; neither barrier waits for remote sync.
-This lets the renderer persist bounded pages as a coherent offline read replica
-without exposing physical segments or introducing another history writer.
-
-Cloud renderer reads use a native Roost IndexedDB replica directly against the
-authorized Streams service, so an offline owner does not block uncached remote
-pages. Commands still use the owner RPC. `roost-streams-sync.ts` schedules native
-Node uploads on the shared SQLite owner; its persistent enrollment index resumes
-work without joining historical session rooms. Enroll before the first native
-write, including recovery writes. Local writes wake upload without waiting for
-the network. `waitUntilSynced` requires native upload confirmation as well as the
-control barrier; local-only workspaces require only local durability.
-
-The shared remote binding carries only generation and owner public key. Streams
-URLs, credentials and cancellation belong to the existing workspace capability.
-Replica bootstrap catches up from the original reverse window tail; a newer HEAD
-would skip writes. Rollback emits a signed non-message branch-state record so
-the same active branch can be reconstructed on other replicas.
-
-Display bootstrap and ordinary directory/body reads use active-branch pages and
-a bounded body cache. Published-message pages cannot establish branch membership.
-Resolve an off-window physical head before sealing or appending; a late successor
-must not turn the next append into a new root. Full snapshots belong to explicit
-export/copy/edit operations, not renderer hydration or missing-new-ID lookup.
-
-The owner starts with 40 logical turns and keeps up to 500 page bodies for subsequent
-hydration. Reverse pages carry their own total count and absolute positions. Cursor
-rejection after a branch rewrite is recoverable by refreshing the loaded window;
-it never authorizes switching back to Loro or reading a superseded published suffix.
-
-ACP batch appliers can mutate item arrays. The Roost adapter applies them to a
-detached working copy, preserving the before-image used to decide what to persist.
-Refreshing an unsealed primary reads only its known physical turn and installs
-the result only while the branch identity and read generation still match.
-External cursor refreshes share the local write queue so an earlier branch read
-cannot overwrite a later mutation's projection; disposal rejects pending reads.
-The synthetic [history benchmark](../../benchmarks/roost-history.mts) exercises
-these production backends and the shared view; its timing excludes renderer
-transport, IndexedDB and paint.
+branch target identity match, runs setup, then permits the first prompt. A missed claim returns
+any retiring cleanup barrier even after its lease has disappeared. Cold creation, discard,
+replacement preparation and shutdown join that barrier, including resources returned after
+cancellation. This can delay cold startup until cleanup finishes; otherwise a retired
+preparation could delete the newly reused directory. Unrelated Sessions remain independent.
 
 Memory identity references travel with turn configuration. `Session.createAgent` maps
 them through `../lib/memory-providers.ts` at spawn; the execution service restarts a

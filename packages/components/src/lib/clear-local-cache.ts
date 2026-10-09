@@ -32,12 +32,6 @@ import { getRegisteredAuthClient } from './auth-client-singleton';
 import { getIpcServices } from './electron-ipc-client';
 import { isWarmWindow } from './desktop-window';
 import { PROMPT_SHORTCUT_DATA_PREFIX } from './prompt-shortcut-storage';
-import {
-  ROOST_HISTORY_CACHE_DB,
-  ROOST_REPLICA_DATABASES_KEY,
-  knownRoostReplicaDatabases,
-  rememberRoostReplicaDatabase,
-} from './roost-history-cache';
 
 /**
  * Prefix for the per-workspace meta remote-cursor startup-bypass marker.
@@ -65,7 +59,6 @@ export type PendingLocalClearMode = 'cache' | 'hard';
 
 /** IndexedDB databases created with static names (not suffixed per workspace). */
 const KNOWN_INDEXEDDB_NAMES = [
-  ROOST_HISTORY_CACHE_DB,
   // Durable session-send journal of earlier builds; no longer written, but an
   // upgraded install may still hold it, and a cache clear should remove it.
   'lody-session-send-v1',
@@ -118,7 +111,6 @@ function knownWorkspaceDatabaseNames(): string[] {
  * them; an ordinary cache repair must not force every share link to be reset.
  */
 const LOCAL_STORAGE_CACHE_KEYS = [
-  ROOST_REPLICA_DATABASES_KEY,
   // slug → workspaceId/name map (`local-storage-cache.ts`). Read by
   // `knownWorkspaceDatabaseNames()` to enumerate per-workspace databases, so
   // the localStorage pass below must run AFTER that enumeration.
@@ -208,7 +200,6 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
     const names = new Set<string>([
       ...KNOWN_INDEXEDDB_NAMES,
       ...knownWorkspaceDatabaseNames(),
-      ...knownRoostReplicaDatabases(),
       ...extraNames,
     ]);
     try {
@@ -253,7 +244,6 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
  * signed out and factory-fresh.
  */
 export async function clearAllLodyLocalData(extraNames: string[] = []): Promise<void> {
-  const replicaNames = knownRoostReplicaDatabases();
   clearWebStorage();
   clearCookies();
 
@@ -261,7 +251,6 @@ export async function clearAllLodyLocalData(extraNames: string[] = []): Promise<
     const names = new Set<string>([
       ...KNOWN_INDEXEDDB_NAMES,
       ...knownWorkspaceDatabaseNames(),
-      ...replicaNames,
       ...extraNames,
     ]);
     try {
@@ -404,12 +393,8 @@ async function revokeServerSessionBestEffort(): Promise<void> {
  */
 export async function startHardReset(): Promise<void> {
   await revokeServerSessionBestEffort();
-  const replicaNames = knownRoostReplicaDatabases();
   clearWebStorage();
   clearCookies();
-  // Retain only the deletion manifest until the next-boot IndexedDB wipe,
-  // including browsers that cannot enumerate their databases.
-  for (const name of replicaNames) rememberRoostReplicaDatabase(name);
   writePendingFlag(HARD_RESET_VALUE);
   replaceAppWindowLocation('/');
   reloadApp();

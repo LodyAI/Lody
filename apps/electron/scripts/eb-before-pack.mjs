@@ -3,7 +3,6 @@ import {
   installEmbeddedNodePtyBinding,
   installEmbeddedSqliteBinding
 } from './cli-native-deps.mjs'
-import { stageRoostArtifact } from './roost-artifact.mjs'
 
 // electron-builder Arch enum (electron-builder/out/index Arch).
 const ARCH_NAMES = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' }
@@ -26,5 +25,4 @@ export default async function beforePack(context) {
   installEmbeddedSqliteBinding({ platform, arch: archName })
   installEmbeddedNodePtyBinding({ platform, arch: archName })
   installEmbeddedKeyringBinding({ platform, arch: archName })
-  stageRoostArtifact({ platform, arch: archName })
 }

@@ -35,10 +35,10 @@ does not expose raw provider error payloads or alter turn execution policy.
 The owning applier suite covers both selection forms across providers, scalar
 precedence, and preservation of the active model after rejection. The existing
 MessageHandler history-gate suite verifies the real SessionDocument receives a
-GUI warning after the driving user turn. Both suites passed locally (21 tests),
-along with scoped Oxfmt and Oxlint checks. The temporary runner reused sibling
-dependencies and disabled unused Roost imports; it exercised the real Loro history
-path. Full CLI type checking remained blocked by missing adapter submodules and
-incompatible borrowed workspace dependencies. No packaged GUI acceptance is
-claimed. Transport errors swallowed by `withTransportRetry` remain a separate
+GUI warning after the driving user turn. Both suites passed again after merging
+`main` (21 tests), along with scoped Oxfmt and Oxlint checks. The temporary runner
+reused sibling dependencies and adapter manifests while exercising the current
+CLI/shared source and real Loro history path. Full repository checks and formatting
+remain blocked by uninstalled workspace dependencies. No packaged GUI acceptance
+is claimed. Transport errors swallowed by `withTransportRetry` remain a separate
 unresolved failure path.

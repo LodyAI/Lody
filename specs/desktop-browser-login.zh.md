@@ -35,6 +35,16 @@ attempt 不得再次交换，也不得注销有效身份。新 attempt 可以替
 或本地错误名、消息及系统错误码）：登录页展示该详情，主进程记录日志并上报。诊断包含 attempt id、阶段、错误分类及该详情，
 不含回调、PKCE 或会话凭据。
 
+## 桌面认证传输
+
+主进程认证请求在应用就绪后使用 Electron 的 Chromium 网络栈，包括系统代理/PAC 处理及结合平台信任的 Chromium 证书验证。
+保留现有 Better Auth cookie 存储钩子和取消信号；切换传输不得引入第二套凭据存储，也不得绕过证书验证。
+25 秒交换截止时间既取消传输，也阻止迟到结果发布。
+
+证书验证失败使用独立的本地化错误分类。提示用户先检查系统时间、代理/防火墙和证书配置，再重新发起登录；
+使用 VPN 时可检查 TUN 模式。证书失败不能证明存在拦截：证书过期或主机名不匹配同样可能导致失败。
+同时识别 Chromium 证书错误和嵌套的 Node TLS 错误。
+
 ## 本地凭据存储
 
 桌面凭据存储（`userData/config.json`）只是服务端会话的缓存，不是身份来源。当前系统密钥已无法解密的已存凭据不得阻塞登录：
@@ -47,16 +57,19 @@ attempt 不得再次交换，也不得注销有效身份。新 attempt 可以替
 工作区数据未就绪时仍由现有工作区守卫阻止访问。CLI 重启是认证成功后的尽力操作，不是登录前提。
 
 浏览器仍需确认要转交的账号。自动回跳和手动打开应用可以安全地发送相同回调。桌面重新发起登录时生成新的 state 和 verifier。
-继续使用 Better Auth 1.5.5 的 `/electron/token` 契约及 cookie/session 插件；桌面接管 PKCE 记录，不再使用 SDK 另一个内存 attempt 表。
+继续使用已固定的 Better Auth 1.6.33 的 `/electron/token` 契约及 cookie/session 插件；桌面接管 PKCE 记录，不再使用 SDK 另一个内存 attempt 表。
 浏览器回调仍携带 base64url 编码的 `{ identifier, state }`。
 
 ## 证据与限制
 
 - 主进程协调器：[desktop-login.ts](../apps/electron/src/main/services/desktop-login.ts)。
+- 传输：[auth-fetch.ts](../apps/electron/src/main/auth-fetch.ts)，由
+  [auth.ts](../apps/electron/src/main/auth.ts) 接入。
 - renderer 状态投影：[auth.ts](../apps/electron/src/renderer/src/auth.ts)。
 - 凭据存储恢复：[auth-storage.ts](../apps/electron/src/main/auth-storage.ts)。
 - 行为测试：[回调测试](../apps/electron/src/renderer/src/auth-callback-transaction.test.mjs)、
   [存储测试](../apps/electron/src/main/auth-storage.test.mjs)。
 - 决策与验证：[记录](../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.zh.md)；
   [不可读凭据存储](../.agents/notes/implemented/bug-fix/2026-09-19-desktop-login-unreadable-credential-store.zh.md)。
+- 传输决策与验证：[Chromium 认证](../.agents/notes/implemented/bug-fix/2026-10-08-desktop-auth-chromium-transport.zh.md)。
 - 真实托管认证与操作系统协议分发仍需打包应用验收；合成测试不能证明这些边界。

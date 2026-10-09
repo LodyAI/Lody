@@ -67,6 +67,21 @@ continues to reflect the agent's confirmed model. Reporting uses the existing
 asynchronous warning path; it does not stop the turn or guarantee display before
 the prompt starts.
 
+## Frozen turn input
+
+A failed Role-backed start retried through a different execution path must retain
+the same accepted instructions and attachments. A turn's `inputConfig.prompt` is
+its effective frozen text, including any Agent Config and Role instructions composed
+at acceptance. `inputBlocks` retain authored text for display/editing and structured
+attachments for execution; their raw text cannot override that frozen prompt.
+
+Create, continue, steer and recovery share this interpretation. Role identity,
+revision and snapshot remain provenance, never a request to resolve today's Role.
+Legacy inputs without a prompt derive text from their existing blocks/history;
+an explicit empty prompt contains no execution text and may accompany attachments.
+Runtime instructions, attachment materialization and history replay remain separate
+from the frozen task, so whole provider requests need not be byte-identical.
+
 ## Local and cloud execution
 
 An OSS Agent Role mention must create work without a Lody account or authenticated

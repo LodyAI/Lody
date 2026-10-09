@@ -1,6 +1,6 @@
 {
   "name": "lody",
-  "version": "0.100.0",
+  "version": "0.104.0",
   "description": "Lody Agent CLI tool for managing remote command execution",
   "type": "module",
   "main": "dist/index.js",
@@ -54,7 +54,6 @@
     "@lody/shared": "workspace:*",
     "@lody/turn-diff-store": "workspace:*",
     "@loro-dev/flock-wasm": "catalog:",
-    "@loro-dev/roost": "0.1.2",
     "@loro-dev/streams-crdt": "catalog:",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/node": "2.0.0",

@@ -22,9 +22,6 @@ import {
 } from '@lody/loro-streams-rpc';
 import {
   HistoryWriteError,
-  HistoryEntryWriteSchema,
-  parseHistoryWrite,
-  PermissionOutcomeSchema,
   MachineId,
   WorkspaceId,
   SessionInputBlockSchema,
@@ -60,8 +57,6 @@ import {
   getMachineRoomId,
   getSessionIdFromRoomId,
   getSessionRoomId,
-  SessionHistoryChangeSchema,
-  type SessionHistoryChange,
   type IssuePRMention,
   type SessionImageGroupContent,
   type SessionInputBlock,
@@ -71,11 +66,6 @@ import {
   getCodeCollabFileIndexSignalFlockDocId,
   type SessionContextWindowUsage,
   type SessionHistoryInput,
-  type SessionHistoryReadResponse,
-  type SessionHistoryReadQuery,
-  type SessionHistoryWriteOperation,
-  type SessionHistoryWriteResponse,
-  type PermissionOutcome,
   type SessionLegacyMetaFields,
   PERMISSION_REQUEST_TIMEOUT_MS,
   type ChatFailedCode,
@@ -187,6 +177,7 @@ import {
 } from '@lody/shared';
 import { getHostMachineProtocolCapabilities } from '../agent/managed-agent-runtime';
 import { ISession, SessionManager } from '../session/session-manager';
+import { getDefaultSessionWorkdir } from '../session/session';
 import { captureCli } from '@/lib/analytics/posthog';
 import { LoroDocumentManager, SessionDocument, subscribeSessionChanges } from './loro/doc';
 import { createSessionBackend, type SessionBackend } from '@/session/session-backend';
@@ -400,15 +391,6 @@ import {
   isLocalProjectWorktreeConfigRequest,
 } from '@/session/worktree/worktree-setup-config-store';
 import { resolveSessionWorktreeCleanupConfig } from '@/session/worktree/worktree-config-resolver';
-
-type SessionHistoryReadRequest = Extract<
-  LocalSessionControlRequestValidated,
-  { type: 'session/history-read' }
->;
-type SessionHistoryWriteRequest = Extract<
-  LocalSessionControlRequestValidated,
-  { type: 'session/history-write' }
->;
 
 type RepoDocMetaPatch = Parameters<LoroDocumentManager['repo']['upsertDocMeta']>[1];
 type LocalProjectFileRpcRequest = Extract<
@@ -3480,11 +3462,6 @@ export class MessageHandler {
         prepareSession: async (spec) => await this.prepareSessionWithAccessCheck(spec),
         cancelSessionPreparation: async (args) =>
           await this.cancelSessionPreparationWithAccessCheck(args),
-        resolveSessionHistoryOwnerSessionId: this.resolveSessionHistoryOwnerSessionId,
-        readSessionHistory: async ({ sessionId, query }) =>
-          await this.readSessionHistoryForRpc(sessionId, query),
-        writeSessionHistory: async ({ sessionId, operation, payload }) =>
-          await this.writeSessionHistoryForRpc(sessionId, operation, payload),
         resolveCodeCollabOwnerSessionId: this.resolveCodeCollabV2OwnerSessionId,
         previewFile: async (request) => await this.filePreviewService.previewFile(request),
         openCodeCollabText: async (request) => await this.codeCollabV2Service.openText(request),
@@ -6310,10 +6287,58 @@ export class MessageHandler {
       };
     }
 
+    // Ordinary chats keep their files after the runtime is evicted. Derive the
+    // same owner directory as Session.getWorkdir(), without creating it or
+    // restoring an agent just to read a file. Never mask an unresolved project.
+    if (!project && !meta.isWorktree) {
+      const ownerMeta =
+        ownerSessionId === sessionId
+          ? meta
+          : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+      if (!ownerMeta) {
+        return {
+          ok: false,
+          error: 'session_not_found',
+          message: 'Session metadata is not available.',
+        };
+      }
+      if (ownerMeta.isArchived) {
+        return { ok: false, error: 'session_archived', message: 'Session is archived.' };
+      }
+      if (meta.machineId !== this.machineId || ownerMeta.machineId !== this.machineId) {
+        return {
+          ok: false,
+          error: 'permission_denied',
+          message: 'Session workspace belongs to another machine.',
+        };
+      }
+      if (
+        !ownerMeta.project &&
+        !ownerMeta.repoFullName?.trim() &&
+        !ownerMeta.isWorktree &&
+        !ownerMeta.parentSessionId
+      ) {
+        const workspaceRoot = getDefaultSessionWorkdir(ownerSessionId);
+        if (!fs.statSync(workspaceRoot, { throwIfNoEntry: false })?.isDirectory()) {
+          return {
+            ok: false,
+            error: 'workspace_unavailable',
+            message: 'Session chat workspace directory is unavailable.',
+          };
+        }
+        return {
+          ok: true,
+          workspaceRoot,
+          source: `chat-workspace:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+    }
+
     return {
       ok: false,
       error: 'workspace_unavailable',
-      message: 'Session has no local project or GitHub repository workspace.',
+      message: 'Session workspace could not be resolved from its metadata.',
     };
   }
 
@@ -6353,7 +6378,7 @@ export class MessageHandler {
           message: resolved.message,
         };
       }
-      if (resolved.error === 'session_archived') {
+      if (resolved.error === 'session_archived' || resolved.error === 'permission_denied') {
         return {
           ok: false,
           code: 'permission_denied',
@@ -6846,12 +6871,6 @@ export class MessageHandler {
       case 'session/file-send-local':
         await this.handleSessionFileSendLocal(message, context);
         break;
-      case 'session/history-read':
-        await this.handleSessionHistoryRead(message, context);
-        break;
-      case 'session/history-write':
-        await this.handleSessionHistoryWrite(message, context);
-        break;
       case 'session/preview-candidate-report':
         await this.handlePreviewCandidateReport(message, context);
         break;
@@ -6865,312 +6884,6 @@ export class MessageHandler {
         context.send(await this.previewService.getStatus(message));
         break;
     }
-  }
-
-  private readonly resolveSessionHistoryOwnerSessionId = async (
-    sessionId: SessionId
-  ): Promise<SessionId> => {
-    const metaRecord = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
-    if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) {
-      throw new Error(`Session ${sessionId} is not available on this machine.`);
-    }
-    const meta = metaRecord.meta as SessionMeta;
-    if (meta.machineId !== this.machineId) {
-      throw new Error(`Session ${sessionId} is owned by another machine.`);
-    }
-    return sessionId;
-  };
-
-  private async readSessionHistoryForRpc(
-    sessionId: SessionId,
-    query: SessionHistoryReadQuery
-  ): Promise<SessionHistoryReadResponse> {
-    try {
-      await this.resolveSessionHistoryOwnerSessionId(sessionId);
-      this.touchSession(sessionId);
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const backend = await this.getSessionBackend(sessionDoc);
-      if (backend.kind !== 'roost') {
-        throw new Error(`Session ${sessionId} does not use Roost history.`);
-      }
-      const history = backend.history;
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        // The read and its revision must straddle no unpublished history write.
-        // These are local durability barriers, never remote synchronization.
-        await backend.flushLocalWrites();
-        const before = await sessionDoc.getRoostHistoryCursor();
-        let result: unknown;
-        let pageTurns: SessionHistoryReadResponse['pageTurns'];
-        switch (query.kind) {
-          case 'count':
-            result = await history.count();
-            break;
-          case 'readAt':
-            result = await history.readAt(query.position);
-            break;
-          case 'readTurn':
-            result = await history.readTurn(query.turnId);
-            break;
-          case 'readRange':
-            result = await history.readRange(query.from, query.to);
-            break;
-          case 'readDirectory':
-            result = await history.readDirectory(query.from, query.to);
-            break;
-          case 'readLatestPage':
-            if (!history.readLatestDirectoryPage) {
-              throw new Error(
-                `Session ${sessionId} history backend does not support reverse pages.`
-              );
-            }
-            {
-              const page = await history.readLatestDirectoryPage(query.limit);
-              result = page;
-              pageTurns = (
-                await history.readRange(page.startPosition, page.startPosition + page.rows.length)
-              ).map((read) => {
-                if (read.state !== 'ready') throw new Error('History page body is unavailable');
-                return read.turn as SessionHistoryInput;
-              });
-            }
-            break;
-          case 'readOlderPage':
-            if (!history.readOlderDirectoryPage) {
-              throw new Error(
-                `Session ${sessionId} history backend does not support reverse pages.`
-              );
-            }
-            {
-              const page = await history.readOlderDirectoryPage(query.cursor, query.limit);
-              result = page;
-              pageTurns = (
-                await history.readRange(page.startPosition, page.startPosition + page.rows.length)
-              ).map((read) => {
-                if (read.state !== 'ready') throw new Error('History page body is unavailable');
-                return read.turn as SessionHistoryInput;
-              });
-            }
-            break;
-          case 'readAll':
-            result = await history.readAll();
-            break;
-          case 'readTurnOutput':
-            result = await history.readTurnOutput(query.userTurnId);
-            break;
-        }
-        await backend.flushLocalWrites();
-        const after = await sessionDoc.getRoostHistoryCursor();
-        if (before?.historyRevision !== after?.historyRevision) continue;
-        if (after?.historyRevision === undefined || after.historyCount === undefined) {
-          throw new Error('Roost history has no durable revision');
-        }
-        let historyChange: SessionHistoryReadResponse['historyChange'];
-        if (after.historyChangeJson) {
-          try {
-            historyChange = SessionHistoryChangeSchema.nullable().parse(
-              JSON.parse(after.historyChangeJson)
-            );
-          } catch {
-            historyChange = { kind: 'structure', from: 0, to: after.historyCount };
-          }
-        }
-        return {
-          type: 'session/history-read_response',
-          sessionId,
-          success: true,
-          result,
-          historyRevision: after.historyRevision,
-          historyCount: after.historyCount,
-          historyChange,
-          ...(pageTurns ? { pageTurns } : {}),
-        };
-      }
-      throw new Error('History changed during the read; retry the observation');
-    } catch (error) {
-      this.logger.debug(`[${sessionId}] History read failed: ${formatErrorMessage(error)}`);
-      return {
-        type: 'session/history-read_response',
-        sessionId,
-        success: false,
-        error: formatErrorMessage(error),
-      };
-    }
-  }
-
-  private async writeSessionHistoryForRpc(
-    sessionId: SessionId,
-    operation: SessionHistoryWriteOperation,
-    rawPayload: Record<string, unknown>
-  ): Promise<SessionHistoryWriteResponse> {
-    try {
-      await this.resolveSessionHistoryOwnerSessionId(sessionId);
-      this.touchSession(sessionId);
-      const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      const backend = await this.getSessionBackend(sessionDoc);
-      if (backend.kind !== 'roost') {
-        throw new Error(`Session ${sessionId} does not use Roost history.`);
-      }
-      const payload = rawPayload;
-      let result: unknown;
-      switch (operation) {
-        case 'append':
-          if (!('entry' in payload)) throw new Error('History append payload is missing entry');
-          await backend.appendHistoryTurn(
-            parseHistoryWrite(HistoryEntryWriteSchema, payload.entry) as SessionHistoryInput
-          );
-          break;
-        case 'replace': {
-          if (typeof payload.turnId !== 'string' || !('entry' in payload)) {
-            throw new Error('History replace payload requires turnId and entry');
-          }
-          const replacement = parseHistoryWrite(
-            HistoryEntryWriteSchema,
-            payload.entry
-          ) as SessionHistoryInput;
-          if (replacement.id !== payload.turnId) {
-            throw new Error('History replace payload turnId does not match entry id');
-          }
-          const existing = await backend.readTurn(payload.turnId);
-          if (existing.state !== 'ready')
-            throw new Error(`History turn ${payload.turnId} was not found`);
-          result = await backend.applyHistoryAction({ kind: 'upsert-turn', turn: replacement });
-          break;
-        }
-        case 'respond_permission':
-          if (typeof payload.requestId !== 'string' || !('outcome' in payload)) {
-            throw new Error('Permission response payload requires requestId and outcome');
-          }
-          result = await backend.respondPermission(
-            payload.requestId,
-            parseHistoryWrite(PermissionOutcomeSchema, payload.outcome) as PermissionOutcome,
-            payload.options as { readonly turnId?: string } | undefined
-          );
-          break;
-        case 'apply_action':
-          if (!('action' in payload)) throw new Error('History action payload is missing action');
-          result = await backend.applyHistoryAction(payload.action as never);
-          break;
-        case 'replace_editable_tail':
-          if (!('input' in payload)) throw new Error('Editable-tail payload is missing input');
-          result = await backend.replaceEditableTail(payload.input as never);
-          break;
-        case 'apply_import':
-          if (!('input' in payload)) throw new Error('History import payload is missing input');
-          result = await backend.applyHistoryImport(payload.input as never);
-          break;
-        case 'copy_history': {
-          if (!Array.isArray(payload.history))
-            throw new Error('History copy payload is missing history');
-          const entries = payload.history.map(
-            (entry) => parseHistoryWrite(HistoryEntryWriteSchema, entry) as SessionHistoryInput
-          );
-          const existingIds = new Set((await backend.readHistory()).map((entry) => entry.id));
-          for (const entry of entries) {
-            if (existingIds.has(entry.id))
-              throw new Error(`History copy target already contains ${entry.id}`);
-            await backend.appendHistoryTurn(entry);
-            existingIds.add(entry.id);
-          }
-          result = { copied: entries.length };
-          break;
-        }
-      }
-      const historyCursor = await sessionDoc.getRoostHistoryCursor();
-      let historyChange: SessionHistoryChange | null = null;
-      if (historyCursor?.historyChangeJson) {
-        try {
-          historyChange = SessionHistoryChangeSchema.nullable().parse(
-            JSON.parse(historyCursor.historyChangeJson)
-          );
-        } catch {
-          historyChange = {
-            kind: 'structure',
-            from: 0,
-            to: historyCursor.historyCount ?? 0,
-          };
-        }
-      }
-      return {
-        type: 'session/history-write_response',
-        sessionId,
-        operation,
-        success: true,
-        ...(result === undefined ? {} : { result }),
-        ...(historyCursor?.historyRevision === undefined
-          ? {}
-          : {
-              historyRevision: historyCursor.historyRevision,
-              ...(historyCursor.historyCount === undefined
-                ? {}
-                : { historyCount: historyCursor.historyCount }),
-              ...(historyChange === undefined ? {} : { historyChange }),
-            }),
-      };
-    } catch (error) {
-      this.logger.debug(
-        `[${sessionId}] History write failed (${operation}): ${formatErrorMessage(error)}`
-      );
-      return {
-        type: 'session/history-write_response',
-        sessionId,
-        operation,
-        success: false,
-        error: formatErrorMessage(error),
-      };
-    }
-  }
-
-  private async handleSessionHistoryRead(
-    message: SessionHistoryReadRequest,
-    dispatchContext: MessageDispatchContext
-  ): Promise<void> {
-    if (message.workspaceId !== this.workspaceId) {
-      dispatchContext.send({
-        type: 'session/history-read_response',
-        sessionId: message.sessionId,
-        success: false,
-        error: `Workspace mismatch for session ${message.sessionId}`,
-      });
-      return;
-    }
-    dispatchContext.send(await this.readSessionHistoryForRpc(message.sessionId, message.query));
-  }
-
-  private async handleSessionHistoryWrite(
-    message: SessionHistoryWriteRequest,
-    dispatchContext: MessageDispatchContext
-  ): Promise<void> {
-    if (message.workspaceId !== this.workspaceId) {
-      dispatchContext.send({
-        type: 'session/history-write_response',
-        sessionId: message.sessionId,
-        operation: message.operation,
-        success: false,
-        error: `Workspace mismatch for session ${message.sessionId}`,
-      });
-      return;
-    }
-    if (
-      typeof message.payload !== 'object' ||
-      message.payload === null ||
-      Array.isArray(message.payload)
-    ) {
-      dispatchContext.send({
-        type: 'session/history-write_response',
-        sessionId: message.sessionId,
-        operation: message.operation,
-        success: false,
-        error: `Invalid payload for history operation ${message.operation}`,
-      });
-      return;
-    }
-    dispatchContext.send(
-      await this.writeSessionHistoryForRpc(
-        message.sessionId,
-        message.operation,
-        message.payload as Record<string, unknown>
-      )
-    );
   }
 
   private async handleCodeCollabHostStart(
