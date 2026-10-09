@@ -62,14 +62,14 @@ on its own branch and does not affect other conversations.
 
 ## Start from an Issue or Pull Request
 
-After selecting a repository on the home page, type `#` to mention Issues and Pull Requests in the
-current repository.
+After selecting a repository on the home page, type `@` to open the mention menu, then choose
+**Issues** or **Pull Requests** to mention one from the current repository.
 
-<img src="/_docs-assets/mention-issue.png" alt="" />
+<MentionPreview locale="en" kind="issue" />
 
-Use the up and down arrow keys to select an item, then press Enter to confirm. The selected Issue
-or PR context is injected into the prompt, so the agent can handle tasks like `Fix #12` or
-`Review the implementation in #56`.
+Use the up and down arrow keys to select an item, then press Enter to confirm. Lody writes the
+selected item into the composer as `#<number>` and injects its context into the prompt, so the agent
+can handle tasks like `Fix #12` or `Review the implementation in #56`.
 
 ## PR Status and CI Sync
 

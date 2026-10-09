@@ -5,21 +5,20 @@
  * screenshots:
  *
  * - `SlashCommandsPreview`  → the `/` command popup over a composer.
- * - `MentionPreview`        → the `@` file/issue/PR/skill popup over a composer.
+ * - `MentionPreview`        → the `@` mention menu (file results and the
+ *   Issues/Pull Requests category list) and the `$` skill popup over a composer.
  *
  * The markup is copied/inspired from the current app surfaces but this file
  * never imports app runtime code (`@/*`, `@lody/*`, Convex, jotai, i18next, …):
  *
  * - `packages/components/src/components/mentions/mention-two-level-menu.tsx`
- *   (row/list/title/hint shapes and the command, file, issue/PR and skill
- *   candidate rendering)
+ *   (row/list/title/hint shapes, the category rows, and the command, file,
+ *   issue/PR and skill candidate rendering)
  * - `packages/components/src/components/mentions/combined-mention-textarea.tsx`
  *   (the two-level menu wiring around the composer textarea)
  * - `packages/components/src/components/mentions/mention-registry.ts`
- *   (`toCommandCandidate`, `toFileCandidate`, `toIssuePrCandidate`,
- *   `toSkillCandidate`)
- * - `packages/components/src/components/mentions/issue-pr-hash-mention.tsx`
- *   (issue/PR glyphs and the `#123` number chip)
+ *   (`toCommandCandidate`, `toFileCandidate`, `toSkillCandidate`, and the
+ *   `useMentionCategories` category list)
  * - `packages/components/src/components/mentions/mention-project-file-source.ts`
  *   (file/folder rows)
  * - `packages/components/src/hooks/use-available-commands.ts` (agent commands)
@@ -31,7 +30,16 @@
  */
 
 import type { ReactNode } from 'react';
-import { CircleDot, Folder, FolderCode, GitPullRequest, Sparkles } from 'lucide-react';
+import {
+  Boxes,
+  ChevronRight,
+  CircleDot,
+  Folder,
+  FolderCode,
+  GitPullRequest,
+  Sparkles,
+  type LucideIcon,
+} from 'lucide-react';
 import { ReplicaSendButton } from '../landing-replica/composer';
 import {
   ReplicaBranchWorktreePill,
@@ -236,18 +244,18 @@ export function SlashCommandsPreview({ locale = 'en' }: { locale?: ReplicaLocale
 }
 
 // ---------------------------------------------------------------------------
-// Mentions (@ files, # issues / PRs, $ skills)
+// Mentions (@ files, Issues / PRs, $ skills)
 // ---------------------------------------------------------------------------
 
 export type MentionPreviewKind = 'file' | 'issue' | 'skill';
 
 type SkillScope = 'project' | 'global' | 'system';
-type IssueState = 'open' | 'merged' | 'closed';
+type MentionCategoryLabel = 'file' | 'issue' | 'pr' | 'skill';
 
 type MentionCopy = {
   caption: Record<MentionPreviewKind, string>;
   scope: Record<SkillScope, string>;
-  state: Record<IssueState, string>;
+  category: Record<MentionCategoryLabel, string>;
 };
 
 const MENTION_COPY: Record<ReplicaLocale, MentionCopy> = {
@@ -255,20 +263,20 @@ const MENTION_COPY: Record<ReplicaLocale, MentionCopy> = {
     caption: {
       file: 'Mock composer. Type @ to fuzzy-match files and folders in the selected project.',
       issue:
-        'Mock composer. Type # to mention an issue or pull request from the selected repository.',
+        'Mock composer. Type @, then choose Issues or Pull Requests to mention one from the selected repository.',
       skill: 'Mock composer. Type $ to browse the skills available to the project and machine.',
     },
     scope: { project: 'Project', global: 'Global', system: 'System' },
-    state: { open: 'Open', merged: 'Merged', closed: 'Closed' },
+    category: { file: 'Files', issue: 'Issues', pr: 'Pull Requests', skill: 'Skills' },
   },
   zh: {
     caption: {
       file: '模拟输入框。输入 @ 可按文件名或路径模糊匹配所选项目中的文件和文件夹。',
-      issue: '模拟输入框。输入 # 可提及所选仓库中的 Issue 或 Pull Request。',
+      issue: '模拟输入框。输入 @ 后选择 Issues 或 Pull Requests，可提及所选仓库中的 Issue 或 PR。',
       skill: '模拟输入框。输入 $ 可浏览项目与机器上可用的 Skill。',
     },
     scope: { project: '项目', global: '全局', system: '系统' },
-    state: { open: '开启', merged: '已合并', closed: '已关闭' },
+    category: { file: '文件', issue: 'Issues', pr: 'Pull Requests', skill: 'Skills' },
   },
 };
 
@@ -291,29 +299,6 @@ const FILE_ITEMS: readonly FileItem[] = [
   { path: 'packages/shared/src/index.ts', kind: 'file' },
   { path: 'packages/shared/src/loro-server-auth.ts', kind: 'file' },
   { path: 'packages/shared/src/message-schemas.ts', kind: 'file' },
-];
-
-type IssueItem = {
-  kind: 'issue' | 'pr';
-  number: number;
-  title: string;
-  state: IssueState;
-};
-
-/** Synthetic repository issues/PRs with numbers and state. */
-const ISSUE_ITEMS: readonly IssueItem[] = [
-  {
-    kind: 'issue',
-    number: 1,
-    title: 'Bug: Text insertion corrupted when inserting 32+ characters sequentially',
-    state: 'open',
-  },
-  {
-    kind: 'pr',
-    number: 2,
-    title: 'Add fuzzing tests for loro-ts and loro-wasm interoperability',
-    state: 'merged',
-  },
 ];
 
 type SkillItem = {
@@ -359,24 +344,21 @@ function FileRow({ item, selected }: { item: FileItem; selected?: boolean }) {
   );
 }
 
-/** `toIssuePrCandidate` + `getItemIconMeta`: glyph, `#number` chip, title, state. */
-function IssueRow({
-  item,
-  locale,
+/**
+ * `CategoryRow` from the app's two-level menu: glyph, label, an optional
+ * direct-trigger key, and the chevron into the next level.
+ */
+function MentionCategoryRow({
+  icon: Icon,
+  label,
+  trailing,
   selected,
 }: {
-  item: IssueItem;
-  locale: ReplicaLocale;
+  icon: LucideIcon;
+  label: string;
+  trailing?: string;
   selected?: boolean;
 }) {
-  const Icon = item.kind === 'pr' ? GitPullRequest : CircleDot;
-  const copy = MENTION_COPY[locale];
-  const stateClass = {
-    open: 'text-github-open',
-    merged: 'text-github-merged',
-    closed: 'text-github-closed',
-  }[item.state];
-
   return (
     <div
       className={cn(
@@ -384,16 +366,16 @@ function IssueRow({
         selected ? 'bg-selection' : undefined
       )}
     >
-      <Icon className="h-4 w-4 shrink-0 text-github-open" strokeWidth={1.75} />
-      <span className="shrink-0 rounded-sm border border-border/70 px-1.5 py-0.5 font-mono text-[11px] leading-none text-muted-foreground">
-        #{item.number}
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
+        <Icon className="h-4 w-4" strokeWidth={1.75} />
       </span>
-      <span className="min-w-0 flex-1 truncate text-sm leading-6 text-foreground">
-        {item.title}
-      </span>
-      <span className={cn('shrink-0 text-[11px] font-medium', stateClass)}>
-        {copy.state[item.state]}
-      </span>
+      <span className="min-w-0 flex-1 truncate text-sm leading-6 text-foreground">{label}</span>
+      {trailing ? (
+        <span className="shrink-0 font-mono text-[11px] leading-none text-muted-foreground">
+          {trailing}
+        </span>
+      ) : null}
+      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
     </div>
   );
 }
@@ -428,9 +410,10 @@ function SkillRow({
 /**
  * A docs-owned, display-only mention popup over the home composer. `kind`
  * selects the surface covered by the old screenshots: `file` for the `@`
- * fuzzy path list, `issue` for the `#` issue/PR list, and `skill` for `$`
- * skills. Sources: `mention-two-level-menu.tsx` (`CandidateRow`), the
- * registry candidate builders, and the `MentionTwoLevelMenu` story fixtures.
+ * fuzzy path list, `issue` for the `@` category list that opens Issues and
+ * Pull Requests, and `skill` for `$` skills. Sources:
+ * `mention-two-level-menu.tsx` (`CategoryRow`/`CandidateRow`), the registry
+ * candidate builders, and the `MentionTwoLevelMenu` story fixtures.
  */
 export function MentionPreview({
   locale = 'en',
@@ -461,17 +444,13 @@ export function MentionPreview({
         locale={locale}
         caption={copy.caption.issue}
         topSelector={topSelector}
-        typed={<span className="text-foreground">#</span>}
+        typed={<span className="text-foreground">@</span>}
         popup={
           <PopupList>
-            {ISSUE_ITEMS.map((item, index) => (
-              <IssueRow
-                key={`${item.kind}-${item.number}`}
-                item={item}
-                locale={locale}
-                selected={index === 1}
-              />
-            ))}
+            <MentionCategoryRow icon={Folder} label={copy.category.file} />
+            <MentionCategoryRow icon={CircleDot} label={copy.category.issue} selected />
+            <MentionCategoryRow icon={GitPullRequest} label={copy.category.pr} />
+            <MentionCategoryRow icon={Boxes} label={copy.category.skill} trailing="$" />
           </PopupList>
         }
       />

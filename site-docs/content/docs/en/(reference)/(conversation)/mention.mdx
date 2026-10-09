@@ -1,15 +1,17 @@
 ---
 title: Mentions
-description: 'Use @ conversation and file mentions, # issue or pull request mentions, and $ Skill mentions to inject precise context into Lody prompts.'
+description: 'Use @ for conversation, file, Issue and Pull Request mentions, and $ for Skill mentions to inject precise context into Lody prompts.'
 ---
 
 # Mentions
 
-Lody enhances the input box with mention support via `@`, `#`, and `$`.
+Lody enhances the input box with mention support. Type `@` to open the mention menu, where you can
+choose conversations, files, Issues, Pull Requests, Skills, or Agent Roles. `$` remains a direct
+shortcut for Skills.
 
 ## Conversation Mentions
 
-Type `@` in a conversation and select another conversation to reference it. Ask the current agent
+Type `@`, choose **Sessions**, and select another conversation to reference it. Ask the current agent
 to contact that session, read relevant context, exchange findings, or request a review. For example,
 mention an implementation session and ask the current agent to review its latest commit and send
 its findings back.
@@ -24,22 +26,22 @@ reviews across agents and machines.
 
 ## File Mentions
 
-Type `@` in the input box to open the file list. Keep typing to fuzzy-match by filename or file
-path. Use the up and down arrow keys to select, then press Enter to confirm. Mentioned files are
-sent to the coding agent as full-path prompt context.
+Type `@` and choose **Files**. Keep typing to fuzzy-match by filename or file path. Use the up and
+down arrow keys to select, then press Enter to confirm. Mentioned files are sent to the coding
+agent as full-path prompt context.
 
 <MentionPreview locale="en" kind="file" />
 
 ## Issue and Pull Request Mentions
 
-After selecting a repository on the home page, type `#` to mention Issues and Pull Requests in the
-current repository.
+After selecting a repository on the home page, type `@` to open the mention menu, then choose
+**Issues** or **Pull Requests** to mention one from the current repository.
 
 <MentionPreview locale="en" kind="issue" />
 
-Use the up and down arrow keys to select, then press Enter to confirm. The selected Issue or PR
-context is injected into the prompt, so the agent can handle tasks like `Fix #12` or
-`Review the implementation in #56`.
+Use the up and down arrow keys to select, then press Enter to confirm. Lody writes the selected
+item into the composer as `#<number>` and injects its context into the prompt, so the agent can
+handle tasks like `Fix #12` or `Review the implementation in #56`.
 
 ## Skill Mentions
 

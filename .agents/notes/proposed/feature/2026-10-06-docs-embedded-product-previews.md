@@ -72,6 +72,11 @@ changes materially.
   `/_docs-assets/logo-180.png` brand mark as its representative generated image,
   and the browser-permission and iOS-notification previews are explicitly
   site-owned mocks of external chrome, not imports of app components.
+- Keep the docs aligned with the unified composer mention menu: the issue/PR
+  preview now shows `@` opening the category list where Issues and Pull Requests
+  live, the English and Chinese Mentions and GitHub core-concept pages describe
+  the `@` flow, and the retired `_docs-assets/mention-issue.png` screenshot is
+  deleted.
 - Keep the archive and delete screenshots; they still match and are outside the
   Feature List scope.
 
@@ -118,5 +123,6 @@ changes materially.
   with it.
 - The Feature List surfaces are converted, but the browser and iOS notification
   previews necessarily imitate external chrome rather than a Lody component.
-  Other docs screenshots outside `(reference)` (changelog, guides, and core
-  concepts) remain and can be converted one surface at a time.
+  Other docs screenshots outside `(reference)` (changelog, guides, and the
+  remaining core-concept surfaces) remain and can be converted one surface at a
+  time.

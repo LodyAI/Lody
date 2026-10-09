@@ -54,6 +54,9 @@ Lody Light 与 Vesper deep-sea 调色板（含 VS Code alias 与 `@lody/ui` 产�
 - 替换中英文 `(reference)` 树里的全部 `_docs-assets` 图片引用。image-output 预览
   作为生成图片示例使用已跟踪的品牌标志 `/_docs-assets/logo-180.png`；浏览器权限和
   iOS 通知预览明确是站点自有的外部界面模拟，不引用产品组件。
+- 让文档与统一的输入框提及菜单保持一致：issue/PR 预览改为展示 `@` 打开的类别列表
+  中的 Issues 与 Pull Requests，中英文提及页和 GitHub 核心概念页都改为描述 `@`
+  流程，并删除已不再使用的 `_docs-assets/mention-issue.png` 截图。
 - 保留归档与删除截图；它们仍然相符，不在 Feature List 范围内。
 
 ## 考虑过的替代方案
@@ -86,5 +89,5 @@ Lody Light 与 Vesper deep-sea 调色板（含 VS Code alias 与 `@lody/ui` 产�
 - 副本拷贝的是某一时刻的 markup，不会自动跟随产品变化。对应界面明显变化时需要重新
   拷贝，并同步更新周边文档正文。
 - Feature List 界面已全部转换，但浏览器与 iOS 通知预览只能模拟外部界面，并非 Lody
-  组件。`(reference)` 之外的文档截图（changelog、guides、core concepts）仍在，可以按
-  界面逐个转换。
+  组件。`(reference)` 之外的文档截图（changelog、guides、其余 core concepts 界面）
+  仍在，可以按界面逐个转换。

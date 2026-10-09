@@ -41,11 +41,11 @@ GitHub App 安装用于授权仓库访问。个人 GitHub 身份是独立且可�
 
 ## 从 Issue 和 Pull Request 开始
 
-在主页选中仓库之后，你可以使用 `#` 符号来提及当前仓库的 Issue 和 Pull Request 列表。
+在主页选中仓库之后，输入 `@` 打开提及菜单，然后选择 **Issues** 或 **Pull Requests**，即可提及当前仓库中的 Issue 或 PR。
 
-<img src="/_docs-assets/mention-issue.png" alt="" />
+<MentionPreview locale="zh" kind="issue" />
 
-可以使用 ↑ ↓ 方向键进行选择，使用回车选中，对应的 Issue 或 PR 信息会加入到 Prompt 中，Agent 可以自行进行对应信息的读取，来完成类似 `修复 #12 的问题`， `review #56 PR 的功能实现` 的工作。
+可以使用 ↑ ↓ 方向键进行选择，使用回车选中。Lody 会把选中的条目以 `#编号` 写入输入框，并把对应的 Issue 或 PR 上下文加入 Prompt，Agent 可以自行读取对应信息，完成类似 `修复 #12 的问题`、`review #56 PR 的功能实现` 的工作。
 
 ## PR 状态和 CI 同步
 
