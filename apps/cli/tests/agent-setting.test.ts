@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -241,7 +241,7 @@ describe('resolveBuiltinACPSetting', () => {
           '--package',
           `@deepseek-ai/dsh-base@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
-          `@deepseek-ai/dsh-agent-presets@${DEEPSEEK_HARNESS_VERSION}`,
+          `@deepseek-ai/dsh-agent-preset-registry@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
           `@deepseek-ai/dsh-mcp-client@${DEEPSEEK_HARNESS_VERSION}`,
           'node',
@@ -269,17 +269,14 @@ describe('resolveBuiltinACPSetting', () => {
       const profileName = runtimeArgs[profileFlag + 1];
       expect(profileName).toBeTruthy();
       const profileDir = join(dshHome, 'profiles', profileName!);
-      const packageJson = await readFile(join(profileDir, 'package.json'), 'utf8');
-      const patch = await readFile(join(profileDir, 'cordis.patch.yml'), 'utf8');
-      expect(packageJson).toContain('@deepseek-ai/dsh-base');
-      expect(patch).toContain('deepseek-acp.js');
-      expect(patch).not.toContain("name: '@deepseek-ai/dsh-agent-spine-demo'");
-      expect(patch).toContain("name: '@deepseek-ai/dsh-agent-presets'");
-      expect(patch).toContain("name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'");
-      expect(patch).toContain('compression: zstd');
-      expect(patch).toContain('defaultPreset: workspace-write');
-      expect(patch).toContain('reasoningEffort: "max"');
-      expect(patch).toContain('model: "deepseek-flash"');
+      expect(await readdir(profileDir)).toEqual(
+        expect.arrayContaining([
+          'package.json',
+          'cordis.yml',
+          'cordis.patch.yml',
+          'pnpm-workspace.yaml',
+        ])
+      );
     } finally {
       vi.unstubAllEnvs();
       await rm(dshHome, { recursive: true, force: true });

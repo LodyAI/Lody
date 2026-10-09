@@ -39,6 +39,11 @@ packaging and native Windows execution remain unverified in this checkout.
 - Disable the newly inherited account-backed provider and account component, in
   addition to existing telemetry and product inventory exclusions. Keep API-key
   routes and credentials in their existing native/host ownership.
+- CLI publish and Electron after-pack checks follow the new flat `presets/<id>.yml`
+  layout. CI caught two stale assumptions: the removed `dsh-agent-presets` package
+  in the launcher test and nested `<id>/agent.cordis.yml` asset checks. The test now
+  requires the native preset registry and verifies generated profile files; native
+  profile probes own preset/configuration behavior instead of source-string checks.
 - Recognize both legacy and session.vN JSONL/zstd filenames during read-only host
   encoding discovery. Native write-open owns supported migrations to V4 and retains
   predecessors; do not implement compression conversion or automatic downgrade.
@@ -63,6 +68,13 @@ evidence before implementing further interfaces on this new runtime.
 - The 14-test host runtime suite runs with an isolated Vitest configuration and an alias to
   the built adapter, including versioned/mixed encoding roots and the synthetic
   Windows forwarding boundary. It does not exercise the Windows native binaries.
-- Changed root files pass scoped Oxfmt. Root check/format remain blocked by missing workspace dependencies; public-boundary
-  and documentation checks encounter other uninitialized submodules. These limitations
-  do not count as passing full-repository validation or desktop packaging.
+- CI follow-up validation uses a standalone clone with frozen-lockfile dependencies:
+  64 launcher/runtime tests, the complete CLI build (including preset copy/import
+  checks), desktop CLI sync/application build, root format, docs check, i18n and all
+  three import/platform/public boundary guards pass. Removing `standard.yml` also
+  makes the published-bundle gate fail as expected.
+- Root `pnpm check` passes typecheck/lint, then stops on the unchanged recursive SSH
+  fixture in `github-git-transport.test.ts`: the local Lody Git wrapper reports
+  `context_unreadable`. The CLI group otherwise has 3,577 passing tests and four
+  skips. This is not a passing full-repository check; desktop E2E scenarios and
+  installer after-pack execution remain unverified locally.

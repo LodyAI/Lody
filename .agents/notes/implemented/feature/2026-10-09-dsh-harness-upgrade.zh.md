@@ -32,6 +32,10 @@ Provider PR：[acp-extension-dsh #28](https://github.com/LodyAI/acp-extension-ds
   文件和默认预置。错误文档拒绝初始化；设置按启动快照读取，修改后需重新连接。
 - 除既有遥测和产品清单禁用项外，还禁用新版引入的账户组件及账户 provider。
   保留 API-key 路由和原有原生/宿主凭据职责。
+- CLI 发布和 Electron after-pack 检查采用新的 `presets/<id>.yml` 平铺布局。CI
+  暴露了两处旧假设：启动测试仍要求已移除的 `dsh-agent-presets` 包，资产检查仍
+  查找 `<id>/agent.cordis.yml`。测试改为要求原生 preset registry 并验证生成的
+  profile 文件；配置行为由原生 profile 验证负责，不再重复源码字符串断言。
 - 宿主只读编码检测识别旧文件名及 session.vN JSONL/zstd。受支持格式的 V4
   迁移由原生 write-open 执行并保留前代文件；不实现压缩转换或自动降级。
 
@@ -50,5 +54,11 @@ provider 机制，保留首次请求目录及源文档保证，并扩展
   提问/审批归属测试也通过，未调用真实模型。
 - 14 项宿主测试使用隔离 Vitest 配置并指向构建后的扩展运行宿主 runtime 测试，覆盖版本化/混合
   编码目录和合成 Windows 转发边界；未执行 Windows 原生二进制。
-- 修改的根仓文件通过限定范围的 Oxfmt 格式化。根 check/format 仍受工作区依赖缺失阻塞；public-boundary 与文档检查遇到其他
-  未初始化子模块。不能据此声称全仓检查或桌面打包通过。
+- CI 修复在独立克隆中按冻结 lockfile 安装依赖验证：64 项启动/runtime 测试、完整
+  CLI 构建（含预置复制与导入检查）、桌面 CLI 同步及应用构建、根 format、docs
+  check、i18n 和三项导入/platform/public 边界检查通过。移走 `standard.yml`
+  时，发布包检查也按预期失败。
+- 根 `pnpm check` 通过 typecheck/lint，随后在未修改的
+  `github-git-transport.test.ts` 递归 SSH fixture 处停止：本地 Lody Git 包装器
+  报 `context_unreadable`。CLI 组其余 3,577 项通过、四项跳过。因此不能声称
+  全仓检查通过；桌面 E2E 场景及安装包 after-pack 执行尚未在本地验证。

@@ -20,7 +20,7 @@ const SMOKE_TIMEOUT_MS = 120_000
 const DEEPSEEK_PACKAGED_ASSETS = [
   'deepseek-acp.js',
   ...['standard', 'ptc', 'minimal', 'cordis'].map((preset) =>
-    path.join('deepseek-agent-presets', preset, 'agent.cordis.yml')
+    path.join('deepseek-agent-presets', `${preset}.yml`)
   )
 ]
 
