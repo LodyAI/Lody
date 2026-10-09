@@ -61,4 +61,36 @@ describe('resolveLocalWorkspaceFilePath', () => {
       resolveLocalWorkspaceFilePath('/Users/dev/project', 'C:\\Windows\\notepad.exe')
     ).toBeNull();
   });
+
+  it('expands a home-rooted path against the local home directory', () => {
+    expect(
+      resolveLocalWorkspaceFilePath('/workspace', '~/Code/app/SKILL.md', true, '/Users/dev')
+    ).toBe('/Users/dev/Code/app/SKILL.md');
+    expect(resolveLocalWorkspaceFilePath('/workspace', '~', true, '/Users/dev')).toBe('/Users/dev');
+    expect(resolveLocalWorkspaceFilePath('/workspace', '~/docs', true, '/Users/dev/')).toBe(
+      '/Users/dev/docs'
+    );
+    // The separator follows the home spelling, like the workspace root.
+    expect(
+      resolveLocalWorkspaceFilePath('/workspace', '~/docs/a.txt', true, 'C:\\Users\\dev')
+    ).toBe('C:\\Users\\dev\\docs\\a.txt');
+    expect(
+      resolveLocalWorkspaceFilePath('/workspace', '~\\docs\\a.txt', true, 'C:\\Users\\dev')
+    ).toBe('C:\\Users\\dev\\docs\\a.txt');
+  });
+
+  it('never joins a home-rooted path onto the workspace root', () => {
+    // Remote targets do not resolve it, exactly like an absolute path.
+    expect(resolveLocalWorkspaceFilePath('/workspace', '~/a.txt', false, '/Users/dev')).toBeNull();
+    // An unknown home directory leaves it unresolved rather than producing
+    // `<workspace>/~/...`.
+    expect(resolveLocalWorkspaceFilePath('/workspace', '~/a.txt', true)).toBeNull();
+    expect(resolveLocalWorkspaceFilePath('/workspace', '~/a.txt', true, '  ')).toBeNull();
+  });
+
+  it('keeps the ~user form workspace-relative', () => {
+    // Other users' homes cannot be resolved, so the form keeps its existing
+    // workspace-relative meaning.
+    expect(resolveLocalWorkspaceFilePath('/workspace', '~dev/a.txt')).toBe('/workspace/~dev/a.txt');
+  });
 });

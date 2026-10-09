@@ -7,9 +7,10 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 ## Build and packaging
 
-- The Node 22 bundle uses native top-level await. Do not run a browser TLA
-  compatibility transform over its output chunks. Validate the CLI SSR build
-  under `NODE_OPTIONS=--max-old-space-size=2048`; increasing the heap is not a fix.
+- CLI SSR uses native Node 22 TLA, never browser TLA transforms.
+  Validate at `NODE_OPTIONS=--max-old-space-size=2048`, not a raised heap.
+  Use per-package chunks, transitive assignment and CJS helper chunks.
+  Keep maps and no app code in vendor chunks.
 
 - The public CLI defaults to the local platform, discovers no deployment dotenv files, and must
   never initialize telemetry in local mode even if PostHog variables exist in the shell.
@@ -43,8 +44,7 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 ## Coding rules
 
-- Prefer Effect TS idioms for new/refactored CLI code — services via `Context.Service` + `Layer`,
-  typed errors, structured concurrency, `Schedule` retries: [guide](../../.agents/docs/cli-effect-ts.md).
+- Prefer Effect v4 for new/refactored CLI code; follow the [Effect guide](../../.agents/docs/cli-effect-ts.md).
 - Keep the strict tsconfig, no `any` or non-null assertions, and Zod at every foreign boundary:
   context/cli-type-safety.md.
 - After a remote prompt arrives, only correctness-critical setup may block before ACP

@@ -20,7 +20,5 @@ export function pricingHead(locale: SiteLocale): SiteHead {
 }
 
 export function PricingRoutePage({ locale }: { locale: SiteLocale }) {
-  // Early-bird yearly ($5/seat/mo) is fixed static copy on PricingPage — no
-  // client clock / env gate (avoids $8 → $5 flash on first paint).
   return <PricingPage locale={locale} />;
 }

@@ -38,7 +38,7 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
   source.
 - `issue-pr-hash-mention.tsx` provides cached GitHub issue/PR lookup, ranking,
   hydration, and post-insert title hints.
-- `mention-skill-source.tsx` provides `$` skill discovery, provider directory
+- `mention-skill-source.tsx` provides `$` skill discovery (`￥` is a menu alias), provider directory
   filtering, hydration, and the before-send prompt expansion.
 - `mention-prompt-shortcut-source.tsx` filters visible and available Prompt
   Shortcuts before the shared slash ranker orders them. Agent Commands use that

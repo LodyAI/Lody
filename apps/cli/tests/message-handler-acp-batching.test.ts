@@ -838,6 +838,81 @@ describe('MessageHandler ACP batching', () => {
     }
   }, 120_000);
 
+  it('deduplicates the persisted prefix when a backend batch fails partway through', async () => {
+    vi.useRealTimers();
+    const sessionId = 'partial-acp-batch' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error(`Missing session doc for ${sessionId}`);
+
+    const originalAgentWrites = doc.agentWrites;
+    const appliedOperationIds = new Set<string>();
+    const observedOperationBatches: string[][] = [];
+    let injectFailure = true;
+    const retryableAgentWrites = {
+      ...originalAgentWrites,
+      applyAgentBatch: async (input: Parameters<typeof originalAgentWrites.applyAgentBatch>[0]) => {
+        const notifications = input.notifications ?? [];
+        const operationIds = input.operationIds ?? [];
+        observedOperationBatches.push([...operationIds]);
+        const { operationIds: _operationIds, ...batchInput } = input;
+
+        for (const [index, notification] of notifications.entries()) {
+          const operationId = operationIds[index];
+          if (operationId && appliedOperationIds.has(operationId)) continue;
+
+          await originalAgentWrites.applyAgentBatch({
+            ...batchInput,
+            notifications: [notification],
+          });
+          if (operationId) appliedOperationIds.add(operationId);
+          if (injectFailure) {
+            injectFailure = false;
+            throw new Error('simulated backend interruption after first item');
+          }
+        }
+      },
+    };
+    const originalAgentWritesDescriptor = Object.getOwnPropertyDescriptor(doc, 'agentWrites');
+    Object.defineProperty(doc, 'agentWrites', {
+      configurable: true,
+      get: () => retryableAgentWrites,
+    });
+
+    try {
+      const host = handler as unknown as {
+        beginConversationTurn(id: SessionId): string;
+        enqueueACPUpdate(id: SessionId, update: AcpSessionNotification): void;
+        flushACPUpdatesNow(id: SessionId): Promise<void>;
+      };
+      host.beginConversationTurn(sessionId);
+      for (const text of ['prefix', 'suffix']) {
+        host.enqueueACPUpdate(sessionId, {
+          sessionId,
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text },
+          },
+        });
+      }
+
+      await host.flushACPUpdatesNow(sessionId);
+
+      const history = await doc.sessionData.history.readAll();
+      expect(readItems(history[0])).toEqual([{ type: 'text', text: 'prefixsuffix' }]);
+      expect(observedOperationBatches).toHaveLength(2);
+      expect(observedOperationBatches[1]).toEqual(observedOperationBatches[0]);
+      expect(new Set(observedOperationBatches[0]).size).toBe(2);
+    } finally {
+      if (originalAgentWritesDescriptor) {
+        Object.defineProperty(doc, 'agentWrites', originalAgentWritesDescriptor);
+      } else {
+        Reflect.deleteProperty(doc, 'agentWrites');
+      }
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   it('keeps unread state and coalesces plans when a plan write is retried', async () => {
     vi.useRealTimers();
     const sessionId = 's-1' as SessionId;

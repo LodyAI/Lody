@@ -1,0 +1,19 @@
+{
+  "version": "0.2.1-lody.1",
+  "platform": "darwin-arm64",
+  "fileName": "baguette_v0.2.1-lody.1_macOS_arm64.tar.gz",
+  "size": 38984850,
+  "sha256": "5494396c93f7d2c0ae29250581d5738909c39c3a8d21530ebe700c7b1254f1df",
+  "executableSha256": "0a66d269ee2a5982b8a02480b38f7f5ba9dbf58f2b2765bf829b1d956da0903d",
+  "source": "https://api.lody.ai/api/runtimes/baguette/0.2.1-lody.1/darwin-arm64/baguette_v0.2.1-lody.1_macOS_arm64.tar.gz",
+  "build": {
+    "upstream": "https://github.com/tddworks/baguette",
+    "upstreamVersion": "0.2.1",
+    "revision": "db17446e25059247879dba7941e4de641c2f31e2",
+    "swiftWebsocketRevision": "ca48d46c25f8fa948d37eaa480c73172182cf90f",
+    "patch": "patches/swift-websocket-continuous-clock.patch",
+    "patchSha256": "76bb7626e87110051da42924123f952da297da7920dfa20ee2f7db924441d8a9",
+    "swiftVersion": "Apple Swift 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)",
+    "command": "swift build -c release --arch arm64 --disable-sandbox --force-resolved-versions"
+  }
+}

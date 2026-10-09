@@ -12,8 +12,10 @@ import {
   useScrollLock,
 } from '@diceui/shared';
 import { FloatingFocusManager, type VirtualElement } from '@floating-ui/react';
+import * as stylex from '@stylexjs/stylex';
 import * as React from 'react';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
+import { cn } from '@/lib/utils';
 import { getDataState, useMentionContext } from './mention-root';
 import { MentionMobilePanel, useIsMentionMobile } from './mention-mobile-content';
 
@@ -26,6 +28,8 @@ const MENTION_VIEWPORT_PADDING_PX = 16;
  * above; only a composer pressed against the top of its layer opens it below.
  */
 const COMPOSER_MENU_ROOM_PX = 360;
+/** A group heading and one option need roughly this much room to be useful. */
+const MIN_TOP_CARET_ROOM_PX = 72;
 /** A composer marks the box a menu belongs to: its chip row and its input. */
 const MENTION_FRAME_SELECTOR = '[data-mention-frame]';
 
@@ -38,9 +42,16 @@ type InputBoundaryRect = {
 };
 type MentionContentStyle = React.CSSProperties & {
   '--mention-input-width'?: string;
+  '--mention-top-max-height'?: string;
   /** Where the entrance starts: one step further from the caret, on the side the menu landed. */
   '--mention-rise'?: string;
 };
+
+const styles = stylex.create({
+  // Floating UI writes a viewport-sized inline max-height. The caret's
+  // smaller upward space must win without losing its viewport width fit.
+  topCaretCap: { maxHeight: 'var(--mention-top-max-height) !important' },
+});
 
 interface MentionContentContextValue {
   side: Side;
@@ -59,7 +70,9 @@ interface MentionContentProps
   /**
    * Which reference rect drives floating placement.
    *
-   * `caret` follows the caret line and flips to stay on screen.
+   * `caret` follows the caret line. An explicit top side scrolls within the
+   * visible room above it, falling below only when even one row cannot fit.
+   * The default bottom side can flip to fit.
    *
    * `composer` belongs to the composer instead: it opens against the nearest
    * `[data-mention-frame]` around the input (else the input's wrapper),
@@ -315,7 +328,23 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
     const anchorRef = composerAnchor
       ? (frameAnchor ?? context.virtualAnchor)
       : context.virtualAnchor;
-    const placedSide: Side = composerAnchor ? (requestedSide ?? lockedSide ?? 'top') : side;
+    const topCaretMaxHeight =
+      !composerAnchor && requestedSide === 'top' && inputBoundary && context.virtualAnchor
+        ? Math.max(
+            0,
+            context.virtualAnchor.getBoundingClientRect().top -
+              inputBoundary.y -
+              MENTION_VIEWPORT_PADDING_PX -
+              sideOffset
+          )
+        : undefined;
+    const topCaretFitsRow =
+      topCaretMaxHeight === undefined || topCaretMaxHeight >= MIN_TOP_CARET_ROOM_PX;
+    const placedSide: Side = composerAnchor
+      ? (requestedSide ?? lockedSide ?? 'top')
+      : requestedSide === 'top' && !topCaretFitsRow
+        ? 'bottom'
+        : side;
 
     const positionerContext = useAnchorPositioner({
       open: context.open,
@@ -344,6 +373,14 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
       trackAnchor,
     });
 
+    // Resize observation can arrive a frame after new rows or a detail pane
+    // change the popup height. Reposition after the commit so an upward menu
+    // cannot paint its new height at the previous top coordinate.
+    const updatePosition = positionerContext.update;
+    React.useLayoutEffect(() => {
+      if (context.open && !isMobile) updatePosition();
+    }, [context.open, isMobile, contentProps.children, updatePosition]);
+
     const setFloatingRef = React.useRef(positionerContext.refs.setFloating);
     setFloatingRef.current = positionerContext.refs.setFloating;
     const handleFloatingRef = React.useCallback((node: ContentElement | null) => {
@@ -362,12 +399,17 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
         ...(composerMaxHeight !== undefined ? { maxHeight: `${composerMaxHeight}px` } : {}),
         ...style,
         ...positionerContext.floatingStyles,
+        ...(topCaretMaxHeight !== undefined && placedSide === 'top'
+          ? { '--mention-top-max-height': `${topCaretMaxHeight}px` }
+          : {}),
         ...(!context.open && forceMount ? { visibility: 'hidden' } : {}),
       };
     }, [
       inputWidthStyle,
       resolvedSide,
       composerMaxHeight,
+      topCaretMaxHeight,
+      placedSide,
       style,
       positionerContext.floatingStyles,
       forceMount,
@@ -442,6 +484,12 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
               data-state={getDataState(context.open)}
               dir={context.dir}
               {...positionerContext.getFloatingProps(contentProps)}
+              className={cn(
+                contentProps.className,
+                topCaretMaxHeight !== undefined &&
+                  placedSide === 'top' &&
+                  stylex.props(styles.topCaretCap).className
+              )}
               style={composedStyle}
             />
           </Presence>

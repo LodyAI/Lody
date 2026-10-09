@@ -1,4 +1,5 @@
 import type { FileDiff, LineChange, SessionDiffStats } from '@lody/shared';
+import { gitDiffBaseRefCandidates } from './git-diff-base';
 
 export type GitRunner = (args: string[]) => Promise<string>;
 
@@ -102,15 +103,7 @@ const resolveBaseRef = async (
   runGit: GitRunner,
   preferredBaseBranch: string
 ): Promise<string | null> => {
-  const candidates: string[] = [
-    `origin/${preferredBaseBranch}`,
-    preferredBaseBranch,
-    'origin/main',
-    'main',
-    'origin/master',
-    'master',
-    'origin/HEAD',
-  ];
+  const candidates = gitDiffBaseRefCandidates(preferredBaseBranch);
 
   for (const candidate of candidates) {
     if (await hasCommitish(runGit, candidate)) {

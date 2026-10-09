@@ -56,3 +56,4 @@ frame 停靠与高度限制。选定的组件测试全部通过（41 项）。�
 
 - [定位 Spec](../../../../specs/composer-mention-menu-placement.zh.md)
 - [编辑重发决策](../feature/2026-09-28-edit-resend-mentions.zh.md)
+- [主 composer 向上定位](2026-09-29-main-composer-mention-above-frame.zh.md)

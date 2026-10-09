@@ -42,6 +42,10 @@ import { usePostHog } from '@posthog/react';
 import debug from 'debug';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import {
+  clearSessionRunConfigDraftsAtom,
+  sessionRunConfigDraftAccountAtom,
+} from '@/atoms/session-run-config-drafts';
+import {
   setDocMetaByRoomIdAtom,
   sessionMetaCacheAtom,
   sessionMetaCountAtom,
@@ -219,6 +223,7 @@ export type SessionActions = {
       dispatch?: boolean;
       guideExpectedTurnId?: string;
       attachments?: SessionAttachmentDraft[];
+      onAccepted?: () => void;
     }
   ) => Promise<SessionHistory>;
   requestSessionDispatch: (
@@ -690,6 +695,7 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
 
+      const draftOwner = store.get(sessionRunConfigDraftAccountAtom);
       const sessionRoomId = getSessionRoomId(sessionId);
       const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
         | SessionMeta
@@ -707,10 +713,18 @@ export function useSessionActions(): SessionActions {
       // Held sends never write after this: cancellation joins any in-flight write.
       await runtime.pendingSends?.cancelSessions([sessionId]);
       await runtime.writer.deleteDoc(sessionRoomId);
+      if (runtime.accountId) {
+        store.set(clearSessionRunConfigDraftsAtom, {
+          accountId: runtime.accountId,
+          lifetime: draftOwner.lifetime,
+          workspaceId: runtime.workspaceId,
+          sessionIds: [sessionId],
+        });
+      }
       await runtime.repo.flush();
       await runtime.releaseSessionStore(sessionId);
     },
-    [invalidateExternalHistoryCatalog, runtime]
+    [invalidateExternalHistoryCatalog, runtime, store]
   );
 
   const deleteSessions = useCallback(

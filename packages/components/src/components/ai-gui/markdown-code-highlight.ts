@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { BundledLanguage, ThemedToken } from 'shiki';
+import { useAtomValue } from 'jotai';
+import { extendedCodeLanguagesEnabledAtom } from '@/atoms';
 import { getMarkdownHighlightWorker } from '@/lib/markdown-highlight-worker';
 import {
   createMarkdownHighlighter,
+  ensureMarkdownCodeLanguage,
   MARKDOWN_CODE_LANGUAGES,
+  MARKDOWN_EXTENDED_CODE_LANGUAGES,
   tokenizeMarkdownCode,
   type MarkdownHighlighter,
 } from '@/lib/markdown-highlighter';
@@ -19,18 +23,42 @@ const MARKDOWN_CODE_LANGUAGE_ALIASES: Partial<Record<string, BundledLanguage>> =
   sh: 'shellscript',
   shell: 'shellscript',
   yml: 'yaml',
+  mysql: 'sql',
+  pgsql: 'sql',
+  postgres: 'sql',
+  postgresql: 'sql',
+  rocq: 'coq',
+  lean4: 'lean',
 };
 
 const MARKDOWN_CODE_LANGUAGE_SET = new Set<string>(MARKDOWN_CODE_LANGUAGES);
+const MARKDOWN_EXTENDED_CODE_LANGUAGE_SET = new Set<string>(MARKDOWN_EXTENDED_CODE_LANGUAGES);
+const MARKDOWN_EXTENDED_LANGUAGE_ALIASES = new Set(['mysql', 'pgsql', 'postgres', 'postgresql']);
 
-const normalizeCodeLanguage = (language: string): BundledLanguage | null => {
+export const resolveMarkdownCodeLanguage = (
+  language: string,
+  extendedLanguagesEnabled: boolean
+): BundledLanguage | null => {
   const normalized = language.trim().toLowerCase();
   if (!normalized) return null;
 
   const alias = MARKDOWN_CODE_LANGUAGE_ALIASES[normalized];
-  if (alias) return alias;
+  if (alias) {
+    if (MARKDOWN_EXTENDED_LANGUAGE_ALIASES.has(normalized) && !extendedLanguagesEnabled) {
+      return null;
+    }
+    if (MARKDOWN_CODE_LANGUAGE_SET.has(alias)) return alias;
+    if (extendedLanguagesEnabled && MARKDOWN_EXTENDED_CODE_LANGUAGE_SET.has(alias)) {
+      return alias;
+    }
+    return null;
+  }
 
-  return MARKDOWN_CODE_LANGUAGE_SET.has(normalized) ? (normalized as BundledLanguage) : null;
+  if (MARKDOWN_CODE_LANGUAGE_SET.has(normalized)) return normalized as BundledLanguage;
+  if (extendedLanguagesEnabled && MARKDOWN_EXTENDED_CODE_LANGUAGE_SET.has(normalized)) {
+    return normalized as BundledLanguage;
+  }
+  return null;
 };
 
 const createPlainTokens = (code: string): MarkdownCodeToken[][] =>
@@ -75,9 +103,15 @@ const writeHighlightCache = (key: string, codeLength: number, tokens: MarkdownCo
 
 let mainThreadHighlighter: Promise<MarkdownHighlighter> | null = null;
 
-const highlightOnMainThread = async (code: string, language: BundledLanguage) => {
+const highlightOnMainThread = async (
+  code: string,
+  language: BundledLanguage,
+  extendedLanguagesEnabled: boolean
+) => {
   mainThreadHighlighter ??= createMarkdownHighlighter();
-  return tokenizeMarkdownCode(await mainThreadHighlighter, code, language).tokens;
+  const highlighter = await mainThreadHighlighter;
+  await ensureMarkdownCodeLanguage(highlighter, language, extendedLanguagesEnabled);
+  return tokenizeMarkdownCode(highlighter, code, language).tokens;
 };
 
 // Tokenizing a large block took 60–80ms of main thread, so it runs in the
@@ -85,17 +119,18 @@ const highlightOnMainThread = async (code: string, language: BundledLanguage) =>
 // runs here.
 const requestTokens = async (
   code: string,
-  language: BundledLanguage
+  language: BundledLanguage,
+  extendedLanguagesEnabled: boolean
 ): Promise<MarkdownCodeToken[][]> => {
   const worker = getMarkdownHighlightWorker();
   if (worker) {
     try {
-      return (await worker.highlight(code, language)).tokens;
+      return (await worker.highlight(code, language, extendedLanguagesEnabled)).tokens;
     } catch {
-      return highlightOnMainThread(code, language);
+      return highlightOnMainThread(code, language, extendedLanguagesEnabled);
     }
   }
-  return highlightOnMainThread(code, language);
+  return highlightOnMainThread(code, language, extendedLanguagesEnabled);
 };
 
 type ResolvedTokens = { key: string; code: string; tokens: MarkdownCodeToken[][] };
@@ -120,7 +155,8 @@ export function useMarkdownCodeTokens(
   languageId: string,
   isIncomplete: boolean
 ): MarkdownCodeToken[][] {
-  const language = normalizeCodeLanguage(languageId);
+  const extendedLanguagesEnabled = useAtomValue(extendedCodeLanguagesEnabledAtom);
+  const language = resolveMarkdownCodeLanguage(languageId, extendedLanguagesEnabled);
   const key = language ? `${language}\0${code}` : null;
   const cacheable = !isIncomplete && code.length <= HIGHLIGHT_CACHE_MAX_CODE_CHARS;
   const [resolved, setResolved] = useState<ResolvedTokens | null>(null);
@@ -128,7 +164,7 @@ export function useMarkdownCodeTokens(
   useEffect(() => {
     if (!key || !language || highlightCache.has(key)) return undefined;
     let cancelled = false;
-    void requestTokens(code, language).then(
+    void requestTokens(code, language, extendedLanguagesEnabled).then(
       (tokens) => {
         if (cacheable) writeHighlightCache(key, code.length, tokens);
         if (!cancelled) setResolved({ key, code, tokens });
@@ -138,7 +174,7 @@ export function useMarkdownCodeTokens(
     return () => {
       cancelled = true;
     };
-  }, [cacheable, code, key, language]);
+  }, [cacheable, code, key, language, extendedLanguagesEnabled]);
 
   return useMemo(() => {
     if (!key) return createPlainTokens(code);

@@ -33,6 +33,8 @@ import {
   CODEX_ACP_ADAPTER_VERSION,
   getManagedAgentRuntimeManager,
   GROK_ACP_ADAPTER_VERSION,
+  DEVIN_ACP_ADAPTER_VERSION,
+  DEVIN_RUNTIME_VERSION,
   KIMI_CODE_VERSION,
   PI_EXTENSIONS_SUPPORTED,
   PI_RUNTIME_VERSION,
@@ -124,6 +126,11 @@ export type ResolveBuiltinAuthenticationProcessLaunchInput = ResolveACPSettingIn
 };
 
 export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
+  devin: {
+    packageName: 'acp-extension-devin',
+    version: DEVIN_ACP_ADAPTER_VERSION,
+    binName: 'devin',
+  },
   pi: {
     packageName: 'acp-extension-pi',
     version: PI_RUNTIME_VERSION,
@@ -201,6 +208,48 @@ registryAgentsById['pi-acp'] = {
   distribution: { npx: { package: 'pi-acp@0.0.33' } },
 };
 
+// Removed from discovery only: persisted registry providers retain their launch contract.
+for (const id of ['kimi', 'kimi-code']) {
+  registryAgentsById[id] = {
+    id,
+    name: id === 'kimi' ? 'Kimi CLI' : 'Kimi Code CLI',
+    version: 'local',
+    distribution: { local: { command: 'kimi', args: ['acp'], versionArgs: ['-V'] } },
+  };
+}
+registryAgentsById.dimcode = {
+  id: 'dimcode',
+  name: 'DimCode',
+  version: '0.5.12',
+  distribution: { npx: { package: 'dimcode@0.5.12', args: ['acp'] } },
+};
+registryAgentsById.devin = {
+  id: 'devin',
+  name: 'Devin',
+  version: '3000.11.3',
+  distribution: {
+    binary: Object.fromEntries(
+      (
+        [
+          ['darwin-aarch64', 'aarch64-apple-darwin'],
+          ['darwin-x86_64', 'x86_64-apple-darwin'],
+          ['linux-aarch64', 'aarch64-unknown-linux'],
+          ['linux-x86_64', 'x86_64-unknown-linux'],
+          ['windows-aarch64', 'aarch64-pc-windows'],
+          ['windows-x86_64', 'x86_64-pc-windows'],
+        ] as const
+      ).map(([platform, target]) => [
+        platform,
+        {
+          archive: `https://static.devin.ai/cli/3000.11.3/devin-3000.11.3-${target}.${platform.startsWith('windows-') ? 'zip' : 'tar.gz'}`,
+          cmd: platform.startsWith('windows-') ? './bin/devin.exe' : './bin/devin',
+          args: ['acp'],
+        },
+      ])
+    ),
+  },
+};
+
 export function resolveBuiltinACPSetting(agentType: string): ResolvedACPSetting {
   if (!isBuiltinAgentType(agentType)) {
     throw new Error(`Unsupported builtin ACP type: ${agentType}`);
@@ -246,6 +295,9 @@ export function getAcpCapabilitySourceVersion(
       if (input.agentType === 'pi') {
         return `builtin-pi:${managedRuntimeVersion ?? PI_RUNTIME_VERSION}${runtimeOverrideSuffix}`;
       }
+      if (input.agentType === 'devin') {
+        return `builtin-devin-acp:${DEVIN_ACP_ADAPTER_VERSION}+official-devin:${managedRuntimeVersion ?? DEVIN_RUNTIME_VERSION}${runtimeOverrideSuffix}`;
+      }
       if (input.agentType === 'grok') {
         return managedRuntimeVersion
           ? `builtin-grok-acp:${GROK_ACP_ADAPTER_VERSION}+official-grok:${managedRuntimeVersion}`
@@ -287,11 +339,11 @@ export function getAcpCapabilitySourceVersion(
 const MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS = {
   kimi: 'kimiPath',
   grok: 'grokPath',
+  devin: 'devinPath',
   claude: 'claudeCodeExecutable',
   codex: 'codexPath',
-  // Pi has no replacement binary. Its override is an extension list, handled in
-  // resolveExpectedAcpCapabilitySourceVersion because it changes which runtime
-  // version the launcher requires rather than which binary it runs.
+  // Pi keeps its managed adapter binary; piPath overrides the CLI the adapter
+  // spawns via LODY_PI_PATH and takes part in the override cache suffix.
   pi: null,
 } as const satisfies Record<ManagedBuiltinAgentType, keyof BuiltinRuntimeOverrides | null>;
 
@@ -470,7 +522,7 @@ async function resolveManagedRuntimeForLaunch(
 }
 
 function resolveCliAdapterEntry(
-  adapter: 'claude-acp' | 'codex-acp' | 'deepseek-acp' | 'grok-acp'
+  adapter: 'claude-acp' | 'codex-acp' | 'deepseek-acp' | 'grok-acp' | 'devin-acp'
 ): [string] {
   const argvEntry = process.argv[1] ? resolve(process.argv[1]) : undefined;
   const candidates: string[] = [];
@@ -546,6 +598,11 @@ async function resolveBuiltinACPProcessLaunch(
           signal: input.signal,
         })
       : await resolveManagedRuntimeForLaunch('pi', input);
+    // The managed runtime is the Pi ACP adapter; piPath overrides the Pi CLI
+    // the adapter spawns via LODY_PI_PATH. The empty string intentionally
+    // shadows inherited values; the adapter's trim-falsy check treats it as
+    // unset, so do not revert to a conditional undefined env.
+    const piPath = trimRuntimeOverride(input.runtimeOverrides?.piPath);
     return {
       command: process.execPath,
       args: [
@@ -553,6 +610,7 @@ async function resolveBuiltinACPProcessLaunch(
         ...extensions.flatMap((path) => ['-e', path]),
         ...(input.extraArgs ?? []),
       ],
+      env: { LODY_PI_PATH: piPath ?? '' },
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
     };
   }
@@ -572,47 +630,31 @@ async function resolveBuiltinACPProcessLaunch(
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
     };
   }
-  if (input.agentType === 'codex') {
-    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.codexPath);
-    const runtime = overridePath
-      ? { command: overridePath, version: undefined }
-      : await resolveManagedRuntimeForLaunch('codex', input);
-    return {
-      command: process.execPath,
-      args: [
-        ...resolveCliAdapterEntry('codex-acp'),
-        ...(BuiltinACPSetting.codex.args ?? []),
-        ...(input.extraArgs ?? []),
-      ],
-      env: { CODEX_PATH: runtime.command },
-      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
-    };
-  }
-  if (input.agentType === 'grok') {
-    const overridePath = trimRuntimeOverride(input.runtimeOverrides?.grokPath);
-    const runtime = overridePath
-      ? { command: overridePath, version: undefined }
-      : await resolveManagedRuntimeForLaunch('grok-build', input);
-    return {
-      command: process.execPath,
-      args: [...resolveCliAdapterEntry('grok-acp'), ...(input.extraArgs ?? [])],
-      env: { GROK_PATH: runtime.command, GROK_DISABLE_AUTOUPDATER: '1' },
-      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
-    };
-  }
-
-  const overridePath = trimRuntimeOverride(input.runtimeOverrides?.claudeCodeExecutable);
+  const agentType = input.agentType;
+  const nativeRuntime = {
+    codex: ['codex', 'CODEX_PATH'],
+    devin: ['devin', 'DEVIN_PATH'],
+    grok: ['grok-build', 'GROK_PATH'],
+    claude: ['claude-code', 'CLAUDE_CODE_EXECUTABLE'],
+  } as const;
+  const [runtimeName, executableEnv] = nativeRuntime[agentType];
+  const overridePath = trimRuntimeOverride(
+    input.runtimeOverrides?.[MANAGED_BUILTIN_RUNTIME_OVERRIDE_PATH_KEYS[agentType]]
+  );
   const runtime = overridePath
     ? { command: overridePath, version: undefined }
-    : await resolveManagedRuntimeForLaunch('claude-code', input);
+    : await resolveManagedRuntimeForLaunch(runtimeName, input);
   return {
     command: process.execPath,
     args: [
-      ...resolveCliAdapterEntry('claude-acp'),
-      ...(BuiltinACPSetting.claude.args ?? []),
+      ...resolveCliAdapterEntry(`${agentType}-acp`),
+      ...(BuiltinACPSetting[agentType].args ?? []),
       ...(input.extraArgs ?? []),
     ],
-    env: { CLAUDE_CODE_EXECUTABLE: runtime.command },
+    env: {
+      [executableEnv]: runtime.command,
+      ...(agentType === 'grok' ? { GROK_DISABLE_AUTOUPDATER: '1' } : {}),
+    },
     capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
   };
 }
@@ -631,6 +673,10 @@ export async function resolveBuiltinAuthenticationProcessLaunch(
     throw new Error(`Unsupported builtin authentication type: ${input.agentType}`);
   }
 
+  if (input.agentType === 'devin') {
+    if (input.action === 'status') return null;
+    throw new Error('Devin authentication uses the ACP authentication flow.');
+  }
   if (input.agentType === 'pi') {
     if (input.action === 'status') return null;
     throw new Error(

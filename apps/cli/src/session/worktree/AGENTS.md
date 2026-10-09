@@ -11,9 +11,10 @@ and file responsibilities: [../README.md](../README.md).
 - Local projects and their worktrees use native Git/GitHub auth, even with GitHub
   remotes. Skip managed credential preparation and never enroll them on refresh.
 
-- Host clone/fetch must receive the prepared session's managed Git PATH/config in
+- Host clone/fetch must receive the prepared session's managed Git PATH/GIT_EXEC_PATH/config in
   `brokerAuth.transportEnv`, not just a helper: HTTP headers authenticate before
-  helpers. Pin the per-call context token; do not read a mutable session file.
+  helpers. Include the managed credential helper for checkout/LFS and scrub non-owner
+  token env. Pin the per-call owner context; never read a mutable session file.
 
 - INVARIANT: host-side git must receive its credential broker as an explicit argument
   (`WorktreeManager.ensureRepo({ brokerAuth })` or the per-call `createWorktree` argument),
@@ -39,6 +40,10 @@ and file responsibilities: [../README.md](../README.md).
 
 ## Worktrees, branches, and setup
 
+- First-task branch naming is agent guidance for ordinary new independent GitHub/local
+  worktree Sessions, including prepared-worktree adoption. Exclude direct folders, child Tabs,
+  prior/resumed ACP Sessions, later turns, and Fork; never restore a host prompt-to-ref
+  generator. Contract: [workspace branches](../../../../../specs/workspace-branch-state.md).
 - Turn finalization NEVER commits or pushes on the session's behalf, in any project shape.
   A PR-linked session that ends with unpublished work is reported through
   `SessionMeta.workspaceDirty` AND `workspaceUnpushed`, which raise the Info Bar's

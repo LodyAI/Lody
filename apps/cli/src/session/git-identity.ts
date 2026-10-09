@@ -18,8 +18,12 @@ type PartialGitIdentity = {
 export type GitIdentityResolutionOptions = {
   /** Only machine-owner turns may read and prefer the machine's Git identity. */
   preferMachineIdentity: boolean;
+  /**
+   * The requester chose "Act as you" for GitHub. Their Lody identity then wins
+   * over the machine's Git configuration, matching the credential precedence.
+   */
+  personalIdentityEnabled?: boolean;
   machineIdentity?: PartialGitIdentity;
-  cwd?: string;
 };
 
 const trimNonEmpty = (value?: string | null): string | undefined => {
@@ -60,10 +64,12 @@ const normalizeName = (name: string | undefined, email: string): string => {
   return email;
 };
 
-const readGitConfig = (key: 'user.name' | 'user.email', cwd?: string): string | undefined => {
+// Global scope only. Lody-managed bare repositories share one config across all
+// worktrees, so a repository-level `user.*` there is whatever some earlier agent
+// wrote (e.g. a test fixture identity) and would leak into every other session.
+const readGitConfig = (key: 'user.name' | 'user.email'): string | undefined => {
   try {
-    const output = execFileSync('git', ['config', key], {
-      cwd,
+    const output = execFileSync('git', ['config', '--global', key], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true,
@@ -74,23 +80,33 @@ const readGitConfig = (key: 'user.name' | 'user.email', cwd?: string): string | 
   }
 };
 
-export const readHostDefaultGitIdentity = (cwd?: string): PartialGitIdentity => ({
+export const readHostDefaultGitIdentity = (): PartialGitIdentity => ({
   name:
     trimNonEmpty(process.env.GIT_AUTHOR_NAME) ??
     trimNonEmpty(process.env.GIT_COMMITTER_NAME) ??
-    readGitConfig('user.name', cwd),
+    readGitConfig('user.name'),
   email:
     trimNonEmpty(process.env.GIT_AUTHOR_EMAIL) ??
     trimNonEmpty(process.env.GIT_COMMITTER_EMAIL) ??
-    readGitConfig('user.email', cwd),
+    readGitConfig('user.email'),
 });
 
 export const resolveSessionGitIdentity = (
   requested: PartialGitIdentity,
   options: GitIdentityResolutionOptions
 ): GitIdentity => {
+  // Missing-email addresses are auth placeholders, not commit identities. A
+  // non-owner must never fall back to the machine owner's Git configuration.
+  const requestedEmail = trimNonEmpty(requested.email);
+  const requestedIdentity = isUsableEmail(requestedEmail)
+    ? { name: normalizeName(trimNonEmpty(requested.name), requestedEmail), email: requestedEmail }
+    : undefined;
+  if (options.personalIdentityEnabled && requestedIdentity) {
+    return requestedIdentity;
+  }
+
   if (options.preferMachineIdentity) {
-    const machineIdentity = options.machineIdentity ?? readHostDefaultGitIdentity(options.cwd);
+    const machineIdentity = options.machineIdentity ?? readHostDefaultGitIdentity();
     const machineEmail = trimNonEmpty(machineIdentity.email);
     if (isUsableEmail(machineEmail)) {
       return {
@@ -100,14 +116,8 @@ export const resolveSessionGitIdentity = (
     }
   }
 
-  // Missing-email addresses are auth placeholders, not commit identities. A
-  // non-owner must never fall back to the machine owner's Git configuration.
-  const requestedEmail = trimNonEmpty(requested.email);
-  if (isUsableEmail(requestedEmail)) {
-    return {
-      name: normalizeName(trimNonEmpty(requested.name), requestedEmail),
-      email: requestedEmail,
-    };
+  if (requestedIdentity) {
+    return requestedIdentity;
   }
 
   return {

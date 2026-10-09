@@ -71,6 +71,7 @@ function canReuseCachedMessageItem(
     cached.item.message.endedAt === entry.endedAt &&
     cached.item.message.permissionWaitMs === entry.permissionWaitMs &&
     cached.item.message.userId === entry.userId &&
+    cached.item.message.author === entry.author &&
     cached.rawModelInfo === entry.modelInfo &&
     cached.item.message.tokenUsage === entry.tokenUsage &&
     cached.rawFileDiff === entry.fileDiff &&
@@ -233,6 +234,7 @@ export function buildChatStreamItems(
       endedAt: entry.endedAt,
       permissionWaitMs: entry.permissionWaitMs,
       userId: entry.userId,
+      author: entry.author,
       acpTurnId: entry.acpTurnId,
       modelInfo: entry.modelInfo,
       tokenUsage: entry.tokenUsage,

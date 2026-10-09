@@ -989,7 +989,7 @@ describe('history import persistence', () => {
     const harness = createHarness();
     const result = await harness.importNewSession(importArgs());
 
-    expect(harness.calls).toEqual(['history', 'cursor', 'meta']);
+    expect(harness.calls).toEqual(['meta', 'history', 'cursor', 'meta']);
     expect(harness.getStoredHistory()).toEqual(importArgs().materialized.history);
     expect(harness.getImportedTurnHashes()).toEqual(['hash-1']);
     expect(harness.upsertDocMeta).toHaveBeenCalledWith(
@@ -1072,8 +1072,15 @@ describe('history import persistence', () => {
     await expect(harness.importNewSession(importArgs())).rejects.toThrow(
       'History import was rejected before commit: unsupported'
     );
-    // The rejected import never publishes meta and cleans up the incomplete doc.
-    expect(harness.upsertDocMeta).not.toHaveBeenCalled();
+    // The rejected import first publishes a retryable metadata-only shell, then
+    // removes it so a failed import cannot be mistaken for a synced session.
+    expect(harness.upsertDocMeta).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        status: expect.objectContaining({ type: 'initializing' }),
+        externalHistory: expect.objectContaining({ status: 'metadata_only' }),
+      })
+    );
     expect(harness.deleteDoc).toHaveBeenCalledTimes(1);
     expect(harness.cleanSessionDoc).toHaveBeenCalledTimes(1);
   });

@@ -69,6 +69,7 @@ export const CONFIG_OPTION_OFF_VALUE = ACP_CONFIG_OPTION_OFF_VALUE;
 // Keep model-specific support aligned with the Codex ACP model catalog.
 const CODEX_EXTENDED_REASONING_BY_MODEL = new Map<string, readonly string[]>([
   ['gpt-6-astra', ['max', 'ultra']],
+  ['gpt-6.1-sol', ['max', 'ultra']],
   ['gpt-6-sol', ['max', 'ultra']],
   ['gpt-6-luna', ['max']],
   ['gpt-5.6-sol', ['max', 'ultra']],
@@ -295,10 +296,10 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
   );
   return staticCapabilities
     ? {
-        authority: 'provisional',
-        configOptions: staticCapabilities.configOptions,
-        modelReasoningEfforts: staticCapabilities.modelReasoningEfforts,
-      }
+      authority: 'provisional',
+      configOptions: staticCapabilities.configOptions,
+      modelReasoningEfforts: staticCapabilities.modelReasoningEfforts,
+    }
     : { authority: 'unavailable', modelReasoningEfforts: undefined };
 };
 
@@ -349,8 +350,8 @@ const buildConfigOptionSelectors = (
     const selectedValue = target?.configOptionValues?.[opt.id];
     const optionValues =
       authority !== 'authoritative' &&
-      typeof selectedValue === 'string' &&
-      !opt.options.some((option) => option.value === selectedValue)
+        typeof selectedValue === 'string' &&
+        !opt.options.some((option) => option.value === selectedValue)
         ? [...opt.options, { value: selectedValue, name: selectedValue }]
         : opt.options;
 
@@ -481,16 +482,16 @@ export const normalizeReasoningEffortSelectors = (
       hasEffort || !binding
         ? selectors
         : [
-            ...selectors,
-            {
-              configId: binding.effortConfigId,
-              label: binding.effortLabel,
-              category: ACP_THOUGHT_LEVEL_CATEGORY,
-              type: 'select',
-              options: [],
-              currentValue: declared.fallbackValue,
-            },
-          ];
+          ...selectors,
+          {
+            configId: binding.effortConfigId,
+            label: binding.effortLabel,
+            category: ACP_THOUGHT_LEVEL_CATEGORY,
+            type: 'select',
+            options: [],
+            currentValue: declared.fallbackValue,
+          },
+        ];
     return applyEffortLadder(withEffort, declared.values, declared.fallbackValue);
   }
   if (options.cliType === 'builtin' && options.agentType?.toLowerCase() === 'codex') {

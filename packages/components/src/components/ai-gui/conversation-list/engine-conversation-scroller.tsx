@@ -111,6 +111,7 @@ export function EngineConversationScroller({
   item,
   keepMounted,
   initialWindowReady,
+  hidden = false,
   suppressAutoScrollRef,
   onAtBottomChange,
   onScroll,
@@ -136,6 +137,7 @@ export function EngineConversationScroller({
     () => getSavedScrollState(sessionId)?.intent.kind !== 'read'
   );
   const [revealed, setRevealed] = useState(false);
+  const lastReportedScroll = useRef<number | null>(null);
 
   const latest = useRef({ onAtBottomChange, onScroll, suppressAutoScrollRef, layoutKey });
   latest.current = { onAtBottomChange, onScroll, suppressAutoScrollRef, layoutKey };
@@ -215,7 +217,15 @@ export function EngineConversationScroller({
       latest.current.onAtBottomChange?.(sticky);
     },
     onFirstCycle: () => setRevealed(true),
-    onScroll: (offset) => latest.current.onScroll?.(offset),
+    onScroll: (offset) => {
+      // Same offset from a later commit must not setState: the view's
+      // `onScroll` lives in a layout effect (afterCommit) and a repeating
+      // update is React #185.
+      const previous = lastReportedScroll.current;
+      if (previous !== null && Math.abs(previous - offset) < 0.5) return;
+      lastReportedScroll.current = offset;
+      latest.current.onScroll?.(offset);
+    },
     onDiagnostic: (diagnostic) => {
       recordScrollEngineDiagnostic(sessionId, diagnostic);
       scrollDebug('engine-cycle', { ...diagnostic });
@@ -240,6 +250,7 @@ export function EngineConversationScroller({
     },
   };
   controller.setCallbacks(callbacks);
+  controller.setHidden(hidden);
   controller.syncRows(rowMeta, 1);
   controller.setMustMount(keepMounted ?? []);
   const plan = controller.plan();
@@ -342,7 +353,8 @@ export function EngineConversationScroller({
     if (!element || typeof ResizeObserver === 'undefined') return undefined;
     let previous = { width: element.clientWidth, height: element.clientHeight };
     widthRef.current = previous.width;
-    controller.setLayoutVersion(layoutVersion(previous.width));
+    // A list mounted hidden has no width yet; showing it resizes the viewport.
+    if (previous.width > 0) controller.setLayoutVersion(layoutVersion(previous.width));
     const observer = new ResizeObserver(() => {
       const next = { width: element.clientWidth, height: element.clientHeight };
       if (next.width === previous.width && next.height === previous.height) return;

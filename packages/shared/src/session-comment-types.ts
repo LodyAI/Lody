@@ -149,6 +149,8 @@ export interface GitHubPullRequestDetails {
   draft: boolean;
   htmlUrl: string;
   baseRef: string;
+  /** The immutable base commit used to open this pull request, when GitHub provides it. */
+  baseSha?: string;
   headRef: string;
   headSha: string;
   user: GitHubUser | null;
@@ -164,6 +166,36 @@ export interface GitHubPullRequestDetails {
   mergeable: boolean | null;
   /** See `GitHubMergeableState`. Normalized to `'unknown'` when absent. */
   mergeableState: GitHubMergeableState;
+}
+
+/** A commit exposed by the pull request commits endpoint. */
+export interface GitHubPullRequestCommit {
+  sha: string;
+  message: string;
+  authorLogin: string | null;
+  authoredAt: string | null;
+  htmlUrl: string | null;
+  parentSha: string | null;
+}
+
+/** A file returned by GitHub's compare endpoint. */
+export interface GitHubPullRequestFile {
+  path: string;
+  previousPath: string | null;
+  status: 'added' | 'modified' | 'removed' | 'renamed' | 'copied' | 'changed';
+  additions: number;
+  deletions: number;
+  changes: number;
+  sha: string | null;
+  blobUrl: string | null;
+  rawUrl: string | null;
+  patch: string | null;
+}
+
+/** Compare response metadata used to locate the actual left side of the diff. */
+export interface GitHubCommitComparison {
+  mergeBaseSha: string | null;
+  files: GitHubPullRequestFile[];
 }
 
 export type GitHubCheckRunStatus = 'queued' | 'in_progress' | 'completed';

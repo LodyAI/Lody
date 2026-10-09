@@ -1,3 +1,4 @@
+import { SiteAnchor } from '@site/components/site-anchor';
 import { localeFromPathname, notFoundCopy, type NotFoundSeoLocale } from '@site/lib/not-found-seo';
 import { useLocation } from '@tanstack/react-router';
 
@@ -24,12 +25,18 @@ export function NotFoundPage({ locale }: { locale?: NotFoundSeoLocale }) {
       <h1 className="text-3xl font-semibold">{copy.heading}</h1>
       <p className="max-w-md text-fd-muted-foreground">{copy.description}</p>
       <p className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
-        <a className="text-sm font-medium text-fd-primary hover:underline" href={copy.homeHref}>
+        <SiteAnchor
+          className="text-sm font-medium text-fd-primary hover:underline"
+          href={copy.homeHref}
+        >
           {copy.home}
-        </a>
-        <a className="text-sm font-medium text-fd-primary hover:underline" href={copy.docsHref}>
+        </SiteAnchor>
+        <SiteAnchor
+          className="text-sm font-medium text-fd-primary hover:underline"
+          href={copy.docsHref}
+        >
           {copy.docs}
-        </a>
+        </SiteAnchor>
       </p>
     </main>
   );

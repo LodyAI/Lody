@@ -7,8 +7,9 @@ lives in its `README.md`.
 
 ## One mention, five stages
 
-1. **Trigger and menu.** `@` opens the two-level menu; `$` opens skills and `/` or `、`
-   opens commands/shortcuts. `#` remains hydration-only. `enableAtMentions` decides what `@` can reach, and it
+1. **Trigger and menu.** `@` opens the two-level menu; `$` or `￥` opens skills and `/` or `、`
+   opens commands/shortcuts. The [skill trigger Spec](../../specs/skill-mention-triggers.md)
+   defines canonical insertion and unselected-text behavior. `#` remains hydration-only. `enableAtMentions` decides what `@` can reach, and it
    gates both trigger registration and whether `<Mention>` mounts at all — a
    source missing from that list silently degrades the composer to a plain
    textarea and drops its type.
@@ -28,13 +29,23 @@ lives in its `README.md`.
 
 ## Menu placement
 
-The desktop menu's virtual anchor measures the textarea's laid-out caret, not
-the width of its unwrapped text. Soft wraps, internal scrolling, and scaled
-editor containers therefore move the popup with the insertion point. The
-virtual element retains the textarea as its observation target so an open menu
-also follows a layout shift that did not change the text. Floating placement
-flips at the viewport edge; when neither side fits a tall menu, the visible
-surface and its rows scroll instead of extending off-screen.
+The main desktop chat composer follows the textarea's laid-out caret and
+prefers the space above it. Its height is capped to that upper space while a
+heading and option fit; otherwise it may open below. The dialog composer and
+inline editor follow the caret but prefer below and flip at viewport edges.
+Soft wraps, internal scrolling, and scaled editor containers move these
+popups with the insertion point. The virtual element retains the textarea as
+its observation target so layout shifts also update the menu. All stay within
+the input's usable width and scroll when their contents exceed visible room.
+An explicit `positionAnchor="composer"` caller instead anchors to the whole
+frame and locks its side for the lifetime of the open menu.
+
+Desktop content changes also request positioning in a layout effect. Entering
+`@role:` or filtering rows can change the popup height before resize observation
+arrives; updating with the content commit keeps an upward menu's bottom edge
+at its anchor. Resize observation still handles later layout changes. The
+[position synchronization decision](../notes/implemented/bug-fix/2026-10-08-mention-layout-position-sync.md)
+records the frame-level evidence.
 
 The mobile composer uses a separate docked strip. Its boundary is the whole
 `data-mention-frame` (input, controls, and attachments), so the strip cannot
@@ -43,6 +54,19 @@ above that frame, including the top inset. Inline edit-and-resend opts out of
 the dock and keeps the floating caret menu. The
 [placement Spec](../../specs/composer-mention-menu-placement.md) owns these
 visible guarantees.
+
+Hovering a candidate may show or hide a desktop detail pane. The menu keeps
+the candidate list mounted across that change so its scroll position and
+registered rows survive; only the pane and layout styles change. The
+[scroll continuity decision](../notes/implemented/bug-fix/2026-10-08-mention-detail-scroll-continuity.md)
+records the reproduction and verification.
+
+Row selection saves the textarea selection, restores focus and that selection,
+then starts insertion/preparation. WebKit touch taps can blur the textarea and
+expose a temporary zero caret during refocus; starting an asynchronous Shortcut
+before that focus cycle lets the empty-query handler cancel it. Preparation keeps
+the menu open for loading and retry feedback. See the
+[touch focus note](../notes/implemented/bug-fix/2026-10-07-shortcut-touch-focus.md).
 
 ## Ranking
 
@@ -132,6 +156,13 @@ a second while an agent streams and `setItem` blocks.
 items separately re-slugged every visible session twice a tick. It reads the
 child-inclusive projection because mentioning is an addressing surface, and
 review/task child sessions are exactly what gets referenced.
+
+The Sessions menu filters that complete list by project before ranking the
+query. Its scope-empty message and "View all projects" action appear only when
+the selected current-project scope has no candidates. If candidates exist but
+the query matches none, the menu shows the localized "Nothing matches" message
+with the query. Scope controls remain available, switching scope retains the
+query and input focus, and clearing the query restores the selected scope's list.
 
 A drop must produce a real range: a token with no range is sent verbatim, so a
 text-only append would look right in the composer and reach the agent as a word.

@@ -1,4 +1,19 @@
 import {
+  MemoryProviderRequestSchema,
+  MemoryProviderResponseSchema,
+  type MemoryProviderRequest,
+  type MemoryProviderResponse,
+} from '@lody/shared';
+import {
+  IosSimulatorRequestSchema,
+  IosSimulatorResponseSchema,
+  IosSimulatorRemoteResponseSchema,
+  RpcSecretPublicKeySchema,
+  type IosSimulatorRemoteResponse,
+  type IosSimulatorRequest,
+  type IosSimulatorResponse,
+} from '@lody/shared';
+import {
   DEFAULT_PREVIEW_CREATE_TIMEOUT_MS,
   PreviewControlProofSchema,
   type PreviewControlProof,
@@ -126,6 +141,8 @@ import {
 } from '@lody/shared';
 import {
   encryptRpcSecret,
+  getIosSimulatorViewerSecretContext,
+  type RpcSecretRecipient,
   getMachineAcpAuthenticationInputSecretContext,
   getMachineAcpAuthorizationCodeSecretContext,
 } from './rpc-secret';
@@ -181,6 +198,7 @@ export const normalizeLoroGatewayBaseUrl = (baseUrl?: string | null): string => 
 export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/status',
   'machine/preview-control',
+  'ios-simulator/control',
   'machine/ping',
   'machine/restart',
   'machine/upgrade',
@@ -189,6 +207,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/acp-authenticate',
   'machine/acp-binary-status',
   'machine/acp-binary-install',
+  'machine/memory',
   'machine/pi-extensions',
   'machine/bug-report',
   'code-collab/open-text',
@@ -359,6 +378,11 @@ export const LoroMachineAcpBinaryInstallRpcRequestSchema = BaseRpcRequestSchema.
       agentType: z.string().trim().min(1),
     })
     .strict(),
+}).strict();
+
+export const LoroMemoryProviderRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('machine/memory'),
+  params: MemoryProviderRequestSchema,
 }).strict();
 
 export const LoroMachinePiExtensionsRpcRequestSchema = BaseRpcRequestSchema.extend({
@@ -576,6 +600,14 @@ export const LoroSessionPreviewCreateRpcRequestSchema = BaseRpcRequestSchema.ext
     .strict(),
 }).strict();
 
+export const LoroIosSimulatorRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('ios-simulator/control'),
+  params: IosSimulatorRequestSchema.extend({
+    proof: PreviewControlProofSchema,
+    responseKey: RpcSecretPublicKeySchema,
+  }).strict(),
+}).strict();
+
 export const LoroSessionPreviewStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('session/preview-status'),
   params: z
@@ -630,6 +662,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroMachineAcpAuthenticateRpcRequestSchema,
   LoroMachineAcpBinaryStatusRpcRequestSchema,
   LoroMachineAcpBinaryInstallRpcRequestSchema,
+  LoroMemoryProviderRpcRequestSchema,
   LoroMachinePiExtensionsRpcRequestSchema,
   LoroMachineBugReportRpcRequestSchema,
   LoroCodeCollabV2OpenTextRpcRequestSchema,
@@ -655,6 +688,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroSessionPreviewCreateRpcRequestSchema,
   LoroSessionPreviewRevokeRpcRequestSchema,
   LoroSessionPreviewStatusRpcRequestSchema,
+  LoroIosSimulatorRpcRequestSchema,
   LoroLocalProjectGitStateRpcRequestSchema,
   LoroLocalProjectControlRpcRequestSchema,
 ]);
@@ -1489,6 +1523,7 @@ export type LoroMachineRpcResult =
   | MachineAcpBinaryStatusResponse
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage
+  | MemoryProviderResponse
   | MachinePiExtensionsResponse
   | MachineBugReportResponse
   | SessionCancelResponse
@@ -1504,6 +1539,7 @@ export type LoroMachineRpcResult =
   | SessionPreviewCreateResponse
   | SessionPreviewRevokeResponse
   | SessionPreviewStatusResponse
+  | IosSimulatorRemoteResponse
   | LocalProjectGitStateRpcResponse
   | LocalProjectControlResponse;
 
@@ -1630,6 +1666,9 @@ const toLegacyRpcErrorResponse = (
       error: `${error.code}: ${error.message}`,
     };
   }
+
+  if (method === 'machine/memory')
+    return { type: 'machine/memory', status: 'error', memories: [], error: error.message };
 
   if (method === 'machine/pi-extensions') {
     return { success: false, error: error.message };
@@ -1779,6 +1818,15 @@ const toLegacyRpcErrorResponse = (
     };
   }
 
+  if (method === 'ios-simulator/control')
+    return {
+      type: 'ios-simulator/control_response',
+      sessionId: previewContext?.sessionId ?? '',
+      success: false,
+      error: 'failed',
+      message: error.message,
+    };
+
   if (method === 'session/preview-status')
     return {
       type: 'session/preview-status_response',
@@ -1883,6 +1931,10 @@ const parseRpcSuccessResult = async (
     const parsed = MachineAcpBinaryInstallResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachineAcpBinaryInstallResponse) : null;
   }
+  if (response.method === 'machine/memory') {
+    const parsed = MemoryProviderResponseSchema.safeParse(response.result);
+    return parsed.success ? parsed.data : null;
+  }
   if (response.method === 'machine/pi-extensions') {
     const parsed = MachinePiExtensionsResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachinePiExtensionsResponse) : null;
@@ -1945,6 +1997,10 @@ const parseRpcSuccessResult = async (
       return previewParsed.success ? previewParsed.data : null;
     }
     const parsed = CodeCollabV2RpcResponseSchema.safeParse(decrypted);
+    return parsed.success ? parsed.data : null;
+  }
+  if (response.method === 'ios-simulator/control') {
+    const parsed = IosSimulatorRemoteResponseSchema.safeParse(response.result);
     return parsed.success ? parsed.data : null;
   }
   if (response.method === 'session/preview-status') {
@@ -2722,6 +2778,16 @@ export class LoroStreamsMachineRpcClient {
     })) as MachineAcpBinaryInstallResponse | null;
   }
 
+  async requestMemoryProvider(
+    params: MemoryProviderRequest
+  ): Promise<MemoryProviderResponse | null> {
+    return (await this.sendRequest({
+      method: 'machine/memory',
+      timeoutMs: 60_000,
+      params,
+    })) as MemoryProviderResponse | null;
+  }
+
   async requestMachinePiExtensions(options: {
     configId?: AgentConfigId;
     timeoutMs: number;
@@ -3118,6 +3184,34 @@ export class LoroStreamsMachineRpcClient {
     })) as SessionPreviewCreateResponse | null;
   }
 
+  async requestIosSimulatorControl(
+    options: IosSimulatorRequest & {
+      proof: PreviewControlProof;
+      responseRecipient: RpcSecretRecipient;
+      timeoutMs?: number;
+    }
+  ): Promise<IosSimulatorResponse | null> {
+    const { timeoutMs, responseRecipient, ...params } = options;
+    const result = (await this.sendRequest({
+      method: 'ios-simulator/control',
+      timeoutMs: timeoutMs ?? 15_000,
+      params: { ...params, responseKey: responseRecipient.publicKey },
+    })) as IosSimulatorRemoteResponse | null;
+    if (!result?.preview) return result;
+    const { viewerUrlEnvelope, ...preview } = result.preview;
+    const viewerUrl = viewerUrlEnvelope
+      ? await responseRecipient.decrypt(
+          viewerUrlEnvelope,
+          getIosSimulatorViewerSecretContext({
+            ...this.options,
+            sessionId: params.sessionId,
+            requestId: params.proof.requestId,
+          })
+        )
+      : undefined;
+    return IosSimulatorResponseSchema.parse({ ...result, preview: { ...preview, viewerUrl } });
+  }
+
   async requestSessionPreviewStatus(options: {
     sessionId: string;
     requestedByUserId: string;
@@ -3279,6 +3373,7 @@ export class LoroStreamsMachineRpcClient {
             agentType: string;
           };
         }
+      | { method: 'machine/memory'; timeoutMs: number; params: MemoryProviderRequest }
       | {
           method: 'machine/pi-extensions';
           timeoutMs: number;
@@ -3443,6 +3538,14 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'ios-simulator/control';
+          timeoutMs: number;
+          params: IosSimulatorRequest & {
+            proof: PreviewControlProof;
+            responseKey: RpcSecretPublicKey;
+          };
+        }
+      | {
           method: 'session/preview-status';
           timeoutMs: number;
           params: {
@@ -3575,7 +3678,8 @@ export class LoroStreamsMachineRpcClient {
       previewContext:
         args.method === 'session/preview-create' ||
         args.method === 'session/preview-revoke' ||
-        args.method === 'session/preview-status'
+        args.method === 'session/preview-status' ||
+        args.method === 'ios-simulator/control'
           ? { sessionId: args.params.sessionId }
           : undefined,
       localProjectContext:
@@ -3658,6 +3762,9 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'machine/acp-binary-install':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'machine/memory':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'machine/pi-extensions':
@@ -3771,6 +3878,9 @@ export class LoroStreamsMachineRpcClient {
           break;
         case 'session/preview-revoke':
         case 'session/preview-status':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'ios-simulator/control':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'local-project/git-state':

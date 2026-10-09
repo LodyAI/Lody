@@ -69,7 +69,6 @@ export function AttachmentAddMenu({
 
   const triggerSize = !isLanding && isMobile ? 'size-9' : 'size-7';
   const itemClass = cn('cursor-pointer', isMobile && 'gap-2.5 py-2.5 text-[15px]');
-  const iconClass = 'size-4 shrink-0 text-muted-foreground';
   const selectedCount = mcp
     ? mcp.selectedIds.filter((id) => mcpServers.some((server) => server.id === id)).length
     : 0;
@@ -88,22 +87,26 @@ export function AttachmentAddMenu({
         if (!nextOpen) setView('root');
       }}
     >
-      <Menu.Trigger render={<Button
-          type="button"
-          variant="ghost"
-          icon
-          disabled={disabled}
-          aria-label={triggerLabel}
-          className={cn(
-            triggerSize,
-            // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
-            // `bg-accent`/`bg-muted`) because those equal the background in the
-            // dark theme and paint nothing.
-            'data-[state=open]:bg-hover data-[state=open]:text-foreground'
-          )}
-        >
-          <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
-        </Button>}>
+      <Menu.Trigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            icon
+            disabled={disabled}
+            aria-label={triggerLabel}
+            className={cn(
+              triggerSize,
+              // Light-stroke "+" with a circular hover/open fill. `bg-hover` (not
+              // `bg-accent`/`bg-muted`) because those equal the background in the
+              // dark theme and paint nothing.
+              'data-[state=open]:bg-hover data-[state=open]:text-foreground'
+            )}
+          >
+            <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
+          </Button>
+        }
+      >
         <Button
           type="button"
           variant="ghost"
@@ -139,11 +142,11 @@ export function AttachmentAddMenu({
           // from the right, the root returns from the left.
           <div key="mcp" className="animate-in fade-in-0 slide-in-from-right-2 duration-150">
             <Menu.Item
-              className={cn(itemClass, 'gap-2 font-medium')}
+              className={cn(itemClass, 'font-medium')}
               closeOnClick={false}
               onClick={() => setView('root')}
+              icon={ChevronLeft}
             >
-              <ChevronLeft className={iconClass} />
               {t('session.mcp.title')}
             </Menu.Item>
             <Menu.Separator />
@@ -156,8 +159,8 @@ export function AttachmentAddMenu({
                 onClick={onAddAttachment}
                 disabled={attachmentDisabled}
                 className={itemClass}
+                icon={Paperclip}
               >
-                <Paperclip className={iconClass} />
                 {triggerLabel}
               </Menu.Item>
             ) : null}
@@ -170,16 +173,15 @@ export function AttachmentAddMenu({
                     disabled={mcp.disabled}
                     closeOnClick={false}
                     onClick={() => setView('mcp')}
+                    icon={Plug}
+                    endContent={<ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
                   >
-                    <Plug className={iconClass} />
-                    <span className="min-w-0 flex-1 truncate">{mcpLabel}</span>
-                    <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
+                    {mcpLabel}
                   </Menu.Item>
                 ) : (
                   <Menu.Submenu>
-                    <Menu.SubmenuTrigger className={itemClass} disabled={mcp.disabled}>
-                      <Plug className={iconClass} />
-                      <span className="min-w-0 flex-1 truncate">{mcpLabel}</span>
+                    <Menu.SubmenuTrigger className={itemClass} disabled={mcp.disabled} icon={Plug}>
+                      {mcpLabel}
                     </Menu.SubmenuTrigger>
                     <Menu.Content className="w-[min(20rem,calc(100vw-2rem))]">
                       <McpServerItems mcp={mcp} isMobile={isMobile} />

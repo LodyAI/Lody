@@ -40,6 +40,10 @@ retryable and cannot sign the user out. See the
 [login contract](../../specs/desktop-browser-login.md) and
 [decision](../../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.md).
 
+Main authentication requests use Chromium networking after app readiness, retaining
+Better Auth's credential storage hooks and cancellation. Certificate failures explain
+which clock, network, or trust settings to check before starting a fresh attempt.
+
 ### Desktop performance bar
 
 Devbar ships in Dev, Staging, and Prod builds and is off at each launch. In the

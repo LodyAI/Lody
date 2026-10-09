@@ -1,7 +1,7 @@
 # Agent notice banner spans the column and drops its header rule
 
 Status: implemented
-Translation: pending
+Translation: current
 
 [中文](2026-09-23-agent-notice-banner-full-width.zh.md)
 
@@ -61,3 +61,22 @@ write outcome with a toast. Keeping copy below the text costs one control row,
 but avoids squeezing the title beside both copy and capacity retry on mobile.
 `CapacityRetryNotice` stories cover a disconnected agent and a title-only failure;
 the disconnected story checks the clipboard report after a click.
+
+## Follow-up: the lone copy action rides the header on phones
+
+The footer kept the title roomy, but a phone-sized screenshot showed its separate
+row costing vertical space even for a one-line failure. `AgentNoticeBanner` now
+renders header, detail, and footer inside one wrapping row. Below the 768px
+mobile breakpoint, when copy is the only trailing control, the footer moves up to
+the header's trailing edge and the detail takes the full-width line beneath it.
+When a capacity retry action is present the header is already occupied, so copy
+keeps its footer row rather than squeezing the title between two controls; above
+the breakpoint detail and footer keep their rows in both cases. The `md` viewport
+breakpoint matches `useIsMobile`'s 768px boundary, so a phone in landscape gets
+the compact treatment too. `CapacityRetryNotice → DisconnectedOnMobile` now also
+asserts the copy button sits in the banner's right half and above the detail text
+before testing the clipboard payload.
+
+Component typecheck and the full `@lody/components` Vitest suite pass; the
+Storybook story was checked at 390px and 900px viewports, including the retry
+variant at 390px to confirm it keeps the footer row.

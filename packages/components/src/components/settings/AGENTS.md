@@ -17,8 +17,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   `settings-page-header.tsx`, never its own title. Groups are flat in `settingsFlat`
   (pane, project window), else cards. Group by meaning, no one-row groups; a helper
   says what the label cannot. Split master/detail by fill; type: `type.stylex.ts`.
-- Model pages on Preferences: each line a `CompactRow`, one answer (value, Switch,
-  Select/menu, button); records too (name, state line; more in its menu/detail).
+- Preferences grammar: `CompactRow`, one answer; records: name, state, menu/detail.
+  Its four switches bind translated labels and rendered helpers.
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
@@ -39,10 +39,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   never surface `machine_rpc_unavailable` as an editor error. The GitHub source
   row must paint from `lody:githubReposCache` on first frame; do not wait on
   `listWorkspaceReposWithStatus` to decide whether GitHub exists.
-- A settings row (`compact-layout.tsx`) is one grid: the label column takes the rest,
-  the control column hugs its content. Never size a column from a viewport breakpoint:
-  the panel is narrower than the window and clips overflow, so a `md:` label column
-  hides the control.
+- Settings rows (`compact-layout.tsx`) give labels remaining width and controls their
+  content width. Never size columns from viewport breakpoints: the panel
+  clips controls. Desktop Settings nav follows panel width; keep categories/drafts,
+  reveal the selection and wrap actions.
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
@@ -53,28 +53,29 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   verification.
 - Keep three.js/R3F behind the lazy usage-calendar module so lightweight and SSR
   consumers never evaluate its renderer graph.
-- Usage day details persist bounded snapshots per auth session, workspace, and
-  date. Reuse for one hour; refresh expired selections without blanking cached
-  data. Preserve auth/capability gates; see [contract](../../../../../specs/usage-detail-cache.md).
+- Charts follow [timeline rules](../../../../../specs/usage-timeline.md).
+  Cache bounded day snapshots per auth session/workspace/date for one hour;
+  refresh expiry without blanking data. Keep auth/capability gates
+  ([cache](../../../../../specs/usage-detail-cache.md)).
 - Interface/terminal fonts exclude symbol families in `lib/local-fonts.ts`; option
-  names stay on the default interface font. Font size is five named tiers writing
-  `--ui-font-size`. Font ligatures is a boolean in the Text group, writing
+  names stay on the default interface font. Five tiers write `--ui-font-size`;
+  sizes use `@lody/ui` text tokens. Font ligatures in the Text group writes
   `--lody-font-ligatures` for conversation, code, and tool output.
 - The Codex reset forecast chip in the provider row must not fetch on mount:
   [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
 - The usage share card is a fixed-format report, not a second `ChatShareCard`:
-  exact pixel aspects, period = the page range, headline = that range's total.
-  Derive every number through `usage-share-stats.ts` (stamp the metric on the
-  stats; never pass it beside them). Money: `formatUsdCompact` headline,
+  fixed aspects, period = page range, headline = range total.
+  Derive numbers through `usage-share-stats.ts` (stamp the metric on stats,
+  never pass it beside them). Money: `formatUsdCompact` headline,
   `formatUsdTight` cells — never `truncate`. Tokens/member anonymity are
   defaults; cost substitutes for tokens; member slices never include email.
-  Both share cards use `lib/share-image-export.ts` and
-  `components/share-theme-scope.ts`; do not fork either.
-  `StatsSettingsView` keeps the entry behind the opt-in `shareCard` prop with a lazy
-  dialog, because the public landing reuses that view. Type and spacing come
-  from the card's `TEXT`, `PAD_X`, and `RHYTHM` constants, never fresh `text-[…]`
-  or off-grid padding. `PAD_X` binds the footer too, so every band
-  shares one left edge. `ASPECT_SIZE` includes the backdrop; size against the
+  Both cards reuse `lib/share-image-export.ts` and `components/share-theme-scope.ts`;
+  never fork them. Pinned cards bind product and avatar StyleX themes locally;
+  inherited aliases keep the app's resolved colours.
+  `StatsSettingsView` gates its lazy dialog with opt-in `shareCard` for public-landing
+  reuse. Type and spacing use `TEXT`, `PAD_X`, and `RHYTHM`, never fresh `text-[…]`
+  or off-grid padding. `PAD_X` aligns every band, including the footer.
+  `ASPECT_SIZE` includes the backdrop; size against the
   48px-shorter framed case. Keep every band but the headline `shrink-0`.
   The graphic follows the range
   (hour skyline, day-by-hour grid, or 53-week calendar, as on the Usage screen);
@@ -86,27 +87,16 @@ Roles are read and written from Settings, mentioned from the composer, and
 resolved by CLI MCP creation, so these are cross-surface rules rather than
 component details.
 
-- Agent Roles are one `agentRole` row family in the same workspace Flock document, not a
-  private and a shared catalog: sharing is an ordinary update of `visibility` on the row.
-  A Role stores no secret — no API key, MCP selection, or memory — and
-  `isSensitiveAgentRoleConfigOptionKey` is applied on read as well as on write,
-  because a workspace row reaches every member's client. It DOES pin the permission
-  mode, as `runConfig.modeId` for legacy ACP modes or the agent's own `_permission`
-  option: permission is a run-config value the agent publishes, not a secret, and a
-  Role that left it out would not be the whole configuration it claims to be. So the
-  composer drops its separate permission button while such a Role is selected. A Role
-  may therefore pin a warning-tone mode (full access / skip permissions), which every
-  surface that hides the permission control must keep visibly marked; what stays out
-  of scope is a Role-level auto-approval POLICY. Settings and mention discovery use
-  `canReadAgentRole`/`canManageAgentRole`; MCP creation resolves an explicit Role id from
-  the workspace catalog without requiring a mention-scoped authorization record.
-- A Role never falls back. `machineId + agentConfigId` bind the execution site exactly;
-  when the machine, config, or a stored model/mode is unavailable the Role stays listed
-  with the precise reason and stops being mentionable. MCP creation resolves the current
-  workspace catalog row by `agentRoleId` before Operation acceptance; the canonical Prompt,
-  target, Role revision, and dispatch config are frozen into the accepted Operation so a
-  later edit or delete cannot change its recovery or retry. `SessionMeta.agentRoleId` /
-  `agentRoleRevision` record where a Session came from and are display-only.
+- Before changing Role settings or dispatch, read the authoritative
+  [shared Role contracts](../../../../shared/AGENTS.md#workspace-mcp-and-agent-roles).
+  The editor clears its memory reference when the target machine changes;
+  discovery and creation use that exact machine's Provider RPC. Memory settings
+  reuse Agents machine tabs/pills and catalog rows. A missing nmem install stays
+  on the page with the provider URL; it must not open a blocking dialog.
+  The Role Memory tab lists saved machine-Flock associations and shares the
+  Configuration tab's draft/save boundary. Role settings retain all machine groups;
+  memory shortcuts locate a group without adding machine tabs or filtering. Only a ready Provider
+  inventory can mark an identity missing; deleting a link never deletes provider data.
 
 ## Workspace ownership
 

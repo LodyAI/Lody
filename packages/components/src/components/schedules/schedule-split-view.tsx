@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Pause, Play, RotateCcw, Trash2, X } from 'lucide-react';
 import { Button } from '@lody/ui/button';
@@ -22,6 +23,86 @@ const MIN_LIST_WIDTH = 280;
 const MIN_DETAIL_WIDTH = 440;
 
 const ease = [0.32, 0.72, 0, 1] as const;
+
+const styles = stylex.create({
+  layout: { display: 'flex', minHeight: 0, flex: '1 1 0%', overflow: 'hidden' },
+  list: { height: '100%', minWidth: 0, flexShrink: 0, overflow: 'hidden' },
+  detail: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 30,
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    borderLeftWidth: '0.5px',
+    borderLeftStyle: 'solid',
+    borderLeftColor: 'hsl(var(--border))',
+    backgroundColor: 'hsl(var(--background))',
+    boxShadow: '-8px 0 24px -16px rgba(0,0,0,0.25)',
+  },
+  detailOffset: (left: number) => ({ left }),
+  resizeHandle: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: '-6px',
+    zIndex: 30,
+    display: 'flex',
+    width: '12px',
+    cursor: 'col-resize',
+    touchAction: 'none',
+    userSelect: 'none',
+    justifyContent: 'center',
+    outlineStyle: {
+      ':focus-visible': { default: 'none', '@media (forced-colors: active)': 'solid' },
+    },
+    outlineWidth: { ':focus-visible': { '@media (forced-colors: active)': '2px' } },
+    outlineColor: { ':focus-visible': { '@media (forced-colors: active)': 'transparent' } },
+    outlineOffset: { ':focus-visible': { '@media (forced-colors: active)': '2px' } },
+  },
+  resizeLine: {
+    height: '100%',
+    width: '1px',
+    backgroundColor: {
+      default: 'transparent',
+      [stylex.when.ancestor(':hover')]: 'hsl(var(--ring) / 0.6)',
+      [stylex.when.ancestor(':focus-visible')]: 'hsl(var(--ring))',
+      [stylex.when.ancestor(':active')]: 'hsl(var(--ring))',
+    },
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  toolbar: {
+    display: 'flex',
+    height: '44px',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: '2px',
+    borderBottomWidth: '0.5px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border))',
+    paddingLeft: '8px',
+    paddingRight: '8px',
+  },
+  paused: {
+    marginLeft: '6px',
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border))',
+    borderRadius: '9999px',
+    paddingLeft: '8px',
+    paddingRight: '8px',
+    paddingTop: '1px',
+    paddingBottom: '1px',
+    fontSize: '0.75em',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  actions: { marginLeft: 'auto', display: 'flex', alignItems: 'center', columnGap: '2px' },
+  icon: { width: '100%', height: '100%' },
+});
 
 function useElementWidth<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -84,9 +165,9 @@ export function ScheduleSplitView({
   return (
     // Not `relative`: the panel is placed against the page (the list view's
     // section), so it rises over the header while the header itself stays put.
-    <div ref={containerRef} className="flex min-h-0 flex-1 overflow-hidden">
+    <div ref={containerRef} {...stylex.props(styles.layout)}>
       <motion.div
-        className="h-full min-w-0 shrink-0 overflow-hidden"
+        {...stylex.props(styles.list)}
         initial={false}
         animate={{ width: open ? width : '100%' }}
         transition={transition}
@@ -98,8 +179,7 @@ export function ScheduleSplitView({
           <motion.section
             key="detail"
             data-schedule-detail=""
-            className="absolute inset-y-0 right-0 z-30 flex min-w-0 flex-col border-l-[0.5px] border-border bg-background shadow-[-8px_0_24px_-16px_rgba(0,0,0,0.25)]"
-            style={{ left: width }}
+            {...stylex.props(styles.detail, styles.detailOffset(width))}
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
@@ -197,11 +277,11 @@ function SplitResizeHandle({
       onDoubleClick={onReset}
       onKeyDown={onKeyDown}
       className={cn(
-        'group/split absolute inset-y-0 -left-1.5 z-30 flex w-3 cursor-col-resize touch-none select-none justify-center focus-visible:outline-hidden',
+        stylex.props(stylex.defaultMarker(), styles.resizeHandle).className,
         WINDOW_DRAG_EXEMPT_CLASS
       )}
     >
-      <span className="h-full w-px bg-transparent transition-colors group-hover/split:bg-ring/60 group-focus-visible/split:bg-ring group-active/split:bg-ring" />
+      <span {...stylex.props(styles.resizeLine)} />
     </div>
   );
 }
@@ -270,22 +350,15 @@ export function ScheduleDetailToolbar({
   const windowDrag = useWindowDragRegionClass();
   return (
     <Tooltip.Provider>
-      <div
-        className={cn(
-          'flex h-11 shrink-0 items-center gap-0.5 border-b-[0.5px] border-border px-2',
-          windowDrag
-        )}
-      >
+      <div className={cn(stylex.props(styles.toolbar).className, windowDrag)}>
         <ToolbarButton label={t('schedules.close', 'Close')} onClick={onClose}>
-          <X className="size-full" />
+          <X {...stylex.props(styles.icon)} />
         </ToolbarButton>
         {paused ? (
-          <span className="ml-1.5 rounded-full border-[0.5px] border-border px-2 py-px text-[0.75em] text-muted-foreground">
-            {t('schedules.paused', 'Paused')}
-          </span>
+          <span {...stylex.props(styles.paused)}>{t('schedules.paused', 'Paused')}</span>
         ) : null}
         {actions ? (
-          <div className="ml-auto flex items-center gap-0.5">
+          <div {...stylex.props(styles.actions)}>
             <ToolbarButton
               label={
                 actions.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume')
@@ -294,9 +367,9 @@ export function ScheduleDetailToolbar({
               onClick={actions.onToggle}
             >
               {actions.enabled ? (
-                <Pause className="size-full" />
+                <Pause {...stylex.props(styles.icon)} />
               ) : (
-                <RotateCcw className="size-full" />
+                <RotateCcw {...stylex.props(styles.icon)} />
               )}
             </ToolbarButton>
             <ToolbarButton
@@ -304,7 +377,7 @@ export function ScheduleDetailToolbar({
               disabled={!actions.canRun}
               onClick={actions.onRun}
             >
-              <Play className="size-full" />
+              <Play {...stylex.props(styles.icon)} />
             </ToolbarButton>
             <ToolbarButton
               label={t('schedules.delete', 'Delete')}
@@ -312,7 +385,7 @@ export function ScheduleDetailToolbar({
               disabled={!actions.canDelete}
               onClick={actions.onDelete}
             >
-              <Trash2 className="size-full" />
+              <Trash2 {...stylex.props(styles.icon)} />
             </ToolbarButton>
           </div>
         ) : null}

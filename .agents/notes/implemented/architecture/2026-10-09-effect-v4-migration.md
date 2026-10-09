@@ -21,8 +21,8 @@ consumer rewrites belong to the subsequent PRs, not this migration.
 builds on it, followed by the process foundation #1065, CLI consumer migration
 #1069, and the cross-runtime consumer PR. Existing process code remains unchanged
 in this bottom PR; each later service is introduced directly with v4 APIs.
-The stack keeps its original main baseline instead of combining this restack
-with an unrelated main update.
+The bottom layer integrates current main so that the v4 baseline is mergeable;
+subsequent layers inherit that update without adding it to their own scope.
 
 Use exact catalog pins `effect: 4.0.0` and `@effect/vitest: 4.0.0`. Both were
 published on October 1 and satisfy the workspace's seven-day minimum release age.

@@ -1,0 +1,397 @@
+diff --git a/lib/ice/src/ice.js b/lib/ice/src/ice.js
+index 51b7191..ee6e963 100644
+--- a/lib/ice/src/ice.js
++++ b/lib/ice/src/ice.js
+@@ -674,6 +674,8 @@ class Connection {
+     }
+     // 4.1.1 Gathering Candidates
+     async gatherCandidates() {
++        if (this.state === "closed") return;
++        this.gatherAbort ??= new AbortController();
+         if (!this.localCandidatesStart) {
+             this.localCandidatesStart = true;
+             // ICE restart keeps transport protocols; re-advertise their host candidates
+@@ -699,10 +701,11 @@ class Connection {
+                 address = Array.from(new Set([...this.options.additionalHostAddresses, ...address]));
+             }
+             const candidatePromises = this.getCandidatePromises(address, 5);
+-            await Promise.allSettled(candidatePromises);
++            this.gathering = Promise.allSettled(candidatePromises);
++            await this.gathering;
+             this.localCandidatesEnd = true;
+         }
+-        this.setState("completed");
++        if (!this.gatherAbort?.signal.aborted) this.setState("completed");
+     }
+     appendLocalCandidate(candidate) {
+         this.localCandidates.push(candidate);
+@@ -890,8 +893,9 @@ class Connection {
+                     interfaceAddresses: this.options.interfaceAddresses,
+                     transport: turnTransport,
+                     tlsOptions: this.options.turnTlsOptions,
++                    signal: this.gatherAbort?.signal,
+                 }).catch(async (e) => {
+-                    if (turnTransport === "udp") {
++                    if (turnTransport === "udp" && !this.gatherAbort?.signal.aborted) {
+                         return await (0, protocol_2.createStunOverTurnClient)({
+                             address: turnServer,
+                             username: turnUsername,
+@@ -899,6 +903,7 @@ class Connection {
+                         }, {
+                             portRange: this.options.portRange,
+                             interfaceAddresses: this.options.interfaceAddresses,
++                            signal: this.gatherAbort?.signal,
+                             transport: "tcp",
+                         });
+                     }
+@@ -1107,6 +1112,8 @@ class Connection {
+         // Close the connection.
+         // """
+         this.setState("closed");
++        this.gatherAbort?.abort();
++        await this.gathering;
+         // # stop consent freshness tests
+         this.stopConsentLifecycle();
+         // # stop check list
+diff --git a/lib/ice/src/turn/protocol.js b/lib/ice/src/turn/protocol.js
+index e8fe6d3..e8d3f12 100644
+--- a/lib/ice/src/turn/protocol.js
++++ b/lib/ice/src/turn/protocol.js
+@@ -341,14 +341,17 @@ class TurnProtocol {
+             value: (exp) => {
+                 this.refreshHandle = (0, helper_1.cancelable)(async (_, __, onCancel) => {
+                     let run = true;
++                    const refreshAbort = new AbortController();
+                     onCancel.once(() => {
+                         run = false;
++                        refreshAbort.abort();
+                     });
+                     while (run) {
+                         // refresh before expire
+                         const delay = (5 / 6) * exp * 1000;
+                         log("refresh delay", delay, { exp });
+-                        await (0, promises_1.setTimeout)(delay);
++                        await (0, promises_1.setTimeout)(delay, undefined, { signal: refreshAbort.signal }).catch(() => {});
++                        if (!run) return;
+                         const request = new message_1.Message(const_1.methods.REFRESH, const_1.classes.REQUEST);
+                         request.setAttribute("LIFETIME", exp);
+                         try {
+@@ -378,6 +381,7 @@ class TurnProtocol {
+             log("connect error", e);
+             throw e;
+         });
++        if (this.closed) throw new Error("TURN closed");
+         this.relayedAddress = response.getAttributeValue("XOR-RELAYED-ADDRESS");
+         this.mappedAddress = response.getAttributeValue("XOR-MAPPED-ADDRESS");
+         const exp = response.getAttributeValue("LIFETIME");
+@@ -477,6 +481,7 @@ class TurnProtocol {
+         // callers pass explicit options. Peer consent goes through StunOverTurnProtocol.
+         // Prefer the TURN session integrity key for response verification.
+         const resolvedAddr = await (0, transaction_1.resolveRequestAddress)(addr);
++    if (this.closed) throw new Error("TURN closed");
+         const options = (0, transaction_1.buildTransactionOptions)(this.integrityKey, retransmissionsOrOptions, onRequestSent);
+         const transaction = new transaction_1.Transaction(request, resolvedAddr, this, options);
+         this.transactions[request.transactionIdHex] = transaction;
+@@ -666,7 +671,12 @@ class TurnProtocol {
+         await this.send(message.bytes, addr);
+     }
+     async close() {
+-        this.refreshHandle?.resolve?.();
++        this.closed = true;
++    this.refreshHandle?.resolve?.();
++    for (const transaction of Object.values(this.transactions)) {
++      transaction.onResponse.error(new Error("TURN closed"));
++      transaction.cancel();
++    }
+         await this.transport.close();
+     }
+ }
+@@ -677,33 +687,44 @@ Object.defineProperty(TurnProtocol, "type", {
+     writable: true,
+     value: "turn"
+ });
+-async function createTurnClient({ address, username, password }, { lifetime, portRange, interfaceAddresses, ssl, tlsOptions, transport: transportType, } = {}) {
+-    lifetime ?? (lifetime = DEFAULT_ALLOCATION_LIFETIME);
+-    transportType ?? (transportType = ssl ? "tls" : "udp");
+-    const transport = transportType === "udp"
+-        ? await common_1.UdpTransport.init("udp4", { portRange, interfaceAddresses })
+-        : transportType === "tcp"
+-            ? await common_1.TcpTransport.init(address)
+-            : await common_1.TlsTransport.init(address, tlsOptions);
+-    const turn = new TurnProtocol(address, username, password, lifetime, transport);
+-    await turn.connectionMade();
++async function createTurnClient({ address, username, password }, {
++  lifetime = DEFAULT_ALLOCATION_LIFETIME, portRange, interfaceAddresses, ssl,
++  tlsOptions, transport: transportType = ssl ? "tls" : "udp", signal,
++} = {}) {
++  // A pending connect/allocation is owned by ICE, including before it becomes a candidate.
++  const pending = signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000);
++  let transport;
++  let turn;
++  let abort;
++  const aborted = new Promise((_, reject) => {
++    abort = () => reject(pending.reason);
++    pending.addEventListener("abort", abort, { once: true });
++    if (pending.aborted) abort();
++  });
++  void aborted.catch(() => {});
++  try {
++    pending.throwIfAborted();
++    // Stream constructors expose the socket before awaiting its handshake.
++    transport = transportType === "udp"
++      ? await common_1.UdpTransport.init("udp4", { portRange, interfaceAddresses })
++      : transportType === "tcp" ? new common_1.TcpTransport(address) : new common_1.TlsTransport(address, tlsOptions);
++    if (transportType !== "udp") await Promise.race([transport.init(), aborted]);
++    pending.throwIfAborted();
++    turn = new TurnProtocol(address, username, password, lifetime, transport);
++    await Promise.race([turn.connectionMade(), aborted]);
++    pending.throwIfAborted();
+     return turn;
++  } catch (error) {
++    if (turn) await turn.close();
++    else await transport?.close();
++    throw error;
++  } finally {
++    pending.removeEventListener("abort", abort);
++  }
+ }
+-async function createStunOverTurnClient({ address, username, password, }, { lifetime, portRange, interfaceAddresses, ssl, tlsOptions, transport: transportType, } = {}) {
+-    const turn = await createTurnClient({
+-        address,
+-        username,
+-        password,
+-    }, {
+-        lifetime,
+-        portRange,
+-        interfaceAddresses,
+-        ssl,
+-        tlsOptions,
+-        transport: transportType,
+-    });
+-    const turnTransport = new StunOverTurnProtocol(turn);
+-    return turnTransport;
++async function createStunOverTurnClient(credentials, options = {}) {
++  const turn = await createTurnClient(credentials, options);
++  return new StunOverTurnProtocol(turn);
+ }
+ function makeIntegrityKey(username, realm, password) {
+     return (0, auth_1.makeTurnIntegrityKey)(username, realm, password);
+diff --git a/lib/index.mjs b/lib/index.mjs
+index bd453cf..bad6cd1 100644
+--- a/lib/index.mjs
++++ b/lib/index.mjs
+@@ -8066,7 +8066,8 @@ var TurnProtocol = class _TurnProtocol {
+         throw e;
+       }
+     );
+-    this.relayedAddress = response.getAttributeValue("XOR-RELAYED-ADDRESS");
++    if (this.closed) throw new Error("TURN closed");
++        this.relayedAddress = response.getAttributeValue("XOR-RELAYED-ADDRESS");
+     this.mappedAddress = response.getAttributeValue("XOR-MAPPED-ADDRESS");
+     const exp = response.getAttributeValue("LIFETIME");
+     log21("connect", this.relayedAddress, this.mappedAddress, { exp });
+@@ -8143,13 +8144,16 @@ var TurnProtocol = class _TurnProtocol {
+   refresh = (exp) => {
+     this.refreshHandle = cancelable(async (_, __, onCancel) => {
+       let run = true;
++                    const refreshAbort = new AbortController();
+       onCancel.once(() => {
+         run = false;
++                        refreshAbort.abort();
+       });
+       while (run) {
+         const delay = 5 / 6 * exp * 1e3;
+         log21("refresh delay", delay, { exp });
+-        await setTimeout4(delay);
++        await setTimeout4(delay, undefined, { signal: refreshAbort.signal }).catch(() => {});
++                        if (!run) return;
+         const request = new Message(4 /* REFRESH */, 0 /* REQUEST */);
+         request.setAttribute("LIFETIME", exp);
+         try {
+@@ -8170,6 +8174,7 @@ var TurnProtocol = class _TurnProtocol {
+       request.setAttribute("USERNAME", this.username).setAttribute("REALM", this.realm).setAttribute("NONCE", this.nonce).addMessageIntegrity(this.integrityKey).addFingerprint();
+     }
+     const resolvedAddr = await resolveRequestAddress(addr);
++    if (this.closed) throw new Error("TURN closed");
+     const options = buildTransactionOptions(
+       this.integrityKey,
+       retransmissionsOrOptions,
+@@ -8350,60 +8355,53 @@ var TurnProtocol = class _TurnProtocol {
+     await this.send(message.bytes, addr);
+   }
+   async close() {
++    this.closed = true;
+     this.refreshHandle?.resolve?.();
++    for (const transaction of Object.values(this.transactions)) {
++      transaction.onResponse.error(new Error("TURN closed"));
++      transaction.cancel();
++    }
+     await this.transport.close();
+   }
+ };
+ async function createTurnClient({ address, username, password }, {
+-  lifetime,
+-  portRange,
+-  interfaceAddresses,
+-  ssl,
+-  tlsOptions,
+-  transport: transportType
++  lifetime = DEFAULT_ALLOCATION_LIFETIME, portRange, interfaceAddresses, ssl,
++  tlsOptions, transport: transportType = ssl ? "tls" : "udp", signal,
+ } = {}) {
+-  lifetime ??= DEFAULT_ALLOCATION_LIFETIME;
+-  transportType ??= ssl ? "tls" : "udp";
+-  const transport = transportType === "udp" ? await UdpTransport.init("udp4", { portRange, interfaceAddresses }) : transportType === "tcp" ? await TcpTransport.init(address) : await TlsTransport.init(address, tlsOptions);
+-  const turn = new TurnProtocol(
+-    address,
+-    username,
+-    password,
+-    lifetime,
+-    transport
+-  );
+-  await turn.connectionMade();
+-  return turn;
++  // A pending connect/allocation is owned by ICE, including before it becomes a candidate.
++  const pending = signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000);
++  let transport;
++  let turn;
++  let abort;
++  const aborted = new Promise((_, reject) => {
++    abort = () => reject(pending.reason);
++    pending.addEventListener("abort", abort, { once: true });
++    if (pending.aborted) abort();
++  });
++  void aborted.catch(() => {});
++  try {
++    pending.throwIfAborted();
++    // Stream constructors expose the socket before awaiting its handshake.
++    transport = transportType === "udp"
++      ? await UdpTransport.init("udp4", { portRange, interfaceAddresses })
++      : transportType === "tcp" ? new TcpTransport(address) : new TlsTransport(address, tlsOptions);
++    if (transportType !== "udp") await Promise.race([transport.init(), aborted]);
++    pending.throwIfAborted();
++    turn = new TurnProtocol(address, username, password, lifetime, transport);
++    await Promise.race([turn.connectionMade(), aborted]);
++    pending.throwIfAborted();
++    return turn;
++  } catch (error) {
++    if (turn) await turn.close();
++    else await transport?.close();
++    throw error;
++  } finally {
++    pending.removeEventListener("abort", abort);
++  }
+ }
+-async function createStunOverTurnClient({
+-  address,
+-  username,
+-  password
+-}, {
+-  lifetime,
+-  portRange,
+-  interfaceAddresses,
+-  ssl,
+-  tlsOptions,
+-  transport: transportType
+-} = {}) {
+-  const turn = await createTurnClient(
+-    {
+-      address,
+-      username,
+-      password
+-    },
+-    {
+-      lifetime,
+-      portRange,
+-      interfaceAddresses,
+-      ssl,
+-      tlsOptions,
+-      transport: transportType
+-    }
+-  );
+-  const turnTransport = new StunOverTurnProtocol(turn);
+-  return turnTransport;
++async function createStunOverTurnClient(credentials, options = {}) {
++  const turn = await createTurnClient(credentials, options);
++  return new StunOverTurnProtocol(turn);
+ }
+ function makeIntegrityKey(username, realm, password) {
+   return makeTurnIntegrityKey(username, realm, password);
+@@ -8993,6 +8991,8 @@ var Connection = class {
+   }
+   // 4.1.1 Gathering Candidates
+   async gatherCandidates() {
++        if (this.state === "closed") return;
++        this.gatherAbort ??= new AbortController();
+     if (!this.localCandidatesStart) {
+       this.localCandidatesStart = true;
+       for (const protocol of this.protocols) {
+@@ -9024,10 +9024,11 @@ var Connection = class {
+         );
+       }
+       const candidatePromises = this.getCandidatePromises(address, 5);
+-      await Promise.allSettled(candidatePromises);
++      this.gathering = Promise.allSettled(candidatePromises);
++            await this.gathering;
+       this.localCandidatesEnd = true;
+     }
+-    this.setState("completed");
++    if (!this.gatherAbort?.signal.aborted) this.setState("completed");
+   }
+   appendLocalCandidate(candidate) {
+     this.localCandidates.push(candidate);
+@@ -9246,10 +9247,11 @@ var Connection = class {
+             portRange: this.options.portRange,
+             interfaceAddresses: this.options.interfaceAddresses,
+             transport: turnTransport,
+-            tlsOptions: this.options.turnTlsOptions
++            tlsOptions: this.options.turnTlsOptions,
++            signal: this.gatherAbort?.signal
+           }
+         ).catch(async (e) => {
+-          if (turnTransport === "udp") {
++          if (turnTransport === "udp" && !this.gatherAbort?.signal.aborted) {
+             return await createStunOverTurnClient(
+               {
+                 address: turnServer,
+@@ -9259,7 +9261,8 @@ var Connection = class {
+               {
+                 portRange: this.options.portRange,
+                 interfaceAddresses: this.options.interfaceAddresses,
+-                transport: "tcp"
++                signal: this.gatherAbort?.signal,
++                            transport: "tcp"
+               }
+             );
+           } else {
+@@ -9598,6 +9601,8 @@ var Connection = class {
+   };
+   async close() {
+     this.setState("closed");
++    this.gatherAbort?.abort();
++    await this.gathering;
+     this.stopConsentLifecycle();
+     if (this.checkList && !this.checkListDone) {
+       this.checkListState.put(
+@@ -17633,7 +17638,8 @@ var RTCPeerConnection = class extends EventTarget {
+     await this.gatherCandidates().catch((e) => {
+       log37("gatherCandidates failed", e);
+     });
+-    if (description.type === "answer") {
++    if (this.isClosed) return description;
++        if (description.type === "answer") {
+       this.connect().catch((err5) => {
+         log37("connect failed", err5);
+         this.secureManager.setConnectionState("failed");
+diff --git a/lib/webrtc/src/peerConnection.js b/lib/webrtc/src/peerConnection.js
+index d722a23..6ab4b54 100644
+--- a/lib/webrtc/src/peerConnection.js
++++ b/lib/webrtc/src/peerConnection.js
+@@ -716,6 +716,7 @@ class RTCPeerConnection extends helper_1.EventTarget {
+             log("gatherCandidates failed", e);
+         });
+         // connect transports
++        if (this.isClosed) return description;
+         if (description.type === "answer") {
+             this.connect().catch((err) => {
+                 log("connect failed", err);

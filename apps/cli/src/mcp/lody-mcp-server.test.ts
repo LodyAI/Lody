@@ -2,6 +2,8 @@ import { LoroDoc, LoroMap } from 'loro-crdt';
 import { createHistoryWriter } from '@lody/shared';
 import { createLoroSessionData } from '@lody/shared/session-data';
 import path from 'path';
+import os from 'node:os';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -9,9 +11,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
   SESSION_FILE_MAX_COUNT,
+  getStaticBuiltinAcpCapabilities,
   getSessionRoomId,
   workspaceFlockKeys,
   type AgentConfigId,
+  type AcpCapabilityCacheEntry,
   type AgentRole,
   type AgentRoleId,
   type MachineId,
@@ -27,8 +31,15 @@ import {
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import {
   getLodyOperationStorePath,
+  LodyOperationStore,
   LodyOperationStoreError,
 } from '@/orchestration/operation-store';
+import {
+  applyAgentRunConfigSelection,
+  resolveEffectiveSessionCreateDispatchConfig,
+  validateTurnConfigOptionValues,
+  validateTurnModeAndModel,
+} from '@/commands/session';
 
 import {
   __lodyMcpServerInternals,
@@ -99,6 +110,26 @@ const agentRole = (overrides: Partial<AgentRole> = {}): AgentRole => ({
   ...overrides,
 });
 
+const createCapability = (agentType: 'codex' | 'grok' | 'claude'): AcpCapabilityCacheEntry => {
+  const capability = getStaticBuiltinAcpCapabilities('builtin', agentType);
+  if (!capability) throw new Error('Missing synthetic capability fixture');
+  return { ...capability, cliType: 'builtin', agentType, fetchedAt: 1 };
+};
+
+const resolveCreateConfig = (
+  input: Parameters<typeof buildMcpTurnDispatchConfig>[0],
+  capability: AcpCapabilityCacheEntry
+) => {
+  const requested = applyAgentRunConfigSelection(buildMcpTurnDispatchConfig(input), capability);
+  validateTurnModeAndModel(requested.config, capability);
+  validateTurnConfigOptionValues(
+    requested.config.configOptionValues,
+    capability,
+    requested.validatedConfigIds
+  );
+  return requested.config;
+};
+
 describe('shared Operation store path', () => {
   // Regression: the daemon-hosted HTTP MCP transport carries its session
   // context in AsyncLocalStorage and its process has no LODY_MCP_MACHINE_ID,
@@ -147,7 +178,11 @@ describe('Lody MCP tool catalog', () => {
     const names = await listPublishedToolNames();
     expect(names).toContain('lody_feedback');
     expect(names).toEqual(
-      expect.arrayContaining(['lody_session_rename', 'lody_session_rename_many'])
+      expect.arrayContaining([
+        'lody_session_rename',
+        'lody_session_rename_many',
+        'lody_ios_simulator_preview',
+      ])
     );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
   });
@@ -464,7 +499,7 @@ describe('session MCP input schemas', () => {
     });
   });
 
-  it('accepts semantic run config on single and batch creates and rejects raw ACP ids', () => {
+  it('accepts semantic controls and explicit ACP selectors on single and batch creates', () => {
     expect(
       SessionCreateToolInputSchema.safeParse({
         operationId: 'review-1',
@@ -473,6 +508,8 @@ describe('session MCP input schemas', () => {
         reasoningEffort: 'high',
         fastMode: true,
         planMode: false,
+        modeId: 'read-only',
+        configOptionValues: { permission_mode: 'ask' },
       }).success
     ).toBe(true);
     expect(
@@ -481,7 +518,7 @@ describe('session MCP input schemas', () => {
         prompt: 'review this',
         configOptionValues: { reasoning_effort: 'high' },
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       SessionCreateToolInputSchema.safeParse({
         operationId: 'review-1',
@@ -492,8 +529,19 @@ describe('session MCP input schemas', () => {
     expect(
       SessionCreateManyToolInputSchema.safeParse({
         operationId: 'review-batch-1',
-        defaults: { reasoningEffort: 'high' },
-        items: [{ prompt: 'review this', planMode: true }],
+        defaults: {
+          reasoningEffort: 'high',
+          modeId: 'default',
+          configOptionValues: { permission_mode: 'ask' },
+        },
+        items: [
+          {
+            prompt: 'review this',
+            planMode: true,
+            modeId: 'plan',
+            configOptionValues: { permission_mode: 'always-approve' },
+          },
+        ],
       }).success
     ).toBe(true);
     expect(
@@ -581,6 +629,8 @@ describe('session MCP input schemas', () => {
         agentConfigId: 'manual-agent',
         modelId: 'manual-model',
         reasoningEffort: 'high',
+        modeId: 'unadvertised-manual-mode',
+        configOptionValues: { unknown: 'unadvertised' },
         useCurrentSessionAsParent: false,
       },
       { chainDepth: 0, frozenInputConfig },
@@ -605,6 +655,8 @@ describe('session MCP input schemas', () => {
     });
     expect(resolved.input).not.toHaveProperty('modelId');
     expect(resolved.input).not.toHaveProperty('reasoningEffort');
+    expect(resolved.input).not.toHaveProperty('modeId');
+    expect(resolved.input).not.toHaveProperty('configOptionValues');
     expect(resolved.dispatchConfig).toEqual({
       modeId: 'default',
       modelId: 'opus',
@@ -618,6 +670,23 @@ describe('session MCP input schemas', () => {
       machineId: 'remote-machine',
       agentConfigId: 'claude-opus',
     });
+    const withoutOverrides = resolveMcpSessionCreate(
+      {
+        operationId: 'role-review-1',
+        prompt: 'Review the current diff.',
+        agentRoleId: 'reviewer',
+        useCurrentSessionAsParent: false,
+      },
+      { chainDepth: 0, frozenInputConfig },
+      {
+        machineId: 'current-machine',
+        project: { kind: 'github', repoFullName: 'loro-dev/lody-oss', branch: 'feature/roles' },
+      },
+      role
+    );
+    expect(buildResolvedMcpCreateCanonicalCommand(resolved)).toEqual(
+      buildResolvedMcpCreateCanonicalCommand(withoutOverrides)
+    );
   });
 
   it('loads Role rows from the workspace catalog without a Turn authorization record', async () => {
@@ -719,6 +788,286 @@ describe('session MCP input schemas', () => {
     ).toThrow(/does not exist in the workspace catalog/);
   });
 
+  it('keeps explicit permission options alongside semantic model, reasoning, Fast and independent Plan', () => {
+    const config = resolveCreateConfig(
+      {
+        modeId: 'default',
+        modelId: 'grok-4.6',
+        reasoningEffort: 'high',
+        planMode: true,
+        configOptionValues: { permission_mode: 'ask' },
+      },
+      createCapability('grok')
+    );
+    expect(config).toEqual({
+      modeId: 'default',
+      modelId: 'grok-4.6',
+      configOptionValues: { permission_mode: 'ask', reasoning_effort: 'high', plan_mode: true },
+    });
+    expect(
+      resolveCreateConfig(
+        { modeId: 'read-only', reasoningEffort: 'high', fastMode: false, planMode: true },
+        createCapability('codex')
+      )
+    ).toMatchObject({
+      modeId: 'read-only',
+      configOptionValues: { reasoning_effort: 'high', 'fast-mode': false, plan_mode: true },
+    });
+  });
+
+  it('retains semantic precedence over raw controls and accepts uncategorized permission options', () => {
+    const capability = createCapability('grok');
+    capability.configOptions = capability.configOptions?.map((option) => {
+      if (option.id !== 'permission_mode') return option;
+      const { category: _category, ...uncategorized } = option;
+      return uncategorized;
+    });
+    expect(
+      resolveCreateConfig(
+        {
+          modelId: 'grok-4.6',
+          reasoningEffort: 'high',
+          planMode: true,
+          configOptionValues: {
+            permission_mode: 'always-approve',
+            reasoning_effort: 'low',
+            plan_mode: false,
+          },
+        },
+        capability
+      )
+    ).toEqual({
+      modelId: 'grok-4.6',
+      configOptionValues: {
+        permission_mode: 'always-approve',
+        reasoning_effort: 'high',
+        plan_mode: true,
+      },
+    });
+  });
+
+  it('preserves omitted create defaults but lets raw selectors replace inherited scalar selectors', async () => {
+    const capability = createCapability('codex');
+    const manager = {
+      repo: {
+        openFlockDoc: async () => ({
+          flock: { scan: () => [{ key: ['acpCapability', 'agent-1'], value: capability }] },
+        }),
+      },
+    } as unknown as LoroDocumentManager;
+    const inherited = {
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      modeId: 'agent',
+      modelId: 'gpt-5.6-sol',
+      configOptionValues: { 'fast-mode': true },
+    };
+    const resolve = (input: Parameters<typeof buildMcpTurnDispatchConfig>[0]) =>
+      resolveEffectiveSessionCreateDispatchConfig({
+        manager,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        agentConfig: {
+          id: 'agent-1' as AgentConfigId,
+          machineId: 'machine-1' as MachineId,
+          name: 'Synthetic Codex',
+          cliType: 'builtin',
+          agentType: 'codex',
+          createdAt: '2026-10-02T00:00:00Z',
+        },
+        localOnly: true,
+        dispatchConfig: {
+          ...buildMcpTurnDispatchConfig(input),
+          frozenInheritedInputConfig: inherited,
+        },
+      });
+    await expect(resolve({})).resolves.toEqual({
+      modeId: 'agent',
+      modelId: 'gpt-5.6-sol',
+      configOptionValues: { 'fast-mode': true },
+      inheritSessionDefaults: false,
+    });
+    await expect(
+      resolve({ configOptionValues: { mode: 'read-only', model: 'gpt-5.5' } })
+    ).resolves.toEqual({
+      modeId: undefined,
+      modelId: undefined,
+      configOptionValues: { mode: 'read-only', model: 'gpt-5.5' },
+      inheritSessionDefaults: false,
+    });
+    await expect(
+      resolve({
+        modeId: 'read-only',
+        modelId: 'gpt-5.5',
+        reasoningEffort: 'high',
+        planMode: true,
+        configOptionValues: { 'fast-mode': false },
+      })
+    ).resolves.toEqual({
+      modeId: 'read-only',
+      modelId: 'gpt-5.5',
+      configOptionValues: { 'fast-mode': false, reasoning_effort: 'high', plan_mode: true },
+      inheritSessionDefaults: false,
+    });
+  });
+
+  it('validates semantic reasoning against a model selected by a raw option', () => {
+    const capability = createCapability('grok');
+    capability.modelReasoningEfforts = { 'grok-4.6': ['high'], 'grok-4.5': ['low'] };
+    expect(() =>
+      resolveCreateConfig(
+        { configOptionValues: { model: 'grok-4.5' }, reasoningEffort: 'high' },
+        capability
+      )
+    ).toThrow(/Invalid reasoning effort for model grok-4.5/);
+    expect(
+      resolveCreateConfig(
+        {
+          configOptionValues: { model: 'grok-4.5', permission_mode: 'ask' },
+          reasoningEffort: 'low',
+        },
+        capability
+      )
+    ).toMatchObject({
+      modelId: 'grok-4.5',
+      configOptionValues: { model: 'grok-4.5', permission_mode: 'ask', reasoning_effort: 'low' },
+    });
+    expect(
+      resolveCreateConfig(
+        { modelId: 'grok-4.6', configOptionValues: { model: 'grok-4.5' }, reasoningEffort: 'high' },
+        capability
+      ).modelId
+    ).toBe('grok-4.6');
+  });
+
+  it.each([
+    { modeId: 'unsupported' },
+    { configOptionValues: { unknown: true } },
+    { configOptionValues: { permission_mode: 'unsupported' } },
+    { configOptionValues: { permission_mode: false } },
+    { configOptionValues: { plan_mode: 'true' } },
+  ])('rejects unadvertised or mistyped selectors before dispatch: %j', (input) => {
+    expect(() => resolveCreateConfig(input, createCapability('grok'))).toThrow();
+  });
+
+  it('rejects only legacy Plan selectors that cannot coexist with the explicit mode', () => {
+    const capability = createCapability('claude');
+    expect(() => resolveCreateConfig({ modeId: 'auto', planMode: true }, capability)).toThrow(
+      /conflicts with explicit mode auto/
+    );
+    expect(() =>
+      resolveCreateConfig({ configOptionValues: { mode: 'auto' }, planMode: true }, capability)
+    ).toThrow(/conflicts with explicit mode auto/);
+    expect(resolveCreateConfig({ modeId: 'plan', planMode: true }, capability)).toEqual({
+      modeId: 'plan',
+    });
+    expect(resolveCreateConfig({ modeId: 'auto', planMode: false }, capability)).toEqual({
+      modeId: 'auto',
+    });
+  });
+
+  it.each(['session_create', 'session_create_many'] as const)(
+    'freezes explicit create permissions across a store reopen and binds retries to the selections (%s)',
+    async (kind) => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'lody-mcp-create-config-'));
+      const storePath = path.join(root, 'operations.sqlite3');
+      let store = new LodyOperationStore(storePath, () => 1000);
+      const input = SessionCreateToolInputSchema.parse({
+        operationId: 'explicit-config',
+        prompt: 'Review synthetic code.',
+        modeId: 'default',
+        configOptionValues: { permission_mode: 'ask', plan_mode: true },
+      });
+      if (!('prompt' in input) || !input.operationId)
+        throw new Error('Expected an asynchronous create');
+      const resolved = resolveMcpSessionCreate(
+        input,
+        undefined,
+        { machineId: 'machine-1' },
+        undefined
+      );
+      const dispatchConfig = {
+        ...resolveCreateConfig(input, createCapability('grok')),
+        inheritSessionDefaults: false as const,
+      };
+      const command = buildResolvedMcpCreateCanonicalCommand(resolved);
+      const acceptance = {
+        workspaceId: 'workspace-1' as WorkspaceId,
+        ownerMachineId: 'machine-1' as MachineId,
+        requesterSessionId: 'requester-1' as SessionId,
+        requesterUserId: 'user-1',
+        operationId: input.operationId,
+        kind,
+        canonicalCommand: kind === 'session_create' ? command : { items: [command] },
+        frozenContinuationConfig: {
+          inputConfig: {},
+          sourceTurnId: 'source-1',
+          targetDispatchConfigs: [dispatchConfig],
+        },
+        initiatorChainDepth: 0,
+        createdAt: '2026-10-02T00:00:00Z',
+        deadlineAt: '2026-10-02T01:00:00Z',
+        items: [
+          {
+            status: 'active' as const,
+            target: { sessionId: 'target-1' as SessionId, userTurnId: 'turn-1' },
+            inputDurable: false,
+          },
+        ],
+      };
+      try {
+        store.accept(acceptance);
+        store.close();
+        store = new LodyOperationStore(storePath, () => 2000);
+        const retryCommand = buildResolvedMcpCreateCanonicalCommand(
+          resolveMcpSessionCreate(
+            { ...input, configOptionValues: { plan_mode: true, permission_mode: 'ask' } },
+            undefined,
+            { machineId: 'machine-1' },
+            undefined
+          )
+        );
+        const retry = store.findMatchingRetry(
+          acceptance.requesterSessionId,
+          input.operationId,
+          kind,
+          kind === 'session_create' ? retryCommand : { items: [retryCommand] },
+          'user-1',
+          'source-1'
+        );
+        expect(retry?.frozenContinuationConfig.targetDispatchConfigs).toEqual([dispatchConfig]);
+        expect(retry?.items[0]).toMatchObject({
+          target: { sessionId: 'target-1', userTurnId: 'turn-1' },
+        });
+        for (const changed of [
+          { modeId: 'plan' },
+          { configOptionValues: { permission_mode: 'always-approve', plan_mode: true } },
+        ]) {
+          const changedCommand = buildResolvedMcpCreateCanonicalCommand(
+            resolveMcpSessionCreate(
+              { ...input, ...changed },
+              undefined,
+              { machineId: 'machine-1' },
+              undefined
+            )
+          );
+          expect(() =>
+            store.findMatchingRetry(
+              acceptance.requesterSessionId,
+              input.operationId,
+              kind,
+              kind === 'session_create' ? changedCommand : { items: [changedCommand] },
+              'user-1',
+              'source-1'
+            )
+          ).toThrowError(expect.objectContaining({ code: 'OPERATION_ID_REUSED' }));
+        }
+      } finally {
+        store.close();
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('defers run config to capability resolution instead of guessing ACP option ids', () => {
     expect(
       buildMcpTurnDispatchConfig({
@@ -777,6 +1126,23 @@ describe('session MCP input schemas', () => {
         }
       ).runConfig
     ).toEqual({
+      modes: [],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          options: [{ value: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' }],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Reasoning effort',
+          category: 'thought_level',
+          type: 'select',
+          options: [{ value: 'high', name: 'High' }],
+        },
+      ],
       models: [{ id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' }],
       reasoningEffortValues: ['high'],
       measuredForModelId: 'gpt-5.6-sol',

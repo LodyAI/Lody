@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { settingContainerClass } from '.';
@@ -13,7 +14,11 @@ import {
   type SettingsUsageRange,
   type SettingsUsageTimelineData,
 } from './settings-data-cache';
-import { formatUsageTimelineBucketLabel } from './usage-timeline-bucket-label';
+import {
+  createUsageTimelineFormatter,
+  formatUsageTimelineBucketLabel,
+} from './usage-timeline-bucket-label';
+import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 
 export function StatsSettingsComponent() {
   const usageAnalyticsAvailable = useAppCapability('usageAnalytics');
@@ -24,21 +29,15 @@ export function StatsSettingsComponent() {
 }
 
 function CloudStatsSettings() {
+  const { i18n } = useTranslation();
+  const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const isMobile = useIsMobile();
   const { activeOrganization } = useOrganization();
   const [range, setRange] = useState<SettingsUsageRange>('day');
   const { workspaceId, usageTimelineByRange, usageCalendar } = useSettingsDataCache();
   const [selectedUsageDayMs, setSelectedUsageDayMs] = useState<number | null>(null);
   const { day: usageDay, loading: usageDayLoading } = useSettingsUsageDay(selectedUsageDayMs);
-  const dayTimeFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(undefined, {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }),
-    []
-  );
+  const dayTimeFormatter = useMemo(() => createUsageTimelineFormatter(locale), [locale]);
 
   const usageTimeline = usageTimelineByRange[range];
 

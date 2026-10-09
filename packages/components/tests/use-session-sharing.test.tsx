@@ -11,10 +11,16 @@ const visibilityMocks = vi.hoisted(() => ({
   useVisibleLocalProjects: vi.fn(),
   useVisibleMachineMetas: vi.fn(),
 }));
+const organizationState = vi.hoisted(() => ({
+  members: [{ userId: 'user-1' }, { userId: 'user-2' }] as
+    | Array<{ userId: string }>
+    | null
+    | undefined,
+}));
 const convexProviderMock = vi.hoisted(() => ({
   useAuthClient: () => ({
     useActiveOrganization: () => ({
-      data: { id: 'workspace-1', members: [{ userId: 'user-1' }, { userId: 'user-2' }] },
+      data: { id: 'workspace-1', members: organizationState.members },
     }),
   }),
 }));
@@ -109,7 +115,44 @@ describe('useSessionSharing project visibility', () => {
     container?.remove();
     container = null;
     vi.clearAllMocks();
+    organizationState.members = [{ userId: 'user-1' }, { userId: 'user-2' }];
   });
+
+  it.each([undefined, null])(
+    'hides sharing for missing membership (%s) and recovers',
+    (members) => {
+      organizationState.members = members;
+      visibilityMocks.useVisibleMachineMetas.mockReturnValue({
+        machines: new Map(),
+        accessByMachineId: new Map(),
+        isLoading: false,
+      });
+      visibilityMocks.useVisibleLocalProjects.mockReturnValue({
+        projects: new Map(),
+        accessByProjectKey: new Map(),
+        isLoading: false,
+      });
+      const results: SharingResult[] = [];
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      const render = () =>
+        act(() => {
+          root?.render(
+            createElement(
+              TestCloudPlatformProvider,
+              null,
+              createElement(Probe, { onResult: (result) => results.push(result) })
+            )
+          );
+        });
+      render();
+      expect(results.at(-1)?.showSessionSharing).toBe(false);
+      organizationState.members = [{ userId: 'user-1' }, { userId: 'user-2' }];
+      render();
+      expect(results.at(-1)?.showSessionSharing).toBe(true);
+    }
+  );
 
   it('loads machine Flock projects only when the consumer requests them', () => {
     visibilityMocks.useVisibleMachineMetas.mockReturnValue({

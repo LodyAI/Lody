@@ -1,7 +1,9 @@
 # Session worktree lifecycle
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](session-worktree-lifecycle.zh.md)
 
 A user archives a Session that ran in its own worktree. Lody must eventually remove
 that worktree directory from the machine that owns it, keep the branch so the Session
@@ -17,6 +19,19 @@ synced workspace metadata, it sees both Sessions are archived and removes their
 worktree directories. Their branches remain. A week later Alice restores one Session;
 its worktree is recreated from the preserved branch. She deletes the other; nothing
 further happens on disk.
+
+## Preparation handoff
+
+A user can send while a draft preparation is being cancelled, replaced, or failing.
+Before formal execution or another preparation reuses that Session's workspace,
+the daemon must finish releasing the old preparation, including resources whose
+creation returns after cancellation. Removing a preparation from the available
+pool does not mean its cleanup has completed. A late cleanup must never remove
+the workspace adopted or recreated for execution. The wait is scoped to the
+Session; unrelated Sessions need not wait for it.
+
+This handoff concerns unadopted speculative resources. It does not change the
+archive and restore retention contract below.
 
 ## Responsibilities
 
@@ -34,9 +49,13 @@ It reconciles the directory tree it created against Session state:
   "never heard of" are distinguishable.
 - The daemon acts only after it has complete workspace metadata. Before that point it
   cannot tell a not-yet-synced Session from an archived one and must not guess.
-- Removal preserves work. Uncommitted, non-ignored changes are committed to the
+- Removal backs up the state remaining after the configured cleanup script.
+  Uncommitted, non-ignored changes are committed to the
   Session branch first. The branch is never deleted by archive, restore, or delete.
-  Ignored files (build output, local environment files) are discarded with the directory.
+  Ignored files (build output, local environment files) can be discarded with the directory.
+  This is a local commit, not a remote push or a full-directory backup. Files deleted or
+  modified by the cleanup script before the commit are outside the backup guarantee.
+  A failed backup commit prevents directory removal and is retried.
   A worktree whose repository cannot be resolved through git (the project directory
   is gone, or the repository is broken) is preserved and retried: there is nowhere to
   commit the backup, and the directory may hold the only copy of the work. A project
@@ -65,6 +84,26 @@ This is separate from disk reconciliation and does not wait for it.
 
 Machines that are no longer part of the workspace are out of scope: nothing can act on
 their disk, and no other machine may try.
+
+## Public retention contract
+
+Manual archive and PR auto-archive use the same cleanup contract. Public documentation
+and auto-archive settings must distinguish retained conversation history and local branches
+from a managed working directory that can be removed before permanent Session deletion.
+They must identify the ignored-file and cleanup-script boundaries and tell users to save
+needed files outside the worktree before archive or enabling auto-archive.
+
+Restore recreates a missing worktree from the preserved branch when execution resumes;
+setup runs again for that new directory. It does not recover discarded ignored files or
+files removed by cleanup scripts. Recovery requires the owning repository and branch to
+remain available; a removed local project must be registered again. Deleting a Session
+deletes its conversation, but does not delete its local Git branch or backup commits.
+
+PR auto-archive settings are under Settings → Preferences. They are device-local and
+apply to Sessions owned by the current user when that device observes a PR status
+transition into an enabled terminal state. An already terminal PR observed at app startup
+does not retroactively archive its Session. The resulting archived state can trigger
+worktree cleanup on the owning machine, including when archive was initiated elsewhere.
 
 ## What this replaces
 

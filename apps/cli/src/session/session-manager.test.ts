@@ -1308,7 +1308,7 @@ describe('SessionManager preparation compatibility', () => {
       config.userName,
       'changed@example.com',
       config.requesterUserId,
-      { preferMachineIdentity: true }
+      { preferMachineIdentity: true, personalIdentityEnabled: false }
     );
   });
 
@@ -1725,6 +1725,15 @@ describe('SessionManager failed agent creation', () => {
     expect(manager.getSession(sessionId)).toBe(replacement);
     expect(terminated).not.toHaveBeenCalled();
 
+    await manager.retireSessionForReconfiguration(replacement);
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(terminated).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    createAgent.mockResolvedValueOnce('acp-memory');
+    const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+    const reconfigured = await manager.createSession({ ...config, memory });
+    expect(reconfigured.getMemoryBinding?.()).toEqual(memory);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
     await manager.terminateSession(sessionId, true);
     expect(terminated).toHaveBeenCalledTimes(1);
     expect(terminated).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));

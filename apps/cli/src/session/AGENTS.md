@@ -17,11 +17,11 @@ Contract: specs/session-orchestration.md.
   substitute.
 - Derive the human identity from the active dispatch/execution runtime and fail closed when none
   exists; retries and recovery never reread mutable history.
-- Machine and Provider credentials stay execution-host scoped; attribution, authorization,
-  GitHub, and Git identity use the frozen identity, never the Session owner.
+- Machine/Provider credentials stay host-scoped. Attribution, authorization and commits
+  use the frozen Turn identity; GitHub network auth uses the trusted conversation owner.
 - Git: owner uses local config, no profile query; others never read it.
   `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
-  Identity never restarts ACP/sandbox, even in prep.
+  Commit attribution never restarts ACP; owner changes retire the runtime.
 
 ## Dispatch
 
@@ -86,11 +86,11 @@ Contract: specs/session-orchestration.md.
 
 ## Sagas
 
-- Preparation peek/claim never delay cold fallback; peek never transfers ownership. Publish the
-  resource BEFORE `start()`. It may create the marked final worktree and complete `newSession`, but cannot
-  create a session doc, run setup, append history, or publish events before adoption.
-- Dispatch and claim rescan the current row and reject changed compatibility under canonical
-  `buildSessionLaunchConfig` semantics; a published incompatible resource cleans up first.
+- Preparation peek/claim are synchronous; peek never transfers ownership. Cold/replacement starts
+  await same-session cleanup, even after lease removal or late creation. Publish before `start()`.
+  Before adoption: marked worktree creation and `newSession` only; no doc, setup, history or events.
+- Dispatch/claim rescan current config using canonical `buildSessionLaunchConfig`; reject changed
+  compatibility and await incompatible-resource cleanup.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
 - Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder

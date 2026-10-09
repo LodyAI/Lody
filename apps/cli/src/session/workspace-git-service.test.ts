@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { devNull, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
-import type { SessionId } from '@lody/shared';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ProjectRef, SessionId } from '@lody/shared';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
 import type { SessionExec } from '@/lib/git/resolve-git-branch-name';
@@ -55,6 +55,18 @@ async function withRepo(
 }
 
 describe('WorkspaceGitService', () => {
+  beforeEach(() => {
+    // Exercise the fixture's native Git URLs, not the caller's transport rewrites,
+    // repository pointers, hooks, or signing configuration. Service subprocesses
+    // must see the same isolated environment as fixture setup.
+    for (const key of Object.keys(process.env)) {
+      if (/^(GIT_|SSH_|LODY_GIT_)/.test(key)) vi.stubEnv(key, undefined);
+    }
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    vi.stubEnv('GIT_CONFIG_GLOBAL', devNull);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
   it('publishes a local repository without a remote, including its unborn branch and later checkout', async () => {
     await withRepo(async (cwd, git) => {
       const { service, meta } = fixture();
@@ -96,16 +108,19 @@ describe('WorkspaceGitService', () => {
         'fixture',
       ]);
       const worktree = join(cwd, 'checkout');
-      await git(['worktree', 'add', '-b', 'feature/worktree', worktree]);
+      await git(['worktree', 'add', '-b', 'session/12345678', worktree]);
       const { service, meta } = fixture();
       await service.syncSession(child, {
         getWorkdir: () => worktree,
         exec: async (command, args, workdir) =>
           (await exec(command, args, { cwd: workdir })).stdout,
       });
-      expect(meta.get(owner)?.branchName).toBe('feature/worktree');
+      expect(meta.get(owner)?.branchName).toBe('session/12345678');
       expect(meta.get(child)).toEqual({ parentSessionId: owner });
       expect((await git(['branch', '--show-current'])).trim()).toBe('feature/local');
+      await git(['-C', worktree, 'branch', '-m', 'feature/worktree']);
+      await service.syncLocalWorkspace(owner, worktree);
+      expect(meta.get(owner)?.branchName).toBe('feature/worktree');
       await git(['-C', worktree, 'checkout', '--detach']);
       await service.syncLocalWorkspace(owner, worktree);
       expect(meta.get(owner)?.branchName).toBe('feature/worktree');

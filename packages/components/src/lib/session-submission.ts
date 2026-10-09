@@ -13,6 +13,7 @@ import type {
 import {
   getSessionRoomId,
   getServerNow,
+  NEW_SESSION_HISTORY_BACKEND,
   normalizeSessionTurnInputConfig,
   SessionStatusFactory,
 } from '@lody/shared';
@@ -50,6 +51,10 @@ function buildSessionCreateResult(payload: SessionToCreate): CreateSessionResult
     createdAt: new Date().toISOString(),
     cliType: payload.cliType,
     agentType: payload.agentType,
+    // Backend selection is a creation policy, not caller-provided turn data.
+    // Flip NEW_SESSION_HISTORY_BACKEND only when the corresponding adapter is
+    // registered on every client that can open the session.
+    historyBackend: NEW_SESSION_HISTORY_BACKEND,
     agentConfigId: payload.agentConfigId,
     acpSessionId: undefined,
     diffStats: undefined,
@@ -187,6 +192,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       dispatch?: boolean;
       guideExpectedTurnId?: string;
       attachments?: SessionAttachmentDraft[];
+      onAccepted?: () => void;
     }
   ) => {
     if (!runtime) {
@@ -235,7 +241,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
           : { kind: options?.dispatch ? 'dispatch' : 'history' },
         undefined,
         undefined,
-        options?.attachments
+        options?.attachments,
+        options?.onAccepted
       );
     } else {
       await runtime.writer.appendSessionTurn(sessionId, entry, dispatch);

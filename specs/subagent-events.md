@@ -197,6 +197,17 @@ Review focus: accept the Core envelope versus native child-session transport;
 accept per-run transcripts inside one Lody session; accept truthful capability
 degradation rather than promising identical output from all providers.
 
+## Task dialog presentation
+
+A task's dialog reads as the parent conversation: Markdown, plan entries and tool
+steps use the same renderers, and adjacent tools/thoughts share the same activity
+summary. Groups start open; folding one keeps surrounding prose visible and the
+reader's choice survives streamed updates. Commands use the shared highlighted
+command sheet; terminal output retains its ANSI rendering and bounds. File links
+open through the owning parent session. The brief and activity scroll together,
+and dialog content does not enter parent conversation search. This presentation
+does not add child permission, fork or dispatch controls.
+
 ## Evidence and validation limits
 
 Provider event inventory and rationale are in the

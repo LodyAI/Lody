@@ -38,9 +38,12 @@ vi.mock('../src/atoms/doc-meta', async () => ({
 vi.mock('../src/lib/session-share-publisher', () => ({
   captureSessionShare: (...args: unknown[]) => cloud.capture(...args),
 }));
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
-}));
+vi.mock('react-i18next', async () => {
+  const { createInstance } = await import('i18next');
+  const i18n = createInstance();
+  await i18n.init({ lng: 'en', resources: {} });
+  return { useTranslation: () => ({ t: i18n.t.bind(i18n) }) };
+});
 vi.mock('@lody/shared/session-sharing', async (original) => ({
   ...(await original<object>()),
   createSessionShareSecret: () => 'a'.repeat(64),
@@ -144,6 +147,121 @@ describe('static publication client lifecycle', () => {
     container.remove();
     vi.unstubAllEnvs();
   });
+  it.each([
+    [
+      'share_quota_exceeded',
+      'at most 2 unfinished publications, 10 new publication attempts per hour, and 2 GiB',
+    ],
+    ['share_conflict', 'Close and reopen sharing'],
+    ['share_forbidden', 'no longer have permission'],
+    ['share_unavailable', 'no longer available'],
+    ['share_confirmation_required', 'send a new request'],
+    ['unauthenticated', 'Sign in again'],
+  ])('explains %s without publishing or exposing the server payload', async (code, expected) => {
+    cloud.mutation.mockRejectedValue(
+      Object.assign(new Error('private transcript access=v1.secret'), {
+        data: { code, privateDetail: 'private transcript' },
+      })
+    );
+    await render();
+    await act(async () => control.onPublish());
+    expect(control.error).toContain(expected);
+    expect(control.error).not.toMatch(/private transcript|access=v1/);
+    expect(control.result).toBeNull();
+    expect(cloud.upload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [new Error('Share image exceeds size limit'), 'Each image can be up to 20 MB'],
+    [new Error('Share history exceeds size limit'), 'history can be up to 32 MiB'],
+    [new Error('Share package exceeds size limit'), 'share can be up to 256 MiB'],
+    [new Error('Too many share attachments'), 'up to 64 images'],
+    [new Error('Invalid share selection'), 'between 1 and 32 conversations'],
+    [
+      new Error('Share object exceeds size limit'),
+      '32 MiB, each image 20 MB, and the whole share 256 MiB',
+    ],
+    [new Error('Share attachment unavailable'), 'image could not be loaded'],
+    [new DOMException('expired', 'TimeoutError'), 'took too long'],
+    [new Error('unknown private transcript'), 'Could not load the conversations'],
+  ])('explains capture failures and allows a fresh retry', async (failure, expected) => {
+    cloud.capture.mockRejectedValueOnce(failure);
+    await render();
+    await act(async () => control.onPublish());
+    expect(control.error).toContain(expected);
+    expect(control.phase).toBe('idle');
+    expect(control.hasPending).toBe(false);
+    expect(cloud.mutation).not.toHaveBeenCalled();
+    await act(async () => control.onPublish());
+    expect(control.error).toBeNull();
+    expect(control.result).not.toBeNull();
+  });
+
+  it('identifies upload failures after progress resets and preserves the retry', async () => {
+    cloud.upload.mockRejectedValueOnce(new TypeError('Failed to fetch private URL'));
+    await render();
+    await act(async () => control.onPublish());
+    expect(control.phase).toBe('idle');
+    expect(control.error).toContain('upload did not finish');
+    expect(control.error).not.toContain('private URL');
+    expect(control.hasPending).toBe(true);
+    await act(async () => control.onPublish());
+    expect(control.error).toBeNull();
+    expect(control.result).not.toBeNull();
+    expect(cloud.capture).toHaveBeenCalledOnce();
+    expect(
+      cloud.mutation.mock.calls.filter(([name]) => name === 'sessionSharing:beginDeployment')
+    ).toHaveLength(1);
+  });
+
+  it('distinguishes admission failure from upload failure', async () => {
+    cloud.mutation.mockRejectedValue(new Error('Unknown transport failure'));
+    await render();
+    await act(async () => control.onPublish());
+    expect(control.error).toContain('Could not start sharing');
+    expect(cloud.upload).not.toHaveBeenCalled();
+  });
+
+  it('keeps the published link available when manual copy is blocked', async () => {
+    const writeText = vi.fn().mockRejectedValue(new DOMException('Denied', 'NotAllowedError'));
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    await render();
+    await act(async () => control.onPublish());
+    expect(control.error).toBeNull();
+    expect(control.result?.copied).toBe(false);
+    const link = control.shareLink;
+    expect(link).toContain('https://share.test/s/');
+    await act(async () => control.onCopy());
+    expect(control.error).toContain('copy the full link');
+    expect(control.shareLink).toBe(link);
+  });
+
+  it('explains a missing device credential without attempting clipboard access', async () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    cloud.state = entry;
+    await render();
+    await act(async () => control.onCopy());
+    expect(control.error).toContain('previous link will stop working');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it.each(['onReset', 'onRevoke'] as const)(
+    'reports uncertain %s results without claiming success',
+    async (action) => {
+      cloud.state = entry;
+      cloud.mutation.mockRejectedValue(new Error('Response lost'));
+      await render();
+      await act(async () => {
+        await control[action]();
+      });
+      expect(control.error).toContain(
+        action === 'onReset' ? 'whether the link was reset' : 'whether sharing was stopped'
+      );
+      expect(control.notice).toBeNull();
+    }
+  );
+
   it('retains the reader credential when the dialog closes during publication', async () => {
     let finish!: (value: typeof entry) => void;
     let entered!: () => void;
@@ -338,7 +456,7 @@ describe('static publication client lifecycle', () => {
     await render();
     await act(async () => control.onPublish());
     expect(control.hasPending).toBe(true);
-    expect(control.error).not.toBeNull();
+    expect(control.error).toContain('Could not confirm whether the share was published');
     cloud.state = { ...entry, currentDeploymentId: 'deployment' };
     await render();
     expect(control.conflict).toBe(false);

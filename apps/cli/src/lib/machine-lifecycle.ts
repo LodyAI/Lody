@@ -309,17 +309,78 @@ const runCommand = async (args: {
   });
 };
 
-/** Returns true only when the upgrade intent existed and npm install succeeded. */
+export type DaemonUpgradeInstallation = { bin: string; version: string };
+
+const InstalledLodyPackageSchema = z.object({
+  name: z.literal(LODY_NPM_PACKAGE_NAME),
+  version: z.string().regex(SEMVER_TARGET_RE),
+  bin: z.union([z.string().min(1), z.object({ lody: z.string().min(1) })]),
+});
+
+/** Resolve the install destination through the same npm used to install, never PATH's lody. */
+async function resolveUpgradedInstallation(args: {
+  npmExecutable: string;
+  targetVersion: string;
+  timeoutMs: number;
+  spawnImpl: SpawnLike;
+  signal?: AbortSignal;
+}): Promise<DaemonUpgradeInstallation> {
+  const run = async (command: string, commandArgs: string[]) => {
+    const result = await runCommand({ ...args, command, commandArgs });
+    if (result.aborted || args.signal?.aborted) {
+      throw new DOMException('Daemon upgrade canceled', 'AbortError');
+    }
+    if (result.timedOut || result.code !== 0) {
+      throw new Error(
+        `Upgrade verification failed (${commandArgs.join(' ')}): ${result.timedOut ? 'timed out' : `exit ${result.code}`}`
+      );
+    }
+    return result.stdout.trim();
+  };
+  const root = await run(args.npmExecutable, ['root', '-g']);
+  if (!path.isAbsolute(root) || /[\r\n]/.test(root)) {
+    throw new Error('npm root -g did not return one absolute installation directory');
+  }
+  const packageRoot = await fs.realpath(path.join(root, LODY_NPM_PACKAGE_NAME));
+  const installed = InstalledLodyPackageSchema.parse(
+    JSON.parse(await fs.readFile(path.join(packageRoot, 'package.json'), 'utf8'))
+  );
+  if (args.targetVersion !== 'latest' && installed.version !== args.targetVersion) {
+    throw new Error(
+      `Installed Lody version ${installed.version} does not match requested ${args.targetVersion}`
+    );
+  }
+  const entry = typeof installed.bin === 'string' ? installed.bin : installed.bin.lody;
+  const bin = await fs.realpath(path.resolve(packageRoot, entry));
+  const relative = path.relative(packageRoot, bin);
+  if (
+    !relative ||
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error('Installed Lody entry must be inside its package directory');
+  }
+  const actualVersion = await run(process.execPath, [bin, '--version']);
+  if (actualVersion !== installed.version) {
+    throw new Error(
+      `Installed Lody entry reports ${actualVersion || 'no version'}; expected ${installed.version}`
+    );
+  }
+  return { bin, version: installed.version };
+}
+
+/** Installation success is not upgrade completion; the caller must verify the runner handoff. */
 export const runDaemonUpgradeFromIntent = async (args: {
   logger: LifecycleLogger;
   timeoutMs?: number;
   spawnImpl?: SpawnLike;
   signal?: AbortSignal;
-}): Promise<boolean> => {
+}): Promise<DaemonUpgradeInstallation | null> => {
   const intent = await readDaemonUpgradeIntent();
   if (!intent) {
     args.logger.warn?.('[daemon-upgrade] no upgrade intent found; respawning without upgrade');
-    return false;
+    return null;
   }
 
   try {
@@ -343,19 +404,38 @@ export const runDaemonUpgradeFromIntent = async (args: {
       args.logger.error?.(
         `[daemon-upgrade] npm install timed out after ${args.timeoutMs ?? MACHINE_UPGRADE_TIMEOUT_MS}ms`
       );
-      return false;
+      return null;
     }
     if (result.code !== 0) {
       const detail = (result.stderr || result.stdout || 'no output').replace(/\s+/g, ' ').trim();
       args.logger.error?.(
         `[daemon-upgrade] npm install failed with code ${result.code}: ${detail.slice(0, 500)}`
       );
-      return false;
+      return null;
     }
     args.logger.info?.(
       `[daemon-upgrade] npm install completed for ${LODY_NPM_PACKAGE_NAME}@${targetVersion}`
     );
-    return true;
+    try {
+      const installation = await resolveUpgradedInstallation({
+        npmExecutable,
+        targetVersion,
+        timeoutMs: args.timeoutMs ?? MACHINE_UPGRADE_TIMEOUT_MS,
+        spawnImpl: args.spawnImpl ?? spawn,
+        signal: args.signal,
+      });
+      args.logger.info?.(
+        `[daemon-upgrade] verified ${installation.version} at ${installation.bin}`
+      );
+      return installation;
+    } catch (error) {
+      if (args.signal?.aborted || (error instanceof Error && error.name === 'AbortError'))
+        throw error;
+      args.logger.error?.(
+        `[daemon-upgrade] ${error instanceof Error ? error.message : String(error)}`
+      );
+      return null;
+    }
   } finally {
     await clearDaemonUpgradeIntent();
   }

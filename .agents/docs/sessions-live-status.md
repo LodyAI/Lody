@@ -12,6 +12,10 @@ this page is the full text of the rules summarised there.
   `notification-permission-prompt.tsx` and the inner content of `session-pin.tsx`
   use the same `ConversationColumn` as the stream and composer; keep full-bleed
   bands outside that column, but never let their interactive content span the pane.
+- Explicit `running + phase: finalizing` presence displays “Finalizing…” /
+  “收尾中…” until the execution owner clears presence or starts another phase.
+  It still counts as busy for submission routing and Stop; a finished history
+  row alone never selects this label. See [intent](../../specs/session-finalization-status.md).
 - Live working/waiting UI (spinners, permission badges, Stop visibility, tab/dock
   status) must use presence (`sessionLiveStatusAtomFamily` or an explicit
   `liveSessionStatuses` map), not `SessionMeta.status` / `lastRunningSeen`.

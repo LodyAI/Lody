@@ -1,9 +1,6 @@
 import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import type { TFunction } from 'i18next';
 import {
-  getAcpCapabilityCacheKey,
-  getStaticBuiltinAcpCapabilities,
-  hasExplicitSchedulePermission,
   machineSupportsSchedulesProtocol,
   type AgentConfigMeta,
   type MachineLegacyMetaFields,
@@ -100,22 +97,6 @@ export function collectScheduleSaveIssues(
           t('schedules.upgrade', 'Update the target machine’s CLI to edit schedules.')
         );
     }
-    if (
-      !hasExplicitSchedulePermission(
-        agent,
-        machine?.acpCapabilities?.[getAcpCapabilityCacheKey(agentConfig.id)] ??
-          getStaticBuiltinAcpCapabilities(
-            agentConfig.cliType,
-            agentConfig.agentType,
-            agentConfig.runtimeOverrides
-          )
-      )
-    )
-      push(
-        'agent',
-        'invalid',
-        t('schedules.choosePermission', 'Choose an explicit permission mode.')
-      );
   }
   if (
     context.project?.kind === 'local' &&

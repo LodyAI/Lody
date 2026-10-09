@@ -64,6 +64,22 @@ primitives into product surfaces and may add layout or interaction constraints,
 while the primitive's props remain the owner of its visual variant, size, tone,
 and shape.
 
+For appearance-only migrations, keep each product component's visual rules in a
+module-level `stylex.create` definition and name styles by their semantic role.
+Reuse existing area surfaces and product tokens where they match; retain exact
+CSS variables and dimensions when no equivalent token exists. Keep runtime
+geometry and styles owned by external rendering engines at their existing dynamic
+boundary. Configure shared primitives through their documented props when those
+props reproduce the existing appearance. The [progressive StyleX migration note](../notes/implemented/simplification/2026-10-04-complex-surfaces-stylex.md) records the retained legacy overrides and
+the current application of these rules.
+
+Settings' `CompactRow` keeps its label and helper in separate text nodes. Its
+optional `labelId` and `helperId` let a caller associate a control with those
+nodes through `aria-labelledby` and `aria-describedby`; visual adjacency alone
+does not name a control. The Preferences switches use this association with the
+existing translated copy. See the
+[decision and browser regression](../notes/implemented/bug-fix/2026-10-01-preferences-switch-names.md).
+
 `--input` is the theme's raw `input.background` and doubles as a muted chip/composer
 slab, so in a light theme it can sit below the page color and read as a disabled field.
 `--input-field` is derived in `lib/vscode-theme/vscode-theme-css.ts` as the lighter of
@@ -90,3 +106,8 @@ onto one in-flight request, and clamping the served `Cache-Control: max-age` to 
 (the endpoint's CDN-shaped 4h is wrong for someone who just opened the panel) keep it to
 roughly one 304 per interaction. An always-visible composer band was rejected because it
 would have to load in the background to know whether to render at all.
+
+The parser also normalizes `scheduled_reset` independently of `active_watch`. Both entry
+points and the dialog prioritize an announced schedule over the forecast probability.
+The local scheduled time is optional; crossing it shows pending execution confirmation.
+See the [API compatibility decision](../notes/implemented/bug-fix/2026-10-02-codex-scheduled-reset.md).

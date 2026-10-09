@@ -1,4 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import { cn } from '@/lib/utils';
 
 /**
@@ -6,9 +8,68 @@ import { cn } from '@/lib/utils';
  * `session-tab-bar.tsx` (canvas → inactive → active) before touching these;
  * re-derive and measure against the actual theme tokens, don't guess.
  */
-export const TAB_PILL_ACTIVE_CLASS = 'bg-foreground/[0.08] text-tab-active-foreground';
-export const TAB_PILL_INACTIVE_CLASS =
-  'bg-foreground/[0.035] text-tab-inactive-foreground hover:bg-foreground/[0.06] hover:text-tab-hover-foreground';
+export const tabPillStyles = stylex.create({
+  active: {
+    backgroundColor: 'color-mix(in oklab, hsl(var(--foreground)) 8%, transparent)',
+    color: 'hsl(var(--tab-active-foreground))',
+  },
+  inactive: {
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--foreground)) 3.5%, transparent)',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'color-mix(in oklab, hsl(var(--foreground)) 6%, transparent)',
+      },
+    },
+    color: {
+      default: 'hsl(var(--tab-inactive-foreground))',
+      ':hover': {
+        default: null,
+        '@media (hover: hover)': 'hsl(var(--tab-hover-foreground))',
+      },
+    },
+  },
+});
+
+export const TAB_PILL_ACTIVE_CLASS = stylex.props(tabPillStyles.active).className;
+export const TAB_PILL_INACTIVE_CLASS = stylex.props(tabPillStyles.inactive).className;
+
+const styles = stylex.create({
+  strip: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+  },
+  pill: {
+    display: 'flex',
+    height: '32px',
+    minWidth: 0,
+    alignItems: 'center',
+    gap: space[1.5],
+    borderRadius: 'var(--radius-md)',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'transparent',
+    paddingInline: space[3],
+    fontSize: '0.9em',
+    fontWeight: 500,
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  icon: {
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+  },
+  label: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+});
 
 export interface TabPillItem<Key extends string = string> {
   key: Key;
@@ -42,7 +103,11 @@ export function TabPillStrip<Key extends string>({
   itemClassName,
 }: TabPillStripProps<Key>) {
   return (
-    <div role="tablist" aria-label={ariaLabel} className={cn('flex items-center gap-1', className)}>
+    <div
+      role="tablist"
+      aria-label={ariaLabel}
+      className={cn(stylex.props(styles.strip).className, className)}
+    >
       {items.map(({ key, label, icon: Icon }) => {
         const active = key === activeKey;
         return (
@@ -53,13 +118,13 @@ export function TabPillStrip<Key extends string>({
             aria-selected={active}
             onClick={() => onSelect(key)}
             className={cn(
-              'flex h-8 min-w-0 items-center gap-1.5 rounded-md border border-transparent px-3 text-[0.9em] font-medium transition-colors',
-              active ? TAB_PILL_ACTIVE_CLASS : TAB_PILL_INACTIVE_CLASS,
+              stylex.props(styles.pill, active ? tabPillStyles.active : tabPillStyles.inactive)
+                .className,
               itemClassName
             )}
           >
-            {Icon ? <Icon className="h-3.5 w-3.5 shrink-0" /> : null}
-            <span className="min-w-0 truncate">{label}</span>
+            {Icon ? <Icon className={stylex.props(styles.icon).className} /> : null}
+            <span {...stylex.props(styles.label)}>{label}</span>
           </button>
         );
       })}

@@ -2,13 +2,67 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { copyShareImage, exportShareImage } from '../src/lib/share-image-export';
 
-const mocks = vi.hoisted(() => ({ toBlob: vi.fn(), bridge: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  toBlob: vi.fn(),
+  bridge: vi.fn(),
+  native: vi.fn(),
+  files: new Map<string, Uint8Array>(),
+  shared: [] as { path: string; bytes: Uint8Array }[],
+  shareError: null as string | null,
+}));
+vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: mocks.native }));
+vi.mock('../src/lib/session-file-upload', () => ({
+  buildSessionFileDownloadUrl: () => {
+    throw new Error('PNG export must stay local');
+  },
+}));
+vi.mock('@capacitor/filesystem', () => ({
+  Directory: { Cache: 'CACHE' },
+  Filesystem: {
+    async writeFile({ path, data }: { path: string; data: string }) {
+      mocks.files.set(
+        path,
+        Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0))
+      );
+    },
+    async appendFile({ path, data }: { path: string; data: string }) {
+      mocks.files.set(
+        path,
+        Uint8Array.from([
+          ...mocks.files.get(path)!,
+          ...Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0)),
+        ])
+      );
+    },
+    async getUri({ path }: { path: string }) {
+      return { uri: `file://${path}` };
+    },
+    async deleteFile({ path }: { path: string }) {
+      mocks.files.delete(path);
+    },
+  },
+}));
+vi.mock('@capacitor/share', () => ({
+  Share: {
+    async share({ files }: { files: string[] }) {
+      const path = files[0].slice('file://'.length);
+      const bytes = mocks.files.get(path);
+      if (!bytes) throw new Error('Missing PNG');
+      if (mocks.shareError) throw new Error(mocks.shareError);
+      mocks.shared.push({ path, bytes });
+    },
+  },
+}));
 vi.mock('@zumer/snapdom', () => ({ snapdom: { toBlob: mocks.toBlob } }));
 vi.mock('../src/lib/image-preview-export', () => ({ getImagePreviewExportBridge: mocks.bridge }));
 
 beforeEach(() => {
   vi.resetAllMocks();
   vi.useFakeTimers();
+  mocks.native.mockReturnValue(false);
+  mocks.files.clear();
+  mocks.shared = [];
+  mocks.shareError = null;
   Object.defineProperty(document, 'fonts', {
     configurable: true,
     value: { ready: Promise.resolve() },
@@ -81,6 +135,43 @@ describe('share image export', () => {
     vi.runAllTimers();
     expect(revoked).toEqual(['blob:share-image']);
   });
+
+  it.each([null, 'Share canceled', 'Permission denied'])(
+    'exports a native PNG through the share sheet and preserves its outcome (%s)',
+    async (error) => {
+      mocks.native.mockReturnValue(true);
+      mocks.shareError = error;
+      const bytes = Uint8Array.of(137, 80, 78, 71);
+      mocks.toBlob.mockResolvedValue({
+        type: 'image/png',
+        size: bytes.length,
+        arrayBuffer: async () => bytes.buffer,
+      });
+      const downloads: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
+        downloads.push(this.href);
+      });
+      const exported = exportShareImage(
+        document.createElement('div'),
+        'Review / rendering',
+        'conversation'
+      );
+      if (error === 'Permission denied') {
+        await expect(exported).rejects.toThrow(error);
+      } else {
+        await expect(exported).resolves.toEqual({ saved: error === null });
+      }
+      expect(downloads).toEqual([]);
+      expect(mocks.files.size).toBe(0);
+      if (error === null) {
+        expect(mocks.shared).toEqual([
+          { path: expect.stringMatching(/^lody-shared\/[^/]+\/Review - rendering\.png$/), bytes },
+        ]);
+      } else {
+        expect(mocks.shared).toEqual([]);
+      }
+    }
+  );
 
   it('reports a cancelled native save as no save, so callers can leave the preview open', async () => {
     const bytes = new Uint8Array([137, 80, 78, 71]).buffer;

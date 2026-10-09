@@ -4,6 +4,12 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  editSessionRunConfigDraftAtom,
+  registerSessionRunConfigDraftLeaseAtom,
+  sessionRunConfigDraftsAtom,
+  setSessionRunConfigDraftAccountAtom,
+} from '../src/atoms/session-run-config-drafts';
 
 vi.mock('@/lib/auth-bootstrap', () => ({
   readAuthBootstrapSnapshot: () => null,
@@ -44,7 +50,7 @@ type TestOrganization = {
   slug: string;
   name: string;
   logo: null;
-  members: Array<{ userId: string; role: string }>;
+  members?: Array<{ userId: string; role: string }> | null;
 };
 
 function createOrganization(id: string, slug: string, name: string): TestOrganization {
@@ -63,6 +69,21 @@ function createDeferred<T>() {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function editRunConfigDraft(store: Store, workspaceId: string, accountId = 'user-1') {
+  store.set(setSessionRunConfigDraftAccountAtom, accountId);
+  const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
+    accountId,
+    workspaceId,
+    sessionId: 'session-1',
+    targetKey: 'codex',
+  });
+  store.set(editSessionRunConfigDraftAtom, {
+    lease,
+    edit: { type: 'config', configId: 'fast', value: false },
+  });
+  return lease;
 }
 
 function OrganizationProbe({ targetSlug }: { targetSlug: string }) {
@@ -183,6 +204,51 @@ describe('useOrganization setActive dedupe', () => {
     });
   }
 
+  it.each([undefined, null])(
+    'gates incomplete membership (%s) and recovers after refetch',
+    async (members) => {
+      await render('old-workspace', 0);
+      expect(latestOrganizationState!.hasAdminPermission).toBe(true);
+
+      activeOrganization = { ...activeOrganization, members };
+      await render('old-workspace', 1);
+
+      expect(latestOrganizationState!.activeOrganization).toBeNull();
+      expect(latestOrganizationState!.role).toBeUndefined();
+      expect(latestOrganizationState!.hasAdminPermission).toBe(false);
+      expect(latestOrganizationState!.error?.message).toContain('Incomplete organization response');
+      expect(organizationMocks.setActive).not.toHaveBeenCalled();
+
+      organizationMocks.refetchActiveOrganization.mockImplementationOnce(() => {
+        activeOrganization = createOrganization('workspace-old', 'old-workspace', 'Old Workspace');
+      });
+      await act(async () => {
+        await latestOrganizationState!.refetchActiveOrganization();
+      });
+      await render('old-workspace', 2);
+
+      expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-old');
+      expect(latestOrganizationState!.role).toBe('owner');
+      expect(latestOrganizationState!.hasAdminPermission).toBe(true);
+      expect(latestOrganizationState!.error).toBeNull();
+    }
+  );
+
+  it('can switch away from a previous organization with incomplete membership', async () => {
+    activeOrganization = { ...activeOrganization, members: undefined };
+    await render('workspace-new', 0);
+
+    expect(latestOrganizationState!.activeOrganization).toBeNull();
+    expect(latestOrganizationState!.hasAdminPermission).toBe(false);
+    expect(latestOrganizationState!.error).toBeNull();
+    expect(organizationMocks.setActive).toHaveBeenCalledWith({ organizationId: 'workspace-new' });
+
+    activeOrganization = createOrganization('workspace-new', 'workspace-new', 'New Workspace');
+    await render('workspace-new', 1);
+    expect(latestOrganizationState!.activeOrganization?.id).toBe('workspace-new');
+    expect(latestOrganizationState!.role).toBe('owner');
+  });
+
   it('sends one setActive request for duplicate target workspace switchers', async () => {
     await render('target-workspace', 0);
 
@@ -208,6 +274,8 @@ describe('useOrganization setActive dedupe', () => {
   });
 
   it('publishes the fallback after delete success when no newer writer intervenes', async () => {
+    const removed = editRunConfigDraft(store, 'workspace-old');
+    editRunConfigDraft(store, 'workspace-target');
     organizationMocks.deleteOrganization.mockResolvedValueOnce({
       data: { id: 'workspace-old' },
       error: null,
@@ -220,9 +288,15 @@ describe('useOrganization setActive dedupe', () => {
 
     expect(store.get(currentWorkspaceSlugAtom)).toBe('target-workspace');
     expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-target');
+    expect(
+      [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => scope.workspaceId)
+    ).toEqual(['workspace-target']);
+    expect(removed.active).toBe(false);
   });
 
   it('rolls back after leave failure when no newer writer intervenes', async () => {
+    const lease = editRunConfigDraft(store, 'workspace-old');
+    const drafts = store.get(sessionRunConfigDraftsAtom);
     organizationMocks.leaveOrganization.mockResolvedValueOnce({
       data: null,
       error: { message: 'leave failed' },
@@ -236,6 +310,8 @@ describe('useOrganization setActive dedupe', () => {
 
     expect(store.get(currentWorkspaceSlugAtom)).toBe('old-workspace');
     expect(store.get(currentWorkspaceIdAtom)).toBe('workspace-old');
+    expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
+    expect(lease.active).toBe(true);
   });
 
   it('does not switch Better Auth or replace identity when delete resolves after navigation', async () => {

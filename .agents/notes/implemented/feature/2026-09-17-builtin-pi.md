@@ -47,6 +47,46 @@ blocked on a checksummed artifact containing matching Windows CI binaries; the o
 manifest intentionally advertises no extension support. See the updated draft Spec
 for the contract. No new executor, profile copy or plugin sandbox is introduced.
 
+Correction (2026-09-30): the published `0.2.0-lody.5cbd610f8476` artifact ships both Windows modules and
+declares `lody.piExtensionsProtocolVersion: 1`, but its committed manifest dropped
+the field, so the daemon never advertised `piExtensions` and the settings section
+stayed disabled. The manifest now carries the field; the fixed-host capability test
+requires `piExtensions` wherever `builtinPi` is advertised, so a runtime bump that
+drops it again fails on every test host.
+
+### Model-picker repair (2026-10-07)
+
+Extension-enabled probes stamped `+override:{"piExtensions":[...]}` correctly,
+but `useSessionAcpSelectorContext` omitted the Provider's `runtimeOverrides`.
+The shared applicability gate treated that omission as removed extensions and
+rejected the entire Pi catalog. Pi has no static fallback. Landing and Provider
+rows already supplied overrides, explaining the inconsistent model lists.
+
+The shared session hook now owns the bound machine's Provider subscription and
+reads the exact id through the shared Provider atom. Both persisted and draft
+composers pass matching machine/type overrides to model and command readers.
+Missing/mismatched Providers expose no catalog. Keep the cache gate: weakening it
+would revive models and commands from removed extensions.
+
+Editing Pi extensions previously reset verification but allowed Save to close
+without probing. Save now uses the existing revision-fenced live-verification
+flow, including removal of the last extension. Unchanged edits still save without
+a probe. The Provider must be persisted before the daemon accepts its id, so a
+failed probe does not roll back the selection: the dialog stays open with the
+error and retry. Changing the selection while a probe is pending cancels its UI
+result; it cannot complete the newer save. Edit mode never uses background
+Provider creation, even after clearing the final extension.
+
+Behavioral coverage in `use-machine-flock-rows.test.tsx` mounts the actual shared
+hook, reads the Provider from Flock, and verifies models and commands across
+selection replacement/removal, refreshed catalogs and mismatched/missing bindings.
+`agent-config-dialog.test.tsx` covers explicit scan/selection, save-time probing,
+late responses, failed verification/retry and unchanged saves. All fixtures are
+synthetic; no user extension is executed. The draft Pi Spec records the save
+behavior and the hooks README explains the shared catalog ownership.
+Validation: `pnpm check`, `pnpm format`, and `pnpm run docs check` passed.
+[PR #1285](https://github.com/LodyAI/Lody/pull/1285).
+
 ## History import follow-up (2026-09-25)
 
 History sync failed with "does not advertise sessionCapabilities.list": the adapter

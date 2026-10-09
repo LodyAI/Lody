@@ -52,16 +52,23 @@ const GALLERY_IMAGES = [
   { key: 'shot-3', src: svgDataUrl('three', '#3b0764', '#a855f7') },
 ];
 
-function ViewerHarness({ images }: { images: { key: string; src: string }[] }) {
-  const [index, setIndex] = useState<number | null>(0);
+function ViewerHarness({
+  images,
+  initiallyOpen = true,
+}: {
+  images: { key: string; src: string }[];
+  initiallyOpen?: boolean;
+}) {
+  const [index, setIndex] = useState<number | null>(initiallyOpen ? 0 : null);
 
   return (
     <div className="flex h-dvh w-full flex-col items-center justify-center gap-3 bg-muted/20">
       <p className="text-sm text-muted-foreground">
         Drag to pan, scroll or double-click to zoom; close from the top-right button or backdrop.
       </p>
-      <Button onClick={() => setIndex(0)} disabled={index !== null}>
-        Open viewer
+      <Button onClick={() => setIndex(0)}>Open viewer</Button>
+      <Button onClick={() => setIndex(1)} disabled={images.length < 2}>
+        before.png
       </Button>
       <ZoomableImageViewer
         open={index !== null}
@@ -93,4 +100,9 @@ export const TallScreenshot: Story = {
 export const Gallery: Story = {
   args: { open: true, onClose: () => {}, images: GALLERY_IMAGES, index: 0 },
   render: () => <ViewerHarness images={GALLERY_IMAGES} />,
+};
+
+export const KeyboardGallery: Story = {
+  args: { open: false, onClose: () => {}, images: GALLERY_IMAGES, index: 0 },
+  render: () => <ViewerHarness images={GALLERY_IMAGES} initiallyOpen={false} />,
 };

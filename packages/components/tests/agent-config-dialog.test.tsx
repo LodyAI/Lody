@@ -217,7 +217,8 @@ describe('AgentConfigDialog', () => {
       success: true,
     }),
     onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected'],
-    onScanPiExtensions?: ComponentProps<typeof AgentConfigDialog>['onScanPiExtensions']
+    onScanPiExtensions?: ComponentProps<typeof AgentConfigDialog>['onScanPiExtensions'],
+    onOpenChange = vi.fn()
   ) => {
     await act(async () => {
       root?.render(
@@ -225,7 +226,7 @@ describe('AgentConfigDialog', () => {
           <Tooltip.Provider>
             <AgentConfigDialog
               open
-              onOpenChange={vi.fn()}
+              onOpenChange={onOpenChange}
               mode={mode}
               machine={machine}
               onSubmit={onSubmit}
@@ -415,6 +416,136 @@ describe('AgentConfigDialog', () => {
     expect(saved.at(-1)?.runtimeOverrides).toBeUndefined();
   });
 
+  it('verifies edited Pi selections before closing, rejects stale results, and retries failures', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const closed: boolean[] = [];
+    const probes: { paths: string[]; finish: (success: boolean) => void }[] = [];
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'pi-edit' as AgentConfigId,
+          machineId,
+          name: 'Pi',
+          cliType: 'builtin',
+          agentType: 'pi',
+          runtimeOverrides: { piExtensions: ['/fixture/plugin.ts'] },
+        },
+      },
+      createMachine('Pi machine', {
+        piExtensions: 1,
+        providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION,
+      }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      }),
+      undefined,
+      (args) =>
+        new Promise((resolve) => {
+          probes.push({
+            paths: saved.at(-1)?.runtimeOverrides?.piExtensions ?? [],
+            finish: (success) =>
+              resolve({
+                type: 'machine/acp-capabilities-refresh_response',
+                machineId: args.machineId,
+                configId: args.configId,
+                cliType: 'builtin',
+                agentType: 'pi',
+                success,
+                ...(success ? {} : { error: 'Synthetic extension failure' }),
+              }),
+          });
+        }),
+      undefined,
+      undefined,
+      (open) => closed.push(open)
+    );
+    const toggle = () =>
+      (
+        document.querySelector(
+          '[aria-label="Pi extensions"] [role="checkbox"]'
+        ) as HTMLButtonElement
+      ).click();
+    // Removing the last extension still needs a new plain catalog.
+    await act(async () => {
+      toggle();
+    });
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(probes.map((probe) => probe.paths)).toEqual([[]]);
+    expect(saved.at(-1)?.backgroundSetup).toBeUndefined();
+    expect(closed).toEqual([]);
+    // Add a different extension before the old probe answers.
+    await act(async () => {
+      setNativeInputValue(
+        document.querySelector('input[aria-label="Extension path"]')!,
+        '/fixture/other.ts'
+      );
+    });
+    await act(async () => {
+      Array.from(document.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Add path')!
+        .click();
+    });
+    await act(async () => {
+      probes[0]!.finish(true);
+    });
+    expect(closed).toEqual([]);
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(probes.at(-1)?.paths).toEqual(['/fixture/other.ts']);
+    await act(async () => {
+      probes.at(-1)!.finish(false);
+    });
+    expect(document.body.textContent).toContain('Synthetic extension failure');
+    expect(closed).toEqual([]);
+    expect(getPrimaryAction('Save').disabled).toBe(false);
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    await act(async () => {
+      probes.at(-1)!.finish(true);
+    });
+    expect(saved.at(-1)?.runtimeOverrides).toEqual({ piExtensions: ['/fixture/other.ts'] });
+    expect(closed).toEqual([false]);
+  });
+
+  it('saves an unchanged Pi extension selection without starting a probe', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const closed: boolean[] = [];
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'pi-unchanged' as AgentConfigId,
+          machineId,
+          name: 'Pi',
+          cliType: 'builtin',
+          agentType: 'pi',
+          runtimeOverrides: { piExtensions: ['/fixture/plugin.ts'] },
+        },
+      },
+      createMachine('Pi machine', { piExtensions: 1 }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      }),
+      undefined,
+      () => {
+        throw new Error('An unchanged selection must not be probed');
+      },
+      undefined,
+      undefined,
+      (open) => closed.push(open)
+    );
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.at(-1)?.runtimeOverrides).toEqual({ piExtensions: ['/fixture/plugin.ts'] });
+    expect(closed).toEqual([false]);
+  });
+
   it('creates a Pi provider with selected extensions through the live-probe path', async () => {
     const saved: AgentConfigSubmitPayload[] = [];
     const scan = async () => ({
@@ -549,10 +680,11 @@ describe('AgentConfigDialog', () => {
     expect(getSelectedOption()?.textContent).toContain('Kimi Code');
     expect(
       getOptionButtons()
-        .slice(0, 5)
+        .slice(0, 6)
         .map((option) => option.textContent)
     ).toEqual([
       expect.stringContaining('Kimi Code'),
+      expect.stringContaining('Devin'),
       expect.stringContaining('Grok'),
       expect.stringContaining('Claude'),
       expect.stringContaining('Codex'),

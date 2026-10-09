@@ -99,3 +99,15 @@ describe('session preparation run config', () => {
     expect(buildSessionPreparationClaimKey(first)).toBe(buildSessionPreparationClaimKey(changed));
   });
 });
+
+it('does not reuse preparation between different memory identities', () => {
+  const config = buildSessionPreparationRunConfig({
+    memory: { providerId: 'nowledge-mem', memoryId: 'reviewer' },
+  });
+  expect(config?.memory?.memoryId).toBe('reviewer');
+  expect(normalizeSessionPreparationRunConfigForDedup(config)).not.toEqual(
+    normalizeSessionPreparationRunConfigForDedup({
+      memory: { providerId: 'nowledge-mem', memoryId: 'designer' },
+    })
+  );
+});

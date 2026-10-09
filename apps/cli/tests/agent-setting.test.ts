@@ -85,6 +85,7 @@ describe('resolveBuiltinACPSetting', () => {
       expect(await resolveACPProcessLaunchAsync(input)).toEqual({
         command: process.execPath,
         args: ['/managed/pi/index.js', '-e', '/fixture/plugin.ts'],
+        env: { LODY_PI_PATH: '' },
         capabilitySourceVersion:
           'builtin-pi:0.2.0+override:{"piExtensions":["/fixture/plugin.ts"]}',
       });
@@ -95,6 +96,40 @@ describe('resolveBuiltinACPSetting', () => {
     } finally {
       manager.mockRestore();
       support.mockRestore();
+    }
+  });
+  it('forwards a user Pi binary to the adapter via LODY_PI_PATH and drops it for other agents', async () => {
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      resolveRuntimeForLaunch: async () => ({
+        runtimeName: 'pi',
+        version: '0.2.0',
+        platformArch: 'node',
+        command: '/managed/pi/index.js',
+      }),
+      ensureCurrentRuntime: async () => {
+        throw new Error('ensureCurrentRuntime must not be used without extensions');
+      },
+    } as ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>);
+    try {
+      const acp = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin' as const,
+        agentType: 'pi',
+        runtimeOverrides: { piPath: '/fixture/user-pi' },
+      });
+      expect(acp.command).toBe(process.execPath);
+      expect(acp.args).toEqual(['/managed/pi/index.js']);
+      expect(acp.env).toEqual({ LODY_PI_PATH: '/fixture/user-pi' });
+      expect(acp.capabilitySourceVersion).toBe(
+        'builtin-pi:0.2.0+override:{"piPath":"/fixture/user-pi"}'
+      );
+      const withoutOverride = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin' as const,
+        agentType: 'pi',
+      });
+      // Empty string shadows inherited LODY_PI_PATH values.
+      expect(withoutOverride.env).toEqual({ LODY_PI_PATH: '' });
+    } finally {
+      manager.mockRestore();
     }
   });
   it('keeps legacy Pi runnable outside the catalog until confirmation', () => {
@@ -118,6 +153,7 @@ describe('resolveBuiltinACPSetting', () => {
       expect(await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'pi' })).toEqual({
         command: process.execPath,
         args: ['/managed/pi/package/dist/index.js'],
+        env: { LODY_PI_PATH: '' },
         capabilitySourceVersion: 'builtin-pi:0.1.0-local',
       });
     } finally {
@@ -390,6 +426,53 @@ describe('resolveBuiltinACPSetting', () => {
         action: 'status',
       })
     ).resolves.toBeNull();
+  });
+
+  it('launches Devin with the managed runtime and keys capabilities to the actual version', async () => {
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      resolveRuntimeForLaunch: async () => ({
+        runtimeName: 'devin',
+        version: '3000.11.1',
+        targetVersion: '3000.11.3',
+        platformArch: 'darwin-arm64',
+        command: '/managed/devin/bin/devin',
+        updateAvailable: false,
+      }),
+    } as ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>);
+    try {
+      const launch = await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'devin' });
+      expect(launch).toEqual({
+        command: process.execPath,
+        args: [expect.stringMatching(/devin-acp\.js$/u)],
+        env: { DEVIN_PATH: '/managed/devin/bin/devin' },
+        capabilitySourceVersion: `builtin-devin-acp:${managedRuntime.DEVIN_ACP_ADAPTER_VERSION}+official-devin:3000.11.1`,
+      });
+      const overridden = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin',
+        agentType: 'devin',
+        runtimeOverrides: { devinPath: '/custom/devin' },
+      });
+      expect(overridden.env).toEqual({ DEVIN_PATH: '/custom/devin' });
+      expect(overridden.capabilitySourceVersion).toContain(
+        '+override:{"devinPath":"/custom/devin"}'
+      );
+      expect(
+        await resolveBuiltinAuthenticationProcessLaunch({
+          cliType: 'builtin',
+          agentType: 'devin',
+          action: 'status',
+        })
+      ).toBeNull();
+      await expect(
+        resolveBuiltinAuthenticationProcessLaunch({
+          cliType: 'builtin',
+          agentType: 'devin',
+          action: 'login',
+        })
+      ).rejects.toThrow('ACP authentication flow');
+    } finally {
+      manager.mockRestore();
+    }
   });
 
   it('launches Grok ACP and device login through an overridden runtime', async () => {
@@ -681,23 +764,19 @@ describe('resolveBuiltinACPSetting', () => {
     );
   });
 
-  it('keeps Devin on the downloadable registry binary path', () => {
-    const agent = getRegistryAgent('devin');
-
-    expect(agent.distribution.local).toBeUndefined();
-    expect(Object.keys(agent.distribution.binary ?? {})).toEqual(
-      expect.arrayContaining([
-        'darwin-aarch64',
-        'darwin-x86_64',
-        'linux-aarch64',
-        'linux-x86_64',
-        'windows-aarch64',
-        'windows-x86_64',
-      ])
-    );
+  it('keeps removed registry providers launchable without listing duplicates', () => {
+    for (const id of ['devin', 'dimcode', 'kimi', 'kimi-code']) {
+      expect(REGISTRY_ACP_AGENTS.some((agent) => agent.id === id)).toBe(false);
+    }
     expect(() => resolveACPSetting({ cliType: 'registry', agentType: 'devin' })).toThrow(
       /resolveACPProcessLaunchAsync/
     );
+    expect(resolveACPSetting({ cliType: 'registry', agentType: 'dimcode' }).exec.args).toEqual([
+      '--prefer-offline',
+      '-y',
+      'dimcode@0.5.12',
+      'acp',
+    ]);
   });
 
   it('uses the hardcoded Interactive Claude registry provider with exact platform npx packages', () => {

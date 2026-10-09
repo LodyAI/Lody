@@ -332,7 +332,9 @@ describe('static share client', () => {
         cancel,
       })
     );
-    await expect(readShareResponseBytes(response, 5)).rejects.toThrow('read failed');
+    await expect(readShareResponseBytes(response, 5)).rejects.toThrow(
+      'Share object exceeds size limit'
+    );
     expect(cancel).toHaveBeenCalledOnce();
   });
 

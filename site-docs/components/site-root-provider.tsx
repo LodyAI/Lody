@@ -1,7 +1,8 @@
-import { Link as RouterLink, useLocation, useNavigate } from '@tanstack/react-router';
+import { Link as RouterLink, useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { RootProvider } from 'fumadocs-ui/provider/tanstack';
 import type { ComponentProps, ReactNode } from 'react';
 
+import { isSitePageHref, SITE_URL, siteHref } from '../lib/site-url.mjs';
 import { OptionalEnhancement } from './optional-enhancement';
 import { DocsSearchDialog } from './docs-search-dialog';
 import { MarketingAtmosphereHost } from './marketing-atmosphere';
@@ -62,10 +63,24 @@ function SiteFrameworkLink({
   prefetch = true,
   ...props
 }: ComponentProps<'a'> & { prefetch?: boolean }) {
-  if (isAppOwnedHref(href)) return <a href={href} {...props} />;
+  const router = useRouter();
+  if (isAppOwnedHref(href) || !isSitePageHref(href)) return <a href={href} {...props} />;
 
-  // Mirrors fumadocs-core's Tanstack adapter for everything this site owns.
-  return <RouterLink preload={prefetch ? 'intent' : false} to={href as never} {...props} />;
+  const normalizedHref = siteHref(href);
+  // Absolute hrefs keep the native navigation semantics of RouterLink's external branch.
+  if (!href.startsWith('/')) return <a href={normalizedHref} {...props} />;
+
+  const url = new URL(normalizedHref, SITE_URL);
+  // `to` is a pathname: trailingSlash must never process a query or fragment.
+  return (
+    <RouterLink
+      preload={prefetch ? 'intent' : false}
+      to={url.pathname as never}
+      search={router.options.parseSearch(url.search) as never}
+      hash={url.hash.slice(1)}
+      {...props}
+    />
+  );
 }
 
 const frameworkComponents = { Link: SiteFrameworkLink };

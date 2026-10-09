@@ -21,6 +21,10 @@ export function pickIndexInputConfig(value: unknown): TurnIndexInputConfig | und
   return {
     ...out,
     ...normalizeSessionTurnInputConfig({
+      memory: value.memory,
+      agentRoleId: value.agentRoleId,
+      agentRoleRevision: value.agentRoleRevision,
+      agentRoleSnapshot: value.agentRoleSnapshot,
       mcpServerIds: value.mcpServerIds,
       configOptionValues: value.configOptionValues,
     }),

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CodexResetForecastDialog } from '../src/components/codex-reset/codex-reset-forecast-dialog';
 import {
   formatCodexResetExpiry,
+  parseCodexResetStatusResponse,
   type CodexResetStatus,
   type CodexResetWatch,
 } from '../src/lib/codex-reset-forecast';
@@ -76,8 +77,51 @@ describe('CodexResetForecastDialog', () => {
   const text = () => document.body.textContent ?? '';
   const panel = () => document.querySelector('[data-lody-dialog-content]');
 
+  it.each(['future', 'elapsed', 'unknown'] as const)(
+    'renders a scheduled reset with %s timing ahead of a watch',
+    async (timing) => {
+      const due = NOW_MS + 14 * 3_600_000;
+      const data = parseCodexResetStatusResponse({
+        data: {
+          active_watch: null,
+          scheduled_reset: {
+            status: 'scheduled',
+            announced_at: '2026-08-20T05:00:00Z',
+            scheduled_for: timing === 'unknown' ? null : new Date(due).toISOString(),
+            text: 'A reset is scheduled.',
+            source: { author: 'example', url: 'https://example.com/reset' },
+          },
+        },
+      });
+      expect(data).not.toBeNull();
+      await render({
+        state: readyState(data!),
+        watch: watch(),
+        nowMs: timing === 'elapsed' ? due : NOW_MS,
+      });
+      expect(text()).toContain('Reset scheduled');
+      expect(text()).not.toContain('% chance');
+      expect(text()).not.toContain('No reset forecast');
+      expect(document.querySelector('a[href="https://example.com/reset"]')).not.toBeNull();
+      if (timing === 'unknown') {
+        expect(text()).toContain('Time not yet specified');
+        expect(document.querySelector('time')).toBeNull();
+      } else {
+        expect(document.querySelector('time')?.getAttribute('datetime')).toBe(
+          new Date(due).toISOString()
+        );
+        expect(text()).toContain(
+          timing === 'elapsed' ? 'Awaiting confirmation of execution' : 'in about 14 hours'
+        );
+      }
+    }
+  );
+
   it('labels itself and keeps one concise third-party attribution at the bottom', async () => {
-    await render({ state: readyState({ watch: watch(), latestReset: null }), watch: watch() });
+    await render({
+      state: readyState({ watch: watch(), scheduledReset: null, latestReset: null }),
+      watch: watch(),
+    });
 
     const dialog = panel();
     expect(dialog).not.toBeNull();
@@ -89,19 +133,20 @@ describe('CodexResetForecastDialog', () => {
       'Third-party forecast from codex-resets.com. For reference only.'
     );
     expect(text().match(/codex-resets\.com/g)).toHaveLength(1);
-    const attributionLink = Array.from(dialog?.querySelectorAll('a') ?? []).find(
-      (node) => node.textContent?.includes('codex-resets.com')
+    const attributionLink = Array.from(dialog?.querySelectorAll('a') ?? []).find((node) =>
+      node.textContent?.includes('codex-resets.com')
     );
-    expect(attributionLink?.getAttribute('href')).toBe(
-      'https://codex-resets.com/?utm_source=lody'
-    );
+    expect(attributionLink?.getAttribute('href')).toBe('https://codex-resets.com/?utm_source=lody');
     expect(attributionLink?.getAttribute('target')).toBe('_blank');
     expect(attributionLink?.getAttribute('rel')).toBe('noopener noreferrer');
   });
 
   it('renders the probability, window, level, and both timestamps', async () => {
     const active = watch();
-    await render({ state: readyState({ watch: active, latestReset: null }), watch: active });
+    await render({
+      state: readyState({ watch: active, scheduledReset: null, latestReset: null }),
+      watch: active,
+    });
 
     expect(text()).toContain('65% chance of a reset');
     expect(text()).toContain('Strong signal');
@@ -128,7 +173,10 @@ describe('CodexResetForecastDialog', () => {
   it('renders the semantic expiry in Chinese instead of the API free text', async () => {
     await initI18n('zh_CN');
     const active = watch();
-    await render({ state: readyState({ watch: active, latestReset: null }), watch: active });
+    await render({
+      state: readyState({ watch: active, scheduledReset: null, latestReset: null }),
+      watch: active,
+    });
 
     expect(text()).toContain('预测有效至');
     expect(text()).toContain(formatCodexResetExpiry(active.expiresAtMs, NOW_MS, 'zh_CN'));
@@ -137,7 +185,10 @@ describe('CodexResetForecastDialog', () => {
 
   it('drops the probability sentence when the forecast has no percentage', async () => {
     const active = watch({ chancePercent: null, level: 'elevated' });
-    await render({ state: readyState({ watch: active, latestReset: null }), watch: active });
+    await render({
+      state: readyState({ watch: active, scheduledReset: null, latestReset: null }),
+      watch: active,
+    });
 
     expect(text()).toContain('Reset watch in effect');
     expect(text()).not.toContain('% chance');
@@ -147,14 +198,20 @@ describe('CodexResetForecastDialog', () => {
 
   it('omits the level badge when the API reports one this build does not know', async () => {
     const active = watch({ level: null });
-    await render({ state: readyState({ watch: active, latestReset: null }), watch: active });
+    await render({
+      state: readyState({ watch: active, scheduledReset: null, latestReset: null }),
+      watch: active,
+    });
 
     expect(text()).not.toContain('signal');
   });
 
   it('opens the source post in a new tab with safe rel attributes', async () => {
     const active = watch();
-    await render({ state: readyState({ watch: active, latestReset: null }), watch: active });
+    await render({
+      state: readyState({ watch: active, scheduledReset: null, latestReset: null }),
+      watch: active,
+    });
 
     const link = Array.from(document.querySelectorAll('a')).find((node) =>
       node.textContent?.includes('@thsottiaux')
@@ -174,6 +231,7 @@ describe('CodexResetForecastDialog', () => {
     await render({
       state: readyState({
         watch: null,
+        scheduledReset: null,
         latestReset: {
           announcedAtIso: '2026-08-13T01:01:37.000Z',
           announcedAtMs: Date.parse('2026-08-13T01:01:37.000Z'),
@@ -192,7 +250,7 @@ describe('CodexResetForecastDialog', () => {
 
   it('says the forecast lapsed rather than pretending none existed', async () => {
     await render({
-      state: readyState({ watch: watch(), latestReset: null }),
+      state: readyState({ watch: watch(), scheduledReset: null, latestReset: null }),
       watch: null,
       isExpired: true,
     });
@@ -223,7 +281,11 @@ describe('CodexResetForecastDialog', () => {
   it('keeps showing the previous forecast when a refresh fails', async () => {
     const active = watch();
     await render({
-      state: { status: 'error', data: { watch: active, latestReset: null }, error: 'offline' },
+      state: {
+        status: 'error',
+        data: { watch: active, scheduledReset: null, latestReset: null },
+        error: 'offline',
+      },
       watch: active,
     });
 

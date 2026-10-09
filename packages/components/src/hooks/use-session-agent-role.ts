@@ -1,3 +1,4 @@
+import { snapshotAgentRole } from '@lody/shared';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -235,6 +236,8 @@ export function useSessionAgentRole({
       ? {
           agentRoleId: selectedRoleId,
           agentRoleRevision: pickedItem.role.revision,
+          memory: pickedItem.role.runConfig.memory,
+          agentRoleSnapshot: snapshotAgentRole(pickedItem.role),
         }
       : pickedRoleId === null
         ? null
@@ -243,7 +246,7 @@ export function useSessionAgentRole({
             null
           : !agentRolesSynced
             ? runConfigHasUserEdits
-              ? undefined
+              ? null
               : typeof storedPickedRevision === 'number'
                 ? { agentRoleId: pickedRoleId, agentRoleRevision: storedPickedRevision }
                 : undefined

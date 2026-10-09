@@ -98,7 +98,13 @@ const permissionRequest = (): RequestPermissionRequest => ({
 it("finalizes only the owning turn's unanswered requests through durable history", async () => {
   const { doc, readStored } = createStoredTool('unknown');
   const request = permissionRequest();
-  await ensurePermissionRequestOnToolCall(doc, 'request', request);
+  await ensurePermissionRequestOnToolCall(
+    doc,
+    'request',
+    request,
+    undefined,
+    doc.sessionData.commands
+  );
   const before = readStored();
   await updateTestHistory(doc, (history) => {
     history[0]?.items.push({ type: 'tool_call', toolCallId: 'late-call', status: 'pending' });
@@ -153,10 +159,16 @@ it("finalizes only the owning turn's unanswered requests through durable history
     // Stop may win while a request is still loading its document. It must not
     // attach to the finished tool or fall back to the newer active turn.
     await expect(
-      ensurePermissionRequestOnToolCall(doc, 'late-request', {
-        ...request,
-        toolCall: { ...request.toolCall, toolCallId: 'late-call' },
-      })
+      ensurePermissionRequestOnToolCall(
+        doc,
+        'late-request',
+        {
+          ...request,
+          toolCall: { ...request.toolCall, toolCallId: 'late-call' },
+        },
+        undefined,
+        doc.sessionData.commands
+      )
     ).resolves.toBe(false);
     expect(await doc.sessionData.history.readAll()).toEqual(history);
   } finally {
@@ -172,7 +184,15 @@ describe.each(['unknown', 'malformed'] as const)(
       const before = readStored();
       const request = permissionRequest();
 
-      await expect(ensurePermissionRequestOnToolCall(doc, 'request', request)).resolves.toBe(true);
+      await expect(
+        ensurePermissionRequestOnToolCall(
+          doc,
+          'request',
+          request,
+          undefined,
+          doc.sessionData.commands
+        )
+      ).resolves.toBe(true);
 
       const after = readStored();
       expect(after.ids).toEqual(before.ids);
@@ -211,13 +231,27 @@ describe.each(['unknown', 'malformed'] as const)(
         } as unknown as RequestPermissionRequest;
 
         await expect(
-          ensurePermissionRequestOnToolCall(doc, 'invalid', invalidRequest)
+          ensurePermissionRequestOnToolCall(
+            doc,
+            'invalid',
+            invalidRequest,
+            undefined,
+            doc.sessionData.commands
+          )
         ).rejects.toThrow('Invalid history write');
         expect(currentClient.version().toJSON()).toEqual(version);
         expect(currentClient.toJSON()).toEqual(json);
         expect(readStored()).toEqual(before);
 
-        await expect(ensurePermissionRequestOnToolCall(doc, 'valid', request)).resolves.toBe(true);
+        await expect(
+          ensurePermissionRequestOnToolCall(
+            doc,
+            'valid',
+            request,
+            undefined,
+            doc.sessionData.commands
+          )
+        ).resolves.toBe(true);
         expect(readStored().tool).toMatchObject({ permissionRequest: { requestId: 'valid' } });
         expect(readStored().content).toEqual(before.content);
         expect(readStored().ids).toEqual(before.ids);

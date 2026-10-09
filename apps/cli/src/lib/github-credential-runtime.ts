@@ -1,85 +1,77 @@
-/** Shared source embedded in the standalone Git and gh helpers (no runtime deps). */
+/** Dependency-free source shared by the native Git and gh adapters. */
 export const githubCredentialRuntime = String.raw`
-const readCredentialPolicy = async () => {
-  const contextToken = getContextToken();
-  if (!contextToken) throw new Error('Lody did not supply a GitHub credential context for this operation. No GitHub credential was selected. Update Lody; if this persists, report this startup/context error.');
-  let response;
-  let policy;
-  try {
-    response = await requestBroker('/github-auth-context', { contextToken }, 10000);
-    policy = response ? await response.json() : null;
-  } catch {}
-  if (!response?.ok || !policy || typeof policy.allowLocalAuth !== 'boolean' || typeof policy.personalEnabled !== 'boolean') {
-    if (policy?.error === 'invalid_context') throw new Error('GitHub credential context expired or the requester changed. Restart this session.');
-    if (response?.status === 401) throw new Error('Lody credential broker authentication failed. Reconnect this machine to Lody before retrying; no GitHub operation was attempted.');
-    throw new Error('Cannot verify GitHub identity preferences with Lody. Check the Lody connection and machine access, then retry; no GitHub operation was attempted.');
-  }
-  return policy;
+const credentialError = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
+const errorCode = error => {
+  if (error?.name === 'TimeoutError' || error?.name === 'AbortError') return 'timeout';
+  const code = [error?.code, error?.cause?.code].find(value => typeof value === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(value));
+  return typeof code === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(code) ? code : 'unexpected_error';
 };
-
-const readManagedCandidate = async (repoFullName, source, invalidatedPersonalToken) => {
+const diagnostic = (source, stage, error) => {
+  const detail = { source, stage, code: errorCode(error) };
+  if (Number.isInteger(error?.status)) detail.status = error.status;
+  if (typeof error?.requestId === 'string' && /^[a-f0-9-]{1,64}$/.test(error.requestId)) detail.requestId = error.requestId;
+  console.error('[Lody GitHub] ' + JSON.stringify(detail));
+  return detail;
+};
+// This file is authored by the host, never inferred from a child's token/env.
+// A pinned context token names an immutable snapshot for host-side clone/fetch.
+const readCredentialContext = (fs, statePath, env) => {
+  const file = env.LODY_GIT_CRED_CONTEXT_FILE || (env.LODY_GIT_CRED_CONTEXT_TOKEN && statePath + '.contexts/' + env.LODY_GIT_CRED_CONTEXT_TOKEN + '.json');
+  if (!file) throw credentialError('context_missing');
+  let context;
+  try { context = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch (cause) { throw credentialError('context_unreadable', { cause }); }
+  if (context?.version !== 1 || typeof context.contextToken !== 'string' || !context.contextToken || typeof context.allowLocalAuth !== 'boolean') throw credentialError('context_invalid');
+  return context;
+};
+const readCredentialPolicy = () => {
+  const context = getContext();
+  return { allowLocalAuth: context.allowLocalAuth, personalEnabled: true };
+};
+const readManagedCandidate = async (repoFullName, source) => {
   const response = await requestBroker('/github-token', {
-    repoFullName, source, contextToken: getContextToken(), invalidatedPersonalToken,
-  }, 15000);
-  if (!response || !response.ok) throw new Error('GitHub credential service is unavailable; no operation was attempted.');
-  const body = await response.json();
-  if (body.available === false) return null;
-  if (!body.token || body.tokenSource !== source) throw new Error('Invalid GitHub credential response.');
-  return body.token;
+    repoFullName, source, contextToken: getContext().contextToken,
+  }, 3000);
+  if (!response) throw credentialError('broker_unavailable');
+  let body;
+  try { body = await response.json(); }
+  catch (cause) { throw credentialError(errorCode(cause) === 'timeout' ? 'timeout' : 'invalid_response', { cause, status: response.status }); }
+  if (!response.ok) throw credentialError(typeof body.error === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(body.error) ? body.error : 'broker_http_error', { status: response.status, requestId: body.requestId });
+  if (body.available === false) throw credentialError(typeof body.reason === 'string' && /^[a-z_]{1,64}$/.test(body.reason) ? body.reason : 'credential_unavailable');
+  if (typeof body.token !== 'string' || !body.token || /[\r\n]/.test(body.token) || body.tokenSource !== source) throw credentialError('invalid_credential_response');
+  return { token: body.token };
 };
-
-// Read-only preflight. Never replay an actual write with another identity.
-// A 403 can be SSO, rate limiting or policy: it must not silently change identity.
-const checkRepositoryCredential = async (token, repo, requireWrite, requirePublic = false) => {
-  let url = new URL('https://api.github.com/repos/' + repo);
-  let response;
-  for (let redirects = 0; redirects < 4; redirects++) {
-    response = await fetch(url.toString(), {
-      headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), Accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(10000), redirect: 'manual',
-    });
-    if (![301, 302, 307, 308].includes(response.status)) break;
-    const target = new URL(response.headers.get('location'), url);
-    if (target.origin !== 'https://api.github.com' || target.username || target.password) throw new Error('Unsafe GitHub redirect.');
-    url = target;
-  }
-  if (response.status === 401) return 'invalid';
-  if (response.status === 404) return 'unavailable';
-  if (!response.ok) throw new Error('GitHub permission check failed (HTTP ' + response.status + '); identity was not changed.');
-  const data = await response.json();
-  if (requirePublic && data.private !== false) return 'unavailable';
-  const permission = typeof requireWrite === 'string' ? requireWrite : 'push';
-  return requireWrite && data.permissions && data.permissions[permission] === false ? 'unavailable' : 'usable';
-};
-
-const selectGitHubCredential = async (repo, policy, localCandidate, requireWrite, anonymousCandidate) => {
-  let personalUnavailable = false;
-  if (policy.personalEnabled) {
-    let token = await readManagedCandidate(repo, 'personal');
-    if (token) {
-      let status = await checkRepositoryCredential(token, repo, requireWrite);
-      if (status === 'invalid') {
-        token = await readManagedCandidate(repo, 'personal', token);
-        if (token) status = await checkRepositoryCredential(token, repo, requireWrite);
-      }
-      if (token && status === 'usable') return { token, source: 'personal' };
-    }
-    personalUnavailable = true;
-  }
-  if (policy.allowLocalAuth) {
-    const local = await localCandidate();
-    if (local) {
-      if (personalUnavailable) console.error('[Lody] Personal GitHub access is unavailable for ' + repo + '; using machine-local credentials.');
-      return { ...local, source: 'local' };
+// One acquisition per source. Consumers can continue after a provably safe
+// failure of the actual operation; never restart this iterator to retry a source.
+async function* githubCredentials(repo, policy, localCandidate, anonymous = false) {
+  const failures = [];
+  for (const source of ['personal', 'local', 'app', ...(anonymous ? ['anonymous'] : [])]) {
+    if (source === 'personal' && policy.personalEnabled === false) continue;
+    if (source === 'local' && !policy.allowLocalAuth) continue;
+    try {
+      const candidate = source === 'anonymous' ? { token: null } : source === 'local' ? await localCandidate() : await readManagedCandidate(repo, source);
+      if (!candidate) throw credentialError('credential_missing');
+      yield { ...candidate, source };
+    } catch (error) {
+      failures.push(diagnostic(source, 'acquire', error));
     }
   }
-  const token = await readManagedCandidate(repo, 'app');
-  if (!token && !requireWrite && anonymousCandidate && await anonymousCandidate()) {
-    console.error('[Lody] Reading public GitHub repository ' + repo + ' anonymously (no applicable credential).');
-    return { token: null, source: 'anonymous' };
+  throw credentialError('credentials_exhausted', { failures });
+}
+const selectGitHubCredential = async (repo, policy, localCandidate, requireWrite, anonymousCandidate, verify = async () => true) => {
+  const failures = [];
+  try {
+    for await (const candidate of githubCredentials(repo, policy, localCandidate, !requireWrite && !!anonymousCandidate)) {
+      try {
+        if (candidate.source === 'anonymous' && !await anonymousCandidate()) throw credentialError('anonymous_unavailable');
+        if (!await verify(candidate)) throw credentialError('access_denied');
+        console.error('[Lody GitHub] ' + JSON.stringify({ source: candidate.source, stage: 'selected', repo }));
+        return candidate;
+      } catch (error) { failures.push(diagnostic(candidate.source, 'access', error)); }
+    }
+  } catch (error) {
+    if (error.code === 'credentials_exhausted') error.failures.push(...failures);
+    throw error;
   }
-  if (!token) throw new Error('No GitHub credential is available for ' + repo + '.');
-  console.error('[Lody] Using GitHub App identity for ' + repo + (personalUnavailable ? ' (personal access unavailable).' : '.'));
-  return { token, source: 'app' };
 };
 `;

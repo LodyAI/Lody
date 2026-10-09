@@ -1,4 +1,7 @@
+import { snapshotAgentRole } from '@lody/shared';
 import { useSessionMentionSource } from '@/hooks/use-session-mention-source';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import {
   snapshotAttachmentDrafts,
   type SessionAttachmentDraft,
@@ -14,7 +17,6 @@ import {
   forwardRef,
   useImperativeHandle,
 } from 'react';
-import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { ArrowUp } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
@@ -39,7 +41,6 @@ import {
   DesktopPermissionModeButton,
   DesktopRunConfigMenu,
 } from '@/components/sessions/desktop-run-config-menu';
-import { composerSurface } from '@/components/shared/composer-surface';
 import {
   ChatComposer,
   type ChatComposerFileItem,
@@ -49,6 +50,7 @@ import type { CombinedMentionTextareaHandle } from '@/components/mentions/combin
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
 import { useComposerSubmission } from '@/components/chat/submission/use-composer-submission';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
+import { useRunConfigFace } from '@/components/mobile/mobile-run-config-button';
 import {
   useMentionPromptExpansion,
   type ExpandedMentionPrompt,
@@ -87,7 +89,6 @@ import {
   toggleVisualAnnotationReferenceItem,
 } from '@/components/chat/visual-annotation-reference-state';
 import { SESSION_IMAGE_MAX_COUNT } from '@lody/shared';
-import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type {
@@ -133,6 +134,110 @@ import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
 
 const sessionDraftsCache = new Map<SessionId, string>();
+
+const styles = stylex.create({
+  shell: {
+    position: 'relative',
+    flexShrink: 0,
+    paddingTop: 0,
+    marginBottom: 'var(--native-keyboard-height, 0px)',
+    paddingBottom:
+      'calc(0.5rem + max(0px, env(safe-area-inset-bottom, 0px) - var(--native-keyboard-height, 0px)))',
+    backgroundColor: colors.background,
+    transitionProperty: 'margin-bottom',
+    transitionDuration: '250ms',
+    transitionTimingFunction: 'var(--ease-out, cubic-bezier(0, 0, 0.2, 1))',
+  },
+  shellEdgeBackLayer: { zIndex: 40 },
+  footerSelectors: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+  },
+  footerSelectorMobile: { minWidth: 0, flex: '1 1 0%', overflow: 'hidden' },
+  footerSelectorDesktop: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    overflow: 'hidden',
+  },
+  externalSync: {
+    display: 'inline-flex',
+    maxWidth: '100%',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    marginBottom: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 1)',
+    paddingInline: 'calc(var(--spacing) * 2)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'hsl(var(--muted) / 0.6)',
+    color: colors.secondaryLabel,
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+  },
+  freeTurnNotice: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: 'calc(var(--spacing) * 1.5)',
+    rowGap: 'calc(var(--spacing) * 1)',
+    marginBottom: 'calc(var(--spacing) * 2)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor:
+      'color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 30%, transparent)',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor:
+      'color-mix(in oklab, var(--color-amber-500, oklch(76.9% 0.188 70.08)) 10%, transparent)',
+    color: {
+      default: 'var(--color-amber-950, oklch(27.9% 0.077 45.635))',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-amber-100, oklch(96.2% 0.059 95.617))',
+    },
+    fontSize: '0.75rem',
+    fontWeight: 500,
+    lineHeight: '1rem',
+    boxShadow: '0 1px 2px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.05))',
+  },
+  freeTurnUpgrade: {
+    fontWeight: 600,
+    color: {
+      default: 'var(--color-amber-700, oklch(55.5% 0.163 48.998))',
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        'var(--color-amber-200, oklch(92.4% 0.12 95.746))',
+      '@media (hover: hover)': {
+        ':hover': 'var(--color-amber-800, oklch(47.3% 0.137 46.201))',
+        ':hover:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+          'var(--color-amber-100, oklch(96.2% 0.059 95.617))',
+      },
+    },
+    textDecorationLine: 'underline',
+    textUnderlineOffset: '2px',
+  },
+  stopGlyph: {
+    borderRadius: '3px',
+    backgroundColor: 'currentColor',
+  },
+  stopGlyphMobile: { width: 'calc(var(--spacing) * 3)', height: 'calc(var(--spacing) * 3)' },
+  stopGlyphDesktop: { width: 'calc(var(--spacing) * 2.5)', height: 'calc(var(--spacing) * 2.5)' },
+  sendIconMobile: { width: 'calc(var(--spacing) * 5)', height: 'calc(var(--spacing) * 5)' },
+  sendIconDesktop: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
+  topSpacer: { height: 'calc(var(--spacing) * 1)' },
+  hiddenInput: { display: 'none' },
+  externalSyncLabel: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+});
 
 type PendingImage = {
   localId: string;
@@ -318,26 +423,13 @@ const createLocalImageId = (): string => {
 export function getSessionChatInputAreaShellClassName({
   protectFromEdgeBackZone = false,
 }: { protectFromEdgeBackZone?: boolean } = {}): string {
-  return cn(
-    'relative shrink-0 pt-0',
-    /* The native session drawer owns a z-30 transparent left-edge swipe zone.
-       Keep the whole mobile composer above it so the zone cannot swallow the
-       left side of controls such as the attachment button. Swiping still works
-       everywhere in the message body above the composer. */
-    protectFromEdgeBackZone && 'z-40',
-    /* On iOS Capacitor the WebView is NOT resized when the soft keyboard opens
-       (`resize: "none"` + `interactive-widget=overlaps-content`). The root
-       layout's `pb-[var(--native-keyboard-height)]` can't reach the session
-       detail page because it renders inside a portal'd drawer, so the composer
-       has to lift itself: `mb` raises it by the keyboard height (the flex-1
-       message list above it shrinks to match), and the bottom padding collapses
-       the home-indicator safe-area once the keyboard covers it.
-       `--native-keyboard-height` is `0px` on web / Android, so both are a no-op
-       there. */
-    'mb-[var(--native-keyboard-height,0px)] transition-[margin-bottom] duration-[250ms] ease-out',
-    'pb-[calc(0.5rem+max(0px,env(safe-area-inset-bottom,0px)-var(--native-keyboard-height,0px)))]',
-    'bg-background'
+  const shell = stylex.props(
+    styles.shell,
+    // The native session drawer owns a z-30 transparent left-edge swipe zone.
+    // Keep the composer above it so the zone cannot swallow its controls.
+    protectFromEdgeBackZone && styles.shellEdgeBackLayer
   );
+  return shell.className ?? '';
 }
 
 export interface SessionChatInputAreaProps {
@@ -1821,6 +1913,10 @@ export const SessionChatInputArea = memo(
             ? {
                 agentRoleId: selectedAgentRoleItemId,
                 agentRoleRevision: selectedAgentRoleItemRevision,
+                memory: selectedAgentRoleItem?.role.runConfig.memory,
+                agentRoleSnapshot: selectedAgentRoleItem
+                  ? snapshotAgentRole(selectedAgentRoleItem.role)
+                  : undefined,
               }
             : null
           : sessionAgentRole.turnSelection,
@@ -1828,6 +1924,7 @@ export const SessionChatInputArea = memo(
         agentRoleControl,
         selectedAgentRoleItemId,
         selectedAgentRoleItemRevision,
+        selectedAgentRoleItem,
         sessionAgentRole.turnSelection,
       ]
     );
@@ -1897,6 +1994,7 @@ export const SessionChatInputArea = memo(
     ]);
     const mobileFooterSelectorNode = isMobile ? (
       <MobileSessionRunConfig
+        disabled={submissionPending}
         agentSelection={mobileAgentSelection}
         allowedMachineIds={session.machineId ? [session.machineId] : []}
         agentLocked={!isEmptyConversation}
@@ -1927,6 +2025,11 @@ export const SessionChatInputArea = memo(
     const desktopFooterSelectorNode = !isMobile ? (
       <>
         <DesktopRunConfigMenu
+          disabledReason={
+            submissionPending
+              ? t('sessions.sendConfigLocked', 'Configuration is locked while sending')
+              : undefined
+          }
           agentSelection={
             session.agentConfigId && session.machineId
               ? { agentId: session.agentConfigId, machineId: session.machineId }
@@ -1948,6 +2051,7 @@ export const SessionChatInputArea = memo(
         />
         {selectedAgentRolePinsPermissionMode ? null : (
           <DesktopPermissionModeButton
+            disabled={submissionPending}
             modeOptions={modeOptions}
             selectedModeId={selectedModeId}
             onModeChange={onModeChange}
@@ -1958,41 +2062,29 @@ export const SessionChatInputArea = memo(
         )}
       </>
     ) : null;
-    const selectedModelLabel = modelOptions.find(
-      (option) => option.value === selectedModelId
-    )?.label;
+    const { modelLabel: selectedModelLabel } = useRunConfigFace({
+      modelOptions,
+      selectedModelId,
+      modeOptions,
+      selectedModeId,
+      configOptionSelectors,
+      configOptionValues,
+    });
     const footerSelectorNode = (
-      <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden">
+      <div {...stylex.props(styles.footerSelectors)}>
         {/* Mobile: run-config button is w-full inside this flex-1 slot so the
             model label can shrink. Desktop: two trigger buttons sit natural-
             width with gap (fragment children of this flex row). */}
         <div
-          className={
-            isMobile
-              ? 'min-w-0 flex-1 overflow-hidden'
-              : 'flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden'
-          }
+          {...stylex.props(isMobile ? styles.footerSelectorMobile : styles.footerSelectorDesktop)}
         >
-          {submissionPending ? (
-            <button
-              type="button"
-              disabled
-              aria-label={t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
-              title={t('sessions.sendConfigLocked', 'Configuration is locked while sending')}
-              {...stylex.props(composerSurface.trigger)}
-            >
-              <span {...stylex.props(composerSurface.truncate)}>
-                {selectedModelLabel ?? t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
-              </span>
-            </button>
-          ) : (
-            (mobileFooterSelectorNode ?? desktopFooterSelectorNode)
-          )}
+          {mobileFooterSelectorNode ?? desktopFooterSelectorNode}
         </div>
         <SessionUsagePopover
           contextWindowUsage={session.contextWindowUsage}
           rateLimits={rateLimits}
           agentType={session.agentType}
+          agentConfigId={session.agentConfigId}
           modelId={selectedModelId}
           modelLabel={selectedModelLabel}
           isContextCompacting={isContextCompacting}
@@ -2005,13 +2097,13 @@ export const SessionChatInputArea = memo(
     const bottomBarNode = null;
     const externalHistorySyncNode =
       isExternalHistoryRefreshing && externalHistorySyncLabel ? (
-        <div className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/60 bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
+        <div {...stylex.props(styles.externalSync)}>
           <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="truncate">{externalHistorySyncLabel}</span>
+          <span {...stylex.props(styles.externalSyncLabel)}>{externalHistorySyncLabel}</span>
         </div>
       ) : null;
     const freeTurnLimitNoticeNode = freeTurnLimitNotice ? (
-      <div className="mb-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-950 shadow-xs dark:text-amber-100">
+      <div {...stylex.props(styles.freeTurnNotice)}>
         <span>
           {t('sessions.freeTurnLimitNotice', {
             current: numberFormatter.format(freeTurnLimitNotice.current),
@@ -2021,7 +2113,7 @@ export const SessionChatInputArea = memo(
         {freeTurnLimitNotice.onUpgrade ? (
           <button
             type="button"
-            className="font-semibold text-amber-700 underline underline-offset-2 hover:text-amber-800 dark:text-amber-200 dark:hover:text-amber-100"
+            {...stylex.props(styles.freeTurnUpgrade)}
             onClick={freeTurnLimitNotice.onUpgrade}
           >
             {t('sessions.freeTurnLimitUpgrade')}
@@ -2030,23 +2122,23 @@ export const SessionChatInputArea = memo(
       </div>
     ) : null;
     /* Keep desktop actions compact while preserving the mobile touch target. */
-    const primaryActionSizeClassName = isMobile ? 'h-8 w-8' : 'h-7 w-7';
     const primaryActionNode = showStopButton ? (
       <Button
         onClick={() => {
           void onStop();
         }}
         variant="ghost"
+        size={isMobile ? 'medium' : 'small'}
+        shape="pill"
         icon
         aria-label={t('sessions.stop')}
-        className={cn(
-          primaryActionSizeClassName,
-          'rounded-full shadow-xs transition-all',
-          'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-        )}
+        className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
       >
         <span
-          className={cn('rounded-[3px] bg-current', isMobile ? 'h-3 w-3' : 'h-2.5 w-2.5')}
+          {...stylex.props(
+            styles.stopGlyph,
+            isMobile ? styles.stopGlyphMobile : styles.stopGlyphDesktop
+          )}
           aria-hidden="true"
         />
       </Button>
@@ -2055,6 +2147,8 @@ export const SessionChatInputArea = memo(
         type="button"
         icon
         variant="ghost"
+        size={isMobile ? 'medium' : 'small'}
+        shape="pill"
         onClick={() => {
           void sendMessage();
         }}
@@ -2064,16 +2158,12 @@ export const SessionChatInputArea = memo(
             ? externalHistorySyncLabel
             : t('sessions.send')
         }
-        className={cn(
-          primaryActionSizeClassName,
-          'rounded-full shadow-xs transition-all',
-          'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
-        )}
+        className="shadow-xs transition-all bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]"
       >
         {submissionPending || isExternalHistoryRefreshing ? (
-          <Spinner className={isMobile ? 'h-5 w-5' : 'h-4 w-4'} />
+          <Spinner size={isMobile ? 'medium' : 'small'} />
         ) : (
-          <ArrowUp className={isMobile ? 'h-5 w-5' : 'h-4 w-4'} />
+          <ArrowUp {...stylex.props(isMobile ? styles.sendIconMobile : styles.sendIconDesktop)} />
         )}
       </Button>
     );
@@ -2180,7 +2270,7 @@ export const SessionChatInputArea = memo(
           />
         ) : null}
         <ConversationColumn>
-          {hideTopSpacer ? null : <div aria-hidden="true" className="h-1" />}
+          {hideTopSpacer ? null : <div aria-hidden="true" {...stylex.props(styles.topSpacer)} />}
           {externalHistorySyncNode}
           {freeTurnLimitNoticeNode}
           {attachmentAddEnabled ? (
@@ -2188,7 +2278,7 @@ export const SessionChatInputArea = memo(
               ref={attachmentInputRef}
               type="file"
               multiple
-              className="hidden"
+              {...stylex.props(styles.hiddenInput)}
               onChange={handleAttachmentInputChange}
             />
           ) : null}

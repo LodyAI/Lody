@@ -15,11 +15,12 @@ import {
   scheduleRunKey,
 } from '../src/schedule-registry';
 import {
-  hasExplicitSchedulePermission,
+  normalizeLegacyScheduleAgent,
   ScheduleAgentSchema,
   ScheduleDefinitionSchema,
 } from '../src/schedule-types';
 import { ScheduleRepository, type ScheduleRepositoryPort } from '../src/schedule-repository';
+import { zonedLocalInputToInstant, instantToZonedLocalInput } from '../src/schedule-recurrence';
 
 const definition = () =>
   ScheduleDefinitionSchema.parse({
@@ -220,98 +221,78 @@ describe('Schedule persistence contract', () => {
   });
 });
 
-it('reads a saved definition back with the fingerprint the Registry published, on another peer', async () => {
-  // Nested maps (Agent options) come back from Mirror tagged with `$cid`; the
-  // owning machine must still see the same definition, or the schedule stays
-  // blocked on DEFINITION_NOT_COMMITTED forever.
-  const docs = new Map<string, LoroDoc>();
-  const rows = new Map<string, unknown>();
-  const port: ScheduleRepositoryPort = {
-    openPersistedDoc: async (id) => {
-      if (!docs.has(id)) docs.set(id, new LoroDoc());
-      return { doc: docs.get(id)! };
-    },
-    openFlockDoc: async () => ({
-      flock: {
-        scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
-        get: (key) => rows.get(JSON.stringify(key)),
-        set: (key, value) => rows.set(JSON.stringify(key), JSON.parse(JSON.stringify(value))),
+it.each([false, true, 'false', 'true'])(
+  'preserves ACP value %s and the Registry fingerprint across peers',
+  async (planMode) => {
+    // Nested maps (Agent options) come back from Mirror tagged with `$cid`; the
+    // owning machine must still see the same definition, or the schedule stays
+    // blocked on DEFINITION_NOT_COMMITTED forever.
+    const docs = new Map<string, LoroDoc>();
+    const rows = new Map<string, unknown>();
+    const port: ScheduleRepositoryPort = {
+      openPersistedDoc: async (id) => {
+        if (!docs.has(id)) docs.set(id, new LoroDoc());
+        return { doc: docs.get(id)! };
       },
-    }),
-    flush: async () => {},
-  };
-  const author = new ScheduleRepository(port, 'workspace' as never);
-  const d = definition();
-  await author.save({
-    scheduleId: 'test',
-    draft: {
-      title: d.title,
-      machineId: d.machineId,
-      trigger: d.trigger,
-      agent: {
-        agentConfigId: d.agent.agentConfigId,
-        modelId: 'model',
-        configOptionValues: { _permission: 'workspace-write', effort: 'high' },
+      openFlockDoc: async () => ({
+        flock: {
+          scan: () => [...rows].map(([key, value]) => ({ key: JSON.parse(key), value })),
+          get: (key) => rows.get(JSON.stringify(key)),
+          set: (key, value) => rows.set(JSON.stringify(key), JSON.parse(JSON.stringify(value))),
+        },
+      }),
+      flush: async () => {},
+    };
+    const author = new ScheduleRepository(port, 'workspace' as never);
+    const d = definition();
+    await author.save({
+      scheduleId: 'test',
+      draft: {
+        title: d.title,
+        machineId: d.machineId,
+        trigger: d.trigger,
+        agent: {
+          agentConfigId: d.agent.agentConfigId,
+          modelId: 'model',
+          configOptionValues: {
+            _permission: 'workspace-write',
+            effort: 'high',
+            plan_mode: planMode,
+            select_flag: 'false',
+          },
+        },
+        project: { kind: 'local', localProjectId: 'project' as never, useWorktree: true },
+        destination: { kind: 'own_session', epoch: 0 },
+        misfirePolicy: d.misfirePolicy,
+        overlapPolicy: d.overlapPolicy,
+        retryPolicy: d.retryPolicy,
+        prompt: 'hello',
       },
-      project: { kind: 'local', localProjectId: 'project' as never, useWorktree: true },
-      destination: { kind: 'own_session', epoch: 0 },
-      misfirePolicy: d.misfirePolicy,
-      overlapPolicy: d.overlapPolicy,
-      retryPolicy: d.retryPolicy,
-      prompt: 'hello',
-    },
-    actorId: 'owner',
-    now: 1,
-    activationId: 'activation',
-    activityId: 'created',
-    create: true,
-  });
-  const [row] = await author.list();
-  const machineDoc = new LoroDoc();
-  machineDoc.import(docs.get('schedule-test')!.export({ mode: 'snapshot' }));
-  const machine = new ScheduleRepository(
-    { ...port, openPersistedDoc: async () => ({ doc: machineDoc }) },
-    'workspace' as never
-  );
-  const read = await machine.read('test');
-  expect(read?.definition.agent.configOptionValues).toEqual({
-    _permission: 'workspace-write',
-    effort: 'high',
-  });
-  expect(scheduleDefinitionFingerprint(read!)).toBe(row!.definitionFingerprint);
-});
+      actorId: 'owner',
+      now: 1,
+      activationId: 'activation',
+      activityId: 'created',
+      create: true,
+    });
+    const [row] = await author.list();
+    const machineDoc = new LoroDoc();
+    machineDoc.import(docs.get('schedule-test')!.export({ mode: 'snapshot' }));
+    const machine = new ScheduleRepository(
+      { ...port, openPersistedDoc: async () => ({ doc: machineDoc }) },
+      'workspace' as never
+    );
+    const read = await machine.read('test');
+    expect(read?.definition.agent.configOptionValues).toEqual({
+      _permission: 'workspace-write',
+      effort: 'high',
+      plan_mode: planMode,
+      select_flag: 'false',
+    });
+    expect(scheduleDefinitionFingerprint(read!)).toBe(row!.definitionFingerprint);
+  }
+);
 
-it('uses explicit advertised permission categories, rejecting unrelated modes and credential options', () => {
-  const permission = {
-    id: 'arbitrary_provider_option',
-    category: '_permission',
-    name: 'Permissions',
-    type: 'select' as const,
-    currentValue: 'safe',
-    options: [{ value: 'safe', name: 'Safe' }],
-  };
-  const capability = { modes: [{ id: 'plan', name: 'Plan' }], configOptions: [permission] };
-  expect(
-    hasExplicitSchedulePermission({ agentConfigId: 'agent', modeId: 'plan' }, capability)
-  ).toBe(false);
-  expect(
-    hasExplicitSchedulePermission(
-      { agentConfigId: 'agent', configOptionValues: { arbitrary_provider_option: 'safe' } },
-      capability
-    )
-  ).toBe(true);
-  expect(
-    hasExplicitSchedulePermission(
-      { agentConfigId: 'agent', configOptionValues: { arbitrary_provider_option: 'unknown' } },
-      capability
-    )
-  ).toBe(false);
-  expect(
-    hasExplicitSchedulePermission(
-      { agentConfigId: 'agent', modeId: 'plan' },
-      { modes: capability.modes }
-    )
-  ).toBe(true);
+it('rejects credential options in schedule definitions', () => {
   expect(
     ScheduleAgentSchema.safeParse({
       agentConfigId: 'agent',
@@ -353,6 +334,52 @@ describe('Chat-mode schedules carry no project', () => {
     };
     return port;
   };
+
+  it.each([
+    ['2026-10-01T02:21', '2026-10-01T09:21:00.000Z'],
+    ['2026-11-01T01:30', '2026-11-01T08:30:00.000Z'],
+  ])(
+    'saves and restores the Once instant before evaluating its due slot (%s)',
+    async (input, at) => {
+      const zone = 'America/Los_Angeles';
+      const port = memoryPort();
+      const repo = new ScheduleRepository(port, 'workspace' as never);
+      const instant = zonedLocalInputToInstant(input, zone)!;
+      expect(instant).toBe(Date.parse(at));
+      await repo.save({
+        scheduleId: 'test',
+        draft: { ...chatDraft(), trigger: { kind: 'once', at: new Date(instant).toISOString() } },
+        actorId: 'owner',
+        now: instant - 60_000,
+        activationId: 'activation',
+        activityId: 'created',
+        create: true,
+      });
+      const doc = (await port.openPersistedDoc('schedule-test')).doc;
+      const peer = new LoroDoc();
+      peer.import(doc.export({ mode: 'snapshot' }));
+      const restored = await new ScheduleRepository(
+        {
+          ...port,
+          openPersistedDoc: async () => ({ doc: peer }),
+        },
+        'workspace' as never
+      ).read('test');
+      expect(restored!.definition.trigger).toEqual({ kind: 'once', at });
+      expect(scheduleDefinitionFingerprint(restored!)).toBe(
+        (await repo.list())[0]!.definitionFingerprint
+      );
+      expect(instantToZonedLocalInput(instant, zone)).toBe(input);
+      expect(
+        previewSchedule(restored!.definition.trigger, restored!.definition.activeFrom, instant - 1)
+      ).toEqual([instant]);
+      const due = evaluateSchedule(restored!.definition, undefined, instant);
+      expect(due.due).toEqual({ scheduledFor: instant, disposition: 'run' });
+      expect(
+        evaluateSchedule(restored!.definition, due.evaluatedThrough, instant + 60_000).due
+      ).toBeUndefined();
+    }
+  );
 
   it('accepts a definition with no project and keeps the field absent through the doc', async () => {
     const repo = new ScheduleRepository(memoryPort(), 'workspace' as never);
@@ -398,5 +425,52 @@ describe('Chat-mode schedules carry no project', () => {
     });
     const handle = await port.openFlockDoc('workspace:sr');
     expect(readScheduleRegistryRows(handle.flock.scan())).toHaveLength(1);
+  });
+});
+
+describe('legacy Schedule ACP value compatibility', () => {
+  it('projects only declared boolean literals without rewriting the authorized definition', () => {
+    const agent = {
+      agentConfigId: 'agent',
+      configOptionValues: {
+        plan_mode: 'false',
+        verbose: 'true',
+        select_flag: 'false',
+        unknown: 'true',
+        invalid: 'off',
+        typed: false,
+      },
+    };
+    const document = { definition: { ...definition(), agent }, prompt: 'hello', timeline: [] };
+    const fingerprint = scheduleDefinitionFingerprint(document);
+    expect(
+      normalizeLegacyScheduleAgent(agent, [
+        { id: 'plan_mode', type: 'boolean' },
+        { id: 'verbose', type: 'boolean' },
+        { id: 'select_flag', type: 'select' },
+        { id: 'invalid', type: 'boolean' },
+        { id: 'typed', type: 'boolean' },
+      ]).configOptionValues
+    ).toEqual({
+      plan_mode: false,
+      verbose: true,
+      select_flag: 'false',
+      unknown: 'true',
+      invalid: 'off',
+      typed: false,
+    });
+    expect(normalizeLegacyScheduleAgent(agent).configOptionValues).toEqual(
+      agent.configOptionValues
+    );
+    expect(agent.configOptionValues.plan_mode).toBe('false');
+    expect(scheduleDefinitionFingerprint(document)).toBe(fingerprint);
+  });
+  it.each([42, null, {}, [], 'x'.repeat(1025)])('rejects invalid option values', (value) => {
+    expect(
+      ScheduleAgentSchema.safeParse({
+        agentConfigId: 'agent',
+        configOptionValues: { option: value },
+      }).success
+    ).toBe(false);
   });
 });

@@ -32,6 +32,8 @@ export const ENGINE_MIN_ROW_PX = 20;
 const MAX_SUPPLEMENTARY_COMMITS = 2;
 /** A downward scroll that ends this close to the real bottom re-arms follow. */
 const REARM_DISTANCE_PX = 4;
+/** Scroll ranges remembered per scroll sequence (see {@link ScrollGesture}). */
+const MAX_GESTURE_BOTTOMS = 32;
 /** How long a send (or a smooth jump) takes to glide to its target. */
 const GLIDE_MS = 360;
 /** Differences below this are sub-pixel rounding, not movement. */
@@ -119,6 +121,19 @@ interface Glide {
   settle: Intent;
 }
 
+/**
+ * One scroll sequence, from its first scroll event to `scrollend`. The
+ * compositor clamps a fling against the scroll range of the last frame it
+ * received; rows measured during the fling can grow the range after that, so
+ * the fling stops at a bottom that was real while it ran. `bottoms` holds
+ * every maximum offset the range had during the sequence.
+ */
+interface ScrollGesture {
+  bottoms: number[];
+  /** The last movement in the sequence was downward. */
+  down: boolean;
+}
+
 interface Transaction {
   reason: string;
   pass: 1 | 2;
@@ -180,12 +195,18 @@ export class ScrollController {
   private touchActive = false;
   /** Touch ended and no `scrollend` yet: any scrolling now is momentum. */
   private momentum = false;
+  private gesture: ScrollGesture | null = null;
   private momentumStats: MomentumStats = { compensations: 0, interruptions: 0 };
   private compensationPendingCheck = false;
   private scrolledSinceCompensation = false;
   private sourceGeneration = 0;
   private disposed = false;
+  /** The viewport has no layout box (a `display: none` tab or a collapsed panel). */
+  private hidden = false;
+  /** Shown again since the last transaction: the DOM position is not the reader's. */
+  private reshown = false;
   private readonly reportedMinRow = new Set<string>();
+  private lastReportedScroll: number | null = null;
 
   constructor(options: ControllerOptions) {
     this.host = options.host;
@@ -233,6 +254,28 @@ export class ScrollController {
     this.geometry.setLayoutVersion(version);
   }
 
+  /**
+   * Whether the viewport is off screen with no layout box. Called during
+   * render. A hidden viewport reads every offset and size as 0 and drops
+   * writes, so nothing it reports is a position or a size: the engine runs no
+   * transactions and reports no scroll until it is shown again, then resolves
+   * the intent it kept. Without this, the adapter's per-commit transaction
+   * accepted the hidden offset 0 and reported it to the view, whose
+   * position-derived state (hydration window, outline) re-rendered the list,
+   * whose commit reported 0 again: an unbounded synchronous loop.
+   */
+  setHidden(hidden: boolean): void {
+    if (hidden === this.hidden) return;
+    this.hidden = hidden;
+    if (hidden) {
+      this.tx = null;
+      this.gesture = null;
+      this.cancelGlide();
+    } else {
+      this.reshown = true;
+    }
+  }
+
   /** The rows to mount and where. Called during render. */
   plan(): RenderPlan {
     const length = this.rows.length;
@@ -277,14 +320,21 @@ export class ScrollController {
     if (this.disposed) return;
     const previous = this.committedPlan;
     this.committedPlan = this.lastPlan;
-    if (this.rows.length === 0) return;
-    if (!this.tx) this.beginTransaction('commit', previous);
+    if (this.rows.length === 0 || this.hidden) return;
+    // A parent setState from `onScroll` (hydration, the top fade) re-commits
+    // the list with the same layout. Starting a fresh cycle every time, then
+    // reporting the offset again, is the React #185 nested-update loop.
+    if (!this.tx) {
+      if (this.isSettled()) return;
+      this.beginTransaction(this.reshown ? 'reshow' : 'commit', previous);
+    }
     this.continueTransaction();
   }
 
   /** Mounted rows changed size (ResizeObserver). */
   onRowsResized(entries: ReadonlyArray<{ key: string; height: number }>): void {
-    if (this.disposed) return;
+    // A hidden row measures 0; its size is unknown, not changed.
+    if (this.disposed || this.hidden) return;
     let changed = false;
     for (const { key, height } of entries) {
       const index = this.geometry.indexOfKey(key);
@@ -301,7 +351,8 @@ export class ScrollController {
 
   /** The viewport changed size (ResizeObserver). */
   onViewportResized(layoutVersion?: string): void {
-    if (this.disposed) return;
+    // Hiding reads as a resize to 0 × 0; showing again resizes back.
+    if (this.disposed || this.hidden) return;
     if (layoutVersion !== undefined) this.geometry.setLayoutVersion(layoutVersion);
     this.refreshViewport();
     this.run('viewport', true);
@@ -309,7 +360,11 @@ export class ScrollController {
 
   /** A native scroll event. */
   onScrollEvent(): void {
-    if (this.disposed || this.rows.length === 0 || this.tx) return;
+    if (this.disposed || this.hidden || this.rows.length === 0 || this.tx) return;
+    if (this.reshown) {
+      this.run('reshow', true);
+      return;
+    }
     this.refreshViewport(false);
     const scrollTop = this.host.readScrollTop();
     const last = this.lastObserved;
@@ -321,6 +376,9 @@ export class ScrollController {
     this.applyMovement(movement, scrollTop, this.committedPlan);
     // Re-arm follow: a downward scroll reaching the real bottom.
     const maxNow = Math.max(0, this.host.readScrollHeight() - this.viewportHeight);
+    this.gesture ??= { bottoms: last ? [last.maxScrollTop] : [], down: false };
+    this.gesture.down = scrollTop > previous;
+    this.recordBottom(maxNow);
     if (
       this.intent.kind === 'read' &&
       !this.glide &&
@@ -357,7 +415,7 @@ export class ScrollController {
       maxScrollTop: maxNow,
       geometryRevision: this.geometry.revision,
     };
-    this.callbacks.onScroll?.(scrollTop);
+    this.reportScroll(scrollTop);
     if (rangeMoved) this.host.requestCommit(false);
   }
 
@@ -387,6 +445,7 @@ export class ScrollController {
 
   /** The native `scrollend` event. */
   onScrollEnd(): void {
+    this.rearmAtGestureBottom();
     if (this.compensationPendingCheck && !this.scrolledSinceCompensation) {
       this.momentumStats.interruptions += 1;
     }
@@ -527,7 +586,7 @@ export class ScrollController {
   // ---- Internals ----------------------------------------------------------
 
   private run(reason: string, sync: boolean, commitFirst = true): void {
-    if (this.tx || this.rows.length === 0) return;
+    if (this.tx || this.hidden || this.rows.length === 0) return;
     this.beginTransaction(reason, this.committedPlan);
     if (commitFirst) {
       this.host.requestCommit(sync);
@@ -537,11 +596,16 @@ export class ScrollController {
   }
 
   private beginTransaction(reason: string, previousPlan: RenderPlan | null): void {
-    this.refreshViewport(!this.viewportKnown);
+    // Shown again: the viewport may have resized, and whatever offset the
+    // browser kept or reset while it was hidden is not reader movement, so the
+    // kept intent is written absolutely.
+    const reshown = this.reshown;
+    this.reshown = false;
+    this.refreshViewport(reshown || !this.viewportKnown);
     if (this.host.isSuppressed() && this.intent.kind === 'follow') this.release('suppressed');
     const sampled = this.host.readScrollTop();
     let movement: MovementClass = 'none';
-    if (this.lastObserved && Math.abs(sampled - this.lastObserved.scrollTop) >= 0.5) {
+    if (!reshown && this.lastObserved && Math.abs(sampled - this.lastObserved.scrollTop) >= 0.5) {
       movement = this.classify(sampled);
       this.applyMovement(movement, sampled, previousPlan);
     }
@@ -555,6 +619,7 @@ export class ScrollController {
       sampled,
       movement,
       relative:
+        !reshown &&
         this.intent.kind === 'read' &&
         this.lastObserved !== null &&
         !this.glide &&
@@ -623,6 +688,7 @@ export class ScrollController {
     }
 
     // 1. grow, 2. write, 3. shrink, 4. read back (extent ownership).
+    this.recordBottom(Math.max(0, this.host.readScrollHeight() - this.viewportHeight));
     this.host.setExtent(Math.max(extentBefore, total));
     this.host.setReplyRoom(Math.max(roomBefore, room));
     let expected: number;
@@ -646,6 +712,7 @@ export class ScrollController {
     this.extent = total;
     const actual = this.host.readScrollTop();
     const maxNow = Math.max(0, this.host.readScrollHeight() - this.viewportHeight);
+    this.recordBottom(maxNow);
     const clampedExpected = Math.min(Math.max(0, expected), maxNow);
 
     if (Math.abs(actual - clampedExpected) > EPSILON_PX) {
@@ -674,12 +741,19 @@ export class ScrollController {
       return;
     }
     this.pendingExternalMove = false;
-    this.lastObserved = {
-      scrollTop: actual,
-      maxScrollTop: maxNow,
-      geometryRevision: this.geometry.revision,
-    };
-    this.finishTransaction(tx, clampedExpected, actual, true);
+    // I3: an uncovered position is never accepted. Write can move the target
+    // (sent → follow, reply-room) after the prospective coverage check; mount
+    // the worst-case window instead of reporting the hole to React.
+    const covered = this.isCovered(actual, this.committedPlan);
+    if (!covered && this.requestCoverageCommit(tx)) return;
+    if (covered) {
+      this.lastObserved = {
+        scrollTop: actual,
+        maxScrollTop: maxNow,
+        geometryRevision: this.geometry.revision,
+      };
+    }
+    this.finishTransaction(tx, clampedExpected, actual, covered);
   }
 
   private finishTransaction(
@@ -707,7 +781,52 @@ export class ScrollController {
       this.firstCycleComplete = true;
       this.callbacks.onFirstCycle?.();
     }
-    if (accepted) this.callbacks.onScroll?.(actual);
+    if (accepted) this.reportScroll(actual);
+  }
+
+  /**
+   * The last accepted cycle still holds: same geometry, the DOM is at that
+   * offset, the intent's target has not moved, and the viewport is covered.
+   * Used so a React re-render that did not change the list does not start a
+   * new cycle (and does not re-enter `onScroll` from a layout effect).
+   */
+  private isSettled(): boolean {
+    if (this.reshown || !this.firstCycleComplete || this.dirty.size > 0 || this.glide) {
+      return false;
+    }
+    const plan = this.committedPlan;
+    const last = this.lastObserved;
+    if (!plan || !last) return false;
+    if (last.geometryRevision !== this.geometry.revision) return false;
+    for (let i = 0; i < plan.keys.length; i += 1) {
+      const index = this.geometry.indexOfKey(plan.keys[i]!);
+      if (index < 0 || !this.geometry.isMeasured(index)) return false;
+    }
+    this.refreshViewport(true);
+    const scrollTop = this.host.readScrollTop();
+    if (Math.abs(scrollTop - last.scrollTop) >= 0.5) return false;
+    if (!this.isCovered(scrollTop, plan)) return false;
+    return Math.abs(this.targetScrollTop() - scrollTop) <= EPSILON_PX;
+  }
+
+  /** Expand the window and commit again; false when this pass is out of commits. */
+  private requestCoverageCommit(tx: Transaction): boolean {
+    if (tx.supplementary >= MAX_SUPPLEMENTARY_COMMITS) return false;
+    if (tx.supplementary === 0) {
+      tx.worstCase = true;
+      tx.freezeNextPlan = true;
+    }
+    tx.supplementary += 1;
+    this.host.requestCommit(true);
+    return true;
+  }
+
+  private reportScroll(offset: number): void {
+    if (this.lastReportedScroll !== null && Math.abs(this.lastReportedScroll - offset) < 0.5) {
+      return;
+    }
+    this.lastReportedScroll = offset;
+    this.callbacks.onScroll?.(offset);
   }
 
   /** Read the sizes of committed rows that are new, stale or reported dirty. */
@@ -944,6 +1063,43 @@ export class ScrollController {
     };
   }
 
+  private recordBottom(maxScrollTop: number): void {
+    const bottoms = this.gesture?.bottoms;
+    if (!bottoms || bottoms[bottoms.length - 1] === maxScrollTop) return;
+    bottoms.push(maxScrollTop);
+    if (bottoms.length > MAX_GESTURE_BOTTOMS) bottoms.shift();
+  }
+
+  /**
+   * A downward scroll sequence that came to rest at a bottom the range had
+   * while it ran reached the end the reader was scrolling to: follow again,
+   * even though the rows measured on the way have moved the end further.
+   */
+  private rearmAtGestureBottom(): void {
+    const gesture = this.gesture;
+    this.gesture = null;
+    if (
+      !gesture?.down ||
+      this.disposed ||
+      this.hidden ||
+      this.rows.length === 0 ||
+      this.tx ||
+      this.intent.kind !== 'read' ||
+      this.glide ||
+      this.pointerHeld ||
+      this.host.isSuppressed() ||
+      this.replyRoom !== 0
+    ) {
+      return;
+    }
+    const scrollTop = this.host.readScrollTop();
+    if (!gesture.bottoms.some((bottom) => Math.abs(bottom - scrollTop) <= REARM_DISTANCE_PX)) {
+      return;
+    }
+    this.setIntent({ kind: 'follow' });
+    this.run('rearm', true);
+  }
+
   private shrinkReplyRoom(scrollTop: number): void {
     const needed =
       scrollTop +
@@ -976,6 +1132,8 @@ export class ScrollController {
   }
 
   private startGlide(rowKey: string, toScreenY: number, settle: Intent): void {
+    // Hidden: the settled intent is already set and is written when shown.
+    if (this.hidden) return;
     const index = this.geometry.indexOfKey(rowKey);
     if (index < 0) {
       this.run('glide-missing', true);

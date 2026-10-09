@@ -1,12 +1,6 @@
-import {
-  useRef,
-  useState,
-  type CSSProperties,
-  type KeyboardEvent,
-  type PointerEvent,
-  type ReactNode,
-} from 'react';
+import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import {
   CalendarClock,
   ChevronRight,
@@ -50,6 +44,7 @@ export function matchingScheduleRuntime(row: ScheduleRegistryRow, runtimes: Sche
 
 export type ScheduleRowContext = {
   machine: string;
+  timeZone?: string;
   agent: string;
   /** `null` for a chat-only schedule that is not bound to any project. */
   project: string | null;
@@ -69,6 +64,390 @@ const MAX_COLUMN_WIDTH = 720;
 const clampWidth = (value: number) =>
   Math.round(Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, value)));
 
+const DARK =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
+const styles = stylex.create({
+  statusPill: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    whiteSpace: 'nowrap',
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border))',
+    borderRadius: '9999px',
+    paddingLeft: '6px',
+    paddingRight: '6px',
+    paddingTop: '1px',
+    paddingBottom: '1px',
+    fontSize: '0.85em',
+    fontWeight: 400,
+    lineHeight: 1.25,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  statusAttention: {
+    borderColor: 'hsl(var(--status-warning) / 0.4)',
+    color: 'hsl(var(--status-warning))',
+  },
+  statusProgress: {
+    borderColor: 'hsl(var(--status-info) / 0.4)',
+    color: 'hsl(var(--status-info))',
+  },
+  listGrid: {
+    display: 'grid',
+    columnGap: '12px',
+  },
+  cellName: { gridColumnStart: 1, gridRowStart: 1 },
+  cellFrequency: {
+    gridColumnEnd: {
+      default: 'span 2',
+      '@media (min-width: 640px)': 3,
+    },
+    gridRowStart: {
+      default: 2,
+      '@media (min-width: 640px)': 1,
+    },
+    gridColumnStart: {
+      default: null,
+      '@media (min-width: 640px)': 2,
+    },
+  },
+  cellNext: {
+    gridColumnEnd: {
+      default: 'span 2',
+      '@media (min-width: 640px)': 4,
+    },
+    gridRowStart: {
+      default: 3,
+      '@media (min-width: 640px)': 1,
+    },
+    gridColumnStart: {
+      default: null,
+      '@media (min-width: 640px)': 3,
+    },
+  },
+  cellTarget: {
+    gridColumnEnd: {
+      default: 'span 2',
+      '@media (min-width: 640px)': 5,
+    },
+    gridRowStart: {
+      default: 4,
+      '@media (min-width: 640px)': 1,
+    },
+    gridColumnStart: {
+      default: null,
+      '@media (min-width: 640px)': 4,
+    },
+  },
+  cellActions: {
+    gridColumnStart: {
+      default: 2,
+      '@media (min-width: 640px)': 5,
+    },
+    gridRowStart: {
+      default: 1,
+      '@media (min-width: 640px)': 1,
+    },
+  },
+  row: {
+    position: 'relative',
+    alignItems: 'flex-start',
+    rowGap: {
+      default: '2px',
+      '@media (min-width: 640px)': 0,
+    },
+    borderBottomWidth: '0.5px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border))',
+    paddingLeft: '16px',
+    paddingRight: '16px',
+    paddingTop: '10px',
+    paddingBottom: '10px',
+    fontSize: '0.9em',
+    lineHeight: '20px',
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  rowHover: { backgroundColor: { default: 'transparent', ':hover': 'hsl(var(--hover))' } },
+  rowSelected: {
+    backgroundColor: {
+      default: 'hsl(var(--foreground) / 0.06)',
+      [DARK]: 'hsl(0 0% 100% / 0.08)',
+    },
+  },
+  openButton: {
+    minWidth: 0,
+    textAlign: 'left',
+    outlineStyle: {
+      ':focus-visible': { default: 'none', '@media (forced-colors: active)': 'solid' },
+    },
+    outlineWidth: { ':focus-visible': { '@media (forced-colors: active)': '2px' } },
+    outlineColor: { ':focus-visible': { '@media (forced-colors: active)': 'transparent' } },
+    outlineOffset: { ':focus-visible': { '@media (forced-colors: active)': '2px' } },
+  },
+  rowHitTarget: { position: 'absolute', inset: 0 },
+  titleLine: { display: 'flex', minWidth: 0, alignItems: 'center', columnGap: '8px' },
+  titleText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontWeight: 400,
+  },
+  mobileOnly: {
+    display: {
+      default: null,
+      '@media (min-width: 640px)': 'none',
+    },
+  },
+  desktopOnly: {
+    display: {
+      default: 'none',
+      '@media (min-width: 640px)': 'inline',
+    },
+  },
+  frequency: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  nextCell: {
+    display: 'flex',
+    minWidth: 0,
+    alignItems: 'center',
+    columnGap: '8px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  upcoming: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'hsl(var(--foreground) / 0.8)',
+  },
+  truncate: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  firstPill: { marginLeft: { default: null, ':first-child': '-6px' } },
+  target: {
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    justifyContent: 'center',
+    rowGap: '1px',
+  },
+  targetLine: { display: 'flex', minWidth: 0, alignItems: 'center', columnGap: '6px' },
+  mutedText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  offlineIcon: {
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    color: 'hsl(var(--status-warning))',
+  },
+  icon14: { width: '14px', height: '14px', flexShrink: 0 },
+  mutedIcon: {
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  machineLine: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.85em',
+    lineHeight: '16px',
+    color: 'hsl(var(--muted-foreground) / 0.7)',
+  },
+  separator: { paddingLeft: '4px', paddingRight: '4px', opacity: 0.5 },
+  actions: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    columnGap: '2px',
+    marginTop: '-4px',
+    marginBottom: '-4px',
+  },
+  actionIcon: { width: '100%', height: '100%' },
+  actionButton: { flexShrink: 0 },
+  chevron: {
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    color: 'hsl(var(--muted-foreground) / 0.5)',
+  },
+  list: {
+    position: 'relative',
+    display: 'flex',
+    height: '100%',
+    minHeight: 0,
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  listHeader: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    columnGap: '8px',
+    paddingLeft: '16px',
+    paddingRight: '16px',
+    paddingTop: '12px',
+    paddingBottom: '12px',
+  },
+  pageTitle: {
+    marginRight: 'auto',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+    fontSize: '1em',
+    fontWeight: 400,
+    color: 'hsl(var(--foreground))',
+  },
+  search: {
+    width: {
+      default: '160px',
+      '@media (min-width: 640px)': '224px',
+    },
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  newButtonLabel: {
+    display: {
+      default: 'none',
+      '@media (min-width: 640px)': 'inline',
+    },
+  },
+  tableScroller: { height: '100%', minHeight: 0, flex: '1 1 0%', overflow: 'auto' },
+  tableMinimum: (minimum: string) => ({
+    minWidth: {
+      default: null,
+      '@media (min-width: 640px)': minimum,
+    },
+  }),
+  headerRow: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 20,
+    display: {
+      default: 'none',
+      '@media (min-width: 640px)': 'grid',
+    },
+    borderBottomWidth: '0.5px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border))',
+    backgroundColor: 'hsl(var(--background))',
+    paddingLeft: '16px',
+    paddingRight: '16px',
+    paddingTop: '6px',
+    paddingBottom: '6px',
+    fontSize: '0.75em',
+    fontWeight: 400,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  headerCell: { position: 'relative', minWidth: 0 },
+  headerLabel: {
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  skeletonRow: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: '12px',
+    borderBottomWidth: '0.5px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'hsl(var(--border))',
+    paddingLeft: '16px',
+    paddingRight: '16px',
+    paddingTop: '12px',
+    paddingBottom: '12px',
+    marginBlockEnd: { default: '1px', ':last-child': 0 },
+  },
+  error: {
+    paddingLeft: '16px',
+    paddingRight: '16px',
+    paddingTop: '32px',
+    paddingBottom: '32px',
+    fontSize: '1em',
+    color: 'hsl(var(--destructive))',
+  },
+  empty: {
+    display: 'flex',
+    maxWidth: '384px',
+    flexDirection: 'column',
+    alignItems: 'center',
+    rowGap: '8px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    paddingLeft: '24px',
+    paddingRight: '24px',
+    paddingTop: '64px',
+    paddingBottom: '64px',
+    textAlign: 'center',
+  },
+  emptyIcon: { width: '20px', height: '20px', color: 'hsl(var(--muted-foreground))' },
+  emptyTitle: { fontSize: '1em', fontWeight: 400 },
+  emptyHelp: { fontSize: '0.9em', color: 'hsl(var(--muted-foreground))' },
+  emptyAction: { marginTop: '8px' },
+  visuallyHidden: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  skeletonTrailing: { marginLeft: 'auto' },
+  resizeHandle: {
+    position: 'absolute',
+    top: '-6px',
+    bottom: '-6px',
+    right: '-9px',
+    zIndex: 10,
+    display: 'flex',
+    width: '12px',
+    cursor: 'col-resize',
+    touchAction: 'none',
+    userSelect: 'none',
+    justifyContent: 'center',
+    outlineStyle: {
+      ':focus-visible': { default: 'none', '@media (forced-colors: active)': 'solid' },
+    },
+    outlineWidth: { ':focus-visible': { '@media (forced-colors: active)': '2px' } },
+    outlineColor: { ':focus-visible': { '@media (forced-colors: active)': 'transparent' } },
+    outlineOffset: { ':focus-visible': { '@media (forced-colors: active)': '2px' } },
+  },
+  resizeLine: {
+    height: '100%',
+    width: '1px',
+    backgroundColor: {
+      default: 'transparent',
+      [stylex.when.ancestor(':hover')]: 'hsl(var(--border))',
+      [stylex.when.ancestor(':focus-visible')]: 'hsl(var(--ring))',
+      [stylex.when.ancestor(':active')]: 'hsl(var(--ring))',
+    },
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  },
+  columnTracks: (name: number, frequency: number, next: number) => ({
+    gridTemplateColumns: {
+      default: 'minmax(0, 1fr) auto',
+      '@media (min-width: 640px)': `minmax(${MIN_COLUMN_WIDTH}px,${name}px) minmax(${MIN_COLUMN_WIDTH}px,${frequency}px) minmax(${MIN_COLUMN_WIDTH}px,${next}px) minmax(0, 1fr) 5.75rem`,
+    },
+  }),
+});
+
 /**
  * Only states that are not the happy path get a pill. An enabled schedule with
  * a next run already says so by having a next run.
@@ -77,11 +456,10 @@ function StatusPill({ status }: { status: ScheduleStatus }) {
   if (status.tone === 'active') return null;
   return (
     <span
-      className={cn(
-        'inline-flex shrink-0 items-center whitespace-nowrap rounded-full border-[0.5px] px-1.5 py-px text-[0.85em] font-normal leading-tight',
-        status.tone === 'attention' && 'border-status-warning/40 text-status-warning',
-        status.tone === 'progress' && 'border-status-info/40 text-status-info',
-        status.tone === 'muted' && 'border-border text-muted-foreground'
+      {...stylex.props(
+        styles.statusPill,
+        status.tone === 'attention' && styles.statusAttention,
+        status.tone === 'progress' && styles.statusProgress
       )}
     >
       {status.label}
@@ -96,35 +474,23 @@ function StatusPill({ status }: { status: ScheduleStatus }) {
  * it varied per row, which redistributed the `fr` columns and left Frequency
  * and Next run visibly unaligned down the list.
  */
-const listGridClass =
-  'grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 sm:grid-cols-[var(--schedule-col-name)_var(--schedule-col-frequency)_var(--schedule-col-next)_minmax(0,1fr)_5.75rem]';
-
 /**
  * The resizable tracks shrink before they overflow: `minmax(min, width)` keeps a
  * dragged width in a wide window and still fits a narrow panel.
  */
-const columnVars = (widths: ScheduleColumnWidths) =>
-  ({
-    '--schedule-col-name': `minmax(${MIN_COLUMN_WIDTH}px,${widths.name}px)`,
-    '--schedule-col-frequency': `minmax(${MIN_COLUMN_WIDTH}px,${widths.frequency}px)`,
-    '--schedule-col-next': `minmax(${MIN_COLUMN_WIDTH}px,${widths.next}px)`,
-    // Below this the table scrolls sideways: the three dragged widths, a
-    // readable "Runs with", the actions, four gaps and the row padding.
-    '--schedule-table-min': `${widths.name + widths.frequency + widths.next + 200 + 92 + 48 + 32}px`,
-  }) as CSSProperties;
-
 const cell = {
-  name: 'col-start-1 row-start-1',
-  frequency: 'col-span-2 row-start-2 sm:col-span-1 sm:col-start-2 sm:row-start-1',
-  next: 'col-span-2 row-start-3 sm:col-span-1 sm:col-start-3 sm:row-start-1',
-  target: 'col-span-2 row-start-4 sm:col-span-1 sm:col-start-4 sm:row-start-1',
-  actions: 'col-start-2 row-start-1 sm:col-start-5 sm:row-start-1',
+  name: styles.cellName,
+  frequency: styles.cellFrequency,
+  next: styles.cellNext,
+  target: styles.cellTarget,
+  actions: styles.cellActions,
 } as const;
 
 function ScheduleListRow({
   row,
   runtime,
   context,
+  widths,
   now,
   onOpen,
   onToggle,
@@ -138,6 +504,7 @@ function ScheduleListRow({
   /** The schedule open beside the list. */
   selected?: boolean;
   context?: ScheduleRowContext;
+  widths: ScheduleColumnWidths;
   now: number;
   onOpen: () => void;
   onToggle?: () => void;
@@ -146,7 +513,7 @@ function ScheduleListRow({
   onOpenSession?: (id: string) => void;
 }) {
   const { t, i18n } = useTranslation();
-  const zone = triggerTimeZone(row.trigger);
+  const zone = triggerTimeZone(row.trigger, context?.timeZone);
   const status = describeStatus(t, row.enabled, runtime?.queueState);
   const next = row.enabled ? runtime?.nextScheduledAt : undefined;
   // A run that is appended to a chat has that chat's workspace, so the
@@ -162,45 +529,41 @@ function ScheduleListRow({
   const canDelete = !!onDelete && context?.canDelete !== false;
   const lastSessionId = runtime?.lastDispatch?.sessionId;
   const toggleLabel = row.enabled ? t('schedules.pause', 'Pause') : t('schedules.resume', 'Resume');
+  const rowStyle = stylex.props(
+    styles.listGrid,
+    styles.columnTracks(widths.name, widths.frequency, widths.next),
+    styles.row,
+    selected ? styles.rowSelected : styles.rowHover
+  );
   const rowElement = (
     <div
       data-schedule-row=""
       aria-current={selected ? 'true' : undefined}
-      className={cn(
-        listGridClass,
-        // Cells align to their FIRST line, not their middle: the Runs-with cell has
-        // a second line (machine · project), and centring every cell made its
-        // first line sit above the name and frequency beside it.
-        'group relative items-start gap-y-0.5 border-b-[0.5px] border-border px-4 py-2.5 text-[0.9em] leading-5 transition-colors sm:gap-y-0',
-        selected ? 'bg-foreground/[0.06] dark:bg-white/[0.08]' : 'hover:bg-hover'
-      )}
+      className={cn(rowStyle.className, 'group')}
+      style={rowStyle.style}
     >
-      <button
-        type="button"
-        onClick={onOpen}
-        className={cn(cell.name, 'min-w-0 text-left focus-visible:outline-hidden')}
-      >
+      <button type="button" onClick={onOpen} {...stylex.props(cell.name, styles.openButton)}>
         {/* Row-wide hit target: the whole row opens the schedule, while the
             action buttons stay above it and keep their own clicks. */}
-        <span className="absolute inset-0" aria-hidden="true" />
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-normal">{row.title}</span>
-          <span className="sm:hidden">
+        <span {...stylex.props(styles.rowHitTarget)} aria-hidden="true" />
+        <span {...stylex.props(styles.titleLine)}>
+          <span {...stylex.props(styles.titleText)}>{row.title}</span>
+          <span {...stylex.props(styles.mobileOnly)}>
             <StatusPill status={status} />
           </span>
         </span>
       </button>
 
-      <div className={cn(cell.frequency, 'min-w-0 truncate text-muted-foreground')}>
-        {describeTrigger(row.trigger, t, i18n.language)}
+      <div {...stylex.props(cell.frequency, styles.frequency)}>
+        {describeTrigger(row.trigger, t, i18n.language, zone)}
       </div>
 
-      <div className={cn(cell.next, 'flex min-w-0 items-center gap-2 text-muted-foreground')}>
+      <div {...stylex.props(cell.next, styles.nextCell)}>
         {next != null ? (
           <Tooltip.Root>
             <Tooltip.Trigger
               render={
-                <span className="truncate text-foreground/80">
+                <span {...stylex.props(styles.upcoming)}>
                   {formatUpcoming(next, zone, now, i18n.language)}
                 </span>
               }
@@ -210,12 +573,14 @@ function ScheduleListRow({
             </Tooltip.Content>
           </Tooltip.Root>
         ) : manual ? (
-          <span className="truncate">{t('schedules.trigger.onDemand', 'On demand')}</span>
+          <span {...stylex.props(styles.truncate)}>
+            {t('schedules.trigger.onDemand', 'On demand')}
+          </span>
         ) : row.enabled ? (
           <Tooltip.Root>
             <Tooltip.Trigger
               render={
-                <span className="truncate">
+                <span {...stylex.props(styles.truncate)}>
                   {t('schedules.notScheduledYet', 'Not scheduled yet')}
                 </span>
               }
@@ -226,21 +591,17 @@ function ScheduleListRow({
           </Tooltip.Root>
         ) : null}
         {/* A pill that starts the cell pulls its text back onto the column line. */}
-        <span className="hidden first:-ml-1.5 sm:inline">
+        <span {...stylex.props(styles.desktopOnly, styles.firstPill)}>
           <StatusPill status={status} />
         </span>
       </div>
 
-      <div className={cn(cell.target, 'flex min-w-0 flex-col justify-center gap-px')}>
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-muted-foreground">
-            {context?.agent ?? row.agentConfigId}
-          </span>
+      <div {...stylex.props(cell.target, styles.target)}>
+        <span {...stylex.props(styles.targetLine)}>
+          <span {...stylex.props(styles.mutedText)}>{context?.agent ?? row.agentConfigId}</span>
           {offline ? (
             <Tooltip.Root>
-              <Tooltip.Trigger
-                render={<CloudOff className="size-3.5 shrink-0 text-status-warning" />}
-              />
+              <Tooltip.Trigger render={<CloudOff {...stylex.props(styles.offlineIcon)} />} />
               <Tooltip.Content>
                 {t(
                   'schedules.machineOfflineHint',
@@ -253,17 +614,17 @@ function ScheduleListRow({
         {/* The machine is what separates two same-named Agents, and two
             chat-only schedules that would otherwise read identically. */}
         <span
-          className="truncate text-[0.85em] leading-4 text-muted-foreground/70"
+          {...stylex.props(styles.machineLine)}
           title={`${context?.machine ?? row.machineId} · ${project}`}
         >
           {context?.machine ?? row.machineId}
-          <span className="px-1 opacity-50">·</span>
+          <span {...stylex.props(styles.separator)}>·</span>
           {project}
         </span>
       </div>
 
       {/* 28px buttons centred on the 20px first line. */}
-      <div className={cn(cell.actions, 'relative -my-1 flex items-center justify-end gap-0.5')}>
+      <div {...stylex.props(cell.actions, styles.actions)}>
         {runtime?.lastDispatch && onOpenSession ? (
           <Tooltip.Root>
             <Tooltip.Trigger
@@ -278,7 +639,7 @@ function ScheduleListRow({
                   onClick={() => onOpenSession(runtime.lastDispatch!.sessionId)}
                   aria-label={t('schedules.lastRun', 'Last run')}
                 >
-                  <History className="size-full" />
+                  <History {...stylex.props(styles.actionIcon)} />
                 </Button>
               }
             />
@@ -295,11 +656,11 @@ function ScheduleListRow({
                   variant="ghost"
                   size="small"
                   icon
-                  className="shrink-0"
+                  className={stylex.props(styles.actionButton).className}
                   onClick={onRun}
                   aria-label={t('schedules.runNow', 'Run now')}
                 >
-                  <Play className="size-full" />
+                  <Play {...stylex.props(styles.actionIcon)} />
                 </Button>
               }
             />
@@ -310,14 +671,18 @@ function ScheduleListRow({
             variant="ghost"
             size="small"
             icon
-            className="shrink-0"
+            className={stylex.props(styles.actionButton).className}
             onClick={onToggle}
             aria-label={toggleLabel}
           >
-            {row.enabled ? <Pause className="size-full" /> : <RotateCcw className="size-full" />}
+            {row.enabled ? (
+              <Pause {...stylex.props(styles.actionIcon)} />
+            ) : (
+              <RotateCcw {...stylex.props(styles.actionIcon)} />
+            )}
           </Button>
         ) : null}
-        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/50" aria-hidden="true" />
+        <ChevronRight {...stylex.props(styles.chevron)} aria-hidden="true" />
       </div>
     </div>
   );
@@ -325,28 +690,28 @@ function ScheduleListRow({
     <ContextMenu.Root>
       <ContextMenu.Trigger render={rowElement} />
       <ContextMenu.Content>
-        <ContextMenu.Item icon={<ExternalLink />} onClick={onOpen}>
+        <ContextMenu.Item icon={ExternalLink} onClick={onOpen}>
           {t('schedules.open', 'Open')}
         </ContextMenu.Item>
         {canRun ? (
-          <ContextMenu.Item icon={<Play />} onClick={onRun}>
+          <ContextMenu.Item icon={Play} onClick={onRun}>
             {t('schedules.runNow', 'Run now')}
           </ContextMenu.Item>
         ) : null}
         {canToggle ? (
-          <ContextMenu.Item icon={row.enabled ? <Pause /> : <RotateCcw />} onClick={onToggle}>
+          <ContextMenu.Item icon={row.enabled ? Pause : RotateCcw} onClick={onToggle}>
             {toggleLabel}
           </ContextMenu.Item>
         ) : null}
         {lastSessionId && onOpenSession ? (
-          <ContextMenu.Item icon={<History />} onClick={() => onOpenSession(lastSessionId)}>
+          <ContextMenu.Item icon={History} onClick={() => onOpenSession(lastSessionId)}>
             {t('schedules.lastRun', 'Last run')}
           </ContextMenu.Item>
         ) : null}
         {canDelete ? (
           <>
             <ContextMenu.Separator />
-            <ContextMenu.Item tone="destructive" icon={<Trash2 />} onClick={onDelete}>
+            <ContextMenu.Item tone="destructive" icon={Trash2} onClick={onDelete}>
               {t('schedules.delete', 'Delete')}
             </ContextMenu.Item>
           </>
@@ -425,8 +790,7 @@ export function ScheduleListView({
       {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
       <section
         // Positioning context for the open schedule, which covers the header.
-        className="relative flex h-full min-h-0 flex-col overflow-hidden"
-        style={columnVars(widths)}
+        {...stylex.props(styles.list)}
         onClick={(event) => {
           const target = event.target as Element;
           // Popups portal out of this DOM; their clicks must not count.
@@ -437,42 +801,49 @@ export function ScheduleListView({
       >
         {/* Joins the Electron window's drag strip, which would otherwise swallow
             clicks on the search and New button under it. */}
-        <header className={cn('flex shrink-0 items-center gap-2 px-4 py-3', windowDrag)}>
-          <h1 className="mr-auto shrink-0 whitespace-nowrap text-[1em] font-normal text-foreground">
-            {t('schedules.title', 'Schedules')}
-          </h1>
+        <header className={cn(stylex.props(styles.listHeader).className, windowDrag)}>
+          <h1 {...stylex.props(styles.pageTitle)}>{t('schedules.title', 'Schedules')}</h1>
           <Input
             size="small"
-            leading={<Search className="size-3.5 text-muted-foreground" aria-hidden="true" />}
+            leading={<Search {...stylex.props(styles.mutedIcon)} aria-hidden="true" />}
             aria-label={t('schedules.search', 'Search schedules')}
             placeholder={t('schedules.search', 'Search schedules')}
-            className={cn('w-40 min-w-0 shrink sm:w-56', WINDOW_DRAG_EXEMPT_CLASS)}
+            className={cn(stylex.props(styles.search).className, WINDOW_DRAG_EXEMPT_CLASS)}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
           <Button
             variant="primary"
             size="small"
-            className={cn('shrink-0', WINDOW_DRAG_EXEMPT_CLASS)}
+            className={cn(stylex.props(styles.actionButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
             onClick={onNew}
             // The label is the only text and it is hidden on narrow screens.
             aria-label={t('schedules.new', 'New schedule')}
           >
-            <Plus className="size-3.5" />
-            <span className="hidden sm:inline">{t('schedules.new', 'New schedule')}</span>
+            <Plus {...stylex.props(styles.icon14)} />
+            <span {...stylex.props(styles.newButtonLabel)}>
+              {t('schedules.new', 'New schedule')}
+            </span>
           </Button>
         </header>
 
         {(renderBody ?? ((table: ReactNode) => table))(
           // Header and rows scroll together, sideways too when the columns do
           // not fit the pane: each column keeps its width instead of squeezing.
-          <div className="h-full min-h-0 flex-1 overflow-auto">
-            <div className="sm:min-w-[var(--schedule-table-min)]">
+          <div {...stylex.props(styles.tableScroller)}>
+            <div
+              {...stylex.props(
+                styles.tableMinimum(
+                  `${widths.name + widths.frequency + widths.next + 200 + 92 + 48 + 32}px`
+                )
+              )}
+            >
               {ready && !error && filtered.length > 0 ? (
                 <div
-                  className={cn(
-                    listGridClass,
-                    'sticky top-0 z-20 hidden border-b-[0.5px] border-border bg-background px-4 py-1.5 text-[0.75em] font-normal text-muted-foreground sm:grid'
+                  {...stylex.props(
+                    styles.listGrid,
+                    styles.columnTracks(widths.name, widths.frequency, widths.next),
+                    styles.headerRow
                   )}
                 >
                   {(
@@ -483,8 +854,8 @@ export function ScheduleListView({
                     ] as const
                   ).map(([key, label]) => (
                     // The cell must not clip: the handle hangs into the column gap.
-                    <span key={key} className="relative min-w-0">
-                      <span className="block truncate">{label}</span>
+                    <span key={key} {...stylex.props(styles.headerCell)}>
+                      <span {...stylex.props(styles.headerLabel)}>{label}</span>
                       <ColumnResizeHandle
                         label={t('schedules.resizeColumn', 'Resize {{column}}', { column: label })}
                         value={widths[key]}
@@ -498,41 +869,49 @@ export function ScheduleListView({
                 </div>
               ) : null}
               {!ready ? (
-                <div className="space-y-px" aria-busy="true">
-                  <span className="sr-only">{t('schedules.loading', 'Loading schedules…')}</span>
+                <div aria-busy="true">
+                  <span {...stylex.props(styles.visuallyHidden)}>
+                    {t('schedules.loading', 'Loading schedules…')}
+                  </span>
                   {[0, 1, 2].map((index) => (
-                    <div
-                      key={index}
-                      className="flex items-center gap-3 border-b-[0.5px] border-border px-4 py-3"
-                    >
+                    <div key={index} {...stylex.props(styles.skeletonRow)}>
                       <Skeleton shape="line" width={192} />
-                      <Skeleton shape="line" width={96} className="ml-auto" />
+                      <Skeleton
+                        shape="line"
+                        width={96}
+                        className={stylex.props(styles.skeletonTrailing).className}
+                      />
                       <Skeleton shape="line" width={80} />
                     </div>
                   ))}
                 </div>
               ) : error ? (
-                <p className="px-4 py-8 text-[1em] text-destructive" role="alert">
+                <p {...stylex.props(styles.error)} role="alert">
                   {t('schedules.loadError', 'Schedules could not be loaded.')}
                 </p>
               ) : filtered.length === 0 ? (
-                <div className="mx-auto flex max-w-sm flex-col items-center gap-2 px-6 py-16 text-center">
-                  <CalendarClock className="size-5 text-muted-foreground" aria-hidden="true" />
-                  <p className="text-[1em] font-normal">
+                <div {...stylex.props(styles.empty)}>
+                  <CalendarClock {...stylex.props(styles.emptyIcon)} aria-hidden="true" />
+                  <p {...stylex.props(styles.emptyTitle)}>
                     {query
                       ? t('schedules.noMatches', 'No schedules match your search')
                       : t('schedules.empty', 'No schedules yet')}
                   </p>
                   {query ? null : (
                     <>
-                      <p className="text-[0.9em] text-muted-foreground">
+                      <p {...stylex.props(styles.emptyHelp)}>
                         {t(
                           'schedules.emptyHelp',
                           'Choose a prompt and a time. Your machine will start a new chat for each run.'
                         )}
                       </p>
-                      <Button variant="secondary" size="small" className="mt-2" onClick={onNew}>
-                        <Plus className="size-3.5" />
+                      <Button
+                        variant="secondary"
+                        size="small"
+                        className={stylex.props(styles.emptyAction).className}
+                        onClick={onNew}
+                      >
+                        <Plus {...stylex.props(styles.icon14)} />
                         {t('schedules.new', 'New schedule')}
                       </Button>
                     </>
@@ -546,6 +925,7 @@ export function ScheduleListView({
                     now={now}
                     runtime={matchingScheduleRuntime(row, runtimes)}
                     context={contextForRow?.(row)}
+                    widths={widths}
                     onOpen={() => onOpen(row.scheduleId)}
                     onToggle={onToggle ? () => onToggle(row) : undefined}
                     onRun={onRun ? () => onRun(row) : undefined}
@@ -618,9 +998,9 @@ function ColumnResizeHandle({
       onPointerCancel={end}
       onDoubleClick={onReset}
       onKeyDown={onKeyDown}
-      className="group/resize absolute -bottom-1.5 -right-[9px] -top-1.5 z-10 flex w-3 cursor-col-resize touch-none select-none justify-center focus-visible:outline-hidden"
+      {...stylex.props(stylex.defaultMarker(), styles.resizeHandle)}
     >
-      <span className="h-full w-px bg-transparent transition-colors group-hover/resize:bg-border group-focus-visible/resize:bg-ring group-active/resize:bg-ring" />
+      <span {...stylex.props(styles.resizeLine)} />
     </div>
   );
 }

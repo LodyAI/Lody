@@ -15,13 +15,19 @@ Design, invariants I1–I8 and the coverage lemma:
   frames interpolate `screenY`). Layout compensation in `read` is relative
   (`scrollBy`), navigation absolute. No deferred compensation, no origin shift.
 - A transaction ends within two passes of at most two supplementary commits;
-  `lastObserved` records only covered positions. Never add timers, frame retries or a
-  hidden/reveal gate; the viewport is never hidden.
+  `lastObserved` records only covered positions, and `onScroll` fires only for those.
+  A React re-render that did not change the list must not start a new cycle (that
+  layout-effect `onScroll` → setState loop is React #185). Never add timers, frame
+  retries or a hidden/reveal gate; the viewport is never hidden.
 - Keep the layout contract: viewport `overflow-anchor: none` and
   `scrollbar-gutter: stable`; rows container `overflow-y: clip`; no row may use
   `content-visibility: auto` or size itself from the container or its position. Rows
   outside the fixed rows (`FIXED_ROW_KINDS`) stay at least `ENGINE_MIN_ROW_PX`; a new
   zero-height row kind joins that list.
+- A viewport without a layout box (`display: none` tab, collapsed panel) pauses the
+  engine through the scroller's `hidden` prop, fed from the host's `isVisible`: no
+  transaction, measurement or `onScroll` until shown, then the kept intent is written.
+  A host that keeps a stream mounted off screen must pass it.
 - Reading anchors are separate from React row keys: resolve through `anchor.ts`
   rules, never by list index.
 - `keyed-layout/` came from Lody's removed Virtua fork with its tests; engine

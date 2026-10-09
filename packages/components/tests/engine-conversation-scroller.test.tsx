@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createRef, StrictMode, type ReactElement } from 'react';
+import { act, createRef, StrictMode, useState, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
@@ -46,6 +46,8 @@ type Ctx = {
   root: ReturnType<typeof createRoot>;
   handle: { current: ConversationListHandle | null };
   state: { current: ConversationScrollerState | null };
+  /** Every offset the list reported through `onScroll`. */
+  scrolls: number[];
   setKeys: (keys: string[]) => void;
   viewport: () => HTMLElement;
   settle: () => Promise<void>;
@@ -77,27 +79,46 @@ function mount(
   sessionId: SessionId,
   initialKeys: string[],
   harnessToReuse?: FrameHarness,
-  { strict = false, suppress }: { strict?: boolean; suppress?: { current: boolean } } = {}
+  {
+    strict = false,
+    suppress,
+    hidden,
+    feedback = false,
+    tickOnScroll = false,
+  }: {
+    strict?: boolean;
+    suppress?: { current: boolean };
+    /** The tab is inactive: `display: none`, so every offset and size reads 0. */
+    hidden?: { current: boolean };
+    /** A view whose state flips whenever it is told the offset is 0. */
+    feedback?: boolean;
+    /** A view that setStates on every onScroll, like the top-fade flag. */
+    tickOnScroll?: boolean;
+  } = {}
 ): Ctx {
   let keys = initialKeys;
   const px = (value: string | undefined) => parseFloat(value ?? '0') || 0;
+  const isHidden = () => hidden?.current === true;
   const harness =
     harnessToReuse ??
     createFrameHarness({
-      viewportHeight: () => VIEWPORT,
+      viewportHeight: () => (isHidden() ? 0 : VIEWPORT),
       scrollHeightOf: (viewport) => {
+        if (isHidden()) return 0;
         const container = viewport.firstElementChild as HTMLElement | null;
         const spacer = container?.nextElementSibling as HTMLElement | null;
         return px(container?.style.height) + px(spacer?.style.height);
       },
       sizeOf: (element) => {
         const el = element as HTMLElement;
+        if (isHidden()) return 0;
         if (el.hasAttribute('data-message-selection-scroll')) return VIEWPORT;
         if (el.hasAttribute('data-virtual-index')) return ROW;
         return undefined;
       },
       rectOf: (element, scrollTop) => {
         const el = element as HTMLElement;
+        if (isHidden()) return { top: 0, height: 0 };
         if (el.hasAttribute('data-message-selection-scroll')) return { top: 0, height: VIEWPORT };
         if (
           el.parentElement?.hasAttribute('data-message-selection-scroll') &&
@@ -122,18 +143,30 @@ function mount(
       harness.attachViewport(next.scrollElement);
     }
   };
-  const render = () => {
-    const list = (
+  const scrolls: number[] = [];
+  function List({ listKeys }: { listKeys: string[] }) {
+    // Stands in for the view's position-derived state (hydration window,
+    // outline): at offset 0 it changes the rows, which commits the list again.
+    const [flipped, setFlipped] = useState(false);
+    const [, setTick] = useState(0);
+    const shown = flipped ? ['flipped', ...listKeys] : listKeys;
+    return (
       <EngineConversationScroller
         sessionId={sessionId}
-        rows={keys.map((key): ReactElement => (
+        rows={shown.map((key): ReactElement => (
           <div key={key} data-row-key={key}>
             {key}
           </div>
         ))}
-        rowMeta={keys.map((key, index) => meta(key, index))}
+        rowMeta={shown.map((key, index) => meta(key, index))}
         item={Row}
         initialWindowReady
+        hidden={isHidden()}
+        onScroll={(offset) => {
+          scrolls.push(offset);
+          if (feedback && offset === 0) setFlipped((value) => !value);
+          if (tickOnScroll) setTick((n) => n + 1);
+        }}
         suppressAutoScrollRef={suppress}
         onStateChange={onStateChange}
         layoutKey="14"
@@ -141,6 +174,9 @@ function mount(
         handleRef={handle}
       />
     );
+  }
+  const render = () => {
+    const list = <List listKeys={keys} />;
     root.render(strict ? <StrictMode>{list}</StrictMode> : list);
   };
   act(render);
@@ -150,6 +186,7 @@ function mount(
     root,
     handle,
     state,
+    scrolls,
     viewport: () => host.firstElementChild as HTMLElement,
     setKeys(next) {
       keys = next;
@@ -326,9 +363,7 @@ it('an upward wheel scrolling a nested code block or terminal keeps following', 
     });
     // A downward wheel and a pinch zoom are not the reader leaving the end either.
     await act(async () => {
-      rowElement(ctx, 'r38').dispatchEvent(
-        new WheelEvent('wheel', { deltaY: 120, bubbles: true })
-      );
+      rowElement(ctx, 'r38').dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true }));
       rowElement(ctx, 'r38').dispatchEvent(
         new WheelEvent('wheel', { deltaY: -120, ctrlKey: true, bubbles: true })
       );
@@ -438,6 +473,48 @@ it('keeps scrolling under StrictMode, whose development remount reruns effect cl
     });
     await ctx.settle();
     expect(screenTopOf(ctx, 'r10')).toBe(0);
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('a hidden tab reports no offset, so a view feeding it back cannot loop; shown again, it reads where it was', async () => {
+  const hidden = { current: false };
+  const { ctx, keys } = await openFollowing('engine-hidden', { hidden, feedback: true });
+  try {
+    await act(async () => {
+      ctx.handle.current?.scrollRowToTop(20, { smooth: false, offset: 0 });
+    });
+    await ctx.settle();
+    expect(screenTopOf(ctx, 'r20')).toBe(0);
+    const reported = ctx.scrolls.length;
+
+    // Switching tabs hides this one (dropping its offset) while it streams on.
+    hidden.current = true;
+    ctx.harness.nativeScrollTo(0);
+    const grown = [...keys, 'r40', 'r41'];
+    ctx.setKeys(grown);
+    await ctx.settle();
+    expect(ctx.scrolls.length).toBe(reported);
+
+    hidden.current = false;
+    ctx.setKeys(grown);
+    await ctx.settle();
+    expect(screenTopOf(ctx, 'r20')).toBe(0);
+    expect(ctx.state.current?.isSticky).toBe(false);
+    expect(ctx.scrolls.at(-1)).toBe(ctx.harness.scrollTop);
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('a view that setStates on every onScroll does not nested-update-loop', async () => {
+  const { ctx } = await openFollowing('engine-scroll-tick', { tickOnScroll: true });
+  try {
+    expect(ctx.harness.scrollTop).toBe(BOTTOM(40));
+    expect(ctx.state.current?.revealed).toBe(true);
+    expect(ctx.scrolls.length).toBeGreaterThan(0);
+    expect(ctx.scrolls.length).toBeLessThan(20);
   } finally {
     unmount(ctx);
   }

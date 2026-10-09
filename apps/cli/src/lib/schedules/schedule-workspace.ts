@@ -19,17 +19,17 @@ import {
   readMachineFlockRowsFromFlock,
   type MachineMeta,
   type AgentConfigId,
-  hasExplicitSchedulePermission,
   hasPendingUserTurnActivation,
 } from '@lody/shared';
-import { readSessionHistory } from '@lody/shared/session-data';
 import type { AuthContext } from '../command-runtime';
 import type { WorkspaceSummary } from '../workspace';
 import type { LoroDocumentManager } from '../loro/doc';
 import type { Logger } from '@/utils/logger';
+import { createSessionBackend } from '@/session/session-backend';
 import { streamsRoomBinding } from '../loro/streams-room-binding';
 import {
   buildScheduleRunTarget,
+  resolveScheduleAgentRunConfig,
   buildScheduleSessionCreateOptions,
   destinationSessionProblem,
   scheduleDestinationSessionId,
@@ -75,7 +75,6 @@ export async function createScheduleWorkspace(args: {
   const resolveTarget = async (
     run: import('./schedule-store').ScheduleRun<PreparedSessionInput>
   ) => {
-    const { readAgentAcpCapability } = await import('@/commands/session');
     const agent = run.definition.agent;
     const machineRecord = await manager.repo.getDocMeta(getMachineRoomId(auth.machineId));
     const machine = machineRecord?.meta as MachineMeta | undefined;
@@ -107,15 +106,6 @@ export async function createScheduleWorkspace(args: {
       if (!projects[requiredLocalProjectId])
         throw new ScheduleConfigurationError('PROJECT_UNAVAILABLE');
     }
-    const capability = await readAgentAcpCapability({
-      manager,
-      workspaceId,
-      machineId: auth.machineId,
-      agentConfigId: agent.agentConfigId as AgentConfigId,
-      localOnly: true,
-    });
-    if (!hasExplicitSchedulePermission(agent, capability))
-      throw new ScheduleConfigurationError('PERMISSION_UNAVAILABLE');
     const destinationSessionId = scheduleDestinationSessionId(
       run.definition.scheduleId,
       run.definition.destination
@@ -161,8 +151,13 @@ export async function createScheduleWorkspace(args: {
     },
     prepare: async (run) => {
       const { prepareSessionInput, resolveTurnDispatchConfig } = await import('@/commands/session');
-      const agent = run.definition.agent;
       const target = await resolveTarget(run);
+      const agent = await resolveScheduleAgentRunConfig(
+        manager,
+        workspaceId,
+        auth.machineId,
+        run.definition.agent
+      );
       const prepared = await prepareSessionInput(
         auth,
         workspace,
@@ -216,18 +211,21 @@ export async function createScheduleWorkspace(args: {
       )
         return false;
       const session = await manager.getOrCreateSessionDoc(id);
-      if ((await session.getMessageQueue()).length) return false;
-      const history = readSessionHistory(session.sessionData.history);
+      const backend = await createSessionBackend(session, meta);
+      if ((await backend.getMessageQueue()).length) return false;
+      const [userRead, assistantRead] = await Promise.all([
+        backend.readTurn(run.userTurnId),
+        backend.readTurn(`assistant:${run.userTurnId}`),
+      ]);
+      const userTurn = userRead.state === 'ready' ? userRead.turn : undefined;
+      const assistantTurn = assistantRead.state === 'ready' ? assistantRead.turn : undefined;
       return (
         !args.hasSessionWork(id) &&
-        history.some(
-          (entry) =>
-            (entry.id === run.userTurnId &&
-              ['handled', 'failed', 'canceled'].includes(entry.status ?? '')) ||
-            (entry.role === 'assistant' &&
-              entry.userTurnId === run.userTurnId &&
-              (entry.finished === true || typeof entry.endedAt === 'number'))
-        )
+        ((userTurn?.id === run.userTurnId &&
+          ['handled', 'failed', 'canceled'].includes(userTurn.status ?? '')) ||
+          (assistantTurn?.role === 'assistant' &&
+            assistantTurn.userTurnId === run.userTurnId &&
+            (assistantTurn.finished === true || typeof assistantTurn.endedAt === 'number')))
       );
     },
     publish: async (runtime) => {

@@ -59,6 +59,16 @@ Chromium. There is no second legacy site tree.
 The dev server runs on port 3002. Use
 `pnpm --filter @lody/site-docs preview:static` to emulate the static host.
 
+## Canonical page URLs
+
+`lib/site-url.mjs` is shared by metadata, sitemap generation, and rendered links.
+Known pages always use directory URLs, including dotted changelog versions.
+`SiteAnchor` and the Fumadocs link adapter apply the same policy to navigation;
+TanStack Router retains the trailing slash after hydration. Files, downloads,
+app routes, and external destinations keep their own URL semantics.
+The Fumadocs adapter passes the URL's pathname, parsed search, and fragment separately
+to RouterLink; only the pathname may be affected by `trailingSlash`.
+
 ## Static content and client startup
 
 Every published URL is prerendered. `src/client.tsx` prepares the current router
@@ -88,7 +98,7 @@ The suite starts its own loopback static host and blocks all external requests.
 It checks every published HTML page with JavaScript disabled, internal link targets,
 404 behavior, actual desktop/mobile navigation, and route/article/static-data failure
 recovery on real landing, blog, and Fumadocs pages. Healthy pages must also respond
-to a theme change. `STATIC_TEST_PHASE=scan|faults|navigation` selects a focused phase;
+to a theme change. `STATIC_TEST_PHASE=scan|faults|navigation|anchors` selects a focused phase;
 the default runs all phases. JSON results and screenshots go to `out/static-verification`.
 
 The mobile menu is a native disclosure so navigation remains usable when client

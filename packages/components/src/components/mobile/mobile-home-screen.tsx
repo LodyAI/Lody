@@ -34,6 +34,8 @@ import {
   X,
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
+import { control, corner, radius } from '@lody/ui/tokens/scales.stylex';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { MdChat, MdComputer, MdFolderCopy } from 'react-icons/md';
 import { FaGithub } from 'react-icons/fa';
@@ -508,14 +510,36 @@ export type MobileHomeScreenProps = {
   onShowArchivedToggle?: () => void;
 };
 
-/* Home header workspace chip — shared `WorkspaceAvatar` so logo /
-   first-letter fallback match the switcher sheet and desktop sidebar. */
+const workspaceAvatarStyles = stylex.create({
+  crop: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: control.large,
+    height: control.large,
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    overflow: 'hidden',
+  },
+  content: {
+    display: 'flex',
+    // Fill the 36px header control with the primitive's 32px large tile.
+    transform: 'scale(1.125)',
+  },
+});
+
+/* The header owns its circular crop; shared workspace tiles keep their shape. */
 function HomeWorkspaceAvatar({ workspace }: { workspace: MobileHomeWorkspace }) {
-  /* One rung: `@lody/ui`'s ladder has nothing between 32 and 64, and the
-     28-vs-36 split this used to carry was a size that had drifted rather than
-     two decisions about how big a workspace tile is. */
   return (
-    <WorkspaceAvatar workspace={{ name: workspace.name, logo: workspace.avatarUrl }} size="large" />
+    <span {...stylex.props(workspaceAvatarStyles.crop)}>
+      <span {...stylex.props(workspaceAvatarStyles.content)}>
+        <WorkspaceAvatar
+          workspace={{ name: workspace.name, logo: workspace.avatarUrl }}
+          size="large"
+        />
+      </span>
+    </span>
   );
 }
 

@@ -54,6 +54,7 @@ import {
 } from '@/components/mentions/mention-project-file-source';
 import {
   SKILL_MENTION_TRIGGER,
+  SKILL_MENTION_TRIGGER_ALIAS,
   SkillMentionHydrator,
   getAllowedSkillMentionDirs,
   type SkillMentionAgent,
@@ -290,7 +291,7 @@ function TwoLevelMentionMenu({
         ],
       },
       emptyState:
-        sessionProjectScope === 'current'
+        sessionProjectScope === 'current' && visibleSessionItems.length === 0
           ? {
               message:
                 sessionProjectKey === 'chat'
@@ -694,7 +695,7 @@ export interface CombinedMentionTextareaProps extends Omit<
   skillAgent?: SkillMentionAgent;
   /** Entry point for mention analytics (spec §8e). Defaults to 'unknown'. */
   mentionSurface?: MentionSurface;
-  /** Preferred side of the menu; caret menus flip to fit. Defaults to `bottom`. */
+  /** Preferred side; an explicit `top` caret menu scrolls above unless no row fits. */
   menuSide?: 'top' | 'bottom';
   /** `caret` follows the insertion point; `composer` fixes the menu to the
    *  nearest `[data-mention-frame]`. Defaults to `caret`. */
@@ -1028,10 +1029,11 @@ export const CombinedMentionTextarea = React.forwardRef<
     const triggers = React.useMemo(() => {
       const nextTriggers: string[] = [];
       // Every mention type is reachable through `@`; skills also retain their
-      // direct `$` entry point, and commands accept `/` and `、` because they must
+      // direct `$` / `￥` entry points, and commands accept `/` and `、` because they must
       // own the whole prompt.
       if (enableAtMentions) nextTriggers.push('@');
-      if (enableSkillMentions) nextTriggers.push(SKILL_MENTION_TRIGGER);
+      if (enableSkillMentions)
+        nextTriggers.push(SKILL_MENTION_TRIGGER, SKILL_MENTION_TRIGGER_ALIAS);
       if (enableShortcutMentions || (enableCommandMentions && isSlashOnly))
         nextTriggers.push('/', '、');
       return nextTriggers;

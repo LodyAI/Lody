@@ -1,3 +1,5 @@
+import { MemoryBindingSchema } from './memory-provider';
+import { AgentRoleSnapshotSchema } from './message-author';
 import { z } from 'zod';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
 import {
@@ -86,6 +88,8 @@ export const BuiltinRuntimeOverridesSchema = z
     claudeCodeExecutable: z.string().optional(),
     kimiPath: z.string().optional(),
     grokPath: z.string().optional(),
+    devinPath: z.string().optional(),
+    piPath: z.string().optional(),
     piExtensions: z
       .array(z.string().trim().min(1).max(PI_EXTENSION_PATH_MAX_LENGTH))
       .max(PI_EXTENSIONS_MAX_SELECTIONS)
@@ -93,7 +97,7 @@ export const BuiltinRuntimeOverridesSchema = z
   })
   .strict();
 
-const AcpConfigOptionValueSchema = z.union([z.string(), z.boolean()]);
+export const AcpConfigOptionValueSchema = z.union([z.string(), z.boolean()]);
 const AcpConfigOptionValuesSchema = z
   .record(z.string(), AcpConfigOptionValueSchema)
   .transform((values) =>
@@ -378,9 +382,11 @@ export const ACPTurnConfigSchema = z
     modeId: z.string().optional(),
     modelId: z.string().optional(),
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
+    memory: MemoryBindingSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
     agentRoleRevision: z.number().int().nonnegative().optional(),
+    agentRoleSnapshot: AgentRoleSnapshotSchema.optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -474,6 +480,7 @@ export const normalizeSessionTurnInputConfig = (
     normalized.configOptionValues = configOptionValues;
   }
 
+  if (record.memory !== undefined) normalized.memory = MemoryBindingSchema.parse(record.memory);
   const mcpServerIds = normalizeMcpServerIdSelection(record.mcpServerIds);
   if (mcpServerIds) {
     normalized.mcpServerIds = mcpServerIds;
@@ -494,6 +501,15 @@ export const normalizeSessionTurnInputConfig = (
   );
   if (agentRoleRevision !== undefined) {
     normalized.agentRoleRevision = agentRoleRevision;
+  }
+
+  const roleSnapshot = maybeParseField(AgentRoleSnapshotSchema, record.agentRoleSnapshot);
+  if (
+    roleSnapshot &&
+    roleSnapshot.id === normalized.agentRoleId &&
+    roleSnapshot.revision === normalized.agentRoleRevision
+  ) {
+    normalized.agentRoleSnapshot = roleSnapshot;
   }
 
   const issuePRMentions = maybeParseField(z.array(IssuePRMentionSchema), record.issuePRMentions);
@@ -930,6 +946,7 @@ export const SessionPreparationRunConfigSchema = z
         Object.entries(values).filter(([configId]) => !isSensitiveAcpConfigOptionId(configId))
       )
     ).optional(),
+    memory: MemoryBindingSchema.optional(),
     mcpServerIds: z
       .array(z.string())
       .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])

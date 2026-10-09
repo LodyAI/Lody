@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   checkoutLocalProjectBranchAtRootPath,
@@ -152,6 +152,16 @@ function createGitProjectWithRemotes(
 }
 
 describe('local-project helpers', () => {
+  beforeEach(() => {
+    // Keep fixture URLs and repository selection independent of host Git rewrites.
+    for (const key of Object.keys(process.env)) {
+      if (/^(GIT_|SSH_|LODY_GIT_)/.test(key)) vi.stubEnv(key, undefined);
+    }
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    vi.stubEnv('GIT_CONFIG_GLOBAL', os.devNull);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
   let tempDir: string | null = null;
 
   afterEach(() => {

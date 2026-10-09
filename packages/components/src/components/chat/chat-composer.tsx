@@ -61,6 +61,15 @@ import {
 } from '@/lib/chat-composer-placeholder';
 import { Kbd } from '@/components/commands/kbd';
 import { commands, formatKeyBinding } from '@/lib/commands';
+import * as stylex from '@stylexjs/stylex';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
+
+const typography = stylex.create({
+  prompt: { fontSize: textScale.bodySize, lineHeight: textScale.bodyLeading },
+  helper: { fontSize: textScale.footnoteSize, lineHeight: textScale.footnoteLeading },
+  code: { fontSize: textScale.subheadlineSize, lineHeight: textScale.subheadlineLeading },
+  caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
+});
 
 type ChatComposerTone = 'light' | 'dark';
 type ChatComposerVariant = 'landing' | 'session' | 'dialog';
@@ -199,7 +208,8 @@ export function getChatComposerTextareaClassName({
   const isLanding = variant === 'landing';
 
   return cn(
-    'input-scrollbar resize-none text-sm leading-6 transition-shadow',
+    'input-scrollbar resize-none transition-shadow',
+    stylex.props(typography.prompt).className,
     isLanding
       ? 'min-h-[120px] border-transparent bg-transparent px-0 py-0 sm:min-h-[140px]'
       : cn(
@@ -627,18 +637,20 @@ export function ChatComposer({
     : undefined;
 
   const dialogTextareaClassName = cn(
-    'input-scrollbar min-h-[120px] resize-none px-4 py-3 text-sm leading-6 transition-shadow sm:min-h-[120px]',
+    'input-scrollbar min-h-[120px] resize-none px-4 py-3 transition-shadow sm:min-h-[120px]',
+    stylex.props(typography.prompt).className,
     'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
     'text-input-foreground placeholder:text-input-placeholder/85'
   );
 
   const actionBaseClassName = cn(
+    stylex.props(isLanding ? typography.caption : typography.code).className,
     'select-none border font-semibold transition-all focus-visible:ring-2 focus-visible:ring-offset-2',
     isDialog
-      ? 'h-10 rounded-lg px-5 text-sm'
+      ? 'h-10 rounded-lg px-5'
       : isLanding
-        ? 'h-6 rounded-[4px] px-2 text-[11px] leading-tight'
-        : 'h-7 rounded-md px-2.5 text-xs'
+        ? 'h-6 rounded-[4px] px-2'
+        : 'h-7 rounded-md px-2.5'
   );
 
   const actionWidthClassName = isLanding ? 'w-auto shrink-0' : 'w-auto';
@@ -674,7 +686,8 @@ export function ChatComposer({
     isLanding ? 'pt-2' : 'pt-0.5'
   );
   const statusClassName = cn(
-    'px-1 text-xs leading-snug',
+    'px-1',
+    stylex.props(typography.helper).className,
     statusTone === 'error'
       ? 'text-destructive'
       : statusTone === 'warning'
@@ -793,13 +806,15 @@ export function ChatComposer({
                             <img
                               src={image.previewUrl}
                               alt={image.name}
-                              className={cn(
-                                'h-full w-full object-cover',
-                                image.status !== 'uploaded' && 'grayscale'
-                              )}
+                              className="h-full w-full object-cover"
                             />
                             {image.status === 'draft' ? (
-                              <span className="text-[10px] text-muted-foreground">
+                              <span
+                                className={cn(
+                                  ' text-muted-foreground',
+                                  stylex.props(typography.caption).className
+                                )}
+                              >
                                 {t('sessions.attachmentDraft')}
                               </span>
                             ) : image.status === 'uploading' ? (
@@ -830,11 +845,21 @@ export function ChatComposer({
                         </Button>
                       </div>
                       {image.status === 'draft' ? (
-                        <span className="text-[10px] text-muted-foreground">
+                        <span
+                          className={cn(
+                            ' text-muted-foreground',
+                            stylex.props(typography.caption).className
+                          )}
+                        >
                           {t('sessions.attachmentDraft')}
                         </span>
                       ) : image.status === 'uploading' ? (
-                        <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center text-[10px] text-white">
+                        <div
+                          className={cn(
+                            'absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center  text-white',
+                            stylex.props(typography.caption).className
+                          )}
+                        >
                           {image.progress}%
                         </div>
                       ) : null}
@@ -843,7 +868,10 @@ export function ChatComposer({
                           type="button"
                           onClick={() => onImageRetry?.(image.id)}
                           aria-label={retryUploadLabel}
-                          className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/65 px-1 py-1 text-[10px] font-medium text-white transition hover:bg-black/75"
+                          className={cn(
+                            'absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/65 px-1 py-1  font-medium text-white transition hover:bg-black/75',
+                            stylex.props(typography.caption).className
+                          )}
                         >
                           <RefreshCw className="h-3 w-3 shrink-0" />
                           <span className="truncate">{uploadFailedShortLabel}</span>
@@ -869,7 +897,7 @@ export function ChatComposer({
                           file.status === 'failed'
                             ? 'text-destructive/80'
                             : 'text-muted-foreground',
-                          isMobile ? 'text-xs' : 'text-[10px]'
+                          stylex.props(isMobile ? typography.helper : typography.caption).className
                         )}
                       >
                         {getFileTypeLabel(file.name)}
@@ -877,7 +905,8 @@ export function ChatComposer({
                       <span
                         className={cn(
                           'mt-1 break-words text-left font-medium text-input-foreground',
-                          isMobile ? 'line-clamp-3 text-sm' : 'line-clamp-2 text-xs'
+                          isMobile ? 'line-clamp-3' : 'line-clamp-2',
+                          stylex.props(typography.helper).className
                         )}
                       >
                         {file.name}
@@ -887,13 +916,21 @@ export function ChatComposer({
                           type="button"
                           onClick={() => onFileRetry?.(file.id)}
                           aria-label={retryUploadLabel}
-                          className="mt-auto flex w-fit items-center gap-1 pt-1 text-[10px] font-medium text-destructive transition hover:text-destructive/80"
+                          className={cn(
+                            'mt-auto flex w-fit items-center gap-1 pt-1  font-medium text-destructive transition hover:text-destructive/80',
+                            stylex.props(typography.caption).className
+                          )}
                         >
                           <RefreshCw className="h-3 w-3 shrink-0" />
                           <span className="truncate">{uploadFailedShortLabel}</span>
                         </button>
                       ) : (
-                        <span className="mt-auto truncate pt-1 text-[10px] text-muted-foreground">
+                        <span
+                          className={cn(
+                            'mt-auto truncate pt-1  text-muted-foreground',
+                            stylex.props(typography.caption).className
+                          )}
+                        >
                           {file.status === 'draft'
                             ? t('sessions.attachmentDraft')
                             : file.status === 'preparing'
@@ -941,6 +978,7 @@ export function ChatComposer({
 
               <CombinedMentionTextarea
                 enablePromptShortcuts={shortcutsEnabled}
+                menuSide="top"
                 id={promptId}
                 ref={promptRef}
                 mentionSource={mentionSource}
@@ -1145,11 +1183,11 @@ export function ChatComposer({
                       <div className="h-1 w-9 rounded-full bg-muted-foreground/30" />
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 px-4 py-2.5">
-                      <Drawer.Title className="flex items-center gap-2 text-sm font-medium">
+                      <Drawer.Title className="flex items-center gap-2 font-medium">
                         <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
                         {pastedTextDialogTitle}
                       </Drawer.Title>
-                      <Drawer.Description className="text-xs text-muted-foreground tabular-nums">
+                      <Drawer.Description className="text-muted-foreground tabular-nums">
                         {summaryText}
                       </Drawer.Description>
                     </div>
@@ -1160,7 +1198,10 @@ export function ChatComposer({
                       readOnly={!onPastedTextDraftsChange}
                       spellCheck={false}
                       autoFocus={false}
-                      className="input-scrollbar min-h-0 flex-1 resize-none rounded-none border-0 bg-background px-4 py-3 font-mono text-[13px] leading-relaxed text-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
+                      className={cn(
+                        'input-scrollbar min-h-0 flex-1 resize-none rounded-none border-0 bg-background px-4 py-3 font-mono  text-foreground focus-visible:ring-0 focus-visible:ring-offset-0',
+                        stylex.props(typography.code).className
+                      )}
                     />
                   </>
                 ) : null}
@@ -1182,12 +1223,12 @@ export function ChatComposer({
               {previewPastedTextDraft ? (
                 <>
                   <div className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-3">
-                    <Dialog.Title className="flex items-center gap-2 text-sm font-medium">
+                    <Dialog.Title className="flex items-center gap-2 font-medium">
                       <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
                       {pastedTextDialogTitle}
                     </Dialog.Title>
                     <div className="flex items-center gap-3">
-                      <Dialog.Description className="text-xs text-muted-foreground tabular-nums">
+                      <Dialog.Description className="text-muted-foreground tabular-nums">
                         {summaryText}
                       </Dialog.Description>
                       <Dialog.Close
@@ -1205,7 +1246,10 @@ export function ChatComposer({
                       onChange={handlePastedTextDraftTextChange}
                       readOnly={!onPastedTextDraftsChange}
                       spellCheck={false}
-                      className="input-scrollbar h-full min-h-0 w-full resize-none overflow-auto rounded-md border-transparent bg-muted/30 px-4 py-3 font-mono text-[13px] leading-relaxed text-foreground focus-visible:ring-1 focus-visible:ring-ring/50"
+                      className={cn(
+                        'input-scrollbar h-full min-h-0 w-full resize-none overflow-auto rounded-md border-transparent bg-muted/30 px-4 py-3 font-mono  text-foreground focus-visible:ring-1 focus-visible:ring-ring/50',
+                        stylex.props(typography.code).className
+                      )}
                     />
                   </div>
                 </>

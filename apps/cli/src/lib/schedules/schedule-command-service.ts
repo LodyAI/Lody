@@ -7,7 +7,6 @@ import {
   getScheduleRoomId,
   getServerNow,
   getSessionRoomId,
-  hasExplicitSchedulePermission,
   isLoroRepoDocDeleted,
   machineSupportsSchedulesProtocol,
   ScheduleRuntimeRowSchema,
@@ -25,10 +24,10 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
-import { readSessionHistory } from '@lody/shared/session-data';
 import type { AuthContext } from '../command-runtime';
 import type { LoroDocumentManager } from '../loro/doc';
 import type { WorkspaceSummary } from '../workspace';
+import { createSessionBackend } from '@/session/session-backend';
 import { readMergedAgentConfigById } from '../agent-config-machine-flock';
 import { publishScheduleProposal } from './schedule-proposal';
 import {
@@ -97,6 +96,7 @@ export async function executeScheduleCommand(
     const session = await manager.getOrCreateSessionDoc(requesterSessionId);
     const sessionRecord = await manager.repo.getDocMeta(getSessionRoomId(requesterSessionId));
     const sessionMeta = sessionRecord?.meta as SessionMeta | undefined;
+    const backend = await createSessionBackend(session, sessionMeta);
     const actorConfig = sessionMeta?.agentConfigId
       ? await readMergedAgentConfigById(
           manager.repo,
@@ -106,7 +106,7 @@ export async function executeScheduleCommand(
         ).catch(() => undefined)
       : undefined;
     const outcome = await publishScheduleProposal(
-      session,
+      backend,
       {
         proposalId: command.requestId,
         title: command.title,
@@ -121,7 +121,7 @@ export async function executeScheduleCommand(
       }
     );
     await manager.repo.flush();
-    if (!localOnly && !(await session.waitUntilSynced()))
+    if (!localOnly && (!(await backend.waitUntilSynced()) || !(await session.waitUntilSynced())))
       throw new Error('Proposal saved locally; sync pending. Retry with the same requestId.');
     return { ok: true, requestId: command.requestId, enabled: false, ...outcome };
   }
@@ -173,22 +173,13 @@ export async function executeScheduleCommand(
   const now = getServerNow();
   if (command.action === 'create' || command.action === 'edit') {
     if (!machine) throw new Error('Target machine is unavailable');
-    const { readAgentAcpCapability, resolveTurnDispatchConfig, validateSessionCreateOptions } =
+    const { resolveTurnDispatchConfig, validateSessionCreateOptions } =
       await import('@/commands/session');
     const draft = command.draft;
     const configId = draft.agent.agentConfigId as AgentConfigId;
     const agent = await readMergedAgentConfigById(manager.repo, workspaceId, machine.id, configId);
     if (!agent.config || agent.config.machineId !== machine.id)
       throw new Error('Selected Agent is unavailable on the target machine');
-    const capability = await readAgentAcpCapability({
-      manager,
-      workspaceId,
-      machineId: machine.id,
-      agentConfigId: configId,
-      localOnly,
-    });
-    if (!hasExplicitSchedulePermission(draft.agent, capability))
-      throw new Error('Choose an explicit permission mode supported by the Agent');
     if (draft.project?.kind === 'local') {
       const flock = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machine.id));
       const projects = getMachineFlockLocalProjects(
@@ -271,10 +262,16 @@ export async function executeScheduleCommand(
   }
   if (command.action === 'pause' && requesterSessionId) {
     const session = await manager.getOrCreateSessionDoc(requesterSessionId);
+    const sessionRecord = await manager.repo.getDocMeta(getSessionRoomId(requesterSessionId));
+    const backend = await createSessionBackend(
+      session,
+      sessionRecord?.meta as SessionMeta | undefined
+    );
     const entryId = `schedule-paused-${command.requestId}`;
     const title = (await repository.read(id))?.definition.title ?? id;
-    if (!readSessionHistory(session.sessionData.history).some((entry) => entry.id === entryId))
-      await session.sessionData.commands.appendTurn({
+    const existing = await backend.readTurn(entryId);
+    if (existing.state !== 'ready')
+      await backend.appendHistoryTurn({
         id: entryId,
         role: 'system',
         timestamp: new Date(now).toISOString(),
@@ -288,7 +285,7 @@ export async function executeScheduleCommand(
         finished: true,
       });
     await manager.repo.flush();
-    if (!localOnly && !(await session.waitUntilSynced()))
+    if (!localOnly && (!(await backend.waitUntilSynced()) || !(await session.waitUntilSynced())))
       throw new Error('Pause saved; notification sync pending. Retry with the same requestId.');
   }
   return { ok: true, scheduleId: id };

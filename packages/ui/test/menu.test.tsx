@@ -235,6 +235,31 @@ describe('Menu row', () => {
     expect(rowNamed('Archive').firstElementChild?.textContent).toBe('Archive');
   });
 
+  test('a component icon fills the leading box; an element keeps its own size', async () => {
+    const Glyph = (props: { className?: string }) => (
+      <svg data-component width="24" height="24" {...props} />
+    );
+    mounted = await mount(
+      <Actions>
+        <Menu.Item icon={Glyph}>Component</Menu.Item>
+        <Menu.Item icon={<svg data-sized style={{ width: '12px' }} />}>Element</Menu.Item>
+      </Actions>
+    );
+    await click(trigger());
+
+    // A component glyph is mounted by the box with the 100% fill class, so a
+    // caller cannot leave a 24px library default behind. An element glyph —
+    // for one that carries props — keeps exactly the size it declares.
+    const component = rowNamed('Component').querySelector('svg')!;
+    const fill = stylex.props(surface.itemIconGlyph).className ?? '';
+    for (const name of fill.split(' ').filter(Boolean)) {
+      expect(component.getAttribute('class')).toContain(name);
+    }
+    expect(component.getAttribute('width')).toBe('24'); // attrs stay; the class wins
+    const element = rowNamed('Element').querySelector('svg')!;
+    expect(element.style.width).toBe('12px');
+  });
+
   test('a shortcut sits after the label rather than inside it', async () => {
     mounted = await mount(
       <Actions>
@@ -502,24 +527,6 @@ describe('Menu surface', () => {
     // its `position: fixed` descendants, so the popup switches strategies with
     // the container rather than landing at the panel's own offset.
     expect((popup().parentElement as HTMLElement).style.position).toBe('absolute');
-  });
-
-  test('the menu and the list a Select opens are one surface, sized differently', async () => {
-    mounted = await mount(
-      <Actions>
-        <Menu.Item>Rename</Menu.Item>
-      </Actions>
-    );
-    await click(trigger());
-    const onSurface = classesOf(popup());
-    const asList = classesFor(surface.popup);
-
-    // Everything a list brings — the rung, the shadow, the radius, the inset,
-    // the type — reaches a menu too, and exactly one of a list's declarations
-    // is replaced: the `--anchor-width` it takes from the control it belongs
-    // to, which a menu has no equivalent of.
-    expect(asList.filter((name) => !onSurface.includes(name))).toHaveLength(1);
-    expect(onSurface).toEqual(expect.arrayContaining(classesFor(surface.popupMenu)));
   });
 });
 

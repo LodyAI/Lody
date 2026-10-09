@@ -25,6 +25,16 @@ if (!canResolve('electron')) {
   process.exit(0)
 }
 
+// Electron 42+ no longer downloads its binary from its own postinstall, but
+// electron-vite dev/preview and the Playwright E2E harness launch it through
+// `electron/path.txt`. The package's installer is idempotent: it returns without
+// downloading when `dist/version` and `path.txt` already match.
+const electronInstaller = path.join(path.dirname(require.resolve('electron')), 'install.js')
+const electronInstall = spawnSync(process.execPath, [electronInstaller], { stdio: 'inherit' })
+if (electronInstall.status !== 0) {
+  process.exit(electronInstall.status ?? 1)
+}
+
 const binName = process.platform === 'win32' ? 'electron-builder.cmd' : 'electron-builder'
 const electronBuilderBin = path.join(process.cwd(), 'node_modules', '.bin', binName)
 

@@ -6,6 +6,9 @@ Shared mention primitive used by composer autocomplete surfaces.
 
 - `onMentionAdd` rejects disabled registered items before any text/range mutation;
   filtering them from keyboard navigation alone is insufficient.
+- Row clicks restore focus and the saved selection before starting preparation:
+  WebKit can expose a zero caret during focus and cancel an in-flight request.
+  Preparation keeps loading/error rows visible until commit or dismissal.
 
 - Inserted text comes from the item, not from the trigger. `MentionItem`'s
   `insertText` (commit) and `navigateText` (drill-down) replace the whole span
@@ -83,8 +86,9 @@ Shared mention primitive used by composer autocomplete surfaces.
   from the collection and breaks arrow-key movement across groups.
 - Desktop `MentionContent` follows the current query caret using mirrored
   textarea wrapping/scroll. Its virtual `contextElement` is the textarea, so
-  layout shifts update an open popup. It flips to fit and stays within the
-  virtual collision boundary and `--mention-input-width`.
+  layout shifts update an open popup. Default bottom menus flip to fit; an
+  explicit top menu stays above while a row fits and scrolls within that room.
+  Both stay within the virtual collision boundary and `--mention-input-width`.
 - `positionAnchor="composer"` anchors to the input's nearest `[data-mention-frame]`
   (else its wrapper), left-aligned and no wider. It picks its side once per open
   — above unless there is no room — and never flips: a level change resizes it
@@ -106,17 +110,10 @@ Shared mention primitive used by composer autocomplete surfaces.
 
 ## Files
 
-- `mention-root.tsx` owns open state, active trigger, selected values, mention
-  ranges, item registration, filtering, and insertion.
-- `mention-input-core.ts` holds the pure text/range algebra both insertion
-  routes and every edit share.
-- `mention-input.tsx` owns textarea behavior: trigger detection, virtual caret
-  anchor creation, controlled value sync, selection restore, and highlighter
-  interaction.
-- `mention-content.tsx` renders the desktop floating listbox and provides the
-  input-width CSS variable; it delegates mobile rendering to `mention-mobile-content.tsx`.
-- `mention-mobile-content.tsx` docks the mobile panel above the composer and
-  handles drawer-safe portal placement.
+- `mention-root.tsx`: open state, triggers, values/ranges, registration and insertion.
+- `mention-input-core.ts`: text/range algebra for insertions and edits.
+- `mention-input.tsx`: textarea events, caret anchors, value sync and selection restore.
+- `mention-content.tsx`: desktop floating listbox and input-width CSS variable;
+  delegates mobile docking and drawer-safe portals to `mention-mobile-content.tsx`.
 - `mention-item.tsx`, `mention-label.tsx`, `mention-highlighter.tsx`, and
-  `mention-trigger.ts` provide row selection, accessibility label, inline
-  highlighting, and trigger/drill-down-prefix parsing helpers.
+  `mention-trigger.ts`: selection, labels, highlighting and trigger parsing.

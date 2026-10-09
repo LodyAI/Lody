@@ -1,4 +1,7 @@
 import type { SessionHistory } from '@lody/shared';
+import remarkParse from 'remark-parse';
+import remarkGfm from 'remark-gfm';
+import { unified } from 'unified';
 
 /**
  * In-conversation search indexes PROSE ONLY: what the user typed and what the
@@ -49,21 +52,49 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const getString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
+const searchMarkdownParser = unified().use(remarkParse).use(remarkGfm).freeze();
+
+type SearchMarkdownNode = {
+  type: string;
+  value?: string;
+  alt?: string | null;
+  children?: SearchMarkdownNode[];
+};
+
+const markdownNodeText = (node: SearchMarkdownNode): string => {
+  switch (node.type) {
+    case 'text':
+    case 'inlineCode':
+    case 'code':
+    case 'html':
+      return node.value ?? '';
+    case 'image':
+    case 'imageReference':
+      return node.alt ?? '';
+    case 'break':
+      return '\n';
+    case 'definition':
+      return '';
+    default:
+      // Keep inline runs contiguous, but never invent a word across blocks.
+      return (node.children ?? [])
+        .map(markdownNodeText)
+        .join(
+          ['root', 'blockquote', 'list', 'listItem', 'table', 'tableRow'].includes(node.type)
+            ? '\n'
+            : ''
+        );
+  }
+};
+
 /**
- * Approximate the text the markdown renderer paints, so index offsets line up
- * with the rendered DOM (see `markdown-renderer.tsx` highlight pass).
+ * Extract CommonMark/GFM prose and code text. Parsing distinguishes formatting
+ * delimiters from literal punctuation, including intraword underscores and
+ * every character inside code. The outline passes only its bounded prefix.
+ * Renderer-specific widgets (math, diagrams, image state) remain approximate.
  */
 export const getSearchableMarkdownText = (value: string): string =>
-  normalizeNewlines(value)
-    .replace(/```[^\n]*\n([\s\S]*?)```/g, (_match, body: string) => body)
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-    .replace(/^\s*>\s?/gm, '')
-    .replace(/^\s*([-+*]|\d+\.)\s+/gm, '')
-    .replace(/[*_~]{1,3}/g, '')
-    .trim();
+  markdownNodeText(searchMarkdownParser.parse(normalizeNewlines(value))).trim();
 
 const pushBlock = (
   blocks: SessionSearchBlock[],

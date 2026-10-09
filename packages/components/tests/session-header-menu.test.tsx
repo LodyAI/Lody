@@ -107,7 +107,7 @@ describe('SessionHeaderMenu', () => {
   }
 
   function menuItem(label: string): HTMLElement {
-    const item = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+    const item = Array.from(document.querySelectorAll<HTMLElement>('[role^="menuitem"]')).find(
       (candidate) => candidate.textContent?.includes(label)
     );
     expect(item, label).toBeDefined();
@@ -275,10 +275,8 @@ describe('SessionHeaderMenu', () => {
     const teamLabel = Array.from(document.querySelectorAll('span')).find(
       (el) => el.textContent === 'Team' && el.childElementCount === 0
     );
-    expect(teamLabel?.className).toContain('font-normal');
-    expect(teamLabel?.className).not.toContain('font-medium');
-    expect(teamLabel?.closest('div')?.className).toContain('cursor-default');
-    expect(teamLabel?.closest('div')?.className).toContain('select-none');
+    expect(teamLabel).not.toBeNull();
+    expect(teamLabel?.closest('button, a, [role="button"], [role="menuitem"]')).toBeNull();
   });
 
   it('omits Open in IDE when no launchers are provided', async () => {

@@ -8,7 +8,7 @@ import type { GitHubTokenManager } from './github-token-manager';
 import type { Logger } from '../utils/logger';
 
 describe('GitCredentialBroker', () => {
-  it('distinguishes upstream policy failure from an invalid session context', async () => {
+  it('serves legacy context locally even when cloud policy is unavailable', async () => {
     const handler = createGitCredentialBrokerHandler({
       authToken: 'bearer',
       ownerUserId: 'owner',
@@ -30,62 +30,54 @@ describe('GitCredentialBroker', () => {
       res
     );
     await res.finished;
-    expect(res.statusCode).toBe(500);
-    expect(JSON.parse(res.body)).toMatchObject({ error: 'policy_unavailable' });
-    expect(JSON.parse(res.body)).not.toHaveProperty('allowLocalAuth');
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toMatchObject({ personalEnabled: true, allowLocalAuth: true });
   });
-  it.each(['policy', 'candidate'] as const)(
-    'fences a pending %s response when the requester context rotates',
-    async (kind) => {
-      let resolvePending!: (value: unknown) => void;
-      let started!: () => void;
-      const entered = new Promise<void>((resolve) => {
-        started = resolve;
-      });
-      const pending = new Promise((resolve) => {
-        resolvePending = resolve;
-      });
-      const lookup = vi.fn(() => {
-        started();
-        return pending;
-      });
-      let current: GitCredentialBrokerSessionContext | null = {
-        sessionId: 's1',
-        requesterUserId: 'owner',
-        machineId: 'm1',
-      };
-      const handler = createGitCredentialBrokerHandler({
-        authToken: 'bearer',
-        ownerUserId: 'owner',
-        logger: { debug: vi.fn() } as unknown as Logger,
-        tokenManager: {
-          getCredentialPolicy: lookup,
-          getCredentialCandidate: lookup,
-        } as unknown as GitHubTokenManager,
-        resolveContext: () => current,
-      });
-      const res = makeRes();
-      handler(
-        makeReq({
-          url: kind === 'policy' ? '/github-auth-context' : '/github-token',
-          auth: 'Bearer bearer',
-          body: { contextToken: 'old', repoFullName: 'org/repo', source: 'personal' },
-        }),
-        res
-      );
-      await entered;
-      current = null;
-      resolvePending(
-        kind === 'policy'
-          ? { personalEnabled: false }
-          : { token: 'secret', tokenSource: 'personal' }
-      );
-      await res.finished;
-      expect(res.statusCode).toBe(403);
-      expect(res.body).not.toContain('secret');
-      expect(res.body).not.toContain('allowLocalAuth');
-    }
-  );
+  it('fences a pending candidate response when the owner context rotates', async () => {
+    let resolvePending!: (value: unknown) => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const pending = new Promise((resolve) => {
+      resolvePending = resolve;
+    });
+    const lookup = vi.fn(() => {
+      started();
+      return pending;
+    });
+    let current: GitCredentialBrokerSessionContext | null = {
+      sessionId: 's1',
+      requesterUserId: 'owner',
+      machineId: 'm1',
+    };
+    const handler = createGitCredentialBrokerHandler({
+      authToken: 'bearer',
+      ownerUserId: 'owner',
+      logger: { debug: vi.fn() } as unknown as Logger,
+      tokenManager: {
+        getCredentialPolicy: lookup,
+        getCredentialCandidate: lookup,
+      } as unknown as GitHubTokenManager,
+      resolveContext: () => current,
+    });
+    const res = makeRes();
+    handler(
+      makeReq({
+        url: '/github-token',
+        auth: 'Bearer bearer',
+        body: { contextToken: 'old', repoFullName: 'org/repo', source: 'personal' },
+      }),
+      res
+    );
+    await entered;
+    current = null;
+    resolvePending({ token: 'secret', tokenSource: 'personal' });
+    await res.finished;
+    expect(res.statusCode).toBe(403);
+    expect(res.body).not.toContain('secret');
+    expect(res.body).not.toContain('allowLocalAuth');
+  });
   it('returns 404 with error body when no token is available', async () => {
     const tokenManager = {
       getWriteTokenForRepo: vi.fn().mockResolvedValue(''),
@@ -113,6 +105,35 @@ describe('GitCredentialBroker', () => {
     expect(JSON.parse(res.body)).toEqual({
       error: 'no_token',
       message: 'No token available for the requested repository.',
+    });
+  });
+
+  it('forwards the personal fallback reason without token material', async () => {
+    const tokenManager = {
+      getCredentialCandidate: vi
+        .fn()
+        .mockResolvedValue({ available: false, reason: 'personal_token_refresh_failed' }),
+    } as unknown as GitHubTokenManager;
+    const handler = createGitCredentialBrokerHandler({
+      authToken: 'auth-token',
+      tokenManager,
+      logger: { debug: vi.fn() } as unknown as Logger,
+      resolveContext: () => ({ sessionId: 's1', requesterUserId: 'owner', machineId: 'm1' }),
+    });
+    const res = makeRes();
+    handler(
+      makeReq({
+        url: '/github-token',
+        auth: 'Bearer auth-token',
+        body: { repoFullName: 'owner/repo', contextToken: 'context', source: 'personal' },
+      }),
+      res
+    );
+    await res.finished;
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({
+      available: false,
+      reason: 'personal_token_refresh_failed',
     });
   });
 
@@ -360,7 +381,7 @@ describe('GitCredentialBroker', () => {
       expect(contexts.get(tokenB)?.sessionId).toBe('s2');
     });
 
-    it('preserves context resolution after broker recovery', async () => {
+    it('serves requester-bound credentials from its local endpoint', async () => {
       const tokenManager = {
         getWriteTokenForRepo: vi.fn().mockResolvedValue('write-token-after-recovery'),
       } as unknown as GitHubTokenManager;
@@ -374,7 +395,6 @@ describe('GitCredentialBroker', () => {
       });
 
       try {
-        await (broker as unknown as { recover(): Promise<void> }).recover();
         const env = (broker as unknown as { env: typeof initialEnv | null }).env ?? initialEnv;
         const response = await fetch(`${env.url}/github-token`, {
           method: 'POST',
