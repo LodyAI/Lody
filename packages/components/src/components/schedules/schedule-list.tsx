@@ -314,6 +314,12 @@ const styles = stylex.create({
     paddingLeft: '16px',
     paddingRight: '16px',
   },
+  // The phone route is edge-to-edge. Grow the 44px row so the title stays
+  // under the status bar; the home tab already sits under its own header.
+  listHeaderSafeArea: {
+    height: 'calc(44px + var(--safe-area-top, 0px))',
+    paddingTop: 'var(--safe-area-top, 0px)',
+  },
   // The show-sidebar button's -4px lands its left edge at 96px, matching Chat
   // Landing and clearing the traffic lights by 24px.
   headerBesideTrafficLights: { paddingLeft: '100px' },
@@ -759,6 +765,7 @@ export function ScheduleListView({
   selectedId,
   renderBody,
   onBlankClick,
+  insetSafeArea = false,
   now = getServerNow(),
 }: {
   rows: ScheduleRegistryRow[];
@@ -780,6 +787,8 @@ export function ScheduleListView({
   renderBody?: (table: ReactNode) => ReactNode;
   /** A click on the page's empty space (the open schedule does not count). */
   onBlankClick?: () => void;
+  /** Phone page that draws under the status bar. The home tab leaves this off. */
+  insetSafeArea?: boolean;
   /** The schedule open beside the list, highlighted. */
   selectedId?: string;
   /** Injected so stories and tests render a fixed "next run" column. */
@@ -841,10 +850,12 @@ export function ScheduleListView({
           {...withClassName(
             stylex.props(
               styles.listHeader,
+              insetSafeArea && styles.listHeaderSafeArea,
               showSidebarToggle && hasMacOSTitlebarInset && styles.headerBesideTrafficLights
             ),
             headerChromeClassName
           )}
+          data-safe-area-inset={insetSafeArea ? '' : undefined}
           data-beside-traffic-lights={showSidebarToggle && hasMacOSTitlebarInset ? '' : undefined}
         >
           {showSidebarToggle ? (

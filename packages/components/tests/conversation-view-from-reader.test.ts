@@ -42,6 +42,81 @@ const backends: Backend[] = [
   },
 ];
 
+it('reveals adjacent reverse pages without replacing retained rows or bodies and keeps edits observable', async () => {
+  const history = buildFixtureHistory(60);
+  const doc = buildSessionDoc(history);
+  const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+  const page = async (end: number, limit: number) => {
+    const start = Math.max(0, end - limit);
+    return {
+      startPosition: start,
+      totalCount: history.length,
+      rows: await data.history.readDirectory(start, end),
+      hasMoreOlder: start > 0,
+      cursor: start > 0 ? String(start) : null,
+    };
+  };
+  const reader: SessionHistoryReader = {
+    ...data.history,
+    readLatestDirectoryPage: (limit) => page(history.length, limit),
+    readOlderDirectoryPage: (cursor, limit) => page(Number(cursor), limit),
+    observe(listener) {
+      const observation = data.history.observe(listener);
+      return { ...observation, initialPage: page(history.length, 40) };
+    },
+  };
+  const idle = createManualIdle();
+  const view = createConversationViewFromReader(reader, {
+    sessionId: FIXTURE_SESSION_ID,
+    tailKeep: 2,
+    scheduleIdle: idle.scheduleIdle,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  try {
+    await flushReaderChanges();
+    idle.runAll();
+    await view.ready;
+    const retained = view.acquireRange(118, 120);
+    await retained.ready;
+    try {
+      const row = view.index(119);
+      const body = view.turn(119);
+      const changes: { from: number; to: number }[] = [];
+      const unsubscribe = view.subscribe((change) => {
+        if (change.kind === 'structure') changes.push(change);
+      });
+      expect(await view.loadOlder?.()).toBe(true);
+      expect(view.indexOf('u-20')).toBe(40);
+      expect(view.index(119)).toBe(row);
+      expect(view.turn(119)).toBe(body);
+      expect(await view.loadOlder?.()).toBe(true);
+      expect(view.hasMoreOlder).toBe(false);
+      expect(changes).toEqual([
+        { kind: 'structure', from: 40, to: 80 },
+        { kind: 'structure', from: 0, to: 40 },
+      ]);
+      for (let index = 0; index < history.length; index += 1)
+        expect(view.indexOf(history[index]!.id)).toBe(index);
+      data.writer.updateEntry('a-59', (entry) => {
+        entry.items = [{ type: 'text', text: 'still streaming after reverse paging' }];
+        return entry;
+      });
+      doc.commit();
+      await flushReaderChanges();
+      expect(view.turn(119)?.items).toEqual([
+        { type: 'text', text: 'still streaming after reverse paging' },
+      ]);
+      unsubscribe();
+    } finally {
+      retained.release();
+    }
+  } finally {
+    view.dispose();
+    data.dispose();
+    doc.free();
+  }
+});
+
 const customUserTurn = (): SessionHistory =>
   ({
     id: 'u-empty-mcp',

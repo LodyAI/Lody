@@ -4,6 +4,9 @@ What each file in this directory is responsible for. Binding rules live in
 [AGENTS.md](AGENTS.md); the long-form explanations it links to live under
 [`.agents/docs/`](../../../../../.agents/docs/) with the `sessions-` prefix.
 
+Session control event meanings and retired request events are described in the
+[auth/session analytics draft](../../../../../specs/auth-session-analytics.md).
+
 ## Page shell and tabs
 
 `ask-user-question-card.tsx` owns interactive and read-only question presentation,

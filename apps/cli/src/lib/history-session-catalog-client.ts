@@ -269,8 +269,11 @@ export async function requestHistorySessionReplay(args: {
   connection: HistoryReplayConnection;
   initResponse: acp.InitializeResponse;
 }): Promise<SessionAcpRuntimeConfigPatch | undefined> {
-  if (args.provider.cliType === 'builtin' && args.provider.agentType === 'codex') {
-    const method = getLodyReadSessionHistoryMethod(args.initResponse);
+  const method = getLodyReadSessionHistoryMethod(args.initResponse);
+  if (
+    method ||
+    (args.provider.cliType === 'builtin' && ['codex', 'deepseek'].includes(args.provider.agentType))
+  ) {
     if (!method) {
       throw new Error(
         `${getProviderLabel(args.provider)} ACP agent does not advertise ` +

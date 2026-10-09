@@ -1,5 +1,6 @@
 import {
   installEmbeddedKeyringBinding,
+  installEmbeddedRoostBinding,
   installEmbeddedNodePtyBinding,
   installEmbeddedSqliteBinding
 } from './cli-native-deps.mjs'
@@ -30,4 +31,5 @@ export default async function beforePack(context) {
   installEmbeddedSqliteBinding({ platform, arch: archName })
   installEmbeddedNodePtyBinding({ platform, arch: archName })
   installEmbeddedKeyringBinding({ platform, arch: archName })
+  installEmbeddedRoostBinding({ platform, arch: archName })
 }

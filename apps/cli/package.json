@@ -55,6 +55,7 @@
     "@lody/shared": "workspace:*",
     "@lody/turn-diff-store": "workspace:*",
     "@loro-dev/flock-wasm": "catalog:",
+    "@loro-dev/roost": "0.1.2",
     "@loro-dev/streams-crdt": "catalog:",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/node": "2.0.0",
@@ -124,6 +125,7 @@
     "LICENSE"
   ],
   "dependencies": {
+    "@loro-dev/roost-node": "0.1.1",
     "@lydell/node-pty": "1.2.0-beta.14",
     "@napi-rs/keyring": "2.1.0",
     "better-sqlite3": "catalog:",

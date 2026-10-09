@@ -4010,6 +4010,8 @@
   "settings.experimental.enableHelper": "Show features that are still being built. They can change or break.",
   "settings.experimental.reviewAgent": "Review agent",
   "settings.experimental.reviewAgentHelper": "Let a review agent check a branch, hand fixes back to the session, and merge once CI is green. You choose per session.",
+  "settings.experimental.roostHistory": "Roost history",
+  "settings.experimental.roostHistoryHelper": "Use Roost for new conversations. Existing conversations keep their current history backend.",
   "settings.review.title": "Review agent",
   "settings.review.machineConfigHelper": "Choose the reviewer used by sessions on each machine.",
   "settings.review.machineTableLabel": "Reviewer configuration by machine",

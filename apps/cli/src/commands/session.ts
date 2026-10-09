@@ -6,6 +6,7 @@ import {
   getModelEffortChoices,
   machineSupportsPreparedSessionInputProtocol,
   machineSupportsMemoryProviders,
+  resolveNewSessionHistoryBackend,
 } from '@lody/shared';
 import {
   materializePreparedSessionInput,
@@ -24,12 +25,6 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { v4 as uuidV4 } from 'uuid';
 import {
-  createLoroStreamsJsonStreamClient,
-  LORO_STREAMS_RPC_RETENTION_SECONDS,
-  LORO_STREAMS_RPC_VERSION,
-  LoroStreamsMachineRpcClient,
-} from '@lody/loro-streams-rpc';
-import {
   getLocalProjectGitStateAtRootPath,
   normalizeLocalProjectRootPath,
   resolveLocalProjectBranchAtRootPath,
@@ -37,8 +32,6 @@ import {
 } from '@lody/shared/node/local-project';
 import {
   type ACPSessionConfig,
-  getLoroStreamsShardUrls,
-  LORO_STREAMS_BUCKET_ID,
   type MessageContent,
   MachineStatusResponseSchema,
   SessionCancelResponseSchema,
@@ -83,6 +76,7 @@ import {
   type ProjectRef,
   type SessionHistory,
   type SessionHistoryInput,
+  type SessionHistoryBackendKind,
   type SessionQuotaKind,
   type SessionTurnInputConfig,
   type SessionId,
@@ -93,10 +87,11 @@ import {
   NEW_SESSION_HISTORY_BACKEND,
 } from '@lody/shared';
 import type { SessionTurn } from '@lody/shared/session-data';
-import { prepareCliStreamsGatewayBaseUrl } from '@/lib/loro/streams-access';
 import { AuthClient } from '@/lib/auth';
 import {
   dispatchLocalControl,
+  createCommandSessionHistoryFactory,
+  withMachineRpcClient,
   ensureWorkspaceMetaSynced,
   listAliveDocMetas,
   listAliveSessionMetas,
@@ -140,7 +135,6 @@ import { flushTelemetry } from '@/instrument';
 import { captureSessionCommandEvent } from './analytics-events';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
 import { createCloudBillingPort, createCloudStreamsTokenPort } from '@/lib/cloud-cli-port';
-import { getCliHttpFetch } from '@/utils/http-transport';
 import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
 import { createSessionBackend } from '@/session/session-backend';
 import { Effect } from 'effect';
@@ -164,6 +158,13 @@ export const DEFAULT_SESSION_LIST_LIMIT = 50;
 export const MAX_MCP_SESSION_LIST_LIMIT = 200;
 export const DEFAULT_SESSION_HISTORY_LIMIT = 50;
 export const MAX_MCP_SESSION_HISTORY_LIMIT = 200;
+
+const parseSessionHistoryBackend = (value: string): SessionHistoryBackendKind => {
+  if (value !== 'loro' && value !== 'roost') {
+    throw new Error(`Unsupported session history backend: ${value}`);
+  }
+  return value;
+};
 
 type PromptOptions = {
   prompt?: string;
@@ -194,6 +195,8 @@ export type CreateOptions = CommonOptions &
     env?: string[];
     wait?: boolean;
     timeout?: number;
+    /** Explicit history backend selection for this session. */
+    historyBackend?: SessionHistoryBackendKind;
     /** Stable ids preallocated by durable orchestration recovery. */
     sessionId?: SessionId;
     userTurnId?: string;
@@ -859,21 +862,23 @@ async function withWorkspaceManager<T>(
     throw new Error('Cloud session commands require LODY_AUTH_URL');
   }
   const logger = getLogger('session');
-  const manager = await LoroDocumentManager.create(
-    workspace.id as WorkspaceId,
-    auth.userId,
-    logger,
-    {
-      attachRemoteOnCreate: true,
-      streamsTokens: createCloudStreamsTokenPort({
-        token: auth.token,
-        authBaseUrl: LODY_AUTH_URL,
-        authSiteUrl: LODY_AUTH_SITE_URL,
-        logger,
-      }),
-      cloudBilling: createCloudBillingPort({ token: auth.token }),
-    }
+  let manager: LoroDocumentManager;
+  const sessionHistoryFactory = createCommandSessionHistoryFactory(
+    () => manager,
+    auth,
+    workspace.id as WorkspaceId
   );
+  manager = await LoroDocumentManager.create(workspace.id as WorkspaceId, auth.userId, logger, {
+    attachRemoteOnCreate: true,
+    streamsTokens: createCloudStreamsTokenPort({
+      token: auth.token,
+      authBaseUrl: LODY_AUTH_URL,
+      authSiteUrl: LODY_AUTH_SITE_URL,
+      logger,
+    }),
+    cloudBilling: createCloudBillingPort({ token: auth.token }),
+    sessionHistoryFactory,
+  });
   try {
     return await fn(manager);
   } finally {
@@ -2039,73 +2044,6 @@ async function ensureLocalRuntimeAvailable(
   }
 }
 
-function readPositiveIntEnv(name: string, fallback: number): number {
-  const raw = normalizeCliValue(process.env[name]);
-  if (!raw) {
-    return fallback;
-  }
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-async function createMachineRpcClient(args: {
-  auth: AuthContext;
-  workspaceId: WorkspaceId;
-  machineId: MachineId;
-}): Promise<LoroStreamsMachineRpcClient> {
-  if (!LODY_AUTH_URL) {
-    throw new Error('Cloud machine RPC requires LODY_AUTH_URL');
-  }
-  const logger = getLogger('session');
-  const cliHttpFetch = getCliHttpFetch({ logger });
-  const streamsTokenProvider = createCloudStreamsTokenPort({
-    token: args.auth.token,
-    authBaseUrl: LODY_AUTH_URL,
-    authSiteUrl: LODY_AUTH_SITE_URL,
-    logger,
-  }).createTokenProvider({ workspaceId: args.workspaceId });
-  const baseUrl = await prepareCliStreamsGatewayBaseUrl(streamsTokenProvider);
-  const streamClient = createLoroStreamsJsonStreamClient({
-    bucketId: LORO_STREAMS_BUCKET_ID,
-    getToken: async () => await streamsTokenProvider.getToken(),
-    // Keep the prepared URL available during an auth-triggered token refresh;
-    // prefer a newly returned gateway after the refresh completes.
-    getBaseUrl: () => streamsTokenProvider.getGatewayBaseUrl() ?? baseUrl,
-    shardUrls: getLoroStreamsShardUrls(baseUrl, streamsTokenProvider.getShardHostSuffix()),
-    fetchImpl: cliHttpFetch,
-    timeout: {
-      connectTimeoutMs: readPositiveIntEnv('LODY_LORO_RPC_CONNECT_TIMEOUT_MS', 30_000),
-    },
-  });
-  const client = new LoroStreamsMachineRpcClient({
-    workspaceId: args.workspaceId,
-    machineId: args.machineId,
-    streamClient,
-    rpcVersion: LORO_STREAMS_RPC_VERSION,
-    retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
-    now: getServerNow,
-    logger,
-  });
-  await client.start();
-  return client;
-}
-
-async function withMachineRpcClient<T>(
-  args: {
-    auth: AuthContext;
-    workspaceId: WorkspaceId;
-    machineId: MachineId;
-  },
-  fn: (client: LoroStreamsMachineRpcClient) => Promise<T>
-): Promise<T> {
-  const client = await createMachineRpcClient(args);
-  try {
-    return await fn(client);
-  } finally {
-    client.stop();
-  }
-}
-
 async function ensureTargetMachineOnline(args: {
   auth: AuthContext;
   workspaceId: WorkspaceId;
@@ -3248,7 +3186,10 @@ export async function prepareSessionInput(
     isArchived: false,
     cliType: agentConfig.cliType,
     agentType: agentConfig.agentType,
-    historyBackend: NEW_SESSION_HISTORY_BACKEND,
+    historyBackend: resolveNewSessionHistoryBackend(targetMachine, {
+      requested: options.historyBackend,
+      preferred: NEW_SESSION_HISTORY_BACKEND,
+    }),
     agentConfigId: agentConfig.id,
     ...(title ? { title, titleSource: 'user' as const } : {}),
     ...(draftTitle ? { title: draftTitle, titleSource: 'draft' as const } : {}),
@@ -4060,6 +4001,11 @@ const sessionCreateCommand = new Command('create')
   .option('--jsonl', 'Print JSON Lines output')
   .option('--wait', 'Wait for the assistant turn to complete before exiting')
   .option('--timeout <seconds>', 'Wait timeout in seconds for --wait', parsePositiveIntOption)
+  .option(
+    '--history-backend <kind>',
+    'History backend for this session (default: loro)',
+    parseSessionHistoryBackend
+  )
   .option('--debug', 'Enable debug output')
   .argument('[prompt]', 'Prompt text')
   .action(async (promptArg: string | undefined, options: CreateOptions) => {

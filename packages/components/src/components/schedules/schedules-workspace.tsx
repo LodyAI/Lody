@@ -209,7 +209,17 @@ const styles = stylex.create({
   },
 });
 
-export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
+export function SchedulesWorkspace({
+  scheduleId,
+  insetSafeArea = false,
+}: {
+  scheduleId?: string;
+  /**
+   * The `/schedules` route on a phone has no shell inset. The home tab
+   * already clears the status bar with its own header, so it leaves this off.
+   */
+  insetSafeArea?: boolean;
+}) {
   const { t } = useTranslation();
   const activeRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
   const scope = useResolvedWorkspaceScope();
@@ -455,6 +465,7 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
       columnWidths={columnWidths ?? undefined}
       onColumnWidthsChange={setColumnWidths}
       onOpenSession={openSession}
+      insetSafeArea={mobile && insetSafeArea}
       contextForRow={(item) => ({
         machine: machines.get(item.machineId as never)?.name ?? item.machineId,
         timeZone: machines.get(item.machineId as never)?.timeZone,

@@ -28,6 +28,8 @@ import {
   SessionStatusFactory,
   getLocalProjectHistoryProviderKey,
   getServerNow,
+  LEGACY_SESSION_HISTORY_BACKEND,
+  ROOST_SESSION_HISTORY_BACKEND,
   evaluateSessionCreateQuota,
   formatSessionQuotaRejection,
   isConvexUnauthenticatedError,
@@ -58,6 +60,7 @@ import {
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { sendIpc } from '@/lib/electron-ipc-client';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
+import { roostHistoryFeatureEnabledAtom } from '@/atoms/settings';
 import {
   createSessionSubmission,
   type CreateSessionResult,
@@ -351,6 +354,7 @@ export async function touchSessionActivityMeta(
 
 export function useSessionActions(): SessionActions {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const roostHistoryEnabled = useAtomValue(roostHistoryFeatureEnabledAtom);
   const setDocMetaByRoomId = useSetAtom(setDocMetaByRoomIdAtom);
   const store = useStore();
   // Convex dedupes identical subscriptions client-side, so this shares the
@@ -414,6 +418,9 @@ export function useSessionActions(): SessionActions {
     () =>
       createSessionSubmission({
         runtime,
+        defaultHistoryBackend: roostHistoryEnabled
+          ? ROOST_SESSION_HISTORY_BACKEND
+          : LEGACY_SESSION_HISTORY_BACKEND,
         assertSessionCreateAllowed,
         recordWorkspaceActivity,
         publishSessionMeta: setDocMetaByRoomId,
@@ -440,6 +447,7 @@ export function useSessionActions(): SessionActions {
       }),
     [
       runtime,
+      roostHistoryEnabled,
       assertSessionCreateAllowed,
       recordWorkspaceActivity,
       setDocMetaByRoomId,

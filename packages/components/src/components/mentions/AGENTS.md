@@ -43,6 +43,8 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   An unasked source reports `loading`, never `ready` with zero rows.
 
+- File fetch accounting follows [its contract](../../../../../specs/mention-file-fetch.md).
+
 ## Hydration and drafts
 
 - Hydrators only add ranges for known tokens/items, preserve existing external

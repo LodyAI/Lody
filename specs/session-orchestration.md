@@ -57,6 +57,16 @@ is `OPERATION_ID_REUSED`. Acceptance freezes each effective target dispatch conf
 Retry and recovery use that config rather than recomputing requester defaults or
 Role configuration. No Operation storage migration is required.
 
+## Runtime model rejection
+
+After acceptance, an agent rejection of the requested model must produce a
+GUI-visible `agent_warning` identifying that model, including for Codex and Claude.
+This applies to creation and subsequent turns, including resume, whether the model
+is supplied as `modelId` or through its advertised config option. Runtime state
+continues to reflect the agent's confirmed model. Reporting uses the existing
+asynchronous warning path; it does not stop the turn or guarantee display before
+the prompt starts.
+
 ## Frozen turn input
 
 A failed Role-backed start retried through a different execution path must retain
