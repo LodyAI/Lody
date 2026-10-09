@@ -68,16 +68,26 @@ compatibility without making public CI depend on an unpublished version.
 Formatting, documentation, type checks, lint and public/platform guards pass.
 A new macOS arm64 directory package through the normal wrapper passes CLI boot,
 native Worker and SQLite reopen probes, retaining exactly one 8,021,248-byte Roost
-binary. This package still uses the pinned 0.1.0; execution of the final split
-0.1.1 bundle under Electron awaits the upstream preparation artifact.
+binary. This package still uses the pinned 0.1.0. The final upstream 0.1.1 bundle
+also passes all six real platform-package selections and signed SQLite reopen
+on Node 24.14 and the actual packaged Lody Electron executable, using temporary
+unpacked runtime directories and synthetic databases. The dependency upgrade
+remains deferred until the user publishes the complete release.
 
 The full local `pnpm check` reaches an unrelated CLI failure: the simulator
 guest-buttons descendant shutdown test raises `kill EPERM` on macOS (3529 CLI
 tests passed, four existing skips). An isolated archive of unchanged HEAD
 `6f5332f` reproduces that exact failure, with four other cases passing. No simulator
 source was changed. Logs: `/private/tmp/lody-roost-split-check.log` and
-`/private/tmp/lody-roost-split-baseline-test.log`. New branch CI is pending; the
-previous CI evidence below refers to the original integration commit.
+`/private/tmp/lody-roost-split-baseline-test.log`.
+
+All [CI checks](https://github.com/LodyAI/Lody/actions/runs/37878236234) and
+[Desktop E2E smoke](https://github.com/LodyAI/Lody/actions/runs/37878236205) pass
+on source commit `8e6cf25de374b50dbaa6b3582710d0a17b265f0c`. The upstream six-platform
+build and complete 0.1.1 release preparation also
+[pass](https://github.com/loro-dev/roost/actions/runs/37877651895). No npm upload
+or dependency upgrade was performed. The previous evidence below refers to the
+original integration commit.
 
 The actual published tarball integrity matches the prepared release. A clean
 consumer passes signed history batches, SQLite reopen, and encrypted Streams

@@ -53,15 +53,23 @@ Roost 正在准备小主包和六个 optional 平台包形式的 0.1.1。Electro
 
 格式、文档、类型检查、lint 和公开仓库/平台边界检查通过。正常 wrapper 生成的新
 macOS arm64 目录包通过 CLI 启动、原生 Worker 和 SQLite 重开探针，Roost 只保留
-一份 8,021,248 字节绑定。该应用仍使用固定的 0.1.0；最终 0.1.1 拆包产物的
-Electron 运行验证等待上游完整构建产物。
+一份 8,021,248 字节绑定。该应用仍使用固定的 0.1.0。上游最终 0.1.1 产物也已通过
+六个真实平台包的选择，以及 Node 24.14 和实际打包 Lody Electron 可执行文件下的
+签名 SQLite 重开验证，使用临时 unpacked 运行目录与合成数据库。正式依赖升级
+等待用户发布完整发行版。
 
 本机完整 `pnpm check` 在另一项 CLI 测试失败：模拟器 guest-buttons 后代进程
 关闭测试在 macOS 报 `kill EPERM`（CLI 3529 项通过、4 项既有跳过）。从未改动的
 HEAD `6f5332f` 导出的独立基线也复现相同失败，其余四个用例通过；未修改模拟器源码。
 日志：`/private/tmp/lody-roost-split-check.log` 和
-`/private/tmp/lody-roost-split-baseline-test.log`。新分支 CI 仍待验证；下方旧 CI
-证据对应原接入提交。
+`/private/tmp/lody-roost-split-baseline-test.log`。
+
+源码提交 `8e6cf25de374b50dbaa6b3582710d0a17b265f0c` 的全部
+[CI 检查](https://github.com/LodyAI/Lody/actions/runs/37878236234)和
+[桌面 E2E smoke](https://github.com/LodyAI/Lody/actions/runs/37878236205)均已通过。
+上游六平台构建与完整 0.1.1 发行准备也
+[通过](https://github.com/loro-dev/roost/actions/runs/37877651895)。本次没有上传 npm
+或升级依赖；下方旧证据对应原接入提交。
 
 实际发布 tarball 的完整性与准备好的发行产物一致。独立消费者在 Node 24.14 和
 Electron 43.7.6 下通过签名历史批次、SQLite 重开及加密 Streams 回环验证。
