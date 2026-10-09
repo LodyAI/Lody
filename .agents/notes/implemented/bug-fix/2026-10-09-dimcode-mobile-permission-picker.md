@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1358](https://github.com/LodyAI/Lody/pull/1358)
 
 [中文](2026-10-09-dimcode-mobile-permission-picker.zh.md)
 
