@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getLodyDataDir } from './installation-profile';
-import { probePidSync } from './process';
+import { probePidSyncLegacy } from './process';
 
 /**
  * Lock file directory:
@@ -57,7 +57,7 @@ function isLockStale(lockPath: string, maxAgeMs: number = 30 * 60 * 1000): boole
 
     // Locks are written by this user's processes. A pid we may not signal
     // (EPERM) now belongs to another user, so the original owner is gone.
-    return probePidSync(lockInfo.pid) !== 'ours';
+    return probePidSyncLegacy(lockInfo.pid) !== 'ours';
   } catch {
     // Can't read lock file, consider it stale
     return true;

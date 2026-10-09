@@ -1,4 +1,4 @@
-import { runCommandText } from '@lody/shared/node/process'
+import { runCommandTextLegacy } from '@lody/shared/node/process'
 
 // Use the system Objective-C bridge; no runtime compiler or downloaded helper.
 // Paths are argv, never executable script text. This changes Finder's custom icon,
@@ -21,7 +21,7 @@ function run(args) {
 `
 
 export async function setMacApplicationIcon(bundlePath: string, imagePath: string | null) {
-  await runCommandText({
+  await runCommandTextLegacy({
     command: '/usr/bin/osascript',
     args: ['-l', 'JavaScript', '-e', script, bundlePath, imagePath ?? ''],
     timeout: 15_000,

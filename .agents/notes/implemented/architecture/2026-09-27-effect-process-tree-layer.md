@@ -116,7 +116,9 @@ URL argument passing remain unchanged.
 ## Cross-runtime consumers ([#1348](https://github.com/LodyAI/Lody/pull/1348))
 
 Electron main, cli-supervisor, shared Node helpers and code-review-helper consume
-the inherited core. The guard expands to those directories; new process
+the inherited core. Their execution calls and test mocks use the Legacy-suffixed
+API names inherited from #1069, with no aliases hiding that migration boundary.
+Effect-returning APIs and resource ownership retain the same implementation. The guard expands to those directories; new process
 capabilities must be added to the core rather than copied into a caller.
 Unused handwritten CJS twins are removed and their unique behavioral cases
 stay on the TypeScript helpers. File locks preserve their EPERM stale-lock

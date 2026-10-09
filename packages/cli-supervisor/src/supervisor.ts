@@ -4,8 +4,8 @@ import type { CliRuntimeState } from '@lody/shared/electron-ipc';
 import {
   childProcessTree,
   hasExited,
-  makeProcessRunner,
-  terminateChildTree,
+  makeProcessRunnerLegacy,
+  terminateChildTreeLegacy,
   type ProcessFacadeOptions,
 } from '@lody/shared/node/process';
 import { buildRetryDelay, FailureWindow, isAlreadyRunningOutcome } from './retry.js';
@@ -48,7 +48,6 @@ type ActiveRun = {
 function isChildProcessRunning(child: ChildProcess | null): boolean {
   return child !== null && !hasExited(child);
 }
-
 
 function runtimeMatchesHost(runtime: CliRuntimeState, host: SupervisorHostIdentity): boolean {
   if (host.mode === 'foreground') {
@@ -656,7 +655,7 @@ export class CliSupervisor {
 
   private async signalTerminate(run: ActiveRun): Promise<boolean> {
     try {
-      await makeProcessRunner(this.processOptions)(
+      await makeProcessRunnerLegacy(this.processOptions)(
         Effect.flatMap(
           childProcessTree(run.handle.child, { processGroup: run.handle.processGroup ?? false }),
           (tree) => tree.signal('SIGTERM')
@@ -675,7 +674,7 @@ export class CliSupervisor {
    */
   private async forceKill(run: ActiveRun): Promise<string | null> {
     try {
-      await terminateChildTree(
+      await terminateChildTreeLegacy(
         run.handle.child,
         {
           graceMs: 0,

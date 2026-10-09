@@ -7,7 +7,7 @@ import type {
   LocalProjectWorkingTreeState,
 } from '../project';
 import { parseGitHubRepo } from '../worktree-paths';
-import { CommandFailed, runCommandText } from './process';
+import { CommandFailed, runCommandTextLegacy } from './process';
 
 type GitCommandResult = {
   status: number | null;
@@ -100,7 +100,7 @@ async function runGitCommand(
 ): Promise<GitCommandResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_GIT_COMMAND_TIMEOUT_MS;
   try {
-    const result = await runCommandText({
+    const result = await runCommandTextLegacy({
       command: 'git',
       args,
       cwd: rootPath,

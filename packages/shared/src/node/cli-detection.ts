@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import * as os from 'os';
 import type { CliType } from '../ai';
-import { CommandFailed, runCommandText } from './process';
+import { CommandFailed, runCommandTextLegacy } from './process';
 
 const CLI_VERSION_COMMAND_TIMEOUT_MS = 5_000;
 
@@ -70,7 +70,7 @@ async function runCommand(
   env: NodeJS.ProcessEnv
 ): Promise<CliCommandResult> {
   try {
-    const result = await runCommandText({
+    const result = await runCommandTextLegacy({
       command,
       args,
       env,

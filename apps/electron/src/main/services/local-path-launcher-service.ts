@@ -2,7 +2,7 @@ import { constants as fsConstants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { app, shell } from 'electron'
-import { runCommandText, startProcess } from '@lody/shared/node/process'
+import { runCommandTextLegacy, startProcessLegacy } from '@lody/shared/node/process'
 import type {
   LaunchLocalPathInput,
   LaunchLocalPathResult,
@@ -53,7 +53,7 @@ async function commandSucceeds(
   args: string[],
   env?: NodeJS.ProcessEnv
 ): Promise<boolean> {
-  return await runCommandText({ command, args, env, check: 'none' }).then(
+  return await runCommandTextLegacy({ command, args, env, check: 'none' }).then(
     ({ code }) => code === 0,
     () => false
   )
@@ -171,7 +171,7 @@ async function spawnDetached(
     try {
       const useWindowsShell = shouldUseWindowsShell(spec.command)
       // The launched editor outlives this app: nothing here ever terminates it.
-      const { child } = startProcess({
+      const { child } = startProcessLegacy({
         command: spec.command,
         args: spec.args ?? [],
         options: {

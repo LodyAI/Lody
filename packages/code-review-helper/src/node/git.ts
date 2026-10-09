@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { runCommandText } from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { parseReviewMarkdown } from '../parser';
 import { createSparseTextForRanges } from '../sparse-text';
@@ -402,7 +402,7 @@ function parseRenameNumstatPath(filePath: string): string | undefined {
 const GIT_TIMEOUT_MS = 60_000;
 
 async function runGit(repoPath: string, args: readonly string[], maxBuffer = 8 * 1024 * 1024) {
-  const result = await runCommandText({
+  const result = await runCommandTextLegacy({
     command: 'git',
     args,
     cwd: repoPath,

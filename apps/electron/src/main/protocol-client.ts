@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { runCommandText } from '@lody/shared/node/process'
+import { runCommandTextLegacy } from '@lody/shared/node/process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -121,7 +121,7 @@ function runDesktopIntegrationCommand(
   args: string[],
   onComplete: (result: DesktopIntegrationCommandResult) => void
 ): void {
-  void runCommandText({ command, args, check: 'none' }).then(
+  void runCommandTextLegacy({ command, args, check: 'none' }).then(
     ({ code, signal, stderr }) => {
       onComplete({
         ok: code === 0,

@@ -6,10 +6,10 @@ import { basename, join, resolve as resolvePath } from 'node:path'
 import { app, powerSaveBlocker, type WebContents } from 'electron'
 import { Effect, Layer, Logger, LogLevel, References } from 'effect'
 import {
-  signalChildTreeNow,
-  startProcess,
+  signalChildTreeNowLegacy,
+  startProcessLegacy,
   type ProcessFacadeOptions,
-  type ProcessHandle,
+  type ProcessHandleLegacy,
   type TerminationPolicy
 } from '@lody/shared/node/process'
 import { isLocalSessionControlRequest } from '@lody/shared/node/local-session-control'
@@ -384,7 +384,7 @@ function resolveRepoRoot(): string | null {
  * where a console-less CLI refuses a graceful `taskkill`.
  */
 function signalCliTreeOnExit(child: ChildProcess): void {
-  signalChildTreeNow(
+  signalChildTreeNowLegacy(
     child,
     process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM',
     { processGroup: EMBEDDED_CLI_PROCESS_GROUP },
@@ -496,7 +496,7 @@ function readMachineIdFromCliCredentials(): string | null {
 }
 
 export class CliService {
-  private readonly trackedCliChildren = new Map<ChildProcess, ProcessHandle>()
+  private readonly trackedCliChildren = new Map<ChildProcess, ProcessHandleLegacy>()
   private autoStartSender: WebContents | undefined
   private readonly cliOutputBuffer: CliOutputEvent[] = []
   private readonly cliStateSenders = new Set<WebContents>()
@@ -1046,7 +1046,7 @@ export class CliService {
       chunk: `$ ${formatCommandForDisplay(command, args)}\n`
     })
 
-    const processHandle = startProcess(
+    const processHandle = startProcessLegacy(
       {
         command,
         args,

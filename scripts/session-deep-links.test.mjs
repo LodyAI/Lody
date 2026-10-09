@@ -147,7 +147,7 @@ test('Windows first launch registers an unhandled scheme and preserves any exist
         electron: { app },
         '@lody/shared/session-link': sessionLinks,
         '@lody/shared/node/process': {
-          runCommandText: async () => ({ code: 0, signal: null, stdout: '', stderr: '' }),
+          runCommandTextLegacy: async () => ({ code: 0, signal: null, stdout: '', stderr: '' }),
         },
       },
       {
@@ -218,7 +218,7 @@ test('AppImage launch preserves the common default, while explicit selection cha
       electron: { app },
       '@lody/shared/session-link': sessionLinks,
       '@lody/shared/node/process': {
-        runCommandText: ({ command, args }) => {
+        runCommandTextLegacy: ({ command, args }) => {
           const result = Promise.resolve().then(() => {
             if (command === 'xdg-mime') handlers.set(args[2].split('/')[1], args[1]);
             return { code: 0, signal: null, stdout: '', stderr: '' };

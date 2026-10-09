@@ -1,4 +1,4 @@
-import { startProcess } from '@lody/shared/node/process'
+import { startProcessLegacy } from '@lody/shared/node/process'
 import { appendFileSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -305,7 +305,7 @@ export class AppUpdaterService {
       const result = await runLinuxDebInstall(
         plan,
         (command, args) =>
-          startProcess({
+          startProcessLegacy({
             command,
             args,
             options: { stdio: ['ignore', 'ignore', 'pipe'] },

@@ -81,9 +81,9 @@ async function captureNativeSample(pid: number, entry: Record<string, unknown>):
     if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Renderer PID unavailable')
     // Loaded on demand: desktop-bootstrap imports this module before the
     // desktop lease is held, and the process layer must stay out of that graph.
-    const { runCommandText } = await import('@lody/shared/node/process')
+    const { runCommandTextLegacy } = await import('@lody/shared/node/process')
     // -file /dev/stdout avoids sample's own unbounded temporary output files.
-    const { stdout: output } = await runCommandText({
+    const { stdout: output } = await runCommandTextLegacy({
       command: '/usr/bin/sample',
       args: [String(pid), '2', '10', '-file', '/dev/stdout'],
       timeout: 8000,

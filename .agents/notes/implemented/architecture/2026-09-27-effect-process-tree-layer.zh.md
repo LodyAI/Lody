@@ -84,6 +84,8 @@ Git、worktree setup/GC、daemon 命令、MCP、preview、文件扫描、资源�
 ## 跨运行时调用方（[#1348](https://github.com/LodyAI/Lody/pull/1348)）
 
 Electron main、cli-supervisor、shared Node 辅助模块与 code-review-helper 使用继承的核心。
+执行调用和测试 mock 使用 #1069 提供的 Legacy 后缀名称，不通过别名隐藏迁移边界；
+返回 Effect 的核心 API 和资源所有权保持原实现。
 守卫扩展到这些目录；新增进程能力必须进核心，不能在调用方复制。删除没有运行时使用方的手写
 CJS 副本，把独有行为用例留在 TypeScript 模块。文件锁通过显式三态探测保留原有 EPERM 失效策略。
 
