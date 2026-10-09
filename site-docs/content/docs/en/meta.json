@@ -1,4 +1,4 @@
 {
   "title": "Lody Docs",
-  "pages": ["index", "(getting-started)", "(core-concepts)", "(guides)", "(migrating)", "(reference)"]
+  "pages": ["index", "(getting-started)", "(core-concepts)", "(guides)", "(reference)", "(migrating)"]
 }
