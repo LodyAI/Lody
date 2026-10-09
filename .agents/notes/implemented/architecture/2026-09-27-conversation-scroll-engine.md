@@ -1015,3 +1015,5 @@ suites and keyed-layout suites pass 102 tests; scoped strict type and lint check
 Full-package checks are blocked by missing dependencies and outdated borrowed workspace
 packages. Validation uses synthetic events and simulated layout, not an iOS compositor.
 Real-device verification remains open; layout compensation can still interrupt an iOS fling.
+
+PR: [#1342](https://github.com/LodyAI/Lody/pull/1342).
