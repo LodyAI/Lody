@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1363
 
 [English](2026-10-09-mobile-video-preview.md)
 
