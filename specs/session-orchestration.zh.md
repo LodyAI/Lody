@@ -52,6 +52,18 @@ Operation id 下更改选择返回 `OPERATION_ID_REUSED`。接受时冻结各目
 配置。重试和恢复使用冻结配置，不重新计算 requester 默认值或 Role 配置。
 不需要 Operation 存储迁移。
 
+## 冻结 turn 输入
+
+带 Role 的首次启动失败后，即使重试走不同执行路径，也必须保留已接受的指令和附件。
+turn 的 `inputConfig.prompt` 是有效的冻结文本，包含接收时组合的 Agent Config 和 Role
+指令。`inputBlocks` 保留用于展示、编辑的原始文本及用于执行的结构化附件；原始文本不能
+覆盖冻结 prompt。
+
+create、continue、steer 和恢复使用同一解释规则。Role 身份、revision 和 snapshot 仅记录
+来源，不要求重新解析当前 Role。缺少 prompt 的旧输入从已有 blocks/history 派生文本；
+显式空 prompt 表示没有执行文本，可以携带附件。运行时指令、附件落地和历史回放与冻结任务
+分离，因此整个 provider 请求不要求字节完全相同。
+
 ## 本地与云端执行
 
 OSS 的 Agent Role mention 必须无需 Lody 账号、无需经过产品云端认证请求即可

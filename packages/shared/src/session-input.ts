@@ -1,3 +1,4 @@
+import type { MemoryBinding } from './memory-provider';
 import type {
   ACPSessionConfig,
   AcpConfigOptionValue,
@@ -61,6 +62,7 @@ export type SessionConversationConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  memory?: MemoryBinding;
   mcpServerIds?: McpServerId[];
   /** Null is an explicit None; undefined means the selected Turn predates this field. */
   agentRoleId?: AgentRoleId | null;
@@ -170,6 +172,7 @@ export const resolveSessionConversationConfig = (
       ...(inputConfig.configOptionValues && Object.keys(inputConfig.configOptionValues).length > 0
         ? { configOptionValues: inputConfig.configOptionValues }
         : {}),
+      ...(inputConfig.memory ? { memory: inputConfig.memory } : {}),
       ...(inputConfig.agentRoleSnapshot
         ? { agentRoleSnapshot: inputConfig.agentRoleSnapshot }
         : {}),
@@ -497,6 +500,26 @@ export const extractPromptPreviewFromInputBlocks = (
     .join('\n\n');
 };
 
+/**
+ * Resolve the frozen execution input, independently of how the turn is dispatched.
+ * `prompt` owns effective text (including accepted Config/Role instructions);
+ * `inputBlocks` retain authored text for editing and own structured attachments.
+ * Only legacy inputs without a prompt derive execution text from their blocks.
+ * An explicit empty prompt means no execution text, not a request to use raw text.
+ */
+export const resolveSessionExecutionInputBlocks = (input: {
+  prompt?: string;
+  inputBlocks?: unknown;
+}): SessionInputBlock[] => {
+  const blocks = normalizeSessionInputBlocks(input.inputBlocks, '');
+  if (input.prompt === undefined) return blocks;
+
+  const attachments = blocks.filter((block) => block.type !== 'text');
+  const prompt = input.prompt.trim();
+  // Authored spans refer to the raw text, never to the composed execution text.
+  return prompt ? [...attachments, { type: 'text', text: prompt }] : attachments;
+};
+
 export const inputBlocksToHistoryItems = (
   inputBlocks: readonly SessionInputBlock[]
 ): NonNullable<SessionHistoryInput['items']> => {
@@ -629,6 +652,7 @@ export const buildSessionTurnInputConfig = (args: {
   modeId?: string | null;
   modelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
+  memory?: MemoryBinding;
   mcpServerIds?: readonly McpServerId[] | null;
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
@@ -650,6 +674,7 @@ export const buildSessionTurnInputConfig = (args: {
       args.configOptionValues && Object.keys(args.configOptionValues).length > 0
         ? args.configOptionValues
         : undefined,
+    memory: args.memory,
     mcpServerIds: args.mcpServerIds ? [...args.mcpServerIds] : undefined,
     ...(args.agentRoleId !== undefined ? { agentRoleId: args.agentRoleId } : {}),
     ...(typeof args.agentRoleId === 'string' && args.agentRoleRevision !== undefined

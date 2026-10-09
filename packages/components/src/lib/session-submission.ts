@@ -192,6 +192,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       dispatch?: boolean;
       guideExpectedTurnId?: string;
       attachments?: SessionAttachmentDraft[];
+      onAccepted?: () => void;
     }
   ) => {
     if (!runtime) {
@@ -240,7 +241,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
           : { kind: options?.dispatch ? 'dispatch' : 'history' },
         undefined,
         undefined,
-        options?.attachments
+        options?.attachments,
+        options?.onAccepted
       );
     } else {
       await runtime.writer.appendSessionTurn(sessionId, entry, dispatch);

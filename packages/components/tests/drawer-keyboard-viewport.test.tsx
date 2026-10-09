@@ -146,8 +146,8 @@ describe('native side-drawer keyboard layout', () => {
     expect(drawer.style.bottom).toBe('0px');
   });
 
-  it.each(['web', 'ios', 'disabled'] as const)('does not take over %s positioning', (mode) => {
-    runtime.native = mode !== 'web';
+  it.each(['ios', 'disabled'] as const)('does not take over %s positioning', (mode) => {
+    runtime.native = true;
     runtime.ios = mode === 'ios';
     const drawer = renderDrawer(mode !== 'disabled');
     expect(drawer.style.bottom).toBe('');

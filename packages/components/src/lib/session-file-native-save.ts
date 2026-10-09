@@ -83,8 +83,11 @@ export async function saveSessionFileToNativeShareSheet(args: NativeSaveArgs): P
   }
 }
 
-/** Export an already-authorized, complete preview snapshot, never a host path. */
-export async function shareFileBytesNatively(fileName: string, bytes: Uint8Array): Promise<void> {
+/** Export local bytes; report OS handoff separately from dismissal, not the destination. */
+export async function shareFileBytesNatively(
+  fileName: string,
+  bytes: Uint8Array
+): Promise<{ shared: boolean }> {
   const { Filesystem, Directory } = await import('@capacitor/filesystem');
   const { Share } = await import('@capacitor/share');
   const cachePath = `lody-shared/${crypto.randomUUID()}/${sanitizeCacheFileName(fileName)}`;
@@ -98,10 +101,12 @@ export async function shareFileBytesNatively(fileName: string, bytes: Uint8Array
     const { uri } = await Filesystem.getUri({ path: cachePath, directory: Directory.Cache });
     try {
       await Share.share({ title: fileName, files: [uri], dialogTitle: fileName });
+      return { shared: true };
     } catch (error) {
       // Capacitor iOS/Android report dismissal as a rejected promise.
       const message = error instanceof Error ? error.message : String(error);
       if (!/^(Share canceled|Share cancelled|User cancelled sharing)$/i.test(message)) throw error;
+      return { shared: false };
     }
   } finally {
     await Filesystem.deleteFile({ path: cachePath, directory: Directory.Cache }).catch(() => {});

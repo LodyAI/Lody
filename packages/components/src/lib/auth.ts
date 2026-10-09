@@ -53,6 +53,16 @@ const invalidateAuthSessionIntent = (authClient: LodyAuthClient): void => {
   AUTH_SESSION_INTENT_GENERATIONS.set(authClient, getAuthSessionIntentGeneration(authClient) + 1);
 };
 
+const localAuthStateClearedListeners = new Set<() => void>();
+
+/** App-store owners subscribe for logout intent, before async auth state catches up. */
+export const subscribeLocalAuthStateCleared = (listener: () => void): (() => void) => {
+  localAuthStateClearedListeners.add(listener);
+  return () => {
+    localAuthStateClearedListeners.delete(listener);
+  };
+};
+
 export const clearLocalAuthState = () => {
   clearStoredAuthToken();
   clearAuthBootstrapSnapshot();
@@ -65,6 +75,7 @@ export const clearLocalAuthState = () => {
     }
   }
   setLoginHintCookie(false);
+  for (const listener of localAuthStateClearedListeners) listener();
 };
 
 export const persistAuthToken = (token: string) => {

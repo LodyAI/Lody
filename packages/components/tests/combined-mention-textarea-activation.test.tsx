@@ -89,6 +89,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    vi.useRealTimers();
     container.remove();
     if (originalScrollIntoView) {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -302,6 +303,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
   });
 
   it('wraps ArrowUp from the first @ result and continues in reverse order', async () => {
+    vi.useFakeTimers();
     sessionItems.push(
       {
         sessionId: 's1',
@@ -327,6 +329,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     );
     await render({ value: '' });
     await typeInto('@session:');
+    await act(async () => vi.advanceTimersToNextFrame());
 
     const input = textarea();
     if (!input) throw new Error('composer textarea missing');

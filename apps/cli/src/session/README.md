@@ -30,6 +30,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   state; it creates the assistant entry when it opens.
 - `session-execution-service.ts` — runs one turn end-to-end: ACP prompt, turn ids,
   lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
+- `session-execution-helpers.ts` — composes first-task prompt context, with branch-naming
+  guidance only for ordinary new independent GitHub/local worktree Sessions.
 - `acp-error-classification.ts` — JSON-RPC/transport error string matching for the above.
 - `session-manager.ts` / `session.ts` / `session-sandbox.ts` / `terminal-manager.ts` —
   session and process lifecycle, workdirs, worktrees, sandboxed spawning, ACP terminals.
@@ -63,6 +65,16 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   [specs/session-worktree-lifecycle.md](../../../../specs/session-worktree-lifecycle.md).
 
 ## Background
+
+### Frozen execution input
+
+Create, continue and steer resolve effective input through shared
+`resolveSessionExecutionInputBlocks`: the accepted turn's `prompt` owns text,
+while `inputBlocks` provide structured attachments and retain authored text for
+editing. Dispatch preserves both fields and supplies legacy history fallback.
+Execution never reconstructs instructions from the current Role catalog. Runtime
+context and attachment materialization remain daemon responsibilities. See the
+[decision and regression evidence](../../../../.agents/notes/implemented/architecture/2026-10-08-frozen-turn-execution-input.md).
 
 ### Why turn activation has its own predicate
 
@@ -268,4 +280,13 @@ identity propagation into adapter-owned Git commands remains unresolved.
 Peek and claim are synchronous published-resource snapshots. A prepared resource may reuse its
 open target-machine Flock to synchronously resolve launch config, but dispatch and claim
 rescan the current row. Durable creation claims the marker only when repo, source, and base
-branch target identity match, runs setup, then permits the first prompt.
+branch target identity match, runs setup, then permits the first prompt. A missed claim returns
+any retiring cleanup barrier even after its lease has disappeared. Cold creation, discard,
+replacement preparation and shutdown join that barrier, including resources returned after
+cancellation. This can delay cold startup until cleanup finishes; otherwise a retired
+preparation could delete the newly reused directory. Unrelated Sessions remain independent.
+
+Memory identity references travel with turn configuration. `Session.createAgent` maps
+them through `../lib/memory-providers.ts` at spawn; the execution service restarts a
+resident ACP process when the next turn changes identity. See the
+[memory Spec](../../../../specs/agent-role-memory.md).

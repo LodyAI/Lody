@@ -6,7 +6,24 @@ import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import en from '../../../locales/en.json';
 import { ScheduleForm } from '../src/components/schedules/schedule-view';
-import { evaluateSchedule, ScheduleDefinitionSchema } from '@lody/shared';
+import { evaluateSchedule, ScheduleDefinitionSchema, ScheduleAgentSchema } from '@lody/shared';
+
+import { ScheduleAgentControls } from '../src/components/schedules/schedule-agent-controls';
+
+// Exercise the schedule adapter with the composer's typed change contract.
+vi.mock('../src/components/sessions/desktop-run-config-menu', () => ({
+  DesktopRunConfigMenu: ({
+    onConfigOptionChange,
+  }: {
+    onConfigOptionChange: (id: string, value: string | boolean) => void;
+  }) => (
+    <>
+      <button onClick={() => onConfigOptionChange('plan_mode', false)}>Plan off</button>
+      <button onClick={() => onConfigOptionChange('select_flag', 'false')}>String choice</button>
+    </>
+  ),
+  DesktopPermissionModeButton: () => null,
+}));
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -76,6 +93,31 @@ describe('Schedule editor', () => {
       setter.call(element, text);
       element.dispatchEvent(new Event('input', { bubbles: true }));
     });
+
+  it('preserves typed composer changes in the saved Agent configuration', () => {
+    let value: NonNullable<ComponentProps<typeof ScheduleAgentControls>['value']> = {
+      agentConfigId: 'agent' as never,
+    };
+    const renderControls = () =>
+      act(() =>
+        root.render(
+          <ScheduleAgentControls
+            machine={undefined}
+            agentConfigs={[]}
+            value={value}
+            onChange={(next) => {
+              value = next;
+            }}
+          />
+        )
+      );
+    renderControls();
+    act(() => container.querySelectorAll('button')[0]!.click());
+    renderControls();
+    act(() => container.querySelectorAll('button')[1]!.click());
+    const saved = ScheduleAgentSchema.parse(value);
+    expect(saved.configOptionValues).toEqual({ plan_mode: false, select_flag: 'false' });
+  });
 
   it('saves without any confirmation checkbox', () => {
     render();

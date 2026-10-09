@@ -234,10 +234,10 @@ lody project delete --help
 
 ## Desktop App Commands
 
-| Command                   | What it does                                              | Help command                  |
-| ------------------------- | --------------------------------------------------------- | ----------------------------- |
-| `lody app [path]`         | Open the desktop app on a new chat with a directory ready  | `lody app --help`             |
-| `lody app reset-cache`    | Clear the desktop app's local cache on its next launch     | `lody app reset-cache --help` |
+| Command                | What it does                                              | Help command                  |
+| ---------------------- | --------------------------------------------------------- | ----------------------------- |
+| `lody app [path]`      | Open the desktop app on a new chat with a directory ready | `lody app --help`             |
+| `lody app reset-cache` | Clear the desktop app's local cache on its next launch    | `lody app reset-cache --help` |
 
 ### Recovering a frozen desktop window
 
@@ -267,7 +267,7 @@ Session commands are the main non-web workflow for Lody.
 Before you use them:
 
 - `session create`, `session chat`, and `session cancel` need `lody start` or `lody daemon start` running on the current machine
-- `session list`, `history`, `show`, `rename`, `archive`, `restore`, and `delete` only need login plus workspace access
+- `session list`, `history`, `observe`, `show`, `rename`, `archive`, `restore`, and `delete` only need login plus workspace access
 - Use [`lody workspace list`](#workspace-commands) if you need a workspace ID or slug
 - `sessionId` can be passed positionally or through `LODY_SESSION_ID`
 
@@ -278,6 +278,7 @@ Before you use them:
 | `lody session cancel`  | Cancel the running turn on a local session   | Yes                 | `lody session cancel --help`  |
 | `lody session list`    | List sessions in a workspace                 | No                  | `lody session list --help`    |
 | `lody session history` | Read visible transcript history              | No                  | `lody session history --help` |
+| `lody session observe` | Inspect and follow persisted Session state   | No                  | `lody session observe --help` |
 | `lody session show`    | Show session metadata                        | No                  | `lody session show --help`    |
 | `lody session rename`  | Rename a session                             | No                  | `lody session rename --help`  |
 | `lody session archive` | Move a session out of the active list        | No                  | `lody session archive --help` |
@@ -391,6 +392,46 @@ Exact flags:
 
 ```bash
 lody session history --help
+```
+
+### session observe
+
+Attach to an existing Session without sending a task or changing unread state.
+This command currently uses Cloud login and workspace access; local-only daemon
+attachment is not supported.
+
+```bash
+lody session observe <sessionId> --json
+lody session observe <sessionId> --jsonl --follow
+lody session observe --workspace my-team --all --jsonl --follow
+```
+
+Without `--follow`, print a snapshot and exit. Follow requires `--jsonl`. Unlike
+`history --jsonl`, it stays attached for later turns. Workspace mode requires both
+`--workspace` and `--all`, rejects a positional Session ID and ignores `LODY_SESSION_ID`.
+
+JSONL events are `snapshot`, `ready`, `session.changed`, `turn.started`,
+`turn.finished` and `session.removed`. Each successful event has `version: 1`,
+`streamId`, `sequence`, `observedAt` (Unix milliseconds) and `workspaceId`.
+`turn.finished` includes User/optional Assistant IDs and
+`outcome: completed | failed | canceled`. Initial snapshots include `latestTurn`
+so a fast task's outcome remains readable; old turns are not replayed as events.
+
+Session snapshots distinguish `source: persisted | metadata` and
+`freshness: synced | unavailable`. Workspace `ready` marks catalog enumeration,
+not the opening of every history room: metadata-only Sessions have `state: unknown`.
+Historical idle rooms are left unopened; changes to their history alone are outside
+workspace follow's scope. Attach individually when needed. Completion requires
+persisted turn evidence; metadata idle or Presence loss is insufficient. Freshness
+is a confirmed read, not proof that the agent is currently online.
+
+Sequence orders one running process and cannot resume another process or guarantee
+replay. After a restart, reconcile snapshots and history. Ordinary streaming text
+is omitted. Structured diagnostics go to stderr; command errors use the existing
+CLI error format. Ctrl+C stops observation without canceling execution.
+
+```bash
+lody session observe --help
 ```
 
 ### session show

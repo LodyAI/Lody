@@ -58,10 +58,13 @@ existing ChatGPT identity; users add a new provider when a new login is required
 
 API key replacement stages a new vault generation, verifies a tools-free synthetic
 Responses request, and only then atomically changes the active generation. Failure
-or cancellation before commit preserves the old key. Running processes retain
-their original generation. Host readiness precedes catalog publication; failed
-publication is retryable. Deletion records local removal, rejects future launches,
-and reconciles credential cleanup without deleting history or killing sessions.
+or cancellation before commit preserves the old key and propagates the original
+authentication error, even if cleanup also fails. Inactive generation records stay
+discoverable for cleanup retries; cleanup must not activate a failed candidate.
+Running processes retain their original generation. Host readiness precedes
+catalog publication; failed publication is retryable. Deletion records local
+removal, rejects future launches, and reconciles credential cleanup without
+deleting history or killing sessions.
 
 The daemon advertises `codexAuthProfiles` v1. Persisted managed providers carry an
 invalid executable-path guard for older daemons; supported readers normalize it
@@ -72,5 +75,6 @@ only as part of the typed profile contract. Old peers must fail, not use native 
 Owners: [profile store](../apps/cli/src/agent/codex-profile-store.ts),
 [credential broker](../apps/cli/src/agent/codex-credential-broker.ts),
 [decision and validation limits](../.agents/notes/proposed/architecture/2026-09-26-codex-account-profiles.md),
-[rate-limit isolation](../.agents/notes/implemented/bug-fix/2026-09-30-provider-rate-limit-isolation.md).
+[rate-limit isolation](../.agents/notes/implemented/bug-fix/2026-09-30-provider-rate-limit-isolation.md),
+[credential failure recovery and ablations](../.agents/notes/implemented/bug-fix/2026-10-07-codex-credential-failure-recovery.md).
 This draft does not assert completion of all lifecycle or platform acceptance tests.

@@ -583,6 +583,7 @@ const acpSessionConfigSchema = schema
       /** Config option values (configId → value) for setSessionConfigOption */
       configOptionValues: schema.Any({ required: false }),
       /** Workspace MCP catalog ids selected for this session (string[]). */
+      memory: schema.Any({ required: false }),
       mcpServerIds: schema.Any({ required: false }),
       /** Agent Role selected for this Turn; null is explicit None. */
       agentRoleId: agentRoleIdSchema,

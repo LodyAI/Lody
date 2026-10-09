@@ -1,4 +1,4 @@
-import { useId, type FormEvent } from 'react';
+import { useId, type FormEvent, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -78,6 +78,8 @@ export type AgentRoleFormProps = {
   onSubmit: () => void;
   onCancel: () => void;
   className?: string;
+  memoryPicker?: ReactNode;
+  tab?: 'configuration' | 'memory' | 'team';
 };
 
 /**
@@ -106,6 +108,8 @@ export function AgentRoleForm({
   onSubmit,
   onCancel,
   className,
+  memoryPicker,
+  tab = 'configuration',
 }: AgentRoleFormProps) {
   const { t } = useTranslation();
   const fieldId = useId();
@@ -125,234 +129,239 @@ export function AgentRoleForm({
   return (
     <form {...withClassName(stylex.props(catalog.editorForm), className)} onSubmit={submit}>
       <div {...withClassName(stylex.props(catalog.editorBody), 'scrollbar-pro')}>
-        {/* The Role's own label, shown as itself rather than inside a titled
+        {tab === 'configuration' ? (
+          <>
+            {/* The Role's own label, shown as itself rather than inside a titled
             card: an emoji and a name need no section heading to be read. */}
-        <div {...stylex.props(catalog.stack)}>
-          <Input
-            id={`${fieldId}-name`}
-            autoComplete="off"
-            aria-label={t('settings.agentRoles.form.name')}
-            leading={
-              <EmojiField
-                value={value.emoji}
-                defaultEmoji={DEFAULT_AGENT_ROLE_EMOJI}
-                onChange={(emoji) => update({ emoji })}
+            <div {...stylex.props(catalog.stack)}>
+              <Input
+                id={`${fieldId}-name`}
+                autoComplete="off"
+                aria-label={t('settings.agentRoles.form.name')}
+                leading={
+                  <EmojiField
+                    value={value.emoji}
+                    defaultEmoji={DEFAULT_AGENT_ROLE_EMOJI}
+                    onChange={(emoji) => update({ emoji })}
+                  />
+                }
+                maxLength={AGENT_ROLE_NAME_MAX_LENGTH}
+                placeholder={t('settings.agentRoles.form.name')}
+                aria-invalid={hasError('name_required') || undefined}
+                value={value.name}
+                onChange={(event) => update({ name: event.target.value })}
               />
-            }
-            maxLength={AGENT_ROLE_NAME_MAX_LENGTH}
-            placeholder={t('settings.agentRoles.form.name')}
-            aria-invalid={hasError('name_required') || undefined}
-            value={value.name}
-            onChange={(event) => update({ name: event.target.value })}
-          />
-          {hasError('name_taken') ? (
-            <FormMessage tone="error">{t('settings.agentRoles.errors.nameTaken')}</FormMessage>
-          ) : null}
-        </div>
+              {hasError('name_taken') ? (
+                <FormMessage tone="error">{t('settings.agentRoles.errors.nameTaken')}</FormMessage>
+              ) : null}
+            </div>
 
-        <Section
-          title={t('settings.agentRoles.form.description')}
-          hint={t('settings.agentRoles.form.descriptionHint')}
-        >
-          <Textarea
-            id={`${fieldId}-description`}
-            rows={2}
-            resize="none"
-            aria-label={t('settings.agentRoles.form.description')}
-            value={value.description}
-            onChange={(event) =>
-              update({ description: normalizeAgentRoleDescription(event.target.value) })
-            }
-          />
-        </Section>
+            <Section
+              title={t('settings.agentRoles.form.description')}
+              hint={t('settings.agentRoles.form.descriptionHint')}
+            >
+              <Textarea
+                id={`${fieldId}-description`}
+                rows={2}
+                resize="none"
+                aria-label={t('settings.agentRoles.form.description')}
+                value={value.description}
+                onChange={(event) =>
+                  update({ description: normalizeAgentRoleDescription(event.target.value) })
+                }
+              />
+            </Section>
 
-        <Section
-          title={t('settings.agentRoles.form.sectionPrompt')}
-          hint={t('settings.agentRoles.form.sectionPromptHint')}
-        >
-          <Textarea
-            id={`${fieldId}-prompt`}
-            rows={4}
-            resize="none"
-            aria-label={t('settings.agentRoles.form.promptPrefix')}
-            placeholder={t('settings.agentRoles.form.promptPrefixPlaceholder')}
-            value={value.promptPrefix}
-            onChange={(event) => update({ promptPrefix: event.target.value })}
-          />
-        </Section>
+            <Section
+              title={t('settings.agentRoles.form.sectionPrompt')}
+              hint={t('settings.agentRoles.form.sectionPromptHint')}
+            >
+              <Textarea
+                id={`${fieldId}-prompt`}
+                rows={4}
+                resize="none"
+                aria-label={t('settings.agentRoles.form.promptPrefix')}
+                placeholder={t('settings.agentRoles.form.promptPrefixPlaceholder')}
+                value={value.promptPrefix}
+                onChange={(event) => update({ promptPrefix: event.target.value })}
+              />
+            </Section>
 
-        <Section
-          title={t('settings.agentRoles.form.sectionTarget')}
-          hint={t('settings.agentRoles.form.sectionTargetHint')}
-        >
-          <div {...stylex.props(catalog.fieldPair)}>
-            <Field label={t('settings.agentRoles.form.machine')}>
-              <Select.Root
-                items={machines.map((machine) => ({
-                  value: machine.machineId,
-                  label: machine.label,
-                }))}
-                value={value.machineId ?? null}
-                onValueChange={(machineId) => {
-                  if (machineId == null) return;
-                  // Changing machine clears the config: an agent config belongs
-                  // to exactly one machine, and carrying the old id over is how
-                  // a Role would silently point at nothing.
-                  update({ machineId: machineId as MachineId, agentConfigId: null });
-                }}
-              >
-                <Select.Trigger
-                  aria-label={t('settings.agentRoles.form.machine')}
-                  aria-invalid={hasError('machine_required') || undefined}
-                >
-                  <Select.Value placeholder={t('settings.agentRoles.form.machinePlaceholder')} />
-                </Select.Trigger>
-                <Select.Content>
-                  {machines.map((machine) => (
-                    <Select.Item key={machine.machineId} value={machine.machineId}>
-                      <span {...stylex.props(styles.option)}>
-                        {machine.label}
-                        {machine.online ? null : (
-                          <span {...stylex.props(styles.offline)}>
-                            {t('settings.agentRoles.status.offline')}
-                          </span>
-                        )}
-                      </span>
-                    </Select.Item>
-                  ))}
-                </Select.Content>
-              </Select.Root>
-            </Field>
-            <Field label={t('settings.agentRoles.form.agentConfig')}>
-              <Select.Root
-                items={agentConfigs.map((config) => ({
-                  value: config.agentConfigId,
-                  label: config.label,
-                }))}
-                value={value.agentConfigId ?? null}
-                disabled={!value.machineId || agentConfigs.length === 0}
-                onValueChange={(agentConfigId) => {
-                  if (agentConfigId == null) return;
-                  update({
-                    agentConfigId: agentConfigId as AgentConfigId,
-                    // Capabilities belong to the config; keeping the old model
-                    // would carry a selection the new agent may not publish.
-                    modeId: null,
-                    modelId: null,
-                    configOptionValues: {},
-                  });
-                }}
-              >
-                <Select.Trigger
-                  aria-label={t('settings.agentRoles.form.agentConfig')}
-                  aria-invalid={hasError('agent_config_required') || undefined}
-                >
-                  <Select.Value
-                    placeholder={t('settings.agentRoles.form.agentConfigPlaceholder')}
-                  />
-                </Select.Trigger>
-                <Select.Content>
-                  {agentConfigs.map((config) => (
-                    <Select.Item key={config.agentConfigId} value={config.agentConfigId}>
-                      {config.label}
-                    </Select.Item>
-                  ))}
-                </Select.Content>
-              </Select.Root>
-            </Field>
-          </div>
-          {value.machineId && agentConfigs.length === 0 ? (
-            <FormMessage tone="warning">{t('settings.agentRoles.form.noAgentConfigs')}</FormMessage>
-          ) : null}
-        </Section>
-
-        {value.agentConfigId ? (
-          <Section
-            title={t('settings.agentRoles.form.sectionRunConfig')}
-            hint={t('settings.agentRoles.form.sectionRunConfigHint')}
-          >
-            {capabilitiesUnavailable || !selectorOptions ? (
-              <FormMessage tone="warning">
-                {t('settings.agentRoles.form.capabilitiesUnavailable')}
-              </FormMessage>
-            ) : (
-              <>
-                {selectorOptions.modelOptions.length > 0 ? (
-                  <Field label={t('settings.agentRoles.form.model')}>
-                    <ValueSelect
-                      label={t('settings.agentRoles.form.model')}
-                      value={value.modelId}
-                      options={selectorOptions.modelOptions}
-                      onChange={(modelId) => update({ modelId })}
-                    />
-                  </Field>
-                ) : null}
-                {selectorOptions.modeOptions.length > 0 ? (
-                  <Field label={t('settings.agentRoles.form.mode')}>
-                    <ValueSelect
-                      label={t('settings.agentRoles.form.mode')}
-                      value={value.modeId}
-                      options={selectorOptions.modeOptions}
-                      onChange={(modeId) => update({ modeId })}
-                    />
-                  </Field>
-                ) : null}
-                {configOptionSelectors.map((selector) => (
-                  <ConfigOptionField
-                    key={selector.configId}
-                    selector={selector}
-                    value={value.configOptionValues[selector.configId]}
-                    onChange={(next) =>
+            <Section
+              title={t('settings.agentRoles.form.sectionTarget')}
+              hint={t('settings.agentRoles.form.sectionTargetHint')}
+            >
+              <div {...stylex.props(catalog.fieldPair)}>
+                <Field label={t('settings.agentRoles.form.machine')}>
+                  <Select.Root
+                    items={machines.map((machine) => ({
+                      value: machine.machineId,
+                      label: machine.label,
+                    }))}
+                    value={value.machineId ?? null}
+                    onValueChange={(machineId) => {
+                      if (machineId == null) return;
+                      // Changing machine clears the config: an agent config belongs
+                      // to exactly one machine, and carrying the old id over is how
+                      // a Role would silently point at nothing.
                       update({
-                        configOptionValues: {
-                          ...value.configOptionValues,
-                          [selector.configId]: next,
-                        },
-                      })
-                    }
-                  />
-                ))}
-              </>
-            )}
-            {issues.length > 0 ? (
-              <FormMessage tone="warning">
-                <span {...stylex.props(styles.issuesTitle)}>
-                  {t('settings.agentRoles.form.incompatibleTitle')}
-                </span>
-                <ul {...stylex.props(styles.issues)}>
-                  {issues.map((issue, index) => (
-                    <li key={`${issue.kind}-${index}`}>
-                      <RunConfigIssueText issue={issue} />
-                    </li>
-                  ))}
-                </ul>
-              </FormMessage>
+                        machineId: machineId as MachineId,
+                        agentConfigId: null,
+                        memory: undefined,
+                      });
+                    }}
+                  >
+                    <Select.Trigger
+                      aria-label={t('settings.agentRoles.form.machine')}
+                      aria-invalid={hasError('machine_required') || undefined}
+                    >
+                      <Select.Value
+                        placeholder={t('settings.agentRoles.form.machinePlaceholder')}
+                      />
+                    </Select.Trigger>
+                    <Select.Content>
+                      {machines.map((machine) => (
+                        <Select.Item key={machine.machineId} value={machine.machineId}>
+                          <span {...stylex.props(styles.option)}>
+                            {machine.label}
+                            {machine.online ? null : (
+                              <span {...stylex.props(styles.offline)}>
+                                {t('settings.agentRoles.status.offline')}
+                              </span>
+                            )}
+                          </span>
+                        </Select.Item>
+                      ))}
+                    </Select.Content>
+                  </Select.Root>
+                </Field>
+                <Field label={t('settings.agentRoles.form.agentConfig')}>
+                  <Select.Root
+                    items={agentConfigs.map((config) => ({
+                      value: config.agentConfigId,
+                      label: config.label,
+                    }))}
+                    value={value.agentConfigId ?? null}
+                    disabled={!value.machineId || agentConfigs.length === 0}
+                    onValueChange={(agentConfigId) => {
+                      if (agentConfigId == null) return;
+                      update({
+                        agentConfigId: agentConfigId as AgentConfigId,
+                        // Capabilities belong to the config; keeping the old model
+                        // would carry a selection the new agent may not publish.
+                        modeId: null,
+                        modelId: null,
+                        configOptionValues: {},
+                      });
+                    }}
+                  >
+                    <Select.Trigger
+                      aria-label={t('settings.agentRoles.form.agentConfig')}
+                      aria-invalid={hasError('agent_config_required') || undefined}
+                    >
+                      <Select.Value
+                        placeholder={t('settings.agentRoles.form.agentConfigPlaceholder')}
+                      />
+                    </Select.Trigger>
+                    <Select.Content>
+                      {agentConfigs.map((config) => (
+                        <Select.Item key={config.agentConfigId} value={config.agentConfigId}>
+                          {config.label}
+                        </Select.Item>
+                      ))}
+                    </Select.Content>
+                  </Select.Root>
+                </Field>
+              </div>
+              {value.machineId && agentConfigs.length === 0 ? (
+                <FormMessage tone="warning">
+                  {t('settings.agentRoles.form.noAgentConfigs')}
+                </FormMessage>
+              ) : null}
+            </Section>
+
+            {value.agentConfigId ? (
+              <Section
+                title={t('settings.agentRoles.form.sectionRunConfig')}
+                hint={t('settings.agentRoles.form.sectionRunConfigHint')}
+              >
+                {capabilitiesUnavailable || !selectorOptions ? (
+                  <FormMessage tone="warning">
+                    {t('settings.agentRoles.form.capabilitiesUnavailable')}
+                  </FormMessage>
+                ) : (
+                  <>
+                    {selectorOptions.modelOptions.length > 0 ? (
+                      <Field label={t('settings.agentRoles.form.model')}>
+                        <ValueSelect
+                          label={t('settings.agentRoles.form.model')}
+                          value={value.modelId}
+                          options={selectorOptions.modelOptions}
+                          onChange={(modelId) => update({ modelId })}
+                        />
+                      </Field>
+                    ) : null}
+                    {selectorOptions.modeOptions.length > 0 ? (
+                      <Field label={t('settings.agentRoles.form.mode')}>
+                        <ValueSelect
+                          label={t('settings.agentRoles.form.mode')}
+                          value={value.modeId}
+                          options={selectorOptions.modeOptions}
+                          onChange={(modeId) => update({ modeId })}
+                        />
+                      </Field>
+                    ) : null}
+                    {configOptionSelectors.map((selector) => (
+                      <ConfigOptionField
+                        key={selector.configId}
+                        selector={selector}
+                        value={value.configOptionValues[selector.configId]}
+                        onChange={(next) =>
+                          update({
+                            configOptionValues: {
+                              ...value.configOptionValues,
+                              [selector.configId]: next,
+                            },
+                          })
+                        }
+                      />
+                    ))}
+                  </>
+                )}
+                {issues.length > 0 ? (
+                  <FormMessage tone="warning">
+                    <span {...stylex.props(styles.issuesTitle)}>
+                      {t('settings.agentRoles.form.incompatibleTitle')}
+                    </span>
+                    <ul {...stylex.props(styles.issues)}>
+                      {issues.map((issue, index) => (
+                        <li key={`${issue.kind}-${index}`}>
+                          <RunConfigIssueText issue={issue} />
+                        </li>
+                      ))}
+                    </ul>
+                  </FormMessage>
+                ) : null}
+              </Section>
             ) : null}
-          </Section>
-        ) : null}
-
-        {/* Stated rather than left to be discovered: a Role looks like a
-            standing assistant, so its owner has to be told the sessions it
-            creates keep nothing between them. */}
-        <div {...stylex.props(surface.formBlock)}>
-          <p {...stylex.props(catalog.blockTitle)}>{t('settings.agentRoles.form.memory')}</p>
-          <p {...stylex.props(catalog.blockHint)}>{t('settings.agentRoles.form.memoryHint')}</p>
-        </div>
-
-        <div {...stylex.props(surface.formBlock, catalog.blockRow)}>
-          <div {...stylex.props(catalog.blockText)}>
-            <UiField.Label htmlFor={`${fieldId}-share`}>
-              {t('settings.agentRoles.form.share')}
-            </UiField.Label>
-            <p {...stylex.props(catalog.blockHint)}>{t('settings.agentRoles.form.shareHint')}</p>
+          </>
+        ) : tab === 'memory' ? (
+          (memoryPicker ?? <p>{t('settings.memory.noMachine')}</p>)
+        ) : (
+          <div {...stylex.props(surface.formBlock, catalog.blockRow)}>
+            <div {...stylex.props(catalog.blockText)}>
+              <UiField.Label htmlFor={`${fieldId}-share`}>
+                {t('settings.agentRoles.form.share')}
+              </UiField.Label>
+              <p {...stylex.props(catalog.blockHint)}>{t('settings.agentRoles.form.shareHint')}</p>
+            </div>
+            <Switch
+              id={`${fieldId}-share`}
+              checked={value.shareWithWorkspace}
+              onCheckedChange={(shareWithWorkspace) => update({ shareWithWorkspace })}
+            />
           </div>
-          <Switch
-            id={`${fieldId}-share`}
-            checked={value.shareWithWorkspace}
-            onCheckedChange={(shareWithWorkspace) => update({ shareWithWorkspace })}
-          />
-        </div>
-
+        )}
         {error ? <FormMessage tone="error">{error}</FormMessage> : null}
       </div>
 

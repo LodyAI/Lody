@@ -12,6 +12,10 @@ import {
 } from '@/lib/local-storage-cache';
 import { useSetAtom, useStore } from 'jotai';
 import {
+  clearSessionRunConfigDraftsAtom,
+  sessionRunConfigDraftAccountAtom,
+} from '@/atoms/session-run-config-drafts';
+import {
   setWorkspaceContextAtRevisionAtom,
   setWorkspaceContextAtom,
   workspaceContextSnapshotAtom,
@@ -617,6 +621,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
    */
   const deleteOrganization = useCallback(
     async (organizationId: string) => {
+      const draftOwner = workspaceContextStore.get(sessionRunConfigDraftAccountAtom);
       setIsMutating(true);
       setMutationError(null);
       const removalTransition = resolveWorkspaceRemovalTransition({
@@ -638,6 +643,13 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         });
         if (data) {
           didDelete = true;
+          if (draftOwner.accountId) {
+            workspaceContextStore.set(clearSessionRunConfigDraftsAtom, {
+              workspaceId: organizationId,
+              accountId: draftOwner.accountId,
+              lifetime: draftOwner.lifetime,
+            });
+          }
           // Drop per-slug caches up front so the post-delete `/` redirect
           // doesn't bounce back into the deleted workspace via preferredSlug,
           // and so `optimisticWorkspaceId` stops resolving the
@@ -737,6 +749,7 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
       if (!user) {
         throw new Error('User not available');
       }
+      const draftOwner = workspaceContextStore.get(sessionRunConfigDraftAccountAtom);
       setIsMutating(true);
       setMutationError(null);
       const removalTransition = resolveWorkspaceRemovalTransition({
@@ -755,6 +768,13 @@ function useCloudOrganizationState(options?: UseOrganizationOptions) {
         });
         if (data) {
           didLeave = true;
+          if (draftOwner.accountId) {
+            workspaceContextStore.set(clearSessionRunConfigDraftsAtom, {
+              workspaceId: organizationId,
+              accountId: draftOwner.accountId,
+              lifetime: draftOwner.lifetime,
+            });
+          }
           if (removalTransition.removedSlug) {
             clearCachedWorkspaceInfo(removalTransition.removedSlug);
             clearPreferredWorkspaceSlugIfMatch(removalTransition.removedSlug);

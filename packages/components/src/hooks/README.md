@@ -28,6 +28,15 @@ and joins it. See the [attachment draft Spec](../../../../specs/session-files.md
 | Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)                               | Reconcile owned Roles after matching runtime probes.                                       |
 | Conversation rendering | [`use-conversation-stream-items.ts`](use-conversation-stream-items.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate the hydration window and history publication.                                   |
 
+## Session ACP catalogs
+
+`use-session-acp-selector-context.ts` owns the Provider subscription for persisted
+and draft composers. It resolves the exact bound id through the shared Provider
+atom and passes its current runtime overrides to both models and slash commands.
+Missing or mismatched Providers expose no catalog; extension changes invalidate
+old capabilities until a matching probe arrives. A matching extension catalog
+must not be read as though no extensions were selected.
+
 ## Session lifecycle
 
 `use-session-actions.ts` reads archive, restore, and archived-root deletion targets

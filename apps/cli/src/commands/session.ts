@@ -5,6 +5,7 @@ import {
   getDeclaredModelControls,
   getModelEffortChoices,
   machineSupportsPreparedSessionInputProtocol,
+  machineSupportsMemoryProviders,
 } from '@lody/shared';
 import {
   materializePreparedSessionInput,
@@ -58,6 +59,7 @@ import {
   resolveActiveAssistantTurnId,
   getServerNow,
   getSessionRoomId,
+  getSessionIdFromRoomId,
   isLoroRepoDocDeleted,
   isMachineDocRoomId,
   isSessionDocRoomId,
@@ -129,7 +131,7 @@ import {
   applyAgentRoleCreateTarget,
   resolveAgentRoleCreateFromCatalog,
 } from '@/lib/agent-role-create';
-import { getLogger, rootLogger } from '@/utils/logger';
+import { getLogger, rootLogger, routeLoggerToStderr } from '@/utils/logger';
 import { parseEnvAssignments } from './agent-config';
 import { formatErrorMessage } from '@/utils/format-error';
 import {
@@ -145,6 +147,10 @@ import { createCloudBillingPort, createCloudStreamsTokenPort } from '@/lib/cloud
 import { getCliHttpFetch } from '@/utils/http-transport';
 import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
 import { createSessionBackend } from '@/session/session-backend';
+import { Effect } from 'effect';
+import { createSessionObserveWriter, resolveObserveSelection } from './session-observe';
+import { acquireSessionObservation } from './session-observe-runtime';
+import { WorkspaceSessionObserver } from './session-observe-workspace';
 
 type CommonOptions = CommonCommandOptions;
 
@@ -1353,6 +1359,7 @@ async function appendUserPromptHistory(args: {
 }
 
 function buildCliHistoryInputConfig(args: {
+  memory?: import('@lody/shared').MemoryBinding;
   prompt: string;
   cliType: SessionMeta['cliType'];
   agentType: SessionMeta['agentType'];
@@ -1363,6 +1370,7 @@ function buildCliHistoryInputConfig(args: {
   chainDepth?: number;
 }): NonNullable<SessionHistoryInput['inputConfig']> {
   return {
+    memory: args.memory,
     prompt: args.prompt,
     cliType: args.cliType,
     agentType: args.agentType,
@@ -1378,6 +1386,7 @@ function buildCliHistoryInputConfig(args: {
 }
 
 export type ResolvedTurnDispatchConfig = {
+  memory?: import('@lody/shared').MemoryBinding;
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
@@ -1545,6 +1554,7 @@ function mergeTurnDispatchConfig(
   fallbackConfig: ResolvedTurnDispatchConfig | undefined
 ): ResolvedTurnDispatchConfig {
   return {
+    memory: explicitConfig.memory ?? fallbackConfig?.memory,
     modeId: explicitConfig.modeId ?? fallbackConfig?.modeId,
     modelId: explicitConfig.modelId ?? fallbackConfig?.modelId,
     configOptionValues: explicitConfig.configOptionValues ?? fallbackConfig?.configOptionValues,
@@ -1785,6 +1795,7 @@ export function resolveTurnDispatchConfigFromInputConfig(
     return undefined;
   }
   return {
+    ...(inputConfig.memory ? { memory: inputConfig.memory } : {}),
     ...(inputConfig.modeId ? { modeId: inputConfig.modeId } : {}),
     ...(inputConfig.modelId ? { modelId: inputConfig.modelId } : {}),
     ...(inputConfig.configOptionValues
@@ -1863,6 +1874,7 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
       }
     : undefined;
   const compatible = filterCompatibleInheritedTurnConfig(inherited, args.capability);
+  if (compatible && previous?.memory) compatible.memory = previous.memory;
   if (compatible) {
     compatible.configOptionValues = filterCompatibleTurnConfigOptionValues(
       inherited?.configOptionValues,
@@ -3074,6 +3086,13 @@ export async function resolveEffectiveSessionCreateDispatchConfig(args: {
   localOnly?: boolean;
 }): Promise<ResolvedTurnDispatchConfig> {
   const { frozenInheritedInputConfig, ...dispatchConfig } = args.dispatchConfig;
+  if (dispatchConfig.memory) {
+    const machine = (await listMachineMetasForWorkspace(args.manager)).find(
+      (entry) => entry.id === args.agentConfig.machineId
+    );
+    if (!machineSupportsMemoryProviders(machine))
+      throw new Error('Update the target machine to use memory providers.');
+  }
   const inheritedDispatchConfig =
     frozenInheritedInputConfig !== undefined
       ? resolveTurnDispatchConfigFromInputConfig(frozenInheritedInputConfig, args.agentConfig)
@@ -3279,6 +3298,7 @@ export async function prepareSessionInput(
         prompt: buildAgentPrompt(prompt, agentConfig.prompt ?? ''),
         cliType: agentConfig.cliType,
         agentType: agentConfig.agentType,
+        memory: effectiveDispatchConfig.memory,
         modeId: effectiveDispatchConfig.modeId ?? undefined,
         modelId: effectiveDispatchConfig.modelId ?? undefined,
         configOptionValues: effectiveDispatchConfig.configOptionValues,
@@ -3558,6 +3578,7 @@ export async function sendSessionChatResult(
         prompt,
         cliType: session.cliType,
         agentType: session.agentType,
+        memory: effectiveDispatchConfig.memory,
         modeId: effectiveDispatchConfig.modeId,
         modelId: effectiveDispatchConfig.modelId,
         configOptionValues: effectiveDispatchConfig.configOptionValues,
@@ -4535,6 +4556,203 @@ const sessionListCommand = new Command('list')
     });
   });
 
+const sessionObserveCommand = new Command('observe')
+  .description(
+    'Observe persisted Session state without executing or marking messages read (Cloud CLI)'
+  )
+  .option('--workspace <selector>', 'Target workspace id, slug, or name')
+  .option('--all', 'Observe the selected Workspace catalog and active Sessions')
+  .option('--follow', 'Keep observing subsequent turns; requires --jsonl')
+  .option('--json', 'Print the current snapshot as JSON')
+  .option('--jsonl', 'Print versioned JSON Lines events')
+  .option('--debug', 'Enable debug output')
+  .argument('[sessionId]', 'Session ID; falls back to LODY_SESSION_ID outside --all')
+  .action(
+    async (
+      sessionIdArg: string | undefined,
+      options: CommonOptions & { follow?: boolean; all?: boolean }
+    ) => {
+      const restoreLogging = options.json || options.jsonl ? routeLoggerToStderr() : () => {};
+      try {
+        await runSessionCommand(options, async () => {
+          const selection = resolveObserveSelection(
+            sessionIdArg,
+            options,
+            process.env.LODY_SESSION_ID
+          );
+          const auth = getAuthContextOrThrow();
+          const sessionId = selection.sessionId;
+          const workspace = selection.all
+            ? selectWorkspaceSummary(await listWorkspacesForToken(auth.token), options.workspace)
+            : await resolveWorkspaceForSessionOrThrow(auth, sessionId as SessionId, {
+                workspace: options.workspace,
+                reason: `session.observe.resolve:${sessionId}`,
+              });
+          await withWorkspaceManager(auth, workspace, async (manager) => {
+            await syncWorkspaceMetaForRead(manager, 'session.observe:meta');
+            const stop = new AbortController();
+            let resolveStopped = () => {};
+            const stopped = new Promise<void>((resolve) => {
+              resolveStopped = resolve;
+            });
+            let failure: unknown;
+            const stopObserving = () => {
+              stop.abort();
+              resolveStopped();
+            };
+            const fail = (error: unknown) => {
+              if (!stop.signal.aborted) {
+                failure = error;
+                stopObserving();
+              }
+            };
+            const write = createSessionObserveWriter({
+              output: process.stdout,
+              workspaceId: workspace.id as WorkspaceId,
+              streamId: uuidV4(),
+              now: getServerNow,
+              signal: stop.signal,
+            });
+            const emit = options.jsonl ? write : async () => {};
+            const attempt = <T>(run: () => Promise<T>) =>
+              Effect.tryPromise({ try: run, catch: (error) => error });
+            await Effect.runPromise(
+              Effect.scoped(
+                Effect.gen(function* () {
+                  yield* Effect.acquireRelease(
+                    Effect.sync(() => {
+                      process.once('SIGINT', stopObserving);
+                      process.once('SIGTERM', stopObserving);
+                    }),
+                    () =>
+                      Effect.sync(() => {
+                        process.off('SIGINT', stopObserving);
+                        process.off('SIGTERM', stopObserving);
+                      })
+                  );
+                  if (selection.all) {
+                    const reader = new WorkspaceSessionObserver({
+                      listMetas: () => listSessionMetasForWorkspace(manager),
+                      async readMeta(id) {
+                        const raw = await manager.repo.getDocMeta(getSessionRoomId(id));
+                        if (isLoroRepoDocDeleted(raw)) return null;
+                        if (!raw?.meta) throw new Error(`Session metadata is unavailable: ${id}`);
+                        return raw.meta as SessionMeta;
+                      },
+                      open: (id, onEvent) =>
+                        acquireSessionObservation({
+                          manager,
+                          sessionId: id,
+                          signal: stop.signal,
+                          emit: onEvent,
+                          onError: fail,
+                        }),
+                      emit,
+                      onError: fail,
+                      follow: options.follow === true,
+                    });
+                    yield* Effect.acquireRelease(Effect.succeed(reader), (owned) =>
+                      Effect.promise(() => owned.close())
+                    );
+                    yield* Effect.acquireRelease(
+                      Effect.sync(() =>
+                        manager.repo.watch(
+                          (event) => {
+                            if (event.kind === 'doc-metadata') {
+                              const id = getSessionIdFromRoomId(event.docId);
+                              if (id) reader.refresh(id);
+                            }
+                          },
+                          { kinds: ['doc-metadata'] }
+                        )
+                      ),
+                      (watch) => Effect.sync(() => watch.unsubscribe())
+                    );
+                    yield* Effect.acquireRelease(
+                      Effect.sync(() => manager.onMetaRoomSynced(() => reader.refresh())),
+                      (unsubscribe) => Effect.sync(unsubscribe)
+                    );
+                    yield* attempt(() => reader.start());
+                    if (!options.jsonl) {
+                      if (options.json)
+                        printJson({
+                          ok: true,
+                          version: 1,
+                          workspaceId: workspace.id,
+                          sessions: reader.current,
+                        });
+                      else
+                        for (const session of reader.current)
+                          console.log(
+                            `${session.sessionId}\t${session.state}\t${session.title ?? ''}`
+                          );
+                    }
+                    if (options.follow) yield* Effect.promise(() => stopped);
+                  } else {
+                    if (!sessionId) throw new Error('Missing Session ID.');
+                    const handle = yield* Effect.acquireRelease(
+                      attempt(() =>
+                        acquireSessionObservation({
+                          manager,
+                          sessionId,
+                          signal: stop.signal,
+                          emit,
+                          onError: fail,
+                          onRemoved: resolveStopped,
+                        })
+                      ),
+                      (owned) =>
+                        Effect.promise(async () => {
+                          await owned?.close();
+                        })
+                    );
+                    if (!handle) return;
+                    const { observer } = handle;
+                    yield* Effect.acquireRelease(
+                      Effect.sync(() =>
+                        manager.repo.watch(
+                          (event) => {
+                            if (
+                              event.kind === 'doc-metadata' &&
+                              event.docId === getSessionRoomId(sessionId)
+                            )
+                              observer.refresh();
+                          },
+                          { kinds: ['doc-metadata'] }
+                        )
+                      ),
+                      (watch) => Effect.sync(() => watch.unsubscribe())
+                    );
+                    observer.refresh();
+                    yield* attempt(() => observer.flush());
+                    if (observer.current) {
+                      if (options.jsonl) yield* attempt(() => write({ type: 'ready', sessionId }));
+                      else if (options.json)
+                        printJson({
+                          ok: true,
+                          version: 1,
+                          workspaceId: workspace.id,
+                          session: observer.current,
+                        });
+                      else
+                        console.log(
+                          `${sessionId}\t${observer.current.state}\t${observer.current.latestTurn?.state ?? '-'}\t${observer.current.title ?? ''}`
+                        );
+                      if (options.follow) yield* Effect.promise(() => stopped);
+                    }
+                  }
+                  if (failure) yield* Effect.fail(failure);
+                })
+              )
+            );
+          });
+        });
+      } finally {
+        restoreLogging();
+      }
+    }
+  );
+
 const sessionHistoryCommand = new Command('history')
   .description('Read visible session transcript history')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
@@ -4848,6 +5066,7 @@ export const sessionCommand = new Command('session')
   .addCommand(sessionCancelCommand)
   .addCommand(sessionListCommand)
   .addCommand(sessionHistoryCommand)
+  .addCommand(sessionObserveCommand)
   .addCommand(sessionShowCommand)
   .addCommand(sessionStatusCommand)
   .addCommand(sessionRenameCommand)

@@ -16,7 +16,7 @@ function Drawer({ repositionInputs, ...props }: React.ComponentProps<typeof Draw
     (props.direction === 'right' || props.direction === 'left') &&
     !props.snapPoints &&
     repositionInputs !== false &&
-    isNativeAppShell() &&
+    (isNativeAppShell() || repositionInputs === true) &&
     !isNativeIOSAppShell();
 
   return (

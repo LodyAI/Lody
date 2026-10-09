@@ -140,3 +140,10 @@ in the browser's own accent, which belongs to no theme and is no thumb's target.
 `useKeyboardAwareSheet()` is three parts that only work together — lift, capped
 scroller, centred focus — and sheets carrying two of the three exist and misbehave
 on iOS, which is why sheets call the hook instead of assembling it.
+
+The full-screen file viewer uses the native iOS `--native-keyboard-height` as
+its bottom inset and disables Vaul input repositioning, so the editor's available
+height shrinks without moving its header. Other hosts explicitly opt into the
+shared drawer's live visual-viewport inset, including mobile browsers. The inset
+returns to zero on keyboard hide; a WebView that already resizes needs no extra
+inset. Monaco's existing automatic layout follows the resized container.

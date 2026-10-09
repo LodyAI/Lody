@@ -493,4 +493,5 @@ export * from './codex-auth-profile';
 export * from './ios-simulator';
 export * from './session-acp-identity';
 
+export * from './memory-provider';
 export * from './message-author';

@@ -438,14 +438,19 @@ export class ScrollController {
     this.pointerHeld = held;
   }
 
-  setTouchActive(active: boolean): void {
+  /** A tap, pinch or cancelled touch has no conversation momentum. */
+  setTouchActive(active: boolean, continuesAfterRelease = true): void {
     this.touchActive = active;
-    if (!active) this.momentum = true;
+    this.momentum = !active && continuesAfterRelease;
+    if (active || !continuesAfterRelease) {
+      this.gesture = null;
+      this.compensationPendingCheck = false;
+      this.momentumStats = { compensations: 0, interruptions: 0 };
+    }
   }
 
   /** The native `scrollend` event. */
   onScrollEnd(): void {
-    this.rearmAtGestureBottom();
     if (this.compensationPendingCheck && !this.scrolledSinceCompensation) {
       this.momentumStats.interruptions += 1;
     }
@@ -455,6 +460,7 @@ export class ScrollController {
     this.momentum = false;
     this.compensationPendingCheck = false;
     this.momentumStats = { compensations: 0, interruptions: 0 };
+    this.rearmAtGestureBottom();
   }
 
   // ---- Commands -----------------------------------------------------------
@@ -998,7 +1004,10 @@ export class ScrollController {
     ) {
       return 'clamp';
     }
-    if (this.pointerHeld || this.touchActive) return 'reader';
+    // A fast touch scroll can deliver its first offset after the finger lifts.
+    // It is still the reader's movement, including when a resize samples it
+    // before its scroll event. Correcting it back to follow would fight the fling.
+    if (this.pointerHeld || this.touchActive || this.momentum) return 'reader';
     return 'unknown';
   }
 
@@ -1009,8 +1018,7 @@ export class ScrollController {
   ): void {
     if (movement === 'none' || movement === 'own-write') return;
     const last = this.lastObserved;
-    // Scrollbar drags, selection auto-scroll and touch pans hold a pointer;
-    // upward movement without one is a clamp or a size correction.
+    // Reader evidence includes a held pointer and post-touch momentum.
     if (
       movement === 'reader' &&
       last &&
@@ -1115,6 +1123,9 @@ export class ScrollController {
 
   private setIntent(intent: Intent): void {
     this.intent = intent;
+    // Explicit navigation or reaching the bottom supersedes the old fling.
+    // This also bounds input evidence on hosts without `scrollend` support.
+    if (intent.kind !== 'read') this.momentum = false;
     const sticky = intent.kind !== 'read';
     if (sticky !== this.sticky) {
       this.sticky = sticky;

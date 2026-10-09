@@ -1,3 +1,4 @@
+import type { MemoryProviderRequest, MemoryProviderResponse } from '@lody/shared';
 import {
   IosSimulatorRemoteResponseSchema,
   type RpcSecretPublicKey,
@@ -358,6 +359,7 @@ type RpcServerDeps = {
     agentType: string;
     onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
   }) => Promise<MachineAcpBinaryInstallResponse>;
+  memoryProvider?: (request: MemoryProviderRequest) => Promise<MemoryProviderResponse>;
   listMachinePiExtensions?: (args: {
     configId?: AgentConfigId;
   }) => Promise<MachinePiExtensionsResponse>;
@@ -1082,6 +1084,18 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'machine/memory': {
+          const response = this.deps.memoryProvider
+            ? await this.deps.memoryProvider(request.params)
+            : {
+                type: 'machine/memory' as const,
+                status: 'error' as const,
+                memories: [],
+                error: 'Memory providers are unavailable',
+              };
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'machine/pi-extensions': {
           if (!this.deps.listMachinePiExtensions) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -1717,6 +1731,7 @@ export class LoroStreamsMachineRpcServer {
       | MachineAcpBinaryInstallResponse
       | MachineAcpBinaryProgressMessage
       | MachineBugReportResponse
+      | MemoryProviderResponse
       | MachinePiExtensionsResponse
       | SessionCancelResponse
       | LoroSessionLiveStatusRpcResponse

@@ -33,6 +33,7 @@ import {
   useSessionAgentRole,
   type SessionAgentRoleControl,
 } from '../src/hooks/use-session-agent-role';
+import { resolveProgrammaticTurnAgentRole } from '../src/lib/composer-agent-roles';
 import {
   sessionAgentRoleDurableSnapshotAtomFamily,
   sessionAgentRoleSelectionAtomFamily,
@@ -324,7 +325,15 @@ describe('useSessionAgentRole', () => {
       runConfigHasUserEdits: true,
       selectedModelId: 'model-2',
     });
-    expect(control?.turnSelection).toBeUndefined();
+    expect(control?.turnSelection).toBeNull();
+    expect(
+      resolveProgrammaticTurnAgentRole({
+        composer: control?.turnSelection,
+        durableRoleId: 'role-1' as AgentRoleId,
+        durableRoleRevision: 5,
+        durableMemory: { providerId: 'nowledge-mem', memoryId: 'synthetic-memory' },
+      })
+    ).toBeNull();
   });
 
   it('does not name the provenance Role after its run config changes', async () => {

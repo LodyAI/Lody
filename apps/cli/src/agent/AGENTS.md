@@ -111,4 +111,4 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   only Claude/Grok trust untagged titles. Sanitize internal instructions and preserve
   user-set titles. Contract: [session titles](../../../../specs/acp-session-titles.md).
 - NEVER derive a git ref from prompt text: refs reach the remote and no filter proves a
-  prompt secret-free. Worktree sessions keep `session/<id>` unless the agent renames it.
+  prompt secret-free. Worktree sessions keep their allocated ref unless the agent renames it.

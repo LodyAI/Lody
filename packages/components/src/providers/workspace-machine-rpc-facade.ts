@@ -1,3 +1,9 @@
+import {
+  MemoryProviderResponseSchema,
+  machineSupportsMemoryProviders,
+  type MemoryProviderRequest,
+  type MemoryProviderResponse,
+} from '@lody/shared';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
 import type { PreviewControlOperation } from '@lody/shared';
 import { mintPreviewControlProof } from '@/lib/preview-control-api';
@@ -1350,6 +1356,48 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const requestMemoryProvider = async (
+    machineId: MachineId,
+    params: MemoryProviderRequest
+  ): Promise<MemoryProviderResponse> => {
+    const fail = (error: string): MemoryProviderResponse => ({
+      type: 'machine/memory',
+      status: 'error',
+      memories: [],
+      error,
+    });
+    try {
+      await targetRouter.resolvePlaneForMachine(machineId, {
+        timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
+      });
+      const capabilities = await deps.getMachineProtocolCapabilities(machineId);
+      if (!machineSupportsMemoryProviders({ protocolCapabilities: capabilities ?? undefined }))
+        return fail('Update this machine to use memory providers.');
+      const plane = targetRouter.getPlaneForMachine(machineId);
+      if (plane === null) return fail('Machine RPC routing is not available.');
+      if (plane === 'local') {
+        const sender = getLocalMachineRpcSender();
+        if (!sender) return fail('Local Machine RPC is not available.');
+        const response = await sender({
+          machineId,
+          workspaceId,
+          method: 'machine/memory',
+          params,
+          timeoutMs: 60_000,
+        });
+        return response.ok
+          ? MemoryProviderResponseSchema.parse(response.result)
+          : fail(response.error);
+      }
+      return (
+        (await (await getMachineRpcClient(machineId)).requestMemoryProvider(params)) ??
+        fail('Memory request timed out.')
+      );
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const requestMachinePiExtensions = async (
     machineId: MachineId,
     options?: { configId?: AgentConfigId }
@@ -1473,6 +1521,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestMemoryProvider,
     requestMachinePiExtensions,
   };
 }

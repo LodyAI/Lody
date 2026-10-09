@@ -87,27 +87,16 @@ Roles are read and written from Settings, mentioned from the composer, and
 resolved by CLI MCP creation, so these are cross-surface rules rather than
 component details.
 
-- Agent Roles are one `agentRole` row family in the same workspace Flock document, not a
-  private and a shared catalog: sharing is an ordinary update of `visibility` on the row.
-  A Role stores no secret — no API key, MCP selection, or memory — and
-  `isSensitiveAgentRoleConfigOptionKey` is applied on read as well as on write,
-  because a workspace row reaches every member's client. It DOES pin the permission
-  mode, as `runConfig.modeId` for legacy ACP modes or the agent's own `_permission`
-  option: permission is a run-config value the agent publishes, not a secret, and a
-  Role that left it out would not be the whole configuration it claims to be. So the
-  composer drops its separate permission button while such a Role is selected. A Role
-  may therefore pin a warning-tone mode (full access / skip permissions), which every
-  surface that hides the permission control must keep visibly marked; what stays out
-  of scope is a Role-level auto-approval POLICY. Settings and mention discovery use
-  `canReadAgentRole`/`canManageAgentRole`; MCP creation resolves an explicit Role id from
-  the workspace catalog without requiring a mention-scoped authorization record.
-- A Role never falls back. `machineId + agentConfigId` bind the execution site exactly;
-  when the machine, config, or a stored model/mode is unavailable the Role stays listed
-  with the precise reason and stops being mentionable. MCP creation resolves the current
-  workspace catalog row by `agentRoleId` before Operation acceptance; the canonical Prompt,
-  target, Role revision, and dispatch config are frozen into the accepted Operation so a
-  later edit or delete cannot change its recovery or retry. `SessionMeta.agentRoleId` /
-  `agentRoleRevision` record where a Session came from and are display-only.
+- Before changing Role settings or dispatch, read the authoritative
+  [shared Role contracts](../../../../shared/AGENTS.md#workspace-mcp-and-agent-roles).
+  The editor clears its memory reference when the target machine changes;
+  discovery and creation use that exact machine's Provider RPC. Memory settings
+  reuse Agents machine tabs/pills and catalog rows. A missing nmem install stays
+  on the page with the provider URL; it must not open a blocking dialog.
+  The Role Memory tab lists saved machine-Flock associations and shares the
+  Configuration tab's draft/save boundary. Role settings retain all machine groups;
+  memory shortcuts locate a group without adding machine tabs or filtering. Only a ready Provider
+  inventory can mark an identity missing; deleting a link never deletes provider data.
 
 ## Workspace ownership
 

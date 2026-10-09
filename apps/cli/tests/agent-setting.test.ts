@@ -85,6 +85,7 @@ describe('resolveBuiltinACPSetting', () => {
       expect(await resolveACPProcessLaunchAsync(input)).toEqual({
         command: process.execPath,
         args: ['/managed/pi/index.js', '-e', '/fixture/plugin.ts'],
+        env: { LODY_PI_PATH: '' },
         capabilitySourceVersion:
           'builtin-pi:0.2.0+override:{"piExtensions":["/fixture/plugin.ts"]}',
       });
@@ -95,6 +96,40 @@ describe('resolveBuiltinACPSetting', () => {
     } finally {
       manager.mockRestore();
       support.mockRestore();
+    }
+  });
+  it('forwards a user Pi binary to the adapter via LODY_PI_PATH and drops it for other agents', async () => {
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      resolveRuntimeForLaunch: async () => ({
+        runtimeName: 'pi',
+        version: '0.2.0',
+        platformArch: 'node',
+        command: '/managed/pi/index.js',
+      }),
+      ensureCurrentRuntime: async () => {
+        throw new Error('ensureCurrentRuntime must not be used without extensions');
+      },
+    } as ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>);
+    try {
+      const acp = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin' as const,
+        agentType: 'pi',
+        runtimeOverrides: { piPath: '/fixture/user-pi' },
+      });
+      expect(acp.command).toBe(process.execPath);
+      expect(acp.args).toEqual(['/managed/pi/index.js']);
+      expect(acp.env).toEqual({ LODY_PI_PATH: '/fixture/user-pi' });
+      expect(acp.capabilitySourceVersion).toBe(
+        'builtin-pi:0.2.0+override:{"piPath":"/fixture/user-pi"}'
+      );
+      const withoutOverride = await resolveACPProcessLaunchAsync({
+        cliType: 'builtin' as const,
+        agentType: 'pi',
+      });
+      // Empty string shadows inherited LODY_PI_PATH values.
+      expect(withoutOverride.env).toEqual({ LODY_PI_PATH: '' });
+    } finally {
+      manager.mockRestore();
     }
   });
   it('keeps legacy Pi runnable outside the catalog until confirmation', () => {
@@ -118,6 +153,7 @@ describe('resolveBuiltinACPSetting', () => {
       expect(await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'pi' })).toEqual({
         command: process.execPath,
         args: ['/managed/pi/package/dist/index.js'],
+        env: { LODY_PI_PATH: '' },
         capabilitySourceVersion: 'builtin-pi:0.1.0-local',
       });
     } finally {

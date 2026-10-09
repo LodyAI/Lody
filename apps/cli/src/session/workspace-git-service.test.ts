@@ -108,16 +108,19 @@ describe('WorkspaceGitService', () => {
         'fixture',
       ]);
       const worktree = join(cwd, 'checkout');
-      await git(['worktree', 'add', '-b', 'feature/worktree', worktree]);
+      await git(['worktree', 'add', '-b', 'session/12345678', worktree]);
       const { service, meta } = fixture();
       await service.syncSession(child, {
         getWorkdir: () => worktree,
         exec: async (command, args, workdir) =>
           (await exec(command, args, { cwd: workdir })).stdout,
       });
-      expect(meta.get(owner)?.branchName).toBe('feature/worktree');
+      expect(meta.get(owner)?.branchName).toBe('session/12345678');
       expect(meta.get(child)).toEqual({ parentSessionId: owner });
       expect((await git(['branch', '--show-current'])).trim()).toBe('feature/local');
+      await git(['-C', worktree, 'branch', '-m', 'feature/worktree']);
+      await service.syncLocalWorkspace(owner, worktree);
+      expect(meta.get(owner)?.branchName).toBe('feature/worktree');
       await git(['-C', worktree, 'checkout', '--detach']);
       await service.syncLocalWorkspace(owner, worktree);
       expect(meta.get(owner)?.branchName).toBe('feature/worktree');

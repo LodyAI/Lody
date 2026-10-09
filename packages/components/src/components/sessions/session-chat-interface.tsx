@@ -220,10 +220,10 @@ import { Separator } from '@lody/ui/separator';
 import { Tooltip } from '@lody/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { useSessionPendingConfig } from '@/hooks/use-session-pending-config';
+import { getSessionRunConfigDraftTargetKey } from '@/atoms/session-run-config-drafts';
 import { useSessionActions } from '@/hooks/use-session-actions';
 import { useWorkspaceMembers, type WorkspaceMember } from '@/hooks/use-workspace-members';
 import { UserAvatar } from '@/components/user-avatar';
-import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import { RenameSessionDialog, type RenameSessionDialogTarget } from './rename-session-dialog';
 import { useResolvedTheme } from '../../theme-provider';
 import { PullRequestBadge } from './pull-request-badge';
@@ -2592,6 +2592,7 @@ export const SessionChatInterface = memo(
     const sessionConversationConfigRevision = `${session.id}:${
       sessionConversationSourceFence.currentTurnKey ?? ''
     }`;
+    const sessionRunConfigTargetKey = getSessionRunConfigDraftTargetKey(session);
     const sessionConfigPreferences = useMemo(
       () => ({
         modeId: sessionConversationConfig.modeId,
@@ -2604,7 +2605,7 @@ export const SessionChatInterface = memo(
         sessionConversationConfig.modelId,
       ]
     );
-    /* No effects here: user edits are the only stored selection state and the
+    /* User edits are the only stored selection state, scoped to this session;
        effective values derive per render. The UNVALIDATED candidates feed the
        capability lookup so the catalog can depend on the selection (Codex
        reasoning tiers, provisional menu enrichment) without feeding back into
@@ -2616,13 +2617,23 @@ export const SessionChatInterface = memo(
       selectMode: handleModeChange,
       selectModel: handleModelChange,
       selectConfigOption: handleConfigOptionChange,
+      captureForSend: captureRunConfigForSend,
     } = useAcpSessionConfigSelectionState({
       enabled: !hideMessageArea && (sessionDocReady || hasPendingConfig),
-      targetKey: `${session.id}:${session.cliType}:${session.agentType}`,
+      targetKey: sessionRunConfigTargetKey,
       preferenceRevision: sessionConversationConfigRevision,
       preferences: sessionConfigPreferences,
       runtimePreferences: hasPendingConfig ? null : sessionRuntimeConfig,
       preserveUnsentUserEdits: true,
+      draftScope:
+        runtime?.accountId && runtime.workspaceId
+          ? {
+              accountId: runtime.accountId,
+              workspaceId: runtime.workspaceId,
+              sessionId: session.id,
+              targetKey: sessionRunConfigTargetKey,
+            }
+          : undefined,
     });
     const {
       availableCommands,
@@ -2655,7 +2666,6 @@ export const SessionChatInterface = memo(
         cliType: session.cliType,
         agentType: session.agentType,
       });
-    useMachineFlockAgentConfigsForMachineIds([session.machineId]);
     const machineDotlodyPath = useMemo(
       () => resolveMachineDotlodyPath(machineFlockRows, isLocalSession ? localHomeDir : null),
       [isLocalSession, localHomeDir, machineFlockRows]
@@ -4240,10 +4250,15 @@ export const SessionChatInterface = memo(
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
+            memory:
+              options?.agentRole === undefined
+                ? sessionConversationConfig.memory
+                : options.agentRole?.memory,
             agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
             resume: session.acpSessionId ?? undefined,
           });
 
+          const onAccepted = captureRunConfigForSend(inputConfig);
           let userTurnId = options?.existingUserTurnId?.trim() || null;
           if (!userTurnId && options?.createHistory) {
             const pendingHistoryEntry = buildDraftUserHistoryEntry(
@@ -4266,6 +4281,7 @@ export const SessionChatInterface = memo(
               dispatch: options?.requestDispatch === true,
               guideExpectedTurnId: options?.guideExpectedTurnId,
               attachments: options?.attachments,
+              onAccepted,
             });
             userTurnId = historyEntry.id;
             touchSessionActivity(session.id).catch((err: unknown) => {
@@ -4330,12 +4346,14 @@ export const SessionChatInterface = memo(
       },
       [
         addSessionHistory,
+        captureRunConfigForSend,
         captureSessionEvent,
         configOptionValues,
         currentUser?.id,
         guardNewBillableTurn,
         guideHistoryEntry,
         knownIssuePrItems,
+        sessionConversationConfig.memory,
         mcpSelection.selectedIds,
         repoFullName,
         requestSessionDispatch,
@@ -4390,6 +4408,10 @@ export const SessionChatInterface = memo(
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
+            memory:
+              options?.agentRole === undefined
+                ? sessionConversationConfig.memory
+                : options.agentRole?.memory,
             agentRoleSnapshot: options?.agentRole?.agentRoleSnapshot,
             resume: session.acpSessionId ?? undefined,
           });
@@ -4405,6 +4427,7 @@ export const SessionChatInterface = memo(
             mcpServerIds: [...mcpSelection.selectedIds],
             agentRoleId: inputConfig.agentRoleId,
             agentRoleRevision: inputConfig.agentRoleRevision,
+            memory: inputConfig.memory,
             agentRoleSnapshot: inputConfig.agentRoleSnapshot,
             resume: inputConfig.resume ?? undefined,
             chainDepth: 0,
@@ -4414,14 +4437,18 @@ export const SessionChatInterface = memo(
             return false;
           }
           const userTurnId = uuidv4();
-          await pushMessageQueue({
-            task: prompt || t('sessions.messageQueue.imageOnly', '[Image message]'),
-            project: sessionProject,
-            userId: derivedUserId,
-            userTurnId,
-            acpSessionConfig: queuedInputConfig,
-            attachments: options?.attachments,
-          });
+          const onAccepted = captureRunConfigForSend(inputConfig);
+          await pushMessageQueue(
+            {
+              task: prompt || t('sessions.messageQueue.imageOnly', '[Image message]'),
+              project: sessionProject,
+              userId: derivedUserId,
+              userTurnId,
+              acpSessionConfig: queuedInputConfig,
+              attachments: options?.attachments,
+            },
+            { onAccepted }
+          );
           return true;
         } catch (err) {
           console.error('Failed to queue session message', err);
@@ -4437,11 +4464,13 @@ export const SessionChatInterface = memo(
         }
       },
       [
+        captureRunConfigForSend,
         captureSessionEvent,
         configOptionValues,
         currentUser?.id,
         guardNewBillableTurn,
         knownIssuePrItems,
+        sessionConversationConfig.memory,
         mcpSelection.selectedIds,
         pushMessageQueue,
         repoFullName,
@@ -4652,6 +4681,7 @@ export const SessionChatInterface = memo(
               : undefined,
           durableRoleId: sessionConversationConfig.agentRoleId,
           durableRoleRevision: sessionConversationConfig.agentRoleRevision,
+          durableMemory: sessionConversationConfig.memory,
         });
         return await dispatchInputBlocks(
           [{ type: 'text', text: prompt }],
@@ -4662,6 +4692,7 @@ export const SessionChatInterface = memo(
         dispatchInputBlocks,
         sessionConversationConfig.agentRoleId,
         sessionConversationConfig.agentRoleRevision,
+        sessionConversationConfig.memory,
       ]
     );
 
@@ -4711,6 +4742,7 @@ export const SessionChatInterface = memo(
           composer: inputAreaRef.current?.getAgentRoleSelection(),
           durableRoleId: sessionConversationConfig.agentRoleId,
           durableRoleRevision: sessionConversationConfig.agentRoleRevision,
+          durableMemory: sessionConversationConfig.memory,
         });
         const accepted = await handleSendMessage(inputBlocks, currentAgentRole);
         if (accepted) {
@@ -4738,6 +4770,7 @@ export const SessionChatInterface = memo(
         handleSendMessage,
         sessionConversationConfig.agentRoleId,
         sessionConversationConfig.agentRoleRevision,
+        sessionConversationConfig.memory,
         updateHistoryEntry,
       ]
     );

@@ -29,6 +29,12 @@ the reasoning behind those rules.
   streaming turn with `@lobehub/streamdown`. Its dependency patch reveals text
   already present at mount so switching back to a live Session does not replay
   the stream fade ([note](../../../../../.agents/notes/implemented/bug-fix/2026-09-26-streamdown-remount-animation.md)).
+  A nonempty session search renders the complete current Markdown without the
+  stream reveal animation, so index results and marks update together; clearing
+  search resumes the stream engine. Search and outline summaries share
+  `lib/session-chat-search.ts`'s CommonMark/GFM text extraction, preserving literal
+  punctuation in prose and code while removing parsed formatting delimiters.
+  [Decision and synthetic acceptance evidence](../../../../../.agents/notes/implemented/bug-fix/2026-10-07-session-search-literal-punctuation.md).
   Conversation paragraphs use start alignment during and after streaming; see
   [conversation Markdown alignment](../../../../../specs/conversation-markdown-alignment.md).
   `markdown-code-block.tsx` owns fenced
@@ -149,6 +155,12 @@ defines locale-specific spacing for these labels.
   ([note](../../../../../.agents/notes/implemented/architecture/2026-09-27-conversation-scroll-engine.md)).
   `bufferSize` is a trade between blank space during a fast scroll and keeping
   resizing rows mounted.
+- **Touch input before scroll delivery.** The adapter releases following on a single
+  upward conversation pan, including its final touch position when no move was
+  delivered. The controller adopts post-touch momentum as reader movement even if
+  a resize samples it before the scroll event. Taps, pinches, horizontal gestures,
+  cancelled touches and nested scrolling do not leave momentum evidence. Model and
+  adapter tests cover these orderings; iOS device behavior still needs verification.
 - **`buildChatStreamItems()` filtering.** An empty assistant entry renders `null`,
   which Virtua cannot measure, and a duplicate history id produces a duplicate key
   that desyncs the list.

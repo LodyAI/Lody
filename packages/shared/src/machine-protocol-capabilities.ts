@@ -8,6 +8,7 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  memoryProviders: 'memoryProviders',
   mcpToolDiscovery: 'mcpToolDiscovery',
   localProjectHistoryProvider: 'localProjectHistoryProvider',
   codexAuthProfiles: 'codexAuthProfiles',
@@ -29,6 +30,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
 } as const;
 
+export const MEMORY_PROVIDERS_PROTOCOL_VERSION = 1;
 export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION = 1;
 
@@ -37,7 +39,8 @@ export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const SUBAGENT_EVENTS_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
-export const SCHEDULES_PROTOCOL_VERSION = 1;
+// v2 preserves ACP string/boolean values and reads legacy stringified booleans.
+export const SCHEDULES_PROTOCOL_VERSION = 2;
 export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
@@ -67,6 +70,16 @@ export function machineSupportsProtocolCapability(
   return getMachineProtocolCapabilityVersion(machine, capability) >= minimumVersion;
 }
 
+export function machineSupportsMemoryProviders(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.memoryProviders,
+    MEMORY_PROVIDERS_PROTOCOL_VERSION
+  );
+}
+
 export function machineSupportsSubagentCancellation(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
@@ -85,6 +98,7 @@ export function machineSupportsSubagentCancellation(
  * in the "supported" direction and there is no version fallback to catch it.
  */
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.memoryProviders]: MEMORY_PROVIDERS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.mcpToolDiscovery]: MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectHistoryProvider]:
     LOCAL_PROJECT_HISTORY_PROVIDER_PROTOCOL_VERSION,

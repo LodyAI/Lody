@@ -1,3 +1,4 @@
+import { handleMemoryProviderRequest } from './memory-providers';
 import { readMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { IosSimulatorService } from '@/ios-simulator/service';
@@ -176,6 +177,7 @@ import {
 } from '@lody/shared';
 import { getHostMachineProtocolCapabilities } from '../agent/managed-agent-runtime';
 import { ISession, SessionManager } from '../session/session-manager';
+import { getDefaultSessionWorkdir } from '../session/session';
 import { captureCli } from '@/lib/analytics/posthog';
 import { LoroDocumentManager, SessionDocument, subscribeSessionChanges } from './loro/doc';
 import { createSessionBackend, type SessionBackend } from '@/session/session-backend';
@@ -3368,6 +3370,7 @@ export class MessageHandler {
             workspaceId: this.workspaceId,
             agentType,
           }),
+        memoryProvider: handleMemoryProviderRequest,
         listMachinePiExtensions: async ({ configId }) =>
           await this.executionService.listMachinePiExtensions(configId),
         installMachineAcpBinary: async ({ agentType, onAcpBinaryProgress }) =>
@@ -6284,10 +6287,58 @@ export class MessageHandler {
       };
     }
 
+    // Ordinary chats keep their files after the runtime is evicted. Derive the
+    // same owner directory as Session.getWorkdir(), without creating it or
+    // restoring an agent just to read a file. Never mask an unresolved project.
+    if (!project && !meta.isWorktree) {
+      const ownerMeta =
+        ownerSessionId === sessionId
+          ? meta
+          : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+      if (!ownerMeta) {
+        return {
+          ok: false,
+          error: 'session_not_found',
+          message: 'Session metadata is not available.',
+        };
+      }
+      if (ownerMeta.isArchived) {
+        return { ok: false, error: 'session_archived', message: 'Session is archived.' };
+      }
+      if (meta.machineId !== this.machineId || ownerMeta.machineId !== this.machineId) {
+        return {
+          ok: false,
+          error: 'permission_denied',
+          message: 'Session workspace belongs to another machine.',
+        };
+      }
+      if (
+        !ownerMeta.project &&
+        !ownerMeta.repoFullName?.trim() &&
+        !ownerMeta.isWorktree &&
+        !ownerMeta.parentSessionId
+      ) {
+        const workspaceRoot = getDefaultSessionWorkdir(ownerSessionId);
+        if (!fs.statSync(workspaceRoot, { throwIfNoEntry: false })?.isDirectory()) {
+          return {
+            ok: false,
+            error: 'workspace_unavailable',
+            message: 'Session chat workspace directory is unavailable.',
+          };
+        }
+        return {
+          ok: true,
+          workspaceRoot,
+          source: `chat-workspace:${ownerSessionId}`,
+          ...ownerSessionIdField(ownerSessionId),
+        };
+      }
+    }
+
     return {
       ok: false,
       error: 'workspace_unavailable',
-      message: 'Session has no local project or GitHub repository workspace.',
+      message: 'Session workspace could not be resolved from its metadata.',
     };
   }
 
@@ -6327,7 +6378,7 @@ export class MessageHandler {
           message: resolved.message,
         };
       }
-      if (resolved.error === 'session_archived') {
+      if (resolved.error === 'session_archived' || resolved.error === 'permission_denied') {
         return {
           ok: false,
           code: 'permission_denied',
@@ -6697,6 +6748,8 @@ export class MessageHandler {
       }
       case 'session/terminate':
         return await this.terminateAcpSession(request.params.sessionId as SessionId);
+      case 'machine/memory':
+        return await handleMemoryProviderRequest(request.params);
       case 'machine/pi-extensions':
         return await this.executionService.listMachinePiExtensions(
           request.params.configId as AgentConfigId | undefined

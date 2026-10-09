@@ -62,6 +62,7 @@ import {
   getManagedBuiltinRuntimeByAgentType,
   getManagedBuiltinRuntimeByRuntimeName,
   serializeCustomAcpLaunchSpec,
+  resolveSessionExecutionInputBlocks,
 } from '@lody/shared';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import { createHash, randomUUID } from 'node:crypto';
@@ -114,7 +115,7 @@ import type { ISession, SessionManager } from './session-manager';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
 import { subscribeSessionChanges } from '@/lib/loro/doc';
 import { createSessionBackend, getSteerOperationId, type SessionBackend } from './session-backend';
-import { buildPrompt, normalizeSessionInputBlocks } from './session-execution-helpers';
+import { buildPrompt } from './session-execution-helpers';
 import type { MemoryPressureEvictionResult } from '@/lib/session-gc-manager';
 import {
   resolveDispatchAcpSessionId,
@@ -1740,10 +1741,7 @@ export class SessionExecutionService {
       preparedDoc = sessionDoc;
       const queuedRejection = await rejectBeforeProviderSubmission();
       if (queuedRejection) return queuedRejection;
-      const inputBlocks = normalizeSessionInputBlocks(
-        options.inputConfig.inputBlocks,
-        options.inputConfig.prompt ?? ''
-      );
+      const inputBlocks = resolveSessionExecutionInputBlocks(options.inputConfig);
       const promptBlocks = await wait(
         this.deps.buildAcpPromptBlocks({
           workspaceId: this.deps.workspaceId,
@@ -3018,15 +3016,16 @@ export class SessionExecutionService {
     ) {
       return;
     }
+    // `handleTurnError` always runs next in this flow and owns the classified
+    // notice for ACP-shaped errors (including auth-required) and agent
+    // disconnects. Recording a generic pre-prompt notice here as well would
+    // show the user two `chat_failed` entries for one failed turn.
+    if (parseACPError(error) || isAgentDisconnectedError(error)) {
+      return;
+    }
     runtime.prePromptFailureRecorded = true;
     const message = formatErrorMessage(error);
-    // A first turn on a brand-new session establishes the ACP session here, so
-    // an agent that requires sign-in fails before the prompt. Keep the specific
-    // reason: it is what lets the client offer the authentication flow instead
-    // of a generic "failed before the agent could start".
-    if (error instanceof AcpAuthenticationRequiredError) {
-      await this.deps.recordChatFailure(sessionDoc, 'acp_auth_required', message);
-    } else if (isGitExecutableNotFoundError(error)) {
+    if (isGitExecutableNotFoundError(error)) {
       await this.deps.recordChatFailure(
         sessionDoc,
         'turn_pre_prompt_failed',
@@ -4696,10 +4695,7 @@ export class SessionExecutionService {
     };
     const turnAnalytics: VisibleSessionTurnAnalytics = {
       dispatchMode: 'continue',
-      inputBlockCount: normalizeSessionInputBlocks(
-        acpSessionConfig.inputBlocks,
-        acpSessionConfig.prompt
-      ).length,
+      inputBlockCount: resolveSessionExecutionInputBlocks(acpSessionConfig).length,
       ...(acpSessionConfig.cliType ? { cliType: acpSessionConfig.cliType } : {}),
       ...(acpSessionConfig.agentType ? { agentType: acpSessionConfig.agentType } : {}),
       ...(dispatchOptions?.dispatchSource
@@ -4819,6 +4815,7 @@ export class SessionExecutionService {
           agentCliType: acpSessionConfig.cliType,
           agentType: acpSessionConfig.agentType,
           configOptionValues: acpSessionConfig.configOptionValues,
+          memory: acpSessionConfig.memory,
           mcpServerIds: acpSessionConfig.mcpServerIds ?? [],
           customAcp: resumeCustomAcp,
           runtimeOverrides: resumeRuntimeOverrides,
@@ -5051,10 +5048,7 @@ export class SessionExecutionService {
           nextSession.updateGitIdentity(userName, userEmail, message.userId, gitIdentityOptions);
         };
 
-        const sessionInputBlocks = normalizeSessionInputBlocks(
-          acpSessionConfig.inputBlocks,
-          acpSessionConfig.prompt
-        );
+        const sessionInputBlocks = resolveSessionExecutionInputBlocks(acpSessionConfig);
         const buildPromptBlocksForCurrentResumeState = (): Promise<ContentBlock[]> =>
           traceAsync(
             self.deps.logger,
@@ -5463,6 +5457,19 @@ export class SessionExecutionService {
           let readySession = session;
           if (
             readySession &&
+            JSON.stringify(readySession.getMemoryBinding?.() ?? null) !==
+              JSON.stringify(acpSessionConfig.memory ?? null)
+          ) {
+            yield* ctx.abortIfCancelled();
+            const previousSession = readySession;
+            yield* self.tryPromise(() =>
+              self.deps.sessionManager.retireSessionForReconfiguration(previousSession)
+            );
+            readySession = null;
+            session = null;
+          }
+          if (
+            readySession &&
             (!readySession.agentClient?.isCreated() || !readySession.acpSessionId)
           ) {
             const pending = self.deps.sessionManager.getPendingSession(sessionId);
@@ -5614,6 +5621,13 @@ export class SessionExecutionService {
     const shouldPrepareWorktree =
       (project?.kind === 'github' && !!githubRepoFullName) ||
       (project?.kind === 'local' && project.useWorktree === true);
+    // Logical first use also covers adoption of a speculatively prepared worktree.
+    // Shared child workspaces and restored ACP sessions retain their branch identity.
+    const newWorktree =
+      shouldPrepareWorktree &&
+      !message.parentSessionId &&
+      !hasPriorAcpSession &&
+      !acpSessionConfig.resume;
     let branch = project?.branch?.trim() || undefined;
     const fromFeedbackPostId =
       message.meta?.fromFeedbackPostId?.trim() ||
@@ -5648,6 +5662,7 @@ export class SessionExecutionService {
       agentCliType: acpSessionConfig.cliType,
       agentType: acpSessionConfig.agentType,
       configOptionValues: acpSessionConfig.configOptionValues,
+      memory: acpSessionConfig.memory,
       mcpServerIds: acpSessionConfig.mcpServerIds ?? [],
       agentConfigId: existingMeta?.agentConfigId,
       customAcp: acpSessionConfig.customAcp,
@@ -5717,8 +5732,7 @@ export class SessionExecutionService {
     };
     const turnAnalytics: VisibleSessionTurnAnalytics = {
       dispatchMode: 'start',
-      inputBlockCount: normalizeSessionInputBlocks(agentConfig.inputBlocks, agentConfig.prompt)
-        .length,
+      inputBlockCount: resolveSessionExecutionInputBlocks(agentConfig).length,
       ...(agentConfig.cliType ? { cliType: agentConfig.cliType } : {}),
       ...(agentConfig.agentType ? { agentType: agentConfig.agentType } : {}),
       ...(dispatchOptions?.dispatchSource
@@ -5818,19 +5832,16 @@ export class SessionExecutionService {
             self.captureStatusChanged(sessionId, 'initializing', 'git-clone', 'session_create');
           }
 
-          const normalizedInputBlocks = normalizeSessionInputBlocks(
-            agentConfig.inputBlocks,
-            agentConfig.prompt
-          );
-          const nonTextInputBlocks = normalizedInputBlocks.filter(
-            (block): block is Exclude<SessionInputBlock, { type: 'text' }> => block.type !== 'text'
-          );
-          const createPromptText = buildPrompt(
-            agentConfig.prompt,
-            project,
-            agentConfig.issuePRMentions,
-            fromFeedbackPostId
-          );
+          const sessionInputBlocks = resolveSessionExecutionInputBlocks({
+            ...agentConfig,
+            prompt: buildPrompt(
+              agentConfig.prompt,
+              project,
+              agentConfig.issuePRMentions,
+              fromFeedbackPostId,
+              { newWorktree }
+            ),
+          });
           const startPromptBlocksBuild = () => {
             const promise = traceAsync(
               self.deps.logger,
@@ -5838,13 +5849,13 @@ export class SessionExecutionService {
               {
                 sessionId,
                 turnId,
-                inputBlocks: nonTextInputBlocks.length + 1,
+                inputBlocks: sessionInputBlocks.length,
               },
               async () =>
                 await self.deps.buildAcpPromptBlocks({
                   workspaceId,
                   sessionId,
-                  inputBlocks: [...nonTextInputBlocks, { type: 'text', text: createPromptText }],
+                  inputBlocks: sessionInputBlocks,
                 })
             );
             void promise.catch(() => undefined);
