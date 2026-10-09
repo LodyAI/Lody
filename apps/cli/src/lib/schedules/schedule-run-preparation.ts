@@ -1,5 +1,8 @@
 import {
   scheduleOwnSessionId,
+  normalizeLegacyScheduleAgent,
+  type ScheduleDefinition,
+  type WorkspaceId,
   type AgentConfigMeta,
   type LocalProjectId,
   type MachineMeta,
@@ -108,4 +111,23 @@ export function destinationSessionProblem(args: {
     meta.agentConfigId === args.agentConfigId
     ? null
     : 'SESSION_UNAVAILABLE';
+}
+
+/** Adapt legacy persisted values only at the Schedule-to-Session boundary. */
+export async function resolveScheduleAgentRunConfig(
+  manager: import('../loro/doc').LoroDocumentManager,
+  workspaceId: WorkspaceId,
+  machineId: MachineMeta['id'],
+  agent: ScheduleDefinition['agent']
+): Promise<ScheduleDefinition['agent']> {
+  if (!agent.configOptionValues) return agent;
+  const { readAgentAcpCapability } = await import('@/commands/session');
+  const capability = await readAgentAcpCapability({
+    manager,
+    workspaceId,
+    machineId,
+    agentConfigId: agent.agentConfigId as AgentConfigMeta['id'],
+    localOnly: true,
+  });
+  return normalizeLegacyScheduleAgent(agent, capability?.configOptions);
 }

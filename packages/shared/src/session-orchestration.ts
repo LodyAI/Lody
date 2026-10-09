@@ -1,3 +1,4 @@
+import type { AgentMessageAuthor } from './message-author';
 import { z } from 'zod';
 
 import type { MachineId, SessionId, WorkspaceId } from './ids';
@@ -227,6 +228,9 @@ export type FrozenOperationContinuationConfig = {
 };
 
 export type StoredLodyOperation = {
+  /** Immutable source presentation; stored separately for old reader compatibility. */
+  author?: AgentMessageAuthor;
+  targetRoleSnapshots?: Array<import('./message-author').AgentRoleSnapshot | null>;
   workspaceId: WorkspaceId;
   ownerMachineId: MachineId;
   requesterSessionId: SessionId;

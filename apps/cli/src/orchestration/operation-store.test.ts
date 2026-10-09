@@ -1,3 +1,4 @@
+import { buildAgentMessageAuthor } from '@lody/shared';
 import { chmod, mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,6 +60,54 @@ afterEach(async () => {
 });
 
 describe('LodyOperationStore', () => {
+  it('freezes source authors across retries and reopening without changing legacy operation rows', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-author-'));
+    roots.add(root);
+    const dbPath = path.join(root, 'operations.sqlite3');
+    const input = baseInput();
+    const author = buildAgentMessageAuthor({
+      sessionId: input.requesterSessionId,
+      turnId: 'source-turn-1',
+      name: 'Agent A',
+      inputConfig: { modelId: 'model-a' },
+      role: { id: 'role-a' as never, revision: 1, name: 'Reviewer', emoji: '🔎' },
+    });
+    let store = new LodyOperationStore(dbPath);
+    try {
+      store.accept({ ...input, author, targetRoleSnapshots: [author.role ?? null] });
+      const retry = store.accept({
+        ...input,
+        author: { ...author, name: 'Renamed', role: undefined },
+      });
+      expect(retry.operation.author).toEqual(author);
+      store.close();
+      store = new LodyOperationStore(dbPath);
+      expect(store.get(input.requesterSessionId, input.operationId)).toMatchObject({
+        requesterUserId: 'user-1',
+        author,
+        targetRoleSnapshots: [author.role],
+      });
+      const db = new Database(dbPath);
+      try {
+        const row = db.prepare('SELECT * FROM operations').get() as Record<string, unknown>;
+        expect(row).not.toHaveProperty('author_json');
+        expect(JSON.parse(row.frozen_config_json as string)).not.toHaveProperty('author');
+      } finally {
+        db.close();
+      }
+      expect(() =>
+        store.accept({
+          ...input,
+          operationId: 'bad-author',
+          author: { ...author, sessionId: 'other' },
+        })
+      ).toThrow('source turn');
+      expect(() => store.get(input.requesterSessionId, 'bad-author')).toThrow();
+    } finally {
+      store.close();
+    }
+  });
+
   it('pages requester-owned summaries without prompts and rejects foreign cursor scopes', async () => {
     const store = await makeStore();
     const scope = {
@@ -318,6 +367,7 @@ describe('LodyOperationStore', () => {
               modeId: 'default',
               modelId: 'gpt-5',
               configOptionValues: { fast: true },
+              memory: { providerId: 'nowledge-mem', memoryId: 'reviewer' },
               inheritSessionDefaults: false as const,
             },
           ],
@@ -330,6 +380,7 @@ describe('LodyOperationStore', () => {
           modeId: 'default',
           modelId: 'gpt-5',
           configOptionValues: { fast: true },
+          memory: { providerId: 'nowledge-mem', memoryId: 'reviewer' },
           inheritSessionDefaults: false,
         },
       ]);

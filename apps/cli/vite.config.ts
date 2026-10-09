@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import wasm from 'vite-plugin-wasm';
+import { devinRuntimeContractPlugin } from './scripts/devin-runtime-contract.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,7 +41,7 @@ export default defineConfig({
   // Node 22 supports native top-level await, including wasm initialization.
   // The browser compatibility transform reparses every emitted chunk into an
   // additional SWC AST and exhausts the 2 GB packaging heap on this bundle.
-  plugins: [wasm()],
+  plugins: [wasm(), devinRuntimeContractPlugin()],
   define: inlineEnv,
   resolve: {
     alias: {
@@ -75,9 +76,11 @@ export default defineConfig({
       input: {
         index: path.resolve(__dirname, 'src/index.ts'),
         'cloudflared-worker': path.resolve(__dirname, 'src/preview/cloudflared-worker.ts'),
+        'baguette-worker': path.resolve(__dirname, 'src/ios-simulator/baguette-worker.ts'),
         'codex-acp': path.resolve(__dirname, 'src/codex-acp-entry.ts'),
         'claude-acp': path.resolve(__dirname, 'src/claude-acp-entry.ts'),
         'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),
+        'devin-acp': path.resolve(__dirname, 'src/devin-acp-entry.ts'),
         'grok-acp': path.resolve(__dirname, 'src/grok-acp-entry.ts'),
         'diff-worker': path.resolve(__dirname, 'src/lib/code-collab/diff-worker.ts'),
         'file-index-scan-worker': path.resolve(
@@ -96,6 +99,16 @@ export default defineConfig({
       external: (id) =>
         id.endsWith('.node') || bundledNodeBuiltins.has(id) || explicitlyExternal.has(id),
       output: {
+        // Keep dependency sourcemaps out of the large CLI entry so the build
+        // fits the 2 GiB heap. Keep packages separate from application workers.
+        manualChunks(id) {
+          if (id === '\0commonjsHelpers.js') return 'commonjs-helpers';
+          const dependency = id.split('/node_modules/').at(-1);
+          if (!id.includes('/node_modules/') || !dependency) return undefined;
+          const segments = dependency.split('/');
+          const name = dependency.startsWith('@') ? segments.slice(0, 2).join('-') : segments[0];
+          return `vendor-${name}`;
+        },
         format: 'es',
         entryFileNames: '[name].js',
         chunkFileNames: 'chunks/[name]-[hash].js',

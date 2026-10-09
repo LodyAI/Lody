@@ -225,6 +225,22 @@ export const DisconnectedOnMobile: Story = {
     try {
       const button = within(canvasElement).getByRole('button', { name: /Copy error|复制错误/ });
       await expect(button).toBeVisible();
+
+      // Copy shares the header row on phones instead of adding a footer row.
+      // A desktop preview keeps the footer below the detail, so only assert the
+      // mobile geometry when the story is actually rendered at phone width.
+      if (window.innerWidth < 768) {
+        const banner = canvasElement.querySelector<HTMLElement>('[role="alert"] > div');
+        if (!banner) throw new Error('Chat failure banner did not render');
+        const detail = within(canvasElement).getByText(
+          'The agent process disconnected unexpectedly. Please try again.'
+        );
+        const buttonRect = button.getBoundingClientRect();
+        const bannerRect = banner.getBoundingClientRect();
+        await expect(buttonRect.right).toBeGreaterThan(bannerRect.left + bannerRect.width * 0.6);
+        await expect(buttonRect.top).toBeLessThan(detail.getBoundingClientRect().top);
+      }
+
       await userEvent.click(button);
       await expect(copiedText).toContain('Reason: agent_disconnected');
       await expect(copiedText).toContain(`Session: ${sessionId}`);

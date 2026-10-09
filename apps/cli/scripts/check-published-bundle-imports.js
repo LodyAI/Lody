@@ -96,6 +96,7 @@ if (violations.length > 0) {
 checkPublishedRuntimeDependencies();
 runDeepSeekAdapterBundleSmoke();
 runGrokAdapterBundleSmoke();
+runDevinAdapterBundleSmoke();
 runPublishedRuntimeSmoke();
 runWorkspaceWatchWorkerSmoke();
 runDiffWorkerSmoke();
@@ -328,6 +329,33 @@ function runGrokAdapterBundleSmoke() {
   }
 
   console.error('Published CLI Grok adapter bundle smoke failed.');
+  if (result.error) console.error(result.error.message);
+  if (result.stdout) console.error(result.stdout);
+  if (result.stderr) console.error(result.stderr);
+  process.exit(1);
+}
+
+function runDevinAdapterBundleSmoke() {
+  const adapterPath = path.join(distDir, 'devin-acp.js');
+  if (!fs.existsSync(adapterPath)) {
+    console.error(`Published CLI Devin adapter is missing: ${adapterPath}`);
+    process.exit(1);
+  }
+
+  const env = { ...process.env };
+  delete env.DEVIN_PATH;
+  const result = spawnSync(process.execPath, [adapterPath], {
+    cwd: cliRoot,
+    encoding: 'utf8',
+    env,
+    input: '',
+  });
+  const expectedError = 'DEVIN_PATH must point to the official Devin runtime';
+  if (result.status === 1 && result.stderr.includes(expectedError)) {
+    return;
+  }
+
+  console.error('Published CLI Devin adapter bundle smoke failed.');
   if (result.error) console.error(result.error.message);
   if (result.stdout) console.error(result.stdout);
   if (result.stderr) console.error(result.stderr);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,24 +12,11 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('../src/ui/drawer', async () => {
-  const React = await import('react');
-  const Passthrough = ({ children }: { readonly children?: ReactNode }) =>
-    React.createElement('div', null, children);
-  return {
-    Drawer: Passthrough,
-    DrawerContent: Passthrough,
-    DrawerTitle: Passthrough,
-  };
-});
-
-vi.mock('../src/components/mobile/vaul-drawer-edge-back-zone', async () => {
-  const React = await import('react');
-  return {
-    VaulDrawerBody: ({ children }: { readonly children?: ReactNode }) =>
-      React.createElement('div', null, children),
-  };
-});
+const runtime = vi.hoisted(() => ({ native: true, ios: false }));
+vi.mock('../src/lib/native-platform', () => ({
+  isNativeAppShell: () => runtime.native,
+  isNativeIOSAppShell: () => runtime.native && runtime.ios,
+}));
 
 vi.mock('../src/components/mobile/mobile-session-menu-sheet', async () => {
   const React = await import('react');
@@ -69,9 +56,12 @@ afterEach(() => {
   root = null;
   container?.remove();
   container = null;
+  vi.unstubAllGlobals();
+  runtime.native = true;
+  runtime.ios = false;
 });
 
-function renderDrawer(onCopyMarkdown?: () => void): HTMLDivElement {
+function renderDrawer(onCopyMarkdown?: () => void): HTMLElement {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -86,16 +76,19 @@ function renderDrawer(onCopyMarkdown?: () => void): HTMLDivElement {
           onCopyPath: vi.fn(),
           ...(onCopyMarkdown ? { onCopyMarkdown } : {}),
         },
-        createElement('div', null, 'Markdown')
+        createElement('textarea', { 'aria-label': 'File text', defaultValue: '# Example' })
       )
     );
   });
-  return container;
+  return document.body;
 }
 
 describe('MobileFileViewerDrawer', () => {
   it('adds a full Markdown copy action when the file view provides one', () => {
-    const onCopyMarkdown = vi.fn();
+    let copied = '';
+    const onCopyMarkdown = () => {
+      copied = '# Example';
+    };
     const view = renderDrawer(onCopyMarkdown);
     const action = Array.from(view.querySelectorAll('button')).find(
       (button) => button.textContent === 'Copy full Markdown'
@@ -103,12 +96,64 @@ describe('MobileFileViewerDrawer', () => {
 
     expect(action).not.toBeUndefined();
     act(() => action?.click());
-    expect(onCopyMarkdown).toHaveBeenCalledTimes(1);
+    expect(copied).toBe('# Example');
   });
 
   it('omits the full Markdown copy action for other file types', () => {
     const view = renderDrawer();
     expect(view.textContent).not.toContain('Copy full Markdown');
     expect(view.textContent).toContain('Copy file path');
+  });
+
+  it.each([true, false])(
+    'resizes with the visual viewport and restores on hide (native: %s)',
+    (native) => {
+      runtime.native = native;
+      const viewport = Object.assign(new EventTarget(), { height: 800, offsetTop: 0, scale: 1 });
+      vi.stubGlobal('visualViewport', viewport);
+      vi.stubGlobal('innerHeight', 800);
+      renderDrawer();
+      const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+      const editor = drawer.querySelector('textarea')!;
+      act(() => {
+        editor.focus();
+        editor.setSelectionRange(3, 3);
+      });
+      for (const height of [480, 400, 800]) {
+        act(() => {
+          viewport.height = height;
+          viewport.dispatchEvent(new Event('resize'));
+        });
+        expect(drawer.style.bottom).toBe(`${800 - height}px`);
+        expect(drawer.style.height).toBe('');
+        expect(document.activeElement).toBe(editor);
+        expect(editor.value).toBe('# Example');
+        expect(editor.selectionStart).toBe(3);
+      }
+    }
+  );
+
+  it('uses the native iOS keyboard inset without Vaul writing a second height', () => {
+    runtime.ios = true;
+    const viewport = Object.assign(new EventTarget(), { height: 800, offsetTop: 0, scale: 1 });
+    vi.stubGlobal('visualViewport', viewport);
+    renderDrawer();
+    const drawer = document.querySelector<HTMLElement>('[data-slot="drawer-content"]')!;
+    const editor = drawer.querySelector('textarea')!;
+    act(() => {
+      editor.focus();
+      editor.setSelectionRange(3, 3);
+    });
+    for (const height of [480, 800]) {
+      act(() => {
+        viewport.height = height;
+        viewport.dispatchEvent(new Event('resize'));
+      });
+      expect(drawer.style.bottom).toBe('var(--native-keyboard-height, 0px)');
+      expect(drawer.style.height).toBe('');
+      expect(document.activeElement).toBe(editor);
+      expect(editor.value).toBe('# Example');
+      expect(editor.selectionStart).toBe(3);
+    }
   });
 });

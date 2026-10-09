@@ -55,15 +55,20 @@ Explicit testing and session startup pass those paths through `-e`, keeping
 remain usable. This is consent to execute code with the user's permissions, not a
 sandbox or a promise of arbitrary plugin/TUI compatibility. Missing paths and load
 failures must not silently succeed. Changing or removing selections invalidates the
-corresponding model catalog; running processes are not hot-reloaded.
+corresponding model catalog; running processes are not hot-reloaded. Persisted and
+draft session model/command selectors read the exact bound Provider's current
+extension selection, so a matching refreshed catalog remains selectable.
+Saving an edited extension selection, including clearing it, completes only after
+live verification succeeds. The configuration is persisted before that probe;
+failure keeps the dialog open with an error and retry, without rolling back the
+saved selection. After another selection edit, the dialog ignores superseded
+verification results rather than completing the newer save.
 
 Scan RPC accepts only an optional saved Pi Provider ID, never caller-supplied launch
 arguments or environment. Local routes cannot fall back to cloud. The daemon
 advertises support only when the checksummed runtime manifest declares
 `piExtensionsProtocolVersion: 1` and the host can run it. Extension-enabled launches
-require that pinned runtime rather than an older cached fallback. The currently
-pinned artifact predates this protocol; enabling the UI requires publishing the
-new artifact with Windows binaries built from the same source revision.
+require that pinned runtime rather than an older cached fallback.
 
 ## Native history import
 

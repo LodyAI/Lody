@@ -1,8 +1,11 @@
+import { resolveSessionConversationConfig } from '@lody/shared';
+import type { MessageAuthor, AgentMessageAuthor } from '@lody/shared';
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
   getDeclaredModelControls,
   getModelEffortChoices,
   machineSupportsPreparedSessionInputProtocol,
+  machineSupportsMemoryProviders,
 } from '@lody/shared';
 import {
   materializePreparedSessionInput,
@@ -10,7 +13,6 @@ import {
   isPreparedSessionDispatched,
   type PreparedSessionInput,
 } from '@/lib/prepared-session-input';
-import { readSessionHistory } from '@lody/shared/session-data';
 import { Command } from 'commander';
 import {
   SessionDiscoveryFilterShape,
@@ -87,6 +89,7 @@ import {
   type SessionOperation,
   type WorkspaceId,
   deriveDraftSessionTitle,
+  NEW_SESSION_HISTORY_BACKEND,
 } from '@lody/shared';
 import type { SessionTurn } from '@lody/shared/session-data';
 import { prepareCliStreamsGatewayBaseUrl } from '@/lib/loro/streams-access';
@@ -138,11 +141,13 @@ import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
 import { createCloudBillingPort, createCloudStreamsTokenPort } from '@/lib/cloud-cli-port';
 import { getCliHttpFetch } from '@/utils/http-transport';
 import { readMachineAccessWithBoundedRetry } from '@/session/session-access-retry';
+import { createSessionBackend } from '@/session/session-backend';
 
 type CommonOptions = CommonCommandOptions;
 
 export type DelegatedSessionRequester = {
   userId: string;
+  author?: AgentMessageAuthor;
 };
 
 type ResolvedSessionRequester = {
@@ -192,6 +197,7 @@ export type CreateOptions = CommonOptions &
     /** Agent Role provenance frozen when the create Operation is accepted. */
     agentRoleId?: string;
     agentRoleRevision?: number;
+    agentRoleSnapshot?: import('@lody/shared').AgentRoleSnapshot;
     /** Durable batch Operations intentionally bypass cooperative session quotas. */
     bypassSessionQuota?: boolean;
     /**
@@ -291,6 +297,7 @@ export type SessionTranscriptEntry = {
   index: number;
   id: string;
   role: SessionTranscriptRole;
+  author?: MessageAuthor;
   timestamp: string;
   text: string;
 };
@@ -552,6 +559,7 @@ export function toSessionTranscriptEntry(
     index,
     id: entry.id,
     role: entry.role,
+    ...(entry.author ? { author: entry.author } : {}),
     timestamp: entry.timestamp,
     text,
   };
@@ -964,10 +972,8 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   // Same ordering as session create: settle the plan before reading the doc.
   const entitlement = await getWorkspaceBillingEntitlementBestEffort(args.manager, args.workspace);
   if (!entitlement || isBillingQuotaExempt(entitlement)) return undefined;
-  const [history, queue] = await Promise.all([
-    readSessionHistory(args.sessionDoc.sessionData.history),
-    args.sessionDoc.getMessageQueue(),
-  ]);
+  const backend = await createSessionBackend(args.sessionDoc, await args.sessionDoc.getMetaState());
+  const [history, queue] = await Promise.all([backend.readHistory(), backend.getMessageQueue()]);
   if (
     args.userTurnId &&
     (history.some((entry) => entry.id === args.userTurnId) ||
@@ -1281,7 +1287,8 @@ async function resolveRunningAssistantTurnId(
   sessionId: SessionId
 ): Promise<string | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = readSessionHistory(sessionDoc.sessionData.history);
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  const history = await backend.readHistory();
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
@@ -1290,14 +1297,16 @@ async function appendUserPromptHistory(args: {
   prompt: string;
   userId: string;
   inputConfig?: SessionHistoryInput['inputConfig'];
+  author?: MessageAuthor;
   preallocatedId?: string;
   /** History the caller already read, so the idempotency check can skip a re-read. */
   knownHistory?: readonly SessionHistory[];
 }): Promise<{ id: string; timestamp: string; inputConfig?: SessionTurnInputConfig }> {
   const { sessionDoc, prompt, userId, inputConfig, preallocatedId } = args;
   const historyId = preallocatedId?.trim() || uuidV4();
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   if (preallocatedId) {
-    const history = args.knownHistory ?? readSessionHistory(sessionDoc.sessionData.history);
+    const history = args.knownHistory ?? (await backend.readHistory());
     const existing = history.find((entry) => entry.id === historyId);
     if (existing) {
       const existingText = existing.items?.find((item) => item.type === 'text');
@@ -1320,6 +1329,7 @@ async function appendUserPromptHistory(args: {
   const entry: SessionHistoryInput = {
     id: historyId,
     role: 'user',
+    author: args.author ?? { v: 1, kind: 'human', userId },
     timestamp,
     status: 'pending',
     read: false,
@@ -1329,7 +1339,7 @@ async function appendUserPromptHistory(args: {
     fileDiff: [],
     finished: true,
   };
-  await sessionDoc.sessionData.commands.appendTurn(entry);
+  await backend.appendUserTurn(entry);
   return {
     id: historyId,
     timestamp,
@@ -1338,6 +1348,7 @@ async function appendUserPromptHistory(args: {
 }
 
 function buildCliHistoryInputConfig(args: {
+  memory?: import('@lody/shared').MemoryBinding;
   prompt: string;
   cliType: SessionMeta['cliType'];
   agentType: SessionMeta['agentType'];
@@ -1348,6 +1359,7 @@ function buildCliHistoryInputConfig(args: {
   chainDepth?: number;
 }): NonNullable<SessionHistoryInput['inputConfig']> {
   return {
+    memory: args.memory,
     prompt: args.prompt,
     cliType: args.cliType,
     agentType: args.agentType,
@@ -1363,6 +1375,7 @@ function buildCliHistoryInputConfig(args: {
 }
 
 export type ResolvedTurnDispatchConfig = {
+  memory?: import('@lody/shared').MemoryBinding;
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
@@ -1406,7 +1419,25 @@ export function applyAgentRunConfigSelection(
   if (!hasAgentRunConfigSelection(runConfig)) {
     return { config: rest, validatedConfigIds: new Set(), unverifiedSelections: [] };
   }
-  const resolved = resolveAgentRunConfigSelection(runConfig, capability);
+  const resolved = resolveAgentRunConfigSelection(
+    {
+      ...runConfig,
+      modelId:
+        runConfig?.modelId ??
+        rest.modelId ??
+        getTurnSelectorConfigOptionValue(rest.configOptionValues, capability, 'model'),
+    },
+    capability
+  );
+  const explicitModeId =
+    rest.modeId ?? getTurnSelectorConfigOptionValue(rest.configOptionValues, capability, 'mode');
+  // A legacy Plan control occupies the same ACP mode selector as permission.
+  // Independent plan_mode options do not produce resolved.modeId.
+  if (resolved.modeId && explicitModeId && resolved.modeId !== explicitModeId) {
+    throw new Error(
+      `Plan mode requires ACP mode ${resolved.modeId}, which conflicts with explicit mode ${explicitModeId}.`
+    );
+  }
   const configOptionValues = {
     ...(rest.configOptionValues ?? {}),
     ...(resolved.configOptionValues ?? {}),
@@ -1512,6 +1543,7 @@ function mergeTurnDispatchConfig(
   fallbackConfig: ResolvedTurnDispatchConfig | undefined
 ): ResolvedTurnDispatchConfig {
   return {
+    memory: explicitConfig.memory ?? fallbackConfig?.memory,
     modeId: explicitConfig.modeId ?? fallbackConfig?.modeId,
     modelId: explicitConfig.modelId ?? fallbackConfig?.modelId,
     configOptionValues: explicitConfig.configOptionValues ?? fallbackConfig?.configOptionValues,
@@ -1752,6 +1784,7 @@ export function resolveTurnDispatchConfigFromInputConfig(
     return undefined;
   }
   return {
+    ...(inputConfig.memory ? { memory: inputConfig.memory } : {}),
     ...(inputConfig.modeId ? { modeId: inputConfig.modeId } : {}),
     ...(inputConfig.modelId ? { modelId: inputConfig.modelId } : {}),
     ...(inputConfig.configOptionValues
@@ -1795,10 +1828,8 @@ async function resolveSessionTurnDispatchDefaults(
   agentConfig: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
 ): Promise<ResolvedTurnDispatchConfig | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  return resolveTurnDispatchDefaultsFromHistory(
-    readSessionHistory(sessionDoc.sessionData.history),
-    agentConfig
-  );
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  return resolveTurnDispatchDefaultsFromHistory(await backend.readHistory(), agentConfig);
 }
 
 export function resolveEffectiveSessionChatDispatchConfig(args: {
@@ -1832,6 +1863,7 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
       }
     : undefined;
   const compatible = filterCompatibleInheritedTurnConfig(inherited, args.capability);
+  if (compatible && previous?.memory) compatible.memory = previous.memory;
   if (compatible) {
     compatible.configOptionValues = filterCompatibleTurnConfigOptionValues(
       inherited?.configOptionValues,
@@ -1895,7 +1927,8 @@ async function removeHistoryEntryById(
   sessionDoc: SessionDocument,
   historyId: string
 ): Promise<void> {
-  await sessionDoc.sessionData.commands.applyHistoryAction({
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  await backend.applyHistoryAction({
     kind: 'remove-turn',
     turnId: historyId,
   });
@@ -3033,7 +3066,7 @@ export async function validateSessionCreateOptions(args: {
   });
 }
 
-async function resolveEffectiveSessionCreateDispatchConfig(args: {
+export async function resolveEffectiveSessionCreateDispatchConfig(args: {
   manager: LoroDocumentManager;
   workspaceId: WorkspaceId;
   agentConfig: AgentConfigMeta;
@@ -3042,6 +3075,13 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
   localOnly?: boolean;
 }): Promise<ResolvedTurnDispatchConfig> {
   const { frozenInheritedInputConfig, ...dispatchConfig } = args.dispatchConfig;
+  if (dispatchConfig.memory) {
+    const machine = (await listMachineMetasForWorkspace(args.manager)).find(
+      (entry) => entry.id === args.agentConfig.machineId
+    );
+    if (!machineSupportsMemoryProviders(machine))
+      throw new Error('Update the target machine to use memory providers.');
+  }
   const inheritedDispatchConfig =
     frozenInheritedInputConfig !== undefined
       ? resolveTurnDispatchConfigFromInputConfig(frozenInheritedInputConfig, args.agentConfig)
@@ -3085,12 +3125,22 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
     capability,
     requested.validatedConfigIds
   );
+  const inherited = filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability);
+  if (inherited) {
+    // Raw selectors must override inherited scalar selectors, which the runtime
+    // otherwise applies first and uses to skip the corresponding option.
+    if (getTurnSelectorConfigOptionValue(requested.config.configOptionValues, capability, 'mode')) {
+      delete inherited.modeId;
+    }
+    if (
+      getTurnSelectorConfigOptionValue(requested.config.configOptionValues, capability, 'model')
+    ) {
+      delete inherited.modelId;
+    }
+  }
   return {
     ...withBuiltinDefaultTurnMode(
-      mergeTurnDispatchConfig(
-        requested.config,
-        filterCompatibleInheritedTurnConfig(inheritedDispatchConfig, capability)
-      ),
+      mergeTurnDispatchConfig(requested.config, inherited),
       args.agentConfig,
       capability
     ),
@@ -3193,6 +3243,7 @@ export async function prepareSessionInput(
     isArchived: false,
     cliType: agentConfig.cliType,
     agentType: agentConfig.agentType,
+    historyBackend: NEW_SESSION_HISTORY_BACKEND,
     agentConfigId: agentConfig.id,
     ...(title ? { title, titleSource: 'user' as const } : {}),
     ...(draftTitle ? { title: draftTitle, titleSource: 'draft' as const } : {}),
@@ -3222,16 +3273,27 @@ export async function prepareSessionInput(
         : 'pending',
     read: !!ownerTarget || machineSupportsPreparedSessionInputProtocol(targetMachine),
     userId: requesterUserId,
+    author: options.delegatedRequester?.author ?? { v: 1, kind: 'human', userId: requesterUserId },
     items: [{ type: 'text', text: prompt }],
-    inputConfig: buildCliHistoryInputConfig({
-      prompt: buildAgentPrompt(prompt, agentConfig.prompt ?? ''),
-      cliType: agentConfig.cliType,
-      agentType: agentConfig.agentType,
-      modeId: effectiveDispatchConfig.modeId ?? undefined,
-      modelId: effectiveDispatchConfig.modelId ?? undefined,
-      configOptionValues: effectiveDispatchConfig.configOptionValues,
-      chainDepth: options.chainDepth,
-    }),
+    inputConfig: {
+      ...(options.agentRoleId
+        ? {
+            agentRoleId: options.agentRoleId as AgentRoleId,
+            agentRoleRevision: options.agentRoleRevision,
+            agentRoleSnapshot: options.agentRoleSnapshot,
+          }
+        : {}),
+      ...buildCliHistoryInputConfig({
+        prompt: buildAgentPrompt(prompt, agentConfig.prompt ?? ''),
+        cliType: agentConfig.cliType,
+        agentType: agentConfig.agentType,
+        memory: effectiveDispatchConfig.memory,
+        modeId: effectiveDispatchConfig.modeId ?? undefined,
+        modelId: effectiveDispatchConfig.modelId ?? undefined,
+        configOptionValues: effectiveDispatchConfig.configOptionValues,
+        chainDepth: options.chainDepth,
+      }),
+    },
     fileDiff: [],
     finished: true,
   };
@@ -3278,6 +3340,7 @@ export async function createSessionResult(
   const agentConfig = { id: meta.agentConfigId! };
   await materializePreparedSessionInput(manager, prepared);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  const backend = await createSessionBackend(sessionDoc, meta);
 
   let completionAbortController: AbortController | undefined;
   let completionPromise: Promise<Awaited<ReturnType<typeof waitForTurnCompletion>>> | undefined;
@@ -3291,6 +3354,7 @@ export async function createSessionResult(
     completionPromise = structuredOutput
       ? waitForTurnCompletion({
           sessionDoc,
+          backend,
           userTurnId,
           outputMode: structuredOutput.outputMode,
           timeoutMs: structuredOutput.timeoutMs,
@@ -3440,6 +3504,7 @@ export async function sendSessionChatResult(
     `session.chat:${sessionId}:prewrite:doc`
   );
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   const quotaHistory = orchestration?.bypassSessionQuota
     ? undefined
     : await checkSessionTurnQuotaAndReadHistory({
@@ -3448,8 +3513,7 @@ export async function sendSessionChatResult(
         sessionDoc,
         userTurnId: orchestration?.userTurnId,
       });
-  const historyForDefaults =
-    quotaHistory ?? (await readSessionHistory(sessionDoc.sessionData.history));
+  const historyForDefaults = quotaHistory ?? (await backend.readHistory());
   const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
     historyForDefaults,
     session
@@ -3481,20 +3545,36 @@ export async function sendSessionChatResult(
     target: session,
     capability,
   });
+  // An unconfigured follow-up retains the target's selected Role, never the sender's.
+  // Explicit execution changes clear it rather than claiming an unchanged preset.
+  const roleSelection =
+    !dispatchConfig.modeId &&
+    !dispatchConfig.modelId &&
+    !dispatchConfig.configOptionValues &&
+    !dispatchConfig.runConfig
+      ? resolveSessionConversationConfig(historyForDefaults)
+      : undefined;
   const userTurn = await appendUserPromptHistory({
     sessionDoc,
     prompt,
     userId: requesterUserId,
-    inputConfig: buildCliHistoryInputConfig({
-      prompt,
-      cliType: session.cliType,
-      agentType: session.agentType,
-      modeId: effectiveDispatchConfig.modeId,
-      modelId: effectiveDispatchConfig.modelId,
-      configOptionValues: effectiveDispatchConfig.configOptionValues,
-      resume: session.acpSessionId ?? undefined,
-      chainDepth: orchestration?.chainDepth,
-    }),
+    author: delegatedRequester?.author,
+    inputConfig: {
+      agentRoleId: roleSelection?.agentRoleId ?? null,
+      agentRoleRevision: roleSelection?.agentRoleRevision,
+      agentRoleSnapshot: roleSelection?.agentRoleSnapshot,
+      ...buildCliHistoryInputConfig({
+        prompt,
+        cliType: session.cliType,
+        agentType: session.agentType,
+        memory: effectiveDispatchConfig.memory,
+        modeId: effectiveDispatchConfig.modeId,
+        modelId: effectiveDispatchConfig.modelId,
+        configOptionValues: effectiveDispatchConfig.configOptionValues,
+        resume: session.acpSessionId ?? undefined,
+        chainDepth: orchestration?.chainDepth,
+      }),
+    },
     preallocatedId: orchestration?.userTurnId,
     knownHistory: quotaHistory,
   });
@@ -3503,6 +3583,7 @@ export async function sendSessionChatResult(
   const completionPromise = structuredOutput
     ? waitForTurnCompletion({
         sessionDoc,
+        backend,
         userTurnId,
         outputMode: structuredOutput.outputMode,
         timeoutMs: structuredOutput.timeoutMs,
@@ -3566,9 +3647,10 @@ async function buildSessionShowResult(
 ): Promise<SessionShowResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
   const [directory, queue] = await Promise.all([
-    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
-    sessionDoc.getMessageQueue(),
+    backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
+    backend.getMessageQueue(),
   ]);
 
   return {
@@ -3765,7 +3847,8 @@ async function buildSessionStatusResult(
 ): Promise<SessionStatusResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = readSessionHistory(sessionDoc.sessionData.history);
+  const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+  const history = await backend.readHistory();
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({
     auth,
@@ -4478,9 +4561,8 @@ const sessionHistoryCommand = new Command('history')
         );
         await resolveSessionMetaOrThrow(manager, sessionId);
         const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-        const transcript = toSessionTranscriptEntries(
-          readSessionHistory(sessionDoc.sessionData.history)
-        );
+        const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+        const transcript = toSessionTranscriptEntries(await backend.readHistory());
         const entries = selectSessionTranscriptEntries(transcript, {
           all: options.all,
           limit: options.limit,

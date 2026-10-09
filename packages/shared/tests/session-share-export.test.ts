@@ -449,3 +449,67 @@ it('copies independent attachments concurrently with stable ids and deduplicates
     expect(projected[0]!.items![1]!.imageId).toBe('a2');
   }
 });
+
+it('captures 64 distinct images but refuses a 65th before downloading', async () => {
+  const conversations = [
+    {
+      sourceId: 'root',
+      title: '',
+      history: [
+        {
+          id: 't',
+          role: 'user',
+          items: Array.from({ length: 64 }, (_, i) => ({ type: 'image', imageId: `image${i}` })),
+        },
+      ],
+    },
+  ];
+  let reads = 0;
+  const readAttachment = async () => {
+    reads++;
+    return { bytes: new Uint8Array([1]), mediaType: 'image/png' };
+  };
+  const result = await captureSharePackage({
+    rootSourceId: 'root',
+    capturedAt,
+    conversations,
+    readAttachment,
+  });
+  expect(result.manifest.attachments).toHaveLength(64);
+  expect(reads).toBe(64);
+  conversations[0]!.history[0]!.items.push({ type: 'image', imageId: 'image64' });
+  await expect(
+    captureSharePackage({ rootSourceId: 'root', capturedAt, conversations, readAttachment })
+  ).rejects.toThrow('Too many share attachments');
+  expect(reads).toBe(64);
+});
+
+it('accepts a 20 MB image and refuses one extra byte', async () => {
+  const conversations = [
+    {
+      sourceId: 'root',
+      title: '',
+      history: [{ id: 't', role: 'user', items: [{ type: 'image', imageId: 'image' }] }],
+    },
+  ];
+  const bytes = new Uint8Array(20_000_001);
+  const readAttachment = async () => ({
+    bytes: bytes.subarray(0, 20_000_000),
+    mediaType: 'image/png',
+  });
+  const result = await captureSharePackage({
+    rootSourceId: 'root',
+    capturedAt,
+    conversations,
+    readAttachment,
+  });
+  expect(result.manifest.objects.find((object) => object.id === 'a1')?.sizeBytes).toBe(20_000_000);
+  await expect(
+    captureSharePackage({
+      rootSourceId: 'root',
+      capturedAt,
+      conversations,
+      readAttachment: async () => ({ bytes, mediaType: 'image/png' }),
+    })
+  ).rejects.toThrow('Share image exceeds size limit');
+});

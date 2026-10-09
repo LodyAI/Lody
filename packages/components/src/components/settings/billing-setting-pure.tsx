@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -50,7 +51,7 @@ const styles = stylex.create({
     columnGap: space[2],
     rowGap: '2px',
     marginTop: space[1],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -85,13 +86,13 @@ const styles = stylex.create({
   helper: {
     margin: 0,
     marginTop: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
   helperFlush: {
     margin: 0,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -110,8 +111,7 @@ const styles = stylex.create({
     color: colors.label,
     fontVariantNumeric: 'tabular-nums',
   },
-  priceUnit: { fontSize: type.caption, color: colors.secondaryLabel },
-  promise: { color: colors.label },
+  priceUnit: { fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   action: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: space[2] },
   perks: {
     display: 'grid',
@@ -121,7 +121,7 @@ const styles = stylex.create({
     margin: 0,
     padding: 0,
     listStyleType: 'none',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   perk: { display: 'flex', alignItems: 'center', gap: space[1.5], minWidth: 0 },
@@ -160,7 +160,7 @@ const styles = stylex.create({
     alignItems: 'baseline',
     justifyContent: 'space-between',
     gap: space[4],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   truncate: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -178,7 +178,7 @@ const styles = stylex.create({
   },
   invoiceText: { minWidth: 0 },
   link: {
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.accent,
     textDecoration: { default: 'none', ':hover': 'underline' },
   },
@@ -194,7 +194,7 @@ const styles = stylex.create({
     backgroundColor: 'transparent',
     color: { default: colors.secondaryLabel, ':hover': colors.label },
     fontFamily: 'inherit',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     cursor: { default: 'pointer', ':disabled': 'default' },
     opacity: { default: 1, ':disabled': 0.6 },
   },
@@ -386,8 +386,13 @@ export function BillingSettingsView({
     overview.effectivePlanTier === 'plus' || overview.effectivePlanTier === 'enterprise';
   const checkoutInProgress = overview.checkoutPending || overview.subscriptionSetupPending;
   const paidCheckoutPending = overview.checkoutPending && !overview.subscriptionSetupPending;
+  // A successful web checkout keeps the page on the pre-payment free overview
+  // until the webhook/reconcile lands. Treat that window as the Plus plan being
+  // activated instead of rendering "Free" over the payment-received banner.
+  const activationPending = paymentProcessing && !isPaid;
+  const entitled = isPaid || activationPending;
   const planName =
-    paidCheckoutPending || overview.effectivePlanTier === 'plus'
+    paidCheckoutPending || overview.effectivePlanTier === 'plus' || activationPending
       ? t('billing.plan.plus')
       : overview.effectivePlanTier === 'enterprise'
         ? t('billing.plan.enterprise')
@@ -408,11 +413,10 @@ export function BillingSettingsView({
     !overview.autoRenewAfterGift &&
     !overview.canResumeAfterGift &&
     overview.effectivePlanTier === 'plus';
-  const showSubscriptionOffer = !isPaid || canScheduleAfterGift;
+  const showSubscriptionOffer = !entitled || canScheduleAfterGift;
 
   // `null` = unlimited.
-  const sessionLimit =
-    overview.effectivePlanTier === 'free' ? FREE_SESSION_LIMIT_PER_WORKSPACE : null;
+  const sessionLimit = entitled ? null : FREE_SESSION_LIMIT_PER_WORKSPACE;
   const nearLimit =
     sessionCount !== null &&
     sessionLimit !== null &&
@@ -421,8 +425,6 @@ export function BillingSettingsView({
 
   const monthlyPrice = formatUsd(overview.pricing.monthlyAmountCents);
   const yearlyPerMonthPrice = formatUsd(Math.round(overview.pricing.yearlyAmountCents / 12));
-  const yearlyEarlyBirdSelected =
-    interval === 'year' && overview.pricing.yearlyOfferKey === 'early_bird_yearly_6000_forever';
   const selectedOfferLabel =
     interval === 'month' && overview.pricing.monthlyOfferKey ? t('billing.founderPrice') : null;
 
@@ -464,13 +466,15 @@ export function BillingSettingsView({
             ? t('billing.promotionalEndsOn', {
                 date: formatDate(giftEnd),
               })
-            : isPaid && overview.currentPeriodEnd
-              ? overview.cancelAtPeriodEnd
-                ? t('billing.cancelsOn', { date: formatDate(overview.currentPeriodEnd) })
-                : t('billing.renewsOn', { date: formatDate(overview.currentPeriodEnd) })
-              : !isPaid
-                ? t('billing.freeTagline')
-                : null;
+            : activationPending
+              ? t('billing.paymentProcessingTitle')
+              : isPaid && overview.currentPeriodEnd
+                ? overview.cancelAtPeriodEnd
+                  ? t('billing.cancelsOn', { date: formatDate(overview.currentPeriodEnd) })
+                  : t('billing.renewsOn', { date: formatDate(overview.currentPeriodEnd) })
+                : !isPaid
+                  ? t('billing.freeTagline')
+                  : null;
 
   const offerTitle = checkoutInProgress
     ? overview.subscriptionSetupPending
@@ -503,13 +507,7 @@ export function BillingSettingsView({
         upcomingInvoice.discount
           ? {
               key: 'discount',
-              // The invoice discount line is offer-agnostic; only name the
-              // campaign when this account's offer actually is early bird.
-              label: t(
-                overview.offerKey === 'early_bird_yearly_6000_forever'
-                  ? 'billing.upcomingDiscountEarlyBird'
-                  : 'billing.upcomingDiscount'
-              ),
+              label: t('billing.upcomingDiscount'),
               amount: upcomingInvoice.discount.amount,
             }
           : null,
@@ -593,9 +591,6 @@ export function BillingSettingsView({
             {hasGiftTimeline && overview.autoRenewAfterGift ? (
               <Badge>{t('billing.postGiftBillingScheduled')}</Badge>
             ) : null}
-            {overview.yearlyEarlyBirdEligible ? (
-              <Badge>{t('billing.yearlyPromoPrice')}</Badge>
-            ) : null}
           </div>
           <div {...stylex.props(styles.statusLine)}>
             {planIntervalLabel ? (
@@ -676,7 +671,7 @@ export function BillingSettingsView({
               <p {...stylex.props(surface.rowLabel)}>{t('billing.members')}</p>
               <span {...stylex.props(styles.metricValue)}>
                 <span {...stylex.props(styles.metricStrong)}>{overview.seatCount}</span>
-                {!isPaid ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
+                {!entitled ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
               </span>
             </div>
           </div>
@@ -732,14 +727,8 @@ export function BillingSettingsView({
                   <span {...stylex.props(styles.priceUnit)}>{t('billing.perSeatMonth')}</span>
                   {selectedOfferLabel ? <Badge>{selectedOfferLabel}</Badge> : null}
                 </div>
-                <p {...stylex.props(styles.helper, yearlyEarlyBirdSelected && styles.promise)}>
-                  {yearlyEarlyBirdSelected
-                    ? overview.yearlyEarlyBirdEligible
-                      ? t('billing.yearlyEarlyBirdAlreadyLocked')
-                      : t('billing.yearlyEarlyBirdCheckoutPromise')
-                    : interval === 'year'
-                      ? t('billing.billedYearly')
-                      : t('billing.billedMonthly')}
+                <p {...stylex.props(styles.helper)}>
+                  {interval === 'year' ? t('billing.billedYearly') : t('billing.billedMonthly')}
                 </p>
               </Tabs.Panel>
             </Tabs.Root>
@@ -767,15 +756,11 @@ export function BillingSettingsView({
                   onClick={onUpgrade}
                 >
                   {pendingAction === 'checkout' ? <Spinner size="small" /> : null}
-                  {yearlyEarlyBirdSelected
-                    ? overview.yearlyEarlyBirdEligible
-                      ? t('billing.subscribeLockedEarlyBird')
-                      : t('billing.upgradeEarlyBird')
-                    : checkoutInProgress
-                      ? t('billing.continueCheckout')
-                      : canScheduleAfterGift
-                        ? t('billing.subscribeAfterGift')
-                        : t('billing.upgrade')}
+                  {checkoutInProgress
+                    ? t('billing.continueCheckout')
+                    : canScheduleAfterGift
+                      ? t('billing.subscribeAfterGift')
+                      : t('billing.upgrade')}
                 </Button>
                 <SubscribeConsentNotice />
               </div>

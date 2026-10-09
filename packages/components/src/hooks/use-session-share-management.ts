@@ -19,6 +19,7 @@ import { activeWorkspaceRuntimeAtom, authTokenAtom } from '@/atoms/runtime';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
+import { sessionShareErrorMessage, type ShareActionStage } from '@/lib/session-share-errors';
 import { captureSessionShare } from '@/lib/session-share-publisher';
 import {
   readSessionShareSecret,
@@ -107,14 +108,19 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
       return null;
     }
   }
-  async function run(action: () => Promise<void>) {
+  async function run(
+    action: (setStage: (stage: ShareActionStage) => void) => Promise<void>,
+    stage: ShareActionStage = 'capture'
+  ) {
     if (!current() || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      await action();
+      await action((next) => {
+        stage = next;
+      });
     } catch (failure) {
       if (current())
         setError(
@@ -123,10 +129,7 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
                 'sharing.manager.credentialStorageFailed',
                 'Could not save the share link on this device. Allow browser storage and retry. This attempt did not publish.'
               )
-            : t(
-                'sharing.manager.failed',
-                'Could not update sharing. Check the current settings and try again.'
-              )
+            : sessionShareErrorMessage(failure, stage, t)
         );
     } finally {
       busyRef.current = false;
@@ -184,7 +187,7 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
         await navigator.clipboard.writeText(link);
         capturePostHogEvent(postHog, 'share/link_copied');
         if (current()) setNotice(t('settings.shares.copied', 'Share link copied'));
-      });
+      }, 'copy');
     },
     reset(entry: SessionShareView) {
       return run(async () => {
@@ -195,14 +198,14 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
           credentialHash: await hashSessionShareSecret(secret),
         });
         remember(updated, secret);
-      });
+      }, 'reset');
     },
     revokeDeployment,
     revoke(entry: SessionShareView) {
       return run(async () => {
         await revokeDeployment(entry);
         capturePostHogEvent(postHog, 'share/revoked');
-      });
+      }, 'revoke');
     },
   };
 }
@@ -338,6 +341,9 @@ export function useSessionShareManagement(
       rootSessionId: sessionId,
       previousSourceIds: confirmation ? undefined : entry?.sourceIds,
       signal,
+    }).catch((error: unknown) => {
+      signal.throwIfAborted();
+      throw error;
     });
     signal.throwIfAborted();
     const expected = !confirmation && entry?.status === 'active' ? entry : null;
@@ -352,7 +358,11 @@ export function useSessionShareManagement(
     return value;
   };
   /** Upload the frozen bytes and commit the deployment. Safe to call again after a failure. */
-  const publishPrepared = async (value: PendingPublication) => {
+  const publishPrepared = async (
+    value: PendingPublication,
+    setStage: (stage: ShareActionStage) => void
+  ) => {
+    setStage('prepare');
     if (!lifetime.current) throw new Error('Share confirmation changed');
     const { expected, prepared, uploadSecret, readerSecret, requestId } = value;
     if (confirmation && !value.delivery) {
@@ -392,6 +402,7 @@ export function useSessionShareManagement(
     lifetime.current.signal.throwIfAborted();
     if (readerSecret) actions.persistBeforePublish(deployment, readerSecret);
     if (!value.sealed) {
+      setStage('upload');
       await uploadPreparedShare({
         origin: import.meta.env.VITE_SERVER_URL,
         deploymentId: deployment.deploymentId,
@@ -408,6 +419,7 @@ export function useSessionShareManagement(
     }
     lifetime.current.signal.throwIfAborted();
     if (readerSecret) actions.persistBeforePublish(deployment, readerSecret);
+    setStage('publish');
     setPhase('publishing');
     const updated = await publish({ deploymentId: deployment.deploymentId });
     // A new link (not an update of an existing one) is a created share.
@@ -436,16 +448,18 @@ export function useSessionShareManagement(
   };
   /** One human action: freeze if needed, then upload and commit. */
   const publishNow = () =>
-    actions.run(async () => {
+    actions.run(async (setStage) => {
       try {
         const existing = pendingRef.current;
         if (existing && conflict) throw new Error('Share confirmation changed');
         if (!existing && entry?.status === 'draft' && entry.canManage) {
           // The draft's upload credentials are gone, so it can only be discarded.
           // The server refuses a second deployment until it is revoked.
+          setStage('revoke');
           await actions.revokeDeployment(entry);
         }
-        await publishPrepared(existing ?? (await capture()));
+        setStage('capture');
+        await publishPrepared(existing ?? (await capture()), setStage);
       } finally {
         setPhase('idle');
       }
@@ -486,7 +500,7 @@ export function useSessionShareManagement(
             await navigator.clipboard.writeText(result.url);
             capturePostHogEvent(postHog, 'share/link_copied');
             setResult((value) => (value ? { ...value, copied: true } : value));
-          })
+          }, 'copy')
         : entry && actions.copy(entry),
     onReset: () => entry && actions.reset(entry),
     onRevoke: () =>

@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  File,
   GitPullRequest,
   MessageSquare,
   Terminal,
@@ -537,7 +538,11 @@ function CategoryRow({
       onMentionNavigate={onNavigate ? () => onNavigate(category) : undefined}
     >
       <RowGlyph value={value}>
-        <CandidateIcon icon={category.icon} />
+        {category.icon === 'file' ? (
+          <File {...stylex.props(styles.glyphSvg)} strokeWidth={1.75} />
+        ) : (
+          <CandidateIcon icon={category.icon} />
+        )}
       </RowGlyph>
       <span {...stylex.props(styles.text, reason != null && styles.textStacked)}>
         <span {...stylex.props(styles.title, disabled && styles.titleMuted)}>{category.label}</span>
@@ -887,11 +892,12 @@ export function MentionTwoLevelMenuBody({
     </div>
   );
 
-  if (!detail) return list;
+  // Keep the scroller mounted when hover adds or removes a detail pane;
+  // replacing its ancestors resets scroll and moves the row under the pointer.
   return (
-    <div {...stylex.props(styles.withDetail)}>
+    <div {...stylex.props(detail && styles.withDetail)}>
       <div {...stylex.props(styles.withDetailList)}>{list}</div>
-      <CandidateDetailPane detail={detail} />
+      {detail ? <CandidateDetailPane detail={detail} /> : null}
     </div>
   );
 

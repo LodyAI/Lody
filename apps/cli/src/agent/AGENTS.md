@@ -2,7 +2,7 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-ACP client side of the CLI. Responsibilities per file and background: [README.md](README.md).
+ACP client side of the CLI. File map: [README.md](README.md).
 Protocol: context/acp-protocol.md; edit-payload quirks:
 context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AGENTS.md).
 
@@ -59,11 +59,10 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   Presets change only before the first prompt. Per-Agent ACP stdio/HTTP MCP
   belongs in the adapter, not host composition. JSONL encoding detection
   is READ-ONLY: fail mixed roots naming both paths; never modify artifacts.
-- `managed-agent-runtime.ts`: Codex/Claude/Grok pins come only from their
+- `managed-agent-runtime.ts`: Codex/Claude/Grok/Devin pins come only from their
   `<name>-runtime-manifest.json`; reject dependency/manifest version mismatches and never
   duplicate pins beside the manager. Do not loosen the metadata
-  schema or accept unknown legacy fields. Definition drift is a miss; cleanup and update scans are best effort. The Grok submodule is never the source for production
-  runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
+  schema or accept unknown legacy fields. Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
   methods stay capability-gated. Inject the artifact base URL from
   `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.
   `LODY_RUNTIME_BASE_URL` is an explicit mirror override only.
@@ -87,7 +86,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Claude capability refresh runs its native status command first so missing credentials surface
   as structured auth-required state before adapter startup; explicit environment-authenticated
   paths bypass it.
-- Registry/custom initialization advertises no terminal capability; only agent-driven methods
+- Registry/custom/Devin initialization advertises no terminal capability; only agent-driven methods
   are runnable (`env_var` rejected as deprecated, `terminal` unsupported until Machine RPC has a
   real interactive-terminal bridge). Method lists and elicitations stay on the original
   long-running request with one pending interaction at a time; replies carry an interaction id

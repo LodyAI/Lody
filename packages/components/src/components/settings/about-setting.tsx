@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
@@ -22,7 +23,6 @@ import { developerModeEnabledAtom } from '@/atoms/settings';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MobileAboutSettings } from '@/components/mobile/mobile-about-settings';
 import { collectClientBuildInfo } from '@/lib/client-build-info';
-import { settingsType as type } from './type.stylex';
 
 const buildInfo = collectClientBuildInfo();
 const BUILD_DATE = buildInfo.buildDate ?? 'development';
@@ -38,7 +38,7 @@ const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
   /** A fact the build states: read, not set, so it is quiet and fixed-width. */
-  value: { fontSize: type.caption, fontFamily: MONO, color: colors.secondaryLabel },
+  value: { fontSize: uiText.footnoteSize, fontFamily: MONO, color: colors.secondaryLabel },
   /** The build's facts on one line, set apart by middle dots. */
   facts: {
     display: 'flex',
@@ -51,7 +51,7 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[1],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   statusError: { color: colors.destructive },
@@ -67,7 +67,7 @@ const styles = stylex.create({
     gap: '2px',
     textAlign: 'end',
   },
-  endpoint: { fontSize: type.caption, fontFamily: MONO, color: colors.secondaryLabel },
+  endpoint: { fontSize: uiText.footnoteSize, fontFamily: MONO, color: colors.secondaryLabel },
 });
 
 type AppIpc = NonNullable<ReturnType<typeof getIpcServices>>['app'];

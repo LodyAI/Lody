@@ -887,7 +887,7 @@ export function AccountSettingsPure({
                     </Menu.Trigger>
                     <Menu.Content align="end">
                       <Menu.Item
-                        icon={<Copy {...stylex.props(styles.glyph)} />}
+                        icon={Copy}
                         onClick={() => {
                           void onCopyInviteLink(getInviteLink(invitation));
                         }}
@@ -897,7 +897,7 @@ export function AccountSettingsPure({
                       {hasAdminPermission ? (
                         <Menu.Item
                           tone="destructive"
-                          icon={<X {...stylex.props(styles.glyph)} />}
+                          icon={X}
                           onClick={() => {
                             void cancelInvitation(invitation.id);
                           }}

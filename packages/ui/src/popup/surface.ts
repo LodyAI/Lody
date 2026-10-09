@@ -43,6 +43,7 @@ export const surface = stylex.create({
     color: popup.label,
     fontFamily: 'inherit',
     fontSize: popup.text,
+    lineHeight: text.subheadlineLeading,
     fontWeight: 500,
     letterSpacing: text.controlTracking,
     outlineStyle: 'none',
@@ -62,10 +63,12 @@ export const surface = stylex.create({
    * A list belongs to a control that shows the value it holds, so it takes
    * `--anchor-width` and the two read as one control. A menu is opened by
    * whatever happens to be there — often a 28px icon button — so it states its
-   * own width and grows past it for the longest row.
+   * own width and grows past it for the longest row. Commands use regular
+   * weight because the rows are peers; group headings keep their emphasis.
    */
   popupMenu: {
     minWidth: popup.menuWidth,
+    fontWeight: 400,
     // A list keeps its scroll in `list`, between the two scroll arrows. A menu
     // has no such part — its rows are the popup's own children — so the popup
     // is the scrolling box, bounded by the `--available-height` it already has.
@@ -76,13 +79,11 @@ export const surface = stylex.create({
   /**
    * A popover surface: the same rung with content on it instead of rows.
    *
-   * It replaces five declarations, the way `popupMenu` replaces one, and
-   * `test/popover.test.tsx` pins that as a count so a sixth cannot appear
-   * quietly. Two are layout: a list is the width of the control it belongs to
+   * A list is the width of the control it belongs to
    * and insets by 4px so a row can reach its edge, while a popover is opened by
    * whatever the surface already had there and holds prose, which needs room
-   * rather than a row's bleed. The other three are the type — size, weight and
-   * tracking — stepping from the control rule to the prose rule, 14 at weight
+   * rather than a row's bleed. Size, leading, weight and tracking
+   * step from the control rule to the prose rule, 14 at weight
    * 400, because what is in a popover is sentences rather than the labels of
    * commands. A control placed inside one brings its own step with it.
    */
@@ -266,6 +267,12 @@ export const surface = stylex.create({
     color: popup.hint,
     pointerEvents: 'none',
   },
+  /**
+   * A component-form `icon` is mounted by the box itself with this class, so
+   * the box owns its size: an svg gets width/height 100% (beating px
+   * attributes), and any glyph component forwarding `className` fills the box.
+   */
+  itemIconGlyph: { display: 'block', width: '100%', height: '100%' },
   /** On a destructive row the icon is part of what the row says, not a hint. */
   itemIconInherit: { color: 'inherit' },
   /**
@@ -307,7 +314,7 @@ export const surface = stylex.create({
     color: popup.label,
     fontFamily: 'inherit',
     fontSize: popup.text,
-    fontWeight: 500,
+    fontWeight: 400,
     letterSpacing: text.controlTracking,
     lineHeight: 1,
     cursor: 'default',

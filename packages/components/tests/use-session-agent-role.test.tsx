@@ -3,6 +3,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_AGENT_ROLE_EMOJI } from '@lody/shared';
 import type {
   AgentConfigId,
   AgentConfigMeta,
@@ -32,6 +33,7 @@ import {
   useSessionAgentRole,
   type SessionAgentRoleControl,
 } from '../src/hooks/use-session-agent-role';
+import { resolveProgrammaticTurnAgentRole } from '../src/lib/composer-agent-roles';
 import {
   sessionAgentRoleDurableSnapshotAtomFamily,
   sessionAgentRoleSelectionAtomFamily,
@@ -264,6 +266,12 @@ describe('useSessionAgentRole', () => {
     expect(control?.turnSelection).toEqual({
       agentRoleId: 'role-special',
       agentRoleRevision: 1,
+      agentRoleSnapshot: {
+        id: 'role-special',
+        revision: 1,
+        name: 'role-special',
+        emoji: DEFAULT_AGENT_ROLE_EMOJI,
+      },
     });
   });
 
@@ -317,7 +325,15 @@ describe('useSessionAgentRole', () => {
       runConfigHasUserEdits: true,
       selectedModelId: 'model-2',
     });
-    expect(control?.turnSelection).toBeUndefined();
+    expect(control?.turnSelection).toBeNull();
+    expect(
+      resolveProgrammaticTurnAgentRole({
+        composer: control?.turnSelection,
+        durableRoleId: 'role-1' as AgentRoleId,
+        durableRoleRevision: 5,
+        durableMemory: { providerId: 'nowledge-mem', memoryId: 'synthetic-memory' },
+      })
+    ).toBeNull();
   });
 
   it('does not name the provenance Role after its run config changes', async () => {

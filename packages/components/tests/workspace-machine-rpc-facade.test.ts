@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   type MachineId,
+  type McpServerId,
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -178,6 +179,138 @@ describe('createWorkspaceMachineRpcFacade', () => {
     });
   });
 
+  it('sends iOS Simulator control to this machine without a login token, proof or cloud', async () => {
+    vi.stubGlobal('fetch', () => {
+      throw new Error('Unexpected cloud HTTP');
+    });
+    const requests: unknown[] = [];
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async (_channel: string, request: { method: string; params: object }) => {
+          requests.push(request);
+          return {
+            ok: true,
+            result: {
+              type: 'ios-simulator/control_response',
+              sessionId,
+              success: true,
+              devices: [],
+            },
+          };
+        },
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => undefined,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected cloud RPC');
+      },
+    });
+    await expect(
+      facade.requestIosSimulatorControl({
+        machineId: localMachineId,
+        sessionId,
+        requestedByUserId: 'local-owner',
+        command: { action: 'list' },
+      })
+    ).resolves.toMatchObject({ success: true, devices: [] });
+    expect(requests).toMatchObject([
+      {
+        method: 'ios-simulator/control',
+        params: { sessionId, requestedByUserId: 'local-owner', command: { action: 'list' } },
+      },
+    ]);
+    expect(mintPreviewControlProof).not.toHaveBeenCalled();
+  });
+
+  it('signs the exact remote iOS Simulator command with the preview handshake nonce', async () => {
+    const runtimeNonce = '00000000-0000-4000-8000-000000000002';
+    const command = { action: 'stop', operationId: 'op-7' } as const;
+    vi.mocked(mintPreviewControlProof).mockImplementation(async (intent) => {
+      expect(intent).toMatchObject({
+        machineId: remoteMachineId,
+        sessionId,
+        requesterUserId: 'owner',
+        runtimeNonce,
+        operation: { action: 'ios-simulator', command },
+      });
+      return { runtimeNonce, requestId: intent.requestId, requestToken: 'sim-proof' };
+    });
+    const sent: unknown[] = [];
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getSessionToken: () => 'test-login-token',
+      getMachineProtocolCapabilities: async () => ({
+        ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        previewControl: 1,
+        iosSimulator: 1,
+      }),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestPreviewControl: async () => ({ success: true, runtimeNonce }),
+          requestIosSimulatorControl: async (request: unknown) => {
+            sent.push(request);
+            return { type: 'ios-simulator/control_response', sessionId, success: true };
+          },
+        }) as never,
+    });
+    await expect(
+      facade.requestIosSimulatorControl({
+        machineId: remoteMachineId,
+        sessionId,
+        requestedByUserId: 'owner',
+        command,
+      })
+    ).resolves.toMatchObject({ success: true });
+    expect(sent).toMatchObject([
+      {
+        sessionId,
+        requestedByUserId: 'owner',
+        command,
+        proof: { runtimeNonce, requestToken: 'sim-proof' },
+      },
+    ]);
+  });
+
+  it('reports a remote Mac without the iOS Simulator protocol before any handshake', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => ({ previewControl: 1 }),
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient: async () =>
+        ({
+          requestPreviewControl: () => {
+            throw new Error('Unexpected handshake');
+          },
+          requestIosSimulatorControl: () => {
+            throw new Error('Unexpected simulator RPC');
+          },
+        }) as never,
+    });
+    await expect(
+      facade.requestIosSimulatorControl({
+        machineId: remoteMachineId,
+        sessionId,
+        requestedByUserId: 'owner',
+        command: { action: 'list' },
+      })
+    ).resolves.toMatchObject({ success: false, error: 'unsupported' });
+    expect(mintPreviewControlProof).not.toHaveBeenCalled();
+  });
+
   it('keeps Pi discovery success and failure on the local machine route', async () => {
     const discovery = { version: 1, agentDir: '/fixture/pi', extensions: [], warnings: [] };
     let failed = false;
@@ -216,8 +349,8 @@ describe('createWorkspaceMachineRpcFacade', () => {
       workspaceId,
       getMachineProtocolCapabilities: async () => undefined,
       targetRouter: {
-        getPlaneForMachine: () => 'remote',
-        resolvePlaneForMachine: async () => 'remote',
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
       },
       getMachineRpcClient: async () => {
         throw new Error('Unexpected RPC');
@@ -357,7 +490,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'local',
-        resolvePlaneForMachine: vi.fn(async () => 'local'),
+        resolvePlaneForMachine: vi.fn(async () => 'local' as const),
       },
       getMachineRpcClient,
     });
@@ -404,7 +537,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'local',
-        resolvePlaneForMachine: vi.fn(async () => 'local'),
+        resolvePlaneForMachine: vi.fn(async () => 'local' as const),
       },
       getMachineRpcClient,
     });
@@ -444,7 +577,7 @@ describe('createWorkspaceMachineRpcFacade', () => {
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
       targetRouter: {
         getPlaneForMachine: () => 'cloud',
-        resolvePlaneForMachine: vi.fn(async () => 'cloud'),
+        resolvePlaneForMachine: vi.fn(async () => 'cloud' as const),
       },
       getMachineRpcClient,
     });
@@ -463,5 +596,142 @@ describe('createWorkspaceMachineRpcFacade', () => {
       timeoutMs: 2_000,
     });
     expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe('local MCP discovery routing', () => {
+  const server = {
+    id: 'test' as McpServerId,
+    name: 'Test',
+    transport: 'stdio' as const,
+    connection: { transport: 'stdio' as const, command: 'synthetic' },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  it.each([true, false])(
+    'gates local inventory by daemon capability (supported=%s)',
+    async (supported) => {
+      const inventory = { type: 'mcp/tools', tools: [{ name: 'read_file' }] };
+      vi.stubGlobal('window', {
+        __LODY_ELECTRON__: true,
+        ipc: {
+          invoke: async () => {
+            if (!supported) throw new Error('Unexpected local RPC');
+            return { ok: true, result: inventory };
+          },
+        },
+      });
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () =>
+          supported ? CURRENT_MACHINE_PROTOCOL_CAPABILITIES : undefined,
+        targetRouter: {
+          getPlaneForMachine: () => 'local',
+          resolvePlaneForMachine: async () => 'local',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('Unexpected remote RPC');
+        },
+      });
+      const result = facade.requestLocalMcpTools(localMachineId, server);
+      if (supported) await expect(result).resolves.toEqual(inventory);
+      else await expect(result).rejects.toThrow('requires a supported local daemon');
+    }
+  );
+});
+
+describe('memory provider routing', () => {
+  const request = { action: 'list', providerId: 'nowledge-mem' } as const;
+  const inventory = {
+    type: 'machine/memory',
+    status: 'ready',
+    memories: [{ id: 'reviewer', name: 'Reviewer' }],
+  } as const;
+  it.each(['local', 'cloud'] as const)(
+    'returns identities from the selected %s machine',
+    async (plane) => {
+      const machineId = plane === 'local' ? localMachineId : remoteMachineId;
+      vi.stubGlobal('window', {
+        __LODY_ELECTRON__: true,
+        ipc: {
+          invoke: async (
+            _channel: string,
+            envelope: { machineId: MachineId; method: string; params: unknown }
+          ) => {
+            if (plane !== 'local') throw new Error('Unexpected local RPC');
+            expect(envelope).toMatchObject({
+              machineId,
+              method: 'machine/memory',
+              params: request,
+            });
+            return { ok: true, result: inventory };
+          },
+        },
+      });
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        targetRouter: {
+          getPlaneForMachine: () => plane,
+          resolvePlaneForMachine: async () => plane,
+        },
+        getMachineRpcClient: async (target) => {
+          if (plane !== 'cloud') throw new Error('Unexpected remote RPC');
+          expect(target).toBe(remoteMachineId);
+          return {
+            requestMemoryProvider: async (params: unknown) => {
+              expect(params).toEqual(request);
+              return inventory;
+            },
+          } as never;
+        },
+      });
+      await expect(facade.requestMemoryProvider(machineId, request)).resolves.toEqual(inventory);
+    }
+  );
+  it.each([undefined, { memoryProviders: 0 }, { memoryProviders: 0.5 }])(
+    'rejects unsupported capabilities %j before routing a command',
+    async (protocolCapabilities) => {
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () => protocolCapabilities,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('Unexpected RPC');
+        },
+      });
+      await expect(facade.requestMemoryProvider(remoteMachineId, request)).resolves.toMatchObject({
+        status: 'error',
+        error: 'Update this machine to use memory providers.',
+        memories: [],
+      });
+    }
+  );
+  it('returns local failure without falling back to a remote machine', async () => {
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async () => ({ ok: false, error: 'local service unavailable' }),
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected remote RPC');
+      },
+    });
+    await expect(facade.requestMemoryProvider(localMachineId, request)).resolves.toMatchObject({
+      status: 'error',
+      error: 'local service unavailable',
+      memories: [],
+    });
   });
 });

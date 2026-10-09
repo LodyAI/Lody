@@ -1,3 +1,4 @@
+import type { MemoryBinding } from './memory-provider';
 import type { AcpModelControls } from './acp-model-capabilities';
 import {
   AvailableCommand,
@@ -22,6 +23,7 @@ import {
 
 export const MANAGED_BUILTIN_RUNTIMES = [
   { runtimeName: 'kimi-code', agentType: 'kimi', displayName: 'Kimi Code' },
+  { runtimeName: 'devin', agentType: 'devin', displayName: 'Devin' },
   { runtimeName: 'grok-build', agentType: 'grok', displayName: 'Grok' },
   { runtimeName: 'claude-code', agentType: 'claude', displayName: 'Claude Code' },
   { runtimeName: 'codex', agentType: 'codex', displayName: 'Codex' },
@@ -67,6 +69,7 @@ export type AgentType = string;
  */
 const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' | 'tagged'> = {
   pi: 'none',
+  devin: 'none',
   claude: 'untagged',
   codex: 'tagged',
   grok: 'untagged',
@@ -142,6 +145,8 @@ export type BuiltinRuntimeOverrides = {
   claudeCodeExecutable?: string;
   kimiPath?: string;
   grokPath?: string;
+  devinPath?: string;
+  piPath?: string;
   piExtensions?: string[];
 };
 
@@ -157,6 +162,8 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     claudeCodeExecutable?: unknown;
     kimiPath?: unknown;
     grokPath?: unknown;
+    devinPath?: unknown;
+    piPath?: unknown;
     piExtensions?: unknown;
   };
   return (
@@ -164,7 +171,9 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     (record.claudeCodeExecutable === undefined ||
       typeof record.claudeCodeExecutable === 'string') &&
     (record.kimiPath === undefined || typeof record.kimiPath === 'string') &&
+    (record.devinPath === undefined || typeof record.devinPath === 'string') &&
     (record.grokPath === undefined || typeof record.grokPath === 'string') &&
+    (record.piPath === undefined || typeof record.piPath === 'string') &&
     (record.piExtensions === undefined ||
       (Array.isArray(record.piExtensions) &&
         record.piExtensions.length <= PI_EXTENSIONS_MAX_SELECTIONS &&
@@ -1882,7 +1891,10 @@ export type IssuePRMention = {
 };
 
 export type ACPTurnConfig = {
+  memory?: MemoryBinding;
+  /** Frozen effective execution text, including accepted Config/Role instructions. */
   prompt: string;
+  /** Authored input for display/editing and structured attachments for execution. */
   inputBlocks?: SessionInputBlock[];
   cliType: AgentConfigCliType;
   agentType: AgentType;
@@ -1901,6 +1913,7 @@ export type ACPTurnConfig = {
   agentRoleId?: AgentRoleId | null;
   /** Catalog revision whose values were frozen into this Turn. */
   agentRoleRevision?: number;
+  agentRoleSnapshot?: import('./message-author').AgentRoleSnapshot;
   issuePRMentions?: IssuePRMention[];
   // continue to chat
   resume?: ACPSessionId;

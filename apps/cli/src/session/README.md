@@ -9,10 +9,10 @@ Dispatch architecture: context/message-flow.md — user turns arrive by being wr
 session doc (meta pointers), not via a message bus. The WS/DO path is DEPRECATED. The
 CLI/MCP orchestration contract is specs/session-orchestration.md.
 
-| Boundary         | Owner                                             | Responsibility                                                       |
-| ---------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
-| Admission        | [Dispatch watcher](session-dispatch-watcher.ts)   | Resolves metadata activation against history, queue, and RPC offers. |
-| Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.      |
+| Boundary         | Owner                                             | Responsibility                                                                       |
+| ---------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Admission        | [Dispatch watcher](session-dispatch-watcher.ts)   | Resolves metadata activation against history, queue, and RPC offers.                 |
+| Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.                      |
 | Process lifetime | [Session](session.ts)                             | Owns ACP resources, confirmed termination, and bounded Codex refresh-start recovery. |
 
 ## Files
@@ -63,6 +63,16 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   [specs/session-worktree-lifecycle.md](../../../../specs/session-worktree-lifecycle.md).
 
 ## Background
+
+### Frozen execution input
+
+Create, continue and steer resolve effective input through shared
+`resolveSessionExecutionInputBlocks`: the accepted turn's `prompt` owns text,
+while `inputBlocks` provide structured attachments and retain authored text for
+editing. Dispatch preserves both fields and supplies legacy history fallback.
+Execution never reconstructs instructions from the current Role catalog. Runtime
+context and attachment materialization remain daemon responsibilities. See the
+[decision and regression evidence](../../../../.agents/notes/implemented/architecture/2026-10-08-frozen-turn-execution-input.md).
 
 ### Why turn activation has its own predicate
 
@@ -236,14 +246,17 @@ subscriptions at every daemon start (see [../lib/loro/AGENTS.md](../lib/loro/AGE
 
 ### GitHub credential broker
 
-Agent `gh` auth for GitHub repo sessions is set up in `session-manager.ts`: it creates the git
-credential broker, prepends the `~/.lody/bin/gh` shim, and injects/refreshes a managed
-`GH_TOKEN` when no user token is present. The shim lives in `../lib/gh-shim-script.ts`; token
-fetching/caching is in `../lib/github-token-manager.ts`; git HTTPS auth uses
-`../lib/git-credential-helper-script.ts`. A native `gh` earlier in PATH bypasses the shim, so the
-PATH merges keep the shim dir first (see [../lib/AGENTS.md](../lib/AGENTS.md)). Session process trees are already correct —
-`prepareGitHubRepoSessionConfig` injects the env explicitly. The host-side rule is in
-[worktree/AGENTS.md](worktree/AGENTS.md).
+Managed GitHub sessions receive a trusted conversation-owner snapshot and workspace
+Git/gh adapters from `session-manager.ts`. The shared credential iterator tries
+personal, eligible machine and repository App sources once, without a cloud policy
+lookup. The broker supplies optional managed tokens; owner-local credentials remain
+available during token-service failure. Native Git helpers use `GIT_EXEC_PATH`;
+standard URLs remain standard. Host operations pin the same owner snapshot through
+checkout. Managed credential helpers also cover checkout filters and LFS; non-owner
+host children scrub inherited GitHub tokens. Owner refresh updates shell eligibility
+and retires the old runtime on transfer, since running children retain their old
+environments. The interrupted operation is not replayed. See [the contract](../../../../specs/github-identity-fallback.md) and
+[worktree rules](worktree/AGENTS.md) for ownership, write non-replay and isolation.
 
 ### Commit identity
 
@@ -256,7 +269,7 @@ Lody/GitHub identity and can never inherit the machine owner's Git config; if no
 identity exists, the neutral LodyAI identity is used. The cloud composition root owns hosted
 user resolution because the daemon does not own an end-user browser session; the local access
 port resolves only its synthetic owner and never performs network I/O. PR and push identity
-itself comes from the requester-bound GitHub token, not from git config. Identity changes update the host Session environment without restarting ACP or its sandbox,
+itself comes from the conversation-owner GitHub credential, not from git config. Identity changes update the host Session environment without restarting ACP or its sandbox,
 including adopted preparations. Existing ACP children retain their launch environment; live
 identity propagation into adapter-owned Git commands remains unresolved.
 
@@ -265,4 +278,13 @@ identity propagation into adapter-owned Git commands remains unresolved.
 Peek and claim are synchronous published-resource snapshots. A prepared resource may reuse its
 open target-machine Flock to synchronously resolve launch config, but dispatch and claim
 rescan the current row. Durable creation claims the marker only when repo, source, and base
-branch target identity match, runs setup, then permits the first prompt.
+branch target identity match, runs setup, then permits the first prompt. A missed claim returns
+any retiring cleanup barrier even after its lease has disappeared. Cold creation, discard,
+replacement preparation and shutdown join that barrier, including resources returned after
+cancellation. This can delay cold startup until cleanup finishes; otherwise a retired
+preparation could delete the newly reused directory. Unrelated Sessions remain independent.
+
+Memory identity references travel with turn configuration. `Session.createAgent` maps
+them through `../lib/memory-providers.ts` at spawn; the execution service restarts a
+resident ACP process when the next turn changes identity. See the
+[memory Spec](../../../../specs/agent-role-memory.md).

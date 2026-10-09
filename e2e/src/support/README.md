@@ -16,7 +16,7 @@
 | `pages/work-session-page.ts`                         | Worktree Session, terminal, deletion, and cleanup contract                 |
 | `pages/agent-role-page.ts`                           | Agent Role settings, accepted invocation evidence, and cleanup             |
 | `pages/agent-provider-lifecycle-page.ts`             | Invalid draft, rollback, two-Provider dispatch, revisit, and deletion      |
-| `pages/context-copy-page.ts`                         | User/assistant prefixes, user-driven stream transitions, and isolation     |
+| `pages/context-copy-page.ts`                         | Visible copy anchors, Markdown prefixes, streaming, and isolation     |
 | `pages/mcp-catalog-editing-page.ts`                  | MCP catalog editing, state toggles, reopen checks, and deletion            |
 | `pages/mcp-catalog-page.ts`                          | MCP settings, Turn selection, ACP startup, and cleanup                     |
 | `pages/project-lifecycle-page.ts`                    | Local project picker, sidebar, catalog, and removal lifecycle              |

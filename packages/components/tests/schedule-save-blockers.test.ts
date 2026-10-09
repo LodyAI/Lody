@@ -46,17 +46,28 @@ const ready = (overrides: Partial<ScheduleSaveContext> = {}): ScheduleSaveContex
 });
 
 describe('what stops a schedule from being saved', () => {
+  it('requires a typed-config daemon before authoring schedules', () => {
+    const context = ready({ machine: { ...machine, protocolCapabilities: { schedules: 1 } } });
+    expect(collectScheduleSaveBlockers(context, t)).toContain(en['schedules.upgrade']);
+    expect(collectScheduleSaveBlockers(ready(), t)).toEqual([]);
+  });
+
   it('does not require a project — a chat-only schedule is complete', () => {
     expect(collectScheduleSaveBlockers(ready(), t)).toEqual([]);
   });
 
-  it('still requires an Agent with an explicit permission mode', () => {
+  it('requires an Agent but not an explicit permission pin or capability cache', () => {
     expect(collectScheduleSaveBlockers(ready({ agent: null, agentConfig: null }), t)).toContain(
       en['schedules.requireAgent']
     );
+    const agent = { agentConfigId: 'agent' as never };
+    expect(collectScheduleSaveBlockers(ready({ agent }), t)).toEqual([]);
     expect(
-      collectScheduleSaveBlockers(ready({ agent: { agentConfigId: 'agent' as never } }), t)
-    ).toContain(en['schedules.choosePermission']);
+      collectScheduleSaveBlockers(
+        ready({ agent, machine: { ...machine!, acpCapabilities: {} } }),
+        t
+      )
+    ).toEqual([]);
   });
 
   it('still requires an owned machine that supports schedules', () => {
@@ -156,7 +167,6 @@ describe('where each reason is marked', () => {
     );
     expect(issues.map(({ field, kind }) => `${field}:${kind}`)).toEqual([
       'form:invalid',
-      'agent:invalid',
       // Never marked on the project chip: that reads as "a project is required".
       'form:invalid',
       'destination:missing',

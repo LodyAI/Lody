@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React, { useEffect, useState } from 'react';
+import React, { act, useEffect, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -11,13 +11,16 @@ import { WORKSPACE_FOCUS_SCOPES } from '../src/atoms/focus-layer';
 import { WebWorkspaceLayout } from '../src/components/web-workspace-layout';
 import { SidebarVisibilityGate } from '../src/components/sidebar-visibility-gate';
 
+const layout = vi.hoisted(() => ({ compact: false }));
+
 vi.mock('@tanstack/react-router', () => ({
   useLocation: ({ select }: { select: (location: { pathname: string }) => string }) =>
     select({ pathname: '/workspace/chat' }),
 }));
 vi.mock('../src/hooks/use-keyboard-navigation', () => ({ useKeyboardNavigation: () => {} }));
-vi.mock('../src/hooks/use-mobile', () => ({ useIsCompactDesktop: () => false }));
+vi.mock('../src/hooks/use-mobile', () => ({ useIsCompactDesktop: () => layout.compact }));
 vi.mock('../src/ui/window-drag-region', () => ({ WindowDragStrip: () => null }));
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('../src/components/loro-app-sidebar', () => ({
   LoroAppSidebar: () => (
     <div data-sidebar-identity="">
@@ -36,6 +39,7 @@ describe('desktop sidebar toggle', () => {
     root = undefined;
     container?.remove();
     container = undefined;
+    layout.compact = false;
   });
 
   function render(node: React.ReactNode) {
@@ -44,6 +48,93 @@ describe('desktop sidebar toggle', () => {
     root = createRoot(container);
     flushSync(() => root?.render(node));
   }
+
+  it('isolates compact navigation from the background content', async () => {
+    layout.compact = true;
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, false);
+    await act(async () =>
+      render(
+        <Provider store={store}>
+          <WebWorkspaceLayout>
+            <button>Machine</button>
+          </WebWorkspaceLayout>
+        </Provider>
+      )
+    );
+    const content = container!.querySelector(
+      `[data-focus-scope="${WORKSPACE_FOCUS_SCOPES.content}"]`
+    )!;
+    expect(content.hasAttribute('inert')).toBe(true);
+    expect(document.querySelector('[role="dialog"][aria-modal="true"]')).not.toBeNull();
+    await act(async () => store.set(sidebarCollapsedAtom, true));
+    expect(content.hasAttribute('inert')).toBe(false);
+  });
+
+  it('closes compact navigation on Escape, persists collapse and restores the opener twice', async () => {
+    layout.compact = true;
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, true);
+    await act(async () =>
+      render(
+        <Provider store={store}>
+          <WebWorkspaceLayout>
+            <button onClick={() => store.set(sidebarCollapsedAtom, false)}>
+              Show navigation sidebar
+            </button>
+          </WebWorkspaceLayout>
+        </Provider>
+      )
+    );
+    const opener = container!.querySelector('button')!;
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      await act(async () => {
+        opener.focus();
+        opener.click();
+      });
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][data-state="open"]')!;
+      expect(dialog).not.toBeNull();
+      await act(async () => {
+        dialog.querySelector('input')!.focus();
+        document.activeElement!.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+        );
+      });
+      expect(store.get(sidebarCollapsedAtom)).toBe(true);
+      expect(document.activeElement).toBe(opener);
+    }
+  });
+
+  it('releases background isolation when compact navigation becomes a desktop column', async () => {
+    layout.compact = true;
+    const store = createStore();
+    store.set(sidebarCollapsedAtom, false);
+    const node = (
+      <Provider store={store}>
+        <WebWorkspaceLayout>
+          <button>Machine</button>
+        </WebWorkspaceLayout>
+      </Provider>
+    );
+    await act(async () => render(node));
+    layout.compact = false;
+    await act(async () =>
+      root!.render(
+        <Provider store={store}>
+          <WebWorkspaceLayout>
+            <button>Machine</button>
+          </WebWorkspaceLayout>
+        </Provider>
+      )
+    );
+    const content = container!.querySelector(
+      `[data-focus-scope="${WORKSPACE_FOCUS_SCOPES.content}"]`
+    )!;
+    expect(content.hasAttribute('inert')).toBe(false);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container!.querySelector('[data-sidebar-identity]')).not.toBeNull();
+    expect(store.get(sidebarCollapsedAtom)).toBe(false);
+  });
 
   it('retains the same sidebar DOM and scroll state across collapse and expand', () => {
     const store = createStore();

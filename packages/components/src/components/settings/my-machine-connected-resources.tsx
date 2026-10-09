@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bot, Folder } from 'lucide-react';
@@ -11,7 +12,6 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { settingsSurface as surface } from './surface';
 import type { ProjectSettingsRow } from './project-settings';
-import { settingsType as type } from './type.stylex';
 
 export type MachineConnectedProject = {
   key: string;
@@ -214,9 +214,19 @@ const styles = stylex.create({
   },
   heading: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
   headingIcon: { flexShrink: 0, width: '14px', height: '14px', color: colors.tertiaryLabel },
-  title: { margin: 0, fontSize: type.caption, fontWeight: 400, color: colors.secondaryLabel },
-  hint: { margin: 0, fontSize: type.caption, lineHeight: 1.375, color: colors.secondaryLabel },
-  note: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  title: {
+    margin: 0,
+    fontSize: uiText.footnoteSize,
+    fontWeight: 400,
+    color: colors.secondaryLabel,
+  },
+  hint: {
+    margin: 0,
+    fontSize: uiText.footnoteSize,
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  note: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   /** The region fill holds rows that run edge to edge, so it drops its padding. */
   list: { paddingInline: 0, paddingBlock: 0, overflow: 'hidden' },
   row: {
@@ -228,7 +238,7 @@ const styles = stylex.create({
   },
   rowText: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
   truncate: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  name: { fontSize: type.caption, color: colors.label },
+  name: { fontSize: uiText.footnoteSize, color: colors.label },
   path: {
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
     fontSize: '11px',

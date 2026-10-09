@@ -4,6 +4,12 @@ Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
 `AGENTS.md` only. Prefer extending a primitive here over a private replacement in a
 feature directory.
 
+## Drawer popups
+
+- `DrawerContent` provides an internal boxless no-drag popup host via state.
+  Keep portals inside that modal and outside scrolling children: body portals
+  inherit Vaul's pointer lock and clicks pass through to the underlying content.
+
 ## Emoji picker
 
 `ui/emoji-picker.tsx` is the shadcn `frimousse` registry component, with its two copy
@@ -74,7 +80,8 @@ strings on i18n rather than the registry's inline English.
   as the workspace Plus badge.
 - Product menu extras live in `menu-styles.ts` (group label, separator, search
   shell); the surface and rows are `@lody/ui`'s popup surface. Rows track
-  `0.9em` of `--ui-font-size`; the edge is a `0.5px` shadow ring, never a 1px
+  `0.9em` of `--ui-font-size` at weight 400, including composer pickers and
+  mention menus; the edge is a `0.5px` shadow ring, never a 1px
   border.
 
 ## Spinner

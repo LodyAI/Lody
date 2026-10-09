@@ -15,6 +15,7 @@ const ALL_PANELS: SessionSidePanelOption[] = [
   { id: 'files', label: 'Files', kind: 'files' },
   { id: 'changes', label: 'All Changes', kind: 'changes' },
   { id: 'browser', label: 'Browser', kind: 'browser' },
+  { id: 'ios-simulator', label: 'iOS Simulator', kind: 'ios-simulator' },
   { id: 'pr', label: 'PR', kind: 'pr' },
 ];
 const INITIAL_TABS: SessionSidePanelTabItem[] = [

@@ -10,6 +10,7 @@ import type {
 } from '@lody/shared';
 
 import { countTextLines } from './diff-line-counts';
+import { gitDiffBaseRefCandidates } from '../git/git-diff-base';
 
 // Pure Git-backed scanning + All Changes computation shared by the file-index
 // Tinypool worker (`file-index-scan-worker.ts`) and the main-thread fallback in
@@ -92,9 +93,11 @@ async function runGitLsFiles(
 
 export async function computeAllChanges(
   workspaceRoot: string,
-  options: { readonly preferredBaseBranch?: string } = {}
+  options: { readonly preferredBaseBranch?: string; readonly diffBase?: string } = {}
 ): Promise<CodeCollabV2AllChangesState> {
-  const diffBase = await resolveAllChangesDiffBase(workspaceRoot, options.preferredBaseBranch);
+  const diffBase =
+    options.diffBase ??
+    (await resolveAllChangesDiffBase(workspaceRoot, options.preferredBaseBranch));
   const diffTarget = diffBase ?? 'HEAD';
   const [numstat, nameStatus, untracked] = await Promise.all([
     // `--numstat` cannot use `-z`, so disable `core.quotePath` to keep non-ASCII paths
@@ -165,7 +168,7 @@ export async function computeAllChanges(
   return changes;
 }
 
-async function resolveAllChangesDiffBase(
+export async function resolveAllChangesDiffBase(
   workspaceRoot: string,
   preferredBaseBranch?: string
 ): Promise<string | null> {
@@ -183,21 +186,14 @@ async function resolveAllChangesDiffBase(
   }
 
   const head = await runGit(workspaceRoot, ['rev-parse', '--verify', 'HEAD^{commit}']);
-  return head.ok && head.stdout.trim() ? 'HEAD' : null;
+  return head.ok && head.stdout.trim() ? head.stdout.trim() : null;
 }
 
 async function resolveAllChangesBaseRef(
   workspaceRoot: string,
   preferredBaseBranch?: string
 ): Promise<string | null> {
-  const candidates = [
-    ...(preferredBaseBranch ? [`origin/${preferredBaseBranch}`, preferredBaseBranch] : []),
-    'origin/main',
-    'main',
-    'origin/master',
-    'master',
-    'origin/HEAD',
-  ];
+  const candidates = gitDiffBaseRefCandidates(preferredBaseBranch);
   for (const candidate of candidates) {
     const exists = await runGit(workspaceRoot, ['rev-parse', '--verify', `${candidate}^{commit}`]);
     if (exists.ok) {

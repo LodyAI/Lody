@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { ExternalLink, MessageSquare } from 'lucide-react';
 import type { ScheduleDestination } from '@lody/shared';
@@ -7,6 +8,34 @@ import { Combobox } from '@lody/ui/combobox';
 import { Select } from '@lody/ui/select';
 import { PropertyRow } from './schedule-property-row';
 import { FieldIssueMark } from './schedule-field-issue-mark';
+
+const styles = stylex.create({
+  issueSpacing: { marginRight: 'calc(var(--spacing) * 1)' },
+  reveal: { overflow: 'hidden' },
+  ownChatButton: { maxWidth: 'calc(var(--spacing) * 56)' },
+  chatPickerButton: { maxWidth: 'calc(var(--spacing) * 64)' },
+  ownSessionActions: { display: 'flex', alignItems: 'center', gap: 'calc(var(--spacing) * 1)' },
+  mutedValue: { fontSize: '0.9em', color: 'hsl(var(--muted-foreground) / 1)' },
+  sessionName: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  sessionDetail: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '0.85em',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  sessionSummary: { display: 'flex', minWidth: 0, flexDirection: 'column' },
+  messageIcon: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+  },
+  externalIcon: {
+    width: 'calc(var(--spacing) * 3)',
+    height: 'calc(var(--spacing) * 3)',
+    flexShrink: 0,
+  },
+});
 
 export type PickableSession = {
   id: string;
@@ -62,7 +91,10 @@ export function ScheduleDestinationRows({
   return (
     <>
       <PropertyRow label={t('schedules.sendTo', 'Send to')}>
-        <FieldIssueMark messages={sendToIssues} className="mr-1" />
+        <FieldIssueMark
+          messages={sendToIssues}
+          className={stylex.props(styles.issueSpacing).className}
+        />
         <Select.Root
           value={value.kind}
           disabled={disabled}
@@ -105,7 +137,7 @@ export function ScheduleDestinationRows({
             animate={{ height: 'auto', opacity: 1 }}
             exit={reduce ? undefined : { height: 0, opacity: 0 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="overflow-hidden"
+            {...stylex.props(styles.reveal)}
           >
             <PropertyRow
               label={t('schedules.destination.chat', 'Chat')}
@@ -122,17 +154,17 @@ export function ScheduleDestinationRows({
               }
             >
               {ownSession ? (
-                <div className="flex items-center gap-1">
+                <div {...stylex.props(styles.ownSessionActions)}>
                   <Button
                     type="button"
                     variant="ghost"
                     size="small"
-                    className="max-w-56"
+                    {...stylex.props(styles.ownChatButton)}
                     onClick={() => onOpenSession?.(ownSession.id)}
                   >
-                    <MessageSquare className="size-3.5 shrink-0" />
-                    <span className="truncate">{ownSession.title}</span>
-                    <ExternalLink className="size-3 shrink-0" />
+                    <MessageSquare {...stylex.props(styles.messageIcon)} />
+                    <span {...stylex.props(styles.sessionName)}>{ownSession.title}</span>
+                    <ExternalLink {...stylex.props(styles.externalIcon)} />
                   </Button>
                   <Button
                     type="button"
@@ -145,7 +177,7 @@ export function ScheduleDestinationRows({
                   </Button>
                 </div>
               ) : (
-                <span className="text-[0.9em] text-muted-foreground">
+                <span {...stylex.props(styles.mutedValue)}>
                   {t('schedules.destination.notCreatedYet', 'Not created yet')}
                 </span>
               )}
@@ -161,7 +193,7 @@ export function ScheduleDestinationRows({
             animate={{ height: 'auto', opacity: 1 }}
             exit={reduce ? undefined : { height: 0, opacity: 0 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="overflow-hidden"
+            {...stylex.props(styles.reveal)}
           >
             <PropertyRow
               label={t('schedules.destination.chat', 'Chat')}
@@ -174,7 +206,10 @@ export function ScheduleDestinationRows({
                   : undefined
               }
             >
-              <FieldIssueMark messages={chatIssues} className="mr-1" />
+              <FieldIssueMark
+                messages={chatIssues}
+                className={stylex.props(styles.issueSpacing).className}
+              />
               <SessionPicker
                 sessions={sessions}
                 value={value.sessionId}
@@ -220,7 +255,7 @@ function SessionPicker({
         size="small"
         aria-label={t('schedules.destination.chooseChat', 'Choose a chat')}
         placeholder={t('schedules.destination.chooseChat', 'Choose a chat')}
-        className="max-w-64"
+        {...stylex.props(styles.chatPickerButton)}
       />
       <Combobox.Content
         search={
@@ -235,12 +270,10 @@ function SessionPicker({
       >
         {(session: PickableSession) => (
           <Combobox.Item key={session.id} value={session}>
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate">{session.title}</span>
+            <span {...stylex.props(styles.sessionSummary)}>
+              <span {...stylex.props(styles.sessionName)}>{session.title}</span>
               {session.detail ? (
-                <span className="truncate text-[0.85em] text-muted-foreground">
-                  {session.detail}
-                </span>
+                <span {...stylex.props(styles.sessionDetail)}>{session.detail}</span>
               ) : null}
             </span>
           </Combobox.Item>

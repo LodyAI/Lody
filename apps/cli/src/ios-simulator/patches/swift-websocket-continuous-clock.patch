@@ -1,0 +1,32 @@
+diff --git a/Sources/WSCore/WebSocketHandler.swift b/Sources/WSCore/WebSocketHandler.swift
+index ddf46ab..31b446a 100644
+--- a/Sources/WSCore/WebSocketHandler.swift
++++ b/Sources/WSCore/WebSocketHandler.swift
+@@ -188,7 +188,8 @@ public struct WebSocketCloseFrame: Sendable {
+                     try await self.close(code: closeCode)
+                     if case .closing = self.stateMachine.state {
+                         group.addTask {
+-                            try await Task.sleep(for: self.configuration.closeTimeout)
++                            let clock = ContinuousClock()
++                            try await clock.sleep(until: clock.now.advanced(by: self.configuration.closeTimeout))
+                             try await self.channel.close()
+                         }
+                         // Close handshake. Wait for responding close or until inbound ends
+@@ -224,14 +225,15 @@ public struct WebSocketCloseFrame: Sendable {
+ 
+     func runAutoPingLoop() async throws {
+         let period = self.stateMachine.pingTimePeriod
+-        try await Task.sleep(for: period)
++        let clock = ContinuousClock()
++        try await clock.sleep(until: clock.now.advanced(by: period))
+         while true {
+             switch self.stateMachine.sendPing() {
+             case .sendPing(let buffer):
+                 try await self.write(frame: .init(fin: true, opcode: .ping, data: buffer))
+ 
+             case .wait(let time):
+-                try await Task.sleep(for: time)
++                try await clock.sleep(until: clock.now.advanced(by: time))
+ 
+             case .closeConnection(let errorCode):
+                 try await self.close(code: errorCode, reason: "Ping timeout")

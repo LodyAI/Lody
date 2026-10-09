@@ -37,6 +37,37 @@ Node 上的 CLI 将配置迁移成无法启动的运行时。
 模块的产物；旧 manifest 故意不声明扩展能力。具体契约见更新后的草案 Spec。
 不引入新的执行器、配置目录副本或插件沙箱。
 
+更正（2026-09-30）：已发布的 `0.2.0-lody.5cbd610f8476` 产物包含两个 Windows 模块，并声明
+`lody.piExtensionsProtocolVersion: 1`，但提交的 manifest 漏了该字段，daemon 因此从未声明
+`piExtensions`，设置页扩展区一直不可用。manifest 现已补上该字段；固定主机参数的能力测试
+要求凡声明 `builtinPi` 必同时声明 `piExtensions`，运行时升级再次漏掉时在任何测试主机上都会失败。
+
+### 模型选择器修复（2026-10-07）
+
+扩展启用后的探测正确写入 `+override:{"piExtensions":[...]}`，但
+`useSessionAcpSelectorContext` 遗漏 Provider 的 `runtimeOverrides`。共享匹配检查
+因此按“扩展已移除”拒绝整个 Pi 目录，而 Pi 没有静态兜底。Landing 和 Provider 行
+已经传入覆盖配置，所以不同页面的模型列表表现不一致。
+
+共享会话 Hook 现在负责订阅绑定机器的 Provider，并通过共享 Provider atom 读取准确
+绑定的 id。已有会话和草稿会话均将匹配机器/类型的覆盖配置交给模型和命令读取器。
+缺失或不匹配的 Provider 不提供目录。保留缓存匹配检查，否则会复活已移除扩展的模型
+和命令。
+
+此前编辑 Pi 扩展会重置验证，但 Save 可不经探测直接关闭。保存现在复用现有按表单
+修订隔离的运行时验证流程，包括清空最后一个扩展；未改动选择仍无需探测。daemon
+接受配置 id 前必须先持久化 Provider，因此探测失败不回滚选择，而是保持对话框打开，
+显示错误并允许重试。探测期间修改选择会使旧结果失效，不能完成新一轮保存。
+编辑模式不会走后台 Provider 创建流程，即使刚清空最后一个扩展也是如此。
+
+`use-machine-flock-rows.test.tsx` 挂载实际共享 Hook，从 Flock 读取 Provider，验证
+替换/移除选择、更新目录、绑定不匹配或缺失时的模型与命令状态。
+`agent-config-dialog.test.tsx` 覆盖显式扫描/选择、保存时探测、旧响应晚到、验证失败
+重试及不改选择的保存。输入均为模拟数据，不执行用户扩展。Pi 草案 Spec 记录保存
+行为，hooks README 解释共享目录的职责归属。
+验证：`pnpm check`、`pnpm format` 和 `pnpm run docs check` 均通过。
+[PR #1285](https://github.com/LodyAI/Lody/pull/1285)。
+
 ## 历史导入后续工作（2026-09-25）
 
 历史同步报错 "does not advertise sessionCapabilities.list"：适配器只实现了 resume。

@@ -50,6 +50,11 @@ import {
   type SidebarMachineInfo,
 } from '@/components/sidebar-machine-card';
 import { cn } from '@/lib/utils';
+import {
+  SIDEBAR_ROW_TEXT_CLASS,
+  SIDEBAR_CAPTION_TEXT_CLASS,
+  SIDEBAR_HELPER_TEXT_CLASS,
+} from './sidebar-row-shared';
 import { formatCompactRelativeTime } from '@/lib/format-relative-time';
 import { isElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { WindowDragStrip } from '@/ui/window-drag-region';
@@ -367,7 +372,7 @@ export function RemoveLocalProjectDialog({
           </Dialog.Description>
         </Dialog.Header>
 
-        <div className="space-y-4 text-sm text-muted-foreground">
+        <div className={cn(SIDEBAR_ROW_TEXT_CLASS, 'space-y-4 text-muted-foreground')}>
           <div className="space-y-1">
             <p className="text-foreground/85">
               {target && target.conversationCount > 0
@@ -395,7 +400,7 @@ export function RemoveLocalProjectDialog({
                 'Lody never deletes the original project folder or its files.'
               )}
             </p>
-            <p className="mt-1 break-all font-mono text-xs">
+            <p className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'mt-1 break-all font-mono')}>
               {(target?.pathLabel ?? target?.name) || ''}
             </p>
           </div>
@@ -415,7 +420,7 @@ export function RemoveLocalProjectDialog({
                     'Also delete session worktrees created by Lody'
                   )}
                 </span>
-                <span className="mt-1 block text-xs leading-relaxed">
+                <span className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'mt-1 block')}>
                   {canCleanupWorktrees
                     ? t(
                         'sidebar.localProjects.remove.cleanupWorktreesHelper',
@@ -430,7 +435,7 @@ export function RemoveLocalProjectDialog({
             </label>
 
             {cleanupWorktrees ? (
-              <div className="mt-3 border-t pt-3 text-xs">
+              <div className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'mt-3 border-t pt-3')}>
                 {isPreflighting ? (
                   <p className="flex items-center gap-2">
                     <Spinner className="h-3.5 w-3.5" />
@@ -754,7 +759,10 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           openedByTree={openedByTree}
         />
         <div
-          className="min-w-0 flex-1 flex items-center gap-1 truncate text-[1em] text-current"
+          className={cn(
+            SIDEBAR_ROW_TEXT_CLASS,
+            'min-w-0 flex-1 flex items-center gap-1 truncate text-current'
+          )}
           // Double-click to rename is scoped to the title only, so it can't be
           // triggered by double-clicking the Archive confirm button.
           onDoubleClick={(event) => {
@@ -773,7 +781,12 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         {/* ③ A relative time on mobile only (no hover info card on touch); on desktop
             the time / branch live in the hover info card, so nothing sits here. */}
         {isMobile ? (
-          <span className="ml-auto flex shrink-0 select-none items-center gap-1 text-[0.8em] tabular-nums text-muted-foreground">
+          <span
+            className={cn(
+              SIDEBAR_CAPTION_TEXT_CLASS,
+              'ml-auto flex shrink-0 select-none items-center gap-1 tabular-nums text-muted-foreground'
+            )}
+          >
             {relativeTime}
           </span>
         ) : null}
@@ -819,7 +832,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         />
         {canTogglePinned ? (
           <ContextMenu.Item
-            icon={isPinned ? <PinOff /> : <Pin />}
+            icon={isPinned ? PinOff : Pin}
             onClick={() => {
               onTogglePinned?.(session.id, !isPinned);
             }}
@@ -829,7 +842,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         ) : null}
         {canMarkUnread ? (
           <ContextMenu.Item
-            icon={<Mail />}
+            icon={Mail}
             onClick={() => {
               onMarkUnread?.(session.id);
             }}
@@ -838,7 +851,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           </ContextMenu.Item>
         ) : null}
         {canRename ? (
-          <ContextMenu.Item icon={<Pencil />} onClick={beginRename}>
+          <ContextMenu.Item icon={Pencil} onClick={beginRename}>
             {contextMenuLabels.rename}
           </ContextMenu.Item>
         ) : null}
@@ -848,7 +861,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         ) : null}
         {canCopyUrl ? (
           <ContextMenu.Item
-            icon={<Link2 />}
+            icon={Link2}
             onClick={() => {
               onCopyUrl?.(session.id);
             }}
@@ -862,11 +875,11 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             disabled={shareMenuState !== 'share'}
             icon={
               shareMenuState === 'share' ? (
-                <Users />
+                Users
               ) : shareMenuState === 'loading' ? (
-                <Spinner />
+                <Spinner size="small" label={null} />
               ) : (
-                <LockKeyhole />
+                LockKeyhole
               )
             }
             onClick={() => {
@@ -913,7 +926,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           <ContextMenu.Separator />
         ) : null}
         <ContextMenu.Item
-          icon={<Archive />}
+          icon={Archive}
           onClick={() => {
             onArchive(session.id);
           }}
@@ -1279,7 +1292,8 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
         // A 14px row with a 16px icon under the 12px semibold group
         // label: the two share a left edge and differ by type.
-        'flex min-w-0 flex-1 select-none items-center gap-2 text-[1em] font-normal transition-colors',
+        SIDEBAR_ROW_TEXT_CLASS,
+        'flex min-w-0 flex-1 select-none items-center gap-2 font-normal transition-colors',
         projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
         removalState && 'text-muted-foreground',
         showSelectedState
@@ -1332,7 +1346,12 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           <Tooltip.Trigger
             delay={300}
             render={
-              <span className="inline-flex min-w-0 shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+              <span
+                className={cn(
+                  SIDEBAR_CAPTION_TEXT_CLASS,
+                  'inline-flex min-w-0 shrink-0 items-center gap-1 font-medium text-muted-foreground'
+                )}
+              >
                 {removalState === 'waiting_for_device' ? (
                   <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
                 ) : (
@@ -1405,12 +1424,14 @@ export const LocalProjectItem = memo(function LocalProjectItem({
             />
             {formattedPath || trimmedMachineName || collapsedActivityDescription ? (
               <Tooltip.Content side="right" align="start" className="max-w-[420px] break-all">
-                <div className="flex flex-col gap-0.5 text-xs">
+                <div className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'flex flex-col gap-0.5')}>
                   {trimmedMachineName ? (
                     <span className="text-muted-foreground">{trimmedMachineName}</span>
                   ) : null}
                   {formattedPath ? (
-                    <span className="font-mono text-[11px] leading-snug">{formattedPath}</span>
+                    <span className={cn(SIDEBAR_CAPTION_TEXT_CLASS, 'font-mono')}>
+                      {formattedPath}
+                    </span>
                   ) : null}
                   {collapsedActivityDescription ? (
                     <span data-sidebar-group-activity-description="">
@@ -1425,7 +1446,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
             <ContextMenu.Content className="min-w-[180px]">
               {onOpenProjectSettings ? (
                 <ContextMenu.Item
-                  icon={<Settings2 />}
+                  icon={Settings2}
                   onClick={() => {
                     onOpenProjectSettings(machineId, project.id);
                   }}
@@ -1435,7 +1456,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               ) : null}
               {revealPath ? (
                 <ContextMenu.Item
-                  icon={<FolderOpen />}
+                  icon={FolderOpen}
                   onClick={() => {
                     onRevealProject?.(revealPath);
                   }}
@@ -1446,7 +1467,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               {onArchiveProjectChats ? (
                 <ContextMenu.Item
                   disabled={archivableSessionIds.length === 0}
-                  icon={<Archive />}
+                  icon={Archive}
                   onClick={() => {
                     onArchiveProjectChats(archivableSessionIds);
                   }}
@@ -1460,7 +1481,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               ) : null}
               {canRemoveProject ? (
                 <ContextMenu.Item
-                  icon={<Trash2 />}
+                  icon={Trash2}
                   onClick={() => {
                     onRequestRemoval({
                       machineId,
@@ -1537,7 +1558,8 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               data-sidebar-show-more={groupKey}
               className={cn(
                 // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
-                'flex h-[30px] select-none items-center gap-2 rounded-md px-2 text-left text-[0.8em] text-sidebar-foreground-muted/80',
+                SIDEBAR_CAPTION_TEXT_CLASS,
+                'flex h-[30px] select-none items-center gap-2 rounded-md px-2 text-left text-sidebar-foreground-muted/80',
                 'transition-colors',
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'

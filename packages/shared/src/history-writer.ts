@@ -80,9 +80,13 @@ function preserveUnknown(
     // A different union variant is a new value, not a carrier for the old one's extensions.
     if (
       record(old) &&
-      typeof old.type === 'string' &&
-      typeof parsed.type === 'string' &&
-      old.type !== parsed.type
+      Object.entries(schema.shape).some(
+        ([key, field]) =>
+          field instanceof z.ZodLiteral &&
+          record(old) &&
+          Object.hasOwn(old, key) &&
+          old[key] !== parsed[key]
+      )
     )
       old = undefined;
     const result: Record<string, unknown> = Object.create(null);
@@ -712,10 +716,16 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
           // Only the matching turn enters the validated local-update path. The
           // "write the outcome" rule itself is the shared planner, so the Loro
           // and in-memory backends cannot drift.
-          return writer.updateEntry(id, (turn) => {
-            applyRespondPermission(turn as unknown as Record<string, unknown>, requestId, outcome);
+          let applied = false;
+          const updated = writer.updateEntry(id, (turn) => {
+            applied = applyRespondPermission(
+              turn as unknown as Record<string, unknown>,
+              requestId,
+              outcome
+            );
             return turn;
           });
+          return updated && applied;
         }
       }
       return false;

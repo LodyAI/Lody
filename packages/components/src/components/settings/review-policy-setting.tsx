@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useAtomValue } from 'jotai';
 import { Check, Monitor, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -75,7 +76,7 @@ const styles = stylex.create({
     gap: space[4],
     paddingInline: space[4],
     paddingBlock: space[1.5],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontWeight: 400,
     color: colors.secondaryLabel,
   },
@@ -98,7 +99,12 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
   },
   machineName: { margin: 0, fontWeight: 400, lineHeight: type.leading, color: colors.label },
-  machineMeta: { margin: 0, fontSize: type.caption, lineHeight: type.leading, color: colors.secondaryLabel },
+  machineMeta: {
+    margin: 0,
+    fontSize: uiText.footnoteSize,
+    lineHeight: type.leading,
+    color: colors.secondaryLabel,
+  },
   reviewerCell: { minWidth: 0, paddingInlineStart: { default: 0, [WIDE]: space[4] } },
   noAgents: {
     display: 'flex',
@@ -107,7 +113,7 @@ const styles = stylex.create({
     justifyContent: 'space-between',
     gap: space[2],
   },
-  noAgentsText: { fontSize: type.caption, color: colors.secondaryLabel },
+  noAgentsText: { fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   actions: { display: 'flex', alignItems: 'center', gap: space[1] },
   actionsEnd: { marginInlineStart: 'auto' },
   pickers: {
@@ -121,7 +127,7 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[1],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   statusWarning: { color: colors.warning },

@@ -14,9 +14,11 @@ import {
   getPendingUserTurnActivationId,
   hasPendingUserTurnActivation,
   type MessageContent,
+  type MessageQueueItem,
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
+  type SessionQueuePromotionRecord,
   type WorkspaceId,
 } from '@lody/shared';
 
@@ -159,6 +161,97 @@ describe('SessionDispatchWatcher', () => {
     status: 'pending',
     read: false,
     userId: 'user-1',
+  });
+
+  const createQueueRecoveryFixture = async (options: {
+    sessionId: SessionId;
+    meta?: Partial<SessionMeta>;
+    history?: SessionHistoryInput[];
+    queue?: MessageQueueItem[];
+  }) => {
+    let meta: SessionMeta = {
+      id: options.sessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-09-30T00:00:00.000Z',
+      cliType: 'builtin',
+      agentType: 'codex',
+      status: { type: 'idle' },
+      ...options.meta,
+    };
+    const upsertDocMeta = vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
+    const repo = {
+      getDocMeta: vi.fn(async () => ({ meta })),
+      upsertDocMeta,
+      flush: vi.fn(async () => {}),
+    };
+    const doc = new SessionDocument(
+      repo as never,
+      options.sessionId,
+      async () => {},
+      createSilentLogger()
+    );
+    doc.roomId = `session-${options.sessionId}`;
+    composeTestSessionDoc(doc, { history: options.history ?? [] });
+    for (const item of options.queue ?? []) {
+      await doc.pushMessageQueue(item);
+    }
+
+    const watcher = createWatcher({
+      logger: createSilentLogger(),
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      workspaceDocument: { repo } as unknown as LoroDocumentManager,
+      executionService: {
+        tryAcquireSessionRewriteConflictLease: vi.fn(() => () => {}),
+      } as unknown as SessionExecutionService,
+      canUseMachine: createAllowMachineAccess(),
+    });
+    const recover = (
+      watcher as unknown as {
+        recoverIncompleteQueuePromotions: (
+          sessionDoc: SessionDocument,
+          currentMeta: SessionMeta
+        ) => Promise<void>;
+      }
+    ).recoverIncompleteQueuePromotions.bind(watcher);
+
+    return {
+      doc,
+      meta: () => meta,
+      updateMeta: (patch: Partial<SessionMeta>) => upsertDocMeta(doc.roomId, patch),
+      recover,
+      dispose: () => doc.mirror.dispose(),
+    };
+  };
+
+  const createQueueItem = (turnId: string): MessageQueueItem =>
+    ({
+      $cid: `mq-${turnId}`,
+      task: `queued ${turnId}`,
+      userId: 'user-1',
+      userTurnId: turnId,
+      operationId: `queue:${turnId}`,
+      timestamp: '2026-09-30T00:00:00.000Z',
+      project: undefined,
+      acpSessionConfig: {
+        prompt: `queued ${turnId}`,
+        inputBlocks: [{ type: 'text', text: `queued ${turnId}` }],
+        cliType: 'builtin',
+        agentType: 'codex',
+      },
+    }) as MessageQueueItem;
+
+  const createQueueReceipt = (
+    turnId: string,
+    state: SessionQueuePromotionRecord['state'] = 'prepared'
+  ): SessionQueuePromotionRecord => ({
+    queueCid: `mq-${turnId}`,
+    userTurnId: turnId,
+    state,
+    updatedAt: 1,
   });
 
   it('processes pending user turns for an idle owned session', async () => {
@@ -1661,6 +1754,12 @@ describe('SessionDispatchWatcher', () => {
           agentType: 'codex',
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
         },
       },
     ];
@@ -1753,6 +1852,12 @@ describe('SessionDispatchWatcher', () => {
         inputConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
         }),
       })
     );
@@ -1766,6 +1871,12 @@ describe('SessionDispatchWatcher', () => {
         acpSessionConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
         }),
       }),
       { dispatchSource: 'queue' }
@@ -1851,6 +1962,106 @@ describe('SessionDispatchWatcher', () => {
       expect(await doc.getMessageQueue()).toHaveLength(0);
     } finally {
       doc.mirror.dispose();
+    }
+  });
+
+  it('recovers queue promotion receipts in queue order using fresh state for each receipt', async () => {
+    const fixture = await createQueueRecoveryFixture({
+      sessionId: 'session-queue-recovery-order' as SessionId,
+      meta: {
+        queuePromotionLedger: {
+          'queue:turn-1': createQueueReceipt('turn-1'),
+          'queue:turn-2': createQueueReceipt('turn-2'),
+        },
+      },
+      queue: [createQueueItem('turn-1'), createQueueItem('turn-2')],
+    });
+    try {
+      await fixture.recover(fixture.doc, fixture.meta());
+
+      expect((await fixture.doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual([
+        'turn-1',
+      ]);
+      expect((await fixture.doc.getMessageQueue()).map((item) => item.userTurnId)).toEqual([
+        'turn-2',
+      ]);
+      expect(fixture.meta().queuePromotionLedger?.['queue:turn-1']?.state).toBe('queue_consumed');
+      expect(fixture.meta().queuePromotionLedger?.['queue:turn-2']?.state).toBe('prepared');
+
+      // Once the first activation is handled, the next recovery pass can use
+      // the newly exposed queue head. It must not reuse the first pass's queue
+      // or metadata snapshot.
+      await fixture.updateMeta({ lastHandledUserMsgId: 'turn-1' });
+      await fixture.recover(fixture.doc, fixture.meta());
+
+      expect((await fixture.doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual([
+        'turn-1',
+        'turn-2',
+      ]);
+      expect(await fixture.doc.getMessageQueue()).toHaveLength(0);
+      expect(fixture.meta().queuePromotionLedger?.['queue:turn-2']?.state).toBe('queue_consumed');
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it('does not replay an old activation when its queue row is gone and a newer activation is pending', async () => {
+    const oldTurn = createPendingUserTurn('turn-old', 'old queued input');
+    const fixture = await createQueueRecoveryFixture({
+      sessionId: 'session-queue-recovery-newer-activation' as SessionId,
+      meta: {
+        latestUserMsgId: 'turn-newer',
+        lastHandledUserMsgId: 'turn-before',
+        queuePromotionLedger: {
+          'queue:turn-old': createQueueReceipt('turn-old', 'activation_published'),
+        },
+      },
+      history: [oldTurn],
+    });
+    try {
+      await fixture.recover(fixture.doc, fixture.meta());
+
+      expect(fixture.meta().latestUserMsgId).toBe('turn-newer');
+      expect(fixture.meta().queuePromotionLedger?.['queue:turn-old']?.state).toBe(
+        'activation_published'
+      );
+      expect(await fixture.doc.getMessageQueue()).toHaveLength(0);
+      expect((await fixture.doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual([
+        'turn-old',
+      ]);
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it('retires a queue receipt when its history entry is already terminal without publishing activation', async () => {
+    const terminalTurn: SessionHistoryInput = {
+      ...createPendingUserTurn('turn-terminal', 'already handled'),
+      status: 'handled',
+      read: true,
+    };
+    const fixture = await createQueueRecoveryFixture({
+      sessionId: 'session-queue-recovery-terminal' as SessionId,
+      meta: {
+        queuePromotionLedger: {
+          'queue:turn-terminal': createQueueReceipt('turn-terminal', 'activation_published'),
+        },
+      },
+      history: [terminalTurn],
+      queue: [createQueueItem('turn-terminal')],
+    });
+    const publish = vi.spyOn(fixture.doc, 'publishUserTurnActivation');
+    try {
+      await fixture.recover(fixture.doc, fixture.meta());
+
+      expect(publish).not.toHaveBeenCalled();
+      expect(await fixture.doc.getMessageQueue()).toHaveLength(0);
+      expect(fixture.meta().queuePromotionLedger?.['queue:turn-terminal']?.state).toBe(
+        'queue_consumed'
+      );
+    } finally {
+      publish.mockRestore();
+      fixture.dispose();
     }
   });
 
@@ -1952,9 +2163,9 @@ describe('SessionDispatchWatcher', () => {
       },
       updateHistory,
     });
-    await expect(
-      promoteNextQueuedMessage(failingDoc, failingMeta, [])
-    ).rejects.toThrow('synthetic-write-rejected');
+    await expect(promoteNextQueuedMessage(failingDoc, failingMeta, [])).rejects.toThrow(
+      'synthetic-write-rejected'
+    );
     expect(remainingQueue).toHaveLength(1);
     expect(remainingQueue[0]?.userTurnId).toBe(turnId);
   });

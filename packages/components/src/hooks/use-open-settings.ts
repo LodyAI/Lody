@@ -9,10 +9,7 @@ import {
   settingsSelectedMachineIdAtom,
   settingsSelectedProjectKeyAtom,
 } from '@/atoms';
-import {
-  SETTINGS_DEFAULT_TAB,
-  type SettingsTabId,
-} from '@/components/settings/settings-tabs';
+import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/settings-tabs';
 import { useAppCapability } from '@/lib/app-platform';
 import { useIsMobile } from './use-mobile';
 
@@ -102,6 +99,9 @@ export function useOpenSettings() {
             params,
             search: { machine: options?.machineId },
           });
+          return;
+        case 'agent-roles':
+          void router.navigate({ to: '/$workspaceName/settings/agent-roles', params });
           return;
         case 'github':
           void router.navigate({ to: '/$workspaceName/settings/github', params });

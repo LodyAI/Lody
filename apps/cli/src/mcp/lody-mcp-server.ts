@@ -1,3 +1,5 @@
+import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
+import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { spawn } from 'child_process';
 import { resolveSessionLinkId } from '@lody/shared/session-link';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -124,6 +126,7 @@ import {
 import { registerScheduleTools } from './schedule-tools';
 import { truncateSessionHistoryText as truncateUtf8HeadTail } from '@/mcp/session-history-page';
 import { buildSessionHistoryForReader } from '@/mcp/session-history-handler';
+import { createSessionBackend } from '@/session/session-backend';
 import { version as cliVersion } from '@/pkg';
 import {
   configureWorkspaceMcpServer,
@@ -139,6 +142,8 @@ import { summarizeDiscoveryAgent as summarizeAgentConfig } from '@/lib/resource-
 import { SessionDiscoveryFilterShape, matchesSessionDiscovery } from '@/lib/discovery-query';
 import { getSessionCommandEnvironment } from '@/lib/session-command-environment';
 import { createSessionToolRegistrar, type SessionToolHandlers } from './session-tool-router';
+
+import { registerIosSimulatorPreviewTool } from './ios-simulator-tool';
 
 const PREVIEW_TOOL_NAME = 'lody_report_preview_candidate';
 const IMAGE_UPLOAD_TOOL_NAME = 'lody_upload_images';
@@ -295,11 +300,25 @@ const SessionWorkContextInputSchema = z.discriminatedUnion('kind', [
 ]);
 
 /**
- * Semantic run-config fields shared by single and batch create. The concrete ACP
- * config option ids differ per agent, so callers pick the values reported by
- * `lody_session_create_options` and the CLI maps them at dispatch time.
+ * Single and batch creates share semantic controls and explicit ACP selectors.
+ * Discovery reports the target's advertised ids and values; the shared CLI create
+ * path resolves semantic controls and validates the resulting configuration.
  */
 const SessionRunConfigInputShape = {
+  modeId: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      'ACP mode id from runConfig.modes. May grant broader permissions than the parent; choose only within the user authorization granted to the caller.'
+    ),
+  configOptionValues: z
+    .record(z.string().min(1), z.union([z.string(), z.boolean()]))
+    .optional()
+    .describe(
+      'Explicit ACP option values using ids and choices from runConfig.configOptions. Includes permission options even without a category. Semantic model/reasoning/Fast/Plan fields retain their existing precedence. Permissions may be broader than the parent; choose only within the user authorization granted to the caller.'
+    ),
   modelId: z
     .string()
     .trim()
@@ -1193,11 +1212,12 @@ const buildStructuredOutputOptions = (
 };
 
 /**
- * MCP callers select run config semantically (model / reasoning effort / fast /
- * plan). The concrete ACP ids are resolved against the target agent's
- * capabilities inside the shared create path, not here.
+ * Semantic controls resolve against target capabilities in the shared create
+ * path. Explicit ACP selectors use the same validation as CLI --mode/--config-option.
  */
 const buildMcpTurnDispatchConfig = (input: {
+  modeId?: string;
+  configOptionValues?: Record<string, string | boolean>;
   modelId?: string;
   reasoningEffort?: string;
   fastMode?: boolean;
@@ -1211,17 +1231,27 @@ const buildMcpTurnDispatchConfig = (input: {
   };
   return {
     ...resolveTurnDispatchConfig({}),
+    ...(input.modeId !== undefined ? { modeId: input.modeId } : {}),
+    ...(input.configOptionValues !== undefined
+      ? { configOptionValues: input.configOptionValues }
+      : {}),
     ...(hasAgentRunConfigSelection(runConfig) ? { runConfig } : {}),
   };
 };
 
 /** Run config is part of the Command's identity, so it is fingerprinted too. */
 const buildMcpRunConfigCanonicalCommand = (input: {
+  modeId?: string;
+  configOptionValues?: Record<string, string | boolean>;
   modelId?: string;
   reasoningEffort?: string;
   fastMode?: boolean;
   planMode?: boolean;
-}): Record<string, string | boolean> => ({
+}): Record<string, string | boolean | Record<string, string | boolean>> => ({
+  ...(input.modeId !== undefined ? { modeId: input.modeId } : {}),
+  ...(input.configOptionValues !== undefined
+    ? { configOptionValues: input.configOptionValues }
+    : {}),
   ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
   ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
   ...(input.fastMode !== undefined ? { fastMode: input.fastMode } : {}),
@@ -1347,6 +1377,7 @@ const bindAgentRoleCreateOptions = (options: CreateOptions, role: AgentRole | un
   if (!role) return;
   options.agentRoleId = role.id;
   options.agentRoleRevision = role.revision;
+  options.agentRoleSnapshot = snapshotAgentRole(role);
 };
 
 const buildMcpCreateOptions = (
@@ -1540,9 +1571,10 @@ const readSessionExecutionSnapshot = async (
   live: SessionLiveWorking
 ): Promise<SessionExecutionSnapshot> => {
   const sessionDoc = await manager.getOrCreateSessionDoc(session.id);
+  const backend = await createSessionBackend(sessionDoc, session);
   const [directory, queue] = await Promise.all([
-    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
-    sessionDoc.getMessageQueue(),
+    backend.readHistoryDirectory(0, Number.MAX_SAFE_INTEGER),
+    backend.getMessageQueue(),
   ]);
   const activeTurnId = resolveActiveAssistantTurnId(directory.map((row) => row.scalars));
   const queuedTurnCount =
@@ -1954,11 +1986,12 @@ const buildSessionHistory = async (input: SessionHistoryToolInput): Promise<unkn
       );
     }
     const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+    const backend = await createSessionBackend(sessionDoc, session);
     // Bounded business paging: `limit` counts displayable turns, the cursor is a
     // raw position, and entries removed by the 128 KiB byte cap stay reachable.
     return await buildSessionHistoryForReader({
       sessionId,
-      history: sessionDoc.sessionData.history,
+      history: backend.history,
       limit: input.limit ?? DEFAULT_MCP_SESSION_HISTORY_LIMIT,
       ...(input.cursor !== undefined ? { cursor: input.cursor } : {}),
       maxBytes: MAX_MCP_SESSION_HISTORY_BYTES,
@@ -2093,11 +2126,13 @@ const bindMcpCreateContext = (
 
 type InvocationIdentity = {
   userId: string;
+  author?: AgentMessageAuthor;
   sourceTurnId: string;
 };
 
 const toDelegatedSessionRequester = (identity: InvocationIdentity): DelegatedSessionRequester => ({
   userId: identity.userId,
+  ...(identity.author ? { author: identity.author } : {}),
 });
 
 type InvokingTurnContext = {
@@ -2151,6 +2186,31 @@ const resolveInvokingTurnSource = async (): Promise<InvokingTurnSource> => {
     userId: active.requesterUserId,
     inputConfig,
   };
+};
+
+const freezeInvokingAuthor = async (
+  manager: LoroDocumentManager,
+  session: SessionMeta,
+  invoking: InvokingTurnContext
+): Promise<void> => {
+  const doc = await manager.getOrCreateSessionDoc(session.id);
+  const backend = await createSessionBackend(doc);
+  const turn = await backend.history.readTurn(`assistant:${invoking.identity.sourceTurnId}`);
+  const storedAuthor = turn.state === 'ready' ? readMessageAuthor(turn.turn.author) : undefined;
+  const author =
+    storedAuthor?.kind === 'agent' &&
+    storedAuthor.sessionId === session.id &&
+    storedAuthor.turnId === invoking.identity.sourceTurnId
+      ? storedAuthor
+      : await resolveSessionMessageAuthor(
+          manager,
+          session,
+          invoking.identity.sourceTurnId,
+          invoking.frozenInputConfig,
+          undefined,
+          getMcpWorkspaceId(getSessionContext()) as WorkspaceId
+        );
+  invoking.identity.author = author;
 };
 
 const resolveInvokingTurnContext = async (session: SessionMeta): Promise<InvokingTurnContext> => {
@@ -2603,6 +2663,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     }
     const preallocatedSessionId = randomUUID() as SessionId;
     const preallocatedUserTurnId = randomUUID();
+    await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
     const accepted = await withOperationStore((store) =>
@@ -2612,8 +2673,10 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
           requesterUserId: invoking.identity.userId,
+          author: invoking.identity.author,
           operationId: args.operationId!,
           kind: 'session_create',
+          targetRoleSnapshots: [resolved.role ? snapshotAgentRole(resolved.role) : null],
           canonicalCommand,
           frozenContinuationConfig: {
             ...(currentSession.agentConfigId
@@ -2638,6 +2701,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       throw new Error('Single create Operation is missing its active target item.');
     }
     if (!pendingItem.inputDurable && accepted.claimedItemIndexes.includes(0)) {
+      createOptions.delegatedRequester = toDelegatedSessionRequester(invoking.identity);
       createOptions.sessionId = pendingItem.target.sessionId;
       createOptions.userTurnId = pendingItem.target.userTurnId;
       createOptions.chainDepth = invoking.chainDepth + 1;
@@ -2756,6 +2820,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       throw new LodyOperationStoreError('COMMAND_REJECTED', formatMcpErrorMessage(error), false);
     }
     const preallocatedUserTurnId = randomUUID();
+    await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
     const accepted = await withOperationStore((store) =>
@@ -2765,6 +2830,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
           requesterUserId: invoking.identity.userId,
+          author: invoking.identity.author,
           operationId: args.operationId!,
           kind: 'session_chat',
           canonicalCommand,
@@ -3147,6 +3213,7 @@ const startSessionCreateManyOperation = async (
     );
     const initialItems = validatedItems.map((item) => item.operationItem);
     const targetDispatchConfigs = validatedItems.map((item) => item.dispatchConfig);
+    await freezeInvokingAuthor(manager, requester, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
     const accepted = await withOperationStore((store) =>
@@ -3156,8 +3223,12 @@ const startSessionCreateManyOperation = async (
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
           requesterUserId: invoking.identity.userId,
+          author: invoking.identity.author,
           operationId: args.operationId,
           kind: 'session_create_many',
+          targetRoleSnapshots: resolvedItems.map((item) =>
+            item.resolved?.role ? snapshotAgentRole(item.resolved.role) : null
+          ),
           canonicalCommand,
           frozenContinuationConfig: {
             ...(requester.agentConfigId ? { agentConfigId: requester.agentConfigId } : {}),
@@ -3350,6 +3421,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
         return activeOperationItem(target.id, randomUUID(), item.label);
       }
     );
+    await freezeInvokingAuthor(manager, requester, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
     const accepted = await withOperationStore((store) =>
@@ -3359,6 +3431,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
           ownerMachineId: ctx.machineId as MachineId,
           requesterSessionId: ctx.sessionId as SessionId,
           requesterUserId: invoking.identity.userId,
+          author: invoking.identity.author,
           operationId: args.operationId,
           kind: 'session_chat_many',
           canonicalCommand,
@@ -3747,12 +3820,29 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     }
   );
 
+  registerIosSimulatorPreviewTool(server, async (command) => {
+    const ctx = getSessionContext();
+    const response = await Effect.runPromise(
+      makeLocalControlClientAuto({ socketPath: ctx.localControlSocketPath }).machineRpc(
+        {
+          method: 'ios-simulator/agent-control',
+          machineId: ctx.machineId,
+          workspaceId: ctx.workspaceId,
+          params: { sessionId: ctx.sessionId, command },
+        },
+        { timeoutMs: SESSION_CONTROL_TIMEOUT_MS }
+      )
+    );
+    if (!response.ok) throw new Error('Simulator control unavailable.');
+    return response.result;
+  });
+
   server.registerTool(
     PREVIEW_TOOL_NAME,
     {
       title: 'Report frontend dev server preview',
       description:
-        "Use this immediately after starting or discovering a frontend/web dev server for the current Lody session. Report the loopback host and port before telling the user the server is ready. On remote-preview-enabled machines, a validated report from the session owner's active agent starts preparing the authenticated remote tunnel in the background. Reporting does not wait for tunnel readiness. Tell the user to click the Browser button in the bar directly above the message input to open the preview.",
+        "Use this immediately after starting or discovering a frontend/web dev server for the current Lody session. Report the loopback host and port before telling the user the server is ready. On remote-preview-enabled machines, a validated report from the session owner's active agent starts preparing the authenticated remote tunnel in the background. Reporting does not wait for tunnel readiness. Tell the user to click the Browser button in the bar directly above the message input to open the preview. For native iOS apps running in an iOS Simulator, use lody_ios_simulator_preview.",
       // Pass the full ZodObject (not `.shape`) so `.strict()` carries through to SDK
       // validation; the MCP SDK runs `safeParseAsync` against this before invoking the
       // handler, so no second `.parse(args)` is needed below.
@@ -3947,6 +4037,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
             currentSession,
             args.agentRoleId ? roleCatalog?.get(args.agentRoleId) : undefined
           );
+          await freezeInvokingAuthor(manager, currentSession, invoking);
           const options = buildMcpCreateOptions(resolved.input, ctx);
           bindMcpCreateContext(options, invoking.identity, currentSession);
           bindAgentRoleCreateOptions(options, resolved.role);
@@ -4031,6 +4122,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           }
           assertDifferentMcpSession(currentSession, targetSession);
           const invoking = await resolveInvokingTurnContext(currentSession);
+          await freezeInvokingAuthor(manager, currentSession, invoking);
           const result = await sendSessionChatResult(
             auth,
             workspace,
@@ -4072,7 +4164,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Create multiple Lody sessions',
       description:
-        'Start one durable batch Operation for 1-20 Session creates. defaults and items shallow-merge; nested objects replace wholesale. Each item may use an agentRoleId from the workspace catalog. When a Role item also includes manual machine, agent config, or run-config fields, the Role takes precedence and those fields are ignored. Non-Role items accept modelId, reasoningEffort, fastMode, and planMode. Ordered item failures are isolated. Completion arrives automatically as one continuation, so do not poll operation_get in a loop.',
+        'Start one durable batch Operation for 1-20 Session creates. defaults and items shallow-merge; nested objects replace wholesale. Each item may use an agentRoleId from the workspace catalog. When a Role item also includes manual machine, agent config, or run-config fields, the Role takes precedence and those fields are ignored. Non-Role items accept modeId, configOptionValues, modelId, reasoningEffort, fastMode, and planMode using target advertised capabilities from lody_session_create_options. Explicit permissions may be broader than the parent; choose only within the user authorization granted to the caller. Ordered item failures are isolated. Completion arrives automatically as one continuation, so do not poll operation_get in a loop.',
       inputSchema: SessionCreateManyToolInputSchema,
     },
     async (input) => {

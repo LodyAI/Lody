@@ -11,7 +11,7 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const output = path.join(packageRoot, 'out/client');
 const artifactDir = path.join(packageRoot, 'out/static-verification');
 const phase = process.env.STATIC_TEST_PHASE ?? 'all';
-assert.ok(['all', 'scan', 'faults', 'navigation', 'agent-pages'].includes(phase));
+assert.ok(['all', 'scan', 'faults', 'navigation', 'anchors'].includes(phase));
 const host = createStaticHost({ root: output, port: 0 });
 const server = await host.listen();
 const origin = `http://127.0.0.1:${server.address().port}`;
@@ -469,99 +469,113 @@ async function navigation() {
     release.resolve();
     await delayedContext.close();
   }
-  const context = await newContext({ js: false });
-  try {
-    await run('repaired Chinese CLI link and anchor', async () => {
-      const page = await context.newPage();
-      await page.goto(origin + '/zh/docs/local-project');
-      await clickTo(
-        page,
-        page.locator('#nd-page').getByRole('link', { name: 'CLI 命令', exact: true }),
-        '/zh/docs/cli'
-      );
-      assert.equal(decodeURIComponent(new URL(page.url()).hash), '#project-命令');
-      assert.ok(await page.locator('[id="project-命令"]').isVisible());
-    });
-  } finally {
-    await context.close();
-  }
 }
 
-async function agentPages() {
+async function anchorPosition(page, id) {
+  await page.waitForFunction((target) => {
+    const rect = document.getElementById(target)?.getBoundingClientRect();
+    return rect && rect.top >= 0 && rect.bottom <= window.innerHeight;
+  }, id);
+  assert.equal(decodeURIComponent(new URL(page.url()).hash), `#${id}`);
+}
+
+async function anchors() {
   for (const mobile of [false, true]) {
     for (const js of [false, true]) {
       const context = await newContext({ mobile, js });
       try {
-        await run(
-          `coding agent pages ${mobile ? 'mobile' : 'desktop'} ${js ? 'hydrated' : 'no-js'}`,
-          async () => {
-            const page = await context.newPage();
-            const errors = [];
-            page.on('pageerror', (error) => errors.push(error.message));
-            for (const [slug, heading] of [
-              ['coding-agent-gui', 'One GUI for Your Coding Agents'],
-              ['coding-agent-remote-control', 'Remote Control for Your Coding Agents'],
-            ]) {
-              await page.goto(`${origin}/${slug}/`);
-              if (js) await settled(page);
-              assert.equal(await page.locator('h1').count(), 1);
-              assert.equal(
-                (await page.locator('h1').textContent()).replace(/\s+/gu, ' ').trim(),
-                heading
-              );
-              assert.equal((await snapshot(page)).canonical, `https://lody.ai/${slug}/`);
-              assert.equal(await page.locator('.agent-page__agent').count(), 6);
-              assert.equal(await page.locator('link[hreflang]').count(), 0);
-              assert.ok(
-                await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
-              );
-              assert.ok(
-                await page
-                  .locator('main img')
-                  .evaluateAll((images) =>
-                    images.every((image) => image.complete && image.naturalWidth > 0)
-                  )
-              );
-              const faq = page.locator('.agent-page__faq details').first();
-              await faq.locator('summary').click();
-              assert.ok(await faq.evaluate((element) => element.open));
-              await faq.locator('summary').click();
-              assert.equal(await faq.evaluate((element) => element.open), false);
+        for (const [source, label, destination, id] of [
+          ['/docs/', 'Daemon Mode', '/docs/cli', 'daemon-mode'],
+          ['/zh/docs/local-project/', 'CLI 命令', '/zh/docs/cli', 'project-命令'],
+        ]) {
+          await run(
+            `docs anchor ${source} ${mobile ? 'mobile' : 'desktop'} ${js ? 'hydrated' : 'no-js'}`,
+            async () => {
+              const page = await context.newPage();
+              const errors = [];
+              page.on('pageerror', (error) => errors.push(error.message));
+              await page.goto(origin + source);
+              const link = page.locator('#nd-page').getByRole('link', { name: label, exact: true });
+              const expectedHref = `${directoryPath(destination)}#${encodeURI(id)}`;
+              assert.equal(await link.getAttribute('href'), expectedHref);
               if (js) {
-                const previous = await page.locator('html').getAttribute('class');
-                await page.getByRole('button', { name: 'Toggle color theme' }).click();
-                await page.waitForFunction(
-                  (value) => document.documentElement.className !== value,
-                  previous
-                );
+                await settled(page);
+                assert.equal(await link.getAttribute('href'), expectedHref);
+                await page.evaluate(() => {
+                  window.__anchorDocument = true;
+                });
               }
-              await page.screenshot({
-                path: path.join(
-                  artifactDir,
-                  `${slug}-${mobile ? 'mobile' : 'desktop'}-${js ? 'js' : 'no-js'}.png`
-                ),
-                fullPage: true,
-              });
+              await clickTo(page, link, destination);
+              await anchorPosition(page, id);
+              if (js) assert.equal(await page.evaluate(() => window.__anchorDocument), true);
+              await page.reload();
+              if (js) await settled(page);
+              await anchorPosition(page, id);
+              // Exercise the existing fragment-only table link on the destination too.
+              await page.evaluate(() => window.scrollTo(0, 0));
+              await page
+                .locator('#nd-page table')
+                .getByRole('link', {
+                  name: source === '/docs/' ? 'Daemon mode' : 'Project 命令',
+                  exact: true,
+                })
+                .click();
+              await anchorPosition(page, id);
+              assert.deepEqual(errors, []);
+              await page.close();
             }
-            await clickTo(
-              page,
-              page
-                .getByRole('navigation', { name: 'Coding agent guides' })
-                .getByRole('link', { name: 'Agent GUI', exact: true }),
-              '/coding-agent-gui'
-            );
-            await page.goBack();
-            await page.waitForURL(`${origin}/coding-agent-remote-control/`);
-            await page.goForward();
-            await page.waitForURL(`${origin}/coding-agent-gui/`);
-            await clickTo(
-              page,
-              page.getByRole('link', { name: 'Follow the quick start', exact: true }).first(),
-              '/docs/quickstart'
-            );
-            assert.deepEqual(errors, []);
-          }
-        );
+          );
+        }
+      } finally {
+        await context.close();
+      }
+    }
+    for (const [prefix, id] of [
+      ['', 'daemon-mode'],
+      ['/zh', 'daemon-模式'],
+    ]) {
+      const context = await newContext({ mobile });
+      const query = '?from=docs&next=a%2Fb&label=%E4%B8%AD%E6%96%87';
+      const href = `${prefix}/docs/cli${query}#${id}`;
+      const source = prefix ? '/zh/docs/local-project/' : '/docs/';
+      const originalHref = prefix
+        ? '/zh/docs/cli/#project-%E5%91%BD%E4%BB%A4'
+        : '/docs/cli#daemon-mode';
+      // Vary only the MDX link input; production MDX, adapter and router still render it.
+      await context.route('**/assets/*.js', async (route) => {
+        const response = await route.fetch();
+        const body = (await response.text()).replaceAll(originalHref, href);
+        await route.fulfill({ response, body });
+      });
+      try {
+        await run(`query + anchor ${prefix || 'en'} ${mobile ? 'mobile' : 'desktop'}`, async () => {
+          const page = await context.newPage();
+          const errors = [];
+          page.on('pageerror', (error) => errors.push(error.message));
+          await page.goto(`${origin}${prefix}/docs/session/`);
+          await settled(page);
+          if (mobile) await page.getByRole('button', { name: 'Open Sidebar', exact: true }).click();
+          await clickTo(page, page.locator(`a[href="${source}"]`).first(), normalize(source));
+          const expectedHref = `${prefix}/docs/cli/${query}#${encodeURI(id)}`;
+          const link = page.locator('#nd-page').getByRole('link', {
+            name: prefix ? 'CLI 命令' : 'Daemon Mode',
+            exact: true,
+          });
+          await link.waitFor();
+          assert.equal(await link.getAttribute('href'), expectedHref);
+          await page.evaluate(() => {
+            window.__anchorDocument = true;
+          });
+          await clickTo(page, link, `${prefix}/docs/cli`);
+          assert.equal(await page.evaluate(() => window.__anchorDocument), true);
+          assert.equal(new URL(page.url()).search, query);
+          await anchorPosition(page, id);
+          await page.reload();
+          await settled(page);
+          assert.equal(new URL(page.url()).search, query);
+          await anchorPosition(page, id);
+          assert.deepEqual(errors, []);
+        });
       } finally {
         await context.close();
       }
@@ -574,7 +588,7 @@ try {
   if (phase === 'all' || phase === 'scan') await scan();
   if (phase === 'all' || phase === 'faults') await faults();
   if (phase === 'all' || phase === 'navigation') await navigation();
-  if (phase === 'all' || phase === 'agent-pages') await agentPages();
+  if (phase === 'all' || phase === 'anchors') await anchors();
 } finally {
   await writeFile(
     path.join(artifactDir, `${phase}.json`),

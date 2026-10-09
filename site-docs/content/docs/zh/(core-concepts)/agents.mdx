@@ -1,38 +1,17 @@
 ---
 title: Agent Config
-description: 在 Lody 的统一界面与远程工作流中配置 Codex、Claude Code、Kimi Code、GLM over Claude Code、DeepSeek Harness、Pi 等编程 Agent。
+description: 配置 Lody Agent Config，支持 Claude Code、Codex、Claude 兼容端点、DeepSeek、Kimi、GLM、MiniMax、Qwen 等运行方式。
 ---
 
 # 代理配置
 
-Agent Config 将编程运行时与它的设置、认证和执行机器连接起来。Lody 支持内置集成、托管运行时、
-模型服务预设、Registry 运行时和自定义 ACP 命令；统一界面不代表各运行时的能力完全相同。
-
-产品概览见 [One GUI for Your Coding Agents（英文）](/coding-agent-gui/) 和
-[Remote Control for Your Coding Agents（英文）](/coding-agent-remote-control/)。
-
-## 选择集成方式
-
-| Agent 或模型服务 | Lody 中的配置 | 需要区分的边界 |
-| --- | --- | --- |
-| Codex | 选择 Codex，使用机器上的受支持登录或配置 | 模型与控件取决于运行时和账号 |
-| Claude Code | 选择 Claude Code 并配置认证 | Lody 从配置中发现可用命令和模式 |
-| Kimi Code | 选择托管 Kimi Code Provider 并登录 | 原生 Kimi Code 与通过 Claude 兼容端点使用 Kimi 不同 |
-| GLM over Claude Code | 使用 GLM 预设，选择匹配的端点并填写 API Key | 通过 Claude Code 运行的模型服务预设，并非独立原生 GLM Agent |
-| DeepSeek Harness | 选择内置 ACP Provider，配置端点和 Token | 与 DeepSeek over Claude Code 不同；委派限制见下文 |
-| Pi | 在受支持的机器上选择内置 Pi Provider | 托管运行时；模型和扩展支持取决于固定版本的运行时 |
-
-执行机器需要具备运行时所需的认证和依赖。远程工作还要求机器保持唤醒、联网，且 Lody CLI 持续运行。
-此列表说明集成路径，不代表每个模型、模式、扩展或移动客户端均经过端到端验证。要求见
-[移动端访问](/zh/docs/mobile/) 和 [CLI 类型支持](/zh/docs/cli-runtimes/)。
-
-## 认证
+Agent Config 是 Lody 中的对多种 Code CLI 的一种抽象概念，由 CLI 类型（Claude Code / Codex）和环境变量组成。
 
 Lody 会自动使用启动 CLI 的机器上的 Claude Code / Codex 的订阅登录，你也可以使用环境变量的方式来配置其他的使用方案。
 
 非订阅登录的方式你可以在 **设置**-**Agent 配置** 中点击加号按钮，创建新的配置，对于 Claude Code 在配置类型中选择 **Claude**。
 
-<img src="/_docs-assets/agent-config-select.png" width="200px" alt="Agent Config 运行时选择器" />
+<img src="/_docs-assets/agent-config-select.png" width="200px" />
 
 以下是官方以及第三方的 API Key 方案的配置方式，可以复制粘贴到环境变量中，并替换你的真实的 API Key
 
@@ -94,15 +73,6 @@ ANTHROPIC_API_KEY=sk-kimi-xxxxxxxxxxxxxxxxxxxxxxxxxx  # 生成的 API Key
 ```
 
 [参考文档](https://www.kimi.com/code/docs/more/third-party-agents.html)
-
-## Pi
-
-Lody 在受支持的机器上通过经过校验的托管 ACP 运行时提供 Pi。请在执行机器上或 Provider 环境中
-配置认证，再选择该 Pi 配置开启对话。可用模型和模式由运行时提供。
-
-当机器支持内置 Pi 时，旧版 Pi 配置可能提供需明确确认的迁移入口。迁移会保留 Provider 配置，
-但不会转换旧的原生会话 ID；迁移后请开启新对话。扩展控件需要兼容的运行时和机器能力，
-不能假设任意 Pi 扩展或终端界面都能在 Lody 中使用。
 
 ## Bub
 

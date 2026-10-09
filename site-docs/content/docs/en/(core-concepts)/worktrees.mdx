@@ -43,9 +43,35 @@ Each task gets its own worktree, so agents never step on each other's changes.
 
 ### Automatic Cleanup
 
-Worktrees are reclaimed when their owning session is archived, so the `~/.lody/repos` tree stays
-in sync with the sessions you actually care about. If you need to nuke everything in one go, you
-can still remove `~/.lody/repos` manually.
+Manual archive and [PR auto-archive](/docs/github#auto-archive-finished-pr-sessions) make a root
+session's Lody-managed worktree eligible for cleanup. The conversation stays in the archive list
+until permanent deletion; the working directory can be removed earlier.
+
+| Resource | After archive and cleanup | After permanent session deletion |
+| --- | --- | --- |
+| Conversation history | Kept; the session can be restored | Deleted; session deletion cannot be undone |
+| Lody-managed worktree directory | Removed by its owning machine | Eligible for cleanup if still present |
+| Local Git branch and commits | Kept, including the backup commit | Kept; deletion does not reclaim the branch |
+| Pending non-ignored changes | Staged and committed locally before removal | The same backup rule applies to remaining worktrees |
+| Ignored files, such as `.env`, dependencies, and build output | Can be discarded with the directory | No recovery guarantee |
+| Original local project directory | Outside managed-worktree cleanup | Outside managed-worktree cleanup |
+
+The owning daemon cleans only worktrees under its Lody data directory after workspace metadata
+is complete and the session runtime has been released. Cleanup may be delayed while that machine
+is offline or a removal fails. Active and unknown owners are left alone; archiving a child tab
+alone does not remove its root session's shared worktree. If the repository cannot be resolved
+or a backup commit fails, the directory is retained for retry.
+
+The backup is a local Git commit, not a remote push or a full-directory backup. A configured
+cleanup script runs before the backup, so files it deletes or changes are outside that protection;
+script failure does not prevent removal. Save needed ignored files and any files affected by the
+script outside the worktree before archiving or enabling auto-archive.
+
+When you restore and continue a session whose worktree was removed, Lody recreates it from the
+preserved local branch and runs the setup script again. Ignored files must be recreated separately.
+Recovery requires that the owning repository and branch still exist; a removed local project must
+be added again. Manually deleting the Lody repository data also deletes those local branches and
+backups, so it is not equivalent to archiving or deleting a session.
 
 ## Worktree Setup and Cleanup Scripts
 

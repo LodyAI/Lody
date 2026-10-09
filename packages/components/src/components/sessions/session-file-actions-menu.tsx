@@ -55,9 +55,8 @@ export function SessionFileActionsMenu({
         {visibleItems.map((item) => {
           const ItemIcon = item.icon;
           return (
-            <Menu.Item key={item.id} className="gap-2" onClick={() => item.run(filePath)}>
-              <ItemIcon className="h-3.5 w-3.5" aria-hidden="true" />
-              <span className="truncate">{item.label}</span>
+            <Menu.Item key={item.id} icon={ItemIcon} onClick={() => item.run(filePath)}>
+              {item.label}
             </Menu.Item>
           );
         })}

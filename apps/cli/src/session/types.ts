@@ -28,6 +28,7 @@ export interface SessionConfig {
   /** Config selected by the driving turn and carried into ACP session startup. */
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
   /** Selection carried by the dispatching turn; ACP startup must not re-read history for it. */
+  memory?: import('@lody/shared').MemoryBinding;
   mcpServerIds: McpServerId[];
   /** Launch spec for this execution request; durable default lives on the agent config. */
   customAcp?: CustomAcpLaunchSpec;

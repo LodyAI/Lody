@@ -91,9 +91,45 @@ describe('schedule list rows', () => {
     container.remove();
   });
   const rowOf = (title: string) =>
-    [...container.querySelectorAll('.group')].find((row) => row.textContent?.includes(title))!;
+    [...container.querySelectorAll('[data-schedule-row]')].find((row) =>
+      row.textContent?.includes(title)
+    )!;
   const buttonIn = (row: Element, label: string) =>
     row.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+
+  it.each([
+    ['America/Los_Angeles', '2:21 AM'],
+    ['Asia/Singapore', '5:21 PM'],
+  ])('shows the same machine clock in Once frequency and next run (%s)', (timeZone, time) => {
+    const once: ScheduleRegistryRow = {
+      ...timed,
+      trigger: { kind: 'once', at: '2026-10-01T09:21:00.000Z' },
+    };
+    act(() =>
+      root.render(
+        <ScheduleListView
+          rows={[once]}
+          ready
+          now={Date.parse('2026-10-01T00:00:00Z')}
+          runtimes={[
+            {
+              scheduleId: once.scheduleId,
+              machineId: once.machineId,
+              activationId: once.activationId,
+              observedDefinitionFingerprint: once.definitionFingerprint,
+              nextScheduledAt: Date.parse('2026-10-01T09:21:00Z'),
+              updatedAt: 0,
+            },
+          ]}
+          contextForRow={() => ({ ...context(), timeZone })}
+          {...handlers}
+        />
+      )
+    );
+    const row = container.querySelector('[data-schedule-row]')!;
+    expect(row.textContent).toContain(timeZone);
+    expect(row.textContent!.split(time)).toHaveLength(3);
+  });
 
   it('gives a manual task a Run button and a timed one a Pause button', () => {
     const manualRow = rowOf('Deploy checklist');

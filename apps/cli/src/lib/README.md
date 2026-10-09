@@ -32,11 +32,15 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   `runBridgeTransition`.
 - `machine-lifecycle.ts` — remote lifecycle verification and upgrade intents; runs the
   fixed npm install through `cross-spawn` so Windows `npm.cmd` shims use the command
-  interpreter. `../commands/daemon-runner.ts` owns restart and upgrade handoff.
+  interpreter. It resolves the installed package through that npm's global root
+  and verifies its entry/version. `../commands/daemon-runner.ts` owns restart and
+  handoff to that explicit entry, including matching-version readiness.
 - `cloud-cli-port.ts` — the sole official-build composition root for cloud clients,
   endpoint-derived adapters, and their lifecycle. `start.ts` validates
   identity/deployment configuration once and injects the resulting `CloudPort` through
   Fleet → Lody → MachineRuntime → MessageHandler/Loro/session services.
+- `cloud-pr-association.ts` — hosted PR association HTTP requests and shared failure
+  cooldowns; independent of GitHub observation and publication.
 - `local-loro-data-plane-server.ts` — Electron renderer ↔ CLI local Loro data plane
   (protocol v7). Design:
   [`.agents/docs/cli-lib-local-loro-data-plane.md`](../../../../.agents/docs/cli-lib-local-loro-data-plane.md).

@@ -8,15 +8,15 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 ## Triggers, menu, and candidates
 
 - `@` reaches every mention type through the two-level menu. Skills keep their
-  direct `$` menu, `/` and `、` open commands directly, and `#` opens no menu but
+  direct `$`/`￥` menu, `/` and `、` open commands directly, and `#` opens no menu but
   keeps its hydrator, so a pasted `#123` still expands before send.
 - `enableAtMentions` is the ONE list of what `@` reaches, gating both trigger
   registration and mounting `<Mention>`; every source with its own `enabled`
   rule (sessions: having any) belongs there too. Placeholder hints advertise `$`
   only under the conditions that enable Skill mentions.
-- The main desktop chat composer pins menus above its frame; inline and dialog
-  menus follow the caret and flip to fit. All cap/scroll within available room
-  and `var(--mention-input-width)`. The mobile dock stays above the whole frame.
+- Main desktop menus follow the caret and prefer above while a heading and row
+  fit; inline/dialog menus prefer below and flip to fit. All cap/scroll within
+  available room and `var(--mention-input-width)`. The mobile dock stays above the frame.
 - `insertText` must keep its type's prompt form (`@path`, `#123`, `$token`,
   `/cmd`): reaching a type through `@` must not change what the agent receives.
   Directory candidates carry BOTH `navigateText` (`@dir/`, descend) and

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { CODEX_SPARK_LIMIT_ID, getRateLimitEntryKey } from '@lody/shared';
+import {
+  CODEX_SPARK_LIMIT_ID,
+  getRateLimitEntryKey,
+  type AgentConfigId,
+} from '@lody/shared';
 
 import {
   canShowSubscriptionRateLimits,
@@ -165,6 +169,52 @@ describe('session usage', () => {
         modelId: 'gpt-5.4',
       })?.limitId
     ).toBe('codex');
+  });
+
+  it('keeps quota snapshots isolated between Codex provider configs', () => {
+    const workConfigId = 'codex-work' as AgentConfigId;
+    const personalConfigId = 'codex-personal' as AgentConfigId;
+    const rateLimits: MachineRateLimits = {
+      [getRateLimitEntryKey('codex', 'codex')]: usage({
+        windows: [
+          { usedPercent: 55, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null },
+        ],
+      }),
+      [getRateLimitEntryKey('codex', 'codex', workConfigId)]: usage({
+        windows: [
+          { usedPercent: 10, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null },
+        ],
+      }),
+      [getRateLimitEntryKey('codex', 'codex', personalConfigId)]: usage({
+        windows: [
+          { usedPercent: 80, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null },
+        ],
+      }),
+    };
+
+    expect(
+      resolveAgentRateLimitForModel({
+        rateLimits,
+        agentType: 'codex',
+        agentConfigId: workConfigId,
+        modelId: null,
+      })?.limits.windows[0]?.usedPercent
+    ).toBe(10);
+    expect(
+      resolveAgentRateLimitForModel({
+        rateLimits,
+        agentType: 'codex',
+        agentConfigId: personalConfigId,
+        modelId: null,
+      })?.limits.windows[0]?.usedPercent
+    ).toBe(80);
+    expect(
+      resolveAgentRateLimitForModel({
+        rateLimits,
+        agentType: 'codex',
+        modelId: null,
+      })?.limits.windows[0]?.usedPercent
+    ).toBe(55);
   });
 
   it('does not show a model-specific tier beside a different selected model', () => {

@@ -77,7 +77,7 @@ export const ClaudeWithRateLimit: Story = {
     config: makeConfig({ name: 'Claude Code', cliType: 'builtin', agentType: 'claude' }),
     machine: makeMachine({
       raceLimits: {
-        [getRateLimitEntryKey('claude', 'claude')]: {
+        [getRateLimitEntryKey('claude', 'claude', 'cfg-claude' as AgentConfigId)]: {
           limitId: 'claude',
           scope: { providerId: 'claude' },
           planName: 'Claude Pro',
@@ -119,7 +119,7 @@ export const ClaudeEnvOverrideHidesRateLimit: Story = {
     }),
     machine: makeMachine({
       raceLimits: {
-        [getRateLimitEntryKey('claude', 'claude')]: {
+        [getRateLimitEntryKey('claude', 'claude', 'cfg-claude' as AgentConfigId)]: {
           limitId: 'claude',
           scope: { providerId: 'claude' },
           planName: 'Claude Pro',
@@ -146,7 +146,11 @@ export const CodexSpark: Story = {
     config: makeConfig({ name: 'Codex Spark', cliType: 'builtin', agentType: 'codex' }),
     machine: makeMachine({
       raceLimits: {
-        [getRateLimitEntryKey('codex', CODEX_SPARK_LIMIT_ID)]: {
+        [getRateLimitEntryKey(
+          'codex',
+          CODEX_SPARK_LIMIT_ID,
+          'cfg-codex' as AgentConfigId
+        )]: {
           limitId: CODEX_SPARK_LIMIT_ID,
           scope: { providerId: 'codex' },
           planName: 'Codex Spark',
@@ -169,7 +173,7 @@ export const CodexWeeklyOnly: Story = {
     config: makeConfig({ name: 'Codex', cliType: 'builtin', agentType: 'codex' }),
     machine: makeMachine({
       raceLimits: {
-        [getRateLimitEntryKey('codex', 'codex')]: {
+        [getRateLimitEntryKey('codex', 'codex', 'cfg-codex' as AgentConfigId)]: {
           planName: 'ChatGPT Plus',
           limitId: 'codex',
           scope: { providerId: 'codex' },

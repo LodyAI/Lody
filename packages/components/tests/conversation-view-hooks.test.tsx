@@ -4,10 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
-import {
-  createHistoryWriter,
-  resolveSessionConversationConfig,
-} from '@lody/shared';
+import { createHistoryWriter, resolveSessionConversationConfig } from '@lody/shared';
 import {
   useConversationVersion,
   useConversationTail,
@@ -20,7 +17,7 @@ import {
   collectConversationConfigSources,
   type ConversationView,
 } from '../src/lib/conversation-view';
-import type { SessionSearchBlock } from '../src/lib/session-chat-search';
+import { buildSessionSearchResults, type SessionSearchBlock } from '../src/lib/session-chat-search';
 import {
   buildFixtureHistory,
   buildSessionDoc,
@@ -360,6 +357,38 @@ describe('conversation view React readers', () => {
     expect(
       Array.from({ length: view.turnCount }, (_, i) => view.isHydrated(i)).filter(Boolean).length
     ).toBeLessThanOrEqual(4);
+  });
+
+  it('refreshes literal search text on streamed turn replacements and keeps settled blocks', async () => {
+    const { doc, view } = await openView(1);
+    let blocks: SessionSearchBlock[] = [];
+    function Probe({ open = true }: { open?: boolean }) {
+      blocks = useIncrementalSearchBlocks(view, open);
+      return null;
+    }
+    await act(async () => root.render(<Probe />));
+    const userBlock = blocks.find((block) => block.messageId === 'u-0');
+    const writer = createHistoryWriter(doc);
+    for (const source of ['QA_RESUMED', 'QA_RESUMED_OK —', '**QA_RESUMED_OK** —']) {
+      await act(async () => {
+        writer.updateEntry('a-0', (entry) => {
+          entry.items = [{ type: 'text', text: source }];
+          return entry;
+        });
+        doc.commit();
+        await flushReaderChanges();
+      });
+      await flush();
+      expect(blocks.find((block) => block.messageId === 'u-0')).toBe(userBlock);
+      expect(buildSessionSearchResults(blocks, 'QA_RESUMED_OK')).toHaveLength(
+        source === 'QA_RESUMED' ? 0 : 1
+      );
+      expect(buildSessionSearchResults(blocks, 'QARESUMEDOK')).toEqual([]);
+    }
+    await act(async () => root.render(<Probe open={false} />));
+    expect(blocks).toEqual([]);
+    await act(async () => root.render(<Probe />));
+    expect(buildSessionSearchResults(blocks, 'QA_RESUMED_OK')).toHaveLength(1);
   });
 
   it('refreshes cached search positions after insertion and deletion', async () => {

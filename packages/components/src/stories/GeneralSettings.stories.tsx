@@ -5,6 +5,9 @@ import { CompactSection } from '@/components/settings/compact-layout';
 import { settingsFlat } from '@/components/settings/material.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
+import { Provider, createStore } from 'jotai';
+import { useState } from 'react';
+import { userAtom } from '@/atoms';
 import { RoutedStory, SettingsStoryProviders } from './settings-story-shell';
 
 /**
@@ -43,6 +46,30 @@ export const Desktop: Story = {
     },
   },
 };
+
+export const PreferencesAccessibility: Story = {
+  render: () => <PreferencesAccessibilityStory />,
+};
+
+function PreferencesAccessibilityStory() {
+  const [store] = useState(() => {
+    const next = createStore();
+    next.set(userAtom, {
+      id: 'preferences-story-user',
+      name: 'Preferences Story',
+      email: 'preferences@example.com',
+      image: null,
+    });
+    return next;
+  });
+  return (
+    <SettingsStoryProviders capabilities={['githubIntegration']}>
+      <Provider store={store}>
+        <GeneralSettingsComponent />
+      </Provider>
+    </SettingsStoryProviders>
+  );
+}
 
 /**
  * 移动端视图

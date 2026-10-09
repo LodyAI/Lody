@@ -388,9 +388,10 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     backgroundColor: getMainWindowBackgroundColor(resolvedTheme),
     autoHideMenuBar: true,
     ...(process.platform === 'linux' ? { icon: productWindowIcon } : {}),
-    // Keep the first light's centre on the sidebar navigation icon column.
+    // Keep equal 16px window insets and the first light's 23px centre on the
+    // sidebar navigation icons' 23px centreline (15px start + 8px half-width).
     ...(process.platform === 'darwin'
-      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 16 } }
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 16 } }
       : {}),
     // Windows: hide the native title bar (its neutral gray clashes with the
     // app canvas) and keep only the OS-drawn caption buttons as an overlay

@@ -15,7 +15,7 @@ import { resolvePreferredChatLandingAgentSelection } from '@/lib/chat-landing-de
  * to the Agent's own defaults. A schedule starts from what the person already
  * uses to chat instead of an empty menu.
  *
- * The permission is always filled — the mode the landing would display, or the
+ * When advertised, permission is filled — the mode the landing would display, or the
  * current value of an advertised `_permission` option — so the editor opens
  * showing a choice the person can see and change, not an unset control.
  */
@@ -34,10 +34,9 @@ export function seedScheduleAgentRunRef(
     runtimeOverrides: config.runtimeOverrides,
     machine: machine ?? null,
   });
-  const values: Record<string, string> = {};
-  for (const [id, value] of Object.entries(cached?.configOptionValues ?? {}))
-    values[id] = String(value);
-  // Fill the permission the same way `hasExplicitSchedulePermission` reads it:
+  const values: NonNullable<AgentRunRef['configOptionValues']> = {};
+  for (const [id, value] of Object.entries(cached?.configOptionValues ?? {})) values[id] = value;
+  // Seed the permission shown by the composer:
   // an advertised `_permission` option wins; otherwise the mode list; otherwise
   // a `mode`-category option (how probed custom/registry agents publish it).
   const fillFrom = (category: string) => {
@@ -47,7 +46,7 @@ export function seedScheduleAgentRunRef(
         selector.configId !== 'interaction_mode' &&
         values[selector.configId] === undefined
       )
-        values[selector.configId] = String(selector.currentValue);
+        values[selector.configId] = selector.currentValue;
   };
   const permissionOptions = options.configOptionSelectors.some(
     (selector) => selector.category === '_permission'

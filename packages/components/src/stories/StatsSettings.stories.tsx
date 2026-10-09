@@ -1,6 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useMemo, useState } from 'react';
 import { StatsSettingsView } from '@/components/settings/stats-setting-pure';
+import {
+  createUsageTimelineFormatter,
+  formatUsageTimelineBucketLabel,
+} from '@/components/settings/usage-timeline-bucket-label';
 import type { StackedAreaBucket } from '@/components/settings/usage-stacked-area-chart';
 import type {
   SettingsUsageCalendarData,
@@ -241,3 +245,49 @@ export const Loading: Story = { args: { loading: true } };
 export const LoadingTransition: Story = { args: { latencyMs: 1600 } };
 export const Empty: Story = { args: { empty: true } };
 export const NoWorkspace: Story = { args: { noWorkspace: true } };
+
+/** One synthetic peak shared by all three charts in a window crossing UTC midnight. */
+export const CrossDayUTC: Story = {
+  render: () => {
+    const startMs = Date.UTC(2026, 8, 30, 16);
+    const timeline: SettingsUsageTimelineData = {
+      workspaceId: 'synthetic-workspace',
+      range: 'day',
+      startMs,
+      endMs: startMs + DAY_MS,
+      bucketSizeMs: 3_600_000,
+      totals: { tokens: 500, costUSD: 0.005 },
+      users: { member: { name: 'Synthetic member' } },
+      buckets: Array.from({ length: 24 }, (_, index) => {
+        const tokens = index === 7 ? 500 : 0;
+        return {
+          bucketStartMs: startMs + index * 3_600_000,
+          bucketLabel: new Date(startMs + index * 3_600_000).toISOString().slice(11, 16),
+          tokens,
+          costUSD: tokens / 100_000,
+          byModel: [{ modelId: 'synthetic-model', tokens, costUSD: tokens / 100_000 }],
+          byUser: [{ userId: 'member', tokens, costUSD: tokens / 100_000 }],
+        };
+      }),
+    };
+    const formatter = createUsageTimelineFormatter('en');
+    const buckets = timeline.buckets.map((bucket) => ({
+      label: formatUsageTimelineBucketLabel(timeline, bucket, formatter),
+      values: [{ id: 'synthetic', label: 'Synthetic', value: bucket.tokens }],
+    }));
+    return (
+      <StatsSettingsView
+        range="day"
+        onRangeChange={() => {}}
+        ready
+        totals={timeline.totals}
+        byModelBuckets={buckets}
+        byMemberBuckets={buckets}
+        usageCalendar={buildCalendar(true)}
+        usageTimeline={timeline}
+        workspaceId={timeline.workspaceId}
+        loading={false}
+      />
+    );
+  },
+};

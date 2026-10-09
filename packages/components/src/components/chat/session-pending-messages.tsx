@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { useAtomValue } from 'jotai';
-import { AlertCircle, Check, Clock3, Image as ImageIcon } from 'lucide-react';
+import { AlertCircle, Clock3, Download, Eye, Image as ImageIcon } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
-import type { SessionId } from '@lody/shared';
+import type { SessionId, WorkspaceId } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import { conversationTextFontSizeStyle } from '@/components/ai-gui/conversation-font-size-classes';
-import { getSessionFileIcon } from '@/components/ai-gui/session-file-card';
+import {
+  getSessionFileIcon,
+  SessionFileCardLayout,
+  SessionFileCardList,
+} from '@/components/ai-gui/session-file-card';
+import { formatFileSize } from '@/lib/session-file-presentation';
+import { peekSessionImageUrl } from '@/lib/session-image-cache';
 import type { SessionChatUser } from '@/components/ai-gui/view';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { UserAvatar } from '@/components/user-avatar';
@@ -28,8 +35,8 @@ const emptySubscribe = () => () => {};
 
 /**
  * Attachments share a card across uploading, stopped, ready and failed states. The
- * skeleton (icon slot / name + one status line / trailing status slot) so the
- * row does not resize as attachments move between them. `ready` wins over
+ * fixed layout (icon slot / name + one status line / trailing status slot) keeps the
+ * row stable as attachments move between them. `ready` wins over
  * `error`: preparation clears the error when it later succeeds, and a retry
  * skips attachments that already finished.
  */
@@ -102,52 +109,15 @@ function PendingFailureNotice({
   );
 }
 
-/**
- * Trailing 32px slot: the state's glyph. The glyphs stay mounted and cross-fade
- * with opacity/scale/blur, so an attachment settling from uploading to ready or
- * failed reads as one object changing rather than a swap. CSS rather than
- * framer-motion: no other component under chat/ or ai-gui/ pulls that dependency
- * into the conversation's module graph.
- */
-function AttachmentStateIcon({ state }: { state: PendingAttachmentState }) {
-  const glyph = (active: boolean) =>
-    cn(
-      'absolute transition-[opacity,scale,filter] duration-300 ease-[cubic-bezier(0.2,0,0,1)]',
-      active ? 'scale-100 opacity-100 blur-none' : 'scale-25 opacity-0 blur-[4px]'
-    );
-  return (
-    <span className="relative flex size-8 shrink-0 items-center justify-center">
-      <AlertCircle
-        className={cn(glyph(state === 'failed'), 'size-4 text-destructive')}
-        aria-hidden="true"
-      />
-      <Spinner
-        className={cn(glyph(state === 'uploading'), 'size-4 text-muted-foreground')}
-        spinning={state === 'uploading'}
-      />
-      <Clock3
-        className={cn(glyph(state === 'interrupted'), 'size-4 text-muted-foreground')}
-        aria-hidden="true"
-      />
-      <Check
-        className={cn(glyph(state === 'ready'), 'size-4 text-muted-foreground')}
-        aria-hidden="true"
-      />
-    </span>
-  );
-}
+const styles = stylex.create({
+  progress: { position: 'absolute', insetInline: 0, bottom: 0, pointerEvents: 'none' },
+  metadata: { maxWidth: '100%' },
+  timestamp: { flexShrink: 0, whiteSpace: 'nowrap' },
+  status: { minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' },
+  statusLabel: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' },
+});
 
-/**
- * A flush strip on the card's bottom edge, ALWAYS in the flow and always the
- * same height — empty when the attachment is not transferring. Reserving the row
- * is what keeps one card height across uploading / ready / failed.
- *
- * It is deliberately not absolutely positioned inside the card's padding: at
- * `bottom-2` the bar overlapped the 40px content row by 2px and left an
- * unrelated 8px gap beneath it, so the spacing above and below never matched
- * anything else in the card. Flush and full-width has no such arbitrary offsets,
- * and the card's own `overflow-hidden` rounds its ends.
- */
+/** Overlay the delivered card's bottom edge without adding a layout row. */
 function AttachmentProgressTrack({
   attachment,
   active,
@@ -156,19 +126,14 @@ function AttachmentProgressTrack({
   active: boolean;
 }) {
   const { t } = useTranslation();
-  return (
-    /* The attribute, not the height class, is the contract: `Progress` merges to
-       the same h-1/w-full and would be indistinguishable by styling alone. */
-    <div className="h-1 w-full" data-attachment-progress="">
-      {active ? (
-        <Progress
-          value={attachment.progress ?? 0}
-          aria-label={t('sessions.attachmentUploading', { progress: attachment.progress ?? 0 })}
-          className="h-1 rounded-none"
-        />
-      ) : null}
+  return active ? (
+    <div {...stylex.props(styles.progress)} data-attachment-progress="">
+      <Progress
+        value={attachment.progress ?? 0}
+        aria-label={t('sessions.attachmentUploading', { progress: attachment.progress ?? 0 })}
+      />
     </div>
-  );
+  ) : null;
 }
 
 /** The delivered `UserImageBlock`'s large-thumbnail square. */
@@ -184,10 +149,14 @@ function PendingImageAttachment({
   attachment,
   active,
   single,
+  workspaceId,
+  sessionId,
 }: {
   attachment: SessionAttachmentDraft;
   active: boolean;
   single: boolean;
+  workspaceId: WorkspaceId;
+  sessionId: SessionId;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -202,6 +171,11 @@ function PendingImageAttachment({
 
   const { state, label } = useAttachmentStatus(attachment, active);
   const failed = state === 'failed';
+  const readyPreviewUrl =
+    attachment.ready?.type === 'image'
+      ? peekSessionImageUrl({ workspaceId, sessionId, imageId: attachment.ready.imageId })
+      : null;
+  const displayedPreviewUrl = readyPreviewUrl ?? previewUrl;
 
   return (
     <div
@@ -212,9 +186,9 @@ function PendingImageAttachment({
       )}
       title={`${attachment.name} · ${label}`}
     >
-      {previewUrl ? (
+      {displayedPreviewUrl ? (
         <img
-          src={previewUrl}
+          src={displayedPreviewUrl}
           alt={attachment.name}
           className={
             single
@@ -239,9 +213,7 @@ function PendingImageAttachment({
           <AlertCircle className="size-6 text-destructive" aria-hidden="true" />
         </div>
       ) : null}
-      <div className="absolute inset-x-0 bottom-0">
-        <AttachmentProgressTrack attachment={attachment} active={state === 'uploading'} />
-      </div>
+      <AttachmentProgressTrack attachment={attachment} active={state === 'uploading'} />
     </div>
   );
 }
@@ -257,37 +229,27 @@ function PendingFileAttachment({
   const failed = state === 'failed';
   const Icon = getSessionFileIcon(attachment.name, attachment.mimeType);
 
+  const ready = attachment.ready?.type === 'file' ? attachment.ready : undefined;
+  const ReadyIcon = ready?.transport === 'local' ? Clock3 : ready?.textPreview ? Eye : Download;
   return (
-    <div
-      className={cn(
-        'w-full max-w-sm overflow-hidden rounded-xl border transition-colors',
-        failed ? FAILED_FRAME_CLASS : 'border-border/60 bg-card/80'
-      )}
-    >
-      <div className="flex min-w-0 items-center gap-3 px-3 py-2.5">
-        {/* The tile keeps the file's identity in every state — tinting it red
-            too only doubled the alarm without adding information. */}
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <Icon className="size-5" aria-hidden="true" />
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate text-sm leading-tight font-medium" title={attachment.name}>
-            {attachment.name}
-          </span>
-          <span
-            className={cn(
-              'truncate text-xs leading-tight tabular-nums',
-              failed ? 'text-destructive' : 'text-muted-foreground'
-            )}
-            title={failed ? label : undefined}
-          >
-            {label}
-          </span>
-        </span>
-        <AttachmentStateIcon state={state} />
-      </div>
-      <AttachmentProgressTrack attachment={attachment} active={state === 'uploading'} />
-    </div>
+    <SessionFileCardLayout
+      fileName={attachment.name}
+      subtitle={ready ? formatFileSize(ready.sizeBytes) : label}
+      icon={<Icon className="size-5" aria-hidden="true" />}
+      actionIcon={
+        failed ? (
+          <AlertCircle className="size-4 text-destructive" aria-hidden="true" />
+        ) : state === 'uploading' ? (
+          <Spinner className="size-4" />
+        ) : state === 'ready' ? (
+          <ReadyIcon className="size-4" aria-hidden="true" />
+        ) : (
+          <Clock3 className="size-4" aria-hidden="true" />
+        )
+      }
+      failed={failed}
+      progress={<AttachmentProgressTrack attachment={attachment} active={state === 'uploading'} />}
+    />
   );
 }
 
@@ -351,13 +313,25 @@ export function PendingMessageRow({
               : 'max-w-full gap-1.5 @[520px]:max-w-[80%] @[720px]:max-w-[70%]'
           )}
         >
-          <div className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground">
-            {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
+          <div
+            className={cn(
+              'flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground',
+              stylex.props(styles.metadata).className
+            )}
+          >
+            {timestampLabel ? (
+              <span className={cn('tabular-nums', stylex.props(styles.timestamp).className)}>
+                {timestampLabel}
+              </span>
+            ) : null}
             {/* Where the delivered row shows its read mark. Neutral on purpose:
                 the icon and the word already say "not sent", and the failure
                 itself is framed below. */}
             <span
-              className="inline-flex items-center gap-1 text-muted-foreground"
+              className={cn(
+                'inline-flex items-center gap-1 text-muted-foreground',
+                stylex.props(styles.status).className
+              )}
               role="status"
               title={messageStatus}
             >
@@ -366,7 +340,11 @@ export function PendingMessageRow({
               ) : (
                 <Clock3 className="size-3.5" strokeWidth={2} aria-hidden="true" />
               )}
-              {isMobile ? <span className="sr-only">{messageStatus}</span> : messageStatus}
+              {isMobile ? (
+                <span className="sr-only">{messageStatus}</span>
+              ) : (
+                <span {...stylex.props(styles.statusLabel)}>{messageStatus}</span>
+              )}
             </span>
           </div>
           <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
@@ -378,12 +356,14 @@ export function PendingMessageRow({
                     attachment={attachment}
                     active={!failed}
                     single={images.length === 1}
+                    workspaceId={record.workspaceId as WorkspaceId}
+                    sessionId={record.sessionId}
                   />
                 ))}
               </div>
             ) : null}
             {files.length ? (
-              <div className="flex w-full flex-col items-end gap-2">
+              <SessionFileCardList align="end">
                 {files.map((attachment) => (
                   <PendingFileAttachment
                     key={attachment.id}
@@ -391,7 +371,7 @@ export function PendingMessageRow({
                     active={!failed}
                   />
                 ))}
-              </div>
+              </SessionFileCardList>
             ) : null}
             {text ? (
               <div className="flex max-w-full justify-end sm:pl-2">

@@ -4,7 +4,6 @@ import {
   ACP_CAPABILITY_CACHE_VERSION,
   getAcpCapabilityCacheKey,
   getServerNow,
-  hasExplicitSchedulePermission,
   type AgentConfigMeta,
   type MachineViewMeta,
 } from '@lody/shared';
@@ -74,12 +73,18 @@ describe('a new schedule starts from the chat landing’s choices', () => {
     agentDefaultsCache.set('reviewer', {
       modeId: null,
       modelId: 'sonnet',
-      configOptionValues: { mode: 'auto', verbose: true, api_key: 'secret' },
+      configOptionValues: {
+        mode: 'auto',
+        verbose: true,
+        plan_mode: false,
+        select_flag: 'false',
+        api_key: 'secret',
+      },
     });
     expect(seedScheduleAgentRunRef(config, host)).toEqual({
       agentConfigId: 'reviewer',
       modelId: 'sonnet',
-      configOptionValues: { mode: 'auto', verbose: 'true' },
+      configOptionValues: { mode: 'auto', verbose: true, plan_mode: false, select_flag: 'false' },
     });
   });
 
@@ -112,12 +117,31 @@ describe('a new schedule starts from the chat landing’s choices', () => {
     });
     const seeded = seedScheduleAgentRunRef(config, host);
     expect(seeded.configOptionValues).toEqual({ mode: 'ask' });
-    // …which is exactly what the save rule accepts as a chosen permission.
-    expect(
-      hasExplicitSchedulePermission(
-        seeded,
-        host.acpCapabilities![getAcpCapabilityCacheKey('reviewer')]
-      )
-    ).toBe(true);
+  });
+  it('seeds Pi without inventing a permission', () => {
+    const config = { ...agent('pi', 'macbook'), cliType: 'builtin' as const, agentType: 'pi' };
+    const host = machine('macbook', {
+      [getAcpCapabilityCacheKey('pi')]: {
+        modes: [],
+        models: [],
+        configOptions: [
+          {
+            id: 'thinking',
+            name: 'Thinking',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'off',
+            options: [{ value: 'off', name: 'Off' }],
+          },
+        ],
+        cliType: 'builtin',
+        agentType: 'pi',
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+        provenance: 'runtime',
+        updatedAt: getServerNow(),
+      },
+    });
+    const seeded = seedScheduleAgentRunRef(config, host);
+    expect(seeded).toEqual({ agentConfigId: 'pi' });
   });
 });

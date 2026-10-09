@@ -32,6 +32,13 @@ StyleX options. Visual choices use component props. `className` is available for
 layout and interaction constraints in product surfaces; it must not duplicate a
 primitive's visual rules.
 
+The existing `text` tokens derive sizes and leading from document `--ui-font-size`
+(14px when unset), so body, controls, hints and headings scale once, including
+portalled overlays. Their 14px-baseline roles are caption 11/16, footnote 12/16,
+subheadline 13/18, body 14/20, headline 16/24 and title 18/24 (size/leading).
+Product integration and terminal preference behavior are specified in
+[Interface typography](../../specs/interface-typography.md).
+
 A field is a composition rather than one component: `Field.Root` owns the name,
 the disabled flag and validity, and `Field.Label`, `Input`, `Textarea`,
 `Checkbox`, `Radio`, `Switch`, `Field.Description` and `Field.Error` read that
@@ -218,10 +225,9 @@ reach it with. A row with no icon takes no box, so an icon-less menu is not
 indented for nothing; a row in a mixed list asks for one with `inset`.
 
 A `Popover` is that same floating surface holding content instead of rows. It
-reads the popup group too, and replaces five of a list's declarations: the width
-a list takes from the control that shows its value, the 4px inset that lets a row
-bleed to the surface's edge, and the three that make the type a control's rather
-than prose.
+reads the popup group too, replacing the list's anchor-width and row-bleed inset
+with content layout, and taking body size, leading, weight and tracking rather
+than the command role. Its title and description keep control and footnote roles.
 
 ```tsx
 <Popover.Root>
@@ -755,6 +761,11 @@ An `Avatar` is who this is: a picture, or the letters standing in for one. It
 is the second part here on no rung and the one that is not a film — what it
 stands in for is opaque, so the fallback takes a **gray**, which is what the
 rules reserve the gray ramp for: a thing with no role.
+
+`ThemeRoot` binds the fallback colours to its palette. A custom product palette
+scope also applies `avatarPaletteTheme` from `@lody/ui/avatar/avatar.tokens.stylex`
+on the scope element so the fallback uses that palette rather than inherited
+colours resolved at the document root.
 
 ```tsx
 <Avatar.Root size="small">

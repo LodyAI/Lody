@@ -1,4 +1,4 @@
-# 会话编排异步链深度
+# 会话编排
 
 Status: draft
 Translation: current
@@ -18,6 +18,46 @@ Spec。
 
 机器侧 Review Automation 在这条 MCP 委派链之外运行。它自己管理轮数、
 Token 和权限预算，并根据外部的 Review 与 CI 状态推进。
+
+## 会话创建配置
+
+编排 Agent 可以通过 `lody_session_create` 和 `lody_session_create_many`
+选择目标 Agent 公布支持的配置，无需创建 Agent Role。可选的 `modeId`
+使用 ACP mode id；`configOptionValues` 使用真实 option id，值为字符串或布尔值。
+所有公布的 option 均可选择，包括没有类别的权限项。发现接口返回 mode 和 option
+的 id、类型、可用值，不返回当前值或启动配置。
+
+创建复用 CLI 的目标能力校验。不支持的 mode、未知 option id 和非法值，在单个
+Operation 接受前被拒绝；批量各项失败仍彼此隔离。批量 defaults 与 items 浅合并，
+item 的 map 整体替换 defaults map。Raw options 保持 CLI 现有继承合同：提供的
+map 整体替换继承 map。显式 raw mode/model selector 覆盖继承的标量 selector。
+省略两个新字段时，保持已有继承和受支持的内置默认值。
+
+显式语义 model、reasoning、Fast 和 Plan 保持既有优先级，解析不得丢掉无关 raw
+option。独立 Plan option 可以与权限共存。旧式 Plan 若占用 ACP mode `plan`，
+则拒绝不同的显式 mode，不能静默覆盖。显式 Role 仍具有完整优先级：手填目标和
+配置字段在能力校验、命令身份和派发前被忽略。
+
+显式权限可能宽于父会话。调用方必须遵守获得的用户授权。本接口不新增权限等级、
+升级审批政策，也不形成相对 CLI 创建路径的安全边界。通过 `lody_session_chat`
+修改已有会话不在本次范围。
+
+显式 selector 参与 canonical command 指纹。Map 键顺序变化仍是同一请求；已接受
+Operation id 下更改选择返回 `OPERATION_ID_REUSED`。接受时冻结各目标的有效派发
+配置。重试和恢复使用冻结配置，不重新计算 requester 默认值或 Role 配置。
+不需要 Operation 存储迁移。
+
+## 冻结 turn 输入
+
+带 Role 的首次启动失败后，即使重试走不同执行路径，也必须保留已接受的指令和附件。
+turn 的 `inputConfig.prompt` 是有效的冻结文本，包含接收时组合的 Agent Config 和 Role
+指令。`inputBlocks` 保留用于展示、编辑的原始文本及用于执行的结构化附件；原始文本不能
+覆盖冻结 prompt。
+
+create、continue、steer 和恢复使用同一解释规则。Role 身份、revision 和 snapshot 仅记录
+来源，不要求重新解析当前 Role。缺少 prompt 的旧输入从已有 blocks/history 派生文本；
+显式空 prompt 表示没有执行文本，可以携带附件。运行时指令、附件落地和历史回放与冻结任务
+分离，因此整个 provider 请求不要求字节完全相同。
 
 ## 本地与云端执行
 

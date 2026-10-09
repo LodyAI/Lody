@@ -26,6 +26,7 @@ import {
 } from '@lody/platform/react';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { cloudOperations as api } from '@/lib/cloud-api-operations';
+import { scheduleIdleTask } from '@/lib/idle-task';
 import { promptShortcutDatabaseName } from '@/lib/prompt-shortcut-storage';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 
@@ -57,6 +58,22 @@ export function usePromptShortcuts() {
       else retry?.();
     },
   };
+}
+
+function PromptShortcutBodyPrefetcher() {
+  const { runtime, entries, loading } = usePromptShortcuts();
+  useEffect(() => {
+    if (!runtime || loading || entries.length === 0) return undefined;
+    const controller = new AbortController();
+    const cancelIdle = scheduleIdleTask(() => {
+      void runtime.prefetch(entries, { signal: controller.signal });
+    });
+    return () => {
+      controller.abort();
+      cancelIdle();
+    };
+  }, [entries, loading, runtime]);
+  return null;
 }
 
 /** Mounted once by MainLayout, not once per settings panel/composer. */
@@ -274,6 +291,7 @@ export function PromptShortcutProvider({
         retry: () => setGeneration((value) => value + 1),
       }}
     >
+      <PromptShortcutBodyPrefetcher />
       {children}
     </Context.Provider>
   );

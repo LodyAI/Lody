@@ -121,6 +121,9 @@ const makeHarness = async (options?: {
   const subscribers = new Map<SessionId, Set<() => void>>();
   let historyUpdateAttempt = 0;
   let remainingProgressHistoryFailures = options?.progressHistoryFailures ?? 0;
+  const flushRepo = async () => {
+    if (options?.failProgressFlush) throw new Error('flush unavailable');
+  };
   const sessionDoc = (sessionId: SessionId) =>
     withHistoryPort({
       mirror: {
@@ -137,10 +140,18 @@ const makeHarness = async (options?: {
         history: {
           count: async () => 0,
           readAt: async () => ({ state: 'missing' as const }),
-          readTurn: async () => ({ state: 'missing' as const }),
+          readTurn: async (turnId: string) => {
+            const turn = (histories.get(sessionId) ?? []).find((entry) => entry.id === turnId);
+            return turn ? { state: 'ready' as const, turn } : { state: 'missing' as const };
+          },
           readRange: async () => [],
           readDirectory: async () => [],
-          observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+          observe: (listener: () => void) => {
+            const set = subscribers.get(sessionId) ?? new Set();
+            set.add(listener);
+            subscribers.set(sessionId, set);
+            return { initial: Promise.resolve([]), unsubscribe: () => set.delete(listener) };
+          },
         },
         commands: {},
         durability: { waitDurable: async () => {} },
@@ -170,6 +181,9 @@ const makeHarness = async (options?: {
         }
         histories.set(sessionId, next);
       },
+      ...(targetInputDurable || options?.failProgressFlush === true
+        ? { flushLocalWrites: flushRepo }
+        : {}),
     });
   const flockRows = options?.machineAgentConfig
     ? [
@@ -203,9 +217,7 @@ const makeHarness = async (options?: {
     return meta ? { meta } : undefined;
   });
   const repo = {
-    flush: async () => {
-      if (options?.failProgressFlush) throw new Error('flush unavailable');
-    },
+    flush: flushRepo,
     watch: () => ({ unsubscribe: vi.fn() }),
     getDocMeta,
     getMeta: getRepoMeta,

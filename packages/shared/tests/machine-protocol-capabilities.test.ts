@@ -10,6 +10,7 @@ import {
   machineSupportsLocalFileResourcesProtocol,
   machineSupportsProtocolCapability,
   machineSupportsSubagentEvents,
+  machineSupportsIosSimulatorControls,
   negotiatedAcpCapabilitiesRefreshForce,
 } from '../src/machine-protocol-capabilities';
 import {
@@ -145,4 +146,16 @@ describe('ACP capability refresh cache protocol capability', () => {
       )
     ).toEqual({});
   });
+});
+
+it('negotiates private simulator controls independently of preview support', () => {
+  expect(machineSupportsIosSimulatorControls(undefined)).toBe(false);
+  expect(machineSupportsIosSimulatorControls({ protocolCapabilities: { iosSimulator: 1 } })).toBe(
+    false
+  );
+  expect(
+    machineSupportsIosSimulatorControls({
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    })
+  ).toBe(true);
 });

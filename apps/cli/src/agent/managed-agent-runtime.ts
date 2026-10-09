@@ -27,6 +27,9 @@ import grokPackageJson from '../../../../packages/acp-extension-grok/package.jso
 import grokRuntimeManifestJson from '../../../../packages/acp-extension-grok/runtime-manifest.json';
 import claudeSdkManifestJson from '../../node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
 import claudeSdkPackageJson from '../../node_modules/@anthropic-ai/claude-agent-sdk/package.json';
+import devinPackageJson from '../../../../packages/acp-extension-devin/package.json';
+import devinAdapterManifest from '../../../../packages/acp-extension-devin/runtime-manifest.json';
+import devinPinsJson from './devin-runtime-manifest.json';
 import grokPinsJson from './grok-runtime-manifest.json';
 import claudeRuntimeManifestJson from './claude-runtime-manifest.json';
 import codexRuntimeManifestJson from './codex-runtime-manifest.json';
@@ -150,6 +153,7 @@ const MANAGED_RUNTIME_NAME_VALUES = [
   'claude-code',
   'kimi-code',
   'grok-build',
+  'devin',
 ] as const satisfies readonly ManagedRuntimeName[];
 
 const ManagedRuntimeNameSchema = z.enum(MANAGED_RUNTIME_NAME_VALUES);
@@ -353,6 +357,13 @@ export const PI_RUNTIME_VERSION = piRuntimeManifestJson.version;
 export const PI_EXTENSIONS_SUPPORTED =
   'piExtensionsProtocolVersion' in piRuntimeManifestJson &&
   piRuntimeManifestJson.piExtensionsProtocolVersion === PI_EXTENSIONS_PROTOCOL_VERSION;
+export const DEVIN_ACP_ADAPTER_VERSION = devinPackageJson.version;
+export const DEVIN_RUNTIME_VERSION = devinPinsJson.version;
+if (DEVIN_RUNTIME_VERSION !== devinAdapterManifest.officialRuntime.version) {
+  throw new Error(
+    'Devin runtime manifest does not match its adapter. Refresh the managed Devin runtime.'
+  );
+}
 export const GROK_ACP_ADAPTER_VERSION = grokPackageJson.version;
 export const GROK_BUILD_RUNTIME_VERSION = grokPinsJson.version;
 if (GROK_BUILD_RUNTIME_VERSION !== grokRuntimeManifestJson.officialRuntime.version) {
@@ -409,7 +420,28 @@ function createGrokRuntimeArchive(platform: keyof typeof grokPinsJson.artifacts)
   };
 }
 
+function createDevinRuntimeArchive(platform: keyof typeof devinPinsJson.artifacts): RuntimeArchive {
+  const { sourceSha256: _sourceSha256, ...artifact } = devinPinsJson.artifacts[platform];
+  return {
+    ...artifact,
+    compression: 'zstd',
+    cmd: platform.startsWith('win32-') ? 'bin/devin.exe' : 'bin/devin',
+  };
+}
+
 const RUNTIMES: Record<ManagedRuntimeName, RuntimeDefinition> = {
+  devin: {
+    name: 'devin',
+    version: DEVIN_RUNTIME_VERSION,
+    platforms: {
+      'darwin-arm64': createDevinRuntimeArchive('darwin-arm64'),
+      'darwin-x64': createDevinRuntimeArchive('darwin-x64'),
+      'linux-arm64': createDevinRuntimeArchive('linux-arm64'),
+      'linux-x64': createDevinRuntimeArchive('linux-x64'),
+      'win32-arm64': createDevinRuntimeArchive('win32-arm64'),
+      'win32-x64': createDevinRuntimeArchive('win32-x64'),
+    },
+  },
   codex: {
     name: 'codex',
     version: CODEX_RUNTIME_VERSION,

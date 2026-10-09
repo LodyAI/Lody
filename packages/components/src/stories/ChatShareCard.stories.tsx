@@ -111,6 +111,39 @@ export const PostDark: Story = {
   args: { ...PostLight.args, theme: 'dark' },
 };
 
+export const MarkdownPalette: Story = {
+  args: {
+    ...PostLight.args,
+    title: '分享图片主题验收',
+    messages: [
+      { id: 'palette-user', role: 'user', text: '请确认分享图片中的正文和代码都清晰可读。' },
+      {
+        id: 'palette-assistant',
+        role: 'assistant',
+        text: [
+          '## 主题与阅读',
+          '正文、**强调文字**、`行内代码`和[链接](https://lody.ai)使用所选图片主题。',
+          '',
+          '> 引用文字也应清晰可读。',
+          '',
+          '1. 浅色卡片使用深色文字。',
+          '2. 深色卡片使用浅色文字。',
+          '',
+          '| 项目 | 结果 |',
+          '| --- | --- |',
+          '| 预览与导出 | 同一主题 |',
+          '',
+          '```ts',
+          'const theme = "light";',
+          '// 图片主题独立于应用主题',
+          'console.log(theme);',
+          '```',
+        ].join('\n'),
+      },
+    ],
+  },
+};
+
 export const ChatLight: Story = {
   args: { ...PostLight.args, destination: 'chat', mat: 16 },
 };

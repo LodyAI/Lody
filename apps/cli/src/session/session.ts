@@ -1,3 +1,4 @@
+import { memoryEnvironment } from '@/lib/memory-providers';
 import EventEmitter from 'eventemitter3';
 import { clearGitHubTokenEnv } from '@/lib/gh-token-env';
 import { applyNonOwnerShellEnv } from '@/lib/non-owner-shell-env';
@@ -387,7 +388,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   ): void {
     const configEnv = this.config.env ?? {};
     if (this.config.githubCredentialPolicy) {
-      this.config.githubCredentialPolicy.allowLocalAuth = options.preferMachineIdentity;
+      // Commit attribution follows the turn; network credentials belong to the session owner.
       if (options.personalIdentityEnabled !== undefined) {
         this.config.githubCredentialPolicy.personalEnabled = options.personalIdentityEnabled;
       }
@@ -419,6 +420,15 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   getGitIdentityForUser(userId: string): { id: string; name: string; email: string } | null {
     return this.gitIdentity.id === userId ? { ...this.gitIdentity } : null;
+  }
+
+  updateGitHubCredentialPolicy(allowLocalAuth: boolean): void {
+    if (!this.config.githubCredentialPolicy) throw new Error('github_context_missing');
+    this.config.githubCredentialPolicy.allowLocalAuth = allowLocalAuth;
+  }
+
+  getMemoryBinding(): SessionConfig['memory'] {
+    return this.config.memory;
   }
 
   updateEnv(env: Record<string, string | undefined>): void {
@@ -517,6 +527,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         if (
           key.startsWith('LODY_GIT_CRED_') ||
           key.startsWith('GIT_CONFIG_') ||
+          key === 'GIT_EXEC_PATH' ||
           key === 'LODY_GIT_LOCAL_CONFIG'
         )
           finalEnv[key] = configEnv[key];
@@ -595,6 +606,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           ? await codexProfileSpawnEnvironment({ profile }, env)
           : { env, close: undefined };
         closeBroker = prepared.close;
+        Object.assign(prepared.env, memoryEnvironment(this.config.memory));
         if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
         const executable = resolveDeepSeekHarnessSpawn({
           command: callbacks.command,

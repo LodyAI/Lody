@@ -36,6 +36,7 @@ export function applyOpenAssistantTurn(draft: Draft, input: OpenAssistantTurnInp
   applyResumeAssistant(draft);
   if (draft.userTurnId === undefined && input.userTurnId !== undefined)
     draft.userTurnId = input.userTurnId;
+  if (draft.author === undefined && input.author !== undefined) draft.author = input.author;
   if (input.modelInfo !== undefined) draft.modelInfo = input.modelInfo;
 }
 
@@ -44,6 +45,7 @@ export function createAssistantTurn(input: OpenAssistantTurnInput): Draft {
   return {
     id: input.turnId,
     role: 'assistant',
+    ...(input.author !== undefined ? { author: input.author } : {}),
     timestamp: input.timestamp,
     ...(input.userTurnId !== undefined ? { userTurnId: input.userTurnId } : {}),
     ...(input.modelInfo !== undefined ? { modelInfo: input.modelInfo } : {}),
@@ -103,6 +105,9 @@ export function applyRespondPermission(
     if (record?.type !== 'tool_call') continue;
     const request = asRecord(record.permissionRequest);
     if (request?.requestId !== requestId) continue;
+    // A permission request is single-assignment. A later automatic outcome
+    // must never overwrite a decision that another client already persisted.
+    if (request.outcome !== undefined) return false;
     record.permissionRequest = { ...request, outcome };
     return true;
   }

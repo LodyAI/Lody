@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
@@ -33,7 +34,6 @@ import {
   getAgentRateLimitEntries,
   getAgentRateLimitWindows,
 } from '@/lib/session-usage';
-import { settingsType as type } from './type.stylex';
 
 /** The fill a pressable settings row takes under the pointer (`surface.pressableLine`). */
 const ROW_HOVER = `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`;
@@ -67,7 +67,7 @@ const styles = stylex.create({
     gap: space[2],
     paddingInlineEnd: space[3],
     paddingBlock: space[1.5],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   trailingList: { paddingBlock: space[3] },
@@ -208,19 +208,20 @@ export function ProviderRow({
   const showRateLimits =
     canShowSubscriptionRateLimits({ cliType, agentType, config }) &&
     !!machine?.raceLimits &&
-    Object.keys(machine.raceLimits).some(
-      (key) => parseRateLimitEntryKey(key).cliType === agentType
-    );
+    Object.keys(machine.raceLimits).some((key) => {
+      const parsed = parseRateLimitEntryKey(key);
+      return parsed.cliType === agentType && parsed.agentConfigId === config.id;
+    });
 
   // Compact usage meters shown inline after the provider name.
   const rateLimitWindows = useMemo(() => {
     if (!showRateLimits || !machine?.raceLimits) return [];
-    for (const entry of getAgentRateLimitEntries(machine.raceLimits, agentType)) {
+    for (const entry of getAgentRateLimitEntries(machine.raceLimits, agentType, config.id)) {
       const windows = getAgentRateLimitWindows(entry.limits);
       if (windows.length > 0) return windows;
     }
     return [];
-  }, [showRateLimits, machine?.raceLimits, agentType]);
+  }, [showRateLimits, machine?.raceLimits, agentType, config.id]);
 
   // Codex-only: the third-party reset forecast for OpenAI's own usage limits.
   const showResetForecast = canShowCodexResetForecast({ cliType, agentType, config });

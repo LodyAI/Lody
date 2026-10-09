@@ -33,10 +33,12 @@ export type TurnIndexInputConfig = Pick<
   SessionTurnInputConfig,
   | 'agentRoleId'
   | 'agentRoleRevision'
+  | 'agentRoleSnapshot'
   | 'modeId'
   | 'modelId'
   | 'cliType'
   | 'agentType'
+  | 'memory'
   | 'mcpServerIds'
   | 'configOptionValues'
 >;

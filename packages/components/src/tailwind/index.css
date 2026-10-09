@@ -48,7 +48,7 @@
 :root {
   --diffs-token-light-font-style: normal;
   --diffs-token-dark-font-style: normal;
-  /* Appearance slider. Settings chrome is 1em of this; compact menus/pills 0.9em. */
+  /* Appearance's document baseline; @lody/ui text tokens derive every role. */
   --ui-font-size: 14px;
 
   /* Dialogs use CSS variables in Tailwind arbitrary z-index classes. Keep these
@@ -181,14 +181,6 @@ pre,
 }
 
 @layer components {
-  /* Agent prose sits 4px inside the rail so it does not read as proud of
-     bordered cards (tables, fenced code). Nested copy in those surfaces stay flush. */
-  .markdown-renderer :is(p, h1, h2, h3, h4, h5, h6) {
-    padding-inline: 4px;
-  }
-  .markdown-renderer > p {
-    text-align: start;
-  }
   /* Desktop settings content: in light themes the section/card surfaces take the
      theme's popover fill (white in Lody Light) instead of the gray --card, so
      grouped rows read as lifted panels on the page rather than gray-on-gray.
@@ -197,11 +189,142 @@ pre,
     --card: var(--popover);
   }
 
+  /* Markdown table columns (`markdown-table.tsx`). Every column keeps a
+     floor so the auto layout cannot squeeze it to a character or two, and
+     breaks between words; a column holding a long unbroken token (path, URL,
+     hash) may also break inside it and has its maximum capped, so it wraps
+     instead of starving prose columns in the auto layout's distribution.
+     `<col>` widths give each column a content-estimated preferred width, and
+     an intrinsically wide column keeps a higher floor so it stays readable
+     when even the minimums already overflow. Beyond phone widths a column of
+     short cells stays on one line at its natural width. Columns past the
+     24th get no classification. */
+  .markdown-renderer [data-markdown-table] :is(th, td) {
+    min-width: 5em;
+    overflow-wrap: break-word;
+  }
   .markdown-renderer
-    :is(table, [data-streamdown='code-block'], [data-streamdown='mermaid-block'])
-    :is(p, h1, h2, h3, h4, h5, h6),
-  [data-tool-detail-sheet] .markdown-renderer :is(p, h1, h2, h3, h4, h5, h6) {
-    padding-inline: 0;
+    :is(
+      [data-break-anywhere-columns~='1'] tr > :nth-child(1),
+      [data-break-anywhere-columns~='2'] tr > :nth-child(2),
+      [data-break-anywhere-columns~='3'] tr > :nth-child(3),
+      [data-break-anywhere-columns~='4'] tr > :nth-child(4),
+      [data-break-anywhere-columns~='5'] tr > :nth-child(5),
+      [data-break-anywhere-columns~='6'] tr > :nth-child(6),
+      [data-break-anywhere-columns~='7'] tr > :nth-child(7),
+      [data-break-anywhere-columns~='8'] tr > :nth-child(8),
+      [data-break-anywhere-columns~='9'] tr > :nth-child(9),
+      [data-break-anywhere-columns~='10'] tr > :nth-child(10),
+      [data-break-anywhere-columns~='11'] tr > :nth-child(11),
+      [data-break-anywhere-columns~='12'] tr > :nth-child(12),
+      [data-break-anywhere-columns~='13'] tr > :nth-child(13),
+      [data-break-anywhere-columns~='14'] tr > :nth-child(14),
+      [data-break-anywhere-columns~='15'] tr > :nth-child(15),
+      [data-break-anywhere-columns~='16'] tr > :nth-child(16),
+      [data-break-anywhere-columns~='17'] tr > :nth-child(17),
+      [data-break-anywhere-columns~='18'] tr > :nth-child(18),
+      [data-break-anywhere-columns~='19'] tr > :nth-child(19),
+      [data-break-anywhere-columns~='20'] tr > :nth-child(20),
+      [data-break-anywhere-columns~='21'] tr > :nth-child(21),
+      [data-break-anywhere-columns~='22'] tr > :nth-child(22),
+      [data-break-anywhere-columns~='23'] tr > :nth-child(23),
+      [data-break-anywhere-columns~='24'] tr > :nth-child(24)
+    ) {
+    max-width: 20em;
+    overflow-wrap: anywhere;
+  }
+  .markdown-renderer
+    :is(
+      [data-wide-columns~='1'] tr > :nth-child(1),
+      [data-wide-columns~='2'] tr > :nth-child(2),
+      [data-wide-columns~='3'] tr > :nth-child(3),
+      [data-wide-columns~='4'] tr > :nth-child(4),
+      [data-wide-columns~='5'] tr > :nth-child(5),
+      [data-wide-columns~='6'] tr > :nth-child(6),
+      [data-wide-columns~='7'] tr > :nth-child(7),
+      [data-wide-columns~='8'] tr > :nth-child(8),
+      [data-wide-columns~='9'] tr > :nth-child(9),
+      [data-wide-columns~='10'] tr > :nth-child(10),
+      [data-wide-columns~='11'] tr > :nth-child(11),
+      [data-wide-columns~='12'] tr > :nth-child(12),
+      [data-wide-columns~='13'] tr > :nth-child(13),
+      [data-wide-columns~='14'] tr > :nth-child(14),
+      [data-wide-columns~='15'] tr > :nth-child(15),
+      [data-wide-columns~='16'] tr > :nth-child(16),
+      [data-wide-columns~='17'] tr > :nth-child(17),
+      [data-wide-columns~='18'] tr > :nth-child(18),
+      [data-wide-columns~='19'] tr > :nth-child(19),
+      [data-wide-columns~='20'] tr > :nth-child(20),
+      [data-wide-columns~='21'] tr > :nth-child(21),
+      [data-wide-columns~='22'] tr > :nth-child(22),
+      [data-wide-columns~='23'] tr > :nth-child(23),
+      [data-wide-columns~='24'] tr > :nth-child(24)
+    ) {
+    min-width: 9em;
+  }
+  @media (min-width: 641px) {
+    .markdown-renderer [data-markdown-table] :is(th, td) {
+      min-width: 8em;
+    }
+    .markdown-renderer
+      :is(
+        [data-wide-columns~='1'] tr > :nth-child(1),
+        [data-wide-columns~='2'] tr > :nth-child(2),
+        [data-wide-columns~='3'] tr > :nth-child(3),
+        [data-wide-columns~='4'] tr > :nth-child(4),
+        [data-wide-columns~='5'] tr > :nth-child(5),
+        [data-wide-columns~='6'] tr > :nth-child(6),
+        [data-wide-columns~='7'] tr > :nth-child(7),
+        [data-wide-columns~='8'] tr > :nth-child(8),
+        [data-wide-columns~='9'] tr > :nth-child(9),
+        [data-wide-columns~='10'] tr > :nth-child(10),
+        [data-wide-columns~='11'] tr > :nth-child(11),
+        [data-wide-columns~='12'] tr > :nth-child(12),
+        [data-wide-columns~='13'] tr > :nth-child(13),
+        [data-wide-columns~='14'] tr > :nth-child(14),
+        [data-wide-columns~='15'] tr > :nth-child(15),
+        [data-wide-columns~='16'] tr > :nth-child(16),
+        [data-wide-columns~='17'] tr > :nth-child(17),
+        [data-wide-columns~='18'] tr > :nth-child(18),
+        [data-wide-columns~='19'] tr > :nth-child(19),
+        [data-wide-columns~='20'] tr > :nth-child(20),
+        [data-wide-columns~='21'] tr > :nth-child(21),
+        [data-wide-columns~='22'] tr > :nth-child(22),
+        [data-wide-columns~='23'] tr > :nth-child(23),
+        [data-wide-columns~='24'] tr > :nth-child(24)
+      ) {
+      min-width: 15em;
+    }
+    .markdown-renderer
+      :is(
+        [data-one-line-columns~='1'] tr > :nth-child(1),
+        [data-one-line-columns~='2'] tr > :nth-child(2),
+        [data-one-line-columns~='3'] tr > :nth-child(3),
+        [data-one-line-columns~='4'] tr > :nth-child(4),
+        [data-one-line-columns~='5'] tr > :nth-child(5),
+        [data-one-line-columns~='6'] tr > :nth-child(6),
+        [data-one-line-columns~='7'] tr > :nth-child(7),
+        [data-one-line-columns~='8'] tr > :nth-child(8),
+        [data-one-line-columns~='9'] tr > :nth-child(9),
+        [data-one-line-columns~='10'] tr > :nth-child(10),
+        [data-one-line-columns~='11'] tr > :nth-child(11),
+        [data-one-line-columns~='12'] tr > :nth-child(12),
+        [data-one-line-columns~='13'] tr > :nth-child(13),
+        [data-one-line-columns~='14'] tr > :nth-child(14),
+        [data-one-line-columns~='15'] tr > :nth-child(15),
+        [data-one-line-columns~='16'] tr > :nth-child(16),
+        [data-one-line-columns~='17'] tr > :nth-child(17),
+        [data-one-line-columns~='18'] tr > :nth-child(18),
+        [data-one-line-columns~='19'] tr > :nth-child(19),
+        [data-one-line-columns~='20'] tr > :nth-child(20),
+        [data-one-line-columns~='21'] tr > :nth-child(21),
+        [data-one-line-columns~='22'] tr > :nth-child(22),
+        [data-one-line-columns~='23'] tr > :nth-child(23),
+        [data-one-line-columns~='24'] tr > :nth-child(24)
+      ) {
+      min-width: 0;
+      white-space: nowrap;
+    }
   }
 
   /* Shiki's CSS-variables theme, for every surface that shows its tokens: a
@@ -221,151 +344,6 @@ pre,
     --lody-shiki-token-inserted: hsl(var(--code-added));
     --lody-shiki-token-deleted: hsl(var(--code-removed));
     --lody-shiki-token-changed: hsl(var(--modified-file));
-  }
-
-  .markdown-renderer [data-streamdown='code-block'] {
-    --markdown-code-block-bg: hsl(var(--code-background));
-    --markdown-code-block-border: hsl(var(--code-border));
-    --markdown-code-block-foreground: hsl(var(--code-foreground));
-    --markdown-code-block-language: hsl(var(--code-foreground) / 0.55);
-    --markdown-code-block-action-bg: hsl(var(--code-background) / 0.88);
-    --markdown-code-block-action-border: hsl(var(--code-border) / 0.78);
-    position: relative;
-    /* Toolbar row, then the highlighted body. */
-    display: flex !important;
-    flex-direction: column !important;
-    width: 100%;
-    margin-block: 0.875rem !important;
-    overflow: hidden;
-    gap: 0 !important;
-    border: none !important;
-    border-radius: 0.5rem !important;
-    background: var(--markdown-code-block-bg) !important;
-    padding: 0 !important;
-    color: var(--markdown-code-block-foreground);
-  }
-
-  .dark .markdown-renderer [data-streamdown='code-block'] {
-    /* Same fill as the session composer (`dark:bg-input/90`). */
-    --markdown-code-block-bg: color-mix(in srgb, hsl(var(--input)) 90%, hsl(var(--background)));
-    --markdown-code-block-action-bg: var(--markdown-code-block-bg);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-toolbar'] {
-    display: flex;
-    min-height: 1.75rem;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding-inline: 0.625rem;
-    border-bottom: 0.5px solid var(--markdown-code-block-border);
-    color: var(--markdown-code-block-language);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-header'] {
-    position: static;
-    display: flex;
-    min-width: 0;
-    flex: 1;
-    height: auto !important;
-    align-items: center;
-    justify-content: flex-start;
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background: transparent;
-    color: var(--markdown-code-block-language);
-    font-family: var(--font-mono);
-    font-size: 0.75em;
-    line-height: 1;
-    letter-spacing: 0.02em;
-    pointer-events: none;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-header'] span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] {
-    position: static;
-    z-index: 1;
-    display: flex;
-    height: auto;
-    flex-shrink: 0;
-    align-items: center;
-    gap: 0.125rem;
-    margin: 0;
-    transform: none;
-    padding: 0 !important;
-    border: 0 !important;
-    background: transparent !important;
-    color: var(--markdown-code-block-language);
-    opacity: 1;
-    backdrop-filter: none;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button {
-    display: inline-flex;
-    width: 1.5rem;
-    height: 1.5rem;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border-radius: 0.25rem;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button svg {
-    width: 0.875rem;
-    height: 0.875rem;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button:hover {
-    color: var(--markdown-code-block-foreground);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-actions'] button[aria-pressed='true'] {
-    color: var(--markdown-code-block-foreground);
-    background: color-mix(in srgb, var(--markdown-code-block-foreground) 12%, transparent);
-  }
-
-  .markdown-renderer [data-markdown-preview='true'] {
-    padding: 0.5rem 0.375rem 0.75rem;
-    /* Keep the fence fill. `--background` here punched a hole through the
-       code-block surface when a markdown fence was previewed in-place. */
-    background: transparent;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] {
-    overflow-x: auto;
-    border: 0 !important;
-    border-radius: 0 !important;
-    background: transparent !important;
-    padding-block: 0.75rem !important;
-    padding-inline: 1rem !important;
-    color: var(--markdown-code-block-foreground);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] pre {
-    min-width: max-content;
-    margin: 0;
-    background: transparent !important;
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] code {
-    font-family: var(--font-mono);
-    /* One step below the conversation body (0.9em of `--ui-font-size`, 12.6px
-       at the default 14px): distinct from prose without the 0.85em cramp, and
-       it scales with the user's font-size setting. */
-    font-size: 0.9em;
-    line-height: 1.4;
-    font-variant-ligatures: var(--lody-font-ligatures, contextual);
-  }
-
-  .markdown-renderer [data-streamdown='code-block-body'] pre > code > span {
-    display: block;
   }
 
   /* A `diff` fence is often an explanatory, headerless snippet rather than a
@@ -399,6 +377,7 @@ pre,
   }
 
   .markdown-renderer [data-markdown-diff-line] {
+    display: block;
     min-height: 1.4em;
     padding-inline: 1rem;
   }
@@ -422,24 +401,6 @@ pre,
 
   .markdown-renderer [data-markdown-diff-line='metadata'] {
     color: var(--markdown-code-block-language);
-  }
-
-  .markdown-renderer [data-code-wrap='true'] [data-streamdown='code-block-body'] {
-    overflow-x: hidden;
-  }
-
-  .markdown-renderer [data-code-wrap='true'] [data-streamdown='code-block-body'] pre {
-    width: 100%;
-    min-width: 0;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .markdown-renderer
-    [data-code-wrap='true']
-    [data-streamdown='code-block-actions']
-    button[aria-pressed='true'] {
-    color: var(--markdown-code-block-foreground);
   }
 
   .markdown-renderer [data-streamdown='mermaid-block'] {

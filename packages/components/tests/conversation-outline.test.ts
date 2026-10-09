@@ -74,6 +74,28 @@ describe('buildConversationOutline', () => {
     expect(outline[0]?.title).toBe('Fix the bug in view.tsx');
   });
 
+  it('preserves literal identifiers in summaries and refreshes only changed turns', () => {
+    const user = message('user', [text('Find QA_RESUMED_OK')]);
+    const assistant = message('assistant', [text('**QA_RESUMED_OK** `foo_bar`')]);
+    const first = buildConversationOutline([user, assistant]);
+    expect(first[0]).toMatchObject({
+      title: 'Find QA_RESUMED_OK',
+      preview: 'QA_RESUMED_OK foo_bar',
+    });
+    expect(buildConversationOutline([user, assistant])).toEqual(first);
+    const updated = {
+      ...assistant,
+      message: { ...assistant.message!, items: [text('QA_RESUMED_OK — updated')] },
+    };
+    expect(buildConversationOutline([user, updated])[0]?.preview).toBe('QA_RESUMED_OK — updated');
+    expect(buildConversationOutline([user, assistant])).toEqual(first);
+    const long = message('assistant', [
+      text('QA_RESUMED_OK ' + 'x'.repeat(960) + ' OUTSIDE_WINDOW'),
+    ]);
+    expect(buildConversationOutline([user, long])[0]?.preview).toContain('QA_RESUMED_OK');
+    expect(buildConversationOutline([user, long])[0]?.preview).not.toContain('OUTSIDE_WINDOW');
+  });
+
   it('leaves the preview empty while a round has produced no agent prose yet', () => {
     const outline = buildConversationOutline([
       message('user', [text('Start working')]),

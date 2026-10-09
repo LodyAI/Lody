@@ -27,6 +27,16 @@ describe('reading a one-off time on the target machine clock', () => {
     expect(zonedLocalInputToInstant('', 'UTC')).toBeNull();
     expect(zonedLocalInputToInstant('2026-09-24 09:30', 'UTC')).toBeNull();
   });
+
+  it('moves a DST gap forward and chooses the earlier instant in a fold', () => {
+    const zone = 'America/Los_Angeles';
+    const gap = zonedLocalInputToInstant('2026-03-08T02:30', zone)!;
+    expect(gap).toBe(Date.parse('2026-03-08T10:30:00Z'));
+    expect(instantToZonedLocalInput(gap, zone)).toBe('2026-03-08T03:30');
+    expect(zonedLocalInputToInstant('2026-11-01T01:30', zone)).toBe(
+      Date.parse('2026-11-01T08:30:00Z')
+    );
+  });
 });
 
 describe('moving a rule onto the machine clock', () => {
