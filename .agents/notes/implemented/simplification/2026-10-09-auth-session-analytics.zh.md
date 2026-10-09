@@ -14,7 +14,7 @@ Translation: current
 
 ## 决策与证据
 
-[草案规范](../../../../specs/auth-session-analytics.zh.md) 负责事件映射与迁移限制。
+[PR #1360](https://github.com/LodyAI/Lody/pull/1360)：[草案规范](../../../../specs/auth-session-analytics.zh.md) 负责事件映射与迁移限制。
 本次延续[功能使用埋点记录](../feature/2026-09-24-new-feature-usage-analytics.md) 的
 结果优先方向，不改动其无关事件清单。
 

@@ -16,7 +16,7 @@ inspected paths; no production volume or reliability improvement has been measur
 
 ## Decision and evidence
 
-The [draft contract](../../../../specs/auth-session-analytics.md) owns the event
+[PR #1360](https://github.com/LodyAI/Lody/pull/1360): the [draft contract](../../../../specs/auth-session-analytics.md) owns the event
 mapping and migration limits. This extends the success-oriented approach in the
 [feature usage note](../feature/2026-09-24-new-feature-usage-analytics.md) without
 changing that note's unrelated event inventory.
