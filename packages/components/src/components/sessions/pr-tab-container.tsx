@@ -8,7 +8,11 @@ import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod, PrStatus } from '@lody/shared';
 
 import { currentWorkspaceIdAtom } from '@/atoms';
-import { derivePrStatusFromDetails } from '@/lib/github-pr-details-state';
+import { useOpenSettings } from '@/hooks/use-open-settings';
+import {
+  isGitHubRepositoryConnectionError,
+  derivePrStatusFromDetails,
+} from '@/lib/github-pr-details-state';
 import { getDurationSinceMs, getPerformanceNowMs } from '@/lib/posthog-analytics';
 import {
   isGitHubOperationTokenConnectionLostError,
@@ -75,6 +79,7 @@ export function PrTabContainer({
 }: PrTabContainerProps) {
   const { t } = useTranslation();
   const postHog = usePostHog();
+  const { openSettings } = useOpenSettings();
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const {
     state,
@@ -301,6 +306,9 @@ export function PrTabContainer({
       state={viewState}
       data={viewData}
       error={error?.message ?? null}
+      onOpenGitHubSettings={
+        isGitHubRepositoryConnectionError(error) ? () => openSettings('github') : undefined
+      }
       isRefreshing={isRevalidating}
       isPostingComment={isPostingComment}
       checksPermissionError={checksPermissionError}

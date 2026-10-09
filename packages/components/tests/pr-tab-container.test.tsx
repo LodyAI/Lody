@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
   }
 
   return {
+    openSettings: vi.fn(),
     markReadyForReview: vi.fn(),
     mergePullRequest: vi.fn(),
     refresh: vi.fn(),
@@ -24,6 +25,10 @@ const mocks = vi.hoisted(() => {
     ReadyForReviewStillDraftError,
   };
 });
+
+vi.mock('@/hooks/use-open-settings', () => ({
+  useOpenSettings: () => ({ openSettings: mocks.openSettings }),
+}));
 
 vi.mock('@posthog/react', () => ({
   usePostHog: () => null,
@@ -80,6 +85,7 @@ vi.mock('@/hooks/use-github-pr-diff', () => ({
 }));
 
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
+import { GitHubRepositoryIdentityError } from '../src/lib/github-pr-details-state';
 import { PrTabContainer } from '../src/components/sessions/pr-tab-container';
 
 (
@@ -241,6 +247,28 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     }
     return button;
   }
+
+  it.each([
+    new GitHubRepositoryIdentityError('unresolved'),
+    Object.assign(new Error('repository unavailable'), { code: 'repo_not_linked' }),
+  ])('routes repository connection failures to GitHub settings', async (error) => {
+    mocks.useGitHubPrDetails.mockReturnValue({
+      ...createPrDetailsResult(),
+      state: 'error',
+      data: null,
+      error,
+    });
+    await renderContainer();
+    expect(container?.textContent).toContain('Check GitHub connection');
+    expect(container?.textContent).toContain('workspace administrator');
+    const button = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (node) => node.textContent === 'Open GitHub settings'
+    );
+    expect(button).toBeDefined();
+    await act(async () => button?.click());
+    expect(mocks.openSettings).toHaveBeenCalledWith('github');
+    expect(container?.querySelector('textarea')).toBeNull();
+  });
 
   it('refreshes once and retries without showing a toast on the first auth failure', async () => {
     mocks.markReadyForReview

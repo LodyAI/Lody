@@ -34,6 +34,7 @@ import type {
 import { withClassName } from '@/lib/stylex';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
+  GITHUB_REPOSITORY_CONNECTION_GUIDANCE,
   derivePrStatusFromDetails,
   isDraftPr,
   isPullRequestMergeabilityPending,
@@ -586,6 +587,7 @@ export interface PrTabViewProps {
   onRefresh?: () => void | Promise<unknown>;
   onPostComment?: (body: string) => Promise<void> | void;
   onGrantChecksPermission?: () => void;
+  onOpenGitHubSettings?: () => void;
   onSelectMergeMethod?: (method: GitHubMergeMethod) => void;
   onMerge?: (method: GitHubMergeMethod) => void | Promise<void>;
   onSetState?: (state: 'open' | 'closed') => void | Promise<void>;
@@ -1784,6 +1786,7 @@ function PrDetailsUnavailable({
   isRefreshing,
   onRetry,
   onReviewAppAccess,
+  onOpenGitHubSettings,
 }: {
   githubUrl: string;
   error: string | null;
@@ -1791,6 +1794,7 @@ function PrDetailsUnavailable({
   onRetry?: () => void | Promise<unknown>;
   /** Opens the GitHub App install page — the same destination the checks-permission grant uses. */
   onReviewAppAccess?: () => void;
+  onOpenGitHubSettings?: () => void;
 }) {
   const { t } = useTranslation();
   const [retrying, setRetrying] = useState(false);
@@ -1813,7 +1817,11 @@ function PrDetailsUnavailable({
     );
   }, [onRetry]);
   const pending = retrying || isRefreshing;
-  const errorText = error !== null && error.trim() !== '' ? error : null;
+  const errorText = onOpenGitHubSettings
+    ? t('sessions.prTab.repositoryIdentityUnresolved', GITHUB_REPOSITORY_CONNECTION_GUIDANCE)
+    : error !== null && error.trim() !== ''
+      ? error
+      : null;
   // GitHub answers "you can't see that" with a 404, so a not-found detail load
   // may be an app-access problem — hedged hint, never a claim.
   const likelyNotFound = errorText !== null && /\b404\b/.test(errorText);
@@ -1821,12 +1829,25 @@ function PrDetailsUnavailable({
     <section
       data-pr-unavailable=""
       role="status"
-      {...stylex.props(styles.notice, styles.noticeDanger)}
+      {...stylex.props(
+        styles.notice,
+        onOpenGitHubSettings ? styles.noticeWarning : styles.noticeDanger
+      )}
     >
-      <AlertCircle aria-hidden {...stylex.props(styles.mark, styles.danger)} />
+      <AlertCircle
+        aria-hidden
+        {...stylex.props(styles.mark, onOpenGitHubSettings ? styles.warning : styles.danger)}
+      />
       <div {...stylex.props(styles.noticeBody)}>
-        <p {...stylex.props(styles.noticeTitle, styles.noticeTitleDanger)}>
-          {t('sessions.prTab.loadError', 'Failed to load pull request')}
+        <p
+          {...stylex.props(
+            styles.noticeTitle,
+            onOpenGitHubSettings ? styles.warning : styles.noticeTitleDanger
+          )}
+        >
+          {onOpenGitHubSettings
+            ? t('sessions.prTab.checkRepositoryConnection', 'Check GitHub connection')
+            : t('sessions.prTab.loadError', 'Failed to load pull request')}
         </p>
         <p {...stylex.props(styles.noticeText)}>
           {t(
@@ -1856,6 +1877,11 @@ function PrDetailsUnavailable({
           </p>
         )}
         <div {...stylex.props(styles.noticeActionRow)}>
+          {onOpenGitHubSettings && (
+            <Button type="button" variant="secondary" size="mini" onClick={onOpenGitHubSettings}>
+              {t('sessions.prTab.openGitHubSettings', 'Open GitHub settings')}
+            </Button>
+          )}
           <Button
             render={<a href={githubUrl} target="_blank" rel="noreferrer" />}
             variant="secondary"
@@ -1908,6 +1934,7 @@ export const PrTabView = memo(function PrTabView({
   onRefresh,
   onPostComment,
   onGrantChecksPermission,
+  onOpenGitHubSettings,
   onSelectMergeMethod,
   onMerge,
   onSetState,
@@ -1926,8 +1953,10 @@ export const PrTabView = memo(function PrTabView({
   useEffect(() => {
     setCommentDraft('');
   }, [prNumber, repoFullName]);
-  const pr = data?.pullRequest;
-  const changes = data?.changes;
+  // Cached details are not proof that the workspace still has access. Keep the
+  // cache in the hook, but show the repair state and withhold mutation controls.
+  const pr = onOpenGitHubSettings ? undefined : data?.pullRequest;
+  const changes = onOpenGitHubSettings ? undefined : data?.changes;
   const changesAvailable = changes != null;
   useEffect(() => {
     setActiveTab(initialTab === 'changes' && changesAvailable ? 'changes' : 'summary');
@@ -1969,7 +1998,7 @@ export const PrTabView = memo(function PrTabView({
       <div {...stylex.props(styles.column, styles.body, embedded && styles.bodyEmbedded)}>
         {state === 'loading' && !pr && <PrBodySkeleton />}
 
-        {state === 'error' && !pr && (
+        {((state === 'error' && !pr) || onOpenGitHubSettings) && (
           <PrDetailsUnavailable
             githubUrl={badgeMeta.url}
             error={error ?? null}
@@ -1978,6 +2007,7 @@ export const PrTabView = memo(function PrTabView({
             // Same destination the checks-permission grant uses: the GitHub
             // App install page is where repo access gets fixed.
             onReviewAppAccess={onGrantChecksPermission}
+            onOpenGitHubSettings={onOpenGitHubSettings}
           />
         )}
 

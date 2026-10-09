@@ -326,7 +326,7 @@ describe('useGitHubPrDetails target isolation', () => {
     await renderHook(input);
     expect(currentResult?.state).toBe('error');
     expect(currentResult?.data).toBeNull();
-    expect(currentResult?.error?.message).toContain('repository identity');
+    expect(currentResult?.error?.message).toContain('repository connection');
     expect(githubMocks.githubFetchPullRequestDetails).not.toHaveBeenCalled();
     await act(async () => {
       await currentResult?.refresh();

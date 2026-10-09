@@ -1,5 +1,20 @@
 import type { GitHubPullRequestDetails, PrStatus } from '@lody/shared';
 
+export const GITHUB_REPOSITORY_CONNECTION_GUIDANCE =
+  'Lody cannot confirm this PR’s repository connection to the current workspace. In Settings > GitHub, ask a workspace administrator to connect the GitHub App and check access to this repository, then retry. If it is already connected, ask them to verify the original repository and PR association. Signing in with the local GitHub CLI does not establish this connection.';
+
+/** A verified PR still needs a workspace repository/association check before hosted operations. */
+export class GitHubRepositoryIdentityError extends Error {
+  override name = 'GitHubRepositoryIdentityError';
+}
+
+export function isGitHubRepositoryConnectionError(error: unknown): boolean {
+  return (
+    error instanceof GitHubRepositoryIdentityError ||
+    (error instanceof Error && 'code' in error && error.code === 'repo_not_linked')
+  );
+}
+
 /**
  * A PR counts as draft when GitHub reports it via the explicit `draft` flag or
  * the `mergeableState === 'draft'` signal (the REST details payload sometimes

@@ -45,6 +45,8 @@ import {
 import { useDiffFocusScroll } from './use-diff-focus-scroll';
 import { useSessionAllChangesDiffData } from './use-session-all-changes-diff-data';
 import { useSessionConversationDiffData } from './use-session-conversation-diff-data';
+import { useOpenSettings } from '@/hooks/use-open-settings';
+import { isGitHubRepositoryConnectionError } from '@/lib/github-pr-details-state';
 import { useGitHubReviewComments } from '@/hooks/use-github-review-comments';
 import {
   getPullRequestNumber,
@@ -463,6 +465,7 @@ function SessionConversationDiffPanelImpl({
 }: SessionConversationDiffPanelProps) {
   const { t } = useTranslation();
   const postHog = usePostHog();
+  const { openSettings } = useOpenSettings();
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
   const user = useAtomValue(userAtom);
   const diffCommentAnalyticsBase = useMemo(
@@ -800,6 +803,11 @@ function SessionConversationDiffPanelImpl({
       {githubReviewComments.error && (
         <GitHubReviewErrorNotice
           message={githubReviewComments.error.message}
+          onOpenGitHubSettings={
+            isGitHubRepositoryConnectionError(githubReviewComments.error)
+              ? () => openSettings('github')
+              : undefined
+          }
           onRetry={() => void refreshGitHubReviewComments()}
         />
       )}

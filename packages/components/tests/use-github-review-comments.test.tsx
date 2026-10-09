@@ -133,7 +133,7 @@ it('keeps the identity gate closed when safe repair is unavailable', async () =>
   mocks.repair.mockRejectedValueOnce(new Error('offline'));
   await render();
   expect(result.status).toBe('error');
-  expect(result.error?.message).toContain('repository identity');
+  expect(result.error?.message).toContain('repository connection');
   await expect(result.refresh()).resolves.toBeUndefined();
   expect(result.threads).toEqual([]);
 });

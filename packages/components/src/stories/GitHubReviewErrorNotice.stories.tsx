@@ -12,8 +12,9 @@ type Story = StoryObj<typeof meta>;
 
 export const UnresolvedIdentity: Story = {
   args: {
+    onOpenGitHubSettings: fn(),
     message:
-      'Cannot verify this session’s repository identity. GitHub operations are paused. Retry after reconnecting to Lody. If the repository was removed, reinstalled or renamed, ask a workspace administrator to verify the original repository and PR association; a matching name alone is not enough.',
+      'Lody cannot confirm this PR’s repository connection to the current workspace. In Settings > GitHub, ask a workspace administrator to connect the GitHub App and check access to this repository, then retry. If it is already connected, ask them to verify the original repository and PR association. Signing in with the local GitHub CLI does not establish this connection.',
   },
 };
 export const NetworkFailure: Story = {

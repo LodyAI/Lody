@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
+import {
+  GITHUB_REPOSITORY_CONNECTION_GUIDANCE,
+  GitHubRepositoryIdentityError,
+} from '@/lib/github-pr-details-state';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
 
@@ -79,11 +83,8 @@ export function useGitHubPrIdentity({
   const error = useMemo(
     () =>
       unresolved
-        ? new Error(
-            t(
-              'sessions.prTab.repositoryIdentityUnresolved',
-              'Cannot verify this session’s repository identity. GitHub operations are paused. Retry after reconnecting to Lody. If the repository was removed, reinstalled or renamed, ask a workspace administrator to verify the original repository and PR association; a matching name alone is not enough.'
-            )
+        ? new GitHubRepositoryIdentityError(
+            t('sessions.prTab.repositoryIdentityUnresolved', GITHUB_REPOSITORY_CONNECTION_GUIDANCE)
           )
         : null,
     [t, unresolved]

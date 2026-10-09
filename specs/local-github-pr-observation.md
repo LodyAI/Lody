@@ -52,6 +52,15 @@ mutation affordances stay unavailable until details load. Branch observation is
 event-driven; PR discovery and status use bounded background polling, not a new
 polling loop per view. Product-cloud requests remain forbidden in local mode.
 
+An unresolved repository identity or a `repo_not_linked` response shows localized
+repair guidance in PR and review surfaces, with a link to the current workspace’s
+GitHub settings and administrator instructions for App installation and repository
+access. Cached details must not hide the notice or retain mutation controls;
+recovery restores details. Repair does not bypass identity checks or association
+cooldowns, and adds no polling, toast, or synchronized metadata. Association
+rejection remains an HTTP failure for clients that only inspect HTTP status;
+expected missing configuration need not become a server execution exception.
+
 ## Evidence
 
 - [Reconciler boundaries](../apps/cli/src/lib/pr-poller/AGENTS.md)

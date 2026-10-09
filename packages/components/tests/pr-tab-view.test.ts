@@ -367,6 +367,8 @@ describe('PrTabView load failure', () => {
     isRefreshing?: boolean;
     onRefresh?: () => void | Promise<unknown>;
     onPostComment?: (body: string) => Promise<void> | void;
+    onGrantChecksPermission?: () => void;
+    onOpenGitHubSettings?: () => void;
   }) => {
     if (!container) {
       container = document.createElement('div');
@@ -432,20 +434,46 @@ describe('PrTabView load failure', () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
-  it('shows the verified identity cause inline', () => {
+  it('offers a settings repair without enabling PR mutations until identity recovers', () => {
+    const onOpenGitHubSettings = vi.fn();
     const identityMessage =
       'Cannot verify this session’s repository identity. GitHub operations are paused.';
     render({
       state: 'error',
       data: null,
       error: identityMessage,
+      onOpenGitHubSettings,
       onRefresh: vi.fn(),
     });
 
-    expect(panel()?.textContent).toContain('Failed to load pull request');
-    expect(panel()?.textContent).toContain(identityMessage);
+    expect(panel()?.textContent).toContain('Check GitHub connection');
+    expect(panel()?.textContent).toContain('workspace administrator');
+    const settingsButton = [...(panel()?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === 'Open GitHub settings'
+    );
+    expect(settingsButton).toBeDefined();
+    flushSync(() => settingsButton?.click());
+    expect(onOpenGitHubSettings).toHaveBeenCalledTimes(1);
+    expect(container?.querySelector('textarea')).toBeNull();
     // Not a 404: no app-access hint.
     expect(panel()?.textContent).not.toContain('GitHub App can’t access');
+    render({ state: 'ready', data });
+    expect(panel()).toBeNull();
+  });
+
+  it('keeps connection repair visible over cached details and withholds mutation controls', () => {
+    render({
+      state: 'ready',
+      data,
+      error: 'Repository connection needs attention',
+      onOpenGitHubSettings: vi.fn(),
+      onPostComment: vi.fn(),
+    });
+    expect(panel()?.textContent).toContain('Open GitHub settings');
+    expect(container?.querySelector('textarea')).toBeNull();
+    expect(
+      [...container!.querySelectorAll('button')].some((button) => button.textContent === 'Merge')
+    ).toBe(false);
   });
 
   it('holds the retry button pending until the reload settles', async () => {
