@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import path from 'path';
 import os from 'os';
 import * as fs from 'fs';
@@ -27,7 +28,8 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { extractTextFromAgentResponse } from './response-utils';
 import { formatErrorMessage } from '@/utils/format-error';
-import { runCommandText } from '@/platform/promise-facade';
+import { runCommandText } from '@lody/shared/node/process';
+
 import { normalizeConfigOptions } from './acp-capabilities';
 import { readLegacySessionModelState } from './acp-capability-normalization';
 import { parseLodyMessagePhase } from './lody-acp-extension';
@@ -233,13 +235,16 @@ export const sanitizeGeneratedTitle = (candidate?: string | null): string | null
 const ensureWorkdirIsGitRepo = async (workdir: string, logger: Logger): Promise<boolean> => {
   const isGitRepo = async (): Promise<boolean> => {
     try {
-      const result = await runCommandText({
-        command: 'git',
-        args: ['rev-parse', '--is-inside-work-tree'],
-        cwd: workdir,
-        timeout: TITLE_GIT_TIMEOUT_MS,
-        check: 'exit-0',
-      });
+      const result = await runCommandText(
+        {
+          command: 'git',
+          args: ['rev-parse', '--is-inside-work-tree'],
+          cwd: workdir,
+          timeout: TITLE_GIT_TIMEOUT_MS,
+          check: 'exit-0',
+        },
+        toShared()
+      );
       return result.stdout.trim() === 'true';
     } catch {
       return false;
@@ -251,13 +256,16 @@ const ensureWorkdirIsGitRepo = async (workdir: string, logger: Logger): Promise<
   }
 
   try {
-    await runCommandText({
-      command: 'git',
-      args: ['init', '--quiet'],
-      cwd: workdir,
-      timeout: TITLE_GIT_TIMEOUT_MS,
-      check: 'exit-0',
-    });
+    await runCommandText(
+      {
+        command: 'git',
+        args: ['init', '--quiet'],
+        cwd: workdir,
+        timeout: TITLE_GIT_TIMEOUT_MS,
+        check: 'exit-0',
+      },
+      toShared()
+    );
   } catch (error) {
     logger.debug(
       `[title-generator] Failed to init git repo in ${workdir}: ${formatErrorMessage(error)}`

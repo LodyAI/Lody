@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import { randomUUID } from 'node:crypto';
 import {
   DEFAULT_WORKTREE_CLEANUP_TIMEOUT_MS,
@@ -11,7 +12,8 @@ import {
   type WorktreeSetupShell,
   type WorkspaceId,
 } from '@lody/shared';
-import { startProcess } from '@/platform/promise-facade';
+import { startProcess } from '@lody/shared/node/process';
+
 import type { TerminationPolicy } from '@lody/shared/node/process';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -236,25 +238,28 @@ async function runWorktreeScript(options: {
     let waitForCloseResolve: (() => void) | null = null;
     // The shell leads its own process group so a failure or timeout ends every
     // command the script started, not just the shell.
-    const shellProcess = startProcess({
-      command,
-      args,
-      options: {
-        cwd: options.workdir,
-        env: {
-          ...process.env,
-          LODY_WORKSPACE_ID: options.workspaceId,
-          LODY_SESSION_ID: options.sessionId,
-          LODY_WORKTREE_PATH: options.workdir,
-          LODY_WORKTREE_BRANCH: options.branch,
-          LODY_WORKTREE_SCRIPT_PHASE: options.phase,
-          ...(options.repoFullName ? { LODY_GITHUB_REPO: options.repoFullName } : {}),
-          ...(options.localProjectId ? { LODY_LOCAL_PROJECT_ID: options.localProjectId } : {}),
+    const shellProcess = startProcess(
+      {
+        command,
+        args,
+        options: {
+          cwd: options.workdir,
+          env: {
+            ...process.env,
+            LODY_WORKSPACE_ID: options.workspaceId,
+            LODY_SESSION_ID: options.sessionId,
+            LODY_WORKTREE_PATH: options.workdir,
+            LODY_WORKTREE_BRANCH: options.branch,
+            LODY_WORKTREE_SCRIPT_PHASE: options.phase,
+            ...(options.repoFullName ? { LODY_GITHUB_REPO: options.repoFullName } : {}),
+            ...(options.localProjectId ? { LODY_LOCAL_PROJECT_ID: options.localProjectId } : {}),
+          },
+          stdio: ['pipe', 'pipe', 'pipe'],
         },
-        stdio: ['pipe', 'pipe', 'pipe'],
+        processGroup: true,
       },
-      processGroup: true,
-    });
+      toShared()
+    );
     const child = shellProcess.child;
 
     const emitOutput = (step: RunningStep, stream: WorktreeScriptOutputStream, chunk: string) => {

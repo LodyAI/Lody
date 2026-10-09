@@ -1,7 +1,9 @@
+import { toShared } from '@/platform/process-options';
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { getLogger } from '@/utils/logger';
-import { startProcess } from '@/platform/promise-facade';
+import { startProcess } from '@lody/shared/node/process';
+
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import {
   WorkspaceWatchCoordinator,
@@ -100,7 +102,7 @@ describe('WorkspaceWatchCoordinator', () => {
       childLauncher: () =>
         startProcess(
           { command: 'watch-worker', args: [], options: {}, processGroup: false },
-          { nodeProcess: table.api }
+          toShared({ nodeProcess: table.api })
         ),
       gracefulShutdownMs: 0,
       sigtermWaitMs: 10,

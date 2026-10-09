@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
 import { resolveSessionLinkId } from '@lody/shared/session-link';
@@ -9,7 +10,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { requestSessionShare } from '@/lib/session-share-delivery';
-import { startProcess } from '@/platform/promise-facade';
+import { startProcess } from '@lody/shared/node/process';
+
 import { formatErrorMessage } from '@/utils/format-error';
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
@@ -1131,22 +1133,25 @@ const runLodyCli = async (
 ): Promise<{ stdout: string; stderr: string }> => {
   const stdout: Buffer[] = [];
   const stderr: Buffer[] = [];
-  const cli = startProcess({
-    command: process.execPath,
-    args: [resolveCliEntrypoint(), ...args],
-    options: {
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
+  const cli = startProcess(
+    {
+      command: process.execPath,
+      args: [resolveCliEntrypoint(), ...args],
+      options: {
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+      // Stays in this server's process group: ending the agent tree that runs
+      // the MCP server must end its in-flight `lody` subcommands too.
+      processGroup: false,
+      onSpawned: (child) => {
+        child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
+        child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
+      },
     },
-    // Stays in this server's process group: ending the agent tree that runs
-    // the MCP server must end its in-flight `lody` subcommands too.
-    processGroup: false,
-    onSpawned: (child) => {
-      child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
-      child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
-    },
-  });
+    toShared()
+  );
   return await new Promise((resolve, reject) => {
     let timedOut = false;
     const timeout = setTimeout(() => {

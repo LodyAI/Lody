@@ -1,6 +1,7 @@
+import { toShared } from '@/platform/process-options';
 import { z } from 'zod';
 
-import { runCommandText } from '@/platform/promise-facade';
+import { runCommandText } from '@lody/shared/node/process';
 
 /**
  * GitHub access for the review engine, over the `gh` CLI.
@@ -40,14 +41,17 @@ export const createGhRunner =
       return { stdout: 'no GitHub credential available', exitCode: 1 };
     }
     try {
-      const result = await runCommandText({
-        command: 'gh',
-        args,
-        timeout: GH_TIMEOUT_MS,
-        env: { ...process.env, GH_TOKEN: token, GH_PROMPT: 'disabled' },
-        maxOutputBytes: 8 * 1024 * 1024,
-        check: 'none',
-      });
+      const result = await runCommandText(
+        {
+          command: 'gh',
+          args,
+          timeout: GH_TIMEOUT_MS,
+          env: { ...process.env, GH_TOKEN: token, GH_PROMPT: 'disabled' },
+          maxOutputBytes: 8 * 1024 * 1024,
+          check: 'none',
+        },
+        toShared()
+      );
       if (result.code !== 0 || result.signal !== null) {
         return { stdout: `${result.stdout}${result.stderr}`.trim(), exitCode: 1 };
       }

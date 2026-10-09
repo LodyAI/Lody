@@ -1,4 +1,5 @@
-import { startProcess } from '@/platform/promise-facade';
+import { toShared } from '@/platform/process-options';
+import { startProcess } from '@lody/shared/node/process';
 
 type OpenCommand = { readonly command: string; readonly args: readonly string[] };
 
@@ -24,14 +25,17 @@ export function buildOpenBrowserCommand(url: string, platform: NodeJS.Platform):
  */
 export async function openBrowser(url: string): Promise<void> {
   const { command, args } = buildOpenBrowserCommand(url, process.platform);
-  const handle = startProcess({
-    command,
-    args,
-    // rundll32 passes its show state on to ShellExecute: hidden, a browser or
-    // the desktop app cold-started for the URL would open without a window.
-    options: { stdio: 'ignore', windowsHide: false },
-    processGroup: false,
-  });
+  const handle = startProcess(
+    {
+      command,
+      args,
+      // rundll32 passes its show state on to ShellExecute: hidden, a browser or
+      // the desktop app cold-started for the URL would open without a window.
+      options: { stdio: 'ignore', windowsHide: false },
+      processGroup: false,
+    },
+    toShared()
+  );
   let spawnError: unknown;
   handle.child.once('error', (error) => {
     spawnError = error;

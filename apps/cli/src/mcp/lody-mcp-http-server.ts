@@ -1,10 +1,12 @@
+import { toShared } from '@/platform/process-options';
 import type { ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { startProcess, type ProcessHandle } from '@/platform/promise-facade';
+import { startProcess, type ProcessHandle } from '@lody/shared/node/process';
+
 import {
   MCP_HTTP_PREFERRED_PORT_ENV,
   MCP_HTTP_TOKEN_ENV,
@@ -164,32 +166,35 @@ class McpHttpHostSupervisor {
   }
 
   private spawnHost(cliEntrypoint: string): ProcessHandle {
-    return startProcess({
-      command: process.execPath,
-      args: [cliEntrypoint, '__internal', 'lody-mcp-http-host'],
-      options: {
-        // stdin held open as the daemon-death signal; fd 3 is the handshake
-        // pipe. The token goes through the environment (owner-readable only),
-        // never through argv.
-        stdio: ['pipe', 'ignore', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          [MCP_HTTP_TOKEN_ENV]: this.token,
-          [MCP_HTTP_PREFERRED_PORT_ENV]: String(this.lastPort),
+    return startProcess(
+      {
+        command: process.execPath,
+        args: [cliEntrypoint, '__internal', 'lody-mcp-http-host'],
+        options: {
+          // stdin held open as the daemon-death signal; fd 3 is the handshake
+          // pipe. The token goes through the environment (owner-readable only),
+          // never through argv.
+          stdio: ['pipe', 'ignore', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            [MCP_HTTP_TOKEN_ENV]: this.token,
+            [MCP_HTTP_PREFERRED_PORT_ENV]: String(this.lastPort),
+          },
+          windowsHide: true,
         },
-        windowsHide: true,
+        processGroup: false,
+        onSpawned: (child) => {
+          child.stderr?.setEncoding('utf8');
+          child.stderr?.on('data', (chunk: string) => {
+            const text = chunk.trim();
+            if (text) {
+              this.logger.debug(`[mcp-http] host stderr: ${text.slice(0, 2_000)}`);
+            }
+          });
+        },
       },
-      processGroup: false,
-      onSpawned: (child) => {
-        child.stderr?.setEncoding('utf8');
-        child.stderr?.on('data', (chunk: string) => {
-          const text = chunk.trim();
-          if (text) {
-            this.logger.debug(`[mcp-http] host stderr: ${text.slice(0, 2_000)}`);
-          }
-        });
-      },
-    });
+      toShared()
+    );
   }
 
   private async readHandshake(child: ChildProcess): Promise<number> {

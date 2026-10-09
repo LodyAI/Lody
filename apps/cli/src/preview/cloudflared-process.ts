@@ -1,6 +1,8 @@
+import { toShared } from '@/platform/process-options';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { startProcess } from '@/platform/promise-facade';
+import { startProcess } from '@lody/shared/node/process';
+
 import { CloudflaredError, type CloudflaredProcess } from './cloudflared-native';
 
 export { CloudflaredError, type CloudflaredProcess } from './cloudflared-native';
@@ -57,19 +59,22 @@ export async function startCloudflaredProcess(options: {
   options.signal.throwIfAborted();
   // Never terminated from here: IPC stop/disconnect is its only shutdown path,
   // so the worker can reap cloudflared and remove its config first.
-  const worker = startProcess({
-    command: process.execPath,
-    args: [
-      options.workerPath ?? fileURLToPath(new URL('./cloudflared-worker.js', import.meta.url)),
-      options.binary,
-      options.proxyOrigin,
-    ],
-    options: {
-      env: workerEnvironment(options.env ?? process.env),
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  const worker = startProcess(
+    {
+      command: process.execPath,
+      args: [
+        options.workerPath ?? fileURLToPath(new URL('./cloudflared-worker.js', import.meta.url)),
+        options.binary,
+        options.proxyOrigin,
+      ],
+      options: {
+        env: workerEnvironment(options.env ?? process.env),
+        stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      },
+      processGroup: false,
     },
-    processGroup: false,
-  }).child;
+    toShared()
+  ).child;
   let failure: CloudflaredError | null = null;
   let diagnostic: string | undefined;
   let stopping = false;

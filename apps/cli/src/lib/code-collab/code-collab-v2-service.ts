@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   chmod,
@@ -55,7 +56,8 @@ import {
 import { formatErrorMessage } from '@/utils/format-error';
 import { getLogger } from '@/utils/logger';
 import { runCommandOk } from '@lody/shared/node/process';
-import { makePlatformRunner, runCommandText } from '@/platform/promise-facade';
+import { makeProcessRunner as makePlatformRunner, runCommandText } from '@lody/shared/node/process';
+
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import { CodeCollabFileIndexChangedPublishError } from './code-collab-flock-publish';
 import type { CodeCollabV2DiffStore } from './code-collab-v2-diff-store';
@@ -2984,19 +2986,22 @@ async function runGit(
   args: readonly string[]
 ): Promise<{ ok: true; stdout: string } | { ok: false }> {
   try {
-    const { stdout } = await runCommandText({
-      command: 'git',
-      args: ['-C', cwd, ...args],
-      maxOutputBytes: 64 * 1024 * 1024,
-      check: 'exit-0',
-    });
+    const { stdout } = await runCommandText(
+      {
+        command: 'git',
+        args: ['-C', cwd, ...args],
+        maxOutputBytes: 64 * 1024 * 1024,
+        check: 'exit-0',
+      },
+      toShared()
+    );
     return { ok: true, stdout };
   } catch {
     return { ok: false };
   }
 }
 
-const runPlatformCommand = makePlatformRunner({});
+const runPlatformCommand = makePlatformRunner(toShared({}));
 
 async function runGitBuffer(
   cwd: string,

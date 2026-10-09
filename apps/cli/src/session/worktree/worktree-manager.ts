@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import { GITHUB_CREDENTIAL_ENV_KEYS } from '@/lib/gh-token-env';
 import { RepoId, SessionId } from '@lody/shared';
 import { resolveLocalProjectBranchAtRootPath } from '@lody/shared/node/local-project';
@@ -8,7 +9,8 @@ import { withFileLock } from '@/utils/file-lock';
 import { redactUrlAuth } from '@/utils/github';
 import { getCredentialHelperHostPath } from '@/lib/git-credential-helper-script';
 import { formatErrorMessage } from '@/utils/format-error';
-import { runCommandText } from '@/platform/promise-facade';
+import { runCommandText } from '@lody/shared/node/process';
+
 import { CommandTimedOut } from '@lody/shared/node/process';
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
@@ -370,7 +372,7 @@ export class WorktreeManager {
           maxOutputBytes: GIT_MAX_OUTPUT_BYTES,
           check: 'none',
         },
-        { nodeProcess: this.nodeProcess }
+        toShared({ nodeProcess: this.nodeProcess })
       );
     } catch (error) {
       if (error instanceof CommandTimedOut) {
@@ -605,7 +607,7 @@ export class WorktreeManager {
         input,
         check: 'none',
       },
-      { nodeProcess: this.nodeProcess }
+      toShared({ nodeProcess: this.nodeProcess })
     );
     const returnedCredentials =
       stdout.includes('username=') && stdout.includes('\npassword=') && stdout.includes('\n\n');

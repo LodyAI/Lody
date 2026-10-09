@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import type { ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
@@ -5,7 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { startProcess, type ProcessHandle } from '@/platform/promise-facade';
+import { startProcess, type ProcessHandle } from '@lody/shared/node/process';
+
 import {
   parseWorkspaceWatchChildMessage,
   type WorkspaceWatchParentMessage,
@@ -467,16 +469,19 @@ function launchWorkspaceWatchChild(_generation: number): WorkspaceWatchChild {
   const productionEntry = path.join(moduleDirectory, 'code-collab-watch-worker.js');
   const env = buildWorkspaceWatchWorkerEnvironment();
   if (existsSync(productionEntry)) {
-    return startProcess({
-      command: process.execPath,
-      args: [productionEntry],
-      options: {
-        env,
-        stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
-        windowsHide: true,
+    return startProcess(
+      {
+        command: process.execPath,
+        args: [productionEntry],
+        options: {
+          env,
+          stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+          windowsHide: true,
+        },
+        processGroup: false,
       },
-      processGroup: false,
-    });
+      toShared()
+    );
   }
   throw Object.assign(new Error('Code Collab watch worker bundle is missing'), {
     code: 'WATCH_WORKER_MISSING',

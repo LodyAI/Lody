@@ -1,9 +1,11 @@
+import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
-import { startProcess } from '@/platform/promise-facade';
+import { startProcess } from '@lody/shared/node/process';
+
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import {
@@ -197,7 +199,7 @@ describe('daemon runner launch cleanup', () => {
     table.queueSpawn({ ignores: ['SIGTERM'] });
     const runner = startProcess(
       { command: 'runner', args: [], options: {}, processGroup: true },
-      { nodeProcess: table.api }
+      toShared({ nodeProcess: table.api })
     );
     const runnerPid = runner.child.pid ?? -1;
     const workerPid = table.addDescendant(runnerPid, { ignores: ['SIGTERM'] });
@@ -220,7 +222,7 @@ describe('daemon runner launch cleanup', () => {
     table.queueSpawn({ ignores: ['SIGTERM', 'SIGKILL'] });
     const runner = startProcess(
       { command: 'runner', args: [], options: {}, processGroup: true },
-      { nodeProcess: table.api }
+      toShared({ nodeProcess: table.api })
     );
 
     await expect(

@@ -1,7 +1,8 @@
+import { toShared } from '@/platform/process-options';
 import type { CloudGithubTokenManager, CloudGithubWriteTokenContext } from '@lody/platform';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { runCommandText } from '@/platform/promise-facade';
+import { runCommandText } from '@lody/shared/node/process';
 
 /**
  * Per-repo GitHub credential resolution for the poller (plan §3).
@@ -41,12 +42,15 @@ type GhHarvest =
 
 const defaultHarvestGhToken = async (): Promise<GhHarvest> => {
   try {
-    const { stdout } = await runCommandText({
-      command: 'gh',
-      args: ['auth', 'token', '--hostname', 'github.com'],
-      timeout: 5000,
-      check: 'exit-0',
-    });
+    const { stdout } = await runCommandText(
+      {
+        command: 'gh',
+        args: ['auth', 'token', '--hostname', 'github.com'],
+        timeout: 5000,
+        check: 'exit-0',
+      },
+      toShared()
+    );
     const token = stdout.trim();
     return token ? { outcome: 'token', token } : { outcome: 'not-authed' };
   } catch (error) {
@@ -57,12 +61,15 @@ const defaultHarvestGhToken = async (): Promise<GhHarvest> => {
 
 const defaultFetchGhUserId = async (): Promise<string | null> => {
   try {
-    const { stdout } = await runCommandText({
-      command: 'gh',
-      args: ['api', '--hostname', 'github.com', 'user', '--jq', '.id'],
-      timeout: 5000,
-      check: 'exit-0',
-    });
+    const { stdout } = await runCommandText(
+      {
+        command: 'gh',
+        args: ['api', '--hostname', 'github.com', 'user', '--jq', '.id'],
+        timeout: 5000,
+        check: 'exit-0',
+      },
+      toShared()
+    );
     const id = stdout.trim();
     return id ? id : null;
   } catch {

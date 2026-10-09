@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
@@ -17,7 +18,8 @@ import {
 } from '@lody/shared/node/local-cli-supervisor';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL } from '@/utils/const';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { startProcess } from '@/platform/promise-facade';
+import { startProcess } from '@lody/shared/node/process';
+
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { TerminationPolicy } from '@lody/shared/node/process';
 
@@ -266,7 +268,7 @@ const runCommand = async (args: {
         });
       },
     },
-    { nodeProcess: args.nodeProcess }
+    toShared({ nodeProcess: args.nodeProcess })
   );
   const child = install.child;
 

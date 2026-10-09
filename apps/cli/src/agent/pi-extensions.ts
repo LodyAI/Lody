@@ -1,5 +1,7 @@
+import { toShared } from '@/platform/process-options';
 import { PiExtensionDiscoverySchema, type PiExtensionDiscovery } from '@lody/shared';
-import { runCommandText } from '@/platform/promise-facade';
+import { runCommandText } from '@lody/shared/node/process';
+
 import { getManagedAgentRuntimeManager, PI_EXTENSIONS_SUPPORTED } from './managed-agent-runtime';
 
 const SCAN_ENV_KEYS = [
@@ -52,14 +54,17 @@ export async function discoverManagedPiExtensions(
     }
   }
   try {
-    const { stdout } = await runCommandText({
-      command: process.execPath,
-      args: [runtime.command, '--list-extensions'],
-      timeout: 30_000,
-      maxOutputBytes: 2 * 1024 * 1024,
-      env,
-      check: 'exit-0',
-    });
+    const { stdout } = await runCommandText(
+      {
+        command: process.execPath,
+        args: [runtime.command, '--list-extensions'],
+        timeout: 30_000,
+        maxOutputBytes: 2 * 1024 * 1024,
+        env,
+        check: 'exit-0',
+      },
+      toShared()
+    );
     return PiExtensionDiscoverySchema.parse(JSON.parse(stdout));
   } catch {
     throw new Error(

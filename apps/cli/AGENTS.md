@@ -45,7 +45,7 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 ## Coding rules
 
 - Prefer Effect v4 for new/refactored CLI code; follow the [Effect guide](../../.agents/docs/cli-effect-ts.md).
-- Processes use `@lody/shared/node/process` (Promise: `src/platform/promise-facade`);
+- Processes use `@lody/shared/node/process` (CLI wiring: `src/platform/process-options`);
   [rules](../../packages/shared/src/node/AGENTS.md), enforced by `check:cli-process-boundary`.
 - Keep the strict tsconfig, no `any` or non-null assertions, and Zod at every foreign boundary:
   context/cli-type-safety.md.

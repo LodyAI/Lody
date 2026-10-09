@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
@@ -14,7 +15,8 @@ import {
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { requestLocalCliHostShutdown } from '@lody/shared/node/local-cli-host-lease';
 import { calculateWorkerMaxOldSpaceMiB } from '@lody/cli-supervisor';
-import { startProcess, type ProcessHandle } from '@/platform/promise-facade';
+import { startProcess, type ProcessHandle } from '@lody/shared/node/process';
+
 import type { NodeProcessApi } from '@lody/shared/node/process';
 export { LODY_LOG_DIR } from '@/utils/log-retention';
 
@@ -340,7 +342,7 @@ export async function spawnDaemonRunnerAndAwaitReady(
       processGroup: true,
       windowsDetached: true,
     },
-    { nodeProcess: options.nodeProcess }
+    toShared({ nodeProcess: options.nodeProcess })
   );
   const { child } = runner;
   const runnerPid = child.pid;

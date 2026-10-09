@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -20,7 +21,8 @@ import { LODY_GIT_CRED_CONTEXT_TOKEN_ENV } from '@/lib/git-credential-broker';
 import { clearManagedGhTokenEnv, LODY_MANAGED_GH_TOKEN_SHA256_ENV } from '@/lib/gh-token-env';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { makePlatformRunner } from '@/platform/promise-facade';
+import { makeProcessRunner as makePlatformRunner } from '@lody/shared/node/process';
+
 import { NodeProcess } from '@lody/shared/node/process';
 import { posixGroupTree, terminateTree, waitUntilGone } from '@lody/shared/node/process';
 import type { TerminationPolicy } from '@lody/shared/node/process';
@@ -163,7 +165,7 @@ function extractLatestTitle(record: TerminalRecord, data: string): string | null
  * group when the session leader exits.
  */
 const terminatePtyProcessGroup = (pid: number, logger: Logger): Promise<void> =>
-  makePlatformRunner({ logger })(
+  makePlatformRunner(toShared({ logger }))(
     Effect.gen(function* () {
       const tree = posixGroupTree(yield* NodeProcess, pid);
       if (yield* waitUntilGone(tree, PTY_HANGUP_GRACE)) return;

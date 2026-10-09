@@ -1,9 +1,11 @@
+import { toShared } from '@/platform/process-options';
 import fs from 'fs';
 import path from 'path';
 
 import type { RepoId, SessionId, SessionMeta } from '@lody/shared';
 
-import { runCommandText } from '@/platform/promise-facade';
+import { runCommandText } from '@lody/shared/node/process';
+
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
@@ -246,13 +248,16 @@ export class WorktreeGarbageCollector {
   private async isInsideGitWorkTree(dir: string): Promise<boolean> {
     if (!fs.existsSync(dir)) return false;
     try {
-      const { stdout } = await runCommandText({
-        command: 'git',
-        args: ['rev-parse', '--is-inside-work-tree'],
-        cwd: dir,
-        timeout: GIT_PROBE_TIMEOUT_MS,
-        check: 'exit-0',
-      });
+      const { stdout } = await runCommandText(
+        {
+          command: 'git',
+          args: ['rev-parse', '--is-inside-work-tree'],
+          cwd: dir,
+          timeout: GIT_PROBE_TIMEOUT_MS,
+          check: 'exit-0',
+        },
+        toShared()
+      );
       return stdout.trim() === 'true';
     } catch {
       return false;

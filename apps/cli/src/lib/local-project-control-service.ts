@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
 import path, { isAbsolute, relative, resolve as resolvePath } from 'node:path';
 import os from 'node:os';
@@ -39,7 +40,7 @@ import {
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
-import { runCommandText } from '@/platform/promise-facade';
+import { runCommandText } from '@lody/shared/node/process';
 
 const DEFAULT_LOCAL_PROJECT_MAX_FILES = 80_000;
 const HARD_LOCAL_PROJECT_MAX_FILES = 200_000;
@@ -254,19 +255,22 @@ type GitCommandResult = {
 
 async function runGitCommand(rootPath: string, args: string[]): Promise<GitCommandResult> {
   try {
-    const result = await runCommandText({
-      command: 'git',
-      args,
-      cwd: rootPath,
-      maxOutputBytes: GIT_COMMAND_MAX_BUFFER_BYTES,
-      timeout: LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS,
-      env: {
-        ...process.env,
-        GIT_TERMINAL_PROMPT: '0',
-        GIT_OPTIONAL_LOCKS: '0',
+    const result = await runCommandText(
+      {
+        command: 'git',
+        args,
+        cwd: rootPath,
+        maxOutputBytes: GIT_COMMAND_MAX_BUFFER_BYTES,
+        timeout: LOCAL_PROJECT_GIT_COMMAND_TIMEOUT_MS,
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: '0',
+          GIT_OPTIONAL_LOCKS: '0',
+        },
+        check: 'none',
       },
-      check: 'none',
-    });
+      toShared()
+    );
     return { status: result.code, stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
     // Spawn failure, timeout or output overflow: no exit status to report.

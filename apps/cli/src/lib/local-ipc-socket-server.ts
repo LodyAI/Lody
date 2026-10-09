@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -19,7 +20,7 @@ import {
   type LocalSessionControlConfig,
 } from '@/lib/local-session-control';
 import { removeStaleUnixSocket } from '@/lib/stale-unix-socket';
-import { isPidAliveSync } from '@/platform/promise-facade';
+import { isPidAliveSync } from '@lody/shared/node/process';
 
 type LocalIpcSocketServerPaths = {
   probeSocketPath?: string;
@@ -87,7 +88,7 @@ function acquireStartupLock(lockFilePath: string): number {
     }
 
     const ownerPid = readLockOwnerPid(lockFilePath);
-    if (ownerPid !== null && isPidAliveSync(ownerPid)) {
+    if (ownerPid !== null && isPidAliveSync(ownerPid, toShared())) {
       throw new Error(`local_ipc_lock_in_use:${lockFilePath}`, { cause: error });
     }
 

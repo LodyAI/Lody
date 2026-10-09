@@ -1,6 +1,6 @@
 import { probeLoginShellEnv } from '@lody/shared/node/login-shell-env';
 
-import { toShared } from '@/platform/promise-facade';
+import { toShared } from '@/platform/process-options';
 
 /**
  * How long an ACP spawn waits for the probe before going ahead without it. The

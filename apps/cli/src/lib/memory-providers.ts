@@ -1,4 +1,6 @@
-import { runCommandText } from '@/platform/promise-facade';
+import { toShared } from '@/platform/process-options';
+import { runCommandText } from '@lody/shared/node/process';
+
 import { z } from 'zod';
 import {
   MemoryBindingSchema,
@@ -15,14 +17,17 @@ type CommandResult = { stdout: string; code?: string | number };
 export type MemoryCommandRunner = (args: string[]) => Promise<CommandResult>;
 const runNmem: MemoryCommandRunner = async (args) => {
   try {
-    const result = await runCommandText({
-      command: 'nmem',
-      args,
-      check: 'none',
-      env: { ...process.env, ...(await getLoginShellEnv()) },
-      timeout: 15_000,
-      maxOutputBytes: 1024 * 1024,
-    });
+    const result = await runCommandText(
+      {
+        command: 'nmem',
+        args,
+        check: 'none',
+        env: { ...process.env, ...(await getLoginShellEnv()) },
+        timeout: 15_000,
+        maxOutputBytes: 1024 * 1024,
+      },
+      toShared()
+    );
     return {
       stdout: result.stdout,
       code: result.code === 0 ? undefined : (result.code ?? 'failed'),

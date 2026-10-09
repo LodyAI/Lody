@@ -1,3 +1,4 @@
+import { toShared } from '@/platform/process-options';
 import os from 'os';
 import { z } from 'zod';
 import {
@@ -5,7 +6,7 @@ import {
   CommandTimedOut,
   READ_ONLY_ABANDON_POLICY,
 } from '@lody/shared/node/process';
-import { runCommandText } from '@/platform/promise-facade';
+import { runCommandText } from '@lody/shared/node/process';
 
 const PROCESS_TABLE_TIMEOUT_MS = 2_000;
 const MAX_PROCESS_TABLE_BYTES = 8 * 1024 * 1024;
@@ -186,15 +187,18 @@ function parseDarwinMemoryBytes(value: string | undefined): number | null {
 async function runProbe(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<string> {
   let result: Awaited<ReturnType<typeof runCommandText>>;
   try {
-    result = await runCommandText({
-      command,
-      args,
-      env,
-      timeout: PROCESS_TABLE_TIMEOUT_MS,
-      abandonPolicy: READ_ONLY_ABANDON_POLICY,
-      maxOutputBytes: MAX_PROCESS_TABLE_BYTES,
-      check: 'none',
-    });
+    result = await runCommandText(
+      {
+        command,
+        args,
+        env,
+        timeout: PROCESS_TABLE_TIMEOUT_MS,
+        abandonPolicy: READ_ONLY_ABANDON_POLICY,
+        maxOutputBytes: MAX_PROCESS_TABLE_BYTES,
+        check: 'none',
+      },
+      toShared()
+    );
   } catch (error) {
     if (error instanceof CommandTimedOut) {
       throw new Error(`${command} process-table probe timed out`, { cause: error });

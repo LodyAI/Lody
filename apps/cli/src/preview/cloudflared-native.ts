@@ -1,9 +1,11 @@
+import { toShared } from '@/platform/process-options';
 import type { ChildProcess } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { startProcess, type ProcessHandle } from '@/platform/promise-facade';
+import { startProcess, type ProcessHandle } from '@lody/shared/node/process';
+
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { TerminationPolicy } from '@lody/shared/node/process';
 
@@ -131,7 +133,7 @@ export async function startCloudflaredNative(options: {
         // A single native binary with no children of its own.
         processGroup: false,
       },
-      { nodeProcess: options.nodeProcess }
+      toShared({ nodeProcess: options.nodeProcess })
     );
   } catch (error) {
     await rm(configDir, { recursive: true });

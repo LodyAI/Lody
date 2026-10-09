@@ -1,6 +1,7 @@
+import { toShared } from '@/platform/process-options';
 import { isMissingEmail } from '@lody/shared';
 
-import { runCommandTextSync } from '@/platform/promise-facade';
+import { runCommandTextSync } from '@lody/shared/node/process';
 
 export const DEFAULT_AI_GIT_AUTHOR_NAME = 'LodyAI';
 export const DEFAULT_AI_GIT_AUTHOR_EMAIL = 'agent@lody.ai';
@@ -70,12 +71,15 @@ const GIT_CONFIG_TIMEOUT_MS = 5_000;
 // Only global identity is a host default; shared bare-repo config belongs to agents.
 const readGitConfig = (key: 'user.name' | 'user.email'): string | undefined => {
   try {
-    const { stdout } = runCommandTextSync({
-      command: 'git',
-      args: ['config', '--global', key],
-      timeout: GIT_CONFIG_TIMEOUT_MS,
-      check: 'exit-0',
-    });
+    const { stdout } = runCommandTextSync(
+      {
+        command: 'git',
+        args: ['config', '--global', key],
+        timeout: GIT_CONFIG_TIMEOUT_MS,
+        check: 'exit-0',
+      },
+      toShared()
+    );
     return trimNonEmpty(stdout);
   } catch {
     return undefined;

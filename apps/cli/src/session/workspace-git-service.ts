@@ -1,8 +1,10 @@
+import { toShared } from '@/platform/process-options';
 import { getLocalProjectGitHubRepoAtRootPath } from '@lody/shared/node/local-project';
 import type { SessionId } from '@lody/shared';
 import { resolveGitBranch, type SessionExec } from '@/lib/git/resolve-git-branch-name';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
-import { runCommandText } from '@/platform/promise-facade';
+import { runCommandText } from '@lody/shared/node/process';
+
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import type { ISession } from './session-manager';
@@ -38,14 +40,17 @@ export class WorkspaceGitService {
       ownerSessionId,
       workspaceRoot,
       async (command, args, cwd) => {
-        const { stdout } = await runCommandText({
-          command,
-          args,
-          cwd,
-          timeout: 10_000,
-          maxOutputBytes: 64 * 1024,
-          check: 'exit-0',
-        });
+        const { stdout } = await runCommandText(
+          {
+            command,
+            args,
+            cwd,
+            timeout: 10_000,
+            maxOutputBytes: 64 * 1024,
+            check: 'exit-0',
+          },
+          toShared()
+        );
         return stdout;
       },
       true

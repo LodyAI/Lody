@@ -66,23 +66,33 @@ const forbidden = [
   // Signalling a ChildProcess (or PTY) directly is a hand-written termination
   // path; `terminateTree` owns escalation and bounded waits. The `NodeProcess`
   // service's own `kill` is the sanctioned door. Covers `child?.kill(`,
-  // `(child as T).kill(` and `children[i].kill(` too.
+  // `(child as T).kill(` and `children[i].kill(` too. `yield* handle.kill(...)`
+  // is the official Effect handle operation; yielding Node's boolean kill result
+  // is rejected by TypeScript and must not be mistaken for an OS bypass.
   {
     pattern: /([\w$]+|[)\]])\s*\??\.kill\s*\(/gu,
     label: 'direct child signal',
-    skip: (match) => ['process', 'np', 'nodeProcess', 'nodeProcessLive'].includes(match[1] ?? ''),
+    skip: (match, text) =>
+      ['process', 'np', 'nodeProcess', 'nodeProcessLive'].includes(match[1] ?? '') ||
+      /\byield\s*\*\s*$/u.test(text.slice(0, match.index)),
   },
 ];
 
 async function listSources() {
-  const { stdout } = await execFileAsync('git', ['ls-files', '-co', '--exclude-standard', ...sourceRoots], {
-    cwd: repoRoot,
-    maxBuffer: 20 * 1024 * 1024,
-  });
+  const { stdout } = await execFileAsync(
+    'git',
+    ['ls-files', '-co', '--exclude-standard', ...sourceRoots],
+    {
+      cwd: repoRoot,
+      maxBuffer: 20 * 1024 * 1024,
+    }
+  );
   return stdout
     .split('\n')
     .filter((file) => /\.(?:ts|tsx|mts|cts|js|mjs|cjs)$/u.test(file))
-    .filter((file) => !/\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file) && !file.includes('/__tests__/'));
+    .filter(
+      (file) => !/\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(file) && !file.includes('/__tests__/')
+    );
 }
 
 const lineOf = (text, index) => text.slice(0, index).split('\n').length;
