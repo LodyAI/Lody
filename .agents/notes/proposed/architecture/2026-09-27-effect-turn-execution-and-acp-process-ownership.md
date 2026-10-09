@@ -676,9 +676,14 @@ claim L3/L4/L5 have shipped.
 
 ## v4 baseline and PR ownership
 
-The bottom [#1070](https://github.com/LodyAI/Lody/pull/1070) migrates only existing Effect consumers and test tooling.
-This plan (#1057) builds on it. #1065 introduces the v4 process core directly in shared,
-CLI containers and ACP consumers; #1069 migrates the remaining CLI consumers and adds
-the CLI guard. The final cross-runtime PR migrates Electron, supervisor, shared helpers
+[#1070](https://github.com/LodyAI/Lody/pull/1070), the existing Effect consumer and test-tooling
+migration to v4, is merged into main. [#1057](https://github.com/LodyAI/Lody/pull/1057) was
+merged into its former base branch rather than main; [#1355](https://github.com/LodyAI/Lody/pull/1355)
+restores only these bilingual plans onto main.
+
+The remaining stack is #1355 → #1065 → #1069 → #1348. #1065 introduces the v4 process
+core directly in shared, CLI containers and ACP consumers; #1069 migrates the remaining
+CLI consumers and adds the CLI guard. #1348 migrates Electron, supervisor, shared helpers
 and the review helper and expands the guard. Every layer uses v4; the core is not first
-introduced in CLI and then relocated.
+introduced in CLI and then relocated. After each squash merge, update the next branch
+from main and retarget its PR to main before merging.

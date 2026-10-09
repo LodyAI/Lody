@@ -457,7 +457,12 @@ stale-ACP 重试路径的事件竞态、SDK 在孙进程持有管道时的关闭
 
 ## v4 基线与 PR 职责
 
-最底部 [#1070](https://github.com/LodyAI/Lody/pull/1070) 只迁移已有 Effect 调用与测试工具。
-本计划 #1057 基于它；#1065 直接在 shared 中引入 v4 进程核心、sandbox 与 ACP 调用方；
-#1069 迁移其余 CLI 调用方和 CLI 守卫；最后的跨运行时 PR 迁移 Electron、supervisor、shared
-辅助模块与 review helper，并扩大守卫。所有层均基于 v4，核心不再经历 CLI 到 shared 的搬迁。
+[#1070](https://github.com/LodyAI/Lody/pull/1070) 的已有 Effect 调用与测试工具 v4 迁移
+已合入 main。[#1057](https://github.com/LodyAI/Lody/pull/1057) 合入了原基础分支而非 main；
+[#1355](https://github.com/LodyAI/Lody/pull/1355) 只将这两份中英文计划恢复到 main。
+
+剩余 stack 为 #1355 → #1065 → #1069 → #1348。#1065 直接在 shared 中引入 v4 进程核心、
+sandbox 与 ACP 调用方；#1069 迁移其余 CLI 调用方和 CLI 守卫；#1348 迁移 Electron、
+supervisor、shared 辅助模块与 review helper，并扩大守卫。所有层均基于 v4，核心不再经历
+CLI 到 shared 的搬迁。每次 squash 合并后，先将 main 更新到下一分支，再把该 PR 的 base
+改为 main，最后合并。
