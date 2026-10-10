@@ -37,6 +37,16 @@ Missing or mismatched Providers expose no catalog; extension changes invalidate
 old capabilities until a matching probe arrives. A matching extension catalog
 must not be read as though no extensions were selected.
 
+## Cloud query recovery
+
+`use-recoverable-convex-query.ts` owns the authenticated query adapter. Each client,
+session and semantic query shares one watch and a retry budget: all consumers release
+the failed watch before a new one starts. A new watch waits for a server update rather
+than reading the SDK's cached error. Server failures return loading during bounded
+recovery; ordinary application errors and exhausted failures throw to the nearest
+boundary. Auth expiry continues through the central supervisor and retains only a
+matching committed snapshot. See the [contract](../../../../specs/cloud-query-recovery.md).
+
 ## Session lifecycle
 
 `use-session-actions.ts` reads archive, restore, and archived-root deletion targets

@@ -13,9 +13,12 @@ A crash the user cannot read or copy is a crash we never hear about, which is wh
 `ErrorBoundary` fallback shows the real error text and offers a one-click copy of the
 full report on every build rather than only in development.
 
-Automatic recovery is deliberately bounded. A crash screen that reloads or resets by
-itself can loop forever on a deterministic error, so `resetKeys` recovery stops after
-`MAX_AUTOMATIC_RESETS` for a repeating error and hands control back to the user.
+Crash screens wait for explicit user recovery; `resetKeys` cannot clear an error.
+Authenticated cloud queries retry opaque server failures before reaching a boundary,
+with a shared, finite budget. Pending retries return loading rather than stale access
+rows. Structured application failures and exhausted retries still throw; the runtime
+provider has its own page boundary because it sits above the Outlet boundary. See the
+[query recovery contract](../../specs/cloud-query-recovery.md).
 
 Both cache-recovery levels defer their asynchronous deletes to the next boot because
 `deleteDatabase()` blocks while the runtime still holds a connection; synchronous
