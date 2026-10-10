@@ -1,3 +1,8 @@
+import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { RepoSyncError, RepoTransportError } from 'loro-repo';
+
+const { formatLoroSyncError } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
+
 export type SyncRoomSubscription = {
   firstSyncedWithRemote: Promise<void>;
   unsubscribe: () => void;
@@ -33,6 +38,8 @@ const defaultSleep = (ms: number): Promise<void> =>
   });
 
 const formatErrorMessage = (error: unknown): string => {
+  const syncError = formatLoroSyncError(error);
+  if (syncError) return syncError;
   if (error instanceof Error) {
     return error.message;
   }

@@ -1,5 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { createCloudSessionSharingPort } from '../src/lib/cloud-cli-port';
+import {
+  createCommandAttachmentTransfer,
+  createCloudSessionSharingPort,
+} from '../src/lib/cloud-cli-port';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -37,4 +40,13 @@ it('preserves the client retry key and separate server ID through the real HTTP 
   });
   expect(await port.request({ ...input, requestId: first.requestId })).toEqual(first);
   expect(requests.size).toBe(1);
+});
+
+it('keeps local workspace attachments local inside a cloud process', () => {
+  vi.stubEnv('LODY_PLATFORM', 'cloud');
+  try {
+    expect(createCommandAttachmentTransfer('', true)).toBeUndefined();
+  } finally {
+    vi.unstubAllEnvs();
+  }
 });

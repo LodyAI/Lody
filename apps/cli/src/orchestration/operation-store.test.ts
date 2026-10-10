@@ -60,6 +60,45 @@ afterEach(async () => {
 });
 
 describe('LodyOperationStore', () => {
+  it('freezes complete attachment inputs atomically across retries and database reopen', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'lody-inputs-'));
+    roots.add(root);
+    const dbPath = path.join(root, 'operations.sqlite3');
+    const input = baseInput();
+    const attachment = {
+      type: 'file' as const,
+      fileId: 'file-1',
+      fileName: 'report.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 8,
+      sha256: 'a'.repeat(64),
+      textPreview: true,
+      transport: 'r2' as const,
+      uploadedAt: 1,
+    };
+    let store = new LodyOperationStore(dbPath);
+    try {
+      store.accept({ ...input, targetInputAttachments: [[attachment]] });
+      const retry = store.accept({
+        ...input,
+        targetInputAttachments: [[{ ...attachment, fileId: 'ignored-retry-upload' }]],
+      });
+      expect(retry.created).toBe(false);
+      expect(retry.operation.targetInputAttachments).toEqual([[attachment]]);
+      store.close();
+      store = new LodyOperationStore(dbPath);
+      expect(store.get(input.requesterSessionId, input.operationId).targetInputAttachments).toEqual(
+        [[attachment]]
+      );
+      expect(() =>
+        store.accept({ ...input, operationId: 'bad', targetInputAttachments: [] })
+      ).toThrow('match');
+      expect(() => store.get(input.requesterSessionId, 'bad')).toThrow();
+    } finally {
+      store.close();
+    }
+  });
+
   it('freezes source authors across retries and reopening without changing legacy operation rows', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'lody-author-'));
     roots.add(root);

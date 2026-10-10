@@ -57,6 +57,10 @@ function deserializeToc(toc: SerializedTocItem[]): TOCItemType[] {
 }
 
 export function DocsRoutePage({ locale, data }: { locale: SiteLocale; data: DocsRouteData }) {
+  // MDX H1s are suppressed; retain their generated anchor on the visible title.
+  const titleAnchor = data.toc.find((item) => item.depth === 1)?.url;
+  const titleId = titleAnchor ? decodeURIComponent(titleAnchor.slice(1)) : undefined;
+
   return (
     <DocsLayout
       {...baseOptions(locale)}
@@ -75,7 +79,9 @@ export function DocsRoutePage({ locale, data }: { locale: SiteLocale; data: Docs
           header: <DocsTocLanguageSelect />,
         }}
       >
-        <DocsTitle>{data.title}</DocsTitle>
+        <DocsTitle id={titleId} className="scroll-m-28">
+          {data.title}
+        </DocsTitle>
         <DocsDescription>{data.description}</DocsDescription>
         <DocsBody>{docsContentLoaders[locale].useContent(data.docPath)}</DocsBody>
       </DocsPage>

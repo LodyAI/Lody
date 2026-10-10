@@ -71,6 +71,11 @@ function snapshot(page) {
     alternates: [...document.querySelectorAll('link[hreflang]')].map((el) => el.href),
     lang: document.documentElement.lang,
     headings: [...document.querySelectorAll('h1')].map((el) => el.textContent.trim()),
+    missingFragmentTargets: [...document.querySelectorAll('a[href^="#"]')]
+      .map((el) => el.getAttribute('href'))
+      .filter(
+        (href) => href.length > 1 && !document.getElementById(decodeURIComponent(href.slice(1)))
+      ),
     paragraphs: [...document.querySelectorAll('main p, #nd-page p')]
       .map((el) => el.textContent.trim())
       .filter(Boolean),
@@ -145,6 +150,10 @@ async function scan() {
             }
             assert.equal(data.lang, urlPath.startsWith('/zh') ? 'zh-CN' : 'en');
             assert.ok(data.headings.length > 0);
+            if (/^\/(zh\/)?docs(\/|$)/u.test(urlPath)) {
+              assert.equal(data.headings.length, 1);
+              assert.deepEqual(data.missingFragmentTargets, [], 'Docs anchors must resolve');
+            }
             assert.ok(await page.locator('h1').first().isVisible());
             assert.ok(data.text.length > 80);
             if (/^\/(zh\/)?docs(\/|$)/u.test(urlPath) || /^\/(zh\/)?blog\//u.test(urlPath)) {
@@ -484,6 +493,26 @@ async function anchors() {
     for (const js of [false, true]) {
       const context = await newContext({ mobile, js });
       try {
+        for (const [urlPath, id] of [
+          ['/docs/quickstart/', 'quick-start'],
+          ['/zh/docs/quickstart/', '快速开始'],
+        ]) {
+          await run(
+            `docs title anchor ${urlPath} ${mobile ? 'mobile' : 'desktop'} ${js ? 'hydrated' : 'no-js'}`,
+            async () => {
+              const page = await context.newPage();
+              await page.goto(`${origin}${urlPath}#${encodeURIComponent(id)}`);
+              if (js) await settled(page);
+              assert.equal(await page.locator('h1').count(), 1);
+              assert.equal(await page.locator('h1').getAttribute('id'), id);
+              await anchorPosition(page, id);
+              await page.reload();
+              if (js) await settled(page);
+              await anchorPosition(page, id);
+              await page.close();
+            }
+          );
+        }
         for (const [source, label, destination, id] of [
           ['/docs/', 'Daemon Mode', '/docs/cli', 'daemon-mode'],
           ['/zh/docs/local-project/', 'CLI 命令', '/zh/docs/cli', 'project-命令'],

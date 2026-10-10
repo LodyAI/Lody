@@ -48,7 +48,8 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
 - **Observation and webhook linkage are independent.** Publish authenticated exact-branch
   GitHub observations even if hosted association fails. Retry linkage under existing gates;
   runtime confirmations are separate from published metadata. The cloud port adds
-  a shared repository failure cooldown; a skipped association remains unconfirmed
+  a shared repo cooldown and six-failure budget, reset on client recreation.
+  Skipped association remains unconfirmed
   while GitHub observation and metadata publication continue. Clear an older fingerprint
   on linkage failure so terminal publication cannot suppress retry, including after restart.
   Without that port, never call product cloud. Tokens remain machine-local.

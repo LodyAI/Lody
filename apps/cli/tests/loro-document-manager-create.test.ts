@@ -41,14 +41,18 @@ vi.mock('@lody/shared', async (importOriginal) => {
   };
 });
 
-vi.mock('loro-repo', () => ({
-  LoroRepo: {
-    create: mocks.repoCreate,
-  },
-  RepoDocHandle: class RepoDocHandle {},
-  RepoWatchHandle: class RepoWatchHandle {},
-  TransportSubscription: class TransportSubscription {},
-}));
+vi.mock('loro-repo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('loro-repo')>();
+  return {
+    ...actual,
+    LoroRepo: {
+      create: mocks.repoCreate,
+    },
+    RepoDocHandle: class RepoDocHandle {},
+    RepoWatchHandle: class RepoWatchHandle {},
+    TransportSubscription: class TransportSubscription {},
+  };
+});
 
 vi.mock('loro-repo/transport/streams', () => {
   class MockStreamsTransportAdapter {

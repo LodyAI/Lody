@@ -1,4 +1,6 @@
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
+import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { SessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
@@ -265,7 +267,6 @@ import {
   withPrBranchUpkeep,
   withQuickActionOrigin,
 } from './create-pr-prompt';
-import { AutoReviewMenuItem } from './auto-review-menu-item';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import {
   getSessionForkDestinationOptions,
@@ -273,9 +274,6 @@ import {
   type SessionForkDestination,
   type SessionForkWorktreeAvailability,
 } from './session-fork-destination-menu';
-import { ReviewAgentSetupDialog } from './auto-review-info';
-import { AutoReviewStatus } from './auto-review-status';
-import { useAutoReview } from '@/hooks/use-auto-review';
 import { SessionAgentFileLinkMenuProvider } from './session-agent-file-link-menu';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
@@ -353,6 +351,8 @@ import {
 } from './session-turn-facts';
 import { AlertDialog } from '@/ui/dialog';
 import { resolveSessionHtmlAttachmentAction } from './session-html-attachment-action';
+
+const { formatLoroSyncError } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
 
 const styles = stylex.create({
   historyTriggerIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
@@ -504,10 +504,6 @@ const styles = stylex.create({
   stream: { height: '100%' },
   shareRequestsScroller: { maxHeight: '35vh', flexShrink: 0, overflowY: 'auto' },
   shareRequestsColumn: { paddingInline: 'calc(var(--spacing) * 3)' },
-  reviewStatusColumn: {
-    paddingInline: 'calc(var(--spacing) * 3)',
-    paddingBottom: 'calc(var(--spacing) * 1.5)',
-  },
   headerMenuStaticRow: {
     display: 'flex',
     width: '100%',
@@ -727,6 +723,8 @@ const styles = stylex.create({
 });
 
 function getErrorMessage(err: unknown): string {
+  const syncError = formatLoroSyncError(err);
+  if (syncError) return syncError;
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
   return String(err);
@@ -741,7 +739,6 @@ import {
 } from '@/lib/posthog-analytics';
 import type { AnalyticsOutcome } from '@lody/shared';
 import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
-import { buildAuthorFixPrompt } from '@lody/shared';
 import {
   getPullRequestNumber,
   getPullRequestRepoFullName,
@@ -1302,7 +1299,6 @@ export function SessionHeaderMenu({
   forkWorktreeAvailability = 'hidden',
   onForkMenuOpen,
   onRename,
-  onOpenReviewSettings,
   owner,
   openedByRelations,
   onArchive,
@@ -1332,7 +1328,6 @@ export function SessionHeaderMenu({
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkMenuOpen?: () => void;
   onRename?: () => void | Promise<void>;
-  onOpenReviewSettings?: () => void;
   /** Multi-member workspaces only; omitted elsewhere. */
   owner?: SessionOwnerMenuState;
   /** Omitted when this Session neither opened nor was opened by another. */
@@ -1377,7 +1372,6 @@ export function SessionHeaderMenu({
     sharing?.visibility === 'unknown' ||
     (sharing?.visibility === 'private' &&
       (sharing.privateReason === 'machine-not-registered' || !sharing.canManage));
-  const [reviewSetupOpen, setReviewSetupOpen] = useState(false);
   const conversationWide = useAtomValue(conversationWideModeAtom);
   const setConversationWide = useSetAtom(conversationWideModeAtom);
 
@@ -1929,12 +1923,6 @@ export function SessionHeaderMenu({
             {t('sessions.shareAsImage', 'Share as image…')}
           </Menu.Item>
 
-          <AutoReviewMenuItem
-            sessionId={session.id}
-            meta={session}
-            onConfigurationRequired={() => setReviewSetupOpen(true)}
-          />
-
           {/* Archive / Restore + Delete */}
           {isArchived
             ? (onRestore || onDelete) && (
@@ -1978,12 +1966,6 @@ export function SessionHeaderMenu({
               )}
         </Menu.Content>
       </Menu.Root>
-      <ReviewAgentSetupDialog
-        open={reviewSetupOpen}
-        onOpenChange={setReviewSetupOpen}
-        machineName={machineName ?? undefined}
-        onOpenSettings={() => onOpenReviewSettings?.()}
-      />
     </>
   );
 }
@@ -3473,7 +3455,6 @@ export const SessionChatInterface = memo(
     const editableLastUserMessageId = useMemo(() => {
       if (
         session.isArchived ||
-        session.autoReview ||
         isGoalActive ||
         session.cliType !== 'builtin' ||
         (session.agentType !== 'codex' && session.agentType !== 'claude')
@@ -3518,7 +3499,6 @@ export const SessionChatInterface = memo(
       isGoalActive,
       session.agentConfigId,
       session.agentType,
-      session.autoReview,
       session.cliType,
       session.isArchived,
       sessionHistory,
@@ -4779,8 +4759,6 @@ export const SessionChatInterface = memo(
         updateHistoryEntry,
       ]
     );
-
-    const autoReview = useAutoReview(session?.id, session);
 
     const handleContinueDiscussingProposedPlan = useCallback(() => {
       if (!latestCompletedProposedPlan) {
@@ -6542,7 +6520,6 @@ export const SessionChatInterface = memo(
                 });
               }
         }
-        onOpenReviewSettings={() => openSettings('preferences')}
         owner={ownerMenuState}
         openedByRelations={openedByRelations}
         onArchive={onArchiveSession}
@@ -6783,39 +6760,6 @@ export const SessionChatInterface = memo(
                       sessionCompleted={session.status?.type === 'idle' && !isSessionWorking}
                     />
 
-                    {/* An active auto-review run states itself here rather than
-                      only in the "…" menu: the failure mode worth designing
-                      against is a user who ticked the box days ago, forgot, and
-                      then finds a pull request merged itself. */}
-                    {autoReview.run && autoReview.active ? (
-                      <ConversationColumn {...stylex.props(styles.reviewStatusColumn)}>
-                        <AutoReviewStatus
-                          run={autoReview.run}
-                          maxRounds={autoReview.run.policy.budget.reviewRounds}
-                          onDisable={() => {
-                            void autoReview.disable();
-                          }}
-                          onConfirmMerge={() => {
-                            void autoReview.confirmMerge();
-                          }}
-                          onResume={() => {
-                            void autoReview.resume();
-                          }}
-                          onFixFinding={(finding) => {
-                            void dispatchPrompt(
-                              buildAuthorFixPrompt([finding], {
-                                // Same reason as the engine's own dispatch: with a
-                                // PR open, a committed-but-unpushed fix is invisible
-                                // to everything that reads the PR head.
-                                hasPullRequest: hasExistingPr,
-                              }),
-                              executionTurnConfigOverrides
-                            );
-                          }}
-                        />
-                      </ConversationColumn>
-                    ) : null}
-
                     {/* Session info bar (desktop AND mobile): the canonical
                       cluster + fixed stage row merging status, goal, schedule,
                       and work context, glued to the composer shell. It
@@ -6823,6 +6767,18 @@ export const SessionChatInterface = memo(
                       in-composer scheduled panel. */}
                     <SessionInfoBar
                       status={statusStripState}
+                      executionMachine={
+                        sessionMachine
+                          ? {
+                              name: sessionMachine.name,
+                              owner: workspaceMembers.find(
+                                (member) => member.userId === sessionMachine.ownerUserId
+                              ),
+                              isMine:
+                                !!currentUser?.id && sessionMachine.ownerUserId === currentUser.id,
+                            }
+                          : undefined
+                      }
                       goal={latestGoal}
                       goalCommands={goalCommands}
                       goalPendingCommand={

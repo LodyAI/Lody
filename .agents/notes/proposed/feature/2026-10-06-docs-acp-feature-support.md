@@ -64,3 +64,7 @@ not runtime probing, so it can lag a provider update until a maintainer rechecks
   navigation timeouts and no new failures.
 - The matrix is a snapshot of the shipped adapters and external ACP server versions. A provider
   update can change the negotiated result before this page is rechecked.
+- Refreshed the `DeepSeek Harness` row against `acp-extension-dsh` 0.2.0 at `8cf61ea`
+  (acp-extension-core 0.1.9): standard load, resume, and fork; Core fork-at-turn, steering,
+  subagents, goal, and background tasks are now declared. Image input remains model-dependent,
+  while scheduled tasks and rate limits stay absent.

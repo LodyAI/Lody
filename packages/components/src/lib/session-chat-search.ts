@@ -1,6 +1,7 @@
 import type { SessionHistory } from '@lody/shared';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import { unified } from 'unified';
 
 /**
@@ -52,7 +53,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const getString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
-const searchMarkdownParser = unified().use(remarkParse).use(remarkGfm).freeze();
+const searchMarkdownParser = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkCjkFriendly)
+  .freeze();
 
 type SearchMarkdownNode = {
   type: string;

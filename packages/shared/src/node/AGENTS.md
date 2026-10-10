@@ -55,6 +55,8 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   retain it until `isAlive` proves absence or `retryTermination` succeeds. Logging
   alone cannot turn that failure into success. Promise boundaries must use
   `squashProcessFailure` to preserve every lease alongside the primary failure.
+  Acquisition error conversions preserve the full Cause, including release
+  defects from the spawner's failed child Scope, before reaching that boundary.
 - Termination often runs in a finalizer, where nothing is interruptible: bound
   its waits by the clock (`waitUntilGone`), never by `timeout*` or a race.
 - Never signal a child without a pid (pid 0 is the caller's own group), and
@@ -71,3 +73,20 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   Promise door. Tests use `@effect/vitest` with `TestClock` and
   `process-testing.ts` (the fake process table); a real-process test waits on
   explicit readiness output, never on elapsed time.
+
+## File locks (`file-lock.ts`)
+
+- Native workflows compose `withFileLock` through one owner-provided `FileLocks`
+  service. Only unmigrated application entrypoints use `fileLocksLegacy`; keep
+  Legacy visible and never execute it inside a native Effect workflow.
+- Keep strict FIFO, fail-fast same-context reentry, profile paths and the deadline
+  that starts after local admission. A plain Semaphore does not preserve FIFO
+  on immediate reacquisition in 4.0.2. Use the owned Ref/Deferred handoff.
+- Publish complete metadata exclusively; register release before the body. Cancelled
+  tickets leave the queue immediately. Retain failed release generations, verify
+  pid plus token, and surface unreadable-lock/cleanup errors. Contract and limits:
+  [file lock lifecycle](../../../../specs/file-lock-lifecycle.md).
+
+The file-lock Legacy native-program boundary uses `squashProcessFailure` to retain
+process recovery leases alongside a body failure. Never discard them with a plain
+Cause projection.

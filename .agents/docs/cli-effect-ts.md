@@ -74,6 +74,12 @@ boundary also has a body error. This tree recovery does not certify drained stdi
 or complete Session shutdown. See the
 [release decision](../notes/implemented/bug-fix/2026-10-10-effect-process-release-failure.md).
 
+In pinned 4.0.2, `Effect.mapError` selects a typed failure and can discard other
+reasons in a mixed Cause. Resource-owning error conversions use `catchCause` and
+`failCause(Cause.map(...))` to retain defects and interruptions. In particular,
+failed process acquisition can already have closed its child Scope: its release
+lease must reach the caller alongside the setup failure.
+
 Never wrap the shared Promise functions back into an Effect. A runner creates a
 separate root fiber. For an unmigrated entry point, the shared facade accepts an
 explicit AbortSignal; pass it when the entry point supports cancellation. This
@@ -86,6 +92,22 @@ whole-group exit and drained stdio. Closing the container Scope terminates its t
 monitor fibers, then removes cgroup resources. `startProcessLegacy` is reserved for
 legacy synchronous/raw Node handles (including IPC and explicit detach), whose
 owner must await `terminate`; it is not a scoped Effect API.
+
+## File locks
+
+`withFileLock(name, body, options)` requires `FileLocks`. `FileLocksLive` captures
+official FileSystem, native NodeProcess and frozen FileLockHost dependencies.
+`fileLockLayer` supplies Node implementations at composition. One service instance
+owns local Ref/Deferred admission and unresolved releases; each operation owns its
+candidate and acquired file. See the [contract](../../specs/file-lock-lifecycle.md)
+and [decision](../notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
+
+Catalog mutations compose the native API and require FileLocks. Existing Promise
+application entrypoints execute them through `fileLocksLegacy.runPromise`; worktree,
+cloudflared and Baguette use its `withLock` callback adapter. This one deprecated
+facade shares a process-lifetime ManagedRuntime so local queue waiting retains its
+old deadline meaning. Remove it when those entrypoints use the daemon runtime.
+Catalog read caching, Git/worktrees and downloads are still under migration.
 
 ## Local-project Git
 
@@ -122,6 +144,14 @@ migrated layer. Current facades:
 `pnpm check:cli-process-boundary` fails when code in those packages bypasses
 these and reaches `child_process`, `cross-spawn`, `node-pty`, `process.kill` or
 a child's `kill` directly.
+
+Session credential acquisition also has a temporary `acquireSessionCredentialsLegacy`
+facade (`session/session-credentials.ts`): the Effect broker lease's scope follows
+preparation into the live Session and closes on failure/termination. The separate
+`makePreparationControlLegacy` facade owns only the preparation TTL and its awaited
+close receipt. Claim stops that control without closing runtime resources. These
+are bounded resource migrations; Session/ACP/worktree Promise orchestration has
+not become Effect-native merely by using these facades.
 
 Execution facades carry a `Legacy` suffix and `@deprecated`; keep that suffix
 visible in imports and calls. New Effect workflows compose core APIs and leave
