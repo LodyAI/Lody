@@ -114,8 +114,7 @@ setup/GC or the daemon's root runtime. Decision and limits:
 official FileSystem, native NodeProcess and frozen FileLockHost dependencies.
 `fileLockLayer` supplies Node implementations at composition. One service instance
 owns local Ref/Deferred admission and unresolved releases; each operation owns its
-candidate and acquired file. See the [contract](../../specs/file-lock-lifecycle.md)
-and [decision](../notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
+candidate and acquired file. See the [decision and preserved lock policy](../notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
 
 Catalog mutations compose the native API and require FileLocks. Existing Promise
 application entrypoints execute them through `fileLocksLegacy.runPromise`; worktree,

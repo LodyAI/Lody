@@ -18,7 +18,7 @@ worktree 查询此前在回调锁下执行 Promise 序列，损坏的仓库可�
 
 服务通过 Layer.effect 捕获 FileSystem、WorktreeGit 和 FileLocks，不持有后台任务或缓存。
 `inspect`、`list` 获取现有 repo 锁，保留跨进程等待的 120 秒期限；同进程入队仍按
-[文件锁契约](../../../../specs/file-lock-lifecycle.zh.md)不计入期限。
+[文件锁决定](2026-10-10-effect-file-lock-lifecycle.zh.md)不计入期限。
 `info` 不再获取一把 repo 锁，创建和重命名调用方已经持有它；`currentBranch` 保留原有无锁读取边界。
 进程有界释放失败时，错误保留恢复租约；文件租约释放不表示外部进程已消失，也不提供 repo 隔离。
 每条 Git 命令通过 [WorktreeGit](2026-10-10-effect-worktree-git-execution.zh.md)拥有进程 Scope。
