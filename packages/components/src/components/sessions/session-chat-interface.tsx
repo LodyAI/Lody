@@ -1,4 +1,6 @@
 import { useIosSimulatorPreviewRequest } from './ios-simulator/use-ios-simulator-preview-request';
+import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import { SessionPendingMessages } from '@/components/chat/session-pending-messages';
 import {
   buildDraftUserHistoryEntry,
@@ -353,6 +355,8 @@ import {
 } from './session-turn-facts';
 import { AlertDialog } from '@/ui/dialog';
 import { resolveSessionHtmlAttachmentAction } from './session-html-attachment-action';
+
+const { formatLoroSyncError } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
 
 const styles = stylex.create({
   historyTriggerIcon: { width: 'calc(var(--spacing) * 4)', height: 'calc(var(--spacing) * 4)' },
@@ -727,6 +731,8 @@ const styles = stylex.create({
 });
 
 function getErrorMessage(err: unknown): string {
+  const syncError = formatLoroSyncError(err);
+  if (syncError) return syncError;
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
   return String(err);

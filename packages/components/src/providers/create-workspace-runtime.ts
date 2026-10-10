@@ -1,4 +1,5 @@
 import { createWorkspacePendingSends } from './workspace-pending-sends';
+import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
 import { migrateLegacySessionSends } from '../lib/legacy-session-send-migration';
 import { createSessionSendResources } from '@/lib/session-send-resources';
 import { waitForScheduleWriteSync, withScheduleWrite } from './schedule-write-sync';
@@ -22,7 +23,13 @@ import {
   type MachineProtocolCapabilities,
   negotiatedAcpCapabilitiesRefreshForce,
 } from '@lody/shared';
-import { LoroRepo, type RepoRoomSubscription, type RepoWatchHandle } from 'loro-repo';
+import {
+  LoroRepo,
+  RepoSyncError,
+  RepoTransportError,
+  type RepoRoomSubscription,
+  type RepoWatchHandle,
+} from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
 import type { StreamsTransportAdapter } from 'loro-repo/transport/streams';
 import { StreamsCrdt, createLoroDocAdapter } from '@loro-dev/streams-crdt/loro';
@@ -172,6 +179,8 @@ declare global {
  * the PostHog wrappers. Rejected: importing posthog-js here directly — the
  * runtime must stay framework-agnostic and unit-testable without a client.
  */
+const { formatLoroSyncError } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
+
 export type WorkspaceRuntimeAnalyticsEvent = {
   name: string;
   properties: Record<string, unknown>;
@@ -258,6 +267,8 @@ class SupersededAttachError extends Error {
 }
 
 const formatTransportError = (error: unknown): string => {
+  const syncError = formatLoroSyncError(error);
+  if (syncError) return syncError;
   if (typeof error !== 'object' || error === null) {
     return String(error);
   }

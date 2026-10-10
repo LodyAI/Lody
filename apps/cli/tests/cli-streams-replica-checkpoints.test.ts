@@ -25,6 +25,7 @@ import {
 } from '../src/lib/loro/sqlite-repo-store';
 import { createCliStreamsTransport } from '../src/lib/loro/streams-transport';
 import type { Logger } from '../src/utils/logger';
+import { formatErrorMessage, formatErrorWithCauses } from '../src/utils/format-error';
 
 const workspaceId = 'ws-replica-checkpoints' as WorkspaceId;
 const gatewayBaseUrl = 'https://streams.checkpoint.invalid';
@@ -132,14 +133,15 @@ async function closeCliProcess(cliProcess: CliProcess): Promise<void> {
 
 async function withTransport<T>(
   cliProcess: CliProcess,
-  run: (adapter: Awaited<ReturnType<typeof createCliStreamsTransport>>['adapter']) => Promise<T>
+  run: (adapter: Awaited<ReturnType<typeof createCliStreamsTransport>>['adapter']) => Promise<T>,
+  logger: Logger = silentLogger
 ): Promise<T> {
   const { adapter } = await createCliStreamsTransport({
     workspaceId,
     tokenProvider,
     repo: cliProcess.repo,
     documentRemoteCursorStore: cliProcess.documentRemoteCursorStore,
-    logger: silentLogger,
+    logger,
   });
   try {
     return await run(adapter);
@@ -168,6 +170,60 @@ afterEach(async () => {
 });
 
 describe('CLI Streams checkpoints are bound to the replica that loaded them', () => {
+  it('logs safe HTTP failure context through the CLI transport composition', async () => {
+    const records: unknown[][] = [];
+    const logger = new Proxy(
+      {},
+      {
+        get:
+          () =>
+          (...args: unknown[]) => {
+            records.push(args);
+          },
+      }
+    ) as Logger;
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response('synthetic-secret-body', {
+          status: 503,
+          headers: { 'X-Request-Id': 'cli-request-503' },
+        })
+    );
+    const cliProcess = await openCliProcess();
+    const result = await withTransport(
+      cliProcess,
+      (adapter) => adapter.syncMeta(cliProcess.repo.getMeta()),
+      logger
+    );
+    expect(result.ok).toBe(false);
+    const wrapped = new Error('synthetic-secret-wrapper', { cause: result.error });
+    expect(formatErrorMessage(wrapped)).toContain('status=503');
+    expect(formatErrorMessage(wrapped)).not.toContain('synthetic-secret');
+    expect(formatErrorWithCauses(wrapped)).toContain('requestId=cli-request-503');
+    expect(formatErrorWithCauses(wrapped)).not.toContain('synthetic-secret');
+    expect(formatErrorMessage(new Error('ordinary failure'))).toBe('ordinary failure');
+    expect(records).toContainEqual([
+      '[loro-streams] transport failure',
+      expect.objectContaining({
+        workspaceId,
+        failures: [
+          expect.objectContaining({
+            streamsCode: 'server_error',
+            retryable: true,
+            failureKind: 'server',
+            streamsContext: expect.objectContaining({
+              source: 'http',
+              status: 503,
+              requestId: 'cli-request-503',
+            }),
+          }),
+        ],
+      }),
+    ]);
+    expect(JSON.stringify(records)).not.toContain('synthetic-secret-body');
+  });
+
   it('bootstraps a process that hydrated before another process advanced the shared file', async () => {
     const server = createStreamsServer(metaSnapshotWithA());
     // The one-shot command opens first, while the file is still empty.

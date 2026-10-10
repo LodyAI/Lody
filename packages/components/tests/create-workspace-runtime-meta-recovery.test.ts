@@ -189,26 +189,30 @@ const enableElectronLocalDataPlane = (): void => {
   });
 };
 
-vi.mock('loro-repo', () => ({
-  LoroRepo: {
-    create: vi.fn(async () => ({
-      setTransportAdapter: mocks.setTransportAdapter,
-      addTransport: mocks.addTransport,
-      removeTransport: mocks.removeTransport,
-      refreshTransportRoutes: mocks.refreshTransportRoutes,
-      transportRooms: mocks.transportRooms,
-      joinMetaRoom: mocks.joinMetaRoom,
-      flush: mocks.flush,
-      destroy: mocks.destroy,
-      reconnect: mocks.reconnect,
-      listDoc: mocks.listDoc,
-      getDocMeta: mocks.getDocMeta,
-      watch: mocks.watch,
-      getMeta: () => mocks.metaFlock,
-      getReplicaCheckpointStore: mocks.getReplicaCheckpointStore,
-    })),
-  },
-}));
+vi.mock('loro-repo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('loro-repo')>();
+  return {
+    ...actual,
+    LoroRepo: {
+      create: vi.fn(async () => ({
+        setTransportAdapter: mocks.setTransportAdapter,
+        addTransport: mocks.addTransport,
+        removeTransport: mocks.removeTransport,
+        refreshTransportRoutes: mocks.refreshTransportRoutes,
+        transportRooms: mocks.transportRooms,
+        joinMetaRoom: mocks.joinMetaRoom,
+        flush: mocks.flush,
+        destroy: mocks.destroy,
+        reconnect: mocks.reconnect,
+        listDoc: mocks.listDoc,
+        getDocMeta: mocks.getDocMeta,
+        watch: mocks.watch,
+        getMeta: () => mocks.metaFlock,
+        getReplicaCheckpointStore: mocks.getReplicaCheckpointStore,
+      })),
+    },
+  };
+});
 
 vi.mock('loro-repo/storage/indexeddb', () => ({
   IndexedDBStorageAdaptor: class IndexedDBStorageAdaptor {

@@ -8,6 +8,10 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./loro-sync-errors": {
+      "types": "./src/loro-sync-errors/index.ts",
+      "import": "./src/loro-sync-errors/index.ts"
+    },
     "./session-link-export": {
       "types": "./src/session-link-export.ts",
       "import": "./src/session-link-export.ts"
@@ -190,6 +194,7 @@
     "loro-repo": "catalog:"
   },
   "devDependencies": {
+    "@loro-dev/flock-wasm": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/cross-spawn": "^6.0.6",
     "@types/dockerode": "^3.3.47",
