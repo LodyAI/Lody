@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1392](https://github.com/LodyAI/Lody/pull/1392)
+
 [English](2026-10-10-effect-worktree-observations.md)
 
 ## 摘要
