@@ -1,11 +1,15 @@
 import { describe, expect, it } from '@effect/vitest';
-import { Cause, Deferred, Effect, Exit, Fiber, Option } from 'effect';
+import { Cause, Clock, Deferred, Effect, Exit, Fiber, Logger, Option } from 'effect';
 import { ChildProcess, ChildProcessSpawner } from 'effect/process';
 import { TestClock } from 'effect/testing';
 import type { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 import {
+  ProcessReleaseFailed,
+  ProcessCleanupFailed,
+  squashProcessFailure,
+  runPromiseSquashedLegacy,
   CommandFailed,
   CommandOutputTooLarge,
   CommandTimedOut,
@@ -80,14 +84,23 @@ describe('process tree termination (POSIX groups)', () => {
     const table = new FakeProcessTable('linux');
     table.queueSpawn({ ignores: ['SIGTERM', 'SIGKILL'] });
     return Effect.gen(function* () {
-      const managed = yield* spawnProcess(agentSpec);
-      const termination = yield* Effect.forkChild(managed.terminate(FORCED));
+      const exit = yield* Effect.exit(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const managed = yield* spawnProcess(agentSpec);
+            const termination = yield* Effect.forkChild(managed.terminate(FORCED));
 
-      yield* TestClock.adjust('5 seconds');
-      const failure = failureOf(yield* Fiber.await(termination));
+            yield* TestClock.adjust('5 seconds');
+            const failure = failureOf(yield* Fiber.await(termination));
 
-      expect(failure).toBeInstanceOf(TerminationFailed);
-      expect(failure?.reason).toBe('still-alive');
+            expect(failure).toBeInstanceOf(TerminationFailed);
+            expect(failure?.reason).toBe('still-alive');
+          })
+        )
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit))
+        expect(squashProcessFailure(exit.cause)).toBeInstanceOf(ProcessReleaseFailed);
     }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });
 
@@ -322,6 +335,212 @@ describe('process tree termination (real processes)', () => {
   );
 });
 
+describe('failed Scope release ownership', () => {
+  it.effect('fails a successful body and retains its tree for a forced retry', () => {
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGTERM'] });
+    let deny = true;
+    let replacementAlive = false;
+    return Effect.gen(function* () {
+      const waiting = yield* Deferred.make<void>();
+      const clock = yield* Clock.Clock;
+      const api = {
+        ...table.api,
+        kill: (target: number, signal: NodeJS.Signals | 0) => {
+          if (replacementAlive && target === -1000) {
+            if (signal !== 0) replacementAlive = false;
+            return;
+          }
+          if (signal !== 0 && deny) throw Object.assign(new Error('denied'), { code: 'EPERM' });
+          table.api.kill(target, signal);
+        },
+      };
+      const exit = yield* Effect.exit(
+        Effect.scoped(spawnProcess(agentSpec).pipe(Effect.as('body succeeded'))).pipe(
+          Effect.provide(processLayer({ nodeProcess: api }))
+        )
+      );
+      if (!Exit.isFailure(exit)) throw new Error('Scope falsely reported success');
+      const owner = squashProcessFailure(exit.cause);
+      expect(owner).toBeInstanceOf(ProcessReleaseFailed);
+      if (!(owner instanceof ProcessReleaseFailed)) throw new Error('Missing recovery owner');
+      expect(yield* owner.isAlive).toBe(true);
+      expect(Exit.isFailure(yield* Effect.exit(owner.retryTermination()))).toBe(true);
+      expect(yield* owner.isAlive).toBe(true);
+      deny = false;
+      const graceful = yield* owner.retryTermination(GRACEFUL).pipe(
+        Effect.provideService(Clock.Clock, {
+          currentTimeMillis: clock.currentTimeMillis,
+          currentTimeMillisUnsafe: () => clock.currentTimeMillisUnsafe(),
+          currentTimeNanos: clock.currentTimeNanos,
+          currentTimeNanosUnsafe: () => clock.currentTimeNanosUnsafe(),
+          monotonicTimeNanos: clock.monotonicTimeNanos,
+          monotonicTimeNanosUnsafe: () => clock.monotonicTimeNanosUnsafe(),
+          sleep: (duration) =>
+            Deferred.succeed(waiting, undefined).pipe(Effect.andThen(clock.sleep(duration))),
+        }),
+        Effect.forkChild
+      );
+      yield* Deferred.await(waiting);
+      yield* owner.retryTermination(FORCED);
+      expect(table.isAlive(1000)).toBe(false);
+      // A pending graceful poll must also observe retirement when the forced
+      // retry finished, instead of signalling a reused group at its deadline.
+      replacementAlive = true;
+      yield* TestClock.adjust('5 seconds');
+      yield* Fiber.join(graceful);
+      expect(replacementAlive).toBe(true);
+      expect(yield* owner.isAlive).toBe(false);
+    });
+  });
+
+  it.effect('retains the tree even when its release diagnostic throws', () => {
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGKILL'] });
+    const diagnostic = new Error('logger unavailable');
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(Effect.scoped(spawnProcess(agentSpec))).pipe(
+        Effect.provide(
+          processLayer({
+            nodeProcess: table.api,
+            loggerLayer: Logger.layer([
+              Logger.make(() => {
+                throw diagnostic;
+              }),
+            ]),
+          })
+        )
+      );
+      if (!Exit.isFailure(exit)) throw new Error('Scope falsely reported success');
+      const failure = squashProcessFailure(exit.cause);
+      if (!(failure instanceof ProcessCleanupFailed))
+        throw new Error('Missing recovery owner alongside logger failure');
+      expect(failure.releases).toHaveLength(1);
+      expect(yield* failure.releases[0]!.isAlive).toBe(true);
+      table.exitOnItsOwn(1000);
+      yield* failure.releases[0]!.retryTermination();
+      expect(yield* failure.releases[0]!.isAlive).toBe(false);
+    });
+  });
+
+  it.effect('interrupts a recovery wait without retiring the unresolved lease', () => {
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGTERM'] });
+    let deny = true;
+    return Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      const unblock = yield* Deferred.make<void>();
+      const interrupted = yield* Deferred.make<void>();
+      const clock = yield* Clock.Clock;
+      const api = {
+        ...table.api,
+        kill: (target: number, signal: NodeJS.Signals | 0) => {
+          if (signal !== 0 && deny) throw Object.assign(new Error('denied'), { code: 'EPERM' });
+          table.api.kill(target, signal);
+        },
+      };
+      const exit = yield* Effect.exit(Effect.scoped(spawnProcess(agentSpec))).pipe(
+        Effect.provide(processLayer({ nodeProcess: api }))
+      );
+      if (!Exit.isFailure(exit)) throw new Error('Scope falsely reported success');
+      const owner = squashProcessFailure(exit.cause);
+      if (!(owner instanceof ProcessReleaseFailed)) throw new Error('Missing recovery owner');
+      deny = false;
+      // Capture an actual wait, independent of TestClock's warning semaphore.
+      const recovering = yield* owner.retryTermination(GRACEFUL).pipe(
+        Effect.provideService(Clock.Clock, {
+          currentTimeMillis: clock.currentTimeMillis,
+          currentTimeMillisUnsafe: () => clock.currentTimeMillisUnsafe(),
+          currentTimeNanos: clock.currentTimeNanos,
+          currentTimeNanosUnsafe: () => clock.currentTimeNanosUnsafe(),
+          monotonicTimeNanos: clock.monotonicTimeNanos,
+          monotonicTimeNanosUnsafe: () => clock.monotonicTimeNanosUnsafe(),
+          sleep: () =>
+            Deferred.succeed(ready, undefined).pipe(Effect.andThen(Deferred.await(unblock))),
+        }),
+        Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+        Effect.forkChild
+      );
+      yield* Deferred.await(ready);
+      const stopping = yield* Effect.forkChild(Fiber.interrupt(recovering));
+      const acknowledgment = yield* Deferred.await(interrupted).pipe(
+        Effect.timeout('100 millis'),
+        Effect.forkChild
+      );
+      yield* TestClock.adjust('100 millis');
+      const acknowledged = yield* Fiber.await(acknowledgment);
+      expect(yield* owner.isAlive).toBe(true);
+      yield* owner.retryTermination(FORCED);
+      yield* Deferred.succeed(unblock, undefined);
+      yield* Fiber.join(stopping);
+      expect(Exit.isSuccess(acknowledged)).toBe(true);
+      expect(Exit.isFailure(yield* Fiber.await(recovering))).toBe(true);
+      expect(yield* owner.isAlive).toBe(false);
+      expect(table.isAlive(1000)).toBe(false);
+    });
+  });
+
+  it.effect('never signals a later generation after observing the failed tree gone', () => {
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGKILL'] });
+    let replacementAlive = false;
+    const api = {
+      ...table.api,
+      kill: (target: number, signal: NodeJS.Signals | 0) => {
+        if (replacementAlive && target === -1000) {
+          if (signal !== 0) replacementAlive = false;
+          return;
+        }
+        table.api.kill(target, signal);
+      },
+    };
+    return Effect.gen(function* () {
+      const exit = yield* Effect.exit(Effect.scoped(spawnProcess(agentSpec))).pipe(
+        Effect.provide(processLayer({ nodeProcess: api }))
+      );
+      if (!Exit.isFailure(exit)) throw new Error('Scope falsely reported success');
+      const owner = squashProcessFailure(exit.cause);
+      if (!(owner instanceof ProcessReleaseFailed)) throw new Error('Missing recovery owner');
+      table.exitOnItsOwn(1000);
+      expect(yield* owner.isAlive).toBe(false);
+      replacementAlive = true;
+      yield* owner.retryTermination(FORCED);
+      expect(yield* owner.isAlive).toBe(false);
+      expect(replacementAlive).toBe(true);
+    });
+  });
+
+  it('preserves all failed owners at the Legacy Promise boundary', async () => {
+    const table = new FakeProcessTable('linux');
+    table.queueSpawn({ ignores: ['SIGKILL'] });
+    table.queueSpawn({ ignores: ['SIGKILL'] });
+    const program = Effect.scoped(
+      Effect.gen(function* () {
+        yield* spawnProcess(agentSpec);
+        yield* spawnProcess(agentSpec);
+        return 'body succeeded';
+      })
+    ).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
+    const failure = await runPromiseSquashedLegacy(program).then(
+      () => {
+        throw new Error('Scope falsely reported success');
+      },
+      (error: unknown) => error
+    );
+    expect(failure).toBeInstanceOf(ProcessCleanupFailed);
+    if (!(failure instanceof ProcessCleanupFailed)) throw new Error('Missing recovery owners');
+    expect(failure.releases).toHaveLength(2);
+    expect(table.isAlive(1000)).toBe(true);
+    expect(table.isAlive(1001)).toBe(true);
+    table.exitOnItsOwn(1000);
+    table.exitOnItsOwn(1001);
+    for (const owner of failure.releases) {
+      await Effect.runPromise(owner.retryTermination());
+      expect(await Effect.runPromise(owner.isAlive)).toBe(false);
+    }
+  });
+});
+
 describe('runCommand', () => {
   const node = (script: string, extra: Partial<CommandSpec> = {}): CommandSpec => ({
     command: process.execPath,
@@ -424,9 +643,20 @@ describe('runCommand', () => {
       );
       yield* TestClock.adjust('1 second');
       yield* TestClock.adjust('5 seconds');
-      const failure = failureOf(yield* Fiber.await(command));
+      const exit = yield* Fiber.await(command);
+      const failure = failureOf(exit);
 
       expect(failure).toBeInstanceOf(CommandTimedOut);
+      if (!Exit.isFailure(exit)) throw new Error('Expected command and cleanup failure');
+      const failureWithOwner = squashProcessFailure(exit.cause);
+      expect(failureWithOwner).toBeInstanceOf(ProcessCleanupFailed);
+      if (!(failureWithOwner instanceof ProcessCleanupFailed))
+        throw new Error('Missing recovery owner');
+      expect(failureWithOwner.releases).toHaveLength(1);
+      expect(yield* failureWithOwner.releases[0]!.isAlive).toBe(true);
+      table.exitOnItsOwn(1000);
+      yield* failureWithOwner.releases[0]!.retryTermination();
+      expect(yield* failureWithOwner.releases[0]!.isAlive).toBe(false);
       expect(table.delivered.map((delivery) => delivery.signal)).toEqual(['SIGTERM', 'SIGKILL']);
     }).pipe(Effect.provide(processLayer({ nodeProcess: table.api })));
   });

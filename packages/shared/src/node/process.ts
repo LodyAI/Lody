@@ -35,6 +35,7 @@ import {
   Fiber,
   Layer,
   References,
+  Ref,
   Option,
   Scope,
   Sink,
@@ -539,6 +540,88 @@ export interface ManagedProcess {
   readonly terminate: (policy: TerminationPolicy) => Effect.Effect<void, TerminationFailed>;
 }
 
+/** A failed Scope transfers its unresolved tree to this explicit recovery lease. */
+export class ProcessReleaseFailed extends Data.TaggedError('ProcessReleaseFailed')<{
+  readonly target: string;
+  readonly message: string;
+  readonly cause: TerminationFailed;
+}> {
+  readonly #resource: ManagedProcess;
+  readonly #policy: TerminationPolicy;
+  readonly #released = Ref.makeUnsafe(false);
+  constructor(resource: ManagedProcess, policy: TerminationPolicy, cause: TerminationFailed) {
+    super({ target: resource.tree.description, message: cause.message, cause });
+    this.#resource = resource;
+    this.#policy = policy;
+  }
+  /** A gone generation is never signalled again, even if its numeric pid is reused. */
+  get isAlive(): Effect.Effect<boolean, TerminationFailed> {
+    return Effect.uninterruptibleMask((restore) =>
+      Ref.get(this.#released).pipe(
+        Effect.flatMap((released) =>
+          released
+            ? Effect.succeed(false)
+            : restore(this.#resource.tree.isAlive).pipe(
+                Effect.tap((alive) => (alive ? Effect.void : Ref.set(this.#released, true)))
+              )
+        )
+      )
+    );
+  }
+  /** Retry the original bounded backend; force may converge with a graceful retry. */
+  retryTermination(
+    policy: TerminationPolicy = this.#policy
+  ): Effect.Effect<void, TerminationFailed> {
+    const tree: ProcessTree = {
+      description: this.#resource.tree.description,
+      isAlive: this.isAlive,
+      signal: (signal) =>
+        Ref.get(this.#released).pipe(
+          Effect.flatMap((released) =>
+            released ? Effect.succeed<SignalOutcome>('gone') : this.#resource.tree.signal(signal)
+          )
+        ),
+    };
+    return Effect.uninterruptibleMask((restore) =>
+      Ref.get(this.#released).pipe(
+        Effect.flatMap((released) =>
+          released
+            ? Effect.void
+            : restore(terminateTree(tree, policy)).pipe(
+                Effect.andThen(Ref.set(this.#released, true))
+              )
+        )
+      )
+    );
+  }
+}
+/** Legacy boundaries preserve every recovery lease instead of squashing it away. */
+export class ProcessCleanupFailed extends Data.TaggedError('ProcessCleanupFailed')<{
+  readonly message: string;
+  readonly cause: unknown;
+}> {
+  readonly #releases: readonly ProcessReleaseFailed[];
+  constructor(cause: unknown, releases: readonly ProcessReleaseFailed[]) {
+    super({ message: `${formatErrorMessage(cause)}; process tree cleanup failed`, cause });
+    this.#releases = Object.freeze([...releases]);
+  }
+  get releases(): readonly ProcessReleaseFailed[] {
+    return this.#releases;
+  }
+}
+/** Pure failure projection; release failure takes priority over the body's error. */
+export const squashProcessFailure = <E>(cause: Cause.Cause<E>): unknown => {
+  const primary = Cause.squash(cause);
+  const releases = cause.reasons.flatMap((reason) =>
+    Cause.isDieReason(reason) && reason.defect instanceof ProcessReleaseFailed
+      ? [reason.defect]
+      : []
+  );
+  return releases.length === 0 || (releases.length === 1 && primary === releases[0])
+    ? primary
+    : new ProcessCleanupFailed(primary, releases);
+};
+
 /**
  * Acquire the raw process for the scoped service and legacy manually owned entry point.
  */
@@ -746,6 +829,8 @@ const makeSpawner = (np: NodeProcessApi): ChildProcessSpawner.ChildProcessSpawne
                   Effect.catch((error) =>
                     Effect.logWarning(
                       `Scope release could not terminate ${error.target}: ${error.message}`
+                    ).pipe(
+                      Effect.ensuring(Effect.die(new ProcessReleaseFailed(resource, policy, error)))
                     )
                   )
                 )
@@ -1262,7 +1347,7 @@ export const runPromiseSquashedLegacy = <A, E>(
 ): Promise<A> =>
   Effect.runPromiseExit(effect, options).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value;
-    throw Cause.squash(exit.cause);
+    throw squashProcessFailure(exit.cause);
   });
 
 const runSyncSquashed = <A, E>(effect: Effect.Effect<A, E>): A => {

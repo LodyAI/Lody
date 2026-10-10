@@ -117,6 +117,11 @@ consumers are updated in #1348. This changes names and documentation only; expli
 cancellation, typed failures, bounded tree termination and Scope retirement retain
 the existing implementation and behavioral tests.
 
+The later [release-reporting correction](../bug-fix/2026-10-10-effect-process-release-failure.md)
+fixes the Scope finalizer's warning-only failure branch and preserves unresolved
+trees through recovery leases. It does not replace this backend decision or
+complete Session shutdown.
+
 ## Validation and limits
 
 Behavioral tests cover official output helpers and a pipeline, replacement

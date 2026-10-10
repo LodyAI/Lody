@@ -106,3 +106,5 @@ cgroup 等待。临时探针和消融脚本不进入产品代码。
 未验证真实 Windows、Linux 委派 cgroup 和签名桌面安装包。Windows 根进程先退出后仍需
 Job Object 才能保留后代归属。Session、ACP、Turn 层仍待迁移，本次不声称已通过其 Promise
 接口实现端到端结构化取消。
+
+后续[释放报告修复](../bug-fix/2026-10-10-effect-process-release-failure.zh.md)修正 Scope finalizer 只记录警告的失败分支，通过恢复租约保留未解决的进程树。它不替换这里的后端决定，也不代表 Session 关停已完成。
