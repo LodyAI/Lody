@@ -138,8 +138,8 @@ daemon runtime completion. Decision:
 FileLocks instance. Inspection/listing acquire the repo lease; information reads
 inside mutations reuse their caller's lock. Failed Git observations do not become
 phantom dirty records or null HEAD. Queued cancellation and command cleanup remain
-structured inside this kernel. The Promise manager's `runObservationLegacy` executes
-through the existing `fileLocksLegacy` runtime, with no second lock coordinator.
+structured inside this kernel. The Promise manager's `runObservationLegacy` composes through `runWorktreeLegacy`,
+which executes in the existing `fileLocksLegacy` runtime, with no second lock coordinator.
 Delete it when the mutation owner receives native services. Synchronous manager
 path/existence methods, setup, GC and the daemon runtime still need migration. See
 [the decision](../notes/implemented/architecture/2026-10-10-effect-worktree-observations.md).
@@ -231,3 +231,14 @@ The guard rejects retired facade imports/exports and aliases that hide Legacy.
 API reference: [official migration guide](https://github.com/Effect-TS/effect/blob/main/MIGRATION.md).
 Use the pinned package's declarations to verify details: the upstream guide can
 advance beyond the installed release.
+
+
+## Local worktree preparation
+
+`LocalWorktreePreparation` composes official FileSystem, WorktreeGit and Clock under
+an already-held mutation lease. It owns the metadata scratch directory before
+writing and publishes only a complete file. Failed five-second cleanup retains a
+bounded recovery Effect. The manager's `runWorktreeLegacy` preserves primary and
+scratch release failures through the existing fileLocksLegacy runtime. Delete the
+executor when native mutations receive services; bare clone/fetch, setup and GC
+remain outside this finite unit. See the [decision](../notes/implemented/architecture/2026-10-10-effect-local-worktree-preparation.md).
