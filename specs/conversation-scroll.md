@@ -25,12 +25,14 @@ for, and never move unless the user or the arrival of new output asks it to.
   keyboard-focusing the control reveals the down arrow even during live work;
   leaving it restores the working indicator. Its scroll action is unchanged.
 - **Sending a message** while the agent is idle smoothly scrolls the sent message to
-  the top of the viewport (instantly when the system asks for reduced motion) and
-  leaves the space below it empty for the reply. The reply fills that space without
+  100 px below its usual top position (instantly when the system asks for reduced
+  motion), keeping the previous message’s tail visible, and leaves the space below
+  it empty for the reply. Near the start, scrolling clamps to zero without adding
+  top whitespace. The reply fills that space without
   moving the message; once it reaches the bottom, the conversation
   follows the end again. If the user scrolls up meanwhile, the empty space is given up
   as they scroll, never re-added, and scrolling down reaches the real end of the reply.
-  A message taller than the viewport is shown from its end instead.
+  A message too tall to fit below that context is shown from its end instead.
 - **Queued or steering messages** sent while the agent is working do not move the view.
 - **Loading.** A conversation that has messages but nothing on this device yet shows a
   skeleton of messages in place of a blank pane. A saved copy is shown at once; while
