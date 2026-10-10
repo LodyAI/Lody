@@ -1,3 +1,4 @@
+import { fileLocksLegacy } from '@/utils/file-lock';
 import {
   SessionAttachmentTransfer,
   type UploadableImageFile,
@@ -18,7 +19,6 @@ import crypto from 'crypto';
 import { pathToFileURL } from 'url';
 
 import { v4 as uuidV4 } from 'uuid';
-import { Effect } from 'effect';
 import {
   createLoroStreamsJsonStreamClient,
   LoroStreamsMachineRpcServer,
@@ -5669,7 +5669,7 @@ export class MessageHandler {
   private async recordWorkspaceAccessSnapshot(
     accessSnapshot: LocalCatalogAccessSnapshot | null
   ): Promise<void> {
-    await Effect.runPromise(
+    await fileLocksLegacy.runPromise(
       this.localWorkspaceCatalog.recordWorkspaceAccessSnapshot({
         workspaceId: this.workspaceId,
         accessSnapshot,

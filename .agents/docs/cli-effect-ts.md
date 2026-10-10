@@ -93,6 +93,21 @@ monitor fibers, then removes cgroup resources. `startProcessLegacy` is reserved 
 legacy synchronous/raw Node handles (including IPC and explicit detach), whose
 owner must await `terminate`; it is not a scoped Effect API.
 
+## File locks
+
+`withFileLock(name, body, options)` requires `FileLocks`. `FileLocksLive` captures
+official FileSystem, native NodeProcess and frozen FileLockHost dependencies.
+`fileLockLayer` supplies Node implementations at composition. One service instance
+owns local Ref/Deferred admission and unresolved releases; each operation owns its
+candidate and acquired file. See the [decision and preserved lock policy](../notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
+
+Catalog mutations compose the native API and require FileLocks. Existing Promise
+application entrypoints execute them through `fileLocksLegacy.runPromise`; worktree,
+cloudflared and Baguette use its `withLock` callback adapter. This one deprecated
+facade shares a process-lifetime ManagedRuntime so local queue waiting retains its
+old deadline meaning. Remove it when those entrypoints use the daemon runtime.
+Catalog read caching, Git/worktrees and downloads are still under migration.
+
 ## Temporary Promise facades
 
 A migrated layer is consumed by callers that are still Promise-based. Such a

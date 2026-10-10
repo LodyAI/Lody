@@ -162,6 +162,14 @@ findings fix several details of the design below:
   - It merges `process.env`, which conflicts with the filtered-environment spawn rule.
   - It would require pinning 0.92.x or upgrading effect.
 
+## Process foundation delivery status
+
+The process foundation and caller series #1065, #1069 and #1348 are merged.
+Their completion does not complete AcpConnection, Session or Turn cancellation.
+The next units and actual prerequisites are maintained in the
+[roadmap dependency graph](2026-09-27-effect-lifecycle-migration-roadmap.md#delivery-dependency-graph).
+New work starts from refreshed main; references below to the original stack are historical planning.
+
 ## Runtime revision
 
 The experiments above are historical v3 evidence, not verification of v4.
@@ -681,10 +689,8 @@ migration to v4, is merged into main. [#1057](https://github.com/LodyAI/Lody/pul
 merged into its former base branch rather than main; [#1355](https://github.com/LodyAI/Lody/pull/1355)
 restores only these bilingual plans onto main.
 
-The remaining stack is #1355 → #1065 → #1069 → #1348. #1065 introduces the v4 process
-core directly in shared, CLI containers and ACP consumers; #1069 migrates the remaining
-CLI consumers and adds the CLI guard. #1348 migrates Electron, supervisor, shared helpers
-and the review helper and expands the guard. Every layer uses v4; the core is not first
-introduced in CLI and then relocated. Use GitHub's native stack merge workflow; it
-rebases the remaining layers after merging the bottom PR. Verify the next layer's
-base and diff before continuing.
+The old #1355 → #1065 → #1069 → #1348 stack is fully merged. Its process and
+caller work uses Effect 4.0.2 and the official process contracts directly in shared.
+Start new independently reviewable units from refreshed main and use the roadmap
+dependency graph; no old stack branch remains an active delivery base. ACP, Session
+and Turn ownership are still proposed and require their own real-boundary evidence.
