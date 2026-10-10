@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1381](https://github.com/LodyAI/Lody/pull/1381)
+
 [中文](2026-10-10-effect-local-project-git.zh.md)
 
 ## Abstract
