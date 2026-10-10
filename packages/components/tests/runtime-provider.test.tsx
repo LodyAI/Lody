@@ -204,6 +204,27 @@ describe('RuntimeProvider warm workspace preparation', () => {
     expect(prepared.disposed).toBe(false);
   });
 
+  it('cancels a retired initialization and publishes only the latest account runtime', async () => {
+    const late = Promise.withResolvers<never>();
+    const replacement = runtimeFixture();
+    vi.mocked(createWorkspaceRuntime)
+      .mockReturnValueOnce(late.promise)
+      .mockResolvedValue(replacement as never);
+    await render();
+    const signal = vi.mocked(createWorkspaceRuntime).mock.calls[0]![0].signal!;
+    await act(async () => {
+      store.set(userAtom, { id: 'new-account' });
+    });
+    expect(signal.aborted).toBe(true);
+    expect(store.get(runtimeAtom)).toBeNull();
+    await act(async () => {
+      late.resolve(prepared as never);
+    });
+    expect(prepared.disposed).toBe(true);
+    expect(store.get(runtimeAtom)).toBe(replacement);
+    expect(replacement.disposed).toBe(false);
+  });
+
   it('disposes the prepared runtime when the route changes scope', async () => {
     await render();
     const lease = editDraft(store);
