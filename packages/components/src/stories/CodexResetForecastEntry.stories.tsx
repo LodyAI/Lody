@@ -11,8 +11,8 @@ import {
   type MachineViewMeta,
 } from '@lody/shared';
 
-// The chip is not rendered directly: the provider row below is its only call
-// site, and mounting the real row is what proves the gating and the placement.
+// Settings exposes forecasts through quota details; render the real provider row
+// to exercise its eligibility and the popover-to-dialog handoff.
 import { ProviderRow } from '@/components/settings/provider-row';
 import { SessionUsagePopover } from '@/components/sessions/session-usage-popover';
 import type { CodexResetStatus, CodexResetWatch } from '@/lib/codex-reset-forecast';
@@ -127,6 +127,7 @@ type StoryProps = {
  * composer's usage popover, and the settings provider row beside its rate limits.
  */
 function EntryPoints({ state, showActions, narrow, withoutRateLimits }: StoryProps) {
+  const [lastAction, setLastAction] = useState<string | null>(null);
   return (
     <WithStubbedForecast state={state}>
       <div {...stylex.props(styles.entries, narrow && styles.narrow)}>
@@ -151,10 +152,15 @@ function EntryPoints({ state, showActions, narrow, withoutRateLimits }: StoryPro
               config={codexConfig}
               machine={withoutRateLimits ? { ...codexMachine, raceLimits: {} } : codexMachine}
               onEdit={() => {}}
-              onRefresh={showActions ? async () => {} : undefined}
+              onRefresh={showActions ? async () => setLastAction('Refreshed Codex') : undefined}
               onDelete={showActions ? async () => {} : undefined}
             />
           </div>
+          {lastAction ? (
+            <p role="status" aria-label="Provider action result">
+              {lastAction}
+            </p>
+          ) : null}
         </section>
       </div>
     </WithStubbedForecast>
@@ -195,7 +201,7 @@ export const WithoutProbability: Story = {
 
 /**
  * No forecast in force: the popover row disappears entirely, while the provider
- * row keeps its always-present entry into the dialog.
+ * row keeps a quota-details entry that leads to the forecast dialog.
  */
 export const NoActiveWatch: Story = {
   args: { state: readyState({ watch: null, scheduledReset: null, latestReset: null }) },

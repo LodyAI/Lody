@@ -209,56 +209,96 @@ for (const locale of ['en', 'zh_CN']) {
     'active-forecast-narrow-with-actions',
     'no-active-watch-with-actions',
   ]) {
-    test(`keeps the Codex forecast clear of hover and focus actions: ${story}, ${locale}`, async ({
+    test(`separates Provider quota, forecast and management: ${story}, ${locale}`, async ({
       page,
     }) => {
       await page.goto(
         `/iframe.html?id=codexreset-codexresetforecastentry--${story}&viewMode=story&globals=locale:${locale};theme:dark`
       );
-      const chip = page.getByRole('button', { name: /Reset forecast|重置预测/ });
-      const refresh = page.getByRole('button', { name: /Refresh models and modes|刷新模型和模式/ });
-      const remove = page.getByRole('button', { name: /^(Delete|删除)$/ });
-      const row = refresh.locator('xpath=../../..');
-      await expect(chip).toBeVisible();
-      await page.evaluate(() => document.fonts.ready);
-      await page.mouse.move(0, 0);
-      await expect(refresh.locator('..')).toHaveCSS('opacity', '0');
-      const idleChipBox = (await chip.boundingBox())!;
-      if (story === 'no-active-watch-with-actions') {
-        const rowBox = (await row.boundingBox())!;
-        // At rest the forecast ends at the normal row inset, with no empty
-        // refresh/delete slots to its right.
-        expect(rowBox.x + rowBox.width - idleChipBox.x - idleChipBox.width).toBeLessThan(24);
+      const quota = page.getByRole('button', { name: /Codex (quota details|额度详情)/ });
+      const manage = page.getByRole('button', { name: /Manage Codex|管理 Codex/ });
+      const row = quota.locator('xpath=../../..');
+      await expectInside(quota, row);
+      await expect(quota).toHaveText(/^(Quota details|额度详情)$/);
+      await expectInside(manage, row);
+      await expect(row.getByText(/Reset forecast|重置预测/)).toHaveCount(0);
+      if (story !== 'no-active-watch-with-actions') {
+        await expect(row).toContainText(/Remaining|剩余/);
+        await expect(row).toContainText('5h');
+        await expect(row).toContainText('59%');
+        await expect(row).toContainText('7d');
+        await expect(row).toContainText('71%');
+        await expect(row).not.toContainText('65%');
       }
-
-      const expectClear = async () => {
-        await expectInside(chip, row);
-        const chipBox = (await chip.boundingBox())!;
-        for (const action of [refresh, remove]) {
-          await expectInside(action, row);
-          const actionBox = (await action.boundingBox())!;
-          expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(chipBox.x);
-          await action.click({ trial: true });
-        }
-        await chip.click({ trial: true });
-      };
-
+      await page.evaluate(() => document.fonts.ready);
+      const idleQuota = await quota.boundingBox();
+      const idleManage = await manage.boundingBox();
       await row.hover();
-      expect(await chip.boundingBox()).toEqual(idleChipBox);
-      await expectClear();
-      await chip.click();
-      const dialog = page.getByRole('dialog', { name: /Codex reset forecast|Codex 重置预测/ });
-      await expect(dialog).toBeVisible();
-      await page.keyboard.press('Escape');
-      await expect(dialog).toBeHidden();
-
-      await page.mouse.move(0, 0);
-      await refresh.focus();
-      await expect(refresh.locator('..')).toHaveCSS('opacity', '1');
-      await expectClear();
-      await chip.focus();
+      expect(await quota.boundingBox()).toEqual(idleQuota);
+      expect(await manage.boundingBox()).toEqual(idleManage);
+      await quota.focus();
       await page.keyboard.press('Enter');
-      await expect(dialog).toBeVisible();
+      const details = page.getByRole('dialog', { name: /Codex (quota details|额度详情)/ });
+      await expect(details).toBeVisible();
+      if (story !== 'no-active-watch-with-actions') {
+        await expect(details.getByRole('progressbar', { name: /5h.*59%/ })).toHaveAttribute(
+          'aria-valuenow',
+          '59'
+        );
+        await expect(details.getByRole('progressbar', { name: /7d.*71%/ })).toHaveAttribute(
+          'aria-valuenow',
+          '71'
+        );
+      } else {
+        await expect(details.getByText(/did not report usage|未提供此套餐/)).toBeVisible();
+      }
+      await expect(details.getByText(/Third-party reset forecast|第三方重置预测/)).toBeVisible();
+      await details.getByRole('button', { name: /^(Reset forecast|重置预测)$/ }).click();
+      const forecast = page.getByRole('dialog', { name: /Codex reset forecast|Codex 重置预测/ });
+      await expect(forecast).toBeVisible();
+      await expect
+        .poll(() => forecast.evaluate((el) => el.contains(document.activeElement)))
+        .toBe(true);
+      await expect(details).toBeHidden();
+      if (story !== 'no-active-watch-with-actions') await expect(forecast).toContainText('65%');
+      await page.keyboard.press('Escape');
+      await expect(forecast).toBeHidden();
+      await expect(quota).toBeFocused();
+      await manage.click();
+      const menu = page.getByRole('menu');
+      await expect(menu.getByText('Codex', { exact: true })).toBeVisible();
+      await menu.getByRole('menuitem', { name: /Refresh models and modes|刷新模型和模式/ }).click();
+      await expect(page.getByRole('status', { name: 'Provider action result' })).toHaveText(
+        'Refreshed Codex'
+      );
+      await manage.click();
+      await page.getByRole('menuitem', { name: /^(Delete|删除)$/ }).click();
+      await expect(page.getByRole('alertdialog')).toBeVisible();
+      await expect(page.getByRole('alertdialog')).toContainText('Codex');
     });
   }
+}
+
+for (const locale of ['en', 'zh_CN']) {
+  test(`keeps additional Provider quota windows in details at narrow widths: ${locale}`, async ({
+    page,
+  }) => {
+    await page.goto(
+      `/iframe.html?id=settings-providerrow--claude-with-rate-limit-narrow&viewMode=story&globals=locale:${locale};theme:dark`
+    );
+    const quota = page.getByRole('button', { name: /Claude Code (quota details|额度详情)/ });
+    const row = quota.locator('xpath=../../..');
+    await expectInside(quota, row);
+    await expectInside(
+      page.getByRole('button', { name: /Manage Claude Code|管理 Claude Code/ }),
+      row
+    );
+    await expect(row).toContainText('+1');
+    await expect(quota).toHaveAccessibleDescription(/5h.*45%.*7d.*68%.*Fable.*33%/);
+    await quota.click();
+    const details = page.getByRole('dialog', { name: /Claude Code (quota details|额度详情)/ });
+    await expect(details.getByRole('progressbar')).toHaveCount(3);
+    await expect(details.getByRole('progressbar', { name: /Fable.*33%/ })).toBeVisible();
+    await expect(details.getByText(/Reset forecast|重置预测/)).toHaveCount(0);
+  });
 }

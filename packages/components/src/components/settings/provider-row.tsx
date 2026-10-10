@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { RefreshCw, Trash2 } from 'lucide-react';
+import { MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
@@ -25,28 +25,35 @@ import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-prog
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { formatLocalizedRelativeTime } from '@/lib/format-relative-time';
-import { CodexResetForecastChip } from '@/components/codex-reset/codex-reset-forecast-entry';
+import { Menu } from '@lody/ui/menu';
+import { ProviderUsageDetails } from './provider-usage-details';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import {
   canShowSubscriptionRateLimits,
-  formatAgentRateLimitWindowLabel,
-  formatRateLimitWindowShortLabel,
   getAgentRateLimitEntries,
   getAgentRateLimitWindows,
 } from '@/lib/session-usage';
 
-/** The fill a pressable settings row takes under the pointer (`surface.pressableLine`). */
-const ROW_HOVER = `color-mix(in oklab, ${colors.elevatedBackground}, ${colors.label} 4%)`;
-
-/** Wide enough in its own container to set the meters beside the name. */
-const ROOMY = '@container (min-width: 24rem)';
+/** The panel, rather than the viewport, decides whether quota fits beside the name. */
+const ROOMY = '@container (min-width: 28rem)';
 
 const styles = stylex.create({
-  /** A line of the machine's provider card; the list draws the card and the rules. */
   root: { minWidth: 0, containerType: 'inline-size' },
-  row: { position: 'relative', display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 },
-  main: { gap: '10px', paddingInline: space[4], paddingBlock: space[2] },
-  mainList: { gap: space[3], paddingInline: space[4], paddingBlock: space[3] },
+  row: {
+    display: 'grid',
+    gridTemplateColumns: { default: 'minmax(0, 1fr) auto', [ROOMY]: 'minmax(0, 1fr) auto auto' },
+    alignItems: 'center',
+    minWidth: 0,
+    paddingInlineEnd: space[4],
+  },
+  main: { gridColumn: 1, gridRow: 1, gap: '10px', paddingInline: space[4], paddingBlock: space[2] },
+  mainList: {
+    gridColumn: 1,
+    gridRow: 1,
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: space[3],
+  },
   icon: {
     display: 'flex',
     flexShrink: 0,
@@ -60,101 +67,30 @@ const styles = stylex.create({
   glyph: { width: '16px', height: '16px' },
   glyphList: { width: '20px', height: '20px' },
   body: { flexGrow: 1, minWidth: 0 },
-  trailing: {
+  usage: {
+    gridColumn: { default: '1 / -1', [ROOMY]: '2' },
+    gridRow: { default: 2, [ROOMY]: 1 },
     display: 'flex',
-    flexShrink: 0,
+    justifyContent: { default: 'flex-start', [ROOMY]: 'flex-end' },
+    paddingInlineStart: { default: '50px', [ROOMY]: 0 },
+    paddingBottom: { default: space[2], [ROOMY]: 0 },
+  },
+  usageList: { paddingInlineStart: { default: '60px', [ROOMY]: 0 } },
+  trailing: {
+    gridColumn: { default: 2, [ROOMY]: 3 },
+    gridRow: 1,
+    display: 'flex',
     alignItems: 'center',
     gap: space[2],
-    paddingInlineEnd: space[3],
-    paddingBlock: space[1.5],
     fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
-  trailingProtected: { position: 'relative' },
-  trailingList: { paddingBlock: space[3] },
-  /** The compact row's facts end on the rows' own inset. */
-  trailingCompact: { paddingInlineEnd: space[4] },
-  /**
-   * The row's own actions, shown to the pointer or keyboard that reaches the
-   * row: at rest the row says only what is true of the provider.
-   */
-  actions: { display: 'flex', alignItems: 'center', gap: space[2] },
-  reveal: {
-    opacity: {
-      default: 0,
-      [stylex.when.ancestor(':hover')]: 1,
-      [stylex.when.ancestor(':focus-within')]: 1,
-    },
-    pointerEvents: {
-      default: 'none',
-      [stylex.when.ancestor(':hover')]: 'auto',
-      [stylex.when.ancestor(':focus-within')]: 'auto',
-    },
-  },
-  // Hover actions may cover passive row text, but never the forecast entry.
-  actionsOverlay: {
-    position: 'absolute',
-    insetInlineEnd: space[3],
-    top: '50%',
-    transform: 'translateY(-50%)',
-    paddingInlineStart: space[2],
-    backgroundColor: ROW_HOVER,
-    boxShadow: `-16px 0 12px -4px ${ROW_HOVER}`,
-  },
-  actionsBeforeTrailing: {
-    insetInlineEnd: '100%',
-    paddingInlineEnd: space[2],
-  },
-  /** The meters sit beside the name when the row has room, and under it when not. */
-  metersInline: {
-    display: { default: 'none', [ROOMY]: 'flex' },
-    alignItems: 'center',
-    gap: '10px',
-  },
-  metersBelow: {
-    display: { default: 'flex', [ROOMY]: 'none' },
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    columnGap: '20px',
-    rowGap: space[1],
-    paddingInline: space[3],
-    paddingTop: '2px',
-    paddingBottom: '10px',
-  },
   progress: {
-    maxWidth: '9rem',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  meter: {
-    display: 'flex',
-    flexShrink: 0,
-    alignItems: 'center',
-    gap: space[1.5],
-    fontSize: '11px',
+    paddingInlineStart: '50px',
+    paddingInlineEnd: space[4],
+    paddingBottom: space[2],
+    fontSize: uiText.captionSize,
     color: colors.secondaryLabel,
-  },
-  /** A meter measures rather than progresses, so it is a gray track and fill. */
-  track: {
-    position: 'relative',
-    width: '40px',
-    height: '4px',
-    overflow: 'hidden',
-    borderRadius: '9999px',
-    backgroundColor: colors.gray5,
-  },
-  fill: {
-    position: 'absolute',
-    insetBlock: 0,
-    insetInlineStart: 0,
-    borderRadius: '9999px',
-    backgroundColor: colors.gray,
-  },
-  fillWidth: (percent: number) => ({ width: `${percent}%` }),
-  percent: {
-    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-    fontVariantNumeric: 'tabular-nums',
   },
 });
 
@@ -218,7 +154,7 @@ export function ProviderRow({
       return parsed.cliType === agentType && parsed.agentConfigId === config.id;
     });
 
-  // Compact usage meters shown inline after the provider name.
+  // Reported subscription windows for this exact provider configuration.
   const rateLimitWindows = useMemo(() => {
     if (!showRateLimits || !machine?.raceLimits) return [];
     for (const entry of getAgentRateLimitEntries(machine.raceLimits, agentType, config.id)) {
@@ -287,6 +223,7 @@ export function ProviderRow({
   };
 
   const compact = variant === 'card';
+  const hasUsageDetails = rateLimitWindows.length > 0 || showResetForecast;
   const facts = compact
     ? [
         kind,
@@ -306,7 +243,7 @@ export function ProviderRow({
     : [kind].filter((fact): fact is string => fact != null);
   return (
     <div {...withClassName(stylex.props(styles.root), className)}>
-      <div {...stylex.props(stylex.defaultMarker(), styles.row, surface.pressableLine)}>
+      <div {...stylex.props(styles.row, surface.pressableLine)}>
         <button
           type="button"
           onClick={() => onEdit(config)}
@@ -333,96 +270,73 @@ export function ProviderRow({
             ) : null}
           </div>
         </button>
-        <div
-          {...stylex.props(
-            styles.trailing,
-            compact ? styles.trailingCompact : styles.trailingList,
-            compact && showResetForecast && styles.trailingProtected
-          )}
-        >
-          {/* Not mounted at all when ineligible, so a non-Codex row costs no
-              store subscription and no clock tick. */}
-          {showResetForecast ? <CodexResetForecastChip enabled /> : null}
-          {rateLimitWindows.length > 0 && compact && (
-            <div {...stylex.props(styles.metersInline)}>
-              {rateLimitWindows.map((window, index) => (
-                <RateLimitMeter
-                  key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-                  label={formatAgentRateLimitWindowLabel(
-                    window,
-                    formatRateLimitWindowShortLabel(window.windowDurationSeconds),
-                    t
-                  )}
-                  remainingPercent={window.remainingPercent}
-                />
-              ))}
-            </div>
-          )}
-          {envCount > 0 && !compact && (
+        {hasUsageDetails ? (
+          <div {...stylex.props(styles.usage, !compact && styles.usageList)}>
+            <ProviderUsageDetails
+              name={config.name}
+              windows={rateLimitWindows}
+              showResetForecast={showResetForecast}
+            />
+          </div>
+        ) : null}
+        <div {...stylex.props(styles.trailing)}>
+          {envCount > 0 && !compact ? (
             <span>{t('settings.agent.provider.envCount', { count: envCount })}</span>
-          )}
-          {refreshing && binaryProgressText ? (
-            <span {...stylex.props(styles.progress)}>{binaryProgressText}</span>
           ) : null}
-          <span
-            {...stylex.props(
-              styles.actions,
-              compact && !refreshing && styles.reveal,
-              compact && (!refreshing || showResetForecast) && styles.actionsOverlay,
-              compact && showResetForecast && styles.actionsBeforeTrailing
-            )}
-          >
-            {onRefresh && (
-              <Button
-                variant="ghost"
-                size="small"
-                icon
-                disabled={refreshing}
-                aria-label={t(
-                  'agents.acpCapabilities.refreshModelsAndModes',
-                  'Refresh models and modes'
-                )}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleRefresh();
-                }}
-              >
-                {refreshing ? (
-                  <Spinner size="small" />
-                ) : (
-                  <RefreshCw {...stylex.props(catalog.icon)} />
-                )}
-              </Button>
-            )}
-            {onDelete && (
-              <Button
-                variant="ghost"
-                aria-label={t('common.delete', 'Delete')}
-                size="small"
-                icon
-                tone="destructive"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setDeleteOpen(true);
-                }}
-              >
-                <Trash2 {...stylex.props(catalog.icon)} />
-              </Button>
-            )}
-          </span>
+          {onRefresh || onDelete ? (
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="small"
+                    icon
+                    disabled={refreshing}
+                    aria-label={t('settings.agent.provider.manage', 'Manage {{name}}', {
+                      name: config.name,
+                    })}
+                  >
+                    {refreshing ? (
+                      <Spinner size="small" />
+                    ) : (
+                      <MoreHorizontal {...stylex.props(catalog.icon)} />
+                    )}
+                  </Button>
+                }
+              />
+              <Menu.Content align="end">
+                <Menu.Group>
+                  <Menu.GroupLabel>{config.name}</Menu.GroupLabel>
+                  {onRefresh ? (
+                    <Menu.Item
+                      icon={RefreshCw}
+                      onClick={() => {
+                        void handleRefresh();
+                      }}
+                    >
+                      {t(
+                        'agents.acpCapabilities.refreshModelsAndModes',
+                        'Refresh models and modes'
+                      )}
+                    </Menu.Item>
+                  ) : null}
+                  {onRefresh && onDelete ? <Menu.Separator /> : null}
+                  {onDelete ? (
+                    <Menu.Item icon={Trash2} tone="destructive" onClick={() => setDeleteOpen(true)}>
+                      {t('common.delete', 'Delete')}
+                    </Menu.Item>
+                  ) : null}
+                </Menu.Group>
+              </Menu.Content>
+            </Menu.Root>
+          ) : null}
         </div>
       </div>
-      {rateLimitWindows.length > 0 && compact && (
-        <div {...stylex.props(styles.metersBelow)}>
-          {rateLimitWindows.map((window, index) => (
-            <RateLimitMeter
-              key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-              label={formatRateLimitWindowShortLabel(window.windowDurationSeconds)}
-              remainingPercent={window.remainingPercent}
-            />
-          ))}
+      {refreshing && binaryProgressText ? (
+        <div role="status" {...stylex.props(styles.progress)}>
+          {binaryProgressText}
         </div>
-      )}
+      ) : null}
       <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialog.Content>
           <AlertDialog.Header>
@@ -455,26 +369,6 @@ export function ProviderRow({
         </AlertDialog.Content>
       </AlertDialog.Root>
     </div>
-  );
-}
-
-function RateLimitMeter({
-  label,
-  remainingPercent,
-}: {
-  label: string;
-  remainingPercent: number | null;
-}) {
-  const pct = remainingPercent == null ? 0 : Math.min(100, Math.max(0, remainingPercent));
-  const percentText = remainingPercent == null ? '—' : `${Math.round(remainingPercent)}%`;
-  return (
-    <span {...stylex.props(styles.meter)} title={`${label}: ${percentText}`}>
-      <span>{label}</span>
-      <span {...stylex.props(styles.track)}>
-        <span {...stylex.props(styles.fill, styles.fillWidth(pct))} />
-      </span>
-      <span {...stylex.props(styles.percent)}>{percentText}</span>
-    </span>
   );
 }
 
