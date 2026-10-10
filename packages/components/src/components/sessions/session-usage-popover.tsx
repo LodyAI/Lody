@@ -360,6 +360,7 @@ function ResetTime({ epochSeconds }: { epochSeconds: number }) {
         timeStyle: 'short',
       }).format(date)
     : formatDistance(date, new Date(getServerNow()), { addSuffix: true, locale });
+  const resetTime = locale === zhCN && /^\d/.test(time) ? ` ${time}` : time;
   const toggleLabel = absolute
     ? t('sessions.usage.showRelativeTime', 'Show relative time')
     : t('sessions.usage.showAbsoluteTime', 'Show absolute time');
@@ -367,7 +368,7 @@ function ResetTime({ epochSeconds }: { epochSeconds: number }) {
   return (
     <div {...stylex.props(resetTimeStyles.row)}>
       <span {...stylex.props(resetTimeStyles.text)}>
-        {t('machines.rateLimits.resetsAt', 'Resets {{time}}', { time })}
+        {t('machines.rateLimits.resetsAt', 'Resets {{time}}', { time: resetTime })}
       </span>
       <Button
         type="button"
