@@ -194,7 +194,6 @@
     "loro-repo": "catalog:"
   },
   "devDependencies": {
-    "@loro-dev/flock-wasm": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/cross-spawn": "^6.0.6",
     "@types/dockerode": "^3.3.47",

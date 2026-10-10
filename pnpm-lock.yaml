@@ -1653,9 +1653,6 @@ importers:
         specifier: 4.3.6
         version: 4.3.6
     devDependencies:
-      '@loro-dev/flock-wasm':
-        specifier: 'catalog:'
-        version: 0.4.3
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.2(effect@4.0.2)(vitest@5.0.2)

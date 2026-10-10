@@ -24,24 +24,36 @@ Translation: current
 
 Streams 现于实际 fetch、HTTP、deadline、游标、CRDT 和 durability 边界记录来源。Repo 保留原始 discriminator、经过验证的 context、故障类别和明确的重试属性。审查后的 [Repo PR #144](https://github.com/loro-dev/loro-repo/pull/144) 合入为 `e99f17b`；[0.21.2 发布](https://github.com/loro-dev/loro-repo/releases/tag/loro-repo-v0.21.2) 已通过官方 registry 安装和 32 项公共 API 测试。Streams [CRDT 0.16.2](https://github.com/loro-dev/loro-streams/releases/tag/streams-crdt-v0.16.2) 精确依赖 [Client 0.9.0](https://github.com/loro-dev/loro-streams/releases/tag/streams-client-v0.9.0)。
 
-Lody 的共享工具显式选择契约内的标量字段。CLI transport 创建将 warn/error 事件写入现有 logger；renderer 组合写入 console。CLI、room 等待、工作区 runtime 和会话错误详情使用同一投影。普通错误保留原格式，正常成功同步保持安静。有限深度的 cause 遍历处理包装与循环，报告保留注册的 transport 身份。
+Lody 的共享工具显式选择契约内的标量字段。CLI transport 创建将 warn/error 事件写入现有 logger；renderer 组合写入 console。CLI、room 等待、工作区 runtime 和会话错误详情把同一投影序列化为 JSON，删除第二份展示字段清单和描述字典。普通错误保留原格式，正常成功同步保持安静。有限深度的 cause 遍历处理包装与循环，报告保留注册的 transport 身份。
 
 工具绑定到各调用方自己的 Repo 错误构造器。独立 pnpm 安装中，CLI 的 SQLite 13 peer 与共享包/renderer 的 SQLite 12 peer 解析为不同 Repo 实例，错误类身份不相等。默认使用共享包的 instanceof 会静默漏掉 CLI 失败。注入构造器可保留类型识别，避免接受任意对象或按消息猜测。
 
 CLI Streams 组合在模块初始化时显式向通用错误工具注册这个绑定后的 formatter。直接从通用工具导入 Repo 会让没有 WASM loader 的独立 process-worker 打包引入 Flock WASM。将运行时绑定留在组合位置可避免该依赖，普通 worker 错误继续使用原有格式化路径。
 
-安全详情包括 code、故障类别、retryability、room/transport、source、operation/stage、请求操作、超时 phase/预算/耗时、HTTP status、受约束 request ID，以及上游提供的白名单 errno；不含任意 message、stack、cause、body、headers、provider、token、key 或 URL query。包装消息可能含旧负载，因此不重新输出。网络证据只描述为请求失败，不宣称设备断网或后端宕机；HTTP 错误描述为响应错误。
+安全详情包括 code、故障类别、retryability、room/transport、source、operation/stage、请求操作、超时 phase/预算/耗时、HTTP status、受约束 request ID，以及上游提供的白名单 errno；不含任意 message、stack、cause、body、headers、provider、token、key 或 URL query。包装消息可能含旧负载，因此不重新输出。故障类别、source 和 errno 只是观测证据，不宣称设备断网或后端宕机。
 
 catalog/lockfile 使用正式版本并删除过时的 Repo peer 例外。无关依赖保持锁定，包括 Roost 单独传递依赖的 Client 0.8.0。local-only 组合和禁用遥测约束保持不变；诊断 helper 不执行 I/O，也不影响重试策略。
 
+## 消融实验与范围精简
+
+[Lody PR #1395](https://github.com/LodyAI/Lody/pull/1395) 不含新 Spec 或新增测试。已删除 11 项新增用例、恢复两份既有 checkpoint 套件、移除仅供测试使用的共享包 Flock 依赖。既有 mock 修改仅在模拟 Repo 创建时保留真实 Repo 导出，不增加用例。临时实验不进入 PR，使用合成 fetch 和假计时器，没有真实联网或 sleep。
+
+| 移除项 | 观察 | 决策 |
+| --- | --- | --- |
+| 描述字典、第二份展示字段清单、公开 collector/type | 共用 JSON 投影后，九个故障夹具及真实 CLI 日志/包装格式实验通过。 | 删除；helper 从 155 行缩至 97 行。 |
+| 调用方构造器绑定 | 共享包检查通过，但 Repo 错误类不同导致 CLI 丢失 HTTP context。 | 保留构造器注入。 |
+| context 字段选择 | 额外的合成 provider/body/header 字段进入序列化输出。 | 保留白名单。 |
+| report 遍历 / wrapper 遍历 | 分别丢失注册 transport 身份或包装中的失败。 | 保留有边界的遍历。 |
+| CLI formatter 注册 | 包装丢失 context；改为通用工具直接导入 Repo，则没有 WASM loader 的独立 worker 编译失败。 | 运行时绑定留在 Streams 组合处。 |
+
 ## 验证与限制
 
-- 旧包调查：10 项确定性行为检查通过。
-- 新 Lody 接入：共享故障 fixture、真实 CLI SQLite 组合、renderer IndexedDB 组合和 room 等待共 24 项测试通过，其中 11 项为新增。故障使用合成消息/域名、注入 fetch 和假计时器，没有真实联网或 sleep。
-- 正式版本已在独立 clone 中通过冻结 lockfile 安装；没有在嵌套 checkout 内安装。
-- 保留真实 Repo 错误导出的 fixture 使 61 项既有 manager/runtime/provider 回归测试通过。Streams RPC：124 项通过、3 项既有集成跳过；共享包：1,380 项通过；Electron：214 项通过。
-- 完整类型检查、类型相关静态分析（0 错误）、国际化及全部边界检查通过。CLI 生产打包、发布包 adapter/worker smoke 检查、WASM 复制和要求的格式化通过。
-- 全量测试发现既有 Roost signed-prefix 超时及九项 Git/simulator fixture 失败；这十项均在未修改源码和原始发布依赖上复现。两项本次引入的收集/构建失败已通过保留真实 fixture 导出、将 formatter 绑定移出通用 worker 工具修正。最终 CLI 子集 22 项测试通过；worker 和 owner bundle 可在没有 WASM loader 时编译。原生 cloudflared IPC 执行受限于未修改基线也复现的超时，不声称 IPC 执行成功。
-- 文档检查仍有此 checkout 未初始化 ACP 子模块造成的 74 个既有链接错误；本 note 及新 Spec 没有链接错误或受保护内容变化。
+- 原始旧包调查：10 项确定性检查通过。
+- 九个故障夹具及真实 CLI 日志/包装夹具仅留在独立 clone 中执行消融实验；各删减版本的失败记录见上表。最终 PR 不新增测试。
+- 精简后 74 项既有相关用例全部通过：CLI checkpoint/manager 21 项；renderer checkpoint/room/runtime/provider 53 项。
+- 冻结 lockfile 安装、要求的格式化、完整类型检查、类型相关 lint（0 错误）、国际化及全部边界检查通过。CLI 生产 bundle、发布 adapter/worker 检查及 WASM 复制通过；嵌套 worktree 未安装依赖。
+- 最新 `pnpm check` 通过完整类型/静态阶段；广泛测试阶段再次出现 Git/simulator 失败和原生 IPC 超时，已停止该轮执行，不声称全量套件通过。
+- 此前全量执行发现 Roost 超时及九项 Git/simulator fixture 失败，十项均在未修改源码和原始依赖上复现。原生 cloudflared IPC 执行也在未修改基线上超时；独立 worker 编译通过。此前更广套件通过共享包 1,380 项、Electron 214 项、Streams RPC 124 项（3 项既有集成跳过）；共享包数量包含现已删除的九项用例。
+- 文档检查仍有此 worktree 未初始化 ACP 子模块造成的 74 个既有链接错误；没有新增链接错误或受保护内容变化。
 
-没有收集生产日志、凭据、对话实录或事故根因证据。未声称执行桌面/浏览器或已部署服务验证。意图仍为 [draft Spec](../../../../specs/streams-sync-diagnostics.zh.md)，实现不表示它已获批准。
+没有收集生产日志、凭据、对话实录或事故根因证据。未声称执行桌面/浏览器或已部署服务验证。

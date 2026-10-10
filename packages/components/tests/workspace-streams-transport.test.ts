@@ -116,47 +116,9 @@ afterEach(async () => {
   for (const tab of openTabs) await tab.repo.destroy();
   openTabs.clear();
   vi.unstubAllGlobals();
-  vi.restoreAllMocks();
 });
 
 describe('renderer Streams checkpoints are bound to the replica that loaded them', () => {
-  it('logs safe HTTP failure context through the renderer transport composition', async () => {
-    const records: unknown[][] = [];
-    vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
-      records.push(args);
-    });
-    vi.stubGlobal(
-      'fetch',
-      async () =>
-        new Response('synthetic-secret-body', {
-          status: 503,
-          headers: { 'X-Request-Id': 'renderer-request-503' },
-        })
-    );
-    const tab = await openTab(`ws-failure-${++sequence}` as WorkspaceId);
-    const result = await syncMeta(tab);
-    expect(result.ok).toBe(false);
-    expect(records).toContainEqual([
-      '[loro-streams] transport failure',
-      expect.objectContaining({
-        workspaceId: tab.workspaceId,
-        failures: [
-          expect.objectContaining({
-            streamsCode: 'server_error',
-            retryable: true,
-            failureKind: 'server',
-            streamsContext: expect.objectContaining({
-              source: 'http',
-              status: 503,
-              requestId: 'renderer-request-503',
-            }),
-          }),
-        ],
-      }),
-    ]);
-    expect(JSON.stringify(records)).not.toContain('synthetic-secret-body');
-  });
-
   it('bootstraps a tab that hydrated before a sibling tab advanced the shared databases', async () => {
     const workspaceId = `ws-tabs-${++sequence}` as WorkspaceId;
     const server = createMetaServer();

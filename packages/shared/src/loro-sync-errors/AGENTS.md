@@ -18,5 +18,3 @@ Root and shared package rules apply. `CLAUDE.md` symlinks here; edit `AGENTS.md`
   add transports, or enable telemetry. Routine successful sync stays silent.
 - Preserve non-Streams error formatting at callers. Technical details supplement
   existing localized action labels rather than introducing a separate UI flow.
-
-Intent: [sync diagnostics](../../../../specs/streams-sync-diagnostics.md).
