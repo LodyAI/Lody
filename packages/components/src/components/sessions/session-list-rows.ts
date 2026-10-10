@@ -13,6 +13,7 @@ import {
   getSessionPullRequestLegacyFields,
   parseGitHubPrNumber,
   resolveProjectGitHubRepo,
+  resolveSessionHistoryBackendKind,
 } from '@lody/shared';
 import type { SessionListRow, SessionListRowOwner } from '@/components/session-list';
 import { getLineChangeDeltaForScope, type LineChangeScope } from '@/lib/file-change-category';
@@ -326,6 +327,7 @@ export function mapSessionMetaToSessionListRow(
       session.openedBySessionId ??
       null,
     machineId: session.machineId,
+    historyBackend: resolveSessionHistoryBackendKind(session),
     repoFullName: repoFullNameRaw ? repoFullNameRaw : null,
     branchName,
     prUrl: prInfo.url,

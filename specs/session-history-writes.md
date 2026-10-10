@@ -189,6 +189,11 @@ than selecting a database on the calling machine. Control metadata and
 delivery state remain in Loro. Local history acceptance does not establish remote
 Roost synchronization.
 
+Desktop sidebar session hover cards display the session's persisted history
+backend as Roost or Loro in Workspace, Updated and Pinned lists. Missing backend
+metadata on a legacy session resolves to Loro; the current experimental preference
+does not determine this label. Showing the label does not read the history body.
+
 Performance work must preserve the existing Lody conversation identity and its
 owner workflow. Edit & Resend may reuse an immutable prefix through the storage
 SDK's internal branch operations; it must not create or navigate to another Lody

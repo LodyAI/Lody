@@ -144,7 +144,7 @@ describe('live agent status', () => {
     expect(shimmering()).toEqual([]);
   });
 
-  it('shows the working state on the scroll-to-latest button while output streams', async () => {
+  it('keeps the scroll-to-latest button actionable while output streams', async () => {
     await render(
       liveTurn([{ type: 'text', text: 'Still writing.' }]),
       { label: 'Working' },
@@ -153,6 +153,9 @@ describe('live agent status', () => {
     const button = container.querySelector<HTMLButtonElement>('[data-scroll-to-latest]');
     expect(button).not.toBeNull();
     expect(button!.querySelector('.animate-spin')).not.toBeNull();
+    expect(button!.querySelector('.lucide-arrow-down')).not.toBeNull();
+    await act(async () => button!.click());
+    expect(container.querySelector('[data-scroll-to-latest]')).toBeNull();
   });
 
   it('keeps the scroll-to-latest arrow while waiting for permission', async () => {

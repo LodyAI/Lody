@@ -93,3 +93,9 @@ Parent instructions apply. Background: [README.md](README.md).
   `[@Title](lody://session/<id>?workspace=<id>)`; accept bare ids and legacy
   `session://` URIs too. Explicit workspace must match the tool context.
   ([contract](../../../../specs/deep-links.md))
+
+- Single create/chat attachments require durable Operations and the calling daemon's
+  `sessionInputAttachments` capability. Resolve paths inside the calling Session's
+  authoritative workspace, never the daemon cwd or target workspace. Freeze references
+  before acceptance; retries use stored references. Legacy wait and batch schemas reject
+  attachment arguments. See [input Spec](../../../../specs/cli-session-attachments.md).

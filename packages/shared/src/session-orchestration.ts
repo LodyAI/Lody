@@ -228,6 +228,11 @@ export type FrozenOperationContinuationConfig = {
 };
 
 export type StoredLodyOperation = {
+  /** Frozen attachment references, stored atomically in the input side table. */
+  targetInputAttachments?: Array<
+    Array<Extract<import('./ai').SessionInputBlock, { type: 'image' | 'file' }>>
+  >;
+
   /** Immutable source presentation; stored separately for old reader compatibility. */
   author?: AgentMessageAuthor;
   targetRoleSnapshots?: Array<import('./message-author').AgentRoleSnapshot | null>;

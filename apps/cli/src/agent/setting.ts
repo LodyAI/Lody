@@ -171,7 +171,8 @@ export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
  */
 const BUILTIN_BUB_CAPABILITY_SOURCE_VERSION = 'builtin-bub:acp';
 
-const DIMCODE_VERSION = '0.5.10';
+// User-managed version; refresh capabilities explicitly after upgrading.
+const BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION = 'builtin-dimcode:local-acp';
 
 // Serve npx launches from the local cache when the package is already
 // installed; go to the registry only on a cache miss. Registry agent specs are
@@ -310,7 +311,7 @@ export function getAcpCapabilitySourceVersion(
           : DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION;
       }
       if (input.agentType === 'dimcode') {
-        return `builtin-dimcode:${DIMCODE_VERSION}`;
+        return BUILTIN_DIMCODE_CAPABILITY_SOURCE_VERSION;
       }
       if (input.agentType === 'bub') {
         // Bub is a user-installed CLI whose version Lody does not own, so the
@@ -559,14 +560,10 @@ async function resolveBuiltinACPProcessLaunch(
   }
   if (input.agentType === 'dimcode') {
     return {
-      command: 'npx',
-      args: [
-        NPX_CACHE_MODE_ARG,
-        '-y',
-        `dimcode@${DIMCODE_VERSION}`,
-        'acp',
-        ...(input.extraArgs ?? []),
-      ],
+      command: 'dimcode',
+      args: ['acp', ...(input.extraArgs ?? [])],
+      // Version changes belong to the user, including standalone installations.
+      env: { DIMCODE_DISABLE_AUTOUPDATE: '1', DIMCODE_AUTOUPDATE: '0' },
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
     };
   }

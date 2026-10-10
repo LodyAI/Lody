@@ -4,7 +4,7 @@ import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '@/utils/logger';
-import { withFileLock } from '@/utils/file-lock';
+import { fileLocksLegacy } from '@/utils/file-lock';
 import { redactUrlAuth } from '@/utils/github';
 import { getCredentialHelperHostPath } from '@/lib/git-credential-helper-script';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -166,7 +166,7 @@ const DEFAULT_ARCHIVE_BACKUP_AUTHOR_EMAIL = 'archive@lody.ai';
  * Per-repo file lock for git operations (cross-process safe)
  */
 async function withRepoLock<T>(repoId: RepoId, fn: () => Promise<T>): Promise<T> {
-  return withFileLock(`worktree-${repoId}`, fn, {
+  return fileLocksLegacy.withLock(`worktree-${repoId}`, fn, {
     timeout: 120000, // 120 seconds timeout for git operations (clone can be slow)
   });
 }

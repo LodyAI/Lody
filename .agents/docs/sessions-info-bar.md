@@ -16,8 +16,9 @@ this page is the full text of the rules summarised there.
   appending, and must never reorder the others. Note the separate, deliberately
   different order in `session-info-bar.tsx` for choosing which item opens on the
   stage (context first, as the most informative default) — that is stage
-  preference, not cluster order, and the two are not meant to match. Stage = the rightmost item. Invariants: no items → the bar
-  hides; with items, EXACTLY one is always expanded on the stage (there is no
+  preference, not cluster order, and the two are not meant to match. Stage = the rightmost item.
+  The bar hides only when items, execution-machine identity and ambient sync are
+  all absent. With items, EXACTLY one is always expanded on the stage (there is no
   fully-collapsed state, and the stage never empties). Click semantics
   (researched; do not overload a second click): cluster chip = promote onto
   stage; stage ICON = inert marker (NOT a button — clicking the rightmost
@@ -187,3 +188,13 @@ are hidden unless current. Each pill is agent icon, live title, and the sidebar'
 highlighted. Tab pills navigate with root + exact tab ids. The page reads only
 a boolean (`useHasSessionRelations`); the chip builds the tree in the leaf.
 Decision: [relations note](../notes/implemented/feature/2026-09-24-session-relations-chip.md).
+
+## Execution-machine identity (review patch)
+
+The optional `executionMachine` identity stays outside cluster/stage selection.
+It resolves `sessionMachine.ownerUserId` against existing workspace members,
+never Session ownership. The owner avatar/name and machine name remain visible
+when context/status changes; below a 600px bar width the controls move beneath it.
+Unknown ownership is explicit, and absence of machine metadata does not synthesize
+an identity. See the [draft Spec](../../specs/composer-machine-owner.md) and
+[review decision](../notes/proposed/feature/2026-10-07-composer-machine-owner.md).

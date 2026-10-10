@@ -25,9 +25,15 @@ Parent `AGENTS.md` files also apply. `CLAUDE.md` is a symlink to this file; edit
 - The shared image viewer is modal: trap focus, isolate the background, use named
   native buttons, and restore the opener without replacing the image gesture engine.
   [Decision](../../../../../.agents/notes/implemented/bug-fix/2026-09-30-image-viewer-modal-focus.md).
-- Image preview copy/save (`lib/image-preview-export.ts`) is Electron-only and splits by
+- Desktop image preview copy/save (`lib/image-preview-export.ts`) is Electron-only and splits by
   what each process can reach: main owns the native menu, clipboard, and save dialog;
   the renderer owns the `blob:` bytes and sends them only after the user picks an
   action. Copy re-encodes to PNG (the one format the system clipboard takes); save keeps
   the original encoding. Without the preload bridge the right-click must fall through to
   the browser's own menu.
+- Touch long-press observes the same photo engine without capturing or cancelling its
+  pan/pinch events. Cancel on movement, another touch, release, dismissal or image identity
+  change. Export the menu's exact image, never the gallery's later selection. The touch menu
+  stays inside the viewer's focus boundary and above its photo layer. Native Save/Share reuse
+  the file share sheet; completion is an OS handoff, not proof of an album save. Unsupported
+  bitmap clipboard/file sharing stays unavailable, never a URL/text substitute.

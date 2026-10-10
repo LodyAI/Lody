@@ -95,19 +95,16 @@ Read parent rules and each heading's linked context before edits.
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)
 
-- Canonical cluster in CONSTANT order + exactly one staged item; no items hides
-  the bar (unless syncing) and the stage never empties or relayouts on click.
+- Fixed cluster order; with items, exactly one staged item. Hide only without
+  items/identity/sync; clicks never empty or relayout the stage.
 - The stage icon is inert, colour is reserved for genuine status, and nothing
   in the bar pulses.
 - Open preview stays gated on a real reported target; repository actions are
   priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated
   below the reply.
 
-## [Auto review, status slot](../../../../../.agents/docs/sessions-auto-review.md)
+## [Session status slot](../../../../../.agents/docs/sessions-auto-review.md)
 
-- Auto review needs a usable reviewer row before a run starts; turning it ON
-  confirms, turning it OFF does not. The banner is NOT gated on the
-  experiment atom. Engine: `apps/cli/src/lib/review-automation/AGENTS.md`
 - One priority-ordered status slot (browser-offline > machine-removed >
   machine-offline): states hand off, never stack; machine-offline never blocks
   sends; doc-stream degradation is never re-added.

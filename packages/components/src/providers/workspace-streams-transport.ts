@@ -1,4 +1,6 @@
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
+import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import {
   createLoroStreamUrl,
   getLoroMetaStreamId,
@@ -10,6 +12,8 @@ import {
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
 import { StreamsTransportAdapter, createRepoStreamsPersistence } from 'loro-repo/transport/streams';
+
+const { getLoroSyncDiagnostic } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
 
 export type WorkspaceStreamsTransportOptions = {
   repo: LoroRepo;
@@ -41,6 +45,15 @@ export const createWorkspaceStreamsTransport = (
   options: WorkspaceStreamsTransportOptions
 ): StreamsTransportAdapter =>
   new StreamsTransportAdapter({
+    diagnostics: (event) => {
+      const diagnostic = getLoroSyncDiagnostic(event);
+      if (diagnostic) {
+        console[diagnostic.level]('[loro-streams] transport failure', {
+          workspaceId: options.workspaceId,
+          ...diagnostic,
+        });
+      }
+    },
     bucketId: LORO_STREAMS_BUCKET_ID,
     metaStreamId: getLoroMetaStreamId(options.workspaceId),
     docStreamId: (docId) => getLoroStreamIdForDocId(options.workspaceId, docId),

@@ -1784,6 +1784,9 @@ export class SessionExecutionService {
         await wait(configuring);
       }
 
+      await wait(
+        this.deps.sessionManager.validateSessionCredentials(runtime.session, options.userId)
+      );
       const preSubmitRejection = await rejectBeforeProviderSubmission();
       if (preSubmitRejection) {
         return preSubmitRejection;
@@ -1939,14 +1942,6 @@ export class SessionExecutionService {
           requesterUserId: options.userId,
           inputConfig: options.inputConfig,
         };
-        const githubSession =
-          runtime.session ?? this.deps.sessionManager.getSession(options.sessionId);
-        if (githubSession)
-          await this.deps.sessionManager.refreshGhTokenForSession(
-            githubSession,
-            undefined,
-            options.userId
-          );
         // Provider acceptance hands the original dispatch forward. A later
         // user-owned steer turn must not cancel or reopen that responsibility.
         await this.settleVisibleTurn(runtime, 'handled', { force: true });
@@ -5144,29 +5139,19 @@ export class SessionExecutionService {
             )
           );
 
-        const refreshPromptGitHubToken = (
+        const validatePromptCredentials = (
           targetSession: ISession,
           triggerReason: 'initial' | 'stale_acp_recovery'
         ): Effect.Effect<void, unknown, never> =>
           Effect.gen(function* () {
-            // Refresh GH_TOKEN before the ACP turn so the agent has a fresh token for git/gh operations.
-            // Installation tokens expire ~1h; refreshing at turn start avoids mid-turn auth failures.
-            if (!project) {
-              const meta = yield* self.tryPromise(() => sessionDoc.getMetaState());
-              project = self.resolveProjectFromMeta(meta, message.project?.branch);
-            }
-            const githubRepo = resolveProjectGitHubRepo(project);
+            // Validate this runtime's owner-bound authority before submitting a turn.
             yield* self.tryPromise(() =>
               traceAsync(
                 self.deps.logger,
-                'execution.refresh_gh_token',
+                'execution.validate_credentials',
                 { sessionId, turnId, triggerReason },
                 async () =>
-                  await self.deps.sessionManager.refreshGhTokenForSession(
-                    targetSession,
-                    githubRepo,
-                    userId
-                  )
+                  await self.deps.sessionManager.validateSessionCredentials(targetSession, userId)
               )
             );
             return undefined;
@@ -5243,7 +5228,7 @@ export class SessionExecutionService {
                 yield* acpReplaySuppression.release;
                 yield* applyPromptConfig(restoredSession, 'stale_acp_recovery');
                 yield* maybeRecordHistoryReplayNotice();
-                yield* refreshPromptGitHubToken(restoredSession, 'stale_acp_recovery');
+                yield* validatePromptCredentials(restoredSession, 'stale_acp_recovery');
                 yield* capturePromptBaseline(restoredSession, 'stale_acp_recovery');
 
                 let retryPromptBlocks = promptBlocks;
@@ -5283,7 +5268,7 @@ export class SessionExecutionService {
 
         yield* abortIfCancelled();
 
-        yield* refreshPromptGitHubToken(activeSession, 'initial');
+        yield* validatePromptCredentials(activeSession, 'initial');
         yield* capturePromptBaseline(activeSession, 'initial');
 
         yield* abortIfCancelled();
@@ -5988,6 +5973,12 @@ export class SessionExecutionService {
           yield* openAssistantEntry();
 
           const promptBlocks = yield* self.tryPromise(() => promptBlocksPromise);
+          yield* self.tryPromise(() =>
+            self.deps.sessionManager.validateSessionCredentials(
+              session,
+              sessionConfig.requesterUserId
+            )
+          );
           yield* abortIfCancelled();
 
           yield* prompt(promptBlocks);

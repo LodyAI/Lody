@@ -1,3 +1,4 @@
+import { makePreparationControlLegacy } from './preparation-control';
 import type { SessionId } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
 
@@ -17,6 +18,14 @@ export interface SessionPreparationResource {
   dispose(): Promise<void>;
 }
 
+/** Creation may reject normally only after releasing all partially acquired resources. */
+export class SessionPreparationCleanupError extends Error {
+  constructor(cause: unknown) {
+    super(`Session preparation cleanup failed: ${formatErrorMessage(cause)}`, { cause });
+    this.name = 'SessionPreparationCleanupError';
+  }
+}
+
 export type SessionPreparationStartDisposition = 'accepted' | 'duplicate' | 'replaced' | 'busy';
 
 type LoggerLike = {
@@ -31,7 +40,7 @@ type PreparationRecord<T extends SessionPreparationResource> = {
   claimKey: string;
   state: SessionPreparationState;
   abortController: AbortController;
-  expiresTimer: ReturnType<typeof setTimeout>;
+  control: ReturnType<typeof makePreparationControlLegacy>;
   resource?: T;
   resourcePromise: Promise<T>;
   cleanupPromise?: Promise<void>;
@@ -97,18 +106,14 @@ export class SessionPreparationService<T extends SessionPreparationResource> {
     record.claimKey = args.claimKey ?? args.requestKey;
     record.state = 'preparing';
     record.abortController = abortController;
-    record.expiresTimer = setTimeout(
-      () => {
-        if (this.records.get(args.sessionId) === record) {
-          this.logger.debug(
-            `[${args.sessionId}] Session preparation ${args.preparationId} reached its hard TTL`
-          );
-          void this.expire(record, 'expired');
-        }
-      },
-      Math.max(1, this.options.hardTtlMs)
-    );
-    record.expiresTimer.unref?.();
+    record.control = makePreparationControlLegacy(this.options.hardTtlMs, () => {
+      if (this.records.get(args.sessionId) === record) {
+        this.logger.debug(
+          `[${args.sessionId}] Session preparation ${args.preparationId} reached its hard TTL`
+        );
+        void this.expire(record, 'expired');
+      }
+    });
     record.resourcePromise = Promise.resolve().then(async () => {
       await predecessorCleanup;
       abortController.signal.throwIfAborted();
@@ -212,7 +217,7 @@ export class SessionPreparationService<T extends SessionPreparationResource> {
 
     record.state = 'claimed';
     this.records.delete(record.sessionId);
-    clearTimeout(record.expiresTimer);
+    void record.control.close();
     return { status: 'claimed', resource: record.resource };
   }
 
@@ -254,21 +259,27 @@ export class SessionPreparationService<T extends SessionPreparationResource> {
       this.records.delete(record.sessionId);
     }
     record.state = state;
-    clearTimeout(record.expiresTimer);
+    const controlClosed = record.control.close();
 
     // Keep retirement discoverable after the lease is removed, including while
     // create() is still returning its resource. Publish before abort listeners run.
     const predecessor = this.retiring.get(record.sessionId);
     const cleanup = Promise.all([
       predecessor,
+      controlClosed,
       Promise.resolve().then(() => this.waitForCleanup(record)),
     ])
       .then(() => undefined)
-      .finally(() => {
+      .then(() => {
         if (this.retiring.get(record.sessionId) === cleanup) {
           this.retiring.delete(record.sessionId);
         }
       });
+    // A failed release remains discoverable and blocks same-session replacement.
+    // Observers may ignore cancel's receipt, so log without consuming its failure.
+    void cleanup.catch((error: unknown) => {
+      this.logger.debug(`Session preparation retirement failed: ${formatErrorMessage(error)}`);
+    });
     record.retirementPromise = cleanup;
     this.retiring.set(record.sessionId, cleanup);
     record.abortController.abort();
@@ -277,21 +288,19 @@ export class SessionPreparationService<T extends SessionPreparationResource> {
 
   private scheduleCleanup(record: PreparationRecord<T>, resource: T): Promise<void> {
     if (record.cleanupPromise) return record.cleanupPromise;
-    const cleanup = Promise.resolve()
-      .then(() => resource.dispose())
-      .catch((error: unknown) => {
-        this.logger.debug(`Failed to dispose session preparation: ${formatErrorMessage(error)}`);
-      });
+    const cleanup = Promise.resolve().then(() => resource.dispose());
+    void cleanup.catch((error: unknown) => {
+      this.logger.debug(`Failed to dispose session preparation: ${formatErrorMessage(error)}`);
+    });
     record.cleanupPromise = cleanup;
     return cleanup;
   }
 
   private async waitForCleanup(record: PreparationRecord<T>): Promise<void> {
-    try {
-      const resource = await record.resourcePromise;
-      await this.scheduleCleanup(record, resource);
-    } catch {
-      // Creation failures are already logged by the resource promise observer.
-    }
+    const resource = await record.resourcePromise.catch((error: unknown) => {
+      if (error instanceof SessionPreparationCleanupError) throw error;
+      return undefined;
+    });
+    if (resource) await this.scheduleCleanup(record, resource);
   }
 }

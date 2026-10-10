@@ -1,7 +1,13 @@
 import * as stylex from '@stylexjs/stylex';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ZoomIn, ZoomOut } from 'lucide-react';
-import { setWasmSource, XlsxViewer, type XlsxViewerController } from '@extend-ai/react-xlsx';
+import { Copy, ZoomIn, ZoomOut } from 'lucide-react';
+import {
+  setWasmSource,
+  useXlsxViewerController,
+  XlsxViewer,
+  type XlsxViewerController,
+} from '@extend-ai/react-xlsx';
 import wasmUrl from '@extend-ai/react-xlsx/duke_sheets_wasm_bg.wasm?url';
 import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
@@ -11,6 +17,8 @@ import { useResolvedTheme } from '@/theme-provider';
 import type { SessionFileErrorActions } from '@/lib/session-file-actions';
 import { SessionFileNoticeCard } from './session-file-error-state';
 import { OfficeViewerFrame, officeFrameStyles } from './session-file-office-frame';
+import { writeSpreadsheetClipboard } from './session-file-spreadsheet-clipboard';
+import { readXlsxSelectionClipboard } from './session-file-xlsx-clipboard';
 
 setWasmSource(wasmUrl);
 
@@ -26,10 +34,20 @@ const styles = stylex.create({
   },
 });
 
-function XlsxToolbar({ controller }: { readonly controller: XlsxViewerController }) {
+function XlsxToolbar({
+  controller,
+  copyStatus,
+  isCopying,
+  onCopy,
+}: {
+  readonly controller: XlsxViewerController;
+  readonly copyStatus: string;
+  readonly isCopying: boolean;
+  readonly onCopy: () => void;
+}) {
   const { t } = useTranslation();
   return (
-    <div {...stylex.props(officeFrameStyles.group)}>
+    <div {...stylex.props(officeFrameStyles.toolbar)}>
       <Button
         type="button"
         variant="ghost"
@@ -58,6 +76,24 @@ function XlsxToolbar({ controller }: { readonly controller: XlsxViewerController
       >
         <ZoomIn size={16} aria-hidden />
       </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="mini"
+        disabled={
+          isCopying ||
+          controller.isLoading ||
+          !controller.activeSheet ||
+          (!controller.selection && !controller.activeCell)
+        }
+        onClick={onCopy}
+      >
+        <Copy size={16} aria-hidden />
+        {t('sessions.fileViewer.spreadsheet.copySelection', 'Copy selection')}
+      </Button>
+      <span {...stylex.props(officeFrameStyles.label)} role="status">
+        {copyStatus}
+      </span>
       <span {...stylex.props(officeFrameStyles.spacer)} />
       <span {...stylex.props(officeFrameStyles.label)}>
         {controller.tabs.length > 0
@@ -83,6 +119,48 @@ export function SessionFileXlsxRenderer({
 }) {
   const { t } = useTranslation();
   const isDark = useResolvedTheme() === 'dark';
+  const controller = useXlsxViewerController({
+    file: buffer,
+    fileName: path.split('/').pop(),
+    readOnly: true,
+    allowResizeInReadOnly: true,
+    useWorker: true,
+    maxFileSizeBytes: 25 * 1024 * 1024,
+  });
+  const copyingRef = useRef<AbortController | null>(null);
+  const [isCopying, setIsCopying] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
+  useEffect(() => () => copyingRef.current?.abort(), [buffer]);
+  const copySelection = () => {
+    if (copyingRef.current || controller.isLoading || !controller.activeSheet) return;
+    const request = new AbortController();
+    copyingRef.current = request;
+    setIsCopying(true);
+    setCopyStatus('');
+    // Start the clipboard write during the gesture; its data can arrive from the worker later.
+    void writeSpreadsheetClipboard(readXlsxSelectionClipboard(controller, request.signal))
+      .then(() => {
+        if (!request.signal.aborted) {
+          setCopyStatus(t('sessions.fileViewer.spreadsheet.copied', 'Selection copied'));
+        }
+      })
+      .catch((error: unknown) => {
+        if (request.signal.aborted) return;
+        setCopyStatus(
+          error instanceof RangeError
+            ? t('sessions.fileViewer.spreadsheet.copyTooLarge', 'Select a smaller range to copy')
+            : t('sessions.fileViewer.spreadsheet.copyFailed', 'Could not copy the selection')
+        );
+      })
+      .finally(() => {
+        copyingRef.current = null;
+        setIsCopying(false);
+      });
+  };
+  const isGridCopyTarget = (target: EventTarget | null) =>
+    target instanceof Element &&
+    target.closest('[role="grid"]') !== null &&
+    target.closest('input, textarea, [contenteditable="true"]') === null;
   const unavailable = (
     <SessionFileNoticeCard
       presentation={{
@@ -100,17 +178,42 @@ export function SessionFileXlsxRenderer({
       label={t('sessions.fileViewer.office.xlsxViewer', 'XLSX viewer')}
       toolbar={null}
     >
-      <div {...stylex.props(styles.viewer)}>
+      <div
+        {...stylex.props(styles.viewer)}
+        onKeyDownCapture={(event) => {
+          if (
+            (event.metaKey || event.ctrlKey) &&
+            !event.altKey &&
+            event.key.toLowerCase() === 'c' &&
+            isGridCopyTarget(event.target)
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!event.repeat) copySelection();
+          }
+        }}
+        onCopyCapture={(event) => {
+          if (!isGridCopyTarget(event.target)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          copySelection();
+        }}
+      >
         <XlsxViewer
-          file={buffer}
-          fileName={path.split('/').pop()}
+          controller={controller}
           height="100%"
           isDark={isDark}
           readOnly
-          useWorker
-          maxFileSizeBytes={25 * 1024 * 1024}
+          allowResizeInReadOnly
           showDefaultToolbar={false}
-          toolbar={(controller) => <XlsxToolbar controller={controller} />}
+          toolbar={() => (
+            <XlsxToolbar
+              controller={controller}
+              copyStatus={copyStatus}
+              isCopying={isCopying}
+              onCopy={copySelection}
+            />
+          )}
           loadingState={
             <div {...stylex.props(styles.loading)} role="status">
               <Spinner label={null} />

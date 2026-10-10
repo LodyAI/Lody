@@ -1,4 +1,7 @@
 import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
+import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { RepoSyncError, RepoTransportError } from 'loro-repo';
+import { registerLoroSyncErrorFormatter } from '../../utils/format-error';
 import {
   CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS,
   getLoroMetaStreamId,
@@ -15,6 +18,12 @@ import { StreamsTransportAdapter, createRepoStreamsPersistence } from 'loro-repo
 import type { Logger } from '@/utils/logger';
 import type { LoroStreamsTokenProvider } from '@lody/platform';
 import { prepareCliStreamsGatewayBaseUrl } from './streams-access';
+
+const { getLoroSyncDiagnostic, formatLoroSyncError } = createLoroSyncErrorTools({
+  RepoSyncError,
+  RepoTransportError,
+});
+registerLoroSyncErrorFormatter(formatLoroSyncError);
 
 export type CliStreamsTransport = {
   adapter: StreamsTransportAdapter;
@@ -41,6 +50,15 @@ export async function createCliStreamsTransport(args: {
     gatewayBaseUrl,
     tokenProvider,
     adapter: new StreamsTransportAdapter({
+      diagnostics: (event) => {
+        const diagnostic = getLoroSyncDiagnostic(event);
+        if (diagnostic) {
+          args.logger[diagnostic.level]('[loro-streams] transport failure', {
+            workspaceId: args.workspaceId,
+            ...diagnostic,
+          });
+        }
+      },
       bucketId: LORO_STREAMS_BUCKET_ID,
       metaStreamId: getLoroMetaStreamId(args.workspaceId),
       docStreamId: (docId) => getLoroStreamIdForDocId(args.workspaceId, docId),

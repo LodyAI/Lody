@@ -226,6 +226,8 @@ function createHarness(
     getHistory: () => loro.getList('history').toJSON() as SessionHistoryInput[],
     logger,
     realDoc,
+    meta,
+    readStoredMeta: () => storedMeta,
     repo,
     service,
   });
@@ -300,6 +302,25 @@ describe('SessionEditAndResendService', () => {
         lastHandledUserMsgId: 'user-1',
       })
     );
+  });
+
+  it('edits and resends while retaining an inert legacy auto-review pointer', async () => {
+    const harness = createHarness();
+    harness.meta.autoReview = { runId: 'retired-review', t: 1 };
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result).toMatchObject({ success: true });
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-3',
+    ]);
+    expect(harness.readStoredMeta()).toMatchObject({
+      autoReview: { runId: 'retired-review', t: 1 },
+      acpSessionId: 'acp-new',
+      latestUserMsgId: 'user-3',
+    });
   });
 
   it('refuses the commit when the editable tail moved after the eligibility check', async () => {
