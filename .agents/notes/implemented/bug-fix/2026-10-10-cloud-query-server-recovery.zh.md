@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1398
 
 [English](2026-10-10-cloud-query-server-recovery.md)
 
@@ -41,8 +42,12 @@ session 失效后的清理。
 
 21 个查询 hook 用例及 100 个相关认证、可见性、手动边界、平台 provider 和
 会话操作用例通过；共享 UI 类型检查、修改文件 lint 和平台边界检查也通过。
-仓库文档检查仍被指向未初始化 Kimi/Grok 子模块的八个链接阻塞；公共边界检查
-无法解析 Devin/Grok 工作区包。尝试拉取后两个子模块时，获取 GitHub 凭据失败。
-要求执行的根 `pnpm check` 也在未修改的 Claude 适配器构建处停止，因为其
+首次仓库文档检查被指向未初始化 Kimi/Grok 子模块的八个链接阻塞；公共边界检查
+当时无法解析 Devin/Grok 工作区包。首次拉取后两个子模块时，获取 GitHub 凭据失败。
+首次根 `pnpm check` 也在未修改的 Claude 适配器构建处停止，因为其
 依赖尚未安装，包括 `@tsconfig/node22`。
 未修改后端或执行部署。
+
+CI 静态及单元测试检查通过。桌面 smoke 在场景步骤之前因 harness 首次导航
+失败；独立的[harness 决定](../testing/2026-10-10-e2e-initial-renderer-navigation.zh.md)
+记录修复和验证。随后本地子模块及依赖初始化成功，文档检查现已通过。

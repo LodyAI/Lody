@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1398
 
 [中文](2026-10-10-cloud-query-server-recovery.zh.md)
 
@@ -51,9 +52,15 @@ its backend logs are outside this checkout's evidence.
 Validation passed for the 21 query-hook cases and 100 related auth, visibility,
 manual-boundary, platform-provider and session-action cases, plus shared UI
 typechecking, changed-file lint and the platform boundary guard. Repository-wide
-documentation checks remain blocked by eight links into uninitialized Kimi/Grok
-submodules; the public boundary check cannot resolve Devin/Grok workspace packages.
-Attempts to fetch the latter submodules failed while acquiring GitHub credentials.
-The required root `pnpm check` also stops in the unchanged Claude adapter build:
+documentation checks initially encountered eight links into uninitialized Kimi/Grok
+submodules; the public boundary check could not resolve Devin/Grok workspace packages.
+Initial fetch attempts failed while acquiring GitHub credentials.
+The initial root `pnpm check` also stopped in the unchanged Claude adapter build:
 its uninstalled dependencies include `@tsconfig/node22`.
 No backend change or deployment was performed.
+
+CI passed its static and unit-test checks. Its desktop smoke failure was in
+initial harness navigation, before scenario steps; the separate
+[harness decision](../testing/2026-10-10-e2e-initial-renderer-navigation.md) records
+that fix and validation. Submodules and dependencies were subsequently initialized
+locally, and the documentation check now passes.

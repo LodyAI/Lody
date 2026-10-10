@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { _electron, type CDPSession, type ElectronApplication, type Page } from '@playwright/test';
 import {
   assertNamedPipeReleased,
@@ -219,7 +219,6 @@ export class ElectronHarness {
     }
 
     this.page = await this.app.firstWindow({ timeout: 60_000 });
-    this.bootProfile = await this.readBootProfile();
     this.page.on('console', (message) => this.record('renderer', message.type(), message.text()));
     this.page.on('pageerror', (error) =>
       this.record('page', 'error', error.stack ?? error.message)
@@ -233,9 +232,14 @@ export class ElectronHarness {
     );
     await this.app.context().tracing.start({ screenshots: true, snapshots: true, sources: true });
     this.traceStarted = true;
-    await this.page.waitForFunction(() => document.readyState !== 'loading', undefined, {
+    // firstWindow can still expose about:blank before Electron's loadFile commits.
+    // Wait for the application document, not the placeholder's readyState.
+    const rendererUrl = pathToFileURL(join(ELECTRON_DIR, 'out', 'renderer', 'index.html'));
+    await this.page.waitForURL((url) => url.href.split('#')[0] === rendererUrl.href, {
+      waitUntil: 'domcontentloaded',
       timeout: 60_000,
     });
+    this.bootProfile = await this.readBootProfile();
     await this.markBootPoint('document-ready-observed');
     await this.page.evaluate(
       () => new Promise<void>((resolveFrame) => requestAnimationFrame(() => resolveFrame()))
