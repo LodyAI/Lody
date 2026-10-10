@@ -675,6 +675,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // generation is torn down it must not publish provider, transport or state.
   let webAttachGeneration = 0;
   const pendingWebAttaches = new Set<Promise<void>>();
+  const pendingCloudRejoins = new Set<Promise<void>>();
   // loro-repo registers a transport synchronously when addTransport starts and
   // only resolves after routing live rooms, so an in-flight add is already live.
   // Generations do not wait for each other, so adds of several generations can
@@ -3953,19 +3954,23 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           );
           const sweepDeadline = Date.now() + CLOUD_REJOIN_SWEEP_BUDGET_MS;
           for (let i = 0; i < errored.length; i += CLOUD_REJOIN_SWEEP_CONCURRENCY) {
-            if (Date.now() >= sweepDeadline) {
+            if (disposePromise || Date.now() >= sweepDeadline) {
               break;
             }
             await Promise.all(
-              errored
-                .slice(i, i + CLOUD_REJOIN_SWEEP_CONCURRENCY)
-                .map((entry) =>
-                  withTimeout(
-                    entry.subscription.rejoin(),
-                    CLOUD_REJOIN_TIMEOUT_MS,
-                    `Timeout rejoining cloud binding (room=${entry.room.kind}:${entry.room.id})`
-                  ).catch(() => undefined)
-                )
+              errored.slice(i, i + CLOUD_REJOIN_SWEEP_CONCURRENCY).map((entry) => {
+                // The timeout releases the retry loop, not the underlying SDK
+                // work. Retain every attempt until it actually settles.
+                const rejoin = entry.subscription.rejoin().finally(() => {
+                  pendingCloudRejoins.delete(rejoin);
+                });
+                pendingCloudRejoins.add(rejoin);
+                return withTimeout(
+                  rejoin,
+                  CLOUD_REJOIN_TIMEOUT_MS,
+                  `Timeout rejoining cloud binding (room=${entry.room.kind}:${entry.room.id})`
+                ).catch(() => undefined);
+              })
             );
           }
         }
@@ -4926,6 +4931,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         localTransportAttachPromise,
       ]);
       await reconnectsClosed;
+      // No reconnect sweep can add work after its loop has closed. Timed-out
+      // attempts may still be running, including attempts from earlier sweeps.
+      await Promise.allSettled(pendingCloudRejoins);
       if (window.repo === repo) delete window.repo;
 
       let destroyError: unknown = null;

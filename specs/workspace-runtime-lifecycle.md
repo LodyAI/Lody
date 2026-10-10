@@ -18,6 +18,8 @@ An offline document commit must remain available after normal workspace closure.
 - Repeated close calls share one completion. Close cancels token HTTP and prevents
   new attach/reconnect work; late results cannot publish clients or subscriptions.
   It joins owned attach, Meta acquisition and reconnect work before destroying Repo.
+  A rejoin timeout releases the retry loop only; close still waits for every
+  original task to settle, including failures and overlapping retry attempts.
 - Pausing retries on an offline event is resumable; permanent close is not.
 - Repo keeps persistence ownership. Committed offline edits survive the existing
   close path; close does not require remote upload acknowledgement.

@@ -61,7 +61,7 @@ change. No keys, persistent mode fields, cryptography, platform key storage,
 deployment or installed cross-platform acceptance are included. Promise workflows
 outside this selected connection group remain separate work.
 
-Local validation: the focused four suites pass 89 tests; the components suite
+Initial head `f9f93315d0e3a1f179d34bb757321664f088d230` validation: the focused four suites pass 89 tests; the components suite
 passes 5042 tests in 556 files. Repository typecheck/lint, boundary guards,
 format checks and docs check pass. `pnpm check` stops at sandbox `listen EPERM`
 in two unchanged shared IPC suites; those pass outside the sandbox (14 tests).
@@ -70,3 +70,19 @@ Git-helper environment failure; its entire affected file passes all six tests
 when only that test process uses system Git without inherited `GIT_EXEC_PATH`.
 Electron passes 215 tests, UI 299, and turn-diff-store 31. This is split
 validation after environment failures, not a successful uninterrupted `pnpm check`.
+
+Correction in [#1406](https://github.com/LodyAI/Lody/pull/1406): independent review
+found the cloud rejoin timeout released the outer loop while the uncancelable SDK
+operation still used Repo. The original real-Repo probe reproduced premature
+destruction on that head. Runtime now retains every raw rejoin lifetime, removes
+it on either outcome, and joins the remaining set after the loops close. The
+10-second timeout, concurrency and retry budget remain unchanged; retirement
+prevents starting another sweep batch. This repairs the existing close contract.
+
+The four new real-Repo cases fail on the original implementation and pass with
+the fix: late success/rejection, overlapping retry attempts, newest-first
+completion, and repeated close. They use controlled transports and virtual time,
+not a live server or disk-close simulation. Follow-up validation is scoped to the
+four owning suites (93 tests), components typecheck, repository quick/static
+checks, formatting and docs; the unchanged full local matrix is not rerun.
+Independent finding closure remains with the original reviewer.

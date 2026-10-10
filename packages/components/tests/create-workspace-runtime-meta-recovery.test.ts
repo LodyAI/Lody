@@ -7,7 +7,7 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import type { LoroRepo } from 'loro-repo';
+import type { LoroRepo, TransportAdapter, TransportSubscription } from 'loro-repo';
 
 const mocks = vi.hoisted(() => {
   const setTransportAdapter = vi.fn(async () => {});
@@ -1656,6 +1656,134 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expect(mocks.reconnect).not.toHaveBeenCalled();
     await runtime.dispose();
   });
+
+  it.each([
+    { retry: false, outcome: 'resolve' },
+    { retry: false, outcome: 'reject' },
+    { retry: true, outcome: 'resolve' },
+    { retry: true, outcome: 'reject' },
+  ] as const)(
+    'joins original cloud rejoin tasks before real Repo destruction (retry=$retry, $outcome)',
+    async ({ retry, outcome }) => {
+      const { LoroRepo: RealRepo } = await vi.importActual<typeof import('loro-repo')>('loro-repo');
+      const repo = await RealRepo.create({
+        metaDebounceCommitMs: 0,
+        resolveRoomTransports: () => ({
+          transportIds: ['local', 'cloud'],
+          readinessTransportId: 'local',
+        }),
+      });
+      const gates = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+      const entered = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+      const active = new Set<number>();
+      let attempts = 0;
+      let cloudStatus: TransportSubscription['status'] = 'joined';
+      let destroyed = false;
+      const activeAtDestroy: number[] = [];
+      const subscription = (cloudDoc: boolean): TransportSubscription => ({
+        get status() {
+          return cloudDoc ? cloudStatus : 'joined';
+        },
+        firstSyncedWithRemote: Promise.resolve(),
+        onStatusChange: () => () => {},
+        unsubscribe: () => {},
+        waitUntilSynced: async () => {},
+        rejoin: async () => {
+          if (!cloudDoc) return;
+          const attempt = attempts++;
+          active.add(attempt);
+          entered[attempt]!.resolve();
+          try {
+            await gates[attempt]!.promise;
+          } finally {
+            active.delete(attempt);
+          }
+        },
+      });
+      const adapter = (cloud: boolean): TransportAdapter => ({
+        connect: async () => {},
+        close: async () => {},
+        isConnected: () => true,
+        getStatus: () => 'connected',
+        onStatusChange: () => () => {},
+        reconnect: async () => {},
+        syncMeta: async () => ({ ok: true }),
+        syncDoc: async () => ({ ok: true }),
+        joinMetaRoom: () => subscription(false),
+        joinDocRoom: () => subscription(cloud),
+      });
+      const add = repo.addTransport.bind(repo);
+      vi.spyOn(repo, 'addTransport').mockImplementation((id, _adapter, options) =>
+        add(id, adapter(id === 'cloud'), options)
+      );
+      const destroy = repo.destroy.bind(repo);
+      vi.spyOn(repo, 'destroy').mockImplementation(async () => {
+        activeAtDestroy.push(...active);
+        await destroy();
+        destroyed = true;
+      });
+      mocks.repoOverride = repo;
+      enableElectronLocalDataPlane();
+      const runtime = await createWorkspaceRuntime({
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+        syncMode: 'dual',
+      });
+      runtime.setLocalMachineId('local-machine' as MachineId);
+      await runtime.setAuthToken('token');
+      const lease = await repo.joinDocRoom('machine-local-machine');
+      let closing: Promise<void> | undefined;
+      let closed = false;
+      try {
+        cloudStatus = 'error';
+        dispatchWindowEvent('online');
+        await entered[0].promise;
+        if (retry) {
+          // The existing timeout must still release the running retry loop.
+          // A new pass can start while the previous raw SDK task is pending.
+          await vi.advanceTimersByTimeAsync(10_000);
+          dispatchWindowEvent('online');
+          await entered[1].promise;
+          expect([...active]).toEqual([0, 1]);
+        }
+        closing = runtime.dispose();
+        expect(runtime.dispose()).toBe(closing);
+        void closing.then(() => {
+          closed = true;
+        });
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect({ closed, destroyed }).toEqual({ closed: false, destroyed: false });
+
+        // Resolve the newest attempt first: closing must still retain older
+        // timed-out work. A rejection must neither escape nor end close early.
+        const last = retry ? 1 : 0;
+        if (outcome === 'reject') gates[last]!.reject(new Error('late rejoin failed'));
+        else gates[last]!.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        if (retry) {
+          expect([...active]).toEqual([0]);
+          expect({ closed, destroyed }).toEqual({ closed: false, destroyed: false });
+          gates[0].resolve();
+        }
+        await closing;
+        expect({ closed, destroyed, activeAtDestroy }).toEqual({
+          closed: true,
+          destroyed: true,
+          activeAtDestroy: [],
+        });
+        expect(runtime.dispose()).toBe(closing);
+        dispatchWindowEvent('online');
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(active.size).toBe(0);
+        expect(attempts).toBe(retry ? 2 : 1);
+      } finally {
+        for (const gate of gates) gate.resolve();
+        lease.unsubscribe();
+        await (closing ?? runtime.dispose());
+      }
+    }
+  );
 
   it('repairs a dual-homed room whose cloud binding failed (invisible to trackers)', async () => {
     // The regression this pins: a dual-homed room's cloud subscription failing

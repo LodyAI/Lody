@@ -34,4 +34,8 @@ Translation: current
 
 [契约](../../../../specs/workspace-runtime-lifecycle.zh.md)为 draft。stream ID、存储名称、快照、游标代码和依赖版本不变。本次没有密钥、持久模式字段、密码学、平台密钥存储、部署或全平台安装包验收。选定连接资源之外的 Promise 工作流仍是后续工作。
 
-本地验证：四组聚焦测试 89 项通过；组件整包 556 个文件、5042 项通过。全仓类型、lint、边界、格式和文档检查通过。`pnpm check` 在两个未修改的 shared IPC 测试中被沙箱 `listen EPERM` 中断；沙箱外重跑 14 项通过。其余包另行补验。CLI 有 3707 项通过及 1 项 Git helper 环境失败；仅让该测试进程使用系统 Git、去掉继承的 `GIT_EXEC_PATH` 后，所属文件 6 项通过。Electron 215 项、UI 299 项、turn-diff-store 31 项通过。这是环境失败后的分项验证，不是一次完整成功的 `pnpm check`。
+初始 head `f9f93315d0e3a1f179d34bb757321664f088d230` 的验证：四组聚焦测试 89 项通过；组件整包 556 个文件、5042 项通过。全仓类型、lint、边界、格式和文档检查通过。`pnpm check` 在两个未修改的 shared IPC 测试中被沙箱 `listen EPERM` 中断；沙箱外重跑 14 项通过。其余包另行补验。CLI 有 3707 项通过及 1 项 Git helper 环境失败；仅让该测试进程使用系统 Git、去掉继承的 `GIT_EXEC_PATH` 后，所属文件 6 项通过。Electron 215 项、UI 299 项、turn-diff-store 31 项通过。这是环境失败后的分项验证，不是一次完整成功的 `pnpm check`。
+
+[#1406](https://github.com/LodyAI/Lody/pull/1406) 修正：独立审查发现，云端 rejoin 超时后外层循环已结束，但不可取消的 SDK 操作仍在使用 Repo。原真实 Repo 探针在该 head 复现了提前销毁。Runtime 现在保留每个原始 rejoin 的生命周期，成功或失败后移除；重连循环关闭后，再等待剩余集合结束。10 秒超时、并发数量和重试预算不变；停用后不再开启下一批任务。这是补齐原关闭契约。
+
+新增 4 项真实 Repo 用例在原实现上全部失败、修复后通过，覆盖晚到成功／拒绝、重叠重试、新任务先结束及重复关闭。使用可控 transport 和虚拟时间，不是实网或磁盘关闭模拟。本次验证限定为原有四组测试（93 项）、components 类型检查、仓库 quick／静态检查、格式和文档；不重跑未变化的本地完整矩阵。独立 finding 仍由原 reviewer 复验后关闭。
