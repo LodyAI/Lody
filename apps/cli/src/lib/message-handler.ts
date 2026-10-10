@@ -9508,7 +9508,7 @@ export class MessageHandler {
           result: await this.localProjectControlService.listProjectDirectory(
             rootPath,
             request.relativePath,
-            { limit: request.limit }
+            { limit: request.limit, sort: request.sort, include: request.include }
           ),
         };
       }

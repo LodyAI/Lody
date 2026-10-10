@@ -2363,6 +2363,15 @@ export const LocalProjectListDirRequestSchema = z
     localProjectId: LocalProjectIdSchema,
     relativePath: z.string(),
     limit: z.number().int().positive().optional(),
+    sort: z
+      .object({
+        by: z.enum(['name', 'mtime', 'size']),
+        order: z.enum(['asc', 'desc']).optional(),
+        directoriesFirst: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+    include: z.array(z.literal('stat')).optional(),
     requestedByUserId: z.string().trim().min(1).optional(),
   })
   .strict();
@@ -2565,6 +2574,8 @@ const LocalProjectDirectoryListResultSchema = z
         .object({
           name: z.string(),
           type: z.enum(['file', 'directory']),
+          mtimeMs: z.number().optional(),
+          size: z.number().int().nonnegative().optional(),
         })
         .strict()
     ),

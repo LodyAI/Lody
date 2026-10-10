@@ -912,6 +912,8 @@ export type LocalProjectFileReadResult = {
 export type LocalProjectDirectoryEntry = {
   name: string;
   type: 'file' | 'directory';
+  mtimeMs?: number;
+  size?: number;
 };
 
 export type LocalProjectDirectoryListResult = {
@@ -1077,6 +1079,12 @@ export type LocalProjectControlRequest =
       localProjectId: LocalProjectId;
       relativePath: string;
       limit?: number;
+      sort?: {
+        by: 'name' | 'mtime' | 'size';
+        order?: 'asc' | 'desc';
+        directoriesFirst?: boolean;
+      };
+      include?: 'stat'[];
       requestedByUserId?: string;
     }
   | {
