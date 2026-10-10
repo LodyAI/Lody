@@ -33,6 +33,24 @@ Session; unrelated Sessions need not wait for it.
 This handoff concerns unadopted speculative resources. It does not change the
 archive and restore retention contract below.
 
+## Git execution failure
+
+A worktree Git operation owns its command until completion or awaited cleanup.
+Startup, timeout, output/stream and unresolved release failures must remain
+observable; they are not missing branches, default identity or successful
+best-effort fetch. Force removal must not remove uncommitted files merely because
+Git cannot start or its cleanup is unresolved. Completed Git exits remain distinct
+from these infrastructure failures; their operation-specific classification belongs
+to the manager. This revision does not provide Git rollback or a crash transaction.
+
+Git invocations keep their ten-minute ceiling and bounded output. Credential-helper
+probing has a five-second ceiling. Failure of this diagnostic can be recorded while
+the original Git operation still fails, but an unreleased diagnostic process must
+remain owned and reported. Cancellation/deadline completion waits for the existing
+bounded tree cleanup; failure retains recovery ownership rather than claiming release.
+The native command boundary does not yet give Promise session/setup/GC callers
+end-to-end structured cancellation.
+
 ## Responsibilities
 
 The daemon that owns a machine is the only actor that touches that machine's disk.
