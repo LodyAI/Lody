@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1397](https://github.com/LodyAI/Lody/pull/1397)
 
 [English](2026-10-10-effect-login-shell-probe.md)
 
