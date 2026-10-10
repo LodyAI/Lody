@@ -389,8 +389,10 @@ flowchart TD
   C --> F
   C --> G["LocalProjects native Git"]
   C --> Q["WorktreeGit execution: #1389"]
-  F --> O["WorktreeObservations"]
+  F --> O["WorktreeObservations: #1392"]
   Q --> O
+  Q --> B["LocalWorktreePreparation"]
+  B --> J
   O --> J["worktree mutations / setup / GC"]
   G --> J
   F --> R["Runtime download / installation"]
@@ -426,6 +428,8 @@ integrates FileLocks and WorktreeGit on a foundation containing refreshed main.
 It does not complete mutation/setup/GC ownership. #1385 is merged and supplies
 runtime credential leases and preparation TTL/control only; raw ACP/worktree
 startup and full session ownership remain unfinished.
+The finite [local-source preparation unit](../../implemented/architecture/2026-10-10-effect-local-worktree-preparation.md) depends on filesystem/Git and borrows the existing mutation lease. Its review base includes observations because their manager boundary is shared; the native kernels are independent.
+Library-side prerequisite verification: this integration consumes Flock 0.4.3, streams-crdt 0.16.1 and loro-repo 0.21.1. The public npm registry now publishes streams-crdt 0.16.2 and loro-repo 0.21.2 (Flock remains 0.4.3); these are not consumed upgrades or proof of an Effect kernel. Re-read the upstream rules and reconcile current source/checkpoint contracts before library migration.
 These subsequent migration units are draft PRs, not merged work.
 
 Introduce one daemon ManagedRuntime and root Scope when the first real long-lived

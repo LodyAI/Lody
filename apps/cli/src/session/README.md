@@ -389,3 +389,10 @@ executes them through `runObservationLegacy`; list/inspect own repo leases, whil
 mutation information reads reuse the caller's lock. Missing and unborn state remain
 distinct from repository/infrastructure failures. See the
 [decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-worktree-observations.md).
+
+Local-shared `ensureRepo`/creation consumes `LocalWorktreePreparation`: source
+validation, directories and complete metadata publication use native FileSystem,
+WorktreeGit and Clock under the caller's existing repo lease. `runWorktreeLegacy`
+executes this and observation programs through the same FileLocks runtime; a failed
+metadata scratch release retains its path and bounded retry capability. Bare
+clone/fetch, full mutations and long-lived GC still require their own native owners.

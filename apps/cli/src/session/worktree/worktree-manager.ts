@@ -1,4 +1,5 @@
-import { Context, Effect } from 'effect';
+import { Context, Effect, Exit } from 'effect';
+import { squashProcessFailure } from '@lody/shared/node/process';
 import { GITHUB_CREDENTIAL_ENV_KEYS } from '@/lib/gh-token-env';
 import { RepoId, SessionId } from '@lody/shared';
 import { localProjectsLegacy } from '@lody/shared/node/local-project';
@@ -7,6 +8,7 @@ import * as path from 'path';
 import { Logger } from '@/utils/logger';
 import { fileLocksLegacy } from '@/utils/file-lock';
 import {
+  FileLocks,
   LockIoError,
   LockReentrant,
   LockReleaseFailed,
@@ -20,6 +22,13 @@ import type { NodeProcessApi } from '@lody/shared/node/process';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { WorktreeGitCommandFailed, WorktreeGitExecutionFailed } from './git-execution';
 import { WorktreeObservations, worktreeObservationLayer } from './worktree-observations';
+import {
+  LocalWorktreePreparation,
+  LocalWorktreeSourceInvalid,
+  LocalWorktreeScratchReleaseFailed,
+  localWorktreePreparationLayer,
+} from './local-worktree-preparation';
+import { LodyDataDirUnavailableError } from '@lody/shared/node/installation-profile';
 import { worktreeGitLegacy, rethrowWorktreeGitInfrastructureFailure } from './git-execution-legacy';
 import {
   getAllocatedSessionBranchName,
@@ -361,61 +370,30 @@ export class WorktreeManager {
     return this.source.kind === 'local-shared' ? this.source.originalRootPath : this.bareGitDir;
   }
 
-  private async ensureLocalSharedRepoLocked(): Promise<void> {
-    if (this.source.kind !== 'local-shared') return;
-
-    // A local-shared repo keeps its git data in the user's own project, but its
-    // worktrees still live under the installation data directory — the same
-    // `fs.mkdirSync` the bare branch of `ensureRepoLocked` performs. Without it the
-    // only thing that would create the directory is `git worktree add`, which reports
-    // the failure as a path git was handed rather than as Lody's own data root.
-    fs.mkdirSync(this.worktreesDir, { recursive: true });
-
-    const originalRootPath = this.source.originalRootPath;
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(originalRootPath);
-    } catch (error) {
-      throw new Error(`[${this.repoId}] Local worktree source is missing: ${originalRootPath}`, {
-        cause: error,
-      });
-    }
-    if (!stat.isDirectory()) {
-      throw new Error(
-        `[${this.repoId}] Local worktree source is not a directory: ${originalRootPath}`
-      );
-    }
-
-    try {
-      await this.runGit(['rev-parse', '--git-dir', '--is-inside-work-tree'], originalRootPath);
-    } catch (error) {
-      rethrowWorktreeGitInfrastructureFailure(error);
-      throw new Error(
-        `[${this.repoId}] Local project is not a git repository: ${originalRootPath}`,
-        { cause: error }
-      );
-    }
-
-    fs.mkdirSync(this.worktreesDir, { recursive: true });
-    fs.mkdirSync(this.cacheDir, { recursive: true });
-    fs.mkdirSync(this.repoDir, { recursive: true });
-    const metaPath = path.join(this.repoDir, 'meta.json');
-    if (!fs.existsSync(metaPath)) {
-      fs.writeFileSync(
-        metaPath,
-        `${JSON.stringify(
-          {
-            kind: 'local',
-            originalRootPath,
-            ...(this.source.sourceGitDir ? { sourceGitDir: this.source.sourceGitDir } : {}),
-            createdAtMs: Date.now(),
-          },
-          null,
-          2
-        )}\n`,
-        'utf8'
-      );
-    }
+  private ensureLocalSharedRepoLocked(): Promise<void> {
+    if (this.source.kind !== 'local-shared') return Promise.resolve();
+    const source = {
+      repoId: this.repoId,
+      dataDir: getLodyDataDir(),
+      repoDir: this.repoDir,
+      worktreesDir: this.worktreesDir,
+      cacheDir: this.cacheDir,
+      originalRootPath: this.source.originalRootPath,
+      sourceGitDir: this.source.sourceGitDir,
+    };
+    return this.runWorktreeLegacy(
+      Effect.flatMap(LocalWorktreePreparation, (preparation) =>
+        preparation.prepareLocked(source)
+      ).pipe(
+        Effect.provide(
+          localWorktreePreparationLayer({
+            logger: this.logger,
+            logPrefix: `[${this.repoId}]`,
+            nodeProcess: this.nodeProcess,
+          })
+        )
+      )
+    );
   }
 
   // When git fails with "terminal prompts disabled" during host-side clone/fetch,
@@ -682,13 +660,12 @@ export class WorktreeManager {
   ): Promise<void> {
     // Both branches below build every path they hand git out of this root, so prove it
     // is reachable once, here, and report it as Lody's own directory when it is not.
-    ensureLodyDataDir();
-
     if (this.source.kind === 'local-shared') {
       await this.ensureLocalSharedRepoLocked();
       return;
     }
 
+    ensureLodyDataDir();
     // Ensure directories exist
     fs.mkdirSync(this.worktreesDir, { recursive: true });
     fs.mkdirSync(this.cacheDir, { recursive: true });
@@ -1395,22 +1372,49 @@ export class WorktreeManager {
       worktreesDir: this.worktreesDir,
       localShared: this.isLocalSharedSource(),
     };
-    return fileLocksLegacy
-      .runPromise(
-        Effect.flatMap(WorktreeObservations, (observations) => query(observations, source)).pipe(
-          Effect.provide(
-            worktreeObservationLayer({
-              logger: this.logger,
-              logPrefix: `[${this.repoId}]`,
-              nodeProcess: this.nodeProcess,
-            })
-          )
+    return this.runWorktreeLegacy(
+      Effect.flatMap(WorktreeObservations, (observations) => query(observations, source)).pipe(
+        Effect.provide(
+          worktreeObservationLayer({
+            logger: this.logger,
+            logPrefix: `[${this.repoId}]`,
+            nodeProcess: this.nodeProcess,
+          })
         )
       )
+    );
+  }
+
+  /** @deprecated Delete when the mutation owner receives native services. */
+  private runWorktreeLegacy<A, E>(program: Effect.Effect<A, E, FileLocks>): Promise<A> {
+    return fileLocksLegacy
+      .runPromise(Effect.exit(program))
+      .then((exit) => {
+        if (Exit.isSuccess(exit)) return exit.value;
+        const primary = squashProcessFailure(exit.cause);
+        const releases = exit.cause.reasons.flatMap((reason) =>
+          reason._tag === 'Die' && reason.defect instanceof LocalWorktreeScratchReleaseFailed
+            ? [reason.defect]
+            : []
+        );
+        const firstRelease = releases[0];
+        if (firstRelease)
+          throw new WorktreeGitExecutionFailed({
+            message: firstRelease.message,
+            cause: new AggregateError(
+              [primary, ...releases],
+              'Worktree operation and metadata scratch release failed',
+              { cause: exit.cause }
+            ),
+          });
+        throw primary;
+      })
       .catch((error: unknown) => {
         rethrowWorktreeGitInfrastructureFailure(error);
         if (
           error instanceof WorktreeGitCommandFailed ||
+          error instanceof LocalWorktreeSourceInvalid ||
+          error instanceof LodyDataDirUnavailableError ||
           error instanceof LockIoError ||
           error instanceof LockReentrant ||
           error instanceof LockReleaseFailed ||
@@ -1418,7 +1422,7 @@ export class WorktreeManager {
         )
           throw error;
         throw new WorktreeGitExecutionFailed({
-          message: error instanceof Error ? error.message : 'Worktree observation failed',
+          message: error instanceof Error ? error.message : 'Worktree operation failed',
           cause: error,
         });
       });

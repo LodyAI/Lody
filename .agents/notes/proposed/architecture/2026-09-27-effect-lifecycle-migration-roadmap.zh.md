@@ -266,8 +266,10 @@ flowchart TD
   C --> F
   C --> G["LocalProjects 原生 Git"]
   C --> Q["WorktreeGit 执行：#1389"]
-  F --> O["WorktreeObservations"]
+  F --> O["WorktreeObservations: #1392"]
   Q --> O
+  Q --> B["LocalWorktreePreparation"]
+  B --> J
   O --> J["worktree 变更 / setup / GC"]
   G --> J
   F --> R["Runtime 下载 / 安装"]
@@ -292,6 +294,8 @@ flowchart TD
 原生 [worktree 观察单元](../../implemented/architecture/2026-10-10-effect-worktree-observations.zh.md)
 在包含刷新 main 的基础上组合 FileLocks 和 WorktreeGit，不代表变更、setup 或 GC 所有权完成。
 #1385 已合并，仅提供运行实例凭据租约和预热 TTL/控制；底层 ACP/worktree 启动及完整会话所有权仍未完成。
+有限[本地源准备单元](../../implemented/architecture/2026-10-10-effect-local-worktree-preparation.zh.md) 依赖文件系统/Git，借用既有变更租约。评审 base 包含观察单元，因为管理器边界共享；原生内核并不互相依赖。
+库侧前置核对：本集成消费 Flock 0.4.3、streams-crdt 0.16.1 和 loro-repo 0.21.1。公开 npm registry 现已发布 streams-crdt 0.16.2 和 loro-repo 0.21.2，Flock 仍为 0.4.3；这不是已消费的升级，也不证明 Effect 内核完成。库侧迁移前仍须读取各自规则并核对当前源码/检查点契约。
 这些后续迁移单元仍是 draft PR，不能标为已合并。
 
 接入首个真正长生命周期服务时建立统一 daemon ManagedRuntime 与根 Scope，随单元迁移扩展；

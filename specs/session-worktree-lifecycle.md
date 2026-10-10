@@ -68,6 +68,21 @@ cleanup. Internal information reads under a mutation's existing lock must not ac
 it again; same-context recursive lock acquisition still fails immediately. A bounded cleanup failure retains external process recovery ownership; file lease
 release is not proof that the process has gone. These observations do not provide an atomic snapshot across commands or Git rollback.
 
+## Local source preparation
+
+Preparation of a local-project worktree validates its source before publishing new
+metadata. Existing source metadata and user files remain untouched. A failed or
+cancelled preparatory write must not publish partial metadata; an exclusive complete
+publication preserves metadata installed by another writer. This guarantee does not
+provide power-loss durability or rollback of persistent directories or Git changes.
+
+The mutation caller owns the repo lease. The preparation owns only its temporary
+metadata directory and awaits its release. Release waiting has a five-second ceiling;
+a failure or timeout retains the uniquely owned path and bounded retry capability,
+and prevents a successful preparation result even if publication already completed.
+A filesystem operation submitted to the kernel can outlive local waiting; failed
+release must not be described as confirmed deletion.
+
 ## Responsibilities
 
 The daemon that owns a machine is the only actor that touches that machine's disk.

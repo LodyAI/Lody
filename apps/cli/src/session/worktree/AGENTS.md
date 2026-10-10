@@ -15,12 +15,13 @@ and file responsibilities: [../README.md](../README.md).
 - `worktreeGitLegacy` is the temporary command facade; keep Legacy
   visible and delete it when the manager becomes native. Infrastructure and
   unresolved-release failures must escape fallback/forced-removal catches.
-  Native observations compose `WorktreeObservations` with the owner-provided
-  FileLocks. `inspect`/`list` own the repo lease; `info` reads under the mutation's
-  already-held lock. Preserve explicit missing/unborn/corrupt outcomes and mixed
-  Cause. `runObservationLegacy` executes through the existing `fileLocksLegacy`
-  runtime until the mutation owner migrates; never create a second coordinator.
-  Setup, GC, mutation filesystem/HTTP orchestration remain under migration.
+  `WorktreeObservations` uses owner-provided FileLocks: inspect/list acquire;
+  info borrows the mutation lease. Preserve missing/unborn/corrupt and mixed Cause.
+  `LocalWorktreePreparation.prepareLocked` borrows that lease; own scratch before
+  writing, publish complete metadata exclusively, retain bounded recovery on
+  failed release. `runWorktreeLegacy` executes both via fileLocksLegacy;
+  runObservationLegacy only composes. Never add a second coordinator.
+  Mutation/setup/GC remains unfinished.
   Decision: [worktree Git](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-worktree-git-execution.md).
 
 ## Git credential broker
