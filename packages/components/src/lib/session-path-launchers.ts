@@ -48,6 +48,7 @@ export const BUILTIN_PATH_LAUNCHERS: readonly BuiltinPathLauncher[] = [
   { kind: 'builtin', id: 'cursor', label: 'Cursor', requiresElectron: true },
   { kind: 'builtin', id: 'antigravity', label: 'Antigravity', requiresElectron: true },
   { kind: 'builtin', id: 'windsurf', label: 'Windsurf', requiresElectron: true },
+  { kind: 'builtin', id: 'devin-desktop', label: 'Devin Desktop', requiresElectron: true },
   { kind: 'builtin', id: 'zed', label: 'Zed', requiresElectron: true },
   { kind: 'builtin', id: 'sublime', label: 'Sublime Text', requiresElectron: true },
   { kind: 'builtin', id: 'warp', label: 'Warp', requiresElectron: true },
@@ -283,7 +284,7 @@ function buildSublimePathLauncherInput(
  * VS Code alone falls back to its deeplink.
  */
 const EDITOR_CLI_LAUNCHERS: Record<
-  'vscode' | 'cursor' | 'windsurf' | 'antigravity' | 'zed',
+  'vscode' | 'cursor' | 'windsurf' | 'devin-desktop' | 'antigravity' | 'zed',
   {
     cli: string;
     darwinApp: string;
@@ -316,6 +317,14 @@ const EDITOR_CLI_LAUNCHERS: Record<
     darwinBundleCli: 'Contents/Resources/app/bin/windsurf',
     win: ['C:\\Program Files\\Windsurf\\Windsurf.exe'],
     linux: ['/usr/bin/windsurf'],
+    newWindowFlag: '-n',
+  },
+  'devin-desktop': {
+    cli: 'devin-desktop',
+    darwinApp: 'Devin',
+    darwinBundleCli: 'Contents/Resources/app/bin/devin-desktop',
+    win: ['C:\\Program Files\\Devin\\Devin.exe'],
+    linux: ['/usr/bin/devin-desktop', '/opt/devin-desktop/devin-desktop'],
     newWindowFlag: '-n',
   },
   antigravity: {

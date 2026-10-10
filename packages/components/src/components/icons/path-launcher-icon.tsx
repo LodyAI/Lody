@@ -3,6 +3,7 @@ import type { BuiltinPathLauncherId, PathLauncherOption } from '@/lib/session-pa
 import {
   AntigravityIcon,
   CursorIcon,
+  DevinDesktopIcon,
   SublimeIcon,
   TerminalIcon,
   VSCodeIcon,
@@ -22,6 +23,7 @@ const BUILTIN_PATH_LAUNCHER_ICONS: Record<BuiltinPathLauncherId, PathLauncherIco
   cursor: CursorIcon,
   antigravity: AntigravityIcon,
   windsurf: WindsurfIcon,
+  'devin-desktop': DevinDesktopIcon,
   zed: ZedIcon,
   sublime: SublimeIcon,
   warp: WarpIcon,
