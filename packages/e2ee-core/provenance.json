@@ -1,0 +1,64 @@
+{
+  "sourceCommit": "bd5a9c1ec71ed7fa8085e51faec4f1e8dbe985b8",
+  "sourceState": "working tree, including staged changes; selected files unmodified relative to source commit",
+  "hashAlgorithm": "SHA-256",
+  "files": {
+    "pure/bytes.ts": {
+      "sha256": "87030179b2516c8c14365d01b6b5043dcadabe196ac0079914045b7c9ba8bb26",
+      "destination": "src/bytes.ts",
+      "scope": "OwnedBytes, public byte brands/parsers, epoch number and EpochKey re-export",
+      "destinationSha256": "87030179b2516c8c14365d01b6b5043dcadabe196ac0079914045b7c9ba8bb26"
+    },
+    "pure/epoch-key.ts": {
+      "sha256": "012d05cc01234c4919596292d939ba9cbee656f3d282f7132b1c94ba3fd272b3",
+      "destination": "src/epoch-key.ts",
+      "scope": "Opaque EpochKey parser; material accessor kept internal",
+      "destinationSha256": "012d05cc01234c4919596292d939ba9cbee656f3d282f7132b1c94ba3fd272b3"
+    },
+    "pure/cbor.ts": {
+      "sha256": "10a793aace02c1fce9cad249dd3b7d3c8b8ab92d86b85a88917230c881ea8337",
+      "destination": "src/cbor.ts",
+      "scope": "8192-byte canonical array/scalar codec only; snapshot codec and schema helpers omitted",
+      "destinationSha256": "0323f14ebe715cb4d202f329f1d7092f5adab4681f62d0d92030af76d5eab425"
+    },
+    "pure/identifiers.ts": {
+      "sha256": "d1e429c816119b5cb3a8b4edcebce88b3c1396829741a89b894e010115b7ac22",
+      "destination": "src/identifiers.ts",
+      "scope": "keyId and joinKey deterministic hex identifiers",
+      "destinationSha256": "d1e429c816119b5cb3a8b4edcebce88b3c1396829741a89b894e010115b7ac22"
+    },
+    "pure/content-frame.ts": {
+      "sha256": "022ef814d7d82f684d6ce39ae78561c9f3e240033b2faff29c0854f808d4b65f",
+      "destination": "src/content-format.ts",
+      "scope": "v0 context/header/AAD/signature bytes and frame parsing only; no DocumentKey, crypto, authority or signing input",
+      "destinationSha256": "12d900004600030a8db248856be4e78ec1aaf4ae6144fd0e791984f4ac6025bc"
+    },
+    "pure/wire-crypto.ts": {
+      "sha256": "0e233bd4db6b07e929f4001239fe4a9dd0f9cb586fbb0fbd185399af1f35e4ad",
+      "destination": "src/concat.ts",
+      "scope": "concat only",
+      "destinationSha256": "e6004e0a4a0f364c39f6236d1cba5365aaeb3c4cf75ddbdb72ce4a1c95e95f5a"
+    },
+    "pure/errors.ts": {
+      "sha256": "e41d6b50ba06e15b2be0c331e2cd893917ffd894424c1941380d017a0536b96e",
+      "destination": "src/errors.ts",
+      "scope": "ValidationError and ContentError only, trimmed error union",
+      "destinationSha256": "eeffe0045a6712980fc2895c78f383aea7c31e93a6357751825a30b2a00d18b4"
+    },
+    "platform/signature-verifier.ts": {
+      "sha256": "729ecbddbf833cfb9147cc6d17e62225013128e3b7e4e8b1bad449cb64a10ee6",
+      "destination": "src/signature.ts",
+      "scope": "Stateless strict Ed25519 algorithm only; no cache, executor, Layer or authority port",
+      "destinationSha256": "527e1bc3594ad4ad9edd62f6b4a0b139a600d07be16b0578f9b892711c9b4cb4"
+    }
+  },
+  "adaptations": [
+    "Flatten imports and retain only selected definitions; use root Effect catalog 4.0.2.",
+    "Return a fresh HKDF salt array instead of mutable exported bytes; domains and algorithms unchanged.",
+    "Expose stateless signature verification as Result; add caller-context content signature check.",
+    "No signing, private-key export, ledger, Lab, Node host, transport or storage entrypoints.",
+    "Bound encoding traversal and copies by expanded canonical wire size before serialization; preserve valid shared values and reject cycles. No wire or algorithm change."
+  ],
+  "migratedScopeSha256": "8c3e3a9e1ba0cc449d2a12b057f2272d4148e5f554d19b4cdb54fc6aa048ad14",
+  "scopeHashEncoding": "UTF-8, destination paths sorted ascending, one line: <destinationSha256>  <destination>\\n"
+}
