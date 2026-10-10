@@ -6,6 +6,18 @@ Repo checkouts, worktrees, branch allocation, and setup scripts for sessions.
 [../AGENTS.md](../AGENTS.md) and [apps/cli/AGENTS.md](../../../AGENTS.md) apply. Background
 and file responsibilities: [../README.md](../README.md).
 
+## Effect execution boundary
+
+- Native Git commands/helper probes compose `WorktreeGit` / `WorktreeGitLive`.
+  Layers supply official filesystem, host environment and the existing process
+  spawner. Preserve the complete Cause when mapping command failure; pinned v4
+  `mapError`/`catch` can discard release defects alongside a typed failure.
+- `worktreeGitLegacy` is the sole temporary manager execution facade; keep Legacy
+  visible and delete it when the manager becomes native. Infrastructure and
+  unresolved-release failures must escape fallback/forced-removal catches.
+  Setup, GC, manager filesystem/HTTP orchestration remain under migration.
+  Decision: [worktree Git](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-worktree-git-execution.md).
+
 ## Git credential broker
 
 - Local projects and their worktrees use native Git/GitHub auth, even with GitHub

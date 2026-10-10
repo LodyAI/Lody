@@ -118,6 +118,19 @@ facade shares a process-lifetime ManagedRuntime so local queue waiting retains i
 old deadline meaning. Remove it when those entrypoints use the daemon runtime.
 Catalog read caching, worktree setup/GC and downloads are still under migration.
 Local-project Git is native as described above; full worktree ownership is separate.
+## Worktree Git execution
+
+`WorktreeGit` / `WorktreeGitLive` own native command execution, status checking and
+bounded credential-helper protocol. Layers provide official FileSystem, the process
+spawner and a per-command environment Effect. Each command owns its process Scope;
+the service has no background work. `worktreeGitLayer` only composes dependencies.
+The Promise manager uses the one deprecated `worktreeGitLegacy` facade; remove it
+when the manager composes this service. That facade uses the shared complete-Cause
+projection. Transport, cancellation and unresolved releases escape manager fallback
+catches. Preserve mixed Fail/Die Cause when mapping commands on pinned v4; ordinary
+mapError can select only the Fail reason. This is not native manager/setup/GC or
+daemon runtime completion. Decision:
+[worktree Git](../notes/implemented/architecture/2026-10-10-effect-worktree-git-execution.md).
 
 ## Temporary Promise facades
 
