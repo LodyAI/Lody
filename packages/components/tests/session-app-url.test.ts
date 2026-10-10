@@ -124,6 +124,29 @@ describe('parseAppSessionUrl', () => {
     });
   });
 
+  it.each(['session:ses_child', 'session%3Ases_child'])(
+    'targets the child selected by tab=%s while preserving the parent URL',
+    (tab) => {
+      const url = `https://lody.ai/acme/sessions/ses_parent?tab=${tab}#top`;
+      expect(parseAppSessionUrl(url, { allowedOrigins })).toEqual({
+        url,
+        workspaceSlug: 'acme',
+        sessionId: 'ses_child',
+      });
+    }
+  );
+
+  it.each(['empty', 'draft:local', 'files', 'session:'])(
+    'does not use the non-session tab %s as a conversation ID',
+    (tab) => {
+      expect(
+        parseAppSessionUrl(`https://lody.ai/acme/sessions/ses_parent?tab=${tab}`, {
+          allowedOrigins,
+        })?.sessionId
+      ).toBe('ses_parent');
+    }
+  );
+
   it('rejects a foreign host even when the path looks like a session', () => {
     expect(
       parseAppSessionUrl('https://evil.example/acme/sessions/ses_abc123', { allowedOrigins })

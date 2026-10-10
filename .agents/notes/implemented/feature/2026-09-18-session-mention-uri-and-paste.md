@@ -48,6 +48,25 @@ still paste as ordinary content.
   so selecting an `@slug` session mention puts `[@Title](session://…)` on the
   clipboard rather than the chip text. Pasted-text expansion shares that helper.
 
+## HTTPS child-target correction (2026-10-10)
+
+HTTPS paste recognition previously returned only the path session ID, so a URL
+with `?tab=session%3Ases_child` inserted a mention of the parent conversation.
+The parser now decodes the query through `URLSearchParams` and uses the existing
+session-tab parser to select the child ID, while preserving the original URL.
+Both the landing and session composers consume this target. Non-session tabs
+retain the path target. This repairs the exact-conversation intent of the
+[deep-link decision](../architecture/2026-09-29-lody-deep-links.md); it does not
+change the current canonical mention format established there.
+
+The owning parser suite passed all 19 cases with an isolated Vitest configuration
+using installed dependencies from another local checkout and a draft-ID predicate
+stub. It covers encoded and unencoded child selectors, URL preservation, and
+non-session tabs. The regular configuration could not start because this checkout
+has no installed dependencies and the borrowed dependencies lack the StyleX plugin.
+Browser clipboard behavior and full type checks remain unverified. Documentation
+checking reports existing broken links to absent ACP submodules.
+
 ## Verification and limits
 
 - [`session-app-url.test.ts`](../../../../packages/components/tests/session-app-url.test.ts)
