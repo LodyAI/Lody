@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1384
 
 [English](2026-10-10-sent-message-context.md)
 
