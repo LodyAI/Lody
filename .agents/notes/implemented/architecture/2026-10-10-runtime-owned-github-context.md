@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1385](https://github.com/LodyAI/Lody/pull/1385)
 
 [中文](2026-10-10-runtime-owned-github-context.zh.md)
 
@@ -83,9 +84,15 @@ asserts blocked retirement. Turn execution, environment, termination, native Git
 helper and gh/runtime suites also pass. Tests use synthetic identities and existing
 controlled signals/virtual clocks; no real credentials or production network were
 used in the new regression cases. CLI type checking, repository documentation checks, public/platform boundaries
-and the process-boundary guard pass.
+and the process-boundary guard pass. Before PR creation, `pnpm format`, workspace
+type checks and type-aware lint passed. The initial `pnpm check` test phase stopped
+on a Roost signed-prefix timeout and a native Git fixture inheriting the authoring
+session's Git wrapper. Both failing suites passed on isolated rerun; the Git fixture
+used an environment without inherited Git/SSH/Lody Git variables or the wrapper
+PATH entry. The complete test phase was not rerun. Remaining i18n and import/boundary
+checks passed separately.
 
 Rejected approaches: a local-only guard leaves stale authority; revoking by Session
 ID can revoke a replacement; swallowing missing policy weakens managed isolation.
 No application restart, live daemon patch, package release or deployed recovery
-verification was performed. There is no PR yet.
+verification was performed.

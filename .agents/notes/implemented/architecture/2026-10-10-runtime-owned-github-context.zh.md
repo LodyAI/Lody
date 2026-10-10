@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1385](https://github.com/LodyAI/Lody/pull/1385)
 
 [English](2026-10-10-runtime-owned-github-context.md)
 
@@ -66,8 +67,12 @@ broker 测试用真实 Scope 获取配合请求 handler 验证：释放 A 后其
 终止、owner 转移撤销，以及旧实例退出不会移除或结束替换实例。原有预热测试覆盖过期、取消、替换和迟到资源，清理失败现在
 断言保持阻塞。轮次执行、环境、终止、原生 Git helper 与 gh/runtime 测试也通过。
 新增回归使用合成身份及可控信号/虚拟时钟，不使用真实凭据或生产网络。CLI 类型检查、
-仓库文档检查、public/platform 边界检查及进程边界 guard 均通过。
+仓库文档检查、public/platform 边界检查及进程边界 guard 均通过。创建 PR 前，
+`pnpm format`、全工作区类型检查和类型感知 lint 通过。首次 `pnpm check` 的测试阶段
+因 Roost signed-prefix 超时及原生 Git fixture 继承当前会话 Git 包装器而中止。
+两个失败套件单独重跑通过；Git fixture 使用移除继承 Git/SSH/Lody Git 环境变量及
+包装器 PATH 的环境。未重新完整跑完测试阶段，其余 i18n、导入及边界检查单独通过。
 
 未采用的方案：仅增加本地 guard 会遗留授权；按 Session ID 撤销会误伤新实例；
 吞掉缺失策略会削弱托管隔离。未重启应用、修改运行中的 daemon、发布版本或验证部署
-恢复效果，尚无 PR。
+恢复效果。
