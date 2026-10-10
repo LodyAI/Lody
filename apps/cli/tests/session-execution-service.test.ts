@@ -207,7 +207,7 @@ const createBaseDeps = (
     abandonPendingSessionCreate: vi.fn(() => false),
     setSessionError: vi.fn(),
     terminateSession: vi.fn(),
-    refreshGhTokenForSession: vi.fn(async () => {}),
+    validateSessionCredentials: vi.fn(async () => {}),
   } as unknown as SessionManager;
   const workspaceDocument = {
     repo: {
@@ -689,7 +689,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -907,7 +907,7 @@ describe('SessionExecutionService', () => {
           createSession: vi.fn(),
           setSessionError: vi.fn(),
           terminateSession: vi.fn(),
-          refreshGhTokenForSession: vi.fn(async () => {}),
+          validateSessionCredentials: vi.fn(async () => {}),
         } as unknown as SessionManager,
         workspaceDocument: {
           repo: {
@@ -1474,7 +1474,7 @@ describe('SessionExecutionService', () => {
           createSession: vi.fn(),
           setSessionError: vi.fn(),
           terminateSession: vi.fn(),
-          refreshGhTokenForSession: vi.fn(async () => {}),
+          validateSessionCredentials: vi.fn(async () => {}),
         } as unknown as SessionManager,
         workspaceDocument: {
           repo: { upsertDocMeta, getDocMeta: vi.fn(async () => ({ meta })) },
@@ -2268,7 +2268,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -2350,7 +2350,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession,
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -2464,7 +2464,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -2816,7 +2816,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -3070,7 +3070,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -3188,7 +3188,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -3514,7 +3514,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -3703,7 +3703,7 @@ describe('SessionExecutionService', () => {
         }),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager;
       const getDocMeta = vi.fn(async (roomId: string) => {
         if (roomId !== getMachineRoomId(machineId)) return undefined;
@@ -3878,7 +3878,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -3994,7 +3994,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -4116,7 +4116,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(async () => createdSession as unknown),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -4255,7 +4255,7 @@ describe('SessionExecutionService', () => {
           terminateSession: async () => {
             live = false;
           },
-          refreshGhTokenForSession: async () => {},
+          validateSessionCredentials: async () => {},
         } as unknown as SessionManager,
         workspaceDocument: {
           repo,
@@ -4408,7 +4408,7 @@ describe('SessionExecutionService', () => {
       }),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
 
     const deps = createBaseDeps({
@@ -4520,7 +4520,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(async () => restoredSession as unknown),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -4660,7 +4660,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -4779,7 +4779,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -4906,7 +4906,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -5013,7 +5013,7 @@ describe('SessionExecutionService', () => {
       }),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -5105,7 +5105,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(async () => createdSession as unknown),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const upsertDocMeta = vi.fn(async () => {});
     const deps = createBaseDeps({
@@ -5249,7 +5249,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -5357,7 +5357,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -5427,7 +5427,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -5529,7 +5529,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -5597,7 +5597,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(async () => {}),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -5652,7 +5652,7 @@ describe('SessionExecutionService', () => {
         createSession,
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: {
@@ -5751,7 +5751,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(async () => createdSession as unknown),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -5837,7 +5837,7 @@ describe('SessionExecutionService', () => {
       }),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -5916,7 +5916,7 @@ describe('SessionExecutionService', () => {
       }),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -5983,7 +5983,7 @@ describe('SessionExecutionService', () => {
       }),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -6085,7 +6085,7 @@ describe('SessionExecutionService', () => {
       }),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -6202,7 +6202,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -6292,7 +6292,7 @@ describe('SessionExecutionService', () => {
       }),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -6458,7 +6458,7 @@ describe('SessionExecutionService', () => {
       }),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -6572,7 +6572,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager;
       const deps = createBaseDeps({
         sessionManager,
@@ -6653,7 +6653,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
 
     const deps = createBaseDeps({
@@ -6767,7 +6767,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
 
     const deps = createBaseDeps({
@@ -6849,7 +6849,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
 
     const deps = createBaseDeps({
@@ -6961,7 +6961,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -7156,7 +7156,7 @@ describe('SessionExecutionService', () => {
         }),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager;
       const deps = createBaseDeps({
         sessionManager,
@@ -7326,7 +7326,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     let activeTurnId: string | undefined;
     let service: SessionExecutionService;
@@ -7551,7 +7551,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -7917,7 +7917,7 @@ describe('SessionExecutionService', () => {
         createSession: vi.fn(),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager;
       const deps = createBaseDeps({
         sessionManager,
@@ -8114,7 +8114,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -8219,7 +8219,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(async () => createdSession as unknown),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
       meta = { ...meta, ...patch };
@@ -8333,7 +8333,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(async () => createdSession as unknown),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -8388,7 +8388,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -8450,7 +8450,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -8504,7 +8504,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -8570,7 +8570,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -8625,7 +8625,7 @@ describe('SessionExecutionService', () => {
       createSession: vi.fn(),
       setSessionError: vi.fn(),
       terminateSession: vi.fn(),
-      refreshGhTokenForSession: vi.fn(async () => {}),
+      validateSessionCredentials: vi.fn(async () => {}),
     } as unknown as SessionManager;
     const deps = createBaseDeps({
       sessionManager,
@@ -9748,7 +9748,7 @@ describe('SessionExecutionService goal control', () => {
       sessionManager: {
         getSession: () => session,
         getPendingSession: () => null,
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument: {
         repo: { upsertDocMeta: async () => {}, getDocMeta: async () => undefined },
@@ -10122,7 +10122,7 @@ describe('SessionExecutionService initialization deadline', () => {
         abandonPendingSessionCreate: vi.fn((id: string) => pendingCreates.delete(id)),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
-        refreshGhTokenForSession: vi.fn(async () => {}),
+        validateSessionCredentials: vi.fn(async () => {}),
       } as unknown as SessionManager,
       workspaceDocument,
       startSessionActivePresence: (

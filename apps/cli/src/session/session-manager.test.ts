@@ -1,3 +1,6 @@
+import { acquireSessionCredentialsLegacy } from './session-credentials';
+import { GitCredentialBroker } from '../lib/git-credential-broker';
+import type { CloudGithubTokenManager } from '@lody/platform';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1218,6 +1221,24 @@ describe('SessionManager durable create ownership', () => {
     expect(managerTerminated).toEqual([]);
   });
 
+  it('does not forward an old runtime exit as the replacement runtime death', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'runtime-generation-events' as SessionId;
+    const config = createSessionConfig({ sessionId });
+    const exits: string[] = [];
+    manager.on('exit', () => exits.push('exit'));
+    manager.on('terminated', () => exits.push('terminated'));
+    const previous = (await createSessionInner(manager, config)) as Session;
+    const replacement = await createSessionInner(manager, config);
+    previous.emit('exit', { sessionId, exitCode: 0 });
+    await previous.terminate(true);
+    expect(manager.getSession(sessionId)).toBe(replacement);
+    expect(exits).toEqual([]);
+    await replacement.terminate(true);
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(exits).toEqual(['terminated']);
+  });
+
   it('reports no entry to abandon when the create already settled', async () => {
     const manager = buildOwnershipManager();
     const sessionId = 'settled-create-session' as SessionId;
@@ -1271,7 +1292,20 @@ describe('SessionManager preparation compatibility', () => {
     );
     const sessionId = 'stale-prepared-git-identity' as SessionId;
     const config = createSessionConfig({ sessionId });
-    const preparedSession = new Session(config, logger, process.cwd(), createNoopSessionSandbox());
+    const credentials = acquireSessionCredentialsLegacy(
+      new GitCredentialBroker({
+        tokenManager: {} as CloudGithubTokenManager,
+        logger,
+      }),
+      { sessionId, requesterUserId: 'user-1', machineId: 'machine-1' }
+    );
+    const preparedSession = new Session(
+      config,
+      logger,
+      process.cwd(),
+      createNoopSessionSandbox(),
+      credentials
+    );
     const updateIdentity = vi.spyOn(preparedSession, 'updateGitIdentity');
     const dispose = vi.fn(async () => await preparedSession.terminate(true));
     const prepared = {
@@ -1312,6 +1346,10 @@ describe('SessionManager preparation compatibility', () => {
       config.requesterUserId,
       { preferMachineIdentity: true, personalIdentityEnabled: false }
     );
+    expect(preparedSession.getGitHubCredentials()).toBe(credentials);
+    expect(credentials.mode === 'managed' && credentials.lease.active).toBe(true);
+    await preparedSession.terminate(true);
+    expect(credentials.mode === 'managed' && credentials.lease.active).toBe(false);
   });
 
   it('rejects a prepared session with different initial config option values', async () => {
