@@ -125,6 +125,20 @@ filesystem and release failures propagate. This does not complete worktree
 setup/GC or the daemon's root runtime. Decision and limits:
 [local-project Git](../notes/implemented/architecture/2026-10-10-effect-local-project-git.md).
 
+## Worktree Git execution
+
+`WorktreeGit` / `WorktreeGitLive` own native command execution, status checking and
+bounded credential-helper protocol. Layers provide official FileSystem, the process
+spawner and a per-command environment Effect. Each command owns its process Scope;
+the service has no background work. `worktreeGitLayer` only composes dependencies.
+The Promise manager uses the one deprecated `worktreeGitLegacy` facade; remove it
+when the manager composes this service. That facade uses the shared complete-Cause
+projection. Transport, cancellation and unresolved releases escape manager fallback
+catches. Preserve mixed Fail/Die Cause when mapping commands on pinned v4; ordinary
+mapError can select only the Fail reason. This is not native manager/setup/GC or
+daemon runtime completion. Decision:
+[worktree Git](../notes/implemented/architecture/2026-10-10-effect-worktree-git-execution.md).
+
 ## Temporary Promise facades
 
 A migrated layer is consumed by callers that are still Promise-based. Such a

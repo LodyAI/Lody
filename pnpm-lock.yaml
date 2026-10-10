@@ -249,6 +249,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@effect/platform-node-shared':
+        specifier: 'catalog:'
+        version: 4.0.2(effect@4.0.2)
       '@loro-dev/roost-node':
         specifier: 0.1.1
         version: 0.1.1
