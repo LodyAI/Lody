@@ -14,9 +14,9 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   registration and mounting `<Mention>`; every source with its own `enabled`
   rule (sessions: having any) belongs there too. Placeholder hints advertise `$`
   only under the conditions that enable Skill mentions.
-- The main desktop chat composer pins menus above its frame; inline and dialog
-  menus follow the caret and flip to fit. All cap/scroll within available room
-  and `var(--mention-input-width)`. The mobile dock stays above the whole frame.
+- Main desktop menus follow the caret and prefer above while a heading and row
+  fit; inline/dialog menus prefer below and flip to fit. All cap/scroll within
+  available room and `var(--mention-input-width)`. The mobile dock stays above the frame.
 - `insertText` must keep its type's prompt form (`@path`, `#123`, `$token`,
   `/cmd`): reaching a type through `@` must not change what the agent receives.
   Directory candidates carry BOTH `navigateText` (`@dir/`, descend) and
@@ -43,6 +43,8 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
 true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   An unasked source reports `loading`, never `ready` with zero rows.
 
+- File fetch accounting follows [its contract](../../../../../specs/mention-file-fetch.md).
+
 ## Hydration and drafts
 
 - Hydrators only add ranges for known tokens/items, preserve existing external
@@ -64,7 +66,7 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
 
 - `useMentionPromptExpansion` owns before-send rewrites (`expand` /
   `getRewrites`). Composer copy reuses them via
-  `getExpandedClipboardTextForSelection` (session → `[@Title](session://…)`,
+  `getExpandedClipboardTextForSelection` (session → `[@Title](lody://session/…)`,
   not `@slug`). Rewritten: `REWRITTEN_SPAN_KINDS`; else verbatim.
 - The transcript chip comes from `MessageTextSpan.mark`, FROZEN at send time,
   never resolved from the catalog at render. A span field must be declared in
@@ -100,10 +102,10 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   insertion, slug resolution, or child-session addressing.
 - A session mention commits as plain `@<title-slug>` (no `session:` marker); the
   range carries `sessionId`, and expansion rewrites to
-  `[@Title](session://<id>)`. A lone app-origin session URL paste becomes that
-  mention unless Cmd/Ctrl+Shift+V. No range → send verbatim; never resolve a
-  slug; hydration skips tokens the file source knows. Evidence:
-  [session:// URI](../../../../../.agents/notes/implemented/feature/2026-09-18-session-mention-uri-and-paste.md).
+  `[@Title](lody://session/<id>?workspace=<id>)`. Paste converts same-workspace
+  resource links or app-origin URLs unless Cmd/Ctrl+Shift+V. No range → send
+  verbatim; never resolve a slug; hydration skips known file tokens.
+  Contract: [deep links](../../../../../specs/deep-links.md).
 - Slugs resolve through the live list, then a synchronous `localStorage` slug →
   id map registered in `lib/clear-local-cache.ts`; skip unchanged writes.
 - A session dragged from the sidebar or a session tab onto a chat surface

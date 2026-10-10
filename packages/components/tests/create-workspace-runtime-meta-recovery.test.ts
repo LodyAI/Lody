@@ -860,6 +860,8 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     // timer that later wakes a torn-down runtime.
     expect(vi.getTimerCount()).toBeGreaterThan(0);
     await runtime.dispose();
+    // Drain v4 completion notifications before counting remaining retry timers.
+    await vi.advanceTimersByTimeAsync(0);
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(mocks.metaCheckpointDelete).toHaveBeenCalledTimes(1);

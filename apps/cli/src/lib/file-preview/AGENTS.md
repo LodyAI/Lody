@@ -20,6 +20,14 @@ save path's text reads.
 
 ## Invariants
 
+- Cold ordinary-chat previews resolve the existing default workspace from durable
+  Session metadata, using the parent owner for child tabs and `getDefaultSessionWorkdir`.
+  Do not create a directory, start an agent, or replace an unavailable project with
+  a chat workspace just to preview a file.
+- Local preview validates durable Session/machine/child ownership independently of
+  workspace availability. An unavailable workspace permits absolute and home-rooted
+  local reads only, marked external/readonly; never guess a relative base. Remote
+  preview and Code Collab still require their existing workspace resolution.
 - `file-preview-service.ts` never throws for a domain failure: every rejection is a
   typed `status: 'error'` response.
 - `file-preview-path-policy.ts` is the security boundary. Remote `file/preview`

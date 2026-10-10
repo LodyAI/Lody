@@ -50,9 +50,9 @@ export async function sendScheduleCommand(
         command,
         requesterSessionId: options.requesterSessionId,
       })
-      .pipe(Effect.either)
+      .pipe(Effect.result)
   );
-  if (response._tag === 'Left') throw classifyLocalDaemonIpcError(response.left);
-  if (!response.right.ok) throw new Error(response.right.error);
-  return response.right.result;
+  if (response._tag === 'Failure') throw classifyLocalDaemonIpcError(response.failure);
+  if (!response.success.ok) throw new Error(response.success.error);
+  return response.success.result;
 }

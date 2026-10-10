@@ -52,7 +52,7 @@ await test('extractFaqFromMdx ignores pages without an FAQ section', () => {
 });
 
 await test('session-handoff English FAQ matches the page and emits FAQPage JSON-LD', () => {
-  const fromMdx = extractFaqFromMdx(readDoc('content/docs/en/(features)/session-handoff.mdx'));
+  const fromMdx = extractFaqFromMdx(readDoc('content/docs/en/(guides)/session-handoff.mdx'));
   const items = docsFaqByPath['/docs/session-handoff'] ?? [];
   assert.equal(items.length, 5);
   assert.deepEqual(items, fromMdx);
@@ -82,7 +82,7 @@ await test('session-handoff English FAQ matches the page and emits FAQPage JSON-
 });
 
 await test('session-handoff Chinese FAQ matches the page', () => {
-  const fromMdx = extractFaqFromMdx(readDoc('content/docs/zh/(features)/session-handoff.mdx'));
+  const fromMdx = extractFaqFromMdx(readDoc('content/docs/zh/(guides)/session-handoff.mdx'));
   const items = docsFaqByPath['/zh/docs/session-handoff'] ?? [];
   assert.equal(items.length, 5);
   assert.deepEqual(items, fromMdx);

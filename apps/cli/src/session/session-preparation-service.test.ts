@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
 import {
@@ -5,9 +8,9 @@ import {
   type SessionPreparationResource,
 } from './session-preparation-service';
 
-function deferred(): { promise: Promise<void>; resolve(): void; reject(error: unknown): void } {
-  let resolvePromise!: () => void;
-  let rejectPromise!: (error: unknown) => void;
+function deferred() {
+  let resolvePromise: () => void = () => {};
+  let rejectPromise: (error: unknown) => void = () => {};
   const promise = new Promise<void>((resolve, reject) => {
     resolvePromise = resolve;
     rejectPromise = reject;
@@ -18,377 +21,399 @@ function deferred(): { promise: Promise<void>; resolve(): void; reject(error: un
 function createResource() {
   const initialized = deferred();
   const sessionReady = deferred();
-  const dispose = vi.fn(async () => undefined);
-  return {
-    resource: {
-      initialized: initialized.promise,
-      sessionReady: sessionReady.promise,
-      dispose,
-    } satisfies SessionPreparationResource,
-    initialized,
-    sessionReady,
-    dispose,
+  const started = deferred();
+  const disposed = deferred();
+  const state = { disposed: false };
+  const resource: SessionPreparationResource = {
+    initialized: initialized.promise,
+    sessionReady: sessionReady.promise,
+    start: () => started.resolve(),
+    dispose: async () => {
+      state.disposed = true;
+      disposed.resolve();
+    },
   };
+  return { resource, initialized, sessionReady, started, disposed, state };
 }
+
+const sessionId = 'session-preparation' as SessionId;
+const identity = { sessionId, requesterUserId: 'user-1', claimKey: 'key' };
+const lease = { sessionId, requesterUserId: 'user-1', preparationId: 'prepare' };
 
 describe('SessionPreparationService', () => {
   const services: SessionPreparationService<SessionPreparationResource>[] = [];
+  const gates: ReturnType<typeof deferred>[] = [];
+  const directories: string[] = [];
 
   afterEach(async () => {
+    for (const pendingGate of gates) pendingGate.resolve();
+    await Promise.all(services.map((service) => service.disposeAll()));
+    await Promise.all(directories.map((path) => rm(path, { recursive: true, force: true })));
+    services.length = gates.length = directories.length = 0;
     vi.useRealTimers();
-    await Promise.all(services.map(async (service) => await service.disposeAll()));
-    services.length = 0;
   });
 
-  function createService(options?: { hardTtlMs?: number; maxConcurrent?: number }) {
+  function gate() {
+    const value = deferred();
+    gates.push(value);
+    return value;
+  }
+
+  function createService(maxConcurrent = 1) {
     const service = new SessionPreparationService<SessionPreparationResource>(
-      { debug: vi.fn() },
-      {
-        hardTtlMs: options?.hardTtlMs ?? 120_000,
-        maxConcurrent: options?.maxConcurrent ?? 1,
-      }
+      { debug: () => {} },
+      { hardTtlMs: 120_000, maxConcurrent }
     );
     services.push(service);
     return service;
   }
 
-  it('tracks initialize and session-ready milestones without blocking start acknowledgement', async () => {
+  function start(
+    service: SessionPreparationService<SessionPreparationResource>,
+    prepared = createResource()
+  ) {
+    service.start({ ...lease, requestKey: 'key', create: async () => prepared.resource });
+    return prepared;
+  }
+
+  it('publishes before side effects, tracks readiness, and transfers ownership exactly once', async () => {
     const service = createService();
     const prepared = createResource();
-    const sessionId = 'session-1' as SessionId;
+    let visibleAtStart: SessionPreparationResource | null = null;
+    prepared.resource.start = () => {
+      visibleAtStart = service.peek(identity);
+      prepared.started.resolve();
+    };
+    start(service, prepared);
+    expect(service.getState(sessionId)).toBe('preparing');
+    await prepared.started.promise;
+    expect(visibleAtStart).toBe(prepared.resource);
+    expect(service.peek({ ...identity, requesterUserId: 'other' })).toBeNull();
+    expect(service.peek({ ...identity, claimKey: 'wrong' })).toBeNull();
+    prepared.initialized.resolve();
+    await prepared.initialized.promise;
+    expect(service.getState(sessionId)).toBe('initialized');
+    prepared.sessionReady.resolve();
+    await prepared.sessionReady.promise;
+    expect(service.getState(sessionId)).toBe('session-ready');
+    expect(service.claim({ ...identity, isCompatible: () => true })).toEqual({
+      status: 'claimed',
+      resource: prepared.resource,
+    });
+    expect(service.claim({ ...identity, isCompatible: () => true })).toEqual({
+      status: 'miss',
+      cleanup: null,
+    });
+    expect(service.cancel(lease)).toBe('not-found');
+    await service.disposeAll();
+    expect(prepared.state.disposed).toBe(false);
+  });
 
+  it.each([
+    'cancel',
+    'ttl',
+    'failure',
+    'start-error',
+    'incompatible',
+    'compatibility-error',
+  ] as const)(
+    'keeps %s cleanup visible until the old workspace can no longer delete the cold workspace',
+    async (trigger) => {
+      vi.useFakeTimers();
+      const service = createService();
+      const root = await mkdtemp(join(tmpdir(), 'lody-preparation-'));
+      directories.push(root);
+      const workdir = join(root, 'worktree');
+      await mkdir(workdir);
+      const releaseCleanup = gate();
+      const cleanupStarted = deferred();
+      const prepared = createResource();
+      prepared.resource.dispose = async () => {
+        cleanupStarted.resolve();
+        await releaseCleanup.promise;
+        await rm(workdir, { recursive: true, force: true });
+      };
+      if (trigger === 'start-error') {
+        prepared.resource.start = () => {
+          prepared.started.resolve();
+          throw new Error('start failed');
+        };
+      }
+      start(service, prepared);
+      await prepared.started.promise;
+      if (trigger === 'cancel') service.cancel(lease);
+      if (trigger === 'ttl') await vi.advanceTimersByTimeAsync(120_000);
+      if (trigger === 'failure') prepared.sessionReady.reject(new Error('startup failed'));
+      if (trigger === 'incompatible' || trigger === 'compatibility-error') {
+        service.claim({
+          ...identity,
+          isCompatible: () => {
+            if (trigger === 'compatibility-error') throw new Error('workspace unavailable');
+            return false;
+          },
+        });
+      }
+      await cleanupStarted.promise;
+      expect(service.getState(sessionId)).toBeNull();
+      const result = service.claim({ ...identity, isCompatible: () => true });
+      expect(result.status).toBe('miss');
+      if (result.status !== 'miss') throw new Error('retired preparation was claimed');
+      expect(result.cleanup).not.toBeNull();
+      const discarded = service.discard(sessionId);
+      expect(discarded).not.toBeNull();
+      let coldStarted = false;
+      const cold = (async () => {
+        await result.cleanup;
+        coldStarted = true;
+        await mkdir(workdir);
+        await writeFile(join(workdir, 'owned'), 'durable session');
+      })();
+      await Promise.resolve();
+      expect(coldStarted).toBe(false);
+      releaseCleanup.resolve();
+      await Promise.all([cold, discarded, service.disposeAll()]);
+      expect(await readFile(join(workdir, 'owned'), 'utf8')).toBe('durable session');
+      expect(service.discard(sessionId)).toBeNull();
+    }
+  );
+
+  it.each(['claim', 'cancel', 'shutdown'] as const)(
+    '%s joins cleanup even when resource creation has not returned',
+    async (operation) => {
+      const service = createService();
+      const createStarted = deferred();
+      const releaseCreate = gate();
+      const releaseCleanup = gate();
+      const cleanupStarted = deferred();
+      const prepared = createResource();
+      prepared.resource.dispose = async () => {
+        cleanupStarted.resolve();
+        await releaseCleanup.promise;
+        prepared.state.disposed = true;
+        prepared.initialized.reject(new Error('disposed before start'));
+        prepared.sessionReady.reject(new Error('disposed before start'));
+      };
+      service.start({
+        ...lease,
+        requestKey: 'key',
+        create: async () => {
+          createStarted.resolve();
+          await releaseCreate.promise;
+          return prepared.resource;
+        },
+      });
+      await createStarted.promise;
+      let cleanup: Promise<void> | null;
+      if (operation === 'claim') {
+        const result = service.claim({ ...identity, isCompatible: () => true });
+        if (result.status !== 'miss') throw new Error('unpublished preparation was claimed');
+        cleanup = result.cleanup;
+      } else {
+        service.cancel(lease);
+        cleanup = operation === 'shutdown' ? service.disposeAll() : service.discard(sessionId);
+      }
+      expect(cleanup).not.toBeNull();
+      let completed = false;
+      const completion = Promise.resolve(cleanup).then(() => {
+        completed = true;
+      });
+      await Promise.resolve();
+      expect(completed).toBe(false);
+      releaseCreate.resolve();
+      await cleanupStarted.promise;
+      expect(completed).toBe(false);
+      releaseCleanup.resolve();
+      await completion;
+      expect(prepared.state.disposed).toBe(true);
+      expect(service.peek(identity)).toBeNull();
+    }
+  );
+
+  it.each(['replacement', 'cancel-then-start'] as const)(
+    'serializes %s behind retirement, including a second cancellation',
+    async (operation) => {
+      const service = createService();
+      const first = createResource();
+      const releaseCleanup = gate();
+      first.resource.dispose = async () => {
+        await releaseCleanup.promise;
+        first.state.disposed = true;
+      };
+      start(service, first);
+      await first.started.promise;
+      if (operation === 'cancel-then-start') service.cancel(lease);
+      let secondCreated = false;
+      service.start({
+        ...lease,
+        preparationId: 'second',
+        requestKey: 'changed',
+        create: async () => {
+          secondCreated = true;
+          return createResource().resource;
+        },
+      });
+      expect(service.cancel(lease)).toBe('not-found');
+      service.cancel({ ...lease, preparationId: 'second' });
+      const third = createResource();
+      let disposedBeforeThird = false;
+      service.start({
+        ...lease,
+        preparationId: 'third',
+        requestKey: 'third',
+        create: async () => {
+          disposedBeforeThird = first.state.disposed;
+          return third.resource;
+        },
+      });
+      expect(service.peek({ ...identity, claimKey: 'third' })).toBeNull();
+      releaseCleanup.resolve();
+      await third.started.promise;
+      expect(secondCreated).toBe(false);
+      expect(disposedBeforeThird).toBe(true);
+      expect(service.claim({ ...identity, claimKey: 'third', isCompatible: () => true })).toEqual({
+        status: 'claimed',
+        resource: third.resource,
+      });
+    }
+  );
+
+  it('keeps another session independent of retirement and enforces lease ownership', async () => {
+    const service = createService(2);
+    const first = start(service);
+    await first.started.promise;
+    expect(service.start({ ...lease, requestKey: 'key', create: async () => first.resource })).toBe(
+      'duplicate'
+    );
+    expect(service.cancel({ ...lease, requesterUserId: 'other' })).toBe('not-owned');
     expect(
       service.start({
-        preparationId: 'prepare-1',
-        sessionId,
-        requesterUserId: 'user-1',
-        requestKey: 'key-1',
-        create: async () => prepared.resource,
+        ...lease,
+        requesterUserId: 'other',
+        requestKey: 'key',
+        create: async () => first.resource,
       })
-    ).toBe('accepted');
-    expect(service.getState(sessionId)).toBe('preparing');
-
-    prepared.initialized.resolve();
-    await vi.waitFor(() => expect(service.getState(sessionId)).toBe('initialized'));
-
-    prepared.sessionReady.resolve();
-    await vi.waitFor(() => expect(service.getState(sessionId)).toBe('session-ready'));
+    ).toBe('busy');
+    const releaseCleanup = gate();
+    first.resource.dispose = async () => {
+      await releaseCleanup.promise;
+      first.state.disposed = true;
+    };
+    service.cancel(lease);
+    const second = createResource();
+    const otherIdentity = {
+      ...identity,
+      sessionId: 'other-session' as SessionId,
+      requesterUserId: 'other',
+    };
+    service.start({
+      ...lease,
+      ...otherIdentity,
+      requestKey: 'key',
+      create: async () => second.resource,
+    });
+    await second.started.promise;
+    expect(first.state.disposed).toBe(false);
+    expect(service.claim({ ...otherIdentity, isCompatible: () => true }).status).toBe('claimed');
   });
 
-  it('publishes a resource before starting its side effects', async () => {
+  it('replaces the same requester across sessions only after disposing its old lease', async () => {
     const service = createService();
-    const prepared = createResource();
-    const sessionId = 'session-published-before-start' as SessionId;
-    let visibleAtStart: SessionPreparationResource | null = null;
-    prepared.resource.start = vi.fn(() => {
-      visibleAtStart = service.peek({
-        sessionId,
-        requesterUserId: 'user-1',
-        claimKey: 'key-published-before-start',
-      });
-    });
-
-    service.start({
-      preparationId: 'prepare-published-before-start',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'key-published-before-start',
-      create: async () => prepared.resource,
-    });
-
-    await vi.waitFor(() => expect(prepared.resource.start).toHaveBeenCalledTimes(1));
-    expect(visibleAtStart).toBe(prepared.resource);
-  });
-
-  it('atomically transfers ownership on a compatible claim', async () => {
-    const service = createService();
-    const prepared = createResource();
-    const sessionId = 'session-2' as SessionId;
-    service.start({
-      preparationId: 'prepare-2',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'key-2',
-      create: async () => prepared.resource,
-    });
-    prepared.initialized.resolve();
-    await vi.waitFor(() => expect(service.getState(sessionId)).toBe('initialized'));
-
+    const first = start(service);
+    await first.started.promise;
+    const releaseCleanup = gate();
+    first.resource.dispose = async () => {
+      await releaseCleanup.promise;
+      first.state.disposed = true;
+    };
+    const second = createResource();
+    const otherSession = 'replacement-session' as SessionId;
+    let oldDisposedAtCreate = false;
     expect(
-      service.claim({
-        sessionId,
-        requesterUserId: 'user-1',
-        claimKey: 'key-2',
-        isCompatible: () => true,
+      service.start({
+        ...lease,
+        sessionId: otherSession,
+        requestKey: 'key',
+        create: async () => {
+          oldDisposedAtCreate = first.state.disposed;
+          return second.resource;
+        },
       })
-    ).toEqual({ status: 'claimed', resource: prepared.resource });
+    ).toBe('replaced');
     expect(
-      service.claim({
-        sessionId,
-        requesterUserId: 'user-1',
-        claimKey: 'key-2',
-        isCompatible: () => true,
+      service.start({
+        ...lease,
+        sessionId: 'busy-session' as SessionId,
+        requesterUserId: 'other',
+        requestKey: 'key',
+        create: async () => createResource().resource,
       })
-    ).toEqual({ status: 'miss', cleanup: null });
+    ).toBe('busy');
+    releaseCleanup.resolve();
+    await second.started.promise;
+    expect(oldDisposedAtCreate).toBe(true);
     expect(service.getState(sessionId)).toBeNull();
     expect(
-      service.cancel({
-        preparationId: 'prepare-2',
-        sessionId,
-        requesterUserId: 'user-1',
-      })
-    ).toBe('not-found');
-    expect(prepared.dispose).not.toHaveBeenCalled();
+      service.claim({ ...identity, sessionId: otherSession, isCompatible: () => true }).status
+    ).toBe('claimed');
   });
 
-  it('peeks at a published resource without transferring ownership', async () => {
+  it('retains routing claim identity when the preparation configuration changes', async () => {
     const service = createService();
-    const prepared = createResource();
-    const sessionId = 'session-peek' as SessionId;
+    const first = createResource();
     service.start({
-      preparationId: 'prepare-peek',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'key-peek',
-      create: async () => prepared.resource,
+      ...lease,
+      requestKey: 'model-a',
+      claimKey: 'routing',
+      create: async () => first.resource,
     });
-    await vi.waitFor(() => expect(service.getState(sessionId)).toBe('preparing'));
-    await vi.waitFor(() =>
-      expect(service.peek({ sessionId, requesterUserId: 'user-1', claimKey: 'key-peek' })).toBe(
-        prepared.resource
-      )
-    );
-
-    expect(service.peek({ sessionId, requesterUserId: 'user-2', claimKey: 'key-peek' })).toBeNull();
+    await first.started.promise;
+    const second = createResource();
     expect(
-      service.peek({ sessionId, requesterUserId: 'user-1', claimKey: 'wrong-key' })
-    ).toBeNull();
-    expect(service.getState(sessionId)).toBe('preparing');
-
-    expect(
-      service.claim({
-        sessionId,
-        requesterUserId: 'user-1',
-        claimKey: 'key-peek',
-        isCompatible: () => true,
+      service.start({
+        ...lease,
+        preparationId: 'second',
+        requestKey: 'model-b',
+        claimKey: 'routing',
+        create: async () => second.resource,
       })
-    ).toEqual({ status: 'claimed', resource: prepared.resource });
+    ).toBe('replaced');
+    await second.started.promise;
+    expect(first.state.disposed).toBe(true);
+    expect(service.cancel(lease)).toBe('not-found');
+    expect(service.claim({ ...identity, claimKey: 'routing', isCompatible: () => true })).toEqual({
+      status: 'claimed',
+      resource: second.resource,
+    });
   });
 
-  it('never waits for an unpublished preparation on the send path', async () => {
+  it('releases retirement after creation or disposal rejects', async () => {
     const service = createService();
-    const prepared = createResource();
     const createStarted = deferred();
-    const releaseCreate = deferred();
-    const sessionId = 'session-cold-fallback' as SessionId;
+    const releaseCreate = gate();
     service.start({
-      preparationId: 'prepare-cold-fallback',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'key-cold-fallback',
+      ...lease,
+      requestKey: 'key',
       create: async () => {
         createStarted.resolve();
         await releaseCreate.promise;
-        return prepared.resource;
+        throw new Error('creation failed');
       },
     });
     await createStarted.promise;
-
-    expect(
-      service.claim({
-        sessionId,
-        requesterUserId: 'user-1',
-        claimKey: 'key-cold-fallback',
-        isCompatible: () => true,
-      })
-    ).toEqual({ status: 'miss', cleanup: null });
+    service.cancel(lease);
+    const cleanup = service.discard(sessionId);
     releaseCreate.resolve();
-    await vi.waitFor(() => expect(prepared.dispose).toHaveBeenCalledTimes(1));
-  });
-
-  it("replaces only the same requester's lease and disposes the previous resource", async () => {
-    const service = createService();
-    const first = createResource();
-    const second = createResource();
-    service.start({
-      preparationId: 'prepare-first',
-      sessionId: 'session-first' as SessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'key-first',
-      create: async () => first.resource,
-    });
-    first.initialized.resolve();
-    await vi.waitFor(() =>
-      expect(service.getState('session-first' as SessionId)).toBe('initialized')
-    );
-
-    expect(
-      service.start({
-        preparationId: 'prepare-second',
-        sessionId: 'session-second' as SessionId,
-        requesterUserId: 'user-1',
-        requestKey: 'key-second',
-        create: async () => second.resource,
-      })
-    ).toBe('replaced');
-    await vi.waitFor(() => expect(first.dispose).toHaveBeenCalledTimes(1));
-  });
-
-  it('treats changed preparation config as a replacement while retaining claim identity', async () => {
-    const service = createService();
-    const first = createResource();
-    const second = createResource();
-    const sessionId = 'session-run-config-replacement' as SessionId;
-    service.start({
-      preparationId: 'prepare-config-first',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'request:model-a',
-      claimKey: 'claim:routing',
-      create: async () => first.resource,
-    });
-    await vi.waitFor(() =>
-      expect(
-        service.peek({
-          sessionId,
-          requesterUserId: 'user-1',
-          claimKey: 'claim:routing',
-        })
-      ).toBe(first.resource)
-    );
-
-    expect(
-      service.start({
-        preparationId: 'prepare-config-second',
-        sessionId,
-        requesterUserId: 'user-1',
-        requestKey: 'request:model-b',
-        claimKey: 'claim:routing',
-        create: async () => second.resource,
-      })
-    ).toBe('replaced');
-    expect(
-      service.cancel({
-        preparationId: 'prepare-config-first',
-        sessionId,
-        requesterUserId: 'user-1',
-      })
-    ).toBe('not-found');
-    await vi.waitFor(() =>
-      expect(
-        service.peek({
-          sessionId,
-          requesterUserId: 'user-1',
-          claimKey: 'claim:routing',
-        })
-      ).toBe(second.resource)
-    );
-  });
-
-  it('serializes replacement startup behind predecessor cleanup', async () => {
-    const service = createService();
-    const first = createResource();
-    const second = createResource();
-    const cleanupGate = deferred();
-    first.dispose.mockImplementation(async () => await cleanupGate.promise);
-    const secondCreate = vi.fn(async () => second.resource);
-    const firstSessionId = 'session-serial-first' as SessionId;
-    service.start({
-      preparationId: 'prepare-serial-first',
-      sessionId: firstSessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'key-serial-first',
-      create: async () => first.resource,
-    });
-    first.initialized.resolve();
-    await vi.waitFor(() => expect(service.getState(firstSessionId)).toBe('initialized'));
-
-    service.start({
-      preparationId: 'prepare-serial-second',
-      sessionId: 'session-serial-second' as SessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'key-serial-second',
-      create: secondCreate,
-    });
-    await Promise.resolve();
-    expect(secondCreate).not.toHaveBeenCalled();
-
-    cleanupGate.resolve();
-    await vi.waitFor(() => expect(secondCreate).toHaveBeenCalledTimes(1));
-  });
-
-  it('expires and disposes an abandoned lease at the hard TTL', async () => {
-    vi.useFakeTimers();
-    const service = createService({ hardTtlMs: 100 });
-    const prepared = createResource();
-    const sessionId = 'session-expiring' as SessionId;
-    service.start({
-      preparationId: 'prepare-expiring',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'key-expiring',
-      create: async () => prepared.resource,
-    });
-    await Promise.resolve();
-
-    await vi.advanceTimersByTimeAsync(100);
-    expect(service.getState(sessionId)).toBeNull();
-    expect(prepared.dispose).toHaveBeenCalledTimes(1);
-  });
-
-  it('rejects a second requester while the bounded preparation slot is occupied', async () => {
-    const service = createService({ maxConcurrent: 1 });
-    const first = createResource();
-    const second = createResource();
-    service.start({
-      preparationId: 'prepare-owner',
-      sessionId: 'session-owner' as SessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'key-owner',
-      create: async () => first.resource,
-    });
-
-    expect(
-      service.start({
-        preparationId: 'prepare-other',
-        sessionId: 'session-other' as SessionId,
-        requesterUserId: 'user-2',
-        requestKey: 'key-other',
-        create: async () => second.resource,
-      })
-    ).toBe('busy');
-    expect(second.dispose).not.toHaveBeenCalled();
-  });
-
-  it('disposes an incompatible published preparation before falling back', async () => {
-    const service = createService();
-    const prepared = createResource();
-    const cleanupGate = deferred();
-    prepared.dispose.mockImplementation(async () => await cleanupGate.promise);
-    const sessionId = 'session-incompatible' as SessionId;
-    service.start({
-      preparationId: 'prepare-incompatible',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: 'key-incompatible',
-      create: async () => prepared.resource,
-    });
-    prepared.initialized.resolve();
-    await vi.waitFor(() => expect(service.getState(sessionId)).toBe('initialized'));
-
-    const result = service.claim({
-      sessionId,
-      requesterUserId: 'user-1',
-      claimKey: 'key-incompatible',
-      isCompatible: () => false,
-    });
-    expect(result.status).toBe('miss');
-    if (result.status === 'miss') {
-      expect(result.cleanup).not.toBeNull();
-      expect(prepared.dispose).toHaveBeenCalledTimes(1);
-      cleanupGate.resolve();
-      await result.cleanup;
-    }
-    expect(prepared.dispose).toHaveBeenCalledTimes(1);
+    await cleanup;
+    expect(service.discard(sessionId)).toBeNull();
+    const prepared = start(service);
+    await prepared.started.promise;
+    prepared.resource.dispose = async () => {
+      throw new Error('disposal failed');
+    };
+    await service.discard(sessionId);
+    expect(service.discard(sessionId)).toBeNull();
+    const replacement = start(service);
+    await replacement.started.promise;
+    expect(service.claim({ ...identity, isCompatible: () => true }).status).toBe('claimed');
   });
 });

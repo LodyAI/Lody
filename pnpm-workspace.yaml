@@ -46,7 +46,9 @@ catalog:
   better-sqlite3: ^13.0.2
   convex: ^1.33.1
   devframe: 1.0.0
-  effect: 3.18.4
+  effect: 4.0.2
+  '@effect/vitest': 4.0.2
+  '@effect/platform-node-shared': 4.0.2
   jotai: ^2.16.0
   loro-adaptors: ^0.6.1
   loro-crdt: 1.16.3
@@ -77,8 +79,22 @@ managePackageManagerVersions: true
 # Delay newly published package versions for seven days before pnpm may resolve them.
 minimumReleaseAge: 10080
 
-# Grandfather versions already locked on main; later releases remain quarantined.
+# Keep approved upgrades and grandfathered versions exact; later releases remain quarantined.
 minimumReleaseAgeExclude:
+  # Approved lifecycle fixes and the matching test helper; future releases wait seven days.
+  - effect@4.0.2
+  - '@effect/vitest@4.0.2'
+  - '@effect/platform-node-shared@4.0.2'
+  # Keep the split release's complete optional platform graph available on every host.
+  - '@loro-dev/roost-node@0.1.1'
+  - '@loro-dev/roost-node-darwin-arm64@0.1.1'
+  - '@loro-dev/roost-node-darwin-x64@0.1.1'
+  - '@loro-dev/roost-node-linux-arm64-gnu@0.1.1'
+  - '@loro-dev/roost-node-linux-x64-gnu@0.1.1'
+  - '@loro-dev/roost-node-win32-arm64-msvc@0.1.1'
+  - '@loro-dev/roost-node-win32-x64-msvc@0.1.1'
+  # Use the pinned npm release instead of requiring a sibling Roost checkout.
+  - '@loro-dev/roost@0.1.2'
   # pnpm 10.20 uses the first rule per package; keep exact Codex versions together.
   - '@openai/codex@0.154.0 || 0.156.0 || 0.156.0-darwin-arm64 || 0.156.0-darwin-x64 || 0.156.0-linux-arm64 || 0.156.0-linux-x64 || 0.156.0-win32-arm64 || 0.156.0-win32-x64 || 0.159.2 || 0.159.2-darwin-arm64 || 0.159.2-darwin-x64 || 0.159.2-linux-arm64 || 0.159.2-linux-x64 || 0.159.2-win32-arm64 || 0.159.2-win32-x64'
   # Exact transitive dependencies already selected for werift.
@@ -93,13 +109,13 @@ minimumReleaseAgeExclude:
   - '@peculiar/asn1-cms@2.10.0'
   - mediabunny@1.61.0
   - '@peculiar/asn1-schema@2.10.0'
-  # Electron 43 desktop runtime. 43.7.6 carries the WASM code-cache fix
-  # (electron/electron#54234); electron-vite 6.0.0-beta.2+ is the first release
+  # Electron 44.7.0 matches DSH's native loader runtime support.
+  # electron-vite 6.0.0-beta.2+ is the first release
   # with Electron 42-44 build targets. rolldown and magic-string come with it.
   # Every rolldown platform binding is listed: a quarantined optional binding is
   # dropped from the lockfile without an error, and rolldown then loads another
   # version's binding and fails while bundling electron.vite.config.ts.
-  - 'electron@43.7.6'
+  - 'electron@44.7.0'
   - 'electron-vite@6.0.0-beta.5'
   - 'magic-string@1.4.2'
   - 'rolldown@1.2.11'

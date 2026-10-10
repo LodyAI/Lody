@@ -25,11 +25,22 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   authorized or executed. Its extensive header comment
   is the authoritative doc for edge cases (stale pointers, history/meta sync races).
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
+- `roost-node-session.ts` — owns Roost history reads/writes and its bounded active-branch
+  page cache; `roost-session-backend.ts` joins it to the existing Loro control plane.
+- `roost-history-generation.ts` — stages structural replacements privately and
+  atomically activates them, fencing writes through superseded handles.
+- `roost-rpc-session.ts` — one-shot Cloud CLI history services backed by owner RPC;
+  `lib/command-runtime.ts` supplies the same composition for sessions, export and MCP.
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns. Created in
   message-handler's `beginConversationTurn`, stored/disposed via `SessionTransientStore` turn
   state; it creates the assistant entry when it opens.
 - `session-execution-service.ts` — runs one turn end-to-end: ACP prompt, turn ids,
   lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
+- `acp-session-config-applier.ts` — applies turn configuration and reports rejected
+  model selections through the GUI warning path, retaining the agent's actual model.
+- `session-execution-helpers.ts` — composes first-task prompt context, with branch-naming
+  guidance only after execution verifies this Session's temporary branch in an ordinary
+  new independent GitHub/local worktree.
 - `acp-error-classification.ts` — JSON-RPC/transport error string matching for the above.
 - `session-manager.ts` / `session.ts` / `session-sandbox.ts` / `terminal-manager.ts` —
   session and process lifecycle, workdirs, worktrees, sandboxed spawning, ACP terminals.
@@ -63,6 +74,16 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   [specs/session-worktree-lifecycle.md](../../../../specs/session-worktree-lifecycle.md).
 
 ## Background
+
+### Frozen execution input
+
+Create, continue and steer resolve effective input through shared
+`resolveSessionExecutionInputBlocks`: the accepted turn's `prompt` owns text,
+while `inputBlocks` provide structured attachments and retain authored text for
+editing. Dispatch preserves both fields and supplies legacy history fallback.
+Execution never reconstructs instructions from the current Role catalog. Runtime
+context and attachment materialization remain daemon responsibilities. See the
+[decision and regression evidence](../../../../.agents/notes/implemented/architecture/2026-10-08-frozen-turn-execution-input.md).
 
 ### Why turn activation has its own predicate
 
@@ -268,9 +289,79 @@ identity propagation into adapter-owned Git commands remains unresolved.
 Peek and claim are synchronous published-resource snapshots. A prepared resource may reuse its
 open target-machine Flock to synchronously resolve launch config, but dispatch and claim
 rescan the current row. Durable creation claims the marker only when repo, source, and base
-branch target identity match, runs setup, then permits the first prompt.
+branch target identity match, runs setup, then permits the first prompt. A missed claim returns
+any retiring cleanup barrier even after its lease has disappeared. Cold creation, discard,
+replacement preparation and shutdown join that barrier, including resources returned after
+cancellation. This can delay cold startup until cleanup finishes; otherwise a retired
+preparation could delete the newly reused directory. Unrelated Sessions remain independent.
 
 Memory identity references travel with turn configuration. `Session.createAgent` maps
 them through `../lib/memory-providers.ts` at spawn; the execution service restarts a
 resident ACP process when the next turn changes identity. See the
 [memory Spec](../../../../specs/agent-role-memory.md).
+
+## Roost history paging
+
+The CLI uses the pinned `@loro-dev/roost-node` npm runtime for SQLite history in a
+Worker. Electron stages that complete package with one target native binding.
+The shared renderer uses the existing local IPC or remote history RPC bridge;
+Web/iOS clients need no Node addon. The owning machine must be available for RPC
+reads; browser-local IndexedDB replicas and offline sync are separate work.
+Runtime packaging and verification: [native runtime note](../../../../.agents/notes/proposed/architecture/2026-10-09-roost-native-runtime.md).
+
+Renderer read replies bind logical page bodies, count and history revision to
+one durable observation. The RPC waits for local writes before and after the
+read and retries a moving revision; neither barrier waits for remote sync.
+This lets the renderer persist bounded pages as a coherent offline read replica
+without exposing physical segments or introducing another history writer.
+
+Display bootstrap and ordinary directory/body reads use active-branch pages and
+a bounded body cache. Published-message pages cannot establish branch membership.
+Resolve an off-window physical head before sealing or appending; a late successor
+must not turn the next append into a new root. Full snapshots belong to explicit
+export/copy/edit operations, not renderer hydration or missing-new-ID lookup.
+
+The owner starts with 40 logical turns and keeps up to 500 page bodies for subsequent
+hydration. Reverse pages carry their own total count and absolute positions. Cursor
+rejection after a branch rewrite is recoverable by refreshing the loaded window;
+it never authorizes switching back to Loro or reading a superseded published suffix.
+
+ACP batch appliers can mutate item arrays. The Roost adapter applies them to a
+detached working copy, preserving the before-image used to decide what to persist.
+Content changes refresh only affected primary bodies. Sealed-turn corrections
+use mutable SDK state records anchored to their primary; permission responses
+remain independent SDK records projected onto the matching tool. Responding does
+not seal the assistant or interrupt its output.
+Ordinary Edit & Resend reuses the sealed prefix through the SDK's branch activation
+inside the same stream/view. The Lody session id and owner saga do not change.
+An application-owned signed epoch commits in that native transaction and fences
+older handles. Immediate rollback restores the old SDK head; rollback with later
+appends retains the existing whole-generation compensation. General structural
+copy/import edits still stage a complete SDK-managed generation and publish one
+signed application-owned activation with a native event-cursor CAS. Failed staging
+retains the old stream; sealed envelopes and SDK indexes are never rewritten.
+
+The local goal projection is an optional derived index tied to an exact native
+event cursor. Incremental page coverage or a complete read establishes its value;
+commands advance it only across their own signed write receipts and index events.
+Unknown, damaged or externally invalidated projections require an authoritative
+read before the active-goal guard. This cache never accepts commands or weakens
+eligibility. Its failed CAS affects reuse only. Historical state/permission reads
+use eight concurrent lanes; a lane issues at most one native request at a time.
+Per-item ACP receipts commit with their output and remain discoverable through
+prior generations, so a lost reply or overlapping retry cannot replay a prefix.
+Count and position reads refresh after a lost activation reply. The local write
+barrier republishes the committed projection before RPC binds its control revision;
+it never retries an indeterminate history action.
+External cursor refreshes share the local write queue so an earlier branch read
+cannot overwrite a later mutation's projection; disposal rejects pending reads.
+Cloud one-shot managers inject owner RPC services and never open a caller-local
+Roost database. Open-ended directory reads clip to the owner count and use at most
+500 rows per RPC, restarting when the durable revision moves. Fork and Edit & Resend
+retain their owner sagas; process-local snapshot/rollback handles do not cross RPC.
+The production SQLite regressions live in
+[`roost-session-backend-contract.test.ts`](../../tests/roost-session-backend-contract.test.ts).
+The synthetic [history benchmark](../../benchmarks/roost-history.mts) exercises
+these production backends and the shared view; `BENCH_STRUCTURAL=1` also measures
+the complete directory and a guarded last-user edit. Its timing excludes renderer
+transport, IndexedDB and paint.

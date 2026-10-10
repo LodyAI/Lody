@@ -880,6 +880,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       resolveInitialSync = resolve;
     });
     const detachInitialSyncListener = manager.onMetaRoomSynced(resolveInitialSync);
+    await vi.advanceTimersByTimeAsync(1);
     await expect(initialSyncObserved).resolves.toBe('meta-room-joined');
     detachInitialSyncListener();
     waitUntilSynced.mockClear();
@@ -898,7 +899,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       listener(metaStatus);
     }
 
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.waitFor(() => expect(syncedListener).toHaveBeenCalledWith('meta-room-joined'));
     await expect(syncedListenerCalled).resolves.toBe('meta-room-joined');
 
     expect(repoReconnect).toHaveBeenCalledTimes(1);

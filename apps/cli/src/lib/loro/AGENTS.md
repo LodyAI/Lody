@@ -16,10 +16,9 @@ Replacement rules: [shared](../../../../../packages/shared/AGENTS.md#session-his
 ## Opening a doc pulls its stream
 
 `LoroDocumentManager.getOrCreateSessionDoc()` is not a cheap read.
-`SessionDocument.init()` (`doc.ts`) calls `startDocRoomSync()` immediately: opening
-a doc joins its room and starts pulling the stream, and the doc stays in the
-manager's `sessions` cache with the room joined until `cleanSessionDoc` tears it
-down. Cost per call = one Streams subscription plus the doc's full initial sync.
+`SessionDocument.init()` joins and pulls the room immediately. It stays joined
+in the manager cache until `cleanSessionDoc`; each open costs a subscription and
+full initial sync.
 
 Rules:
 
@@ -36,10 +35,8 @@ Rules:
   filtered candidates, under a concurrency bound (`mapWithConcurrency`, 4).
 - To drop a doc you opened for inspection, first prove no other holder adopted
   it: `LoroDocumentManager.sessions` is a shared cache with **no refcounting**,
-  and `cleanSessionDoc`/`destroy` disposes the mirror out from under every other
-  subscriber (the dispatch watcher, for one, unsubscribes before it cleans and
-  its `watchedSessions` guard would block a re-subscribe — a destroyed shared
-  instance silently kills doc-level signals for that session). When you cannot
+  and `cleanSessionDoc`/`destroy` disposes every holder's mirror/subscriptions
+  (the dispatch watcher's `watchedSessions` guard blocks re-subscription). When you cannot
   prove sole ownership, leave the doc cached. Never call
   `repo.unloadDoc`/`unloadDocRoom` on a live wrapper directly either (the room
   binding would leak; see `SessionDocument.destroy` in `doc.ts`), and never let
@@ -48,6 +45,11 @@ Rules:
 
 The dispatch watcher's contract, "session metadata is the activation index", is
 documented in `../../session/AGENTS.md` and applies to any module enumerating rooms.
+
+`getOrCreateSessionDoc(..., { skipAutoRead: true })` affects only newly initialized
+wrappers. Use it for observation in an isolated command manager, never to change
+a cached execution wrapper's policy. Read-only release must preserve status;
+see [observe scopes](../../commands/session-observe-runtime.ts).
 
 ## Streams cursors are replica-bound
 
@@ -76,9 +78,7 @@ turn-finalization side effects. Intent and the reader contract:
 A workspace has ONE serial presence queue and the machine heartbeat shares it. Trigger
 a presence write ONLY from a timer, a lifecycle transition, or a user navigation,
 NEVER from a stream/progress/chunk callback however small one payload is, and bound
-every field in `packages/shared/src/presence.ts`. A burst delays the heartbeat past
-its 90s freshness window while the room still reports `joined`, so the machine reads
-offline with no error raised anywhere. The `(phase, detail)` dedupe is NOT a rate
+every field in `packages/shared/src/presence.ts`. A burst can delay the heartbeat past its 90s freshness window despite a joined room. The `(phase, detail)` dedupe is NOT a rate
 limit: a detail that changes per emit (percentage, counter, label) defeats it.
 
 INVARIANT: `initializing` is bounded per stage from the last phase/detail change; on

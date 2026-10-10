@@ -23,6 +23,7 @@ const bundledNodeBuiltins = new Set([
 ]);
 
 const explicitlyExternal = new Set([
+  '@loro-dev/roost-node',
   '@napi-rs/keyring',
   'better-sqlite3',
   '@lydell/node-pty',
@@ -57,7 +58,7 @@ export default defineConfig({
     },
   },
   ssr: {
-    external: ['bufferutil', 'utf-8-validate', 'typescript'],
+    external: ['bufferutil', 'utf-8-validate', 'typescript', '@loro-dev/roost-node'],
     noExternal: true,
   },
   build: {
@@ -97,7 +98,10 @@ export default defineConfig({
         ),
       },
       external: (id) =>
-        id.endsWith('.node') || bundledNodeBuiltins.has(id) || explicitlyExternal.has(id),
+        id.endsWith('.node') ||
+        bundledNodeBuiltins.has(id) ||
+        explicitlyExternal.has(id) ||
+        id.includes('/node_modules/@loro-dev/roost-node/'),
       output: {
         // Keep dependency sourcemaps out of the large CLI entry so the build
         // fits the 2 GiB heap. Keep packages separate from application workers.

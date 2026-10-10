@@ -13,6 +13,7 @@ import {
   type CompletedCodexProposedPlan,
 } from '@/lib/codex-plan-decision';
 import type { ConversationView, DeriveTurnFact, TurnIndexRow } from '@/lib/conversation-view';
+import { jsonValueEqual } from '@/lib/json-value-equal';
 
 type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
 
@@ -104,10 +105,15 @@ export type SessionTurnFacts = {
   fileDiff: SessionHistory['fileDiff'];
 };
 
-export const deriveSessionTurnFacts: DeriveTurnFact<SessionTurnFacts> = (turn) => {
+export const deriveSessionTurnFacts: DeriveTurnFact<SessionTurnFacts> = (
+  turn,
+  _row,
+  _index,
+  previous
+) => {
   const items = Array.isArray(turn.items) ? (turn.items as unknown as MessageContent[]) : [];
   const scheduling = items.filter(isSchedulingToolCall);
-  return {
+  const next: SessionTurnFacts = {
     id: turn.id,
     role: turn.role,
     goal: resolveLatestSessionGoalFromHistory([turn]),
@@ -124,6 +130,7 @@ export const deriveSessionTurnFacts: DeriveTurnFact<SessionTurnFacts> = (turn) =
     permissionRequests: scanPermissionRequests([turn]),
     fileDiff: turn.fileDiff,
   };
+  return previous && jsonValueEqual(previous, next) ? previous : next;
 };
 
 export type SessionTurnFactsResult = {
@@ -143,7 +150,7 @@ const EMPTY_ORDERED: readonly SessionTurnFacts[] = [];
 export function useSessionTurnFacts(
   view: ConversationView | null | undefined
 ): SessionTurnFactsResult {
-  const rows = useConversationIndexRows(view);
+  const rows = useConversationIndexRows(view, { includeSummary: false });
   const { facts, complete, version } = useConversationDerivation(view, deriveSessionTurnFacts);
   const previousOrderedRef = useRef<readonly SessionTurnFacts[]>(EMPTY_ORDERED);
   const ordered = useMemo(() => {

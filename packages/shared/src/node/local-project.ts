@@ -1,16 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type {
   LocalProjectGitState,
   LocalProjectId,
   LocalProjectWorkingTreeState,
 } from '../project';
 import { parseGitHubRepo } from '../worktree-paths';
-
-const execFileAsync = promisify(execFile);
+import { CommandFailed, runCommandTextLegacy } from './process';
 
 type GitCommandResult = {
   status: number | null;
@@ -103,40 +100,31 @@ async function runGitCommand(
 ): Promise<GitCommandResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_GIT_COMMAND_TIMEOUT_MS;
   try {
-    const result = await execFileAsync('git', args, {
+    const result = await runCommandTextLegacy({
+      command: 'git',
+      args,
       cwd: rootPath,
-      encoding: 'utf-8',
       timeout: timeoutMs,
-      killSignal: 'SIGTERM',
-      maxBuffer: GIT_COMMAND_MAX_BUFFER_BYTES,
-      // The daemon runs without a console on Windows; without this each of
-      // the ~8 git calls per git-state refresh pops a visible console window.
-      windowsHide: true,
+      maxOutputBytes: GIT_COMMAND_MAX_BUFFER_BYTES,
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',
         GIT_OPTIONAL_LOCKS: '0',
       },
+      check: 'exit-0',
     });
-    const commandResult = {
-      status: 0,
-      stdout: String(result.stdout ?? ''),
-      stderr: String(result.stderr ?? ''),
-    };
-    return commandResult;
+    return { status: 0, stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
-    const withOutput = error as
-      | (Error & { code?: number | string; signal?: string; stdout?: string; stderr?: string })
-      | undefined;
+    // A non-zero exit keeps its status and output. A spawn failure, a timeout
+    // or an output overflow has no status and reports its message as stderr.
+    if (error instanceof CommandFailed) {
+      return { status: error.code, stdout: error.stdout, stderr: error.stderr };
+    }
     const message =
       error instanceof Error
         ? error.message || `Git command failed after ${timeoutMs}ms: git ${args.join(' ')}`
         : String(error);
-    return {
-      status: typeof withOutput?.code === 'number' ? withOutput.code : null,
-      stdout: String(withOutput?.stdout ?? ''),
-      stderr: String(withOutput?.stderr ?? message),
-    };
+    return { status: null, stdout: '', stderr: message };
   }
 }
 
@@ -609,7 +597,10 @@ async function probeGitHubRemoteAtRootPath(rootPath: string): Promise<{
 }
 
 export async function getLocalProjectGitHubRepoAtRootPath(rootPath: string) {
-  return (await probeGitHubRemoteAtRootPath(normalizeLocalProjectRootPath(rootPath)))?.repoFullName ?? null;
+  return (
+    (await probeGitHubRemoteAtRootPath(normalizeLocalProjectRootPath(rootPath)))?.repoFullName ??
+    null
+  );
 }
 
 async function listLocalProjectBranchesAtRootPath(rootPath: string): Promise<{

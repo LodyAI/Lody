@@ -35,6 +35,8 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 
 ## Build toolchain and window identity
 
+- Electron 44 desktop builds require macOS 13 or newer.
+
 - `desktop-bootstrap` must be the first main import: Nightly chooses its data
   directory before auth stores open. `desktop-channel` changes desktop identity,
   never the shared CLI namespace, data root, or Host endpoint.
@@ -58,9 +60,11 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 
 - The embedded CLI runs built JavaScript, never source-loader/Jiti. Development
   and packaged builds share the output layout.
-- `better-sqlite3`, `@lydell/node-pty`, and `loro-crdt` remain external and must be
+- `@loro-dev/roost-node`, `better-sqlite3`, `@lydell/node-pty`, and `loro-crdt` remain external and must be
   staged under `resources/cli/node_modules` by `scripts/sync-cli-dist.mjs` and
   `scripts/cli-native-deps.mjs`.
+  Roost's client, Worker, and binding retain relative paths; stage only the target prebuild,
+  from the main package or its exact-version optional platform package.
 - `@lydell/node-pty` and `better-sqlite3 >= 13.0.2` use N-API artifacts. Stage the
   target platform/architecture artifact; do not rebuild by Electron ABI.
 - Every embedded-CLI descendant launched through `process.execPath` must inherit

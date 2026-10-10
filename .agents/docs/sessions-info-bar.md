@@ -16,8 +16,9 @@ this page is the full text of the rules summarised there.
   appending, and must never reorder the others. Note the separate, deliberately
   different order in `session-info-bar.tsx` for choosing which item opens on the
   stage (context first, as the most informative default) — that is stage
-  preference, not cluster order, and the two are not meant to match. Stage = the rightmost item. Invariants: no items → the bar
-  hides; with items, EXACTLY one is always expanded on the stage (there is no
+  preference, not cluster order, and the two are not meant to match. Stage = the rightmost item.
+  The bar hides only when items, execution-machine identity and ambient sync are
+  all absent. With items, EXACTLY one is always expanded on the stage (there is no
   fully-collapsed state, and the stage never empties). Click semantics
   (researched; do not overload a second click): cluster chip = promote onto
   stage; stage ICON = inert marker (NOT a button — clicking the rightmost

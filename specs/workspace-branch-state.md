@@ -31,9 +31,35 @@ non-Git Session has no branch. Idle external checkout changes become visible at 
 next workspace refresh or turn; this contract does not promise continuous Git HEAD
 watching. The existing mobile layout still omits branch text in its bottom bar.
 
+## First-task branch naming
+
+For an ordinary new independent GitHub/local worktree Session, the daemon reads
+the actual checkout after workspace preparation and setup. It requests naming only
+when the branch matches this Session's allocated temporary ref, including numeric
+name or namespace collision suffixes. Descriptive branches, another Session's refs,
+detached HEAD and failed probes receive no naming request; cached metadata and the
+base ref do not substitute for that read.
+
+The first prompt directly asks the agent to rename the verified branch to a short
+task name before starting work. The command names the verified old ref, so a
+checkout change does not silently redirect the rename to another branch. The agent
+avoids sensitive input and force-overwrites, chooses another name on collision,
+and reports rename failure while continuing the task. It need not inspect the
+checkout to decide whether naming is appropriate.
+
+Eligibility follows first use of the Session, including adoption of a prepared
+worktree. Direct local directories, shared child Tabs, Sessions with a prior ACP
+session or an explicit resume request, subsequent turns, and the separate Fork
+flow do not receive this first-task request. Naming is provider-independent and
+requires no public API or persisted flag. This is agent guidance, not a guarantee
+that the model performs a rename. The daemon neither derives refs from prompts nor
+launches another ACP generator. Existing Git observation publishes an agent's rename;
+Provider-owned session title updates remain independent.
+
 ## Evidence
 
 - [Branch owner](../apps/cli/src/session/workspace-git-service.ts)
 - [Execution lifecycle](../apps/cli/src/session/session-execution-service.ts)
 - [Workspace refresh](../apps/cli/src/lib/code-collab/code-collab-v2-service.ts)
 - [Decision and verification](../.agents/notes/implemented/bug-fix/2026-09-24-workspace-branch-observation.md)
+- [First-task naming decision](../.agents/notes/implemented/feature/2026-10-08-new-worktree-branch-prompt.md)

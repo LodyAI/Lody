@@ -12,8 +12,9 @@ an icon or Session ownership. This review patch adds a persistent avatar, owner,
 and machine label to the shared composer info bar using existing machine metadata
 and workspace members. It stays outside the rotating cluster/stage model and
 wraps the remaining controls onto another line on narrow screens. Component tests
-cover persistence and fallback labels; actual browser screenshots and live
-team-session verification are blocked in the current execution environment.
+cover persistence and fallback labels; synthetic desktop and narrow-screen browser
+checks confirm that the identity labels render. Visual approval and live
+team-session verification remain pending.
 
 ## Decision and limits
 
@@ -25,7 +26,8 @@ second row below 600px. The existing conversation Storybook harness supplies onl
 synthetic identity data and uses real composer/info-bar components.
 
 The draft [Spec](../../../../specs/composer-machine-owner.md) describes intended
-behavior. Review is pending: shell Chromium cannot create its startup socket and
-the available browser rejects the local preview address. No screenshots were
-produced and no visual fidelity is claimed. This change is being published as a draft PR; visual approval and live
-team-session verification remain pending.
+behavior. On 2026-10-10, the existing synthetic desktop and mobile Storybook
+fixtures rendered visible owner and machine-name labels in Chromium. No
+screenshots were captured. These checks establish component rendering with
+fixture data, not live workspace-member resolution or visual approval.
+Live team-session verification remains pending.

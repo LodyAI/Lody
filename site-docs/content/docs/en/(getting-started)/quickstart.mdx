@@ -3,7 +3,7 @@ title: Quick Start
 description: Install and set up Lody, from the desktop app or the CLI, then connect GitHub and configure your agents.
 ---
 
-import { MonitorDown, TabletSmartphone, Compass } from 'lucide-react';
+import { MonitorDown, TabletSmartphone, Compass, SquareTerminal } from 'lucide-react';
 
 # Quick Start
 
@@ -11,12 +11,25 @@ Lody runs everywhere you work: native apps for macOS, Windows, and Linux, mobile
 Android, any browser, and a CLI you can run on a remote server.
 
 <Cards>
-  <Card href="/download" title="Download the desktop app" icon={<MonitorDown />}>macOS, Windows, Linux</Card>
-  <Card href="/download" title="Download the mobile app" icon={<TabletSmartphone />}>iOS, Android</Card>
+  <Card href="/download" title="Download the desktop app" icon={<MonitorDown />}>
+    macOS, Windows, Linux
+  </Card>
+  <Card href="/download" title="Download the mobile app" icon={<TabletSmartphone />}>
+    iOS, Android
+  </Card>
   <Card href="/login" icon={<Compass />} title="Sign in to Lody">
     Open Lody in your browser
   </Card>
+  <Card href="#start-from-the-cli" icon={<SquareTerminal />} title="Start the CLI">
+    Use Lody from a server
+  </Card>
 </Cards>
+
+Run this on a server:
+
+```bash
+npx lody daemon start
+```
 
 ## Start from the Desktop App
 
@@ -40,6 +53,7 @@ Android, any browser, and a CLI you can run on a remote server.
 ```bash tab="Daemon (recommended)"
 npx lody daemon start
 ```
+
 ```bash tab="Foreground"
 npx lody login
 npx lody start
@@ -63,25 +77,26 @@ and turn off **Run local agent**.
 
 Once it is off, the desktop app stops managing that CLI and keeps it off on the next launch. Agents
 running on other machines are unaffected.
+
 </Callout>
 
 ## Add a Project
 
 ### Add a Local Project
 
-<Accordions type="single">
-  <Accordion title="From the desktop app">
-  Use the button in the top-right corner of **Settings** -> **Projects**. Pick the machine you want,
-  and Lody lists its directories so you can choose one as the project root.
-  </Accordion>
-  <Accordion title="From the mobile app">
-  Use the button in the top-right corner of **Projects**. Pick the machine you want, and Lody lists
-  its directories so you can choose one as the project root.
-  </Accordion>
-  <Accordion title="From the CLI">
-  Run `npx lody project add <path>`, where `<path>` is the project root directory.
-  </Accordion>
-</Accordions>
+<Tabs items={['Desktop', 'Mobile', 'CLI']}>
+<Tab value="Desktop">
+Use the button in the top-right corner of **Settings** -> **Projects**. Pick the machine you want,
+and Lody lists its directories so you can choose one as the project root.
+</Tab>
+<Tab value="Mobile">
+Use the button in the top-right corner of **Projects**. Pick the machine you want, and Lody lists
+its directories so you can choose one as the project root.
+</Tab>
+<Tab value="CLI">
+Run `npx lody project add <path>`, where `<path>` is the project root directory.
+</Tab>
+</Tabs>
 
 ### Connect Your GitHub Repository
 
@@ -91,13 +106,13 @@ you can pick the repositories to add to your workspace. [Learn more](/docs/githu
 
 ## Configure Agents
 
-Lody works with many agents, including Claude Code, Codex, Grok, OpenCode, Kimi, custom ACP agents,
-and any CLI listed in the
+Lody ships built-in ACP providers including Claude Code, Codex, Grok, Kimi Code, Devin, Pi,
+DeepSeek Harness, Bub, and Dimcode. You can also bring custom ACP agents and any CLI listed in the
 [ACP Registry](https://agentclientprotocol.com/get-started/registry). Add and configure them under
 **Settings** -> **Agents** in the desktop or mobile app.
 
 [Claude Code and Codex](/docs/claude-codex-capabilities) are maintained by Lody directly, so they
-support capabilities beyond what the ACP protocol covers. More first-class agents will follow.
+support capabilities beyond what the ACP protocol covers.
 
 ### FAQ
 
@@ -132,7 +147,9 @@ on the Settings page.
 
 🎉 That covers the basic setup. From here you can explore more of what Lody does:
 
+- [Run your first session](/docs/first-session) - One small task, from prompt to reviewed result
+- [Read the concepts and glossary](/docs/concepts) - The objects behind every screen
 - [CLI Commands](/docs/cli) - See all `lody` commands and options
 - [Learn about Worktrees](/docs/worktrees) - Understand how Lody isolates tasks
-- [Configure Agents](/docs/agents) - Set up Claude Code, Codex, or Claude-compatible endpoints
+- [CLI Runtime Types](/docs/cli-runtimes) - Add ACP Registry runtimes or a custom ACP agent
 - [Mobile Access](/docs/mobile) - Review and approve changes from your phone

@@ -61,3 +61,7 @@ see [attachment rendering](../ai-gui/session-files-rendering.md#upload-to-histor
   nothing.
 - Draft ACP preparation has a longer contract that remains in the private
   architecture context.
+
+Chat Landing no longer emits the legacy onboarding project-source, project-selection,
+or agent-selection events. Onboarding owns its route-scoped flow, step and operation
+telemetry; see [event semantics](../../../../../specs/onboarding-analytics.md).

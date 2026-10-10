@@ -1,4 +1,68 @@
 import { test, expect, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+
+// Load the real rules without imports that require Storybook's CSS pipeline.
+const markdownStyles = readFileSync(
+  new URL('../../src/tailwind/index.css', import.meta.url),
+  'utf8'
+).replace(/^@import .*$/gm, '');
+
+for (const active of [false, true]) {
+  for (const tall of [false, true]) {
+    const state = `${active ? 'active' : 'inactive'}, ${tall ? 'tall' : 'fitting'}`;
+    test(`Mermaid scroll chaining (${state})`, async ({ page }) => {
+      await page.setViewportSize({ width: 900, height: 900 });
+      // Isolate native scroll chaining: jsdom wheel dispatch cannot exercise it.
+      // The SVG dimensions are synthetic; the diagram DOM matches the renderer.
+      await page.setContent(`
+        <style>
+          #conversation { height: 700px; width: 500px; overflow: auto; }
+          .spacer { height: 600px; }
+        </style>
+        <div id="conversation">
+          <div class="spacer"></div>
+          <div class="markdown-renderer">
+            <div data-streamdown="mermaid" ${active ? 'data-lody-canvas="active"' : ''}>
+              <div><div data-streamdown="mermaid-svg">
+                <svg width="200" height="${tall ? 1200 : 120}"></svg>
+              </div></div>
+            </div>
+          </div>
+          <div class="spacer"></div>
+        </div>
+      `);
+      await page.addStyleTag({ content: markdownStyles });
+      const conversation = page.locator('#conversation');
+      const diagram = page.locator('[data-streamdown="mermaid"] > div');
+      const scrollTop = () => conversation.evaluate((element) => element.scrollTop);
+
+      await conversation.evaluate((element) => {
+        element.scrollTop = 550;
+      });
+      await diagram.hover();
+      if (tall) {
+        await page.mouse.wheel(0, 80);
+        await expect.poll(() => diagram.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+        expect(await scrollTop()).toBe(550);
+      }
+
+      for (const direction of [-1, 1]) {
+        await conversation.evaluate((element) => {
+          element.scrollTop = 550;
+        });
+        await diagram.evaluate(
+          (element, down) => {
+            element.scrollTop = down ? element.scrollHeight : 0;
+          },
+          direction > 0
+        );
+        await diagram.hover();
+        await page.mouse.wheel(0, direction * 80);
+        await expect.poll(async () => ((await scrollTop()) - 550) * direction).toBeGreaterThan(0);
+      }
+    });
+  }
+}
 
 /**
  * The conversation scroll engine in a real browser (scroll-engine note,

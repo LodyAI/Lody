@@ -266,6 +266,34 @@ describe('MessageHandler terminal cleanup', () => {
     expect(getSessionMeta(sessionId)).toMatchObject({ status: SessionStatusFactory.idle() });
   });
 
+  // A process that survives SIGKILL (stuck in uninterruptible I/O) must not
+  // leave the archive half done: the Session is released either way.
+  it('finishes archiving when a session process tree cannot be terminated', async () => {
+    const { handler, sessionId, sessionManager, getSessionMeta } = createHarness({
+      activeSessionIds: ['session-1' as SessionId],
+      sessionMetas: [
+        {
+          id: 'session-1' as SessionId,
+          machineId: 'machine-1',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          userId: 'user-1',
+          cliType: 'codex',
+          agentType: 'codex',
+          status: SessionStatusFactory.running(),
+          isArchived: true,
+        } as SessionMeta,
+      ],
+    });
+    sessionManager.terminateSession.mockRejectedValueOnce(
+      new Error('process group 4321 was still running 5000ms after SIGKILL')
+    );
+
+    await handler.handleSessionArchived(sessionId);
+
+    expect(getSessionMeta(sessionId)).toMatchObject({ status: SessionStatusFactory.idle() });
+    expect(sessionManager.archiveSession).toHaveBeenCalledWith(sessionId);
+  });
+
   it('removes the worktree of an archived local-project session and keeps its branch', async () => {
     const localProjectId = 'local-project-archive' as LocalProjectId;
     const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-archive-project-'));

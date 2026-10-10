@@ -1,5 +1,11 @@
 import {
   createServerTimeFetcher,
+  getLoroStreamsShardUrls,
+  LORO_STREAMS_BUCKET_ID,
+  getServerNow,
+  getMachineRoomId,
+  resolveNewSessionHistoryBackend,
+  type MachineMeta,
   getSessionIdFromRoomId,
   isLoroRepoDocDeleted,
   isSessionDocRoomId,
@@ -24,6 +30,16 @@ import {
 } from '@lody/shared/node/local-ipc';
 import { AuthClient } from '@/lib/auth';
 import { LoroDocumentManager } from '@/lib/loro/doc';
+import { createRoostSessionBackendFactory } from '@/session/roost-session-backend';
+import { createRoostRpcSessionServices } from '@/session/roost-rpc-session';
+import {
+  createLoroStreamsJsonStreamClient,
+  LORO_STREAMS_RPC_RETENTION_SECONDS,
+  LORO_STREAMS_RPC_VERSION,
+  LoroStreamsMachineRpcClient,
+} from '@lody/loro-streams-rpc';
+import { prepareCliStreamsGatewayBaseUrl } from '@/lib/loro/streams-access';
+import { getCliHttpFetch } from '@/utils/http-transport';
 import { listWorkspacesForToken, type WorkspaceSummary } from '@/lib/workspace';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL, LODY_SERVER_URL } from '@/utils/const';
 import { initCliAnalytics } from '@/lib/analytics/posthog';
@@ -238,6 +254,91 @@ export async function resolveWorkspaceOrThrow(
   return selectWorkspaceSummary(workspaces, effectiveSelector);
 }
 
+export async function withMachineRpcClient<T>(
+  args: { auth: AuthContext; workspaceId: WorkspaceId; machineId: MachineId },
+  fn: (client: LoroStreamsMachineRpcClient) => Promise<T>
+): Promise<T> {
+  if (!LODY_AUTH_URL) throw new Error('Cloud machine RPC requires LODY_AUTH_URL');
+  const logger = getLogger('session');
+  const streamsTokenProvider = createCloudStreamsTokenPort({
+    token: args.auth.token,
+    authBaseUrl: LODY_AUTH_URL,
+    authSiteUrl: LODY_AUTH_SITE_URL,
+    logger,
+  }).createTokenProvider({ workspaceId: args.workspaceId });
+  const baseUrl = await prepareCliStreamsGatewayBaseUrl(streamsTokenProvider);
+  const configuredTimeout = Number.parseInt(process.env.LODY_LORO_RPC_CONNECT_TIMEOUT_MS ?? '', 10);
+  const streamClient = createLoroStreamsJsonStreamClient({
+    bucketId: LORO_STREAMS_BUCKET_ID,
+    getToken: () => streamsTokenProvider.getToken(),
+    getBaseUrl: () => streamsTokenProvider.getGatewayBaseUrl() ?? baseUrl,
+    shardUrls: getLoroStreamsShardUrls(baseUrl, streamsTokenProvider.getShardHostSuffix()),
+    fetchImpl: getCliHttpFetch({ logger }),
+    timeout: { connectTimeoutMs: configuredTimeout > 0 ? configuredTimeout : 30_000 },
+  });
+  const client = new LoroStreamsMachineRpcClient({
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+    streamClient,
+    rpcVersion: LORO_STREAMS_RPC_VERSION,
+    retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
+    now: getServerNow,
+    logger,
+  });
+  try {
+    await client.start();
+    return await fn(client);
+  } finally {
+    client.stop();
+  }
+}
+
+export function createCommandSessionHistoryFactory(
+  getManager: () => LoroDocumentManager,
+  auth: AuthContext,
+  workspaceId: WorkspaceId,
+  withRpc: typeof withMachineRpcClient = withMachineRpcClient
+) {
+  return createRoostSessionBackendFactory(async (doc) => {
+    const manager = getManager();
+    const meta = await doc.getMetaState();
+    if (!meta?.machineId || meta.id !== doc.sessionId)
+      throw new Error('Session history owner is unavailable');
+    const target = { auth, workspaceId, machineId: meta.machineId };
+    const machine = (await manager.repo.getDocMeta(getMachineRoomId(meta.machineId)))?.meta as
+      | MachineMeta
+      | undefined;
+    resolveNewSessionHistoryBackend(machine, { requested: 'roost' });
+    return createRoostRpcSessionServices(doc, {
+      read: async (query) => {
+        const response = await withRpc(target, (client) =>
+          client.requestSessionHistoryRead({
+            sessionId: doc.sessionId,
+            ownerSessionId: meta.id,
+            query,
+          })
+        );
+        if (!response) throw new Error('Owner history read timed out');
+        return response;
+      },
+      write: async (operation, payload) => {
+        if (!(await manager.waitUntilMetaSynced()))
+          throw new Error('Session metadata has not reached its history owner');
+        const response = await withRpc(target, (client) =>
+          client.requestSessionHistoryWrite({
+            sessionId: doc.sessionId,
+            ownerSessionId: meta.id,
+            operation,
+            payload,
+          })
+        );
+        if (!response) throw new Error('Owner history write timed out');
+        return response;
+      },
+    });
+  });
+}
+
 export async function withWorkspaceManager<T>(
   auth: AuthContext,
   workspace: WorkspaceSummary,
@@ -257,21 +358,22 @@ export async function withWorkspaceManager<T>(
     throw new Error('Cloud workspace commands require LODY_AUTH_URL');
   }
   const logger = getLogger(loggerName);
-  const manager = await LoroDocumentManager.create(
-    workspace.id as WorkspaceId,
-    auth.userId,
-    logger,
-    {
-      attachRemoteOnCreate: true,
-      streamsTokens: createCloudStreamsTokenPort({
-        token: auth.token,
-        authBaseUrl: LODY_AUTH_URL,
-        authSiteUrl: LODY_AUTH_SITE_URL,
-        logger,
-      }),
-      cloudBilling: createCloudBillingPort({ token: auth.token }),
-    }
-  );
+  let manager: LoroDocumentManager;
+  manager = await LoroDocumentManager.create(workspace.id as WorkspaceId, auth.userId, logger, {
+    attachRemoteOnCreate: true,
+    streamsTokens: createCloudStreamsTokenPort({
+      token: auth.token,
+      authBaseUrl: LODY_AUTH_URL,
+      authSiteUrl: LODY_AUTH_SITE_URL,
+      logger,
+    }),
+    cloudBilling: createCloudBillingPort({ token: auth.token }),
+    sessionHistoryFactory: createCommandSessionHistoryFactory(
+      () => manager,
+      auth,
+      workspace.id as WorkspaceId
+    ),
+  });
 
   try {
     return await fn(manager);
@@ -384,22 +486,22 @@ export async function ensureDaemonReachable(options: LocalIpcDiscoveryOptions = 
   // A 2xx whose body fails health validation still means the daemon is serving
   // the probe (e.g. CLI/daemon version skew), so we must not report it as down.
   const outcome = await Effect.runPromise(
-    Effect.either(
+    Effect.result(
       makeLocalProbeClientAuto(options).health({
         timeoutMs: DAEMON_HEALTH_PROBE_TIMEOUT_MS,
       })
     )
   );
-  if (outcome._tag === 'Left') {
+  if (outcome._tag === 'Failure') {
     if (
-      outcome.left instanceof IpcProtocolError &&
-      typeof outcome.left.status === 'number' &&
-      outcome.left.status >= 200 &&
-      outcome.left.status < 300
+      outcome.failure instanceof IpcProtocolError &&
+      typeof outcome.failure.status === 'number' &&
+      outcome.failure.status >= 200 &&
+      outcome.failure.status < 300
     ) {
       return;
     }
-    throw classifyLocalDaemonIpcError(outcome.left);
+    throw classifyLocalDaemonIpcError(outcome.failure);
   }
 }
 
@@ -410,16 +512,16 @@ export async function dispatchLocalControl(
   // Send the real request once. A health preflight doubles local IPC traffic and
   // cannot distinguish a daemon that exits between the probe and the request.
   const outcome = await Effect.runPromise(
-    Effect.either(
+    Effect.result(
       makeLocalControlClientAuto(options).sessionControl(message, {
         timeoutMs: readLocalControlTimeoutMs(),
       })
     )
   );
-  if (outcome._tag === 'Left') {
-    throw classifyLocalDaemonIpcError(outcome.left);
+  if (outcome._tag === 'Failure') {
+    throw classifyLocalDaemonIpcError(outcome.failure);
   }
-  return outcome.right;
+  return outcome.success;
 }
 
 export function resolveStructuredOutputMode(

@@ -26,7 +26,7 @@ afterEach(async () => {
 
 async function createSessionArtifact(
   sessionsRoot: string,
-  filename: 'session.jsonl' | 'session.jsonl.zstd',
+  filename: string,
   content: string,
   sessionId = 'session-1'
 ): Promise<string> {
@@ -114,7 +114,7 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     ]);
     expect(stdout.trim()).toBe('synthetic-acp-loaded');
     expect(profile.cordisPatchYml).toContain(
-      `path: ${JSON.stringify(join(adapterDir, 'deepseek-agent-presets'))}`
+      `presetRoot: ${JSON.stringify(join(adapterDir, 'deepseek-agent-presets'))}`
     );
 
     const repeated = await readGeneratedProfile(
@@ -151,8 +151,8 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     expect(launch.args).not.toContain('@deepseek-ai/dsh@0.1.0-rc.6');
     // The Cordis ecosystem versions independently of the Harness family, and
     // a `DEEPSEEK_HARNESS_VERSION` specifier for it fails the cold install.
-    expect(launch.args).toContain('@deepseek-ai/cordis@4.0.2');
-    expect(launch.args).toContain('@deepseek-ai/cordis-plugin-hmr@1.0.17');
+    expect(launch.args).toContain('@deepseek-ai/cordis@4.0.4');
+    expect(launch.args).toContain(`@deepseek-ai/dsh-hmr@${DEEPSEEK_HARNESS_VERSION}`);
     expect(launch.args).not.toContain(`@deepseek-ai/cordis@${DEEPSEEK_HARNESS_VERSION}`);
     expect(launch.env[DEEPSEEK_HARNESS_HOME_ENV]).toBe(rootDir);
     expect(await readdir(rootDir)).toEqual(expect.arrayContaining(['profiles', 'sessions']));
@@ -356,28 +356,31 @@ child.on('exit', code => { process.exitCode = code ?? 1; });
     }
   );
 
-  it('uses zstd when an existing standalone Harness root is compressed', async () => {
+  it.each(['session.jsonl.zstd', 'session.v4.jsonl.zstd'])(
+    'uses zstd for compressed %s',
+    async (filename) => {
+      const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
+      temporaryRoots.push(rootDir);
+      const sessionsRoot = join(rootDir, 'sessions');
+      const artifact = await createSessionArtifact(sessionsRoot, filename, 'zstd-bytes');
+
+      expect(await resolveDeepSeekHarnessSessionCompression(sessionsRoot)).toBe('zstd');
+      const launch = await resolveDeepSeekHarnessProcessLaunch({
+        adapterPath: '/bundled/deepseek-acp.js',
+        rootDir,
+      });
+      const profile = await readGeneratedProfile(launch, rootDir);
+
+      expect(profile.cordisPatchYml).toContain('compression: zstd');
+      expect(await readFile(artifact, 'utf8')).toBe('zstd-bytes');
+    }
+  );
+
+  it.each(['session.jsonl', 'session.v4.jsonl'])('keeps none for raw %s', async (filename) => {
     const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
     temporaryRoots.push(rootDir);
     const sessionsRoot = join(rootDir, 'sessions');
-    const artifact = await createSessionArtifact(sessionsRoot, 'session.jsonl.zstd', 'zstd-bytes');
-
-    expect(await resolveDeepSeekHarnessSessionCompression(sessionsRoot)).toBe('zstd');
-    const launch = await resolveDeepSeekHarnessProcessLaunch({
-      adapterPath: '/bundled/deepseek-acp.js',
-      rootDir,
-    });
-    const profile = await readGeneratedProfile(launch, rootDir);
-
-    expect(profile.cordisPatchYml).toContain('compression: zstd');
-    expect(await readFile(artifact, 'utf8')).toBe('zstd-bytes');
-  });
-
-  it('keeps none for an existing legacy raw-only Lody root', async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
-    temporaryRoots.push(rootDir);
-    const sessionsRoot = join(rootDir, 'sessions');
-    const artifact = await createSessionArtifact(sessionsRoot, 'session.jsonl', 'raw-jsonl');
+    const artifact = await createSessionArtifact(sessionsRoot, filename, 'raw-jsonl');
 
     expect(await resolveDeepSeekHarnessSessionCompression(sessionsRoot)).toBe('none');
     const launch = await resolveDeepSeekHarnessProcessLaunch({
@@ -390,40 +393,43 @@ child.on('exit', code => { process.exitCode = code ?? 1; });
     expect(await readFile(artifact, 'utf8')).toBe('raw-jsonl');
   });
 
-  it('rejects mixed roots before publishing a profile and leaves both artifacts unchanged', async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
-    temporaryRoots.push(rootDir);
-    const sessionsRoot = join(rootDir, 'sessions');
-    const rawArtifact = await createSessionArtifact(
-      sessionsRoot,
-      'session.jsonl',
-      'raw-jsonl',
-      'raw-session'
-    );
-    const zstdArtifact = await createSessionArtifact(
-      sessionsRoot,
-      'session.jsonl.zstd',
-      'zstd-bytes',
-      'zstd-session'
-    );
+  it.each(['session.jsonl', 'session.v4.jsonl'])(
+    'rejects mixed roots with %s without modifying artifacts',
+    async (filename) => {
+      const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
+      temporaryRoots.push(rootDir);
+      const sessionsRoot = join(rootDir, 'sessions');
+      const rawArtifact = await createSessionArtifact(
+        sessionsRoot,
+        filename,
+        'raw-jsonl',
+        'raw-session'
+      );
+      const zstdArtifact = await createSessionArtifact(
+        sessionsRoot,
+        'session.jsonl.zstd',
+        'zstd-bytes',
+        'zstd-session'
+      );
 
-    await expect(
-      resolveDeepSeekHarnessProcessLaunch({
-        adapterPath: '/bundled/deepseek-acp.js',
-        rootDir,
-      })
-    ).rejects.toMatchObject({
-      name: 'DeepSeekHarnessMixedSessionCompressionError',
-      code: 'DSH_MIXED_SESSION_COMPRESSION',
-      sessionsRoot,
-      rawArtifact,
-      zstdArtifact,
-    } satisfies Partial<DeepSeekHarnessMixedSessionCompressionError>);
+      await expect(
+        resolveDeepSeekHarnessProcessLaunch({
+          adapterPath: '/bundled/deepseek-acp.js',
+          rootDir,
+        })
+      ).rejects.toMatchObject({
+        name: 'DeepSeekHarnessMixedSessionCompressionError',
+        code: 'DSH_MIXED_SESSION_COMPRESSION',
+        sessionsRoot,
+        rawArtifact,
+        zstdArtifact,
+      } satisfies Partial<DeepSeekHarnessMixedSessionCompressionError>);
 
-    expect(await readdir(rootDir)).toEqual(['sessions']);
-    expect(await readFile(rawArtifact, 'utf8')).toBe('raw-jsonl');
-    expect(await readFile(zstdArtifact, 'utf8')).toBe('zstd-bytes');
-  });
+      expect(await readdir(rootDir)).toEqual(['sessions']);
+      expect(await readFile(rawArtifact, 'utf8')).toBe('raw-jsonl');
+      expect(await readFile(zstdArtifact, 'utf8')).toBe('zstd-bytes');
+    }
+  );
 });
 
 describe('resolveDeepSeekHarnessSpawn', () => {

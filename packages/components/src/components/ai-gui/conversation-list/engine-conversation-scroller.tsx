@@ -36,15 +36,25 @@ const isUpwardNavigationKey = (event: KeyboardEvent): boolean =>
   (event.key === ' ' && event.shiftKey);
 
 /**
- * Whether an upward wheel over `target` scrolls some element nested inside the
+ * Whether input over `target` scrolls some element nested inside the
  * viewport (a code block, a terminal) rather than the viewport itself.
  */
-function wheelUpScrollsNestedElement(target: EventTarget | null, viewport: Element): boolean {
+function inputScrollsNestedElement(
+  target: EventTarget | null,
+  viewport: Element,
+  upward: boolean
+): boolean {
   let element = target instanceof Element ? target : null;
   while (element && element !== viewport) {
-    if (element instanceof HTMLElement && element.scrollTop > 0) {
+    if (element instanceof HTMLElement) {
       const overflowY = getComputedStyle(element).overflowY;
-      if (overflowY === 'auto' || overflowY === 'scroll') return true;
+      if (
+        (overflowY === 'auto' || overflowY === 'scroll') &&
+        (upward
+          ? element.scrollTop > 0
+          : element.scrollHeight - element.clientHeight - element.scrollTop > 0)
+      )
+        return true;
     }
     element = element.parentElement;
   }
@@ -396,7 +406,7 @@ export function EngineConversationScroller({
       if (event.deltaY >= 0 || event.ctrlKey) return;
       if (element.scrollHeight <= element.clientHeight) return;
       // A code block or terminal scrolling inside a row is not the conversation.
-      if (wheelUpScrollsNestedElement(event.target, element)) return;
+      if (inputScrollsNestedElement(event.target, element, true)) return;
       controller.release('wheel-up');
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -410,15 +420,56 @@ export function EngineConversationScroller({
       if (event.button === 0) controller.setPointerHeld(true);
     };
     const onPointerUp = () => controller.setPointerHeld(false);
-    const onTouchStart = () => controller.setTouchActive(true);
-    const onTouchEnd = () => controller.setTouchActive(false);
+    let touchOrigin: { id: number; x: number; y: number } | null = null;
+    let touchScrolled = false;
+    const cancelTouch = () => {
+      touchOrigin = null;
+      touchScrolled = false;
+      controller.setTouchActive(false, false);
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      cancelTouch();
+      if (event.touches.length !== 1) return;
+      const touch = event.touches[0]!;
+      touchOrigin = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
+      controller.setTouchActive(true);
+    };
+    const observeTouch = (event: TouchEvent, touches: TouchList) => {
+      if (!touchOrigin || touches.length !== 1) {
+        cancelTouch();
+        return;
+      }
+      const touch = touches[0]!;
+      if (touch.identifier !== touchOrigin.id) {
+        cancelTouch();
+        return;
+      }
+      const dx = touch.clientX - touchOrigin.x;
+      const dy = touch.clientY - touchOrigin.y;
+      if (Math.abs(dy) <= Math.max(1, Math.abs(dx))) return;
+      if (element.scrollHeight <= element.clientHeight) return;
+      if (inputScrollsNestedElement(event.target, element, dy > 0)) return;
+      touchScrolled = true;
+      // Finger moving down scrolls the conversation up. Release on the input,
+      // before a streaming commit can overwrite the still-pending native offset.
+      if (dy > 0) controller.release('touch-up');
+    };
+    const onTouchMove = (event: TouchEvent) => observeTouch(event, event.touches);
+    const onTouchEnd = (event: TouchEvent) => {
+      // A fast swipe may have no delivered touchmove before its final position.
+      observeTouch(event, event.changedTouches);
+      controller.setTouchActive(false, touchScrolled);
+      touchOrigin = null;
+      touchScrolled = false;
+    };
     element.addEventListener('scroll', onScrollEvent, { passive: true });
     element.addEventListener('scrollend', handleScrollEnd, { passive: true });
     element.addEventListener('wheel', onWheel, { passive: true });
     element.addEventListener('pointerdown', onPointerDown, { passive: true });
     element.addEventListener('touchstart', onTouchStart, { passive: true });
+    element.addEventListener('touchmove', onTouchMove, { passive: true });
     element.addEventListener('touchend', onTouchEnd, { passive: true });
-    element.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    element.addEventListener('touchcancel', cancelTouch, { passive: true });
     ownerDocument.addEventListener('pointerup', onPointerUp, true);
     ownerDocument.addEventListener('pointercancel', onPointerUp, true);
     ownerDocument.addEventListener('keydown', onKeyDown, true);
@@ -428,8 +479,9 @@ export function EngineConversationScroller({
       element.removeEventListener('wheel', onWheel);
       element.removeEventListener('pointerdown', onPointerDown);
       element.removeEventListener('touchstart', onTouchStart);
+      element.removeEventListener('touchmove', onTouchMove);
       element.removeEventListener('touchend', onTouchEnd);
-      element.removeEventListener('touchcancel', onTouchEnd);
+      element.removeEventListener('touchcancel', cancelTouch);
       ownerDocument.removeEventListener('pointerup', onPointerUp, true);
       ownerDocument.removeEventListener('pointercancel', onPointerUp, true);
       ownerDocument.removeEventListener('keydown', onKeyDown, true);

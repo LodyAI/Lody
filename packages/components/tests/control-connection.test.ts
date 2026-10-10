@@ -1,4 +1,5 @@
-import { Duration, Effect, Fiber, TestClock, TestContext } from 'effect';
+import { Duration, Effect, Fiber } from 'effect';
+import { TestClock } from 'effect/testing';
 import { describe, expect, it } from 'vitest';
 import { deriveLodyConnectionUiState } from '../src/atoms/control-connection';
 import {
@@ -104,14 +105,14 @@ describe('computeLocalReconnectDelayMs', () => {
   it('waits for the computed backoff delay with TestClock', async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           waitForLocalReconnectDelayEffect({ attempt: 2, random: () => 0.5 })
         );
 
         yield* TestClock.adjust(Duration.millis(4_000));
 
         return yield* Fiber.join(fiber);
-      }).pipe(Effect.provide(TestContext.TestContext))
+      }).pipe(Effect.provide(TestClock.layer()))
     );
 
     expect(result).toBe(4000);

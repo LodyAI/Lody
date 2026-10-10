@@ -1,9 +1,17 @@
+import { toShared } from '@/platform/process-options';
 import os from 'os';
-import spawn from 'cross-spawn';
 import { z } from 'zod';
+import {
+  CommandOutputTooLarge,
+  CommandTimedOut,
+  READ_ONLY_ABANDON_POLICY,
+} from '@lody/shared/node/process';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 const PROCESS_TABLE_TIMEOUT_MS = 2_000;
 const MAX_PROCESS_TABLE_BYTES = 8 * 1024 * 1024;
+/** Only the start of a failing probe's stderr goes into its error. */
+const MAX_PROBE_STDERR_CHARS = 64 * 1024;
 
 export type ProcessTableEntry = {
   pid: number;
@@ -177,57 +185,34 @@ function parseDarwinMemoryBytes(value: string | undefined): number | null {
 }
 
 async function runProbe(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<string> {
-  return await new Promise<string>((resolve, reject) => {
-    const child = spawn(command, args, {
-      env,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    let stdoutBytes = 0;
-    let settled = false;
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(new Error(`${command} process-table probe timed out`));
-    }, PROCESS_TABLE_TIMEOUT_MS);
-    timer.unref?.();
-
-    const finish = (error?: Error): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve(Buffer.concat(stdoutChunks).toString('utf8'));
-    };
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdoutBytes += chunk.length;
-      if (stdoutBytes > MAX_PROCESS_TABLE_BYTES) {
-        child.kill('SIGKILL');
-        finish(new Error(`${command} process-table probe exceeded output limit`));
-        return;
-      }
-      stdoutChunks.push(chunk);
-    });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      if (stderrChunks.reduce((total, item) => total + item.length, 0) < 64 * 1024) {
-        stderrChunks.push(chunk);
-      }
-    });
-    child.once('error', (error) => finish(error));
-    child.once('close', (code) => {
-      if (code !== 0) {
-        const stderr = Buffer.concat(stderrChunks).toString('utf8').trim();
-        finish(new Error(`${command} process-table probe exited with ${code}: ${stderr}`));
-        return;
-      }
-      finish();
-    });
-  });
+  let result: Awaited<ReturnType<typeof runCommandTextLegacy>>;
+  try {
+    result = await runCommandTextLegacy(
+      {
+        command,
+        args,
+        env,
+        timeout: PROCESS_TABLE_TIMEOUT_MS,
+        abandonPolicy: READ_ONLY_ABANDON_POLICY,
+        maxOutputBytes: MAX_PROCESS_TABLE_BYTES,
+        check: 'none',
+      },
+      toShared()
+    );
+  } catch (error) {
+    if (error instanceof CommandTimedOut) {
+      throw new Error(`${command} process-table probe timed out`, { cause: error });
+    }
+    if (error instanceof CommandOutputTooLarge) {
+      throw new Error(`${command} process-table probe exceeded output limit`, { cause: error });
+    }
+    throw error;
+  }
+  if (result.code !== 0) {
+    const stderr = result.stderr.slice(0, MAX_PROBE_STDERR_CHARS).trim();
+    throw new Error(`${command} process-table probe exited with ${result.code}: ${stderr}`);
+  }
+  return result.stdout;
 }
 
 function parseNonNegativeInteger(value: string | undefined): number | null {

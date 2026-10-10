@@ -21,10 +21,9 @@
   commands, join teardown. Never restart SpringBoard. Prewarm failure preserves video.
 - `device-controls.ts` maps the shared control union to fixed loopback routes. Text
   uses `host-controls.ts` to write the device clipboard, then sends acknowledged Cmd-V.
-  The IPC worker directly owns fixed simctl/devicectl commands for text, appearance,
+  The IPC worker owns fixed simctl/devicectl commands for text, appearance,
   shake and deep links; abort joins child close before release. Do not delegate these to
-  Baguette's Foundation.Process paths: those children create separate process groups
-  and can outlive the native server. Control bodies/errors never enter logs or RPC.
+  Baguette's subprocess paths: they can outlive the native server. Control bodies/errors never enter logs or RPC.
   iPhone/iPad preparation disables device-local `AutomaticMinimizationEnabled` and
   notifies keyboard preferences so the guest software keyboard remains available.
   Never rewrite host-global Simulator preferences or reboot to change keyboards.
@@ -74,6 +73,7 @@
   release; the gateway validates start band and rejects mid-gesture edge changes.
   Authenticated init chooses mobile upright or desktop-following display rotation;
   layout/input/capture share that angle, independent of native rotation.
+- Use `@lody/shared/node/process`; keep EOF release and join bounded tree cleanup.
 - `baguette-worker.ts` owns the native process through an IPC lease. Owner loss must
   reap it and join pending host controls; never terminate the worker as normal cleanup. All build compositions emit
   the same sibling worker entry. No user simulator is shut down during cleanup.
@@ -88,7 +88,7 @@
   key. Never put a viewer URL in workspace-readable Streams. Revocation fences proof
   verification as well as startup; owner/machine reassignment closes existing viewers.
   Browser and Simulator have independent service/proxy owners and share only transport
-  primitives. There is no simulator sharing route or anonymous viewer grant.
+  primitives. No simulator sharing or anonymous viewer grant.
 - One operation owns one native process and gateway, with lazy local and remote
   endpoints. Return only the requesting plane's URL/status, including while connecting.
   The remote gateway path selects remote flow budgets without reinitializing controls.

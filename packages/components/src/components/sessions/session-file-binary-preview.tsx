@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { getImageMimeTypeForPath } from '@/lib/image-file-preview';
 import { isPdfFilePath } from '@/lib/pdf-file-preview';
 import { getOfficePreviewKind } from '@/lib/session-file-office-source';
+import { getVideoMimeTypeForPath } from '@/lib/video-file-preview';
+import { SessionFileVideoPreview } from './session-file-video-preview';
 import { SessionFileImagePreview } from './session-file-image-preview';
 import { SessionFileOfficePreview } from './session-file-office-preview';
 import { SessionFilePdfPreview } from './session-file-pdf-preview';
@@ -18,7 +20,7 @@ interface SessionFileBinaryPreviewProps {
 }
 
 /**
- * Renders a binary Code Collab file. Images, PDFs, and modern Office files open inline;
+ * Renders a binary Code Collab file. Images, videos, PDFs, and modern Office files open inline;
  * everything else offers local system actions when available. Render-only:
  * binary bytes and resource URLs come from the file-content snapshot.
  */
@@ -31,6 +33,18 @@ export const SessionFileBinaryPreview = memo(function SessionFileBinaryPreview({
 }: SessionFileBinaryPreviewProps) {
   const { t } = useTranslation();
   const officeKind = getOfficePreviewKind(path);
+
+  if (getVideoMimeTypeForPath(path) && (url || bytes !== undefined)) {
+    return (
+      <SessionFileVideoPreview
+        path={path}
+        bytes={bytes}
+        url={url}
+        active={active}
+        fileActions={fileActions}
+      />
+    );
+  }
 
   if (isPdfFilePath(path) && (url || bytes !== undefined)) {
     return (

@@ -26,9 +26,11 @@ import type {
   ScheduleRegistryRow,
   ScheduleRuntimeRow,
 } from '@lody/shared';
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useState, type ReactNode } from 'react';
+import { createStore, Provider } from 'jotai';
 import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
+import { sidebarCollapsedAtom } from '../atoms/sidebar-state';
 
 /** Frozen clock so "Next run" and the editor preview never drift. */
 const NOW = Date.parse('2026-09-06T09:12:00+08:00');
@@ -167,7 +169,66 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+function CollapsedSidebar({ children }: { children: ReactNode }) {
+  const [store] = useState(() => {
+    const next = createStore();
+    next.set(sidebarCollapsedAtom, true);
+    return next;
+  });
+  return <Provider store={store}>{children}</Provider>;
+}
+
+function MacElectronCollapsedSidebar({ children }: { children: ReactNode }) {
+  const [store] = useState(() => {
+    window.__LODY_ELECTRON__ = true;
+    window.__LODY_PLATFORM__ = {
+      os: 'darwin',
+      homeDir: '/Users/story',
+      machineName: 'storybook',
+    };
+    const next = createStore();
+    next.set(sidebarCollapsedAtom, true);
+    return next;
+  });
+  useLayoutEffect(
+    () => () => {
+      delete window.__LODY_ELECTRON__;
+      delete window.__LODY_PLATFORM__;
+    },
+    []
+  );
+  return (
+    <Provider store={store}>
+      <div className="relative h-dvh bg-background text-foreground">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute top-[16px] left-[16px] z-30 flex gap-2"
+        >
+          <span className="size-[14px] rounded-full bg-[#ff5f57]" />
+          <span className="size-[14px] rounded-full bg-[#febc2e]" />
+          <span className="size-[14px] rounded-full bg-[#28c840]" />
+        </div>
+        {children}
+      </div>
+    </Provider>
+  );
+}
+
 export const List: Story = {};
+export const SidebarHidden: Story = {
+  render: (args) => (
+    <CollapsedSidebar>
+      <ScheduleListView {...args} />
+    </CollapsedSidebar>
+  ),
+};
+export const SidebarHiddenBesideTrafficLights: Story = {
+  render: (args) => (
+    <MacElectronCollapsedSidebar>
+      <ScheduleListView {...args} />
+    </MacElectronCollapsedSidebar>
+  ),
+};
 export const Narrow: Story = {
   parameters: { viewport: { defaultViewport: 'mobile1' } },
 };

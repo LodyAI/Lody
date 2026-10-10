@@ -2,6 +2,18 @@
 
 Lody desktop application built with Electron, React, and TypeScript.
 
+The desktop pins Electron 44.7.0 and requires macOS 13 or newer on Mac.
+This runtime is compatible with the pinned DeepSeek Harness native loader;
+see the [runtime compatibility decision](../../.agents/notes/implemented/bug-fix/2026-10-10-dsh-electron-runtime.md).
+
+## Conversation links
+
+All versions generate `lody://session/<id>?workspace=<id>`. In-app links stay in
+the current installation; external links use the OS default selected in Settings →
+About. Startup does not replace an existing default; packaged Windows fills an absent handler after first launch. Version-specific schemes remain for
+explicit handoff and login callbacks. The shared packaging hook advertises both
+resource and callback protocols; see the [deep-link contract](../../specs/deep-links.md).
+
 ## Recommended IDE Setup
 
 - [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Oxc](https://marketplace.visualstudio.com/items?itemName=oxc.oxc-vscode)
@@ -39,6 +51,10 @@ subscribe to revisioned login snapshots. Organization hydration is separately
 retryable and cannot sign the user out. See the
 [login contract](../../specs/desktop-browser-login.md) and
 [decision](../../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.md).
+
+Main authentication requests use Chromium networking after app readiness, retaining
+Better Auth's credential storage hooks and cancellation. Certificate failures explain
+which clock, network, or trust settings to check before starting a fresh attempt.
 
 ### Desktop performance bar
 

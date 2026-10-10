@@ -24,7 +24,7 @@ import { getMemoryPressureSnapshot } from '@/utils/memory';
 const mockedGetMemoryPressureSnapshot = vi.mocked(getMemoryPressureSnapshot);
 
 describe('SessionGCManager', () => {
-  let cleanMock: ReturnType<typeof vi.fn>;
+  let cleanMock: ReturnType<typeof vi.fn<(sessionId: SessionId) => Promise<void>>>;
   let loggerMock: {
     info: ReturnType<typeof vi.fn>;
     debug: ReturnType<typeof vi.fn>;
@@ -42,7 +42,7 @@ describe('SessionGCManager', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     sleepCalls = [];
-    cleanMock = vi.fn().mockResolvedValue(undefined);
+    cleanMock = vi.fn<(sessionId: SessionId) => Promise<void>>().mockResolvedValue(undefined);
     loggerMock = {
       info: vi.fn(),
       debug: vi.fn(),

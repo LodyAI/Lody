@@ -111,3 +111,8 @@ tuning shortcut are in [`README.md`](README.md).
   [standalone replica note](../.agents/notes/implemented/architecture/2026-09-24-landing-standalone-product-replica.md).
 - Keep `next-themes` as a direct dependency (fumadocs re-exports `useTheme`
   from it; bare transitive resolution fails under pnpm).
+- Docs pages follow the same boundary for previews in `components/docs-replica/`:
+  display-only, synthetic mock data plus the page locale, no app or network
+  imports, and fully rendered in the prerendered HTML. Register the component in
+  `components/mdx.tsx`; rationale:
+  [docs preview note](../.agents/notes/proposed/feature/2026-10-06-docs-embedded-product-previews.md).

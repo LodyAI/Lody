@@ -3,6 +3,7 @@ productName: Lody OSS
 protocols:
   - name: Lody OSS Desktop
     schemes:
+      - lody
       - lody-oss
 directories:
   buildResources: build

@@ -17,6 +17,7 @@ import {
 } from '@lody/shared';
 import {
   isConfigOptionValueValid,
+  type AcpConfigOptionSelector,
   type AcpSelectorOptions,
 } from '@/components/shared/acp-selector-options';
 
@@ -239,6 +240,19 @@ export const applyAgentRoleRunConfigDefaults = (
   }
   return { ...value, modelId, modeId, configOptionValues };
 };
+
+export const carryAgentRoleOptionsToModel = (
+  values: AgentRoleFormValue['configOptionValues'],
+  outgoing: readonly AcpConfigOptionSelector[],
+  incoming: readonly AcpConfigOptionSelector[]
+): AgentRoleFormValue['configOptionValues'] =>
+  Object.fromEntries(
+    Object.entries(values).filter(([configId, value]) => {
+      if (!outgoing.some((selector) => selector.configId === configId)) return true;
+      const next = incoming.find((selector) => selector.configId === configId);
+      return next !== undefined && isConfigOptionValueValid(next, value);
+    })
+  );
 
 // ---------------------------------------------------------------------------
 // Capability compatibility

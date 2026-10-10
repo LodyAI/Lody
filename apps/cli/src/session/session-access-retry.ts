@@ -184,11 +184,11 @@ export interface AccessRetryOptions {
   /** Consecutive auth-cause failures before escalating. Default 5. */
   readonly escalateAfter?: number;
   /** First backoff delay. Default 2s. */
-  readonly baseDelay?: Duration.DurationInput;
+  readonly baseDelay?: Duration.Input;
   /** Backoff cap. Default 1m. */
-  readonly maxDelay?: Duration.DurationInput;
+  readonly maxDelay?: Duration.Input;
   /** Per-attempt timeout for the verify call. Default 10s. */
-  readonly verifyTimeout?: Duration.DurationInput;
+  readonly verifyTimeout?: Duration.Input;
   /**
    * Add randomness to delays (anti-thundering-herd). Default true; tests set
    * false for exact, deterministic timing under TestClock.
@@ -225,7 +225,7 @@ export const verifyMachineAccessWithRetry = (
     }).pipe(
       Effect.timeout(opts.verifyTimeout ?? Duration.seconds(10)),
       // A hung verify is just another transient failure → retry.
-      Effect.catchTag('TimeoutException', () =>
+      Effect.catchTag('TimeoutError', () =>
         Effect.fail(new AccessIndeterminate({ cause: 'network', error: 'verify timed out' }))
       ),
       Effect.flatMap((verification): Effect.Effect<void, AccessDenied | AccessIndeterminate> => {
@@ -252,18 +252,19 @@ export const verifyMachineAccessWithRetry = (
       )
     );
 
-    const cappedBackoff = Schedule.union(
+    const cappedBackoff = Schedule.min([
       Schedule.exponential(opts.baseDelay ?? Duration.seconds(2)),
-      // union takes the SHORTER delay, so once the exponential exceeds this it
+      // min takes the SHORTER delay, so once the exponential exceeds this it
       // settles into a steady interval — i.e. a cap.
-      Schedule.spaced(opts.maxDelay ?? Duration.minutes(1))
-    );
+      Schedule.spaced(opts.maxDelay ?? Duration.minutes(1)),
+    ]);
     const jittered = opts.jitter === false ? cappedBackoff : Schedule.jittered(cappedBackoff);
     // Retry while the failure is indeterminate; a definitive AccessDenied makes
-    // `whileInput` false, which stops the schedule and propagates the denial.
-    const policy = Schedule.whileInput(
+    // `while` false, which stops the schedule and propagates the denial.
+    const policy = Schedule.while(
       jittered,
-      (error: AccessDenied | AccessIndeterminate) => error._tag === 'AccessIndeterminate'
+      ({ input }: { input: AccessDenied | AccessIndeterminate }) =>
+        input._tag === 'AccessIndeterminate'
     );
 
     yield* Effect.retry(attempt, policy).pipe(

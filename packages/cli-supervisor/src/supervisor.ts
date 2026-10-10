@@ -1,5 +1,13 @@
 import type { ChildProcess } from 'node:child_process';
+import { Effect } from 'effect';
 import type { CliRuntimeState } from '@lody/shared/electron-ipc';
+import {
+  childProcessTree,
+  hasExited,
+  makeProcessRunnerLegacy,
+  terminateChildTreeLegacy,
+  type ProcessFacadeOptions,
+} from '@lody/shared/node/process';
 import { buildRetryDelay, FailureWindow, isAlreadyRunningOutcome } from './retry.js';
 import type {
   CliRunResult,
@@ -38,7 +46,7 @@ type ActiveRun = {
 };
 
 function isChildProcessRunning(child: ChildProcess | null): boolean {
-  return child !== null && child.exitCode === null && child.signalCode === null;
+  return child !== null && !hasExited(child);
 }
 
 function runtimeMatchesHost(runtime: CliRuntimeState, host: SupervisorHostIdentity): boolean {
@@ -76,6 +84,7 @@ export class CliSupervisor {
   private readonly healthyRunMs: number;
   private readonly failureWindow: FailureWindow;
   private readonly oomFailureWindow: FailureWindow;
+  private readonly processOptions: ProcessFacadeOptions;
 
   private desiredState: 'running' | 'stopped' = 'stopped';
   private probeOnly = false;
@@ -133,6 +142,7 @@ export class CliSupervisor {
       options.fatalOomWindowMs ?? DEFAULT_FATAL_OOM_WINDOW_MS,
       options.fatalOomThreshold ?? DEFAULT_FATAL_OOM_THRESHOLD
     );
+    this.processOptions = options.processOptions ?? {};
   }
 
   getState(): SupervisorState {
@@ -594,53 +604,102 @@ export class CliSupervisor {
     this.clearHealthyRunTimer();
     this.lastStateMessage = reason;
     this.publishState();
-    this.requestGracefulShutdown(run);
+    const graceDelivered = this.requestGracefulShutdown(run);
 
-    let result = await this.waitForRun(run, graceMs);
+    let result = await this.waitForRun(run, graceMs, graceDelivered);
+    let killFailure: string | null = null;
     if (!result) {
       this.lastStateMessage = `${reason}; forcing CLI process to exit`;
       this.publishState();
-      this.signalChild(run.handle.child, 'SIGKILL');
-      result = await this.waitForRun(run, this.forceKillWaitMs);
-      if (!result) {
-        const message = `CLI process ${run.handle.child.pid ?? 'unknown'} did not exit after SIGKILL`;
-        this.fatalReason = message;
-        this.lastStateMessage = message;
-        this.publishState();
-        throw new Error(message);
-      }
+      [result, killFailure] = await Promise.all([
+        this.waitForRun(run, this.forceKillWaitMs),
+        this.forceKill(run),
+      ]);
     }
 
-    if (this.activeRun === run) this.activeRun = null;
-    this.latestRuntimeState = null;
-    this.lastExitCode = result.code;
-    this.lastExitAtMs = Date.now();
+    if (result) {
+      if (this.activeRun === run) this.activeRun = null;
+      this.latestRuntimeState = null;
+      this.lastExitCode = result.code;
+      this.lastExitAtMs = Date.now();
+    }
+    if (!result || killFailure) {
+      const message = `CLI process ${run.handle.child.pid ?? 'unknown'} did not exit after SIGKILL${
+        killFailure ? `: ${killFailure}` : ''
+      }`;
+      this.fatalReason = message;
+      this.lastStateMessage = message;
+      this.publishState();
+      throw new Error(message);
+    }
   }
 
-  private requestGracefulShutdown(run: ActiveRun): void {
-    if (run.handle.requestShutdown) {
+  /**
+   * Ask the child to drain: the cross-platform shutdown channel first, SIGTERM
+   * to its tree when there is none or it fails. Resolves false when no graceful
+   * request could be delivered at all, so the caller escalates at once instead
+   * of waiting out a grace period nothing is using.
+   */
+  private async requestGracefulShutdown(run: ActiveRun): Promise<boolean> {
+    const { requestShutdown } = run.handle;
+    if (requestShutdown) {
       try {
-        void Promise.resolve(run.handle.requestShutdown()).catch(() => {
-          this.signalChild(run.handle.child, 'SIGTERM');
-        });
-        return;
+        await requestShutdown();
+        return true;
       } catch {
         // Fall through to the OS signal fallback.
       }
     }
-    this.signalChild(run.handle.child, 'SIGTERM');
+    return await this.signalTerminate(run);
   }
 
-  private signalChild(child: ChildProcess, signal: NodeJS.Signals): void {
-    if (!isChildProcessRunning(child)) return;
+  private async signalTerminate(run: ActiveRun): Promise<boolean> {
     try {
-      child.kill(signal);
+      await makeProcessRunnerLegacy(this.processOptions)(
+        Effect.flatMap(
+          childProcessTree(run.handle.child, { processGroup: run.handle.processGroup ?? false }),
+          (tree) => tree.signal('SIGTERM')
+        )
+      );
+      return true;
     } catch {
-      // The exit promise is authoritative; timeout escalation reports failure.
+      // Undeliverable SIGTERM: end the grace period; force-kill reports failure.
+      return false;
     }
   }
 
-  private async waitForRun(run: ActiveRun, timeoutMs: number): Promise<CliRunResult | null> {
+  /**
+   * SIGKILL the child's whole tree and wait, bounded, until it is gone.
+   * Resolves with why the tree could not be proven gone, or null.
+   */
+  private async forceKill(run: ActiveRun): Promise<string | null> {
+    try {
+      await terminateChildTreeLegacy(
+        run.handle.child,
+        {
+          graceMs: 0,
+          killWaitMs: this.forceKillWaitMs,
+          processGroup: run.handle.processGroup ?? false,
+        },
+        this.processOptions
+      );
+      return null;
+    } catch (error) {
+      return this.formatError(error);
+    }
+  }
+
+  /**
+   * The run's result within `timeoutMs`, or null. A `graceDelivered` that
+   * resolves false ends the wait early. Every promise raced here settles, so
+   * no reaction outlives the call (a shared never-settling promise would keep
+   * each run's result alive for the life of the process).
+   */
+  private async waitForRun(
+    run: ActiveRun,
+    timeoutMs: number,
+    graceDelivered?: Promise<boolean>
+  ): Promise<CliRunResult | null> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
@@ -648,6 +707,9 @@ export class CliSupervisor {
         new Promise<null>((resolve) => {
           timeout = setTimeout(() => resolve(null), timeoutMs);
           timeout.unref?.();
+          void graceDelivered?.then((delivered) => {
+            if (!delivered) resolve(null);
+          });
         }),
       ]);
     } finally {

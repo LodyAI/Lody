@@ -673,6 +673,49 @@ describe('hidden viewport', () => {
 });
 
 describe('momentum diagnostics', () => {
+  it.each(['scroll', 'resize'])(
+    'keeps an upward fling whose first %s arrives after touchend',
+    (delivery) => {
+      const rows = turnRows(
+        40,
+        () => 100,
+        () => 100
+      );
+      const sim = new ScrollSim(rows, V);
+      sim.render();
+      sim.settle();
+      const bottom = sim.readScrollTop();
+      sim.controller.setTouchActive(true);
+      sim.controller.setTouchActive(false);
+      sim.nativeScroll(bottom - 60);
+      if (delivery === 'resize') {
+        sim.rows[39]!.height += 40;
+        sim.task(() => sim.controller.onRowsResized([{ key: 't39', height: 140 }]));
+      }
+      sim.settle();
+      expect(sim.controller.mode).toBe('read');
+      expect(sim.readScrollTop()).toBe(bottom - 60);
+
+      for (let step = 1; step <= 4; step++) {
+        sim.nativeScroll(bottom - 60 - step * 12);
+        sim.settle();
+        expect(sim.readScrollTop()).toBe(bottom - 60 - step * 12);
+        expectHealthy(sim);
+      }
+      const reading = sim.readScrollTop();
+      sim.rows[39]!.height += 50;
+      sim.settle();
+      expect(sim.readScrollTop()).toBe(reading);
+      sim.task(() => sim.controller.onScrollEnd());
+      sim.task(() => sim.controller.scrollToBottom());
+      sim.settle();
+      sim.nativeScroll(sim.maxTop() - 60);
+      sim.settle();
+      expect(sim.controller.mode).toBe('follow');
+      expect(sim.readScrollTop()).toBe(sim.maxTop());
+    }
+  );
+
   it('counts compensations during a touch fling and which of them ended it', () => {
     let rows = turnRows(
       80,

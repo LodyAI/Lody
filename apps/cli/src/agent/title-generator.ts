@@ -1,8 +1,7 @@
-import { execFile } from 'child_process';
+import { toShared } from '@/platform/process-options';
 import path from 'path';
 import os from 'os';
 import * as fs from 'fs';
-import { promisify } from 'util';
 
 import {
   type AcpSessionNotification,
@@ -29,11 +28,12 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { extractTextFromAgentResponse } from './response-utils';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { normalizeConfigOptions } from './acp-capabilities';
 import { readLegacySessionModelState } from './acp-capability-normalization';
 import { parseLodyMessagePhase } from './lody-acp-extension';
 
-const execFileAsync = promisify(execFile);
 const TITLE_GIT_TIMEOUT_MS = 5_000;
 export const TITLE_TASK_PROMPT_MAX_CHARS = 4_000;
 
@@ -235,12 +235,17 @@ export const sanitizeGeneratedTitle = (candidate?: string | null): string | null
 const ensureWorkdirIsGitRepo = async (workdir: string, logger: Logger): Promise<boolean> => {
   const isGitRepo = async (): Promise<boolean> => {
     try {
-      const result = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
-        cwd: workdir,
-        encoding: 'utf8',
-        timeout: TITLE_GIT_TIMEOUT_MS,
-      });
-      return String(result.stdout ?? '').trim() === 'true';
+      const result = await runCommandTextLegacy(
+        {
+          command: 'git',
+          args: ['rev-parse', '--is-inside-work-tree'],
+          cwd: workdir,
+          timeout: TITLE_GIT_TIMEOUT_MS,
+          check: 'exit-0',
+        },
+        toShared()
+      );
+      return result.stdout.trim() === 'true';
     } catch {
       return false;
     }
@@ -251,11 +256,16 @@ const ensureWorkdirIsGitRepo = async (workdir: string, logger: Logger): Promise<
   }
 
   try {
-    await execFileAsync('git', ['init', '--quiet'], {
-      cwd: workdir,
-      encoding: 'utf8',
-      timeout: TITLE_GIT_TIMEOUT_MS,
-    });
+    await runCommandTextLegacy(
+      {
+        command: 'git',
+        args: ['init', '--quiet'],
+        cwd: workdir,
+        timeout: TITLE_GIT_TIMEOUT_MS,
+        check: 'exit-0',
+      },
+      toShared()
+    );
   } catch (error) {
     logger.debug(
       `[title-generator] Failed to init git repo in ${workdir}: ${formatErrorMessage(error)}`
