@@ -2,7 +2,11 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Effect } from 'effect';
+import { Effect, ManagedRuntime } from 'effect';
+import { fileLockLayer, type FileLocks } from '@/utils/file-lock';
+
+let runtime: ManagedRuntime.ManagedRuntime<FileLocks, never>;
+const runCatalog = <A, E>(effect: Effect.Effect<A, E, FileLocks>) => runtime.runPromise(effect);
 import {
   localCatalogWorkspaceToWorkspaceListItem,
   makeLocalWorkspaceCatalog,
@@ -22,10 +26,12 @@ const makeCatalog = () => {
 
 describe('LocalWorkspaceCatalog', () => {
   beforeEach(async () => {
+    runtime = ManagedRuntime.make(fileLockLayer);
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-local-catalog-'));
   });
 
   afterEach(async () => {
+    await runtime.dispose();
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true });
       tempDir = undefined;
@@ -35,7 +41,7 @@ describe('LocalWorkspaceCatalog', () => {
   it('treats a missing catalog as empty', async () => {
     const catalog = makeCatalog();
 
-    await expect(Effect.runPromise(catalog.read())).resolves.toEqual({
+    await expect(runCatalog(catalog.read())).resolves.toEqual({
       version: 1,
       identity: null,
       machine: null,
@@ -46,7 +52,7 @@ describe('LocalWorkspaceCatalog', () => {
 
   it('caches remote workspaces and marks omitted workspaces as remote_missing', async () => {
     const catalog = makeCatalog();
-    await Effect.runPromise(
+    await runCatalog(
       catalog.cacheRemoteWorkspaces({
         identity: { userId: 'user-1', email: 'user@example.com', name: 'User One' },
         machine: { machineId: 'machine-1', machineName: 'host' },
@@ -57,7 +63,7 @@ describe('LocalWorkspaceCatalog', () => {
       })
     );
 
-    await Effect.runPromise(
+    await runCatalog(
       catalog.cacheRemoteWorkspaces({
         identity: { userId: 'user-1', email: 'user@example.com', name: 'User One' },
         machine: { machineId: 'machine-1', machineName: 'host' },
@@ -65,7 +71,7 @@ describe('LocalWorkspaceCatalog', () => {
       })
     );
 
-    const snapshot = await Effect.runPromise(catalog.read());
+    const snapshot = await runCatalog(catalog.read());
     expect(snapshot.workspaces).toHaveLength(2);
     expect(
       snapshot.workspaces.find((workspace) => workspace.workspaceId === 'workspace-2')
@@ -81,7 +87,7 @@ describe('LocalWorkspaceCatalog', () => {
       state: 'remote_missing',
     });
 
-    const active = await Effect.runPromise(catalog.listActiveWorkspaces());
+    const active = await runCatalog(catalog.listActiveWorkspaces());
     expect(active.map(localCatalogWorkspaceToWorkspaceListItem)).toEqual([
       { id: 'workspace-2', name: 'Beta', slug: null, role: 'admin' },
     ]);
@@ -89,14 +95,14 @@ describe('LocalWorkspaceCatalog', () => {
 
   it('records workspace access snapshots and preserves them across remote refreshes', async () => {
     const catalog = makeCatalog();
-    await Effect.runPromise(
+    await runCatalog(
       catalog.cacheRemoteWorkspaces({
         identity: { userId: 'user-1' },
         machine: { machineId: 'machine-1', machineName: 'host' },
         workspaces: [{ id: 'workspace-1', name: 'Alpha', slug: 'alpha', role: 'owner' }],
       })
     );
-    await Effect.runPromise(
+    await runCatalog(
       catalog.recordWorkspaceAccessSnapshot({
         workspaceId: 'workspace-1',
         accessSnapshot: {
@@ -105,7 +111,7 @@ describe('LocalWorkspaceCatalog', () => {
         },
       })
     );
-    await Effect.runPromise(
+    await runCatalog(
       catalog.cacheRemoteWorkspaces({
         identity: { userId: 'user-1' },
         machine: { machineId: 'machine-1', machineName: 'host' },
@@ -113,7 +119,7 @@ describe('LocalWorkspaceCatalog', () => {
       })
     );
 
-    const active = (await Effect.runPromise(catalog.read())).workspaces.find(
+    const active = (await runCatalog(catalog.read())).workspaces.find(
       (workspace) => workspace.workspaceId === 'workspace-1'
     );
     expect(active).toMatchObject({
@@ -125,14 +131,14 @@ describe('LocalWorkspaceCatalog', () => {
       },
     });
 
-    await Effect.runPromise(
+    await runCatalog(
       catalog.cacheRemoteWorkspaces({
         identity: { userId: 'user-1' },
         machine: { machineId: 'machine-1', machineName: 'host' },
         workspaces: [],
       })
     );
-    const missing = (await Effect.runPromise(catalog.read())).workspaces.find(
+    const missing = (await runCatalog(catalog.read())).workspaces.find(
       (workspace) => workspace.workspaceId === 'workspace-1'
     );
     expect(missing).toMatchObject({
@@ -145,24 +151,24 @@ describe('LocalWorkspaceCatalog', () => {
 
   it('clears a cached allow when recordWorkspaceAccessSnapshot is called with null', async () => {
     const catalog = makeCatalog();
-    await Effect.runPromise(
+    await runCatalog(
       catalog.cacheRemoteWorkspaces({
         identity: { userId: 'user-1' },
         machine: { machineId: 'machine-1', machineName: 'host' },
         workspaces: [{ id: 'workspace-1', name: 'Alpha', slug: 'alpha', role: 'owner' }],
       })
     );
-    await Effect.runPromise(
+    await runCatalog(
       catalog.recordWorkspaceAccessSnapshot({
         workspaceId: 'workspace-1',
         accessSnapshot: { ownerUserId: 'user-1', verifiedAt: '2026-07-02T00:00:00.000Z' },
       })
     );
-    await Effect.runPromise(
+    await runCatalog(
       catalog.recordWorkspaceAccessSnapshot({ workspaceId: 'workspace-1', accessSnapshot: null })
     );
 
-    const workspace = (await Effect.runPromise(catalog.read())).workspaces.find(
+    const workspace = (await runCatalog(catalog.read())).workspaces.find(
       (item) => item.workspaceId === 'workspace-1'
     );
     expect(workspace?.accessSnapshot).toBeUndefined();
@@ -176,7 +182,7 @@ describe('LocalWorkspaceCatalog', () => {
     await fs.writeFile(filePath, '{not-json', 'utf8');
 
     const catalog = makeCatalog();
-    await expect(Effect.runPromise(catalog.read())).resolves.toMatchObject({
+    await expect(runCatalog(catalog.read())).resolves.toMatchObject({
       version: 1,
       workspaces: [],
     });
@@ -191,7 +197,7 @@ describe('LocalWorkspaceCatalog', () => {
 
     await Promise.all(
       ['session-1', 'session-2', 'session-3'].map((sessionId) =>
-        Effect.runPromise(
+        runCatalog(
           catalog.upsertSession({
             sessionId,
             workspaceId: 'workspace-1',
@@ -202,7 +208,7 @@ describe('LocalWorkspaceCatalog', () => {
       )
     );
 
-    const snapshot = await Effect.runPromise(catalog.read());
+    const snapshot = await runCatalog(catalog.read());
     expect(snapshot.sessions.map((session) => session.sessionId).sort()).toEqual([
       'session-1',
       'session-2',
@@ -221,10 +227,10 @@ describe('LocalWorkspaceCatalog', () => {
       cacheTtlMs: 60_000,
     });
 
-    await expect(Effect.runPromise(catalog.read())).resolves.toMatchObject({ version: 1 });
+    await expect(runCatalog(catalog.read())).resolves.toMatchObject({ version: 1 });
     await fs.writeFile(filePath, '{invalid-after-cache-warm', 'utf8');
 
-    await expect(Effect.runPromise(catalog.read())).resolves.toMatchObject({ version: 1 });
+    await expect(runCatalog(catalog.read())).resolves.toMatchObject({ version: 1 });
     expect((await fs.readdir(tempDir)).some((entry) => entry.includes('.corrupt-'))).toBe(false);
   });
 
@@ -240,7 +246,7 @@ describe('LocalWorkspaceCatalog', () => {
       cacheTtlMs: 10,
       now: () => now,
     });
-    await Effect.runPromise(
+    await runCatalog(
       catalog.cacheRemoteWorkspaces({
         identity: { userId: 'user-1' },
         machine: { machineId: 'machine-1' },
@@ -269,10 +275,10 @@ describe('LocalWorkspaceCatalog', () => {
     );
 
     now = 11;
-    const stale = await Effect.runPromise(catalog.read());
+    const stale = await runCatalog(catalog.read());
     expect(stale.workspaces[0]?.name).toBe('Alpha');
     await vi.waitFor(async () => {
-      const refreshed = await Effect.runPromise(catalog.read());
+      const refreshed = await runCatalog(catalog.read());
       expect(refreshed.workspaces[0]?.name).toBe('Alpha Updated');
     });
   });

@@ -1,3 +1,4 @@
+import { fileLocksLegacy } from '@/utils/file-lock';
 import {
   SessionAttachmentTransfer,
   type UploadableImageFile,
@@ -18,7 +19,6 @@ import crypto from 'crypto';
 import { pathToFileURL } from 'url';
 
 import { v4 as uuidV4 } from 'uuid';
-import { Effect } from 'effect';
 import {
   createLoroStreamsJsonStreamClient,
   LoroStreamsMachineRpcServer,
@@ -236,7 +236,7 @@ import {
   ensureAttachmentsGitExcluded,
 } from '@/lib/session-file-attachments';
 import { deriveRepoIdFromGitHubRepo } from '@/utils/github';
-import { getLocalProjectGitStateAtRootPath } from '@lody/shared/node/local-project';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
@@ -2418,7 +2418,7 @@ export class MessageHandler {
     }
 
     try {
-      const state = await getLocalProjectGitStateAtRootPath(rootPath);
+      const state = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
       return {
         type: 'local-project/git-state_response',
         machineId: this.machineId,
@@ -5669,7 +5669,7 @@ export class MessageHandler {
   private async recordWorkspaceAccessSnapshot(
     accessSnapshot: LocalCatalogAccessSnapshot | null
   ): Promise<void> {
-    await Effect.runPromise(
+    await fileLocksLegacy.runPromise(
       this.localWorkspaceCatalog.recordWorkspaceAccessSnapshot({
         workspaceId: this.workspaceId,
         accessSnapshot,

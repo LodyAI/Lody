@@ -19,10 +19,6 @@ import { ensureGitHubGitTransport } from '@/lib/github-git-transport';
 import type { GitCredentialBrokerAuth } from './worktree-manager';
 import { isGitExecutableNotFoundError } from './git-process-error';
 
-vi.mock('@/utils/file-lock', () => ({
-  withFileLock: async <T>(_name: string, fn: () => Promise<T>): Promise<T> => fn(),
-}));
-
 type SpawnCall = { command: string; args: readonly string[]; options: SpawnOptions };
 type SpawnImpl = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 
@@ -578,6 +574,67 @@ process.exit(result.status ?? 1);
     );
 
     expect(isGitExecutableNotFoundError(failure)).toBe(true);
+  });
+
+  it('routes native command diagnostics to the supplied logger sink', async () => {
+    const { WorktreeManager } = await import('./worktree-manager');
+    const logger = createLogger();
+    const messages: string[] = [];
+    logger.debug = (message) => {
+      messages.push(String(message));
+    };
+    const manager = new WorktreeManager({
+      repoId: REPO_ID,
+      repoUrl: REPO_URL,
+      logger,
+      nodeProcess,
+    });
+    await manager.ensureRepo();
+    expect(messages.some((message) => message.includes('Running git fetch origin --prune'))).toBe(
+      true
+    );
+  });
+
+  it.each(['remote', 'fetch', 'rev-parse'])(
+    'propagates %s infrastructure failure instead of best-effort success',
+    async (verb) => {
+      const normal = spawnImpl;
+      spawnImpl = (command, args, options) => {
+        if (args[0] !== verb) return normal(command, args, options);
+        const child = new EventEmitter();
+        queueMicrotask(() =>
+          child.emit('error', Object.assign(new Error('git access denied'), { code: 'EACCES' }))
+        );
+        return child as unknown as ChildProcess;
+      };
+      const manager = await newManager();
+      await expect(manager.ensureRepo()).rejects.toMatchObject({
+        _tag: 'WorktreeGitExecutionFailed',
+        cause: { _tag: 'SpawnFailed' },
+      });
+      expect(manager.hasWorktree('failed-fetch' as SessionId)).toBe(false);
+    }
+  );
+
+  it('force removal preserves files when Git cannot start', async () => {
+    const sessionId = 'preserved-on-failure' as SessionId;
+    const worktree = path.join(dataDir, 'repos', REPO_ID, 'worktrees', sessionId);
+    mkdirSync(worktree, { recursive: true });
+    writeFileSync(path.join(worktree, 'uncommitted.txt'), 'uncommitted fixture');
+    spawnImpl = () => {
+      const child = new EventEmitter();
+      queueMicrotask(() =>
+        child.emit('error', Object.assign(new Error('git unavailable'), { code: 'EACCES' }))
+      );
+      return child as unknown as ChildProcess;
+    };
+    const manager = await newManager();
+    await expect(manager.removeWorktree(sessionId, true)).rejects.toMatchObject({
+      _tag: 'WorktreeGitExecutionFailed',
+    });
+    expect(readFileSync(path.join(worktree, 'uncommitted.txt'), 'utf8')).toBe(
+      'uncommitted fixture'
+    );
   });
 
   it('uses native Git without installing managed credentials or borrowing an ambient broker', async () => {

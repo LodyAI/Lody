@@ -4,6 +4,14 @@ Binding rules live in [AGENTS.md](AGENTS.md) and in the scoped `AGENTS.md` of ea
 subdirectory; this file is the navigation index. Cross-module explanations live in
 [`.agents/docs/`](../../../../.agents/docs/AGENTS.md).
 
+## Local persistence
+
+- `local-workspace-catalog.ts` — cached workspace/identity discovery; mutations
+  compose native FileLocks and keep the file write inside its lease. Read-cache
+  refresh orchestration remains Promise-based. Existing application entrypoints
+  provide the lock through the shared `fileLocksLegacy` runtime until daemon
+  composition migrates.
+
 ## Resource discovery
 
 - `discovery-query.ts` — strict query schemas, scope-bound keyset pagination and
@@ -65,6 +73,12 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Projects and providers
 
+Local-project observation and branch commands use shared `LocalProjects` native
+Effect workflows through the visible `localProjectsLegacy` facade while these
+entrypoints remain Promise-based. Worktree setup/GC and Session lifecycle still
+need their own migration; the facade is removed once the application runtime
+provides LocalProjects. See the [decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-local-project-git.md).
+
 - `local-project-history-sync-service.ts` / `local-project-history-precheck.ts` —
   Provider-bound local-project ACP history catalogs, import and refresh. Catalogs
   separate configurations; legacy transcript identifiers remain stable.
@@ -84,9 +98,12 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   assistant models through shallow scalar/count reads of already-open documents.
   It compares current catalog metadata on each reconciliation so stale overwrites
   are repaired on the next history change or flush.
+  `streams-transport.ts` connects safe failure diagnostics to the existing logger;
+  it registers the typed error formatter without adding Repo/WASM imports to the
+  generic error utility used by standalone workers.
+  The [shared helper](../../../../packages/shared/src/loro-sync-errors/README.md)
+  owns the same safe projection used by renderer error details.
 - `pr-poller/` — PR discovery, lifecycle, CI rollup, and merge-state reconciliation
   ([AGENTS.md](pr-poller/AGENTS.md)).
-- `review-automation/` — "Auto review and merge"
-  ([AGENTS.md](review-automation/AGENTS.md)).
 - `analytics/`, `git/`, `notifications/`, `session-export/`, `usage/` — supporting
   services.

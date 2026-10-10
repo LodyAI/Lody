@@ -97,3 +97,23 @@ delegated cgroups, packaging or production validation. The earlier
 profile and local-wait behavior; [release-failure ownership](../bug-fix/2026-10-10-effect-process-release-failure.md)
 is a prerequisite for reliable failure projection. Runtime installers, startup gate,
 connection/session ownership and native application caches remain separate units.
+
+The review branch now follows the seven-unit linear stack recorded in the original
+roadmap. Its GitHub base is #1394; the native probe still depends only on process
+capabilities. The base order does not turn worktree preparation into a shell
+requirement. Updated prerequisites include lossless acquisition failures from
+#1379. The cached application lifecycle remains explicitly Legacy.
+
+The restacked integration passes all workspace typechecks and zero-error lint;
+format, format:check, Shared formatter checks, all five boundary guards and docs
+check pass. Shared passes 112 files / 1405 cases and Electron passes 215 cases.
+The shell/process suites pass 56 cases; corrected-env marker/cache/session suites
+pass 20 cases. Earlier global LODY_DATA_DIR validation settings bypassed HOME
+fixtures, causing a stale speculative marker and an installation-profile mismatch.
+Those failures are reproduced with that setting and disappear after removing it;
+only a task-owned LODY_LOCKS_DIR is now supplied. No product or fixture is changed
+to suppress them. Full validation remains non-green: the recorded stack-wide CLI
+run has 3697 passes, one skip, the Roost signed-prefix timeout and the now-explained
+marker failure. The complete CLI suite was not repeated after environment repair.
+This does not establish Windows/macOS, delegated cgroups, packaging or production
+behavior. No further migration unit is published with this stack integration.

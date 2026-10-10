@@ -24,8 +24,8 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import {
+  localProjectsLegacy,
   createLocalProjectBranchSelector,
-  normalizeLocalProjectRootPath,
 } from '@lody/shared/node/local-project';
 
 import type { MachineAccessCheckResult } from '@/lib/workspace';
@@ -1541,7 +1541,7 @@ describe('session command helpers', () => {
     const project = {
       id: 'local-project-1',
       name: 'lody',
-      rootPath: normalizeLocalProjectRootPath(process.cwd()),
+      rootPath: localProjectsLegacy.normalizeLocalProjectRootPath(process.cwd()),
     };
 
     expect(selectLocalProjectsBySelector([project], '.')).toEqual([project]);

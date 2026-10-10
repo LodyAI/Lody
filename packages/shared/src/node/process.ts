@@ -970,15 +970,21 @@ export const spawnProcess = (
 > =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const handle = yield* spawner
-      .spawn(processCommand(spec, releasePolicy))
-      .pipe(
-        Effect.mapError((error) =>
-          error.cause instanceof SpawnFailed
-            ? error.cause
-            : new SpawnFailed({ command: spec.command, message: error.message, cause: error.cause })
+    const handle = yield* spawner.spawn(processCommand(spec, releasePolicy)).pipe(
+      Effect.catchCause((cause) =>
+        Effect.failCause(
+          Cause.map(cause, (error) =>
+            error.cause instanceof SpawnFailed
+              ? error.cause
+              : new SpawnFailed({
+                  command: spec.command,
+                  message: error.message,
+                  cause: error.cause,
+                })
+          )
         )
-      );
+      )
+    );
     if (!(processDetails in handle))
       return yield* Effect.fail(
         new SpawnFailed({
@@ -1104,14 +1110,18 @@ export const runCommand = (
         true
       );
       const handle = yield* spawner.spawn(command).pipe(
-        Effect.mapError((error) =>
-          error.cause instanceof SpawnFailed
-            ? error.cause
-            : new SpawnFailed({
-                command: spec.command,
-                message: error.message,
-                cause: error.cause,
-              })
+        Effect.catchCause((cause) =>
+          Effect.failCause(
+            Cause.map(cause, (error) =>
+              error.cause instanceof SpawnFailed
+                ? error.cause
+                : new SpawnFailed({
+                    command: spec.command,
+                    message: error.message,
+                    cause: error.cause,
+                  })
+            )
+          )
         )
       );
       const collect = (stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>) =>

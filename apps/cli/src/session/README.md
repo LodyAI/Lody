@@ -67,6 +67,11 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 - `session-access-retry.ts` — remote machine access verification: bounded retries at command
   validation boundaries and interruptible unbounded retries for an already-durable dispatch.
 - `session-user-resolver.ts` + `git-identity.ts` — the requesting user's commit identity.
+- `worktree/git-execution.ts` — native WorktreeGit service: command Scope,
+  status/error distinction, environment/official filesystem and bounded helper probe.
+  `git-execution-legacy.ts` executes that kernel for the Promise manager; remove its
+  visible facade after the manager migrates. Infrastructure/release failure cannot
+  authorize fallback or force removal. Setup/GC ownership remains separate.
 - `worktree/` — repo checkouts, worktrees, branch allocation, setup scripts
   ([AGENTS.md](worktree/AGENTS.md)). `worktree-gc.ts` reconciles the Lody-managed
   worktree tree against Session state: archived or deleted root Sessions lose their
@@ -92,7 +97,7 @@ Fast-path turns that finish before their history entry syncs are reconciled by
 `lastMissingHistoryUserMsgId`, and a stale activation whose entry is already terminal is
 retired into `settledActivationUserMsgId`. Both slots retire an activation while deliberately
 leaving `latestUserMsgId` and `lastHandledUserMsgId` unequal, so a consumer that compares the
-two pointers itself sees pending work forever: auto review waits on a finished session, GC
+two pointers itself sees pending work forever: GC
 never reclaims it, MCP reports a phantom queued turn. That is why
 `hasPendingUserTurnActivation` in `@lody/shared` is the single answer, and why
 `packages/shared/tests/dispatch-activation-predicate.test.ts` fails on any new comparison.
@@ -377,3 +382,17 @@ The synthetic [history benchmark](../../benchmarks/roost-history.mts) exercises
 these production backends and the shared view; `BENCH_STRUCTURAL=1` also measures
 the complete directory and a guarded last-user edit. Its timing excludes renderer
 transport, IndexedDB and paint.
+
+Worktree observations use the native `WorktreeObservations` service: official
+filesystem, WorktreeGit and the existing FileLocks coordinator. The Promise manager
+executes them through `runObservationLegacy`; list/inspect own repo leases, while
+mutation information reads reuse the caller's lock. Missing and unborn state remain
+distinct from repository/infrastructure failures. See the
+[decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-worktree-observations.md).
+
+Local-shared `ensureRepo`/creation consumes `LocalWorktreePreparation`: source
+validation, directories and complete metadata publication use native FileSystem,
+WorktreeGit and Clock under the caller's existing repo lease. `runWorktreeLegacy`
+executes this and observation programs through the same FileLocks runtime; a failed
+metadata scratch release retains its path and bounded retry capability. Bare
+clone/fetch, full mutations and long-lived GC still require their own native owners.

@@ -5,6 +5,20 @@
 Node-only helpers shared by the CLI, the desktop main process and the CLI
 supervisor. Package rules: [shared](../../AGENTS.md).
 
+## Local-project Git (`local-project.ts`)
+
+- Native workflows require `LocalProjects`, provided by `LocalProjectsLive` with
+  filesystem paths, host environment and the official process spawner. Compose
+  their Effects directly; do not call a Promise facade from an Effect workflow.
+- Expected Git statuses may represent absence. Startup, deadline, corruption,
+  filesystem and release failures must remain observable; parallel probe failure
+  interrupts and joins its siblings. Preserve exact-ref and canonical project
+  identity behavior.
+- `localProjectsLegacy` is the single deprecated execution facade for remaining
+  CLI entrypoints. Keep Legacy visible in calls; remove it after those owners
+  receive the native service. Its synchronous path/identity methods remain
+  explicitly blocking. Worktree setup/GC still need their own lifecycle migration.
+
 ## Process layer (`process.ts`)
 
 The one implementation that starts, awaits and signals OS processes for the CLI,
@@ -44,6 +58,8 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   retain it until `isAlive` proves absence or `retryTermination` succeeds. Logging
   alone cannot turn that failure into success. Promise boundaries must use
   `squashProcessFailure` to preserve every lease alongside the primary failure.
+  Acquisition error conversions preserve the full Cause, including release
+  defects from the spawner's failed child Scope, before reaching that boundary.
 - Termination often runs in a finalizer, where nothing is interruptible: bound
   its waits by the clock (`waitUntilGone`), never by `timeout*` or a race.
 - Never signal a child without a pid (pid 0 is the caller's own group), and
@@ -60,3 +76,20 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   Promise door. Tests use `@effect/vitest` with `TestClock` and
   `process-testing.ts` (the fake process table); a real-process test waits on
   explicit readiness output, never on elapsed time.
+
+## File locks (`file-lock.ts`)
+
+- Native workflows compose `withFileLock` through one owner-provided `FileLocks`
+  service. Only unmigrated application entrypoints use `fileLocksLegacy`; keep
+  Legacy visible and never execute it inside a native Effect workflow.
+- Keep strict FIFO, fail-fast same-context reentry, profile paths and the deadline
+  that starts after local admission. A plain Semaphore does not preserve FIFO
+  on immediate reacquisition in 4.0.2. Use the owned Ref/Deferred handoff.
+- Publish complete metadata exclusively; register release before the body. Cancelled
+  tickets leave the queue immediately. Retain failed release generations, verify
+  pid plus token, and surface unreadable-lock/cleanup errors. Contract and limits:
+  [file lock lifecycle](../../../../specs/file-lock-lifecycle.md).
+
+The file-lock Legacy native-program boundary uses `squashProcessFailure` to retain
+process recovery leases alongside a body failure. Never discard them with a plain
+Cause projection.

@@ -73,3 +73,7 @@ format:check、所属源码/测试格式、开始 docs status 与结束 docs che
 [进程层原决定](2026-09-27-effect-process-tree-layer.zh.md) 记录兼容 profile/本地等待行为；
 [释放失败所有权](../bug-fix/2026-10-10-effect-process-release-failure.zh.md) 是失败投影的
 前置依赖。安装器、启动闸门、连接/会话拥有者与原生应用缓存仍是独立单元。
+
+评审分支现遵循原路线图记录的七单元线性 stack，GitHub base 为 #1394；原生探测仍只依赖进程能力，评审顺序不把 worktree 准备变成 shell 依赖。更新的前置包含 #1379 对获取失败完整原因的保留；应用缓存生命周期仍明确为 Legacy。
+
+重新组成的 stack 通过全工作区类型检查及零错误 lint，format、format:check、额外 Shared 格式检查、全部五项边界守卫和 docs check 通过。Shared 112 个文件、1405 个用例及 Electron 215 个用例通过；shell/进程套件 56 个用例和修正环境后的 marker/缓存/Session 套件 20 个用例通过。此前验证统一设置 LODY_DATA_DIR，绕过 HOME fixture 隔离，造成旧 speculative marker 和 installation profile 不匹配；有该设置可复现，移除后消失。现在仅提供任务拥有的 LODY_LOCKS_DIR，没有修改产品或 fixture 压制失败。全仓验证仍非绿色：已记录的 stack CLI 3697 个通过、一个跳过，失败为 Roost signed-prefix 超时和现已解释的 marker 失败；修正环境后未重复完整 CLI。此验证不代表真实 Windows/macOS、委派 cgroup、打包或生产行为。本次 stack 整合未发布其他迁移单元。

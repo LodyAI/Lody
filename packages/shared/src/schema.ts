@@ -1,8 +1,5 @@
 import type { SessionEntry, SessionFileDiff } from './session-data/domain';
 import { InferInputType, InferType, schema } from 'loro-mirror';
-// Type-only, so the cycle with `review.ts` (which needs
-// `SessionPullRequestStateMeta` for the merge gate) is erased at compile time.
-import type { SessionAutoReviewMeta } from './review';
 import {
   ACPSessionId,
   AcpConfigOptionValue,
@@ -1163,14 +1160,10 @@ export type SessionMeta = {
    */
   awaitingUserSince?: number;
   /**
-   * Auto review and merge authorization plus a pointer to the run document.
-   * Presence of this field IS the checkbox being on, so unchecking removes it.
-   *
-   * Only a human may write it. The reviewer and the authoring agent both run
-   * with MCP access to this session, and an agent that could grant itself merge
-   * authority would make the whole gate decorative.
+   * Historical auto-review pointer, retained for stored metadata compatibility.
+   * The retired review automation no longer reads or acts on this field.
    */
-  autoReview?: SessionAutoReviewMeta;
+  autoReview?: { runId: string; t: number };
 };
 
 /**
@@ -1182,7 +1175,7 @@ export type SessionMeta = {
  * either fires. `lastMissingHistoryUserMsgId` is a permanent negative ack for a
  * turn whose payload never synced; `settledActivationUserMsgId` retires a turn
  * whose history entry is already terminal. Every consumer that asks "does this
- * session still owe a turn?" — dispatch, idle GC, auto review, MCP status —
+ * session still owe a turn?" — dispatch, idle GC, MCP status —
  * must go through here, or they disagree with the watcher and hang.
  */
 export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {

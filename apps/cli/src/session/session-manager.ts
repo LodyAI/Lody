@@ -106,11 +106,7 @@ import { createWorktreeScriptHistoryRecorder } from './worktree/worktree-script-
 import { createSessionBackend } from './session-backend';
 import { runWorktreeSetup } from './worktree/worktree-setup-runner';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
-import {
-  normalizeLocalProjectRootPath,
-  parseLocalProjectBranchRefAtRootPath,
-  resolveLocalProjectLegacyBaseBranchAtRootPath,
-} from '@lody/shared/node/local-project';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import { ensureDefaultSessionWorkdir, getDefaultSessionWorkdir, Session } from './session';
 import {
   calculateAutomaticSessionSandboxLimits,
@@ -2089,7 +2085,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (project?.kind !== 'local' || project.useWorktree !== true || !workdir) {
       return null;
     }
-    const originalRootPath = normalizeLocalProjectRootPath(workdir);
+    const originalRootPath = localProjectsLegacy.normalizeLocalProjectRootPath(workdir);
     return {
       repoId: deriveRepoIdFromLocalProjectPath(originalRootPath),
       originalRootPath,
@@ -2142,22 +2138,36 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       if (!existingRef) throw new Error('Local project branch is required');
       return (
         await (existingRef.startsWith('refs/')
-          ? parseLocalProjectBranchRefAtRootPath(options.originalRootPath, existingRef)
-          : resolveLocalProjectLegacyBaseBranchAtRootPath(options.originalRootPath, existingRef, {
-              useWorktree: true,
-            }))
+          ? localProjectsLegacy.parseLocalProjectBranchRefAtRootPath(
+              options.originalRootPath,
+              existingRef
+            )
+          : localProjectsLegacy.resolveLocalProjectLegacyBaseBranchAtRootPath(
+              options.originalRootPath,
+              existingRef,
+              {
+                useWorktree: true,
+              }
+            ))
       ).refName;
     }
     if (storedBaseBranch && storedBaseBranch !== selector) {
       return (
-        await parseLocalProjectBranchRefAtRootPath(options.originalRootPath, storedBaseBranch)
+        await localProjectsLegacy.parseLocalProjectBranchRefAtRootPath(
+          options.originalRootPath,
+          storedBaseBranch
+        )
       ).refName;
     }
 
     return (
-      await resolveLocalProjectLegacyBaseBranchAtRootPath(options.originalRootPath, selector, {
-        useWorktree: true,
-      })
+      await localProjectsLegacy.resolveLocalProjectLegacyBaseBranchAtRootPath(
+        options.originalRootPath,
+        selector,
+        {
+          useWorktree: true,
+        }
+      )
     ).refName;
   }
 

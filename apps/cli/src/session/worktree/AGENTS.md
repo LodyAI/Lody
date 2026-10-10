@@ -6,6 +6,24 @@ Repo checkouts, worktrees, branch allocation, and setup scripts for sessions.
 [../AGENTS.md](../AGENTS.md) and [apps/cli/AGENTS.md](../../../AGENTS.md) apply. Background
 and file responsibilities: [../README.md](../README.md).
 
+## Effect execution boundary
+
+- Native Git commands/helper probes compose `WorktreeGit` / `WorktreeGitLive`.
+  Layers supply official filesystem, host environment and the existing process
+  spawner. Preserve the complete Cause when mapping command failure; pinned v4
+  `mapError`/`catch` can discard release defects alongside a typed failure.
+- `worktreeGitLegacy` is the temporary command facade; keep Legacy
+  visible and delete it when the manager becomes native. Infrastructure and
+  unresolved-release failures must escape fallback/forced-removal catches.
+  `WorktreeObservations` uses owner-provided FileLocks: inspect/list acquire;
+  info borrows the mutation lease. Preserve missing/unborn/corrupt and mixed Cause.
+  `LocalWorktreePreparation.prepareLocked` borrows that lease; own scratch before
+  writing, publish complete metadata exclusively, retain bounded recovery on
+  failed release. `runWorktreeLegacy` executes both via fileLocksLegacy;
+  runObservationLegacy only composes. Never add a second coordinator.
+  Mutation/setup/GC remains unfinished.
+  Decision: [worktree Git](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-worktree-git-execution.md).
+
 ## Git credential broker
 
 - Local projects and their worktrees use native Git/GitHub auth, even with GitHub
@@ -50,7 +68,7 @@ and file responsibilities: [../README.md](../README.md).
   A PR-linked session that ends with unpublished work is reported through
   `SessionMeta.workspaceDirty` AND `workspaceUnpushed`, which raise the Info Bar's
   `Commit & Push` action; the agent is asked to keep the branch current by the Create PR
-  prompt (`packages/shared/src/review-prompts.ts`), which the user can override in
+  prompt (`packages/shared/src/pr-prompts.ts`), which the user can override in
   conversation. Do not re-add an automatic post-turn commit/push.
 - Publish BOTH flags or the signal has a hole: `git status` goes clean the moment the agent
   commits, so a commit whose push failed reads as "all clear" and the Info Bar offers Merge
