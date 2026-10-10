@@ -95,8 +95,10 @@ equal, carry the same Abstract/摘要 meaning, and mark both `Translation: curre
 `Translation: pending` remains available only to a human who cannot write the
 other language; an agent that can write both never merges a note as pending.
 
-Implemented notes preserve the decision in its historical context. Current
-behavior belongs in Specs; important later changes use a new linked note. Identify
+Implemented notes preserve the decision in its historical context. Keep current
+implementation behavior in owning docs; only consequential human-reviewed intent
+belongs in [Specs](../../specs/AGENTS.md). A Note does not require a companion Spec.
+Important later changes use a new linked note. Identify
 factual corrections as corrections. Adding a note includes a scoped search for
 related decisions: link partial replacements and archive obsolete implemented
 records only when their rationale is no longer useful. Do not rewrite an old

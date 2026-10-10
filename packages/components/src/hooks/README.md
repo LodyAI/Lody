@@ -37,6 +37,20 @@ Missing or mismatched Providers expose no catalog; extension changes invalidate
 old capabilities until a matching probe arrives. A matching extension catalog
 must not be read as though no extensions were selected.
 
+## Cloud query recovery
+
+`use-recoverable-convex-query.ts` owns the authenticated query adapter. Each client,
+session and semantic query shares one watch and three retries after 1, 2 and 4 seconds.
+All consumers release the failed watch before a new one starts, which waits for a
+server update rather than reading the SDK's cached error. Opaque server failures
+return loading during bounded recovery; application errors and exhausted failures throw to the nearest
+boundary. Auth expiry continues through the central supervisor and retains only a
+matching committed snapshot. Brief success and temporary auth skips do not replenish
+attempts; 30 seconds of continuously observed success resets the budget. Skipped or
+unmounted queries stop retries, and session/query identity fences callbacks and results.
+Public queries, mutations/actions and local-only clients keep their existing behavior.
+See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-10-cloud-query-server-recovery.md).
+
 ## Session lifecycle
 
 `use-session-actions.ts` reads archive, restore, and archived-root deletion targets

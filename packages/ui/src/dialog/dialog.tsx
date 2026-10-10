@@ -4,7 +4,11 @@ import { forwardRef, type ComponentProps, type CSSProperties, type ReactNode } f
 import { Button } from '../button/button';
 import { appendClassName } from '../internal/class-name';
 import { CrossGlyph } from '../internal/glyphs';
-import { PopupContainerProvider, type PopupContainer } from '../popup/portal-container';
+import {
+  useModalContainer,
+  PopupContainerProvider,
+  type PopupContainer,
+} from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import {
   DialogFooter,
@@ -32,7 +36,7 @@ type DescriptionBaseProps = ComponentProps<typeof BaseDialog.Description>;
  * to Radix for a `style` attribute.
  */
 export interface ModalContentProps extends Omit<PopupBaseProps, 'className' | 'render'> {
-  /** Where the dialog mounts. Defaults to the document body. */
+  /** Where the dialog mounts. Defaults to the enclosing modal host, or the document body. */
   container?: PopupContainer;
   /**
    * Content laid over the backdrop rather than in the panel. The backdrop is
@@ -162,6 +166,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
   },
   ref
 ) {
+  const modalContainer = useModalContainer();
   const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
   const centre = useInlineCentre(centerOn);
   // A portalled panel leaves the subtree whose palette it should be using, so
@@ -171,7 +176,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
   const noTransition = noAnimation ? stylex.props(modal.noTransition).className : undefined;
   return (
     <BaseDialog.Portal
-      container={container}
+      container={container === undefined ? modalContainer : container}
       className={[stylex.props(styles.portal).className, ...palette].filter(Boolean).join(' ')}
     >
       <DialogBackdrop className={appendClassName(backdropClassName, noTransition)}>

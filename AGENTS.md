@@ -12,9 +12,12 @@ Repository map and entry points: [README.md](README.md#repository).
 - Specs express intent, docs explain implementation, notes record decisions.
   Distinguish bugs, stale docs, and unimplemented intent using code and evidence;
   never change a Spec to justify a bug.
-- Changed intent/guarantees require a [Spec](specs/AGENTS.md) updated as `draft`.
-  `approved` requires linked human approval of that revision; `outdated` needs
-  review. Only meaning-preserving editorial edits may retain approval.
+- Reserve [Specs](specs/AGENTS.md) for consequential product, architecture, or
+  protocol decisions needing human review. Prefer updating an existing Spec;
+  ordinary fixes and implementation changes do not require a new one.
+  Changes to reviewed intent/guarantees return that Spec to `draft`. `approved`
+  requires linked human approval of that revision; `outdated` needs review.
+  Only meaning-preserving editorial edits may retain approval.
 - Non-trivial work MUST add/update the owning [Agent Note](.agents/notes/AGENTS.md#when-to-write)
   in the same PR; substantial research/design also requires a note without a PR.
   Only mechanical/local edits without changed decisions are exempt. Link different
@@ -77,13 +80,13 @@ Repository map and entry points: [README.md](README.md#repository).
   Test the real boundary and resulting state, including failure paths; retain
   meaningful compile-failure contracts. Extend the owning suite instead of adding
   a file per small fix. Do not delete behavioral coverage merely to reduce counts.
-- Keep PR documentation compact: update the owning Spec and Note instead of adding
-  incremental fix/run-log documents. Consolidate redundant PR-local notes, retaining
+- Keep PR documentation compact: update owning docs and Notes; update a Spec only
+  when its reviewed intent is affected. Avoid incremental fix/run-log documents.
+  Consolidate redundant PR-local notes, retaining
   decisions, reproducible evidence and unresolved limits; repair inbound links.
 - Keep edits traceable to the request and preserve unrelated work. Prefer explicit
   contracts over hidden fallbacks; remove only unused code. Update the nearest
   public `AGENTS.md` when an invariant or boundary changes.
-
 
 ## Code Review Rules
 

@@ -231,13 +231,13 @@ function RootApp() {
                   manager={toastManager}
                   closeLabel={i18next.t('common.close', 'Close')}
                 />
-                <RuntimeProvider>
-                  {/* Location-driven effects and the Outlet boundary subscribe to
-                      router state in these two small components, so a navigation
-                      no longer re-renders the whole provider stack above. */}
-                  <RootLocationEffects />
-                  <RootOutletBoundary />
-                </RuntimeProvider>
+                {/* Auth invalidation must remain mounted even if the runtime fails. */}
+                <RootLocationEffects />
+                <ErrorBoundary name="RootRuntime" variant="page" propagateAuthErrors={false}>
+                  <RuntimeProvider>
+                    <RootOutletBoundary />
+                  </RuntimeProvider>
+                </ErrorBoundary>
                 {/* <TanStackRouterDevtools /> */}
               </>
             </LanguageProvider>

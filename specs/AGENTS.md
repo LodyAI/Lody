@@ -5,6 +5,20 @@ contains only publicly shareable client behavior, architecture, and protocol
 Specs. No private implementation, operator configuration, or internal records.
 Use public evidence and identify what this repository cannot establish.
 
+Create or expand a Spec only when the user explicitly requests one or there is a
+consequential decision that needs human review: for example, data ownership,
+security boundaries, durability, compatibility, or a major product/architecture
+trade-off. Routine PR review and behavior changes alone are insufficient. Ordinary
+fixes, features, refactors, retry timings and testing details belong in owning docs
+and Notes.
+
+Before creating a file, name the decision and review need in the PR or owning Note
+and check whether an existing Spec covers it. Prefer updating that owner. Keep one
+Spec per enduring decision, rather than per PR or fix; do not duplicate code or Notes.
+Default to a few short paragraphs covering the scenario, decision and essential
+guarantees. Link implementation and validation details instead of copying them;
+add length or sections only when needed to review the decision.
+
 Translation follows the [shared language policy](../.agents/README.md#asynchronous-bilingual-documentation).
 Use the [structural writing guide](../.agents/README.md#structural-explanations)
 for diagrams, [`.agents/docs/`](../.agents/docs/AGENTS.md) for explanation that
