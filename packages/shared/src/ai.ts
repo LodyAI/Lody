@@ -126,6 +126,29 @@ export const trustsUntaggedAcpSessionTitle = (
 ): boolean => builtinAcpTitleOwnership(cliType, agentType) === 'untagged';
 
 /**
+ * Grace period after a turn that could have delivered a provider-owned title
+ * before Lody's isolated generator runs as the fallback. Providers that
+ * generate at turn end deliver within seconds, so a title still missing this
+ * long after a completed turn is not coming — the adapter's own generation is
+ * best-effort and swallows its failures without signalling the client.
+ */
+export const PROVIDER_OWNED_TITLE_FALLBACK_DELAY_MS = 90_000;
+
+/**
+ * Whether Lody's isolated generator should run as the safety net for a
+ * session whose provider owns title generation: only while the session still
+ * has no real title — none at all, or only the replaceable `draft` from
+ * creation, the same state the normal generator path may overwrite. A user
+ * rename (`user`) and a stored `generated` title both keep the fallback off;
+ * a missing session means there is nothing to title.
+ */
+export const shouldFallbackGenerateSessionTitle = (
+  meta: { title?: string; titleSource?: string } | null | undefined,
+  ownsTitle: boolean
+): boolean =>
+  ownsTitle && (!!meta && (!meta.title?.trim() || meta.titleSource === 'draft'));
+
+/**
  * User-defined ACP launch spec for `cliType: 'custom'` providers: the exact
  * executable + args the CLI spawns on the owning machine. Env vars come from
  * the agent config's existing `env` field, so a custom provider reuses every

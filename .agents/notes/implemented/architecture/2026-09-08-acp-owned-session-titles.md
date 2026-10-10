@@ -150,7 +150,10 @@ entirely on resumed sessions (its internal source is `unknown` there), so a
 resumed codex session no longer gets a Lody-generated title. Generation is also
 best-effort inside the adapter and swallows failures without signalling the
 client, so a failed generation now leaves the draft title rather than falling
-back to Lody's generator.
+back to Lody's generator. (Revisited 2026-10-03: after observed silent failures
+left whole providers' sessions permanently on their drafts, a delayed fallback
+now exists — see
+[the follow-up note](../bug-fix/2026-10-03-provider-owned-title-fallback.md).)
 
 That draft only existed for sessions started from the desktop composer. Sessions
 created through `lody session create` or the MCP `lody_session_create` tools —
