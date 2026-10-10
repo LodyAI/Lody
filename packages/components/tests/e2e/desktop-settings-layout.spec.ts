@@ -221,6 +221,15 @@ for (const locale of ['en', 'zh_CN']) {
       const row = refresh.locator('xpath=../../..');
       await expect(chip).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
+      await page.mouse.move(0, 0);
+      await expect(refresh.locator('..')).toHaveCSS('opacity', '0');
+      const idleChipBox = (await chip.boundingBox())!;
+      if (story === 'no-active-watch-with-actions') {
+        const rowBox = (await row.boundingBox())!;
+        // At rest the forecast ends at the normal row inset, with no empty
+        // refresh/delete slots to its right.
+        expect(rowBox.x + rowBox.width - idleChipBox.x - idleChipBox.width).toBeLessThan(24);
+      }
 
       const expectClear = async () => {
         await expectInside(chip, row);
@@ -228,13 +237,14 @@ for (const locale of ['en', 'zh_CN']) {
         for (const action of [refresh, remove]) {
           await expectInside(action, row);
           const actionBox = (await action.boundingBox())!;
-          expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(actionBox.x);
+          expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(chipBox.x);
           await action.click({ trial: true });
         }
         await chip.click({ trial: true });
       };
 
       await row.hover();
+      expect(await chip.boundingBox()).toEqual(idleChipBox);
       await expectClear();
       await chip.click();
       const dialog = page.getByRole('dialog', { name: /Codex reset forecast|Codex 重置预测/ });

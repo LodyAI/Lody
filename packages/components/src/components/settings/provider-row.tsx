@@ -70,6 +70,7 @@ const styles = stylex.create({
     fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
+  trailingProtected: { position: 'relative' },
   trailingList: { paddingBlock: space[3] },
   /** The compact row's facts end on the rows' own inset. */
   trailingCompact: { paddingInlineEnd: space[4] },
@@ -90,8 +91,7 @@ const styles = stylex.create({
       [stylex.when.ancestor(':focus-within')]: 'auto',
     },
   },
-  // Only passive facts may sit under hover actions. A forecast button needs
-  // its own space, including while the actions are hidden.
+  // Hover actions may cover passive row text, but never the forecast entry.
   actionsOverlay: {
     position: 'absolute',
     insetInlineEnd: space[3],
@@ -100,6 +100,10 @@ const styles = stylex.create({
     paddingInlineStart: space[2],
     backgroundColor: ROW_HOVER,
     boxShadow: `-16px 0 12px -4px ${ROW_HOVER}`,
+  },
+  actionsBeforeTrailing: {
+    insetInlineEnd: '100%',
+    paddingInlineEnd: space[2],
   },
   /** The meters sit beside the name when the row has room, and under it when not. */
   metersInline: {
@@ -330,7 +334,11 @@ export function ProviderRow({
           </div>
         </button>
         <div
-          {...stylex.props(styles.trailing, compact ? styles.trailingCompact : styles.trailingList)}
+          {...stylex.props(
+            styles.trailing,
+            compact ? styles.trailingCompact : styles.trailingList,
+            compact && showResetForecast && styles.trailingProtected
+          )}
         >
           {/* Not mounted at all when ineligible, so a non-Codex row costs no
               store subscription and no clock tick. */}
@@ -360,7 +368,8 @@ export function ProviderRow({
             {...stylex.props(
               styles.actions,
               compact && !refreshing && styles.reveal,
-              compact && !refreshing && !showResetForecast && styles.actionsOverlay
+              compact && (!refreshing || showResetForecast) && styles.actionsOverlay,
+              compact && showResetForecast && styles.actionsBeforeTrailing
             )}
           >
             {onRefresh && (
