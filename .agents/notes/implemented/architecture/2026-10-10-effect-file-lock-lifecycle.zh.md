@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1377](https://github.com/LodyAI/Lody/pull/1377)
 
 [English](2026-10-10-effect-file-lock-lifecycle.md)
 
@@ -42,4 +43,4 @@ Catalog 修改直接组合 `withFileLock`，依赖环境暴露 FileLocks；删�
 
 所属套件覆盖释放后立即重取时的严格 FIFO、本地和跨进程等待者取消、body 失败或中断、失效和 foreign pid 回收、名称别名及 child fiber 重入、元数据写入失败、释放失败保留和重试、token 替换保护。真实 Node 子进程通过就绪 IPC 验证双向互斥，仍由现有进程服务启动和清理。CLI 保留 profile 路径和命名覆盖，将重复的失效/存活锁测试集中到原生套件；catalog、worktree 和 cloudflared 消费保留行为覆盖。
 
-13 项消融均被保留的行为测试捕获：同时放行全部票据、保留已取消票据、跳过释放、吞掉释放失败、移除 generation 校验、允许重入、覆盖发布、冻结发布时间、丢弃失败 scratch 拥有权、拒绝已确认的 scratch 不存在、使发布可中断、屏蔽元数据准备、跳过 Layer 清理。恢复内核后 20 项测试全部通过。实验只在临时副本运行，不提交脚本或源码字符串测试。全仓类型检查和 type-aware lint 无错误；20 项所属测试、35 项消费测试、25 项隔离环境的原生夹具、format/format:check、docs check 及平台/进程/公开/import/i18n 守卫通过。此前完整 pnpm check 在无关 Roost 历史覆盖及受环境影响的夹具中失败；只隔离验证子进程的 Git/PATH 与临时 package scope 后，后者通过，signed-prefix Roost 超时也在干净 main 643222f2 复现。完整重跑与这些已通过检查分开，在 PR 记录；未删除覆盖或修改全局 Git 配置。本地 Linux 结果不能证明真实 Windows、其它文件系统 hard link、委派 cgroup、打包安装或 ACP/Session/Turn 端到端取消。进程后端的 Windows 根进程先退出边界保持不变。
+13 项消融均被保留的行为测试捕获：同时放行全部票据、保留已取消票据、跳过释放、吞掉释放失败、移除 generation 校验、允许重入、覆盖发布、冻结发布时间、丢弃失败 scratch 拥有权、拒绝已确认的 scratch 不存在、使发布可中断、屏蔽元数据准备、跳过 Layer 清理。恢复内核后 20 项测试全部通过。实验只在临时副本运行，不提交脚本或源码字符串测试。全仓类型检查和 type-aware lint 无错误；20 项所属测试、35 项消费测试、25 项隔离环境的原生夹具、format/format:check、docs check 及平台/进程/公开/import/i18n 守卫通过。此前完整 pnpm check 在无关 Roost 历史覆盖及受环境影响的夹具中失败；只隔离验证子进程的 Git/PATH 与临时 package scope 后，后者通过，signed-prefix Roost 超时也在干净 main 643222f2 复现。完整隔离重跑仅剩该 Roost 超时：CLI 为 3687 通过、1 失败、1 跳过，因此 pnpm check 未通过；后续守卫独立执行。验证 clone 基于 0561e9da，此次执行未验证更新的 main 改动；未删除覆盖或修改全局 Git 配置。本地 Linux 结果不能证明真实 Windows、其它文件系统 hard link、委派 cgroup、打包安装或 ACP/Session/Turn 端到端取消。进程后端的 Windows 根进程先退出边界保持不变。
