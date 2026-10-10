@@ -1,7 +1,7 @@
 import { toShared } from '@/platform/process-options';
 import { GITHUB_CREDENTIAL_ENV_KEYS } from '@/lib/gh-token-env';
 import { RepoId, SessionId } from '@lody/shared';
-import { resolveLocalProjectBranchAtRootPath } from '@lody/shared/node/local-project';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '@/utils/logger';
@@ -998,9 +998,13 @@ export class WorktreeManager {
         // `preferred` can still be a pre-selector bare name, which git itself
         // would resolve local-first rather than reject.
         return (
-          await resolveLocalProjectBranchAtRootPath(this.source.originalRootPath, preferred, {
-            preferLocalOnCollision: true,
-          })
+          await localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
+            this.source.originalRootPath,
+            preferred,
+            {
+              preferLocalOnCollision: true,
+            }
+          )
         ).refName;
       }
       if (await this.hasCommitish('HEAD', env)) return 'HEAD';

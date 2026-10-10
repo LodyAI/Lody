@@ -79,10 +79,8 @@ import { resolveWorkspaceLocalProjectRootPathWithRetry } from '@/lib/local-proje
 import { readTimeoutEnv, withTimeout } from '@/lib/loro/timeout-utils';
 import { ConcurrentQueue } from '@/lib/concurrent-queue';
 import {
-  checkoutLocalProjectBranchAtRootPath,
+  localProjectsLegacy,
   createLocalProjectBranchSelector,
-  getLocalProjectGitStateAtRootPath,
-  resolveLocalProjectBranchAtRootPath,
 } from '@lody/shared/node/local-project';
 import { getAcpCapabilitySourceVersion, resolveACPProcessLaunch } from '@/agent/setting';
 import { type AcpLauncher, resolveAcpLauncher } from '@/agent/acp-analytics';
@@ -3231,14 +3229,18 @@ export class SessionExecutionService {
   }): Promise<{ executionBranch: string; baseRef: string }> {
     const { project, workdir, branch } = options;
 
-    const gitState = await getLocalProjectGitStateAtRootPath(workdir);
+    const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(workdir);
     if (!gitState.git) {
       throw new Error(`Local project is not a git repository: ${project.localProjectId}`);
     }
 
-    const resolvedBranch = await resolveLocalProjectBranchAtRootPath(workdir, branch, {
-      preferLocalOnCollision: true,
-    });
+    const resolvedBranch = await localProjectsLegacy.resolveLocalProjectBranchAtRootPath(
+      workdir,
+      branch,
+      {
+        preferLocalOnCollision: true,
+      }
+    );
 
     // Persist the namespace decision before checkout can create a same-named
     // local tracking branch. A process exit after checkout must not make the
@@ -3257,7 +3259,7 @@ export class SessionExecutionService {
 
     return {
       executionBranch: (
-        await checkoutLocalProjectBranchAtRootPath(
+        await localProjectsLegacy.checkoutLocalProjectBranchAtRootPath(
           workdir,
           createLocalProjectBranchSelector(resolvedBranch)
         )

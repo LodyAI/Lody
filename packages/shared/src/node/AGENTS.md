@@ -5,6 +5,20 @@
 Node-only helpers shared by the CLI, the desktop main process and the CLI
 supervisor. Package rules: [shared](../../AGENTS.md).
 
+## Local-project Git (`local-project.ts`)
+
+- Native workflows require `LocalProjects`, provided by `LocalProjectsLive` with
+  filesystem paths, host environment and the official process spawner. Compose
+  their Effects directly; do not call a Promise facade from an Effect workflow.
+- Expected Git statuses may represent absence. Startup, deadline, corruption,
+  filesystem and release failures must remain observable; parallel probe failure
+  interrupts and joins its siblings. Preserve exact-ref and canonical project
+  identity behavior.
+- `localProjectsLegacy` is the single deprecated execution facade for remaining
+  CLI entrypoints. Keep Legacy visible in calls; remove it after those owners
+  receive the native service. Its synchronous path/identity methods remain
+  explicitly blocking. Worktree setup/GC still need their own lifecycle migration.
+
 ## Process layer (`process.ts`)
 
 The one implementation that starts, awaits and signals OS processes for the CLI,

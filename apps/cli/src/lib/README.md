@@ -73,6 +73,12 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Projects and providers
 
+Local-project observation and branch commands use shared `LocalProjects` native
+Effect workflows through the visible `localProjectsLegacy` facade while these
+entrypoints remain Promise-based. Worktree setup/GC and Session lifecycle still
+need their own migration; the facade is removed once the application runtime
+provides LocalProjects. See the [decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-local-project-git.md).
+
 - `local-project-history-sync-service.ts` / `local-project-history-precheck.ts` —
   Provider-bound local-project ACP history catalogs, import and refresh. Catalogs
   separate configurations; legacy transcript identifiers remain stable.
