@@ -37,6 +37,7 @@ import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
+import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import remarkMath from 'remark-math';
 import { Check, Copy, MessagesSquare } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -869,6 +870,7 @@ const remarkMarkUnclosedFences = () => (tree: unknown, file: MarkdownFile) => {
 
 const MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
+  remarkCjkFriendly,
   remarkRepairMalformedGfmAutolinks,
   remarkLinkifyPlainUrls,
   remarkLinkifyFilePaths,

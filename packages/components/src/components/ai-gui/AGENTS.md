@@ -86,11 +86,11 @@ Ownership: [README.md](README.md).
   and `support.cancel`. Dialogs share turn renderers/grouping and one scroller:
   [task rows and dialog](README.md#subagent-tasks).
 
-- Text roles use `@lody/ui`; reading prose uses `conversation.readingLeading`.
-  Compact prose/code use subheadline, never nested `em`. Message sizes use
-  `conversation-font-size-classes.ts`; hosts require CSS typed division. Only live
-  turns load the stream engine. Remounted live rows show existing text immediately;
-  only additions animate.
+- Text roles: `@lody/ui`; prose: `conversation.readingLeading`; compact prose/code:
+  subheadline, no nested `em`. Message sizes: `conversation-font-size-classes.ts`;
+  hosts require CSS typed division. Stream engine: live turns only;
+  remounts show existing text immediately and animate only additions.
+- Rendering and search share CJK emphasis rules.
 - A Mermaid diagram in a message is a still preview until a pointer click
   activates it, and an unmodified wheel is NEVER taken — activated or not.
   Deactivation preserves pan/zoom and activation adds no outline; see the
