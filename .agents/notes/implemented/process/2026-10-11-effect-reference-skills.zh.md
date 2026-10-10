@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1410
 
 [English](2026-10-11-effect-reference-skills.md)
 
