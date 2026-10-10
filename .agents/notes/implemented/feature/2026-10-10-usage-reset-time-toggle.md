@@ -32,3 +32,5 @@ Documentation checks still report existing links to absent ACP submodule files.
 Repository `pnpm format` passes. Full `pnpm check` stops during typechecking
 because dependencies outside the installed UI workspace subset are missing
 (e.g. `packages/ignore` cannot resolve `effect` and Node types).
+
+PR: [#1416](https://github.com/LodyAI/Lody/pull/1416).

@@ -27,3 +27,5 @@ Oxfmt 和翻译键检查通过。Chromium 在真实 QuotaOnly story 中验证了
 
 仓库 `pnpm format` 通过。全量 `pnpm check` 在类型检查阶段停止，原因是仅安装了 UI 工作区
 依赖，其他包依赖缺失（例如 `packages/ignore` 无法解析 `effect` 和 Node 类型）。
+
+PR: [#1416](https://github.com/LodyAI/Lody/pull/1416).
