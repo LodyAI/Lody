@@ -1,4 +1,8 @@
 {
+  "authRecovery.failedTitle": "无法恢复登录状态",
+  "authRecovery.failedDescription": "尝试 6 次后仍无法恢复认证，已停止自动重试。请重试连接或重新登录，本地数据会保留。",
+  "authRecovery.retry": "重试连接",
+  "authRecovery.signInAgain": "重新登录",
   "sessions.videoPreview.label": "视频预览",
   "sessions.videoPreview.failedTitle": "无法播放视频",
   "sessions.videoPreview.failedMessage": "无法播放此视频。当前设备可能不支持该格式，或无法读取文件。",
@@ -2154,7 +2158,7 @@
   "sessions.prTab.loadError": "加载 Pull Request 失败",
   "sessions.prTab.notFoundHint": "404 也可能是因为 Lody GitHub App 没有这个仓库的访问权限。",
   "sessions.prTab.reviewAppAccess": "检查应用权限",
-  "sessions.prTab.repositoryIdentityUnresolved": "无法确认此会话的仓库身份，已暂停 GitHub 操作。请连接 Lody 后重试。若仓库曾被移除、重新安装或更名，请工作区管理员核实原仓库和 PR 关联；仅名称相同不能证明是同一仓库。",
+  "sessions.prTab.repositoryIdentityUnresolved": "无法确认此会话的仓库身份，已暂停 GitHub 操作。请工作区管理员在“设置 > GitHub”检查有效的 GitHub App 安装、仓库权限及原 PR 关联。后台关联失败 6 次后会停止重试；修复权限后，请重启会话所在机器的 Lody 后台代理，再重试。重新登录不能修复缺失的仓库关联。",
   "sessions.prTab.mergeAction": "合并 Pull Request",
   "sessions.prTab.mergeBlocked": "合并被阻止——可能需要审核、检查未通过或分支落后。",
   "sessions.prTab.mergeBlockedNotice": "合并被阻止，需完成必要审核并通过检查后才能继续。",

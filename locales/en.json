@@ -1,4 +1,8 @@
 {
+  "authRecovery.failedTitle": "Unable to restore your sign-in",
+  "authRecovery.failedDescription": "Authentication could not be restored after 6 attempts. Automatic retries have stopped. Retry the connection or sign in again. Your local data will be kept.",
+  "authRecovery.retry": "Retry connection",
+  "authRecovery.signInAgain": "Sign in again",
   "sessions.videoPreview.label": "Video preview",
   "sessions.videoPreview.failedTitle": "Video unavailable",
   "sessions.videoPreview.failedMessage": "This video could not be played. Its format may not be supported on this device, or the file could not be read.",
@@ -2154,7 +2158,7 @@
   "sessions.prTab.loadError": "Failed to load pull request",
   "sessions.prTab.notFoundHint": "A 404 can also mean the Lody GitHub App can’t access this repository.",
   "sessions.prTab.reviewAppAccess": "Review app access",
-  "sessions.prTab.repositoryIdentityUnresolved": "Cannot verify this session’s repository identity. GitHub operations are paused. Retry after reconnecting to Lody. If the repository was removed, reinstalled or renamed, ask a workspace administrator to verify the original repository and PR association; a matching name alone is not enough.",
+  "sessions.prTab.repositoryIdentityUnresolved": "Cannot verify this session’s repository identity. GitHub operations are paused. Ask a workspace administrator to check Settings > GitHub, the active GitHub App installation, repository access and the original PR association. Background association stops after 6 failed attempts; after fixing access, restart this machine’s Lody background agent and retry. Signing in again does not repair a missing repository link.",
   "sessions.prTab.mergeAction": "Merge pull request",
   "sessions.prTab.mergeBlocked": "Merging is blocked — required reviews, failing checks, or the branch is behind.",
   "sessions.prTab.mergeBlockedNotice": "Merging is blocked until required reviews and checks pass.",
