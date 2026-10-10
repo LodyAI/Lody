@@ -8,9 +8,9 @@ Translation: current
 ## 摘要
 
 Lody 的生命周期缺陷集中在少数几类手写机制上：定时器驱动的退避与 watchdog、代际计数器、
-手写 disposed 标志、按 key 的 promise 链和被吞掉的 `.catch`。仓库已依赖 effect 3.18，
-但只以"在类方法里构造 Effect、在边界 `runPromise`"的孤岛方式使用。本路线图确立自底向上的
-迁移原则：从平台层到入口层分为七层，一层只有在其全部依赖都已是 Effect 服务后才算完成；
+手写 disposed 标志、按 key 的 promise 链和被吞掉的 `.catch`。最初调查描述 effect 3.18
+孤岛；当前工作区使用 Effect 4.0.2，已有原生共享进程服务及迁移后的进程调用方。本路线图确立自底向上的
+迁移原则：从平台层到入口层分为七层，单元只有在实际生命周期依赖已是原生 Effect 服务后才算完成；
 自己的 Promise 模块必须重写，只有真正的第三方 I/O 边界允许包装一次。按这一原则，Loro 同步
 栈的生命周期应在库内部解决：loro-repo 与 streams-crdt 在 Flock 持久化迁移之后改为 Effect
 内核，同时提供 Effect 与 Promise 两个入口。第一步是平台层与进程叶子层。排序依据是 fix 提交与
@@ -146,10 +146,10 @@ Lody 这一层的缺陷（#4 unload/invalidate 顺序、#774 join 永久停在 c
 
 ### L0 + L1：平台与进程叶子层
 
-由 [Turn 执行与 ACP 进程所有权](2026-09-27-effect-turn-execution-and-acp-process-ownership.zh.md)
-的第一、二个 PR 交付，是所有上层的共同前提。其余约 35 个直接 spawn 的文件（git、worktree
-setup runner、终端、登录 shell 环境、MCP、preview、code-collab 扫描等）在第二个 PR 起迁到
-同一个 ProcessService；setup 脚本超时只 SIGTERM shell、子孙泄漏的问题在此解决。
+#1065/#1069/#1348 的进程核心、sandbox 所有权与进程调用方已合并。官方进程服务
+保留 Lody 有界后端；这代表进程阶段完成，不代表文件系统、Git、runtime、Session 或
+Turn 编排完成。原生 shell 探测是有限叶子，尚存的应用缓存需要自己的拥有者；不重写
+spawn、输出收集或终止循环。
 
 ### L2 与 Loro 同步栈
 
@@ -247,16 +247,21 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 
 ## 建议顺序
 
-1. L0 + L1 ProcessService，迁移全部 ACP 相关进程（Turn 提案第一个 PR，#1065）。
-2. CLI 其余调用方（#1069），随后单独迁移 Electron main、supervisor 与 shared 辅助模块；
-   核心从 #1065 起就在 shared，不再搬迁。
-3. 与 1–2 并行：loro-repo Flock 持久化迁移。
-4. loro-repo 与 streams-crdt 的 Effect 内核与 `loro-repo/effect` 入口（各自仓库）。
-5. Lody L2：可在第 2 步后基于临时 `LoroRepo` Layer 开始，第 4 步完成后替换 Layer；同期完成
-   托管 runtime、worktree 与文件锁。
-6. L3 → L4 → L5（Turn 提案）。
-7. L6 与编排投递。
-8. Renderer workspace runtime（第 4 步之后），然后 Electron 与 supervisor。
+进程服务与调用方迁移已合并。后续按真实依赖边推进；有限依赖可独立验收时进一步拆评审：
+
+1. 官方文件系统能力与文件锁（#1377）。
+2. Git 与 worktree 准备/setup/GC（#1381/#1389/#1392/#1394 覆盖有限叶子）。
+3. runtime 安装、登录环境/缓存与启动闸门；独立叶子不等待无关 worktree 实现。
+4. AcpConnection 与领域操作，再到拥有资源的 Session/会话池。
+5. Turn/steer/停止/收尾等待实际 ACP 和 Loro 依赖完成原生化。
+6. dispatch/MessageHandler/编排及应用根 runtime；后续 Renderer、Electron、supervisor
+   上层编排按各自真实依赖推进。
+
+Loro 主线独立：streams-crdt/loro-repo 生命周期 → 文档/历史/presence → Turn。
+Flock 持久化记录为 implemented；消费版本为 Flock 0.4.3、streams-crdt 0.16.1、
+loro-repo 0.21.1。2026-10-10 核对的 registry 发布版本分别为 0.4.3、0.16.2、0.21.2；
+这不授权自动升级，也不证明原生生命周期完成。库侧 PR 前分别读取上游规则与现行代码。
+Lody 临时适配必须登记删除条件，不代表同步栈最终完成。
 
 ## 验证边界
 
@@ -270,8 +275,27 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 已合入 main。[#1057](https://github.com/LodyAI/Lody/pull/1057) 合入了原基础分支而非 main；
 [#1355](https://github.com/LodyAI/Lody/pull/1355) 只将这两份中英文计划恢复到 main。
 
-剩余 stack 为 #1355 → #1065 → #1069 → #1348。#1065 直接在 shared 中引入 v4 进程核心、
-sandbox 与 ACP 调用方；#1069 迁移其余 CLI 调用方和 CLI 守卫；#1348 迁移 Electron、
-supervisor、shared 辅助模块与 review helper，并扩大守卫。所有层均基于 v4，核心不再经历
-CLI 到 shared 的搬迁。使用 GitHub 原生 stack 的合并流程；合并底部 PR 后，它会 rebase
-剩余层。继续合并前，核对下一层的 base 和差异。
+此前 #1355 → #1065 → #1069 → #1348 已合并。共享官方进程服务保留 Lody 有界后端，
+调用方迁移不等于整个 L0/L1 或 daemon 所有权完成。新评审使用新分支及实际依赖边；
+文件锁 #1377、Git 叶子 #1381/#1389、worktree 查询 #1392 和本地准备 #1394 是评审
+单元，不宣称 mutations、setup/GC 或 Session 取消已完成。
+
+独立的[登录 shell 探测单元](../../implemented/architecture/2026-10-10-effect-login-shell-probe.zh.md)
+依赖进程释放失败所有权 #1379，不依赖 worktree 准备。有限探测已原生化；应用缓存在
+应用 runtime/根 Scope 落实前仍是 Legacy。维护两个真实路径：
+
+```mermaid
+flowchart LR
+  P[原生进程服务与释放所有权] --> S[原生登录 shell 探测]
+  S --> C[应用拥有的 shell 缓存：待完成]
+  P --> G[Git 与文件系统/锁评审单元]
+  G --> W[worktree setup 和 GC：待完成]
+  C --> A[ACP 启动组合：待完成]
+  W --> A
+  L[Loro 库生命周期：待完成] --> T[Turn：待完成]
+  A --> Q[连接与 Session 所有权：待完成]
+  Q --> T
+```
+
+有限探测保留 CLI 三秒 pending 等待，同时保留实际失败；它不迁移 runtime 下载或启动
+闸门。Loro 库主线保持独立；Turn 等待真实两边依赖，而非按层号全局串行。

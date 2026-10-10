@@ -14,7 +14,7 @@ import {
   type LocalMachineRpcResponse,
   type MachineLifecycleCapability,
 } from '@lody/shared';
-import { getLoginShellEnv } from '@/agent/login-shell-env';
+import { getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 import { SessionManager } from '@/session/session-manager';
 import { installRoostNodeSessionBackend } from '@/session/roost-node-session';
 import pkg from '@/pkg';
@@ -141,9 +141,9 @@ export class Lody {
   async start(): Promise<void> {
     // Warm the login-shell env probe (~100-300ms) concurrently with startup so
     // synchronous terminal environment callbacks usually read a populated PATH.
-    // ACP startup awaits the same cached probe before spawning. Fire-and-forget:
-    // getLoginShellEnv swallows failures and fails open to an empty overlay.
-    void getLoginShellEnv();
+    // ACP startup awaits the same cached probe before spawning. The Legacy cache
+    // retains and reports failures; launchers receive them on later reads.
+    void getLoginShellEnvLegacy().catch(() => undefined);
     await traceAsync(
       this.logger,
       'startup.machine_runtime',

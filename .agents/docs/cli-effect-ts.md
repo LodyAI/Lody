@@ -55,6 +55,18 @@ catch })` and pass the signal on, so interruption aborts the work.
   `onSpawned` hook). A listener attached after a fiber yield can miss an event
   that already fired.
 
+## Login-shell probes and pending compatibility caches
+
+`LoginShellEnvironment` captures `LoginShellHost` and the official process service
+through a passive Layer. Native `probeLoginShellEnv` composes the existing scoped
+command API; `probeLoginShellEnvLegacy` is the single execution facade for the
+remaining CLI/Electron caches. Timeout and release failures propagate with their
+recovery owners. CLI cache accessors and Electron's getter carry visible Legacy
+names. Their process-lifetime Promise/timer cache ownership is still pending; the
+CLI three-second local wait only bounds that reader while probing continues.
+See the [draft contract](../../specs/login-shell-environment-lifecycle.md) and
+[decision](../notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
+
 ## Process service and resource ownership
 
 Use `ChildProcess` and `ChildProcessSpawner` from `effect/process`. The shared

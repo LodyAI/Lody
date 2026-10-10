@@ -75,3 +75,8 @@ bypasses unrelated `beforeunload` guards such as unsaved editors.
   `downloadedFile` is set, `recordError` keeps `phase: 'downloaded'`; dropping
   to `error` hides the sidebar banner and the About install button, which are
   the only ways to retry.
+
+Login-shell environment uses the shared native probe through the explicit
+`getUserShellEnvCachedLegacy` cache. Preserve failures and recovery owners rather
+than returning null for failed cleanup. Before changing it, read the
+[contract](../../../../../specs/login-shell-environment-lifecycle.md).

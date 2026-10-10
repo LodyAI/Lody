@@ -15,13 +15,13 @@ Lody's lifecycle defects cluster around a few hand-written mechanisms:
 - keyed promise chains;
 - swallowed `.catch` handlers.
 
-The repository already depends on effect 3.18, but only as islands: an Effect is built inside
-a class method and run with `runPromise` at the boundary.
+The initial survey described Effect 3.18 islands. The current workspace uses
+Effect 4.0.2, with a native shared process service and migrated process consumers.
 
 This roadmap sets a bottom-up migration rule:
 
 - seven layers run from the platform to the entry points;
-- a layer is done only when every dependency below it is already an Effect service;
+- a unit is done only when its actual lifecycle dependencies are already native Effect services;
 - our own Promise modules are rewritten, and only real third-party I/O boundaries may be
   wrapped once.
 
@@ -215,14 +215,11 @@ reconnection under Effect, so the decision is to go inside the libraries:
 
 ### L0 + L1: platform and process leaf
 
-Delivered by the first and second PRs of
-[turn execution and ACP process ownership](2026-09-27-effect-turn-execution-and-acp-process-ownership.md).
-This is the shared prerequisite for every upper layer.
-
-From the second PR on, the other ~35 files that spawn processes directly move onto the same
-ProcessService: git, the worktree setup runner, terminals, login-shell environment, MCP,
-preview, code-collab scans, and others. This fixes a setup-script timeout signalling only the
-shell (SIGTERM), which leaks its descendants.
+The process core, sandbox ownership and process callers from #1065/#1069/#1348
+are merged. The official process service keeps Lody's bounded backend. This is
+completed process work, not completed filesystem, Git, runtime, Session or Turn
+orchestration. The native shell probe is a finite leaf; its remaining application
+caches need their own owner. Do not rebuild spawn/output/termination loops.
 
 ### L2 and the Loro sync stack
 
@@ -365,17 +362,25 @@ Migrate these only when touched:
 
 ## Suggested order
 
-1. L0 + L1 ProcessService, migrating every ACP-related process (the turn proposal's first PR, #1065).
-2. The remaining CLI spawn callers (#1069), then cross-runtime consumers in their own PR.
-   The core already lives in shared from #1065; no relocation is needed.
-3. In parallel with 1–2: the loro-repo Flock persistence migration.
-4. The Effect core and `loro-repo/effect` entry for loro-repo and streams-crdt, each in its own
-   repository.
-5. Lody L2. It can start after step 2 on the temporary `LoroRepo` Layer, and swaps that Layer
-   once step 4 lands. Managed runtime and worktrees/file locks finish in the same period.
-6. L3 → L4 → L5 (the turn proposal).
-7. L6 and orchestration delivery.
-8. The renderer workspace runtime (after step 4), then Electron and the supervisor.
+Process service and caller migration are merged. Continue according to actual
+edges, splitting reviews further when a finite dependency can be accepted alone:
+
+1. Official filesystem capabilities and file locks (#1377).
+2. Git and worktree preparation/setup/GC (#1381/#1389/#1392/#1394 cover finite leaves).
+3. Runtime installation, login environment/cache and startup gate; independent
+   leaves may proceed without waiting for unrelated worktree implementation.
+4. AcpConnection and domain operations, then owned sessions/pools.
+5. Turn/steer/stop/finalization only after its ACP and Loro dependencies are native.
+6. Dispatch/MessageHandler/orchestration and application root runtime; later
+   renderer, Electron and supervisor orchestration follows its real dependencies.
+
+The Loro line remains independent: streams-crdt/loro-repo lifecycle → documents,
+history/presence → Turn. Flock persistence is recorded as implemented; consumed
+versions are Flock 0.4.3, streams-crdt 0.16.1 and loro-repo 0.21.1. Published registry
+versions checked on 2026-10-10 are 0.4.3, 0.16.2 and 0.21.2 respectively; no automatic
+upgrade or native lifecycle completion follows from that fact. Read each upstream
+repository's rules and current code before separate library PRs. Temporary Lody
+adapters require explicit deletion conditions and do not complete the sync stack.
 
 ## Verification limits
 
@@ -396,10 +401,32 @@ migration to v4, is merged into main. [#1057](https://github.com/LodyAI/Lody/pul
 merged into its former base branch rather than main; [#1355](https://github.com/LodyAI/Lody/pull/1355)
 restores only these bilingual plans onto main.
 
-The remaining stack is #1355 → #1065 → #1069 → #1348. #1065 introduces the v4 process
-core directly in shared, CLI containers and ACP consumers; #1069 migrates the remaining
-CLI consumers and adds the CLI guard. #1348 migrates Electron, supervisor, shared helpers
-and the review helper and expands the guard. Every layer uses v4; the core is not first
-introduced in CLI and then relocated. Use GitHub's native stack merge workflow; it
-rebases the remaining layers after merging the bottom PR. Verify the next layer's
-base and diff before continuing.
+The former #1355 → #1065 → #1069 → #1348 stack is merged. The shared official
+process service retains Lody's bounded backend; its caller migration does not
+finish whole L0/L1 or daemon ownership. New reviews use fresh branches and actual
+dependency edges. File locks (#1377), Git leaves (#1381/#1389), worktree observations
+(#1392) and local preparation (#1394) are review units, not a claim that mutations,
+setup/GC or Session cancellation are complete.
+
+The independent [login-shell probe unit](../../implemented/architecture/2026-10-10-effect-login-shell-probe.md)
+depends on process release-failure ownership (#1379), not worktree preparation.
+Its finite probe is native; application caches remain Legacy until application
+runtime/root Scope ownership is introduced. Maintain both actual paths:
+
+```mermaid
+flowchart LR
+  P[Native process service + release ownership] --> S[Native login-shell probe]
+  S --> C[Application-owned shell cache: pending]
+  P --> G[Git + filesystem/locks review units]
+  G --> W[Worktree setup and GC: pending]
+  C --> A[ACP startup composition: pending]
+  W --> A
+  L[Loro library lifecycle: pending] --> T[Turn: pending]
+  A --> Q[Connection and Session ownership: pending]
+  Q --> T
+```
+
+The finite probe preserves the CLI three-second pending wait while retaining
+actual failures. It does not migrate runtime downloads or the startup gate. The
+Loro library mainline remains independent; Turn waits for both actual dependency
+paths, not a global sequence of layer numbers.

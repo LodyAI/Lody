@@ -70,7 +70,7 @@ import type { BootstrapSession } from './auth-service'
 import { desktopInstallationProfile, isLocalPlatform, mainPlatformKind } from '../platform'
 import { getDesktopLog } from '../desktop-log'
 import type { DesktopExecutionHost } from './desktop-execution-host'
-import { getUserShellEnvCached, shouldUseWindowsShell } from './shell-env'
+import { getUserShellEnvCachedLegacy, shouldUseWindowsShell } from './shell-env'
 import { applyProxyEnvFallback, resolveSystemProxyEnv } from './system-proxy-env'
 import type { CliOutputEvent, CliRunResult } from '../types'
 
@@ -1151,7 +1151,7 @@ export class CliService {
       )
     }
 
-    const shellEnv = await getUserShellEnvCached()
+    const shellEnv = await getUserShellEnvCachedLegacy()
     throwIfAborted(options?.signal)
     const env: NodeJS.ProcessEnv = {
       ...process.env,

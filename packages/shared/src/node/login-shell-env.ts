@@ -8,12 +8,19 @@
  */
 import { userInfo } from 'node:os';
 
-import { Duration } from 'effect';
+import { Cause, Clock, Context, Duration, Effect, Layer, Option } from 'effect';
+import { ChildProcessSpawner } from 'effect/process';
 
 import {
   CommandTimedOut,
   READ_ONLY_ABANDON_POLICY,
-  runCommandTextLegacy,
+  CommandFailed,
+  SpawnFailed,
+  errnoCode,
+  processLayer,
+  runCommandOk,
+  runPromiseSquashedLegacy,
+  type RunCommandError,
   type ProcessFacadeOptions,
 } from './process';
 
@@ -75,14 +82,14 @@ const withoutProbeEnv = (
   return result;
 };
 
-const defaultShell = (env: NodeJS.ProcessEnv): string => {
+const defaultShell = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string => {
   try {
     const { shell } = userInfo();
     if (shell) return shell;
   } catch {
     // No passwd entry (a container user); fall back to the environment.
   }
-  return env.SHELL || (process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh');
+  return env.SHELL || (platform === 'darwin' ? '/bin/zsh' : '/bin/sh');
 };
 
 export interface LoginShellEnvOptions {
@@ -95,45 +102,111 @@ export interface LoginShellEnvOptions {
   readonly env?: NodeJS.ProcessEnv;
   /** Defaults to the user's login shell. */
   readonly shell?: string;
+}
+
+export class LoginShellHost extends Context.Service<
+  LoginShellHost,
+  {
+    readonly platform: NodeJS.Platform;
+    readonly env: Effect.Effect<NodeJS.ProcessEnv>;
+    readonly shellFor: (env: NodeJS.ProcessEnv) => Effect.Effect<string>;
+  }
+>()('lody/LoginShellHost') {}
+
+export const LoginShellHostLive = Layer.succeed(LoginShellHost, {
+  platform: process.platform,
+  env: Effect.sync(() => ({ ...process.env })),
+  shellFor: (env) => Effect.sync(() => defaultShell(env, process.platform)),
+});
+
+export class LoginShellEnvironment extends Context.Service<
+  LoginShellEnvironment,
+  {
+    readonly probe: (
+      options?: LoginShellEnvOptions
+    ) => Effect.Effect<NodeJS.ProcessEnv | null, RunCommandError | CommandFailed>;
+  }
+>()('lody/LoginShellEnvironment') {}
+
+/** Finite probes own each shell command Scope; caches belong to their application. */
+export const LoginShellEnvironmentLive = Layer.effect(
+  LoginShellEnvironment,
+  Effect.gen(function* () {
+    const host = yield* LoginShellHost;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    return LoginShellEnvironment.of({
+      probe: (options = {}) =>
+        Effect.gen(function* () {
+          if (host.platform === 'win32') return null;
+          const baseEnv = { ...(options.env ?? (yield* host.env)) };
+          const first = options.shell ?? (yield* host.shellFor(baseEnv));
+          const shells = [first, ...FALLBACK_SHELLS.filter((shell) => shell !== first)];
+          const budgetMs = Duration.toMillis(options.timeout ?? DEFAULT_TIMEOUT);
+          const deadline = (yield* Clock.currentTimeMillis) + budgetMs;
+          for (const shell of shells) {
+            const remainingMs = deadline - (yield* Clock.currentTimeMillis);
+            if (remainingMs <= 0)
+              return yield* Effect.fail(
+                new CommandTimedOut({
+                  command: shell,
+                  message: `Login shell environment probe timed out after ${budgetMs}ms`,
+                })
+              );
+            const output = yield* runCommandOk({
+              command: shell,
+              args: ['-ilc', probeScript(shell)],
+              env: { ...baseEnv, ...PROBE_ENV },
+              timeout: remainingMs,
+              abandonPolicy: READ_ONLY_ABANDON_POLICY,
+              maxOutputBytes: MAX_OUTPUT_BYTES,
+            }).pipe(
+              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+              Effect.catchCause(
+                (cause): Effect.Effect<undefined, RunCommandError | CommandFailed> => {
+                  const error = Cause.findErrorOption(cause);
+                  // Only completed exits or an absent candidate are optional fallback.
+                  // Timeout, stream/startup errors and mixed release defects stay failures.
+                  if (
+                    cause.reasons.length === 1 &&
+                    Option.isSome(error) &&
+                    (error.value instanceof CommandFailed ||
+                      (error.value instanceof SpawnFailed &&
+                        errnoCode(error.value.cause) === 'ENOENT'))
+                  )
+                    return Effect.succeed(undefined);
+                  return Effect.failCause(cause);
+                }
+              )
+            );
+            if (output !== undefined) {
+              const parsed = parseLoginShellEnvOutput(output.stdout.toString('utf8'));
+              if (parsed) return withoutProbeEnv(parsed, baseEnv);
+            }
+          }
+          return null;
+        }),
+    });
+  })
+);
+
+/** Native composition; execution belongs to the application owner. */
+export const probeLoginShellEnv = (options: LoginShellEnvOptions = {}) =>
+  Effect.flatMap(LoginShellEnvironment, (environment) => environment.probe(options));
+
+export const loginShellEnvLayer = (options: ProcessFacadeOptions = {}) =>
+  LoginShellEnvironmentLive.pipe(
+    Layer.provideMerge(Layer.merge(LoginShellHostLive, processLayer(options)))
+  );
+
+export interface LoginShellEnvLegacyOptions extends LoginShellEnvOptions {
   readonly processOptions?: ProcessFacadeOptions;
 }
 
-/**
- * Run the login shell interactively and return the environment it ends with,
- * or null (Windows, or no shell produced one). A shell that fails to start or
- * exits unsuccessfully falls back to zsh, then bash; a shell that times out
- * does not, because its rc files are what hung.
- */
-export const probeLoginShellEnv = async (
-  options: LoginShellEnvOptions
-): Promise<NodeJS.ProcessEnv | null> => {
-  if (process.platform === 'win32') return null;
-  const baseEnv = options.env ?? process.env;
-  const first = options.shell ?? defaultShell(baseEnv);
-  const shells = [first, ...FALLBACK_SHELLS.filter((shell) => shell !== first)];
-  const deadline = Date.now() + Duration.toMillis(options.timeout ?? DEFAULT_TIMEOUT);
-  for (const shell of shells) {
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) return null;
-    try {
-      const output = await runCommandTextLegacy(
-        {
-          command: shell,
-          args: ['-ilc', probeScript(shell)],
-          env: { ...baseEnv, ...PROBE_ENV },
-          timeout: remainingMs,
-          // An interactive shell ignores SIGTERM; a grace period only delays.
-          abandonPolicy: READ_ONLY_ABANDON_POLICY,
-          maxOutputBytes: MAX_OUTPUT_BYTES,
-          check: 'exit-0',
-        },
-        options.processOptions
-      );
-      const parsed = parseLoginShellEnvOutput(output.stdout);
-      if (parsed) return withoutProbeEnv(parsed, baseEnv);
-    } catch (error) {
-      if (error instanceof CommandTimedOut) return null;
-    }
-  }
-  return null;
-};
+/** @deprecated Only for the unmigrated CLI/Electron cache owners; delete after both migrate. */
+export const probeLoginShellEnvLegacy = (
+  options: LoginShellEnvLegacyOptions = {}
+): Promise<NodeJS.ProcessEnv | null> =>
+  runPromiseSquashedLegacy(
+    probeLoginShellEnv(options).pipe(Effect.provide(loginShellEnvLayer(options.processOptions))),
+    { signal: options.processOptions?.signal }
+  );
