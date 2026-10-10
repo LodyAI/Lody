@@ -21,7 +21,7 @@ Cause.squash 会选择主要错误，可能丢失同时发生的清理 defect。
 
 独立审查后的纠正：首版在成功获取进程后保留租约，但配置失败可能在 handle 返回调用方之前就关闭 spawner 的子 Scope。产生的混合 Fail/Die Cause 随后经过 Effect.mapError；已安装的 4.0.2 会选择 typed Fail，丢掉释放 defect。spawnProcess 与 runCommand 现在使用 catchCause 和 failCause(Cause.map(...)) 转换错误，只改变 typed failure，保留全部 defect 和 interruption。即使获取本身失败，接收方仍能恢复该进程树；释放成功时普通配置错误保持不变。
 
-[draft Spec](../../../../specs/process-scope-release.zh.md)说明接收方责任。本单元没有实现根注册表、自动重试服务或会话协调器。调用方丢弃失败仍可能放弃其责任，上层迁移必须替换这种处理。成功命令继续保留其刻意留在后台的 helper。
+接收方保留每个恢复租约，直到确认进程不存在或有界终止成功。本单元没有实现根注册表、自动重试服务或会话协调器。调用方丢弃失败仍可能放弃其责任，上层迁移必须替换这种处理。成功命令继续保留其刻意留在后台的 helper。
 
 ## 验证与边界
 

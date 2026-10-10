@@ -55,8 +55,8 @@ every defect and interruption survives. The receiver can recover that tree even
 though acquisition itself failed; ordinary setup errors remain unchanged when
 release succeeds.
 
-The [draft Spec](../../../../specs/process-scope-release.md) names the receiver's
-responsibility. No root registry, automatic retry service or Session coordinator
+The receiver retains each recovery lease until absence is confirmed or bounded
+termination succeeds. No root registry, automatic retry service or Session coordinator
 is claimed by this unit. A caller discarding its failure can still abandon that
 responsibility; upper-layer migration must replace such handling. Successful
 commands continue preserving helpers deliberately left running.

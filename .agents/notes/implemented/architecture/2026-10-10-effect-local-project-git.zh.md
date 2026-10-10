@@ -27,7 +27,7 @@ localProjectLayer 只组合依赖。单个 deprecated 的 localProjectsLegacy �
 
 默认命令上限保持探测五秒、checkout 三十秒、每个输出流十六 MiB。命令中断沿用两秒优雅终止策略，无法确认释放时保留失败与恢复租约。每条命令通过 Layer 提供的 Effect 读取主机环境，非交互 Git 配置不变；runtime 初始化后的变化仍可见，保留原生 Git 环境配置行为。显式注入允许后续接入登录环境服务，不代表该服务已迁移。
 
-[draft Spec](../../../../specs/local-project-git-lifecycle.zh.md)记录失败保证变化。清理成功不构成跨进程 Git 修改事务。本单元没有新增隐式文件锁串行化，也不回滚取消前已经发生的 Git 操作。
+以上记录本次迁移的失败保证变化。清理成功不构成跨进程 Git 修改事务。本单元没有新增隐式文件锁串行化，也不回滚取消前已经发生的 Git 操作。
 
 ## 验证与边界
 
