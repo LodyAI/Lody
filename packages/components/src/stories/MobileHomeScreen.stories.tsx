@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useEffect, useState, type ContextType } from 'react';
+import { useEffect, useState } from 'react';
 import { fn } from 'storybook/test';
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 
@@ -322,13 +323,16 @@ function MobileHomeScreenStory({
 }
 
 /* Schedules tab mounts the real workspace, which asks the platform for
-   machine rows. Storybook has no platform, so this stub makes those queries
-   skip instead of throwing. */
-const schedulesStoryPlatform = {
-  kind: 'local',
-  capabilities: { has: () => false },
-  cloudApi: null,
-} as NonNullable<ContextType<typeof PlatformContext>>;
+   machine rows. The local platform has no cloud capabilities, so those
+   queries skip instead of throwing. */
+const schedulesStoryPlatform = createLocalPlatformProvider({
+  session: createStaticStore({ status: 'authenticated', user: { id: 'owner', name: 'Lody' } }),
+  workspaces: createStaticStore({
+    status: 'ready',
+    workspaces: [{ id: 'lody', name: 'Lody', slug: null, role: 'owner' }],
+    activeWorkspaceId: 'lody',
+  }),
+});
 
 /** Phone schedules tab: home header and bottom dock, not the standalone list. */
 export const SchedulesTab: Story = {
