@@ -6,6 +6,8 @@ Contract: [foundation Spec](../../specs/e2ee-foundations.md). Entry map: [README
   private-key export or signing API. Keep the root export map explicit.
 - Preserve candidate wire algorithms, domains and versions. Expected malformed
   input returns Effect 4 Result errors; never silently repair or downgrade bytes.
+- Enforce CBOR limits before full expansion or copying: charge shared values by
+  their expanded wire size and reject cycles without unbounded traversal.
 - Trusted Org genesis, resource, epoch, purpose and signer come from the caller's
   independently verified context. Frame metadata is unverified. Signature success
   establishes neither current permission nor AEAD validity.

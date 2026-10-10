@@ -13,6 +13,9 @@ package entry is `@lody/e2ee-core`; it uses the root Effect 4.0.2 catalog.
 | `verifyContentSignature` | v0 signature against caller-supplied scope and trusted signer |
 
 Use `Effect.fromResult` in existing workflows; this package starts no runtime.
+CBOR encoding budgets the expanded wire size before serialization and copies only
+bounded data. Shared values remain valid within 8192 bytes; cycles return a Result
+failure. These limits bound data traversal, not arbitrary code in getters/proxies.
 `verifyContentSignature(frame, trustedScope, trustedSigner, additionalData?)`
 checks the supplied organization genesis, document resource, epoch, purpose and
 independent binding. It does not decrypt, establish membership, approve a

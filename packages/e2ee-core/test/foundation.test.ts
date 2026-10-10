@@ -18,6 +18,7 @@ import {
   verifyContentSignature,
   type ContentScope,
   type ContentPurpose,
+  type CborValue,
 } from '../src/index';
 import vector from './content-vector.json';
 
@@ -99,6 +100,86 @@ describe('bounded canonical CBOR', () => {
       expect(Result.isFailure(decodeCbor(hex(wire)))).toBe(true);
     expect(Result.isFailure(decodeCbor(new Uint8Array(8193)))).toBe(true);
     expect(Result.isFailure(encodeCbor([new Uint8Array(257)]))).toBe(true);
+  });
+  it('rejects shared expansion before exhausting the traversal budget', () => {
+    // The guard keeps a regression from killing the test runner. It is not a
+    // time limit: an 8192-byte encoding cannot contain this many scalar visits.
+    let visits = 0;
+    const leaf = [0];
+    Object.defineProperty(leaf, 0, {
+      get: () => {
+        if (++visits > 8192) throw new Error('expanded beyond the wire budget');
+        return 0;
+      },
+    });
+    let value: CborValue = leaf;
+    for (let i = 0; i < 6; i++) value = Array(32).fill(value);
+    const result = encodeCbor(value);
+    expect(Result.isFailure(result) && result.failure.code).toBe('oversize');
+  });
+  it('accepts shared values, rejects cycles, and snapshots each input occurrence', () => {
+    const shared = [0, new Uint8Array([1])];
+    expect(toHex(ok(encodeCbor([shared, shared])))).toBe('828200410182004101');
+    const cyclic: CborValue[] = [];
+    cyclic.push(cyclic);
+    const result = encodeCbor(cyclic);
+    expect(Result.isFailure(result) && result.failure.code).toBe('canonical');
+
+    const changing = [0];
+    Object.defineProperty(changing, 0, {
+      get: () => {
+        Object.defineProperty(changing, 0, { value: new Uint8Array(8193) });
+        return 0;
+      },
+      configurable: true,
+    });
+    expect(toHex(ok(encodeCbor(changing)))).toBe('8100');
+  });
+  it('preserves the exact 8192-byte limit, including repeated byte strings', () => {
+    const shared = new Uint8Array(256);
+    const value = [...Array<Uint8Array>(31).fill(shared), new Uint8Array(159)];
+    const bytes = ok(encodeCbor(value));
+    expect(bytes.byteLength).toBe(8192);
+    expect(toHex(bytes)).toBe(
+      '9820' + ('590100' + '00'.repeat(256)).repeat(31) + '589f' + '00'.repeat(159)
+    );
+    expect(ok(decodeCbor(bytes))).toEqual(value);
+    value[31] = new Uint8Array(160);
+    const result = encodeCbor(value);
+    expect(Result.isFailure(result) && result.failure.code).toBe('oversize');
+  });
+  it('preserves depth, array, byte-string and integer header boundaries', () => {
+    let value: CborValue = 0;
+    for (let i = 0; i < 8; i++) value = [value];
+    expect(toHex(ok(encodeCbor(value)))).toBe('81'.repeat(8) + '00');
+    expect(Result.isFailure(encodeCbor([value]))).toBe(true);
+    expect(toHex(ok(encodeCbor(Array(32).fill(0))))).toBe('9820' + '00'.repeat(32));
+    expect(Result.isFailure(encodeCbor(Array(33).fill(0)))).toBe(true);
+    for (const [length, header] of [
+      [23, '57'],
+      [24, '5818'],
+      [255, '58ff'],
+      [256, '590100'],
+    ] as const) {
+      expect(toHex(ok(encodeCbor(new Uint8Array(length))))).toBe(header + '00'.repeat(length));
+    }
+    expect(
+      toHex(
+        ok(
+          encodeCbor([
+            23,
+            24,
+            255,
+            256,
+            65535,
+            65536,
+            0xffffffff,
+            0x100000000,
+            Number.MAX_SAFE_INTEGER,
+          ])
+        )
+      )
+    ).toBe('8917181818ff19010019ffff1a000100001affffffff1b00000001000000001b001fffffffffffff');
   });
 });
 

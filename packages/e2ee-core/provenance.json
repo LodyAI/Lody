@@ -19,7 +19,7 @@
       "sha256": "10a793aace02c1fce9cad249dd3b7d3c8b8ab92d86b85a88917230c881ea8337",
       "destination": "src/cbor.ts",
       "scope": "8192-byte canonical array/scalar codec only; snapshot codec and schema helpers omitted",
-      "destinationSha256": "0669a7c9dd7a374d883967d1e804578f1da407d704ab1e75d01fe5b69ed2651e"
+      "destinationSha256": "0323f14ebe715cb4d202f329f1d7092f5adab4681f62d0d92030af76d5eab425"
     },
     "pure/identifiers.ts": {
       "sha256": "d1e429c816119b5cb3a8b4edcebce88b3c1396829741a89b894e010115b7ac22",
@@ -56,8 +56,9 @@
     "Flatten imports and retain only selected definitions; use root Effect catalog 4.0.2.",
     "Return a fresh HKDF salt array instead of mutable exported bytes; domains and algorithms unchanged.",
     "Expose stateless signature verification as Result; add caller-context content signature check.",
-    "No signing, private-key export, ledger, Lab, Node host, transport or storage entrypoints."
+    "No signing, private-key export, ledger, Lab, Node host, transport or storage entrypoints.",
+    "Bound encoding traversal and copies by expanded canonical wire size before serialization; preserve valid shared values and reject cycles. No wire or algorithm change."
   ],
-  "migratedScopeSha256": "430d7ada8d841a8c1cbb8d954208d6414fba9f7f68c55cd9f4ac1a3a916f9764",
+  "migratedScopeSha256": "8c3e3a9e1ba0cc449d2a12b057f2272d4148e5f554d19b4cdb54fc6aa048ad14",
   "scopeHashEncoding": "UTF-8, destination paths sorted ascending, one line: <destinationSha256>  <destination>\\n"
 }

@@ -57,12 +57,40 @@ view or injected signature verdict exists here. Mixed-torsion A/R regressions
 exercise the strict verifier even when the library's cofactored equation accepts
 the constructed signature.
 
+## Correction: bound encoding before expansion
+
+Review of `30ce60bae3d7ed30b4f0d409d63ed24b4b0451f7` found that the encoder checked
+8192 bytes only after serialization. Six arrays, each containing 32 references to
+the previous value (starting at zero), exhausted a 128 MiB Node subprocess heap.
+The original packed-root probe reproduced SIGABRT without a Result. This belongs
+to the extracted codec, not the excluded candidate failures above.
+
+The encoder now charges exact canonical wire size per occurrence while preparing
+a bounded snapshot, before copying byte strings or calling DAG-CBOR. Every item
+costs at least one byte, bounding traversal and allocation even for shared graphs.
+Shared values remain valid when their expanded size fits; active-path cycles fail
+with `canonical`. Depth, array and byte-string limits remain unchanged. Snapshotting
+also avoids rereading changing accessors during serialization. This bounds ordinary
+data traversal, not execution of arbitrary caller-supplied getters or proxies.
+
+The unchanged packed-root probe on Node 22.23.1 now returns `Failure/oversize`
+with the same 128 MiB heap and 10-second subprocess safety timeout. The original
+seven independent probe groups pass. The focused suite passes 46/46, including
+exact 8192/8193 bytes, shared values, cycles, depth 8/9 and fixed header vectors.
+Its guarded expansion regression fails against the old codec (45 pass, 1 fail),
+without needing an OOM in the test runner. Source fingerprints stay unchanged;
+[provenance](../../../../packages/e2ee-core/provenance.json) refreshes only migrated
+code fingerprints and records this adaptation. Full `pnpm check` was rerun and
+reproduced only the same CLI Git fixture failure described below; typecheck, lint,
+format and documentation/boundary checks pass. Reviewer re-verification remains
+separate; this correction changes no protocol algorithm or production entry.
+
 ## Verification and limits
 
 Tests use fixed RFC 8032 bytes, independently native-signed v0 frames, CBOR vectors
 and negative cases: wrong Org/document/purpose, unknown version/generation,
 binding mismatch, tampering, byte ownership and Effect composition. Source content
-domains remain unchanged. The focused suite passes 42/42, typecheck and scoped
+domains remain unchanged. The initial focused suite passed 42/42, typecheck and scoped
 lint pass, and a browser-target ESM bundle executes the fixed vector in Node.
 Format, docs (zero errors), frozen install and boundary checks pass. Full
 `pnpm check` reaches a baseline CLI Git fixture failure (`context_unreadable`):

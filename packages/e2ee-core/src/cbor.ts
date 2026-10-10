@@ -86,10 +86,69 @@ function decodeBounded(input: unknown, maxBytes: number, maxArray: number): Resu
 export const decodeCbor = (input: unknown): Result<CborValue> =>
   decodeBounded(input, MAX_RECORD_BYTES, MAX_ARRAY_LENGTH);
 
+function headerSize(value: number): number {
+  if (value < 24) return 1;
+  if (value <= 0xff) return 2;
+  if (value <= 0xffff) return 3;
+  if (value <= 0xffffffff) return 5;
+  return 9;
+}
+
+// Charge each occurrence before copying it. A shared subtree costs its expanded
+// wire size, not its object count; every visited item consumes at least one byte.
+// Encode the bounded snapshot so input accessors cannot change it after checking.
+function prepareEncoding(value: CborValue, maxBytes: number): Result<CborValue> {
+  let remaining = maxBytes;
+  const ancestors = new Set<readonly CborValue[]>();
+  const charge = (size: number): boolean => {
+    remaining -= size;
+    return remaining >= 0;
+  };
+  const visit = (item: unknown, depth: number): Result<CborValue> => {
+    if (depth > MAX_DEPTH) return invalid('nesting');
+    if (!charge(1)) return invalid('oversize');
+    if (item === null || item === true || item === false) return Result.succeed(item);
+    if (typeof item === 'number') {
+      if (!Number.isSafeInteger(item) || item < 0) return invalid('canonical');
+      return charge(headerSize(item) - 1) ? Result.succeed(item) : invalid('oversize');
+    }
+    if (item instanceof Uint8Array) {
+      const length = item.byteLength;
+      if (length > MAX_BSTR_BYTES || !charge(headerSize(length) - 1 + length)) {
+        return invalid('oversize');
+      }
+      return Result.succeed(copyBytes(item));
+    }
+    if (Array.isArray(item)) {
+      const length = item.length;
+      if (length > MAX_ARRAY_LENGTH || !charge(headerSize(length) - 1)) {
+        return invalid('oversize');
+      }
+      if (ancestors.has(item)) return invalid('canonical');
+      ancestors.add(item);
+      const result: CborValue[] = [];
+      for (let i = 0; i < length; i++) {
+        const parsed = visit(item[i], depth + 1);
+        if (Result.isFailure(parsed)) return parsed;
+        result.push(parsed.success);
+      }
+      ancestors.delete(item);
+      return Result.succeed(result);
+    }
+    return invalid('canonical');
+  };
+  return visit(value, 0);
+}
+
 function encodeBounded(value: CborValue, maxBytes: number): Result<Uint8Array<ArrayBuffer>> {
   return Result.gen(function* () {
+    const prepared = yield* Result.try({
+      try: () => prepareEncoding(value, maxBytes),
+      catch: () => new ValidationError({ code: 'canonical' }),
+    });
+    const stable = yield* prepared;
     const bytes = yield* Result.try({
-      try: () => copyBytes(encode(value)),
+      try: () => copyBytes(encode(stable)),
       catch: () => new ValidationError({ code: 'canonical' }),
     });
     if (bytes.byteLength > maxBytes) return yield* invalid('oversize');
