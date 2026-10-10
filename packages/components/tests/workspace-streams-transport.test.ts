@@ -614,6 +614,9 @@ describe('workspace Streams content boundary', () => {
   });
 
   it('keeps a reader live through rejoin without local edits', async () => {
+    // Hold automatic retry backoff until the explicit rejoin. Otherwise a slow
+    // writer save can let the SDK reconnect before this fixture has new bytes.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const server = createByteServer();
     const workspaceId = `reader-${++sequence}` as WorkspaceId;
     const writer = await openTab(`${workspaceId}-writer` as WorkspaceId);
@@ -643,13 +646,13 @@ describe('workspace Streams content boundary', () => {
     unwatch();
     // The writer changes while the reader's connection is replaced. Rejoin must
     // catch up using its durable cursor, without requiring a local dirty write.
-    a.getMap('data').set('value', 2);
-    a.commit();
-    expect((await ta.syncDoc('doc-a', a)).ok).toBe(true);
     const received = Promise.withResolvers<void>();
     const stopObserving = b.subscribe(() => {
       if (b.getMap('data').get('value') === 2) received.resolve();
     });
+    a.getMap('data').set('value', 2);
+    a.commit();
+    expect((await ta.syncDoc('doc-a', a)).ok).toBe(true);
     await subscription.rejoin!();
     await received.promise;
     stopObserving();

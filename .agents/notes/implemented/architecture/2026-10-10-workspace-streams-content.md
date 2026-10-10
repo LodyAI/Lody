@@ -52,6 +52,13 @@ socket permission (9 passed); no unrelated Git code was changed.
 The rebased full check passes typecheck/lint and reproduces the same CLI failure
 (3,658 passed, 1 failed, 4 skipped); that failure interrupts the other test groups.
 Rebased formatting, source/test typechecking, documentation and boundary checks pass.
+PR CI exposed a race in the reader-rejoin fixture: automatic retry could reopen SSE
+before the writer's next save, while the byte fixture only sends backlog on connection.
+A controlled-clock reproduction retained the old reader value. The test now holds
+retry timers until explicit rejoin and observes the reader before publishing; it does
+not change production retry behavior or increase timeouts.
+The corrected test passes with the 80 focused cases and all 1,730 cases in the
+previously failing components shard (184 files).
 
 The SDK upload gate has no room parameter and is not server admission. Repo retains the
 sanitized `payload_protection_error` message and coarse `internal` error code. Main's
