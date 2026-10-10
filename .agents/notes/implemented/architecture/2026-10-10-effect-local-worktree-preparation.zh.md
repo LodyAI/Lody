@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1394](https://github.com/LodyAI/Lody/pull/1394)
 
 [English](2026-10-10-effect-local-worktree-preparation.md)
 
