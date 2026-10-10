@@ -4,6 +4,14 @@ Binding rules live in [AGENTS.md](AGENTS.md) and in the scoped `AGENTS.md` of ea
 subdirectory; this file is the navigation index. Cross-module explanations live in
 [`.agents/docs/`](../../../../.agents/docs/AGENTS.md).
 
+## Local persistence
+
+- `local-workspace-catalog.ts` — cached workspace/identity discovery; mutations
+  compose native FileLocks and keep the file write inside its lease. Read-cache
+  refresh orchestration remains Promise-based. Existing application entrypoints
+  provide the lock through the shared `fileLocksLegacy` runtime until daemon
+  composition migrates.
+
 ## Resource discovery
 
 - `discovery-query.ts` — strict query schemas, scope-bound keyset pagination and
