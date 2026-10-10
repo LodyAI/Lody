@@ -65,9 +65,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   state into the existing repo document; never replace unsent local edits or share
   the UI repo's persistence/cursors with the worker. Intent:
   [background prefetch](../../../../specs/session-background-prefetch.zh.md).
-- `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
-  target ownership and transport selection; do not restore a second writer or a
-  proxy-authoring/write-intent mirror.
+- Keep one Repo view; `WorkspaceTargetRouter` owns target/transport selection.
+  Never restore a second writer or proxy-authoring/write-intent mirror.
+- Runtime close cancels auth, joins attach/reconnect work, then destroys Repo.
+  Failed startup shares this close path.
 - Local-only window bootstrap may exchange same-workspace CRDT snapshots from
   already owned documents. Merge into the receiving Repo; never treat peer state
   as authoritative sync or open stores solely to answer bootstrap requests.
@@ -113,8 +114,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 ## Attachment transfer ownership
 
 Workspace `sendResources` owns preparation, cancellation and store borrows across
-React unmount. Dispose before transports/caches; join noncancelable IPC. Only the
-cache disposes stores. Cancel I/O, fence late results, await multipart cleanup.
+React unmount. Close before transports/caches; join IPC, cancel I/O, fence late
+results and await multipart cleanup. Only the cache disposes stores.
 
 Ready sends: local commits, then best-effort RPC; no persistence or retry. Unready
 sends live only in `pendingSends`; archive/delete cancel/join them. Never

@@ -267,6 +267,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
 
     let disposed = false;
+    const initializationAbort = new AbortController();
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
     // Logging-only workspace id resolution inputs intentionally stay out of
     // this effect's dependency list. A cached id can create the runtime before
@@ -296,6 +297,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           eagerSyncSurface,
         });
         workspaceRuntime = await createWorkspaceRuntime({
+          signal: initializationAbort.signal,
           accountId,
           workspaceSlug,
           workspaceId: effectiveWorkspaceId,
@@ -388,6 +390,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         workspaceSlug,
       });
       disposed = true;
+      initializationAbort.abort();
       setRuntime(null);
       setControlConnectionState('idle');
       // Reset to true for next initialization cycle

@@ -70,6 +70,8 @@ export type LocalReconnectLoop = {
   update: () => void;
   trigger: (reason?: LocalReconnectTriggerReason) => void;
   stop: () => void;
+  /** Permanently stop retries and join the current reconciliation before its repo closes. */
+  close: () => Promise<void>;
 };
 
 /**
@@ -89,6 +91,8 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
   let backoffResetWait: PendingWait | null = null;
   let retryAttempt = 0;
   let inFlight = false;
+  let inFlightDone: PromiseWithResolvers<void> | null = null;
+  let closing: Promise<void> | null = null;
   let pendingForcedRun = false;
   let pendingTriggerReason: LocalReconnectTriggerReason | undefined;
 
@@ -142,7 +146,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
   // update() calls must not push the reset out indefinitely); cancelled the
   // moment a problem is observed again.
   const scheduleBackoffResetWait = () => {
-    if (backoffResetWait || retryAttempt === 0) {
+    if (closing || backoffResetWait || retryAttempt === 0) {
       return;
     }
     const current: PendingWait = { fiber: null, settled: false };
@@ -172,6 +176,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
   const isActive = (): boolean => inFlight || pendingWait !== null;
 
   const update = () => {
+    if (closing) return;
     if (!options.canRun() || !options.hasProblem()) {
       cancelPendingWait();
       // No immediate forgiveness: a cleared problem may just be the transient
@@ -212,6 +217,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
   };
 
   const run = async (force: boolean) => {
+    if (closing) return;
     if (!options.canRun()) {
       if (force) {
         clearPendingTrigger();
@@ -236,6 +242,8 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
 
     const hadProblemAtStart = options.hasProblem();
     inFlight = true;
+    const done = Promise.withResolvers<void>();
+    inFlightDone = done;
     options.onStateChange();
     try {
       await options.reconnect(triggerReason === undefined ? { force } : { force, triggerReason });
@@ -243,6 +251,8 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
       options.onError?.(error);
     } finally {
       inFlight = false;
+      inFlightDone = null;
+      done.resolve();
       // An attempt against a problem always costs a backoff step, even when
       // hasProblem() reads false right now — the reconnect we just ran leaves
       // rooms in a transient 'connecting' window, and treating that as
@@ -269,6 +279,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
     isActive,
     update,
     trigger: (reason) => {
+      if (closing) return;
       recordPendingTrigger(reason);
       cancelPendingWait();
       cancelBackoffResetWait();
@@ -277,6 +288,22 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
       // history; otherwise repeated token/online/visibility signals can pin a
       // broken connection to the first backoff step forever.
       void run(true);
+    },
+    close: () => {
+      if (closing) return closing;
+      const done = Promise.withResolvers<void>();
+      closing = done.promise;
+      const waits = [pendingWait?.fiber, backoffResetWait?.fiber].filter(
+        (fiber): fiber is Fiber.Fiber<void> => fiber != null
+      );
+      clearPendingTrigger();
+      cancelPendingWait();
+      cancelBackoffResetWait();
+      void Promise.all([
+        inFlightDone?.promise,
+        ...waits.map((fiber) => Effect.runPromise(Fiber.await(fiber))),
+      ]).then(() => done.resolve(), done.reject);
+      return closing;
     },
     stop: () => {
       clearPendingTrigger();
