@@ -1701,8 +1701,11 @@ export const SessionChatInputArea = memo(
                 clearPendingFiles();
               if (sessionPastedTextDraftsCache.get(session.id) === submittedDraft.pastedText)
                 updatePastedTextDraftsForSession(session.id, () => []);
-              if (commentReferencesRef.current === submittedDraft.comments)
-                publishCommentReferences([]);
+              publishCommentReferences(
+                commentReferencesRef.current.filter(
+                  (item) => !submittedDraft.comments.includes(item)
+                )
+              );
               if (visualAnnotationReferencesRef.current === submittedDraft.annotations)
                 publishVisualAnnotationReferences([]);
             } else if (

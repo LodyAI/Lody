@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import * as stylex from '@stylexjs/stylex';
+import type { CommentReferencePayload } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 
 import { UserAvatar } from '@/components/user-avatar';
@@ -57,6 +58,8 @@ interface SessionCommentDraftProps {
   /** Whether a PR is linked to this session */
   prLinked?: boolean;
   onSubmitToGitHub?: (input: { anchor: CommentAnchor; body: string }) => void | Promise<void>;
+  /** Attaches the comment to the next chat message as a local reference. */
+  onSendToChat?: (reference: CommentReferencePayload) => boolean | void;
   onCancel?: () => void;
   className?: string;
 }
@@ -66,6 +69,7 @@ export function SessionCommentDraft({
   currentUser,
   prLinked = false,
   onSubmitToGitHub,
+  onSendToChat,
   onCancel,
   className,
 }: SessionCommentDraftProps) {
@@ -73,13 +77,12 @@ export function SessionCommentDraft({
   const [body, setBody] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = useCallback(async () => {
-    const trimmed = body.trim();
-    if (!trimmed || isSubmitting) return;
+  const canSubmitToGitHub = prLinked && Boolean(onSubmitToGitHub);
+  const authorName = currentUser?.name ?? t('comments.anonymous', 'Anonymous');
 
-    if (!prLinked || !onSubmitToGitHub) {
-      return;
-    }
+  const handleSubmitToGitHub = useCallback(async () => {
+    const trimmed = body.trim();
+    if (!trimmed || isSubmitting || !prLinked || !onSubmitToGitHub) return;
 
     setIsSubmitting(true);
     try {
@@ -92,6 +95,30 @@ export function SessionCommentDraft({
       setIsSubmitting(false);
     }
   }, [anchor, body, isSubmitting, onCancel, onSubmitToGitHub, prLinked]);
+
+  const handleSendToChat = useCallback(() => {
+    const trimmed = body.trim();
+    if (!trimmed || isSubmitting || !onSendToChat) return;
+
+    const accepted = onSendToChat({
+      source: 'lody',
+      path: anchor.path,
+      lineNumber: anchor.lineNumber,
+      side: anchor.side ?? 'additions',
+      commentBody: trimmed,
+      authorName,
+      authorImage: currentUser?.image ?? undefined,
+      turnId: anchor.turnId,
+      mode: anchor.mode,
+      // Each local comment is its own reference, so two comments on one line do not merge.
+      threadId: crypto.randomUUID(),
+    });
+    if (accepted === false) return;
+    setBody('');
+    onCancel?.();
+  }, [anchor, authorName, body, currentUser?.image, isSubmitting, onCancel, onSendToChat]);
+
+  const handleSubmit = canSubmitToGitHub ? handleSubmitToGitHub : handleSendToChat;
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -121,10 +148,12 @@ export function SessionCommentDraft({
           />
         )}
         <span {...stylex.props(styles.author)}>
-          {currentUser?.name ?? t('comments.anonymous', 'Anonymous')}
+          {authorName}
         </span>
         <span {...stylex.props(styles.destination)}>
-          {t('comments.githubOnly', 'Posts to GitHub')}
+          {canSubmitToGitHub
+            ? t('comments.githubOnly', 'Posts to GitHub')
+            : t('comments.chatOnly', 'Sends with your next message')}
         </span>
       </div>
 
@@ -153,14 +182,27 @@ export function SessionCommentDraft({
         >
           {t('comments.cancel', 'Cancel')}
         </Button>
+        {canSubmitToGitHub && onSendToChat && (
+          <Button
+            type="button"
+            size="small"
+            variant="secondary"
+            disabled={!body.trim() || isSubmitting}
+            onClick={handleSendToChat}
+          >
+            {t('comments.addToChat', 'Add to chat')}
+          </Button>
+        )}
         <Button
           type="button"
           size="small"
           variant="primary"
-          disabled={!body.trim() || isSubmitting || !prLinked || !onSubmitToGitHub}
+          disabled={!body.trim() || isSubmitting || (!canSubmitToGitHub && !onSendToChat)}
           onClick={() => void handleSubmit()}
         >
-          {t('comments.comment', 'Comment')}
+          {canSubmitToGitHub
+            ? t('comments.comment', 'Comment')
+            : t('comments.addToChat', 'Add to chat')}
         </Button>
       </div>
     </div>
