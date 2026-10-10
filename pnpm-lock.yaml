@@ -1539,6 +1539,34 @@ importers:
         specifier: '>=4'
         version: 4.3.0
 
+  packages/e2ee-core:
+    dependencies:
+      '@ipld/dag-cbor':
+        specifier: 10.0.2
+        version: 10.0.2
+      '@noble/ed25519':
+        specifier: 3.2.0
+        version: 3.2.0
+      '@noble/hashes':
+        specifier: 2.2.0
+        version: 2.2.0
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.2
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.12
+      oxfmt:
+        specifier: ^0.65.0
+        version: 0.65.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
+
   packages/ignore:
     dependencies:
       effect:
@@ -1835,6 +1863,19 @@ importers:
         version: 2.8.2
 
 packages:
+
+  multiformats@14.0.5:
+    resolution: {integrity: sha512-vbIm83F2yZ1pWJGS0yl0ysracIvv56LtbrIyiIQHoLdYDJOMoLfVFsXhh9DUH4SFdkdkFhucyWniihsNzVEjkQ==}
+
+  '@ipld/dag-cbor@10.0.2':
+    resolution: {integrity: sha512-1eCD4YMTlkx5i36oQUmeAojLS/wu+XCd1Gs31BA0afk0TaVkhnyMofIAT/pi0wV3HS3/G7QSN/1NibhiksMyZQ==}
+
+  '@noble/ed25519@3.2.0':
+    resolution: {integrity: sha512-criDgRlnUA09hchYrTy/JUWPIEap5rZxQe6wDWzRx51oWWpDRcUpuNzlgPxDJaOK6AsW9c0wKcj3rKRv6t+bPQ==}
+
+  cborg@6.1.3:
+    resolution: {integrity: sha512-Kb/wD/AFuVcqvVjR+HYNOjNiuhVJ2C+RWxQE2Yqq2WVlVkRjdvVLkkM6QsL3NMsBRh+rgNc+aXmcraA+X0HObQ==}
+    hasBin: true
 
   '@adobe/css-tools@4.4.4':
     resolution: {integrity: sha512-Elp+iwUx5rN5+Y8xLt5/GRoG20WGoDCQ/1Fb+1LiGtvwbDavuSk0jhD/eZdckHAuzcDzccnkv+rEjyWfRx18gg==}
@@ -14145,6 +14186,17 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  multiformats@14.0.5: {}
+
+  '@ipld/dag-cbor@10.0.2':
+    dependencies:
+      cborg: 6.1.3
+      multiformats: 14.0.5
+
+  '@noble/ed25519@3.2.0': {}
+
+  cborg@6.1.3: {}
 
   '@adobe/css-tools@4.4.4': {}
 

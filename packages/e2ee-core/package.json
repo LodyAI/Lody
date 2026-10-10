@@ -1,0 +1,27 @@
+{
+  "name": "@lody/e2ee-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run",
+    "format": "oxfmt 'src/**/*.ts' 'test/**/*.ts'",
+    "format:check": "oxfmt --check 'src/**/*.ts' 'test/**/*.ts'"
+  },
+  "dependencies": {
+    "@ipld/dag-cbor": "10.0.2",
+    "@noble/ed25519": "3.2.0",
+    "@noble/hashes": "2.2.0",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "3.2.4",
+    "oxfmt": "^0.65.0"
+  }
+}
