@@ -70,8 +70,8 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   on immediate reacquisition in 4.0.2. Use the owned Ref/Deferred handoff.
 - Publish complete metadata exclusively; register release before the body. Cancelled
   tickets leave the queue immediately. Retain failed release generations, verify
-  pid plus token, and surface unreadable-lock/cleanup errors. Contract and limits:
-  [file lock lifecycle](../../../../specs/file-lock-lifecycle.md).
+  pid plus token, and surface unreadable-lock/cleanup errors. Decision and limits:
+  [file lock lifecycle](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
 
 The file-lock Legacy native-program boundary uses `squashProcessFailure` to retain
 process recovery leases alongside a body failure. Never discard them with a plain
