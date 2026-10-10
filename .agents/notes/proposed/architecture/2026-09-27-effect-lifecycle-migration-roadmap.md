@@ -233,7 +233,7 @@ File locks are the first subsequent dependency unit; see the
 [file-lock decision](../../implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
 They supply a real filesystem protocol, fair interruptible local admission and
 observable cleanup failures. LocalProjects and WorktreeGit execution have native
-kernels under draft review; worktree mutation/setup/GC, login-shell waiting, managed
+kernels under draft review; worktree mutation/setup/GC, login-shell application-cache ownership, managed
 runtime installation, startup gates, SDK requests, Sessions and Turns remain to
 migrate. Process unification does not finish those lifecycles or daemon ownership.
 
@@ -396,11 +396,14 @@ flowchart TD
   O --> J["worktree mutations / setup / GC"]
   G --> J
   F --> R["Runtime download / installation"]
-  P --> E["Login environment / startup gate"]
+  C --> E["Native login-shell probe: #1397"]
+  E --> EC["Application shell-cache ownership: pending"]
+  P --> SG["ACP start gate: pending"]
   P --> A["Independent ACP transport → domain operations"]
   J --> S["AgentSession / session pool"]
   R --> S
-  E --> S
+  EC --> S
+  SG --> S
   A --> S
   N["Merged #1385: runtime credentials / preparation TTL leaves"] --> S
   K["Flock persistence: implemented in Lody; verify release / consumption"] --> L["streams-crdt / loro-repo Effect kernels: separate repositories"]
@@ -458,8 +461,49 @@ migration to v4, is merged into main. [#1057](https://github.com/LodyAI/Lody/pul
 merged into its former base branch rather than main; [#1355](https://github.com/LodyAI/Lody/pull/1355)
 restores only these bilingual plans onto main.
 
-The old #1355 → #1065 → #1069 → #1348 stack is fully merged. Do not edit its
-branches. Start the file-lock unit and subsequent independently reviewable units
-from refreshed main, stacking only actual dependencies. The current fixed catalog
-is 4.0.2; refresh it and GitHub state before each delivery. Remaining work follows
-the dependency graph above, not completion labels inherited from the old stack.
+The former #1355 → #1065 → #1069 → #1348 stack is merged. The shared official
+process service retains Lody's bounded backend; its caller migration does not
+finish whole L0/L1 or daemon ownership. New reviews use fresh branches and actual
+dependency edges. File locks (#1377), Git leaves (#1381/#1389), worktree observations
+(#1392) and local preparation (#1394) are review units, not a claim that mutations,
+setup/GC or Session cancellation are complete.
+
+The independent [login-shell probe unit](../../implemented/architecture/2026-10-10-effect-login-shell-probe.md)
+depends on process release-failure ownership (#1379), not worktree preparation.
+Its finite probe is native; application caches remain Legacy until application
+runtime/root Scope ownership is introduced. Maintain both actual paths:
+
+```mermaid
+flowchart LR
+  P[Native process service + release ownership] --> S[Native login-shell probe]
+  S --> C[Application-owned shell cache: pending]
+  P --> G[Git + filesystem/locks review units]
+  G --> W[Worktree setup and GC: pending]
+  C --> A[ACP startup composition: pending]
+  W --> A
+  L[Loro library lifecycle: pending] --> T[Turn: pending]
+  A --> Q[Connection and Session ownership: pending]
+  Q --> T
+```
+
+The finite probe preserves the CLI three-second pending wait while retaining
+actual failures. It does not migrate runtime downloads or the startup gate. The
+Loro library mainline remains independent; Turn waits for both actual dependency
+paths, not a global sequence of layer numbers.
+
+### Current review stack
+
+The seven draft reviews form one linear stack:
+
+```text
+main → #1379 → #1377 → #1381 → #1389 → #1392 → #1394 → #1397
+```
+
+Each PR targets the preceding PR's head branch and contains that predecessor.
+This replaces the temporary worktree/shell integration bases. The order is a
+review and merge sequence: LocalProjects does not acquire FileLocks, the Git
+execution kernel does not require LocalProjects, and the finite shell probe
+requires process ownership rather than worktree preparation. Preserve the actual
+dependency diagrams above when planning the next units. Process acquisition error
+conversion now retains setup failure and every unresolved recovery lease. These
+PRs remain drafts; this stack does not mark any subsequent daemon phase complete.

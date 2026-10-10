@@ -30,7 +30,7 @@ import {
   type AcpStartupTimeoutOptions,
   type AcpSessionStartTarget,
 } from './agent-client';
-import { getLoginShellEnv } from './login-shell-env';
+import { getLoginShellEnvLegacy } from './login-shell-env';
 import {
   mergeACPProcessEnv,
   mergeLoginShellEnv,
@@ -383,7 +383,7 @@ export const startLocalAcpAgent = async (options: StartLocalAcpAgentOptions) => 
   // omits user tool dirs, so resolve the login-shell env and overlay it before
   // merging the agent-specific env. withDefaultAcpPathEntries still runs as a
   // last-resort fallback for environments where the shell probe yields nothing.
-  const loginShellEnv = await getLoginShellEnv();
+  const loginShellEnv = await getLoginShellEnvLegacy();
   // withLoopbackNoProxy runs outermost so a proxy contributed by the login
   // shell is covered too: the agent reaches Lody's MCP HTTP host over
   // loopback, and a proxy that intercepts that kills MCP entirely.

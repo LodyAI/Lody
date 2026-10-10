@@ -1,4 +1,4 @@
-import { probeLoginShellEnv } from '@lody/shared/node/login-shell-env'
+import { probeLoginShellEnvLegacy } from '@lody/shared/node/login-shell-env'
 
 // GUI-launched apps (macOS launchd, Linux .desktop) inherit a minimal PATH that
 // usually omits /usr/local/bin, Homebrew, and editor CLIs (`code`, `cursor`,
@@ -13,19 +13,20 @@ async function loadUserShellEnv(): Promise<NodeJS.ProcessEnv | null> {
   // Windows has no login shell; returning here also keeps the warning below meaningful.
   if (process.platform === 'win32') return null
   if (process.env.LODY_ELECTRON_DISABLE_SHELL_ENV === '1') return null
-  const env = await probeLoginShellEnv({})
+  const env = await probeLoginShellEnvLegacy({})
   if (!env) console.warn('Login shell environment unavailable; using the inherited environment')
   return env
 }
 
 /**
  * Resolve (and cache for the process lifetime) the user's login-shell
- * environment. Returns null on Windows, when disabled, or when the probe fails;
- * callers should fall back to `process.env` in that case. A failure is cached
- * too: the probe's 15 s bound already covers a slow cold login, and a shell that
+ * environment. Returns null on Windows, when disabled, or for an absent shell
+ * environment; callers fall back to `process.env` in those cases. Infrastructure,
+ * timeout and resource release failures reject and remain cached: the probe's 15 s bound already covers a slow cold login, and a shell that
  * outlives it would otherwise stall every CLI launch and launcher probe again.
  */
-export async function getUserShellEnvCached(): Promise<NodeJS.ProcessEnv | null> {
+/** @deprecated Electron cache ownership has not yet migrated to its application Scope. */
+export async function getUserShellEnvCachedLegacy(): Promise<NodeJS.ProcessEnv | null> {
   if (!cachedShellEnvPromise) {
     cachedShellEnvPromise = loadUserShellEnv()
   }

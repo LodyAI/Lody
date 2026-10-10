@@ -3,20 +3,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock the underlying probe so we can drive its timing deterministically. The
 // opt-out test never reaches it (shouldSkip short-circuits), so the default
 // vi.fn() is harmless there.
-vi.mock('@lody/shared/node/login-shell-env', () => ({ probeLoginShellEnv: vi.fn() }));
+vi.mock('@lody/shared/node/login-shell-env', () => ({ probeLoginShellEnvLegacy: vi.fn() }));
 
-import { probeLoginShellEnv } from '@lody/shared/node/login-shell-env';
+import { probeLoginShellEnvLegacy } from '@lody/shared/node/login-shell-env';
 
 import {
-  getCachedLoginShellEnvSync,
-  getLoginShellEnv,
-  resetLoginShellEnvCache,
+  getCachedLoginShellEnvSyncLegacy,
+  getLoginShellEnvLegacy,
+  resetLoginShellEnvCacheLegacy,
 } from '../src/agent/login-shell-env';
 
 describe('login-shell-env opt-out', () => {
   afterEach(() => {
     delete process.env.LODY_DISABLE_SHELL_ENV;
-    resetLoginShellEnvCache();
+    resetLoginShellEnvCacheLegacy();
   });
 
   it('LODY_DISABLE_SHELL_ENV=1 yields an empty overlay without spawning a shell', async () => {
@@ -24,27 +24,27 @@ describe('login-shell-env opt-out', () => {
 
     // Both accessors must short-circuit to {} so the withDefaultAcpPathEntries
     // fallback is the only thing that touches PATH when the user opts out.
-    expect(getCachedLoginShellEnvSync()).toEqual({});
-    await expect(getLoginShellEnv()).resolves.toEqual({});
+    expect(getCachedLoginShellEnvSyncLegacy()).toEqual({});
+    await expect(getLoginShellEnvLegacy()).resolves.toEqual({});
   });
 });
 
 describe('login-shell-env slow-probe recovery', () => {
   beforeEach(() => {
     delete process.env.LODY_DISABLE_SHELL_ENV;
-    resetLoginShellEnvCache();
-    vi.mocked(probeLoginShellEnv).mockReset();
+    resetLoginShellEnvCacheLegacy();
+    vi.mocked(probeLoginShellEnvLegacy).mockReset();
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    resetLoginShellEnvCache();
+    resetLoginShellEnvCacheLegacy();
   });
 
   it('serves the real env to later awaiters once a slow probe lands after the timeout', async () => {
     vi.useFakeTimers();
     let resolveProbe!: (env: NodeJS.ProcessEnv | null) => void;
-    vi.mocked(probeLoginShellEnv).mockReturnValue(
+    vi.mocked(probeLoginShellEnvLegacy).mockReturnValue(
       new Promise<NodeJS.ProcessEnv | null>((resolve) => {
         resolveProbe = resolve;
       })
@@ -52,7 +52,7 @@ describe('login-shell-env slow-probe recovery', () => {
 
     // First awaiter kicks off the probe + the 3s timeout; the timeout wins so the
     // early caller gets the empty overlay (and falls back to default PATH dirs).
-    const firstAwait = getLoginShellEnv();
+    const firstAwait = getLoginShellEnvLegacy();
     await vi.advanceTimersByTimeAsync(3000);
     await expect(firstAwait).resolves.toEqual({});
 
@@ -63,7 +63,33 @@ describe('login-shell-env slow-probe recovery', () => {
     // The memoized promise must now serve the real env — otherwise async callers
     // (acp-runner aux sessions, history-sync) would be stuck on {} for the whole
     // process while the sync accessor recovered, a permanent disagreement.
-    expect(getCachedLoginShellEnvSync()).toEqual({ PATH: '/opt/homebrew/bin' });
-    await expect(getLoginShellEnv()).resolves.toEqual({ PATH: '/opt/homebrew/bin' });
+    expect(getCachedLoginShellEnvSyncLegacy()).toEqual({ PATH: '/opt/homebrew/bin' });
+    await expect(getLoginShellEnvLegacy()).resolves.toEqual({ PATH: '/opt/homebrew/bin' });
+  });
+
+  it('retains an early failed probe for both synchronous and asynchronous launchers', async () => {
+    const failure = new Error('shell cleanup failed');
+    vi.mocked(probeLoginShellEnvLegacy).mockRejectedValue(failure);
+    await expect(getLoginShellEnvLegacy()).rejects.toBe(failure);
+    expect(() => getCachedLoginShellEnvSyncLegacy()).toThrow(failure);
+    await expect(getLoginShellEnvLegacy()).rejects.toBe(failure);
+  });
+
+  it('retains a late failure after a pending caller has used the three-second empty overlay', async () => {
+    vi.useFakeTimers();
+    let rejectProbe!: (error: unknown) => void;
+    vi.mocked(probeLoginShellEnvLegacy).mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectProbe = reject;
+      })
+    );
+    const early = getLoginShellEnvLegacy();
+    await vi.advanceTimersByTimeAsync(3000);
+    await expect(early).resolves.toEqual({});
+    const failure = Object.assign(new Error('unreleased shell'), { recoveryOwner: { pid: 123 } });
+    rejectProbe(failure);
+    await vi.runAllTimersAsync();
+    expect(() => getCachedLoginShellEnvSyncLegacy()).toThrow(failure);
+    await expect(getLoginShellEnvLegacy()).rejects.toBe(failure);
   });
 });

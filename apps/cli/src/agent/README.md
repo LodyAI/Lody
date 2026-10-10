@@ -53,7 +53,9 @@ context/message-flow.md "Upstream".
   registry launches.
 - `acp-capabilities.ts` / `acp-startup-monitor.ts` / `acp-analytics.ts` — capability cache,
   startup health, analytics.
-- `login-shell-env.ts` — login-shell env capture for spawned agents.
+- `login-shell-env.ts` — explicit Legacy cache over the shared native
+  LoginShellEnvironment probe; the three-second pending wait is distinct from
+  retained failure. [Decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
 - `fixtures/` — synthetic test fixtures.
 
 ## Background

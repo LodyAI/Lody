@@ -1,11 +1,12 @@
-import { probeLoginShellEnv } from '@lody/shared/node/login-shell-env';
+import { probeLoginShellEnvLegacy } from '@lody/shared/node/login-shell-env';
 
 import { toShared } from '@/platform/process-options';
+import { getLogger } from '@/utils/logger';
 
 /**
  * How long an ACP spawn waits for the probe before going ahead without it. The
  * probe itself keeps its own bound (shared with the desktop) and ends the
- * shell's whole process tree when it runs out, so a hung rc file leaks nothing.
+ * shell's whole process tree when it runs out. Failed release retains its owner.
  */
 const SHELL_ENV_WAIT_MS = 3000;
 
@@ -17,11 +18,13 @@ const SHELL_ENV_WAIT_MS = 3000;
 let cachedShellEnvPromise: Promise<NodeJS.ProcessEnv> | null = null;
 /** Last successfully resolved env, exposed to synchronous callers. */
 let resolvedShellEnv: NodeJS.ProcessEnv = {};
+/** The compatibility cache retains failed probe/resource ownership for later readers. */
+let retainedProbeFailure: { readonly error: unknown } | null = null;
 
 const shouldSkip = (): boolean => process.env.LODY_DISABLE_SHELL_ENV === '1';
 
 const resolveOnce = (): Promise<NodeJS.ProcessEnv> => {
-  const probe = probeLoginShellEnv({ processOptions: toShared() })
+  const probe = probeLoginShellEnvLegacy({ processOptions: toShared() })
     .then((probed) => {
       const env = probed ?? {};
       resolvedShellEnv = env;
@@ -34,7 +37,16 @@ const resolveOnce = (): Promise<NodeJS.ProcessEnv> => {
       cachedShellEnvPromise = Promise.resolve(env);
       return env;
     })
-    .catch((): NodeJS.ProcessEnv => ({}));
+    .catch((error: unknown): never => {
+      retainedProbeFailure = { error };
+      cachedShellEnvPromise = Promise.reject(error);
+      // Observe the rejection without replacing the cached failure or its leases.
+      void cachedShellEnvPromise.catch(() => undefined);
+      getLogger().error('Login-shell probe failed; retaining its failure for launchers', {
+        errorName: error instanceof Error ? error.name : 'unknown',
+      });
+      throw error;
+    });
 
   // A slow rc file must not hold every awaiting ACP spawn for the probe's
   // whole bound. Fail open to the empty overlay so the
@@ -60,13 +72,14 @@ const resolveOnce = (): Promise<NodeJS.ProcessEnv> => {
  * login shell, so we pick up tools wherever they live instead of guessing a
  * fixed set of directories.
  *
- * Never throws: when no shell yields an environment the overlay is `{}`. The
+ * Expected absent/unsupported shells yield `{}`; failed probes reject with their retained error. The
  * overlay is the login shell's whole environment, which stays safe because
  * `mergeLoginShellEnv` is base-wins for non-PATH vars (a no-op for vars the
  * base already has) and the caller scrubs inherited auth/routing vars *after*
  * overlaying (see session.ts). Disable entirely via `LODY_DISABLE_SHELL_ENV=1`.
  */
-export const getLoginShellEnv = async (): Promise<NodeJS.ProcessEnv> => {
+/** @deprecated The cache owner remains Promise-based; native callers use LoginShellEnvironment. */
+export const getLoginShellEnvLegacy = async (): Promise<NodeJS.ProcessEnv> => {
   if (shouldSkip()) {
     return {};
   }
@@ -79,22 +92,27 @@ export const getLoginShellEnv = async (): Promise<NodeJS.ProcessEnv> => {
 /**
  * Synchronous view of the login-shell env for callers that cannot await, such as
  * terminal-manager environment callbacks. Returns `{}` until
- * `getLoginShellEnv()` has resolved at least once, so the first read kicks off
+ * `getLoginShellEnvLegacy()` has resolved at least once, so the first read kicks off
  * resolution and relies on the `withDefaultAcpPathEntries` fallback for that one
  * call; later reads see the cached env. ACP startup awaits the async accessor.
  */
-export const getCachedLoginShellEnvSync = (): NodeJS.ProcessEnv => {
+/** @deprecated Explicitly synchronous, pending-compatible cache access. */
+export const getCachedLoginShellEnvSyncLegacy = (): NodeJS.ProcessEnv => {
   if (shouldSkip()) {
     return {};
   }
+  if (retainedProbeFailure) throw retainedProbeFailure.error;
   if (!cachedShellEnvPromise) {
-    void getLoginShellEnv();
+    // The Legacy cache records and reports failed background probing.
+    void getLoginShellEnvLegacy().catch(() => undefined);
   }
   return resolvedShellEnv;
 };
 
 /** Test-only: clear the memoized login-shell env so cases can re-resolve. */
-export const resetLoginShellEnvCache = (): void => {
+/** @deprecated Test-only reset of the remaining Legacy cache. */
+export const resetLoginShellEnvCacheLegacy = (): void => {
   cachedShellEnvPromise = null;
   resolvedShellEnv = {};
+  retainedProbeFailure = null;
 };

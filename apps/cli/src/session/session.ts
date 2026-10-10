@@ -40,7 +40,7 @@ import {
   resolveAcpLauncher,
 } from '@/agent/acp-analytics';
 import { scrubInheritedClaudeAuthEnv, shouldScrubClaudeAuthEnv } from '@/agent/claude-env-conflict';
-import { getCachedLoginShellEnvSync, getLoginShellEnv } from '@/agent/login-shell-env';
+import { getCachedLoginShellEnvSyncLegacy, getLoginShellEnvLegacy } from '@/agent/login-shell-env';
 import { mergeLoginShellEnv, withDefaultAcpPathEntries } from '@/agent/setting';
 import { withLoopbackNoProxy } from '@lody/shared/proxy-env';
 import { ShellTerminalManager, TerminalManager } from './terminal-manager';
@@ -467,7 +467,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   private buildShellEnv(
     extraEnv?: Record<string, string>,
-    loginShellEnv: NodeJS.ProcessEnv = getCachedLoginShellEnvSync()
+    loginShellEnv: NodeJS.ProcessEnv = getCachedLoginShellEnvSyncLegacy()
   ): NodeJS.ProcessEnv {
     const configEnv = this.config.env ?? {};
     const workspaceSessionId = this.config.parentSessionId ?? this.sessionId;
@@ -548,7 +548,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   async createAgent(callbacks: CreateAgentConfig): Promise<string> {
     this.acpCapabilitySourceVersion = callbacks.capabilitySourceVersion ?? null;
-    const loginShellEnv = await getLoginShellEnv();
+    const loginShellEnv = await getLoginShellEnvLegacy();
     callbacks.abortSignal?.throwIfAborted();
     const env = withLodyNpmCacheForNpx(
       callbacks.command,

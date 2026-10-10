@@ -851,7 +851,7 @@ export function withDefaultAcpPathEntries(
 }
 
 /**
- * Overlay a login-shell environment (see `getLoginShellEnv`) onto a base env when
+ * Overlay a login-shell environment (see `getLoginShellEnvLegacy`) onto a base env when
  * spawning ACP agents.
  *
  * - Non-PATH vars: base wins. The base carries lody-injected values (e.g.

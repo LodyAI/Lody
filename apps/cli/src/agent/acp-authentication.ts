@@ -41,7 +41,7 @@ import { startProcessLegacy } from '@lody/shared/node/process';
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import type { ManagedRuntimeProgressEvent } from './managed-agent-runtime';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
-import { getLoginShellEnv } from './login-shell-env';
+import { getLoginShellEnvLegacy } from './login-shell-env';
 import { appendStderrTail, createAcpStartupMonitor } from './acp-startup-monitor';
 import { runNpxStartupWithRecovery } from './acp-npx-startup-policy';
 import { withLodyNpmCacheForNpx } from './npx-cache';
@@ -183,7 +183,7 @@ type AcpAuthenticationManagerOptions = {
   authenticationTimeoutMs?: number;
   terminationGraceMs?: number;
   nodeProcess?: NodeProcessApi;
-  resolveLoginShellEnv?: typeof getLoginShellEnv;
+  resolveLoginShellEnv?: typeof getLoginShellEnvLegacy;
   resolveAuthenticationProcessLaunch?: typeof resolveBuiltinAuthenticationProcessLaunch;
 };
 
@@ -204,7 +204,7 @@ type ProbeBuiltinAuthenticationOptions = {
   signal?: AbortSignal;
   statusProbeTimeoutMs?: number;
   nodeProcess?: NodeProcessApi;
-  resolveLoginShellEnv?: typeof getLoginShellEnv;
+  resolveLoginShellEnv?: typeof getLoginShellEnvLegacy;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -381,7 +381,7 @@ async function buildAuthenticationProcessEnv(options: {
   launch: ResolvedACPProcessLaunch;
   agentType: string;
   env?: NodeJS.ProcessEnv;
-  resolveLoginShellEnv: typeof getLoginShellEnv;
+  resolveLoginShellEnv: typeof getLoginShellEnvLegacy;
 }): Promise<NodeJS.ProcessEnv> {
   const loginShellEnv = await options.resolveLoginShellEnv();
   const baseEnv: NodeJS.ProcessEnv = {
@@ -432,7 +432,7 @@ export async function probeBuiltinAuthentication(
     launch,
     agentType: options.agentType,
     env: options.env,
-    resolveLoginShellEnv: options.resolveLoginShellEnv ?? getLoginShellEnv,
+    resolveLoginShellEnv: options.resolveLoginShellEnv ?? getLoginShellEnvLegacy,
   });
   options.signal?.throwIfAborted();
   if (hasBuiltinEnvAuthentication(options.agentType, env)) {
@@ -531,7 +531,7 @@ export class AcpAuthenticationManager {
   private readonly authenticationTimeoutMs: number;
   private readonly terminationGraceMs: number;
   private readonly nodeProcess: NodeProcessApi | undefined;
-  private readonly resolveLoginShellEnv: typeof getLoginShellEnv;
+  private readonly resolveLoginShellEnv: typeof getLoginShellEnvLegacy;
   private readonly resolveAuthenticationProcessLaunch: typeof resolveBuiltinAuthenticationProcessLaunch;
 
   constructor(
@@ -547,7 +547,7 @@ export class AcpAuthenticationManager {
       options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS
     );
     this.nodeProcess = options.nodeProcess;
-    this.resolveLoginShellEnv = options.resolveLoginShellEnv ?? getLoginShellEnv;
+    this.resolveLoginShellEnv = options.resolveLoginShellEnv ?? getLoginShellEnvLegacy;
     this.resolveAuthenticationProcessLaunch =
       options.resolveAuthenticationProcessLaunch ?? resolveBuiltinAuthenticationProcessLaunch;
   }
