@@ -67,6 +67,8 @@ has no installed dependencies and the borrowed dependencies lack the StyleX plug
 Browser clipboard behavior and full type checks remain unverified. Documentation
 checking reports existing broken links to absent ACP submodules.
 
+Tracked in [PR #1371](https://github.com/LodyAI/Lody/pull/1371).
+
 ## Verification and limits
 
 - [`session-app-url.test.ts`](../../../../packages/components/tests/session-app-url.test.ts)

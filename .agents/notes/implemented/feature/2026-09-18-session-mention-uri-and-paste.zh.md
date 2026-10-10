@@ -54,6 +54,8 @@ URL 保留及非会话标签。常规配置未能启动：本检出未安装依�
 StyleX 插件。真实浏览器剪贴板行为与完整类型检查仍未验证；文档检查报告的
 已有断链指向未检出的 ACP 子模块。
 
+对应 [PR #1371](https://github.com/LodyAI/Lody/pull/1371).
+
 ## 验证与限制
 
 - [`session-app-url.test.ts`](../../../../packages/components/tests/session-app-url.test.ts)
