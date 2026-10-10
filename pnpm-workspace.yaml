@@ -109,13 +109,13 @@ minimumReleaseAgeExclude:
   - '@peculiar/asn1-cms@2.10.0'
   - mediabunny@1.61.0
   - '@peculiar/asn1-schema@2.10.0'
-  # Electron 43 desktop runtime. 43.7.6 carries the WASM code-cache fix
-  # (electron/electron#54234); electron-vite 6.0.0-beta.2+ is the first release
+  # Electron 44.7.0 matches DSH's native loader runtime support.
+  # electron-vite 6.0.0-beta.2+ is the first release
   # with Electron 42-44 build targets. rolldown and magic-string come with it.
   # Every rolldown platform binding is listed: a quarantined optional binding is
   # dropped from the lockfile without an error, and rolldown then loads another
   # version's binding and fails while bundling electron.vite.config.ts.
-  - 'electron@43.7.6'
+  - 'electron@44.7.0'
   - 'electron-vite@6.0.0-beta.5'
   - 'magic-string@1.4.2'
   - 'rolldown@1.2.11'

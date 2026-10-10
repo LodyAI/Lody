@@ -504,7 +504,7 @@ importers:
     dependencies:
       '@better-auth/electron':
         specifier: 'catalog:'
-        version: 1.6.33(patch_hash=222834fca69f7b6e53d590cf72f14cb0460c0fa0df5f835f13339d4b389ac038)(b73c277373c894cd139c0168762e33d3)
+        version: 1.6.33(patch_hash=222834fca69f7b6e53d590cf72f14cb0460c0fa0df5f835f13339d4b389ac038)(4701953f4432162da1aa939c2c63d679)
       '@convex-dev/better-auth':
         specifier: 'catalog:'
         version: 0.12.5(ee1a75af1940684457323137e467c4ea)
@@ -543,10 +543,10 @@ importers:
         version: 1.0.0
       '@electron-toolkit/preload':
         specifier: ^3.0.2
-        version: 3.0.2(electron@43.7.6)
+        version: 3.0.2(electron@44.7.0)
       '@electron-toolkit/utils':
         specifier: ^4.0.0
-        version: 4.0.0(electron@43.7.6)
+        version: 4.0.0(electron@44.7.0)
       '@lody/cli-supervisor':
         specifier: workspace:*
         version: link:../../packages/cli-supervisor
@@ -576,10 +576,10 @@ importers:
         version: 4.0.2
       electron-ipc-decorator:
         specifier: ^1.0.2
-        version: 1.0.2(electron@43.7.6)
+        version: 1.0.2(electron@44.7.0)
       electron-sparkle-updater:
         specifier: 0.5.1
-        version: 0.5.1(electron@43.7.6)
+        version: 0.5.1(electron@44.7.0)
       electron-updater:
         specifier: ^6.3.9
         version: 6.7.3
@@ -642,8 +642,8 @@ importers:
         specifier: ^5.2.0
         version: 5.2.0(vite@7.3.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
       electron:
-        specifier: 43.7.6
-        version: 43.7.6
+        specifier: 44.7.0
+        version: 44.7.0
       electron-builder:
         specifier: ^26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
@@ -1044,7 +1044,7 @@ importers:
         version: 0.10.9(@assistant-ui/react@0.10.50(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(immer@11.1.4)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(use-sync-external-store@1.6.0(react@19.2.0)))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@better-auth/electron':
         specifier: 'catalog:'
-        version: 1.6.33(patch_hash=222834fca69f7b6e53d590cf72f14cb0460c0fa0df5f835f13339d4b389ac038)(d3b2d669ca9bab84f2abb6b16f58e3e5)
+        version: 1.6.33(patch_hash=222834fca69f7b6e53d590cf72f14cb0460c0fa0df5f835f13339d4b389ac038)(435b68c4599ded4b816a73e0a6b66658)
       '@capacitor/browser':
         specifier: ^8.0.0
         version: 8.0.3(@capacitor/core@8.5.0)
@@ -8953,8 +8953,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@43.7.6:
-    resolution: {integrity: sha512-dLKMEDmUFG9hyL5fj0wOPXxxtIbhH+I6gSXOFMGSLiOIxeU2LjNb9YkQQOH7clD2TSBf2fa+gz8EEQ46FTpMaA==}
+  electron@44.7.0:
+    resolution: {integrity: sha512-aUq9/zLAAFYc+a9gy6cd0C3Y/N/RmovLCD8TV8LhIzNhuND6HEgsu96jJz9cbAxvckSPv+Trf2PKEjktoZgFkw==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -14607,19 +14607,7 @@ snapshots:
       '@better-auth/core': 1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.2.2)(kysely@0.29.6)(nanostores@1.2.0)
       '@better-auth/utils': 0.4.2
 
-  '@better-auth/electron@1.6.33(patch_hash=222834fca69f7b6e53d590cf72f14cb0460c0fa0df5f835f13339d4b389ac038)(b73c277373c894cd139c0168762e33d3)':
-    dependencies:
-      '@better-auth/core': 1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.2.2)(kysely@0.29.6)(nanostores@1.2.0)
-      '@better-auth/utils': 0.4.2
-      '@better-fetch/fetch': 1.3.1
-      better-auth: 1.6.33(@opentelemetry/api@1.9.0)(@prisma/client@7.4.0(prisma@7.4.0(@types/react@19.2.17)(better-sqlite3@12.10.0)(magicast@0.3.5)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(typescript@5.9.3))(typescript@5.9.3))(@tanstack/react-start@1.168.33(crossws@0.4.12(srvx@1.0.4))(esbuild@0.28.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(rolldown@1.2.11)(rollup@4.57.1)(vite@7.3.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))(better-sqlite3@12.10.0)(mongodb@7.1.0(socks@2.8.7))(mysql2@3.15.3)(prisma@7.4.0(@types/react@19.2.17)(better-sqlite3@12.10.0)(magicast@0.3.5)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(typescript@5.9.3))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vitest@4.1.11(@opentelemetry/api@1.9.0)(@types/node@24.10.12)(jsdom@26.1.0)(vite@7.3.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))(vue@3.5.28(typescript@5.9.3))
-      better-call: 1.4.0(zod@4.3.6)
-      zod: 4.3.6
-    optionalDependencies:
-      conf: 15.1.0
-      electron: 43.7.6
-
-  '@better-auth/electron@1.6.33(patch_hash=222834fca69f7b6e53d590cf72f14cb0460c0fa0df5f835f13339d4b389ac038)(d3b2d669ca9bab84f2abb6b16f58e3e5)':
+  '@better-auth/electron@1.6.33(patch_hash=222834fca69f7b6e53d590cf72f14cb0460c0fa0df5f835f13339d4b389ac038)(435b68c4599ded4b816a73e0a6b66658)':
     dependencies:
       '@better-auth/core': 1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.2.2)(kysely@0.29.6)(nanostores@1.2.0)
       '@better-auth/utils': 0.4.2
@@ -14629,7 +14617,19 @@ snapshots:
       zod: 4.3.6
     optionalDependencies:
       conf: 15.1.0
-      electron: 43.7.6
+      electron: 44.7.0
+
+  '@better-auth/electron@1.6.33(patch_hash=222834fca69f7b6e53d590cf72f14cb0460c0fa0df5f835f13339d4b389ac038)(4701953f4432162da1aa939c2c63d679)':
+    dependencies:
+      '@better-auth/core': 1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.2.2)(kysely@0.29.6)(nanostores@1.2.0)
+      '@better-auth/utils': 0.4.2
+      '@better-fetch/fetch': 1.3.1
+      better-auth: 1.6.33(@opentelemetry/api@1.9.0)(@prisma/client@7.4.0(prisma@7.4.0(@types/react@19.2.17)(better-sqlite3@12.10.0)(magicast@0.3.5)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(typescript@5.9.3))(typescript@5.9.3))(@tanstack/react-start@1.168.33(crossws@0.4.12(srvx@1.0.4))(esbuild@0.28.2)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(rolldown@1.2.11)(rollup@4.57.1)(vite@7.3.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))(better-sqlite3@12.10.0)(mongodb@7.1.0(socks@2.8.7))(mysql2@3.15.3)(prisma@7.4.0(@types/react@19.2.17)(better-sqlite3@12.10.0)(magicast@0.3.5)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(typescript@5.9.3))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vitest@4.1.11(@opentelemetry/api@1.9.0)(@types/node@24.10.12)(jsdom@26.1.0)(vite@7.3.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))(vue@3.5.28(typescript@5.9.3))
+      better-call: 1.4.0(zod@4.3.6)
+      zod: 4.3.6
+    optionalDependencies:
+      conf: 15.1.0
+      electron: 44.7.0
 
   '@better-auth/kysely-adapter@1.6.33(@better-auth/core@1.6.33(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@opentelemetry/api@1.9.0)(better-call@1.4.0(zod@4.3.6))(jose@6.2.2)(kysely@0.29.6)(nanostores@1.2.0))(@better-auth/utils@0.4.2)(kysely@0.29.6)':
     dependencies:
@@ -15376,17 +15376,17 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@electron-toolkit/preload@3.0.2(electron@43.7.6)':
+  '@electron-toolkit/preload@3.0.2(electron@44.7.0)':
     dependencies:
-      electron: 43.7.6
+      electron: 44.7.0
 
   '@electron-toolkit/tsconfig@2.0.0(@types/node@24.10.12)':
     dependencies:
       '@types/node': 24.10.12
 
-  '@electron-toolkit/utils@4.0.0(electron@43.7.6)':
+  '@electron-toolkit/utils@4.0.0(electron@44.7.0)':
     dependencies:
-      electron: 43.7.6
+      electron: 44.7.0
 
   '@electron/asar@3.4.1':
     dependencies:
@@ -22288,9 +22288,9 @@ snapshots:
       - electron-builder-squirrel-windows
       - supports-color
 
-  electron-ipc-decorator@1.0.2(electron@43.7.6):
+  electron-ipc-decorator@1.0.2(electron@44.7.0):
     dependencies:
-      electron: 43.7.6
+      electron: 44.7.0
 
   electron-publish@26.15.3:
     dependencies:
@@ -22306,12 +22306,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron-sparkle-updater@0.5.1(electron@43.7.6):
+  electron-sparkle-updater@0.5.1(electron@44.7.0):
     dependencies:
       node-addon-api: 8.9.1
       node-gyp: 13.0.2
     optionalDependencies:
-      electron: 43.7.6
+      electron: 44.7.0
 
   electron-to-chromium@1.5.286: {}
 
@@ -22354,7 +22354,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@43.7.6:
+  electron@44.7.0:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0

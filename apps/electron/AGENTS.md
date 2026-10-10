@@ -35,6 +35,8 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 
 ## Build toolchain and window identity
 
+- Electron 44 desktop builds require macOS 13 or newer.
+
 - `desktop-bootstrap` must be the first main import: Nightly chooses its data
   directory before auth stores open. `desktop-channel` changes desktop identity,
   never the shared CLI namespace, data root, or Host endpoint.

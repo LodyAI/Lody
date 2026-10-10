@@ -2,6 +2,10 @@
 
 Lody desktop application built with Electron, React, and TypeScript.
 
+The desktop pins Electron 44.7.0 and requires macOS 13 or newer on Mac.
+This runtime is compatible with the pinned DeepSeek Harness native loader;
+see the [runtime compatibility decision](../../.agents/notes/implemented/bug-fix/2026-10-10-dsh-electron-runtime.md).
+
 ## Conversation links
 
 All versions generate `lody://session/<id>?workspace=<id>`. In-app links stay in
