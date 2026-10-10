@@ -56,7 +56,7 @@ catalog:
   loro-mirror-jotai: 2.3.2
   loro-mirror-react: 2.3.2
   loro-protocol: ^0.3.0
-  loro-repo: 0.21.2
+  loro-repo: 0.22.0
   loro-websocket: ^0.6.2
   lucide-react: ^0.523.0
   react: 19.2.0
@@ -156,9 +156,8 @@ minimumReleaseAgeExclude:
   # Safe error provenance and context, reviewed with loro-repo#144.
   - '@loro-dev/streams-crdt@0.16.2'
   - '@loro-dev/streams-client@0.9.0'
-  # Fast-path hydration of stored Flock files (loro-dev/loro-repo#142), on top of
-  # SQLite replica-bound Streams checkpoints (#137, #138, #141).
-  - loro-repo@0.21.2
+  # Reviewed host AAD helper and safe protection reasons (loro-dev/loro-repo#146).
+  - loro-repo@0.22.0
   # Adds the `remend` option the streaming Markdown renderer passes (lobehub/streamdown#5).
   - '@lobehub/streamdown@1.4.0'
   # Replaces the removed @lody/virtua fork: this release's source plus unused keyed changes.
