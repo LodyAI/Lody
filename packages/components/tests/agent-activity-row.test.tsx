@@ -420,6 +420,52 @@ describe('live agent status', () => {
     expect(taskStop.textContent).toBe('{"task_id":"b7q2"}');
   });
 
+  it('shows a shell step text result verbatim instead of reflowing it as Markdown', async () => {
+    // Pi sessions recorded before its results became terminal output stored
+    // them as plain text content.
+    const output = '==== one ====\nline 1\n==== two ====\nline 2';
+    await render(
+      liveTurn([
+        {
+          type: 'tool_call',
+          toolCallId: 'pi-bash-1',
+          title: 'bash',
+          kind: 'execute',
+          status: 'completed',
+          content: [
+            { type: 'content', content: { type: 'text', text: output } },
+            { type: 'terminal_command', command: 'echo one; echo two' },
+          ],
+        },
+        {
+          type: 'tool_call',
+          toolCallId: 'pi-bash-2',
+          title: 'pwd',
+          kind: 'execute',
+          status: 'completed',
+          content: [{ type: 'terminal_command', command: 'pwd' }],
+        },
+      ]),
+      { label: 'Working' }
+    );
+
+    const button = (text: string) =>
+      [...container.querySelectorAll('button')].find((candidate) =>
+        candidate.textContent?.includes(text)
+      )!;
+    await act(async () => button('Ran 2 commands').click());
+    if (button('Ran bash').getAttribute('aria-expanded') !== 'true') {
+      await act(async () => button('Ran bash').click());
+    }
+
+    const sheet = [...container.querySelectorAll('[data-tool-detail-sheet]')].find((candidate) =>
+      candidate.textContent?.includes('echo one; echo two')
+    );
+    expect(sheet).toBeDefined();
+    expect(sheet!.querySelector('.markdown-renderer')).toBeNull();
+    expect([...sheet!.querySelectorAll('pre')].map((pre) => pre.textContent)).toContain(output);
+  });
+
   it('shows the turn token usage in compact units with exact values on hover', async () => {
     await render(
       liveTurn([{ type: 'text', text: 'Done.' }], {
