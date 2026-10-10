@@ -70,3 +70,7 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   tickets leave the queue immediately. Retain failed release generations, verify
   pid plus token, and surface unreadable-lock/cleanup errors. Contract and limits:
   [file lock lifecycle](../../../../specs/file-lock-lifecycle.md).
+
+The file-lock Legacy native-program boundary uses `squashProcessFailure` to retain
+process recovery leases alongside a body failure. Never discard them with a plain
+Cause projection.

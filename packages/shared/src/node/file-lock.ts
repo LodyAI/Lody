@@ -2,7 +2,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import * as path from 'node:path';
 import { NodeFileSystem } from '@effect/platform-node-shared';
 import {
-  Cause,
   Clock,
   Context,
   Data,
@@ -17,7 +16,7 @@ import {
 } from 'effect';
 import type { PlatformError } from 'effect/PlatformError';
 import { getLodyDataDir } from './installation-profile';
-import { NodeProcess, nodeProcessLive, probePid } from './process';
+import { NodeProcess, nodeProcessLive, probePid, squashProcessFailure } from './process';
 
 export interface LockOptions {
   /** Bounds cross-process contention only, after the in-process queue (default: 30000). */
@@ -445,6 +444,6 @@ export const fileLocksLegacy = {
       )
       .then((exit) => {
         if (Exit.isSuccess(exit)) return exit.value;
-        throw Cause.squash(exit.cause);
+        throw squashProcessFailure(exit.cause);
       }),
 };

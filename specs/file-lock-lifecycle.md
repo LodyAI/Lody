@@ -28,3 +28,5 @@ The single `fileLocksLegacy` facade owns a process-lifetime compatibility runtim
 ## Evidence and limits
 
 Implementation: `packages/shared/src/node/file-lock.ts`. Native tests use real local files, Deferred readiness and TestClock; a real child process verifies mutual exclusion in both directions. CLI tests cover adapter paths, catalog writes and installation consumption. These checks do not establish Windows, network filesystem, delegated cgroup or packaged installer behavior. Age-based reclamation is a cooperative stale-lock policy, not a kernel advisory lock or a crash transaction.
+
+Legacy error projection for native programs retains simultaneous process release failures and recovery leases. The receiver continues owning unresolved trees; releasing the file lock does not release those external resources.

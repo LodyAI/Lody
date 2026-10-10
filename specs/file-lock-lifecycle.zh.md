@@ -27,3 +27,5 @@ Worktree 操作或 runtime 安装必须持有命名锁，直到工作和清理�
 ## 证据与边界
 
 实现为 `packages/shared/src/node/file-lock.ts`。原生套件使用真实本地文件、Deferred 就绪信号和 TestClock；真实子进程验证双向互斥。CLI 套件覆盖路径适配、catalog 写入和安装消费。没有验证真实 Windows、网络文件系统、委派 cgroup 或打包安装。按年龄回收是协作式失效锁策略，不是内核 advisory lock 或崩溃事务。
+
+原生程序的 Legacy 错误投影保留同时发生的进程释放失败与恢复租约，接收方继续拥有未释放的进程树；锁的释放不等于这些外部资源已释放。

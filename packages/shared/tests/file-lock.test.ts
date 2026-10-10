@@ -15,7 +15,14 @@ import {
   withFileLock,
   fileLocksLegacy,
 } from '../src/node/file-lock';
-import { NodeProcess, nodeProcessLive, processLayer, spawnProcess } from '../src/node/process';
+import {
+  NodeProcess,
+  nodeProcessLive,
+  processLayer,
+  spawnProcess,
+  ProcessCleanupFailed,
+} from '../src/node/process';
+import { FakeProcessTable } from '../src/node/process-testing';
 
 const fixture = Effect.gen(function* () {
   const baseFs = yield* FileSystem.FileSystem;
@@ -702,6 +709,56 @@ describe('real cross-process file lock', () => {
 });
 
 describe('single Legacy facade', () => {
+  it('retains unresolved process cleanup alongside a native program failure', async () => {
+    const locksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-lock-process-'));
+    const table = new FakeProcessTable('linux');
+    let denied = true;
+    const failure = new Error('native operation failed');
+    const program = Effect.gen(function* () {
+      yield* spawnProcess(
+        { command: 'agent', args: [], options: { stdio: 'pipe' }, processGroup: true },
+        { graceMs: 0, killWaitMs: 0 }
+      );
+      return yield* Effect.fail(failure);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        processLayer({
+          nodeProcess: {
+            ...table.api,
+            kill: (target, signal) => {
+              if (signal !== 0 && denied)
+                throw Object.assign(new Error('denied'), { code: 'EPERM' });
+              table.api.kill(target, signal);
+            },
+          },
+        })
+      )
+    );
+    try {
+      const rejected = await fileLocksLegacy
+        .runPromise(withFileLock('native-process', program, { locksDir }))
+        .catch((error: unknown) => error);
+      expect(rejected).toBeInstanceOf(ProcessCleanupFailed);
+      if (!(rejected instanceof ProcessCleanupFailed)) throw new Error('Missing cleanup owner');
+      expect(rejected.cause).toBe(failure);
+      expect(rejected.releases).toHaveLength(1);
+      const owner = rejected.releases[0]!;
+      expect(await Effect.runPromise(owner.isAlive)).toBe(true);
+      denied = false;
+      await Effect.runPromise(owner.retryTermination());
+      expect(table.isAlive(1000)).toBe(false);
+      expect(await Effect.runPromise(owner.isAlive)).toBe(false);
+      await expect(
+        fileLocksLegacy.withLock('native-process', async () => 42, { locksDir })
+      ).resolves.toBe(42);
+      expect(fs.readdirSync(locksDir)).toEqual([]);
+    } finally {
+      table.exitOnItsOwn(1000);
+      fs.rmSync(locksDir, { recursive: true, force: true });
+    }
+  });
+
   it('preserves Promise callback errors and async-context reentry without a second kernel', async () => {
     const locksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-lock-legacy-'));
     try {

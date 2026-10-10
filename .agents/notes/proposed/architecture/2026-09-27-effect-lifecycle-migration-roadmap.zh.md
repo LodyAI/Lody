@@ -210,8 +210,8 @@ Flock 新鲜度同步用 `timeout` + `orElse` 回落本地副本。约束：**�
 - 位置：`worktree-manager.ts`、`speculative-worktree.ts`、`worktree-gc.ts`、
   `packages/shared/src/node/file-lock.ts`。
 - 证据：#76、#6；开放 #296（可能已被 #620 修复，需核实）。
-- 目标：按 key 的 `Semaphore` 取代 `withSessionMarkerLock` promise 链；文件锁为 `acquireRelease`
-  资源并用 `Schedule` 轮询；GC 为守护进程作用域上的 `Effect.repeat`。
+- 文件锁内核已在 #1377 实现；其行为保证与单一 Legacy 门面以所属决定为准。
+- 剩余目标：迁移 Git/worktree 操作与 marker 排队；GC 由 daemon Scope 拥有。仅改变函数返回类型、或让计时循环调用 Promise 方法，不构成这些单元完成。
 
 ### 编排投递
 
@@ -262,11 +262,15 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 ```mermaid
 flowchart TD
   P["已合并进程基础"] --> F["FileSystem + FileLocks"]
-  F --> G["Git → worktree setup / GC"]
+  P --> C["Scope 释放失败与恢复租约：#1379"]
+  C --> F
+  C --> G["LocalProjects 原生 Git"]
+  F --> J["worktree setup / GC"]
+  G --> J
   F --> R["Runtime 下载 / 安装"]
   P --> E["登录环境 / 启动闸门"]
   P --> A["可独立的 ACP transport → 领域操作"]
-  G --> S["AgentSession / 会话池"]
+  J --> S["AgentSession / 会话池"]
   R --> S
   E --> S
   A --> S
@@ -279,6 +283,8 @@ flowchart TD
   L --> W["Renderer runtime"]
   M --> X["Electron / supervisor 上层编排"]
 ```
+
+文件锁门面的原生程序错误投影同样依赖 #1379，内核仍使用既有 pid 探测；文件锁由 [#1377](https://github.com/LodyAI/Lody/pull/1377) 审查。原生 Git 验证发现 Scope 释放失败曾被吞掉，独立修复 [#1379](https://github.com/LodyAI/Lody/pull/1379) 保留恢复租约。LocalProjects 在 #1379 之上的 [#1381](https://github.com/LodyAI/Lody/pull/1381) 审查，其内核不依赖 FileLocks；worktree setup/GC 需要同时集成两者。这些仍是 draft PR，不能标为已合并。
 
 接入首个真正长生命周期服务时建立统一 daemon ManagedRuntime 与根 Scope，随单元迁移扩展；
 最终集成继续保留两阶段关停。已登记删除条件的临时上游适配可解除 Lody 集成阻塞，但不能

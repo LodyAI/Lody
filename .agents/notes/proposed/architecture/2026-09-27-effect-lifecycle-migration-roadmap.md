@@ -305,10 +305,11 @@ The turn layer depends on L2 and, by the layering rule, finishes last.
 - **Where:** `worktree-manager.ts`, `speculative-worktree.ts`, `worktree-gc.ts`,
   `packages/shared/src/node/file-lock.ts`.
 - **Evidence:** #76, #6; open #296 (possibly fixed by #620; needs checking).
-- **Target:**
-  - a keyed `Semaphore` replaces the `withSessionMarkerLock` promise chain;
-  - file locks become `acquireRelease` resources that poll with a `Schedule`;
-  - GC becomes an `Effect.repeat` in the daemon scope.
+- File-lock implementation is delivered in #1377; its owning decision defines
+  the behavior guarantee and single Legacy facade.
+- Remaining work migrates Git/worktree operations and marker admission, with GC
+  owned by the daemon Scope. Changing return types or repeating Promise methods
+  does not complete these units.
 
 ### Orchestration delivery
 
@@ -383,11 +384,15 @@ new PR; later units start from latest main or an explicit new dependent branch.
 ```mermaid
 flowchart TD
   P["Merged process foundation"] --> F["FileSystem + FileLocks"]
-  F --> G["Git → worktree setup / GC"]
+  P --> C["Scope release failure and recovery leases: #1379"]
+  C --> F
+  C --> G["LocalProjects native Git"]
+  F --> J["worktree setup / GC"]
+  G --> J
   F --> R["Runtime download / installation"]
   P --> E["Login environment / startup gate"]
   P --> A["Independent ACP transport → domain operations"]
-  G --> S["AgentSession / session pool"]
+  J --> S["AgentSession / session pool"]
   R --> S
   E --> S
   A --> S
@@ -400,6 +405,15 @@ flowchart TD
   L --> W["Renderer runtime"]
   M --> X["Electron / supervisor upper orchestration"]
 ```
+
+The file-lock native-program compatibility projection also depends on #1379;
+its kernel continues using the existing pid probe. File locks are reviewed in [#1377](https://github.com/LodyAI/Lody/pull/1377).
+Native Git validation exposed swallowed Scope release failure; the independent
+correction [#1379](https://github.com/LodyAI/Lody/pull/1379) retains recovery leases.
+LocalProjects is reviewed in [#1381](https://github.com/LodyAI/Lody/pull/1381)
+above #1379. Its kernel does not depend on FileLocks; worktree setup/GC must
+integrate both.
+These are draft PRs, not merged work.
 
 Introduce one daemon ManagedRuntime and root Scope when the first real long-lived
 services enter composition; extend it as units migrate. The final integration
