@@ -47,6 +47,15 @@ const fixture = Effect.gen(function* () {
 }).pipe(Effect.provide(NodeFileSystem.layer));
 const errorOf = <A, E>(exit: Exit.Exit<A, E>) =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
+const clockWithSleep = (clock: Clock.Clock, sleep: Clock.Clock['sleep']): Clock.Clock => ({
+  currentTimeMillisUnsafe: () => clock.currentTimeMillisUnsafe(),
+  currentTimeMillis: clock.currentTimeMillis,
+  currentTimeNanosUnsafe: () => clock.currentTimeNanosUnsafe(),
+  currentTimeNanos: clock.currentTimeNanos,
+  monotonicTimeNanosUnsafe: () => clock.monotonicTimeNanosUnsafe(),
+  monotonicTimeNanos: clock.monotonicTimeNanos,
+  sleep,
+});
 
 // Real files, injected clocks and explicit readiness; no sleeps or timer races.
 describe('native file locks', () => {
@@ -186,6 +195,131 @@ describe('native file locks', () => {
     })
   );
 
+  it.effect('backs off and times out when stale contents keep changing before reclamation', () =>
+    Effect.gen(function* () {
+      const { filesystem, locksDir } = yield* fixture;
+      const lockPath = path.join(locksDir, 'replaced.lock');
+      const boundary = yield* Deferred.make<void>();
+      const clock = yield* Clock.Clock;
+      const now = yield* Clock.currentTimeMillis;
+      let generation = 0;
+      let replacing = true;
+      let ran = false;
+      fs.writeFileSync(lockPath, JSON.stringify({ pid: 2147483647, timestamp: now, generation }));
+      const changing = FileSystem.FileSystem.of({
+        ...filesystem,
+        readFileString: (file, encoding) =>
+          file !== lockPath || !replacing
+            ? filesystem.readFileString(file, encoding)
+            : Effect.gen(function* () {
+                // Bound a broken immediate-retry loop without relying on wall-clock time.
+                if (++generation > 12) {
+                  yield* Deferred.succeed(boundary, undefined);
+                  return yield* Effect.fail(
+                    systemError({ _tag: 'Unknown', module: 'FileSystem', method: 'readFileString' })
+                  );
+                }
+                fs.writeFileSync(
+                  file,
+                  JSON.stringify({ pid: 2147483647, timestamp: now, generation })
+                );
+                return yield* filesystem.readFileString(file, encoding);
+              }),
+      });
+      yield* Effect.gen(function* () {
+        const waiter = yield* withFileLock(
+          'replaced',
+          Effect.sync(() => {
+            ran = true;
+          }),
+          { timeout: 20, retryDelay: 50 }
+        ).pipe(
+          Effect.provideService(
+            Clock.Clock,
+            clockWithSleep(clock, (duration) =>
+              Deferred.succeed(boundary, undefined).pipe(Effect.andThen(clock.sleep(duration)))
+            )
+          ),
+          Effect.forkChild
+        );
+        yield* Deferred.await(boundary);
+        yield* TestClock.adjust(51);
+        expect(errorOf(yield* Fiber.await(waiter))).toBeInstanceOf(LockTimeout);
+        expect(ran).toBe(false);
+        expect(fs.existsSync(lockPath)).toBe(true);
+        expect(fs.readdirSync(locksDir)).toEqual(['replaced.lock']);
+        replacing = false;
+        fs.unlinkSync(lockPath);
+        yield* withFileLock('replaced', Effect.void);
+        expect(fs.readdirSync(locksDir)).toEqual([]);
+      }).pipe(
+        Effect.provide(
+          FileLocksLive.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.succeed(FileSystem.FileSystem, changing),
+                Layer.succeed(FileLockHost, { locksDir, pid: process.pid }),
+                Layer.succeed(NodeProcess, nodeProcessLive)
+              )
+            )
+          )
+        )
+      );
+    })
+  );
+
+  it.effect('immediately retries when the stale generation disappears during the recheck', () =>
+    Effect.gen(function* () {
+      const { filesystem, locksDir } = yield* fixture;
+      const lockPath = path.join(locksDir, 'disappeared.lock');
+      fs.writeFileSync(lockPath, 'invalid');
+      let observed = false;
+      let disappeared = false;
+      const disappearing = FileSystem.FileSystem.of({
+        ...filesystem,
+        readFileString: (file, encoding) =>
+          Effect.suspend(() => {
+            if (file === lockPath) {
+              if (observed && !disappeared) {
+                fs.rmSync(file, { force: true });
+                disappeared = true;
+              }
+              observed = true;
+            }
+            return filesystem.readFileString(file, encoding);
+          }),
+      });
+      // A delayed retry fails visibly; confirmed absence must retry immediately.
+      expect(
+        yield* withFileLock(
+          'disappeared',
+          Effect.sync(() => {
+            expect(fs.existsSync(lockPath)).toBe(true);
+            return 'acquired';
+          }),
+          { timeout: 0 }
+        ).pipe(
+          Effect.provideService(
+            Clock.Clock,
+            clockWithSleep(yield* Clock.Clock, () => Effect.die('unexpected backoff'))
+          ),
+          Effect.provide(
+            FileLocksLive.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  Layer.succeed(FileSystem.FileSystem, disappearing),
+                  Layer.succeed(FileLockHost, { locksDir, pid: process.pid }),
+                  Layer.succeed(NodeProcess, nodeProcessLive)
+                )
+              )
+            )
+          )
+        )
+      ).toBe('acquired');
+      expect(fs.readdirSync(locksDir)).toEqual([]);
+    })
+  );
+
   it.effect(
     'timestamps publication after cross-process waiting, preserving the full stale age window',
     () =>
@@ -277,6 +411,48 @@ describe('native file locks', () => {
           yield* cleanupStaleLocks();
           expect(fs.readdirSync(locksDir)).toEqual(['live.lock']);
         }).pipe(Effect.provideContext(context));
+      })
+  );
+
+  it.effect(
+    'collects crashed candidates while preserving live published and unpublished owners',
+    () =>
+      Effect.gen(function* () {
+        const { locksDir, context } = yield* fixture;
+        const now = yield* Clock.currentTimeMillis;
+        const candidate = (suffix: string, pid: number, published: boolean) => {
+          const scratch = path.join(locksDir, `.lody-lock-${suffix}`);
+          fs.mkdirSync(scratch);
+          const owner = path.join(scratch, 'owner');
+          fs.writeFileSync(owner, JSON.stringify({ pid, timestamp: now, token: owner }));
+          if (published) fs.linkSync(owner, path.join(locksDir, `${suffix}.lock`));
+          return scratch;
+        };
+        const crashed = candidate('crashed', 2147483647, true);
+        const unpublished = candidate('crashed-unpublished', 2147483647, false);
+        const live = candidate('live', process.pid, true);
+        const preparing = candidate('preparing', process.pid, false);
+        const oldEmpty = path.join(locksDir, '.lody-lock-old-empty');
+        const freshEmpty = path.join(locksDir, '.lody-lock-fresh-empty');
+        const oldPartial = path.join(locksDir, '.lody-lock-old-partial');
+        for (const dir of [oldEmpty, freshEmpty, oldPartial]) fs.mkdirSync(dir);
+        const old = new Date(now - 31 * 60 * 1000);
+        fs.writeFileSync(path.join(oldPartial, 'owner'), '{');
+        fs.utimesSync(path.join(oldPartial, 'owner'), old, old);
+        for (const dir of [oldEmpty, oldPartial]) fs.utimesSync(dir, old, old);
+        fs.utimesSync(freshEmpty, new Date(now), new Date(now));
+        const liveBytes = fs.readFileSync(path.join(live, 'owner'), 'utf8');
+        yield* cleanupStaleLocks().pipe(Effect.provideContext(context));
+        for (const dir of [crashed, unpublished, oldEmpty, oldPartial])
+          expect(fs.existsSync(dir)).toBe(false);
+        expect(fs.existsSync(path.join(locksDir, 'crashed.lock'))).toBe(false);
+        expect(fs.readFileSync(path.join(locksDir, 'live.lock'), 'utf8')).toBe(liveBytes);
+        expect(fs.readFileSync(path.join(live, 'owner'), 'utf8')).toBe(liveBytes);
+        expect(fs.statSync(path.join(live, 'owner')).ino).toBe(
+          fs.statSync(path.join(locksDir, 'live.lock')).ino
+        );
+        expect(fs.existsSync(preparing)).toBe(true);
+        expect(fs.existsSync(freshEmpty)).toBe(true);
       })
   );
 
@@ -709,6 +885,42 @@ describe('real cross-process file lock', () => {
 });
 
 describe('single Legacy facade', () => {
+  it('resolves current environment defaults on every operation in the same runtime', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-lock-env-'));
+    const previousLocks = process.env.LODY_LOCKS_DIR;
+    const previousData = process.env.LODY_DATA_DIR;
+    const observe = async (dir: string, options = {}) => {
+      await fileLocksLegacy.withLock(
+        'environment',
+        async () => {
+          expect(fs.existsSync(path.join(dir, 'environment.lock'))).toBe(true);
+        },
+        options
+      );
+      expect(fs.readdirSync(dir)).toEqual([]);
+    };
+    try {
+      process.env.LODY_LOCKS_DIR = path.join(root, 'first');
+      await observe(process.env.LODY_LOCKS_DIR);
+      fs.rmSync(process.env.LODY_LOCKS_DIR, { recursive: true });
+      process.env.LODY_LOCKS_DIR = path.join(root, 'second');
+      await observe(process.env.LODY_LOCKS_DIR);
+      expect(fs.existsSync(path.join(root, 'first'))).toBe(false);
+      await observe(path.join(root, 'explicit'), { locksDir: path.join(root, 'explicit') });
+      delete process.env.LODY_LOCKS_DIR;
+      process.env.LODY_DATA_DIR = path.join(root, 'profile-first');
+      await observe(path.join(process.env.LODY_DATA_DIR, 'locks'));
+      process.env.LODY_DATA_DIR = path.join(root, 'profile-second');
+      await observe(path.join(process.env.LODY_DATA_DIR, 'locks'));
+    } finally {
+      if (previousLocks === undefined) delete process.env.LODY_LOCKS_DIR;
+      else process.env.LODY_LOCKS_DIR = previousLocks;
+      if (previousData === undefined) delete process.env.LODY_DATA_DIR;
+      else process.env.LODY_DATA_DIR = previousData;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('retains unresolved process cleanup alongside a native program failure', async () => {
     const locksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-lock-process-'));
     const table = new FakeProcessTable('linux');

@@ -96,7 +96,9 @@ owner must await `terminate`; it is not a scoped Effect API.
 ## File locks
 
 `withFileLock(name, body, options)` requires `FileLocks`. `FileLocksLive` captures
-official FileSystem, native NodeProcess and frozen FileLockHost dependencies.
+official FileSystem, native NodeProcess and FileLockHost dependencies. The host
+fixes pid and resolves the default lock directory on each operation; tests may
+inject a fixed directory.
 `fileLockLayer` supplies Node implementations at composition. One service instance
 owns local Ref/Deferred admission and unresolved releases; each operation owns its
 candidate and acquired file. See the [decision and preserved lock policy](../notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).

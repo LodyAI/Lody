@@ -65,12 +65,17 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
 - Native workflows compose `withFileLock` through one owner-provided `FileLocks`
   service. Only unmigrated application entrypoints use `fileLocksLegacy`; keep
   Legacy visible and never execute it inside a native Effect workflow.
+- Resolve each operation using explicit locksDir, current LODY_LOCKS_DIR, then
+  current profile locks; production composition must not freeze environment paths.
 - Keep strict FIFO, fail-fast same-context reentry, profile paths and the deadline
   that starts after local admission. A plain Semaphore does not preserve FIFO
   on immediate reacquisition in 4.0.2. Use the owned Ref/Deferred handoff.
 - Publish complete metadata exclusively; register release before the body. Cancelled
   tickets leave the queue immediately. Retain failed release generations, verify
-  pid plus token, and surface unreadable-lock/cleanup errors. Decision and limits:
+  pid plus token, and surface unreadable-lock/cleanup errors. Changed stale
+  generations must return to backoff/deadline checks. Stale cleanup also collects
+  crash-orphan scratch using ownership/age checks, preserving fresh live
+  candidates and giving unidentified preparation a 30-minute grace period. Decision and limits:
   [file lock lifecycle](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
 
 The file-lock Legacy native-program boundary uses `squashProcessFailure` to retain

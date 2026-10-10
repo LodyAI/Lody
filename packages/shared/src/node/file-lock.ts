@@ -10,6 +10,7 @@ import {
   FileSystem,
   Layer,
   ManagedRuntime,
+  Option,
   Ref,
   Schedule,
   Deferred,
@@ -53,10 +54,10 @@ export class LockReleaseFailed extends Data.TaggedError('LockReleaseFailed')<{
 export type FileLockError = LockTimeout | LockReentrant | LockIoError | LockReleaseFailed;
 class LockBusy extends Data.TaggedError('LockBusy') {}
 
-/** Frozen host inputs; tests replace them without changing process globals. */
+/** Stable pid and per-operation directory resolver; tests may inject a fixed directory. */
 export class FileLockHost extends Context.Service<
   FileLockHost,
-  { locksDir: string; pid: number }
+  { locksDir: string | (() => string); pid: number }
 >()('lody/FileLockHost') {}
 const heldPaths = Context.Reference<ReadonlySet<string>>('lody/FileLockHeldPaths', {
   defaultValue: () => new Set(),
@@ -115,7 +116,10 @@ export const FileLocksLive = Layer.effect(
     const nodeProcess = yield* NodeProcess;
     const entries = yield* Ref.make(new Map<string, QueueEntry>());
     const directory = (options: Pick<LockOptions, 'locksDir'>) =>
-      path.resolve(options.locksDir?.trim() || host.locksDir);
+      path.resolve(
+        options.locksDir?.trim() ||
+          (typeof host.locksDir === 'function' ? host.locksDir() : host.locksDir)
+      );
     const read = (lockPath: string) =>
       fs
         .readFileString(lockPath)
@@ -153,8 +157,48 @@ export const FileLocksLive = Layer.effect(
         if (raw === undefined) return true;
         if (!(yield* stale(raw))) return false;
         // Recheck the observed generation before removing a stale file.
-        if ((yield* read(lockPath)) === raw) yield* remove(lockPath);
+        const current = yield* read(lockPath);
+        if (current === undefined) return true;
+        if (current !== raw) return false;
+        yield* remove(lockPath);
         return true;
+      });
+    const stat = (file: string) =>
+      fs
+        .stat(file)
+        .pipe(
+          Effect.catch((error) =>
+            hasReason(error, 'NotFound')
+              ? Effect.succeed(undefined)
+              : Effect.fail(new LockIoError({ path: file, cause: error }))
+          )
+        );
+    const reclaimScratch = (scratch: string) =>
+      Effect.gen(function* () {
+        const info = yield* stat(scratch);
+        if (info?.type !== 'Directory') return;
+        const owner = path.join(scratch, 'owner');
+        const raw = yield* read(owner);
+        if (raw !== undefined && parseLock(raw)) {
+          // A live candidate may be published or still preparing/waiting to link.
+          if (!(yield* stale(raw))) return;
+        } else {
+          // A crash can precede the first complete write. Do not collect a new
+          // directory while its owner is still preparing metadata.
+          const ownerInfo = yield* stat(owner);
+          if (Option.isNone(info.mtime)) return;
+          if (ownerInfo && Option.isNone(ownerInfo.mtime)) return;
+          const modified = Math.max(
+            info.mtime.value.getTime(),
+            ownerInfo && Option.isSome(ownerInfo.mtime)
+              ? ownerInfo.mtime.value.getTime()
+              : -Infinity
+          );
+          if ((yield* Clock.currentTimeMillis) - modified <= 30 * 60 * 1000) return;
+        }
+        // Retain a candidate that changed since the ownership/age check.
+        if ((yield* read(owner)) !== raw) return;
+        yield* remove(scratch, true);
       });
     const release = (lockPath: string, token: string) =>
       Effect.gen(function* () {
@@ -192,14 +236,22 @@ export const FileLocksLive = Layer.effect(
       Ref.get(entries).pipe(
         Effect.flatMap((map) =>
           Effect.forEach([...map], ([lockPath, entry]) =>
-            recover(lockPath, entry).pipe(Effect.exit)
+            recover(lockPath, entry).pipe(
+              Effect.exit,
+              Effect.map((result) => ({ lockPath, result }))
+            )
           )
         ),
         Effect.flatMap((results) => {
-          const failures = results.filter(Exit.isFailure);
+          const failures = results.filter(({ result }) => Exit.isFailure(result));
           return failures.length === 0
             ? Effect.void
-            : Effect.fail(new LockReleaseFailed({ path: host.locksDir, cause: failures }));
+            : Effect.fail(
+                new LockReleaseFailed({
+                  path: failures[0]!.lockPath,
+                  cause: failures.map(({ result }) => result),
+                })
+              );
         }),
         Effect.orDie
       )
@@ -349,20 +401,23 @@ export const FileLocksLive = Layer.effect(
       cleanupStale: (options = {}) =>
         Effect.gen(function* () {
           const dir = directory(options);
-          yield* fs.makeDirectory(dir, { recursive: true });
-          const files = yield* fs.readDirectory(dir);
+          yield* fs
+            .makeDirectory(dir, { recursive: true })
+            .pipe(Effect.mapError((cause) => new LockIoError({ path: dir, cause })));
+          const files = yield* fs
+            .readDirectory(dir)
+            .pipe(Effect.mapError((cause) => new LockIoError({ path: dir, cause })));
           yield* Effect.forEach(
             files.filter((name) => name.endsWith('.lock')),
             (name) => reclaim(path.join(dir, name)),
             { discard: true }
           );
-        }).pipe(
-          Effect.mapError((cause) =>
-            cause instanceof LockIoError
-              ? cause
-              : new LockIoError({ path: directory(options), cause })
-          )
-        ),
+          yield* Effect.forEach(
+            files.filter((name) => name.startsWith('.lody-lock-')),
+            (name) => reclaimScratch(path.join(dir, name)),
+            { discard: true }
+          );
+        }),
     });
   })
 );
@@ -375,7 +430,7 @@ export const fileLockLayer = Layer.provide(
     Layer.succeed(NodeProcess, nodeProcessLive),
     Layer.sync(FileLockHost, () => ({
       pid: process.pid,
-      locksDir: process.env.LODY_LOCKS_DIR?.trim() || path.join(getLodyDataDir(), 'locks'),
+      locksDir: () => process.env.LODY_LOCKS_DIR?.trim() || path.join(getLodyDataDir(), 'locks'),
     }))
   )
 );
