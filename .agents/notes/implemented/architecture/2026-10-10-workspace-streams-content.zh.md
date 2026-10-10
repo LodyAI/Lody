@@ -14,8 +14,10 @@ Translation: current
 
 ## 决定
 
-直接使用 `loro-repo` 0.21.1、`streams-crdt` 0.16.1 及其 `streams-client` 0.8.0，
-不升级依赖、不复制同步机制。
+直接使用已有的已发布 SDK 接口，不另行升级依赖、不复制同步机制。首次验证使用
+`loro-repo` 0.21.1、`streams-crdt` 0.16.1 及 `streams-client` 0.8.0。
+变基到 [#1395](https://github.com/LodyAI/Lody/pull/1395) 合入后的 main 时，继承主线的
+0.21.2 / 0.16.2 / 0.9.0 版本，并保留主线的工厂诊断。
 `content` 是工厂配置，不是服务端工作区 DTO；普通 runtime 调用不变。受保护调用方提供
 可信 namespace、覆盖所有房间的解析器及明确的 `snapshotUpload.canUpload`。SDK 负责
 只接受受保护读取、保护写入、逻辑房间 AAD、导入和进度；调用方负责保护器与密钥。
@@ -32,15 +34,19 @@ Translation: current
 Meta/Flock 进度、真实存储保存失败、验证拒绝时不推进游标、重试及无本地写入的读端重连。
 可逆测试保护器只验证 SDK 的 AAD 接线，明确不属于密码学实现。
 
-局部验证：工厂 24 项和相邻游标/runtime/router 56 项测试通过。components 源码及本测试文件
+局部验证：工厂 24 项和相邻游标/runtime/router 56 项测试在原依赖和变基后的主线版本上均通过。
+components 源码及本测试文件
 类型检查、局部类型感知 lint、格式与 `pnpm run docs check` 通过（原有文档警告仍在）。
-components 全量 5032 项通过；根目录 `pnpm format`、类型、lint 和边界检查通过。
+原依赖下 components 全量 5032 项通过；根目录 `pnpm format`、类型、lint 和边界检查通过。
 全仓 `pnpm check` 未全绿：未修改的 CLI 原生 SSH 子模块测试遇到当前 Git helper 的
 `context_unreadable`，单独复跑仍为 5 过、1 败。IPC 的沙箱失败在允许 socket 后消失
 （9 项通过）；没有修改无关 Git 代码。
+变基后的全仓检查通过类型和 lint，随后复现相同 CLI 失败（3658 过、1 败、4 跳过），
+该失败中断其它测试组。变基后的格式、源码及测试类型、文档和边界检查通过。
 
-SDK 的发布准入没有房间参数，也不是服务端准入。Repo 0.21.1 保留清洗后的
-`payload_protection_error` 消息，但错误码归入 `internal`。
+SDK 的发布准入没有房间参数，也不是服务端准入。Repo 保留清洗后的
+`payload_protection_error` 消息，错误码仍归入 `internal`。主线升级到 0.21.2 后还保留
+安全的 Streams 上下文和明确的重试标志。
 已从源码核对上游 `encodeStreamsRoomAdditionalData` helper 和只读
 `payloadProtectionReason` 字段，本次尚未消费，正式发布和依赖接入另行跟进。
 可信宿主的快照准入必须通过上游 helper 绑定相同 namespace 和逻辑房间 AAD，

@@ -16,8 +16,11 @@ separate, and the scope of stopping after verification failure is still undecide
 
 ## Decision
 
-Use `loro-repo` 0.21.1, `streams-crdt` 0.16.1 and its `streams-client` 0.8.0 directly,
-with no dependency change or copied synchronization. `content` is factory configuration, not a server workspace DTO;
+Use the existing published SDK interfaces without a dependency change or copied
+synchronization. Initial validation used `loro-repo` 0.21.1, `streams-crdt` 0.16.1 and
+`streams-client` 0.8.0. Rebasing onto main after [#1395](https://github.com/LodyAI/Lody/pull/1395)
+inherits its 0.21.2 / 0.16.2 / 0.9.0 versions and preserves its factory diagnostics.
+`content` is factory configuration, not a server workspace DTO;
 ordinary runtime callers stay unchanged. Protected callers supply a trusted namespace,
 total room resolver and explicit `snapshotUpload.canUpload`. The SDK owns encrypted-only
 reads/writes, logical-room AAD, import and checkpoints; callers own providers and keys.
@@ -37,17 +40,22 @@ failed storage saves, verification rejection without cursor advancement, retry, 
 reader reconnecting without local writes. Its reversible provider checks SDK AAD plumbing
 only and is deliberately not cryptography.
 
-Focused validation: 24 factory tests and 56 adjacent cursor/runtime/router tests pass.
+Focused validation: 24 factory tests and 56 adjacent cursor/runtime/router tests pass
+on both the original dependencies and the rebased main versions.
 Components source plus this test file typecheck; scoped type-aware lint, formatting and
 `pnpm run docs check` pass (existing documentation warnings remain).
-The full components suite passes 5,032 tests. Root `pnpm format`, typecheck, lint and
+On the original dependencies, the full components suite passes 5,032 tests. Root `pnpm format`, typecheck, lint and
 boundary checks pass. Full `pnpm check` is not green: the unchanged CLI native SSH
 submodule fixture fails with the environment's Git helper `context_unreadable`, also
 reproduced in isolation (5 passed, 1 failed). Sandbox IPC failures disappear with
 socket permission (9 passed); no unrelated Git code was changed.
+The rebased full check passes typecheck/lint and reproduces the same CLI failure
+(3,658 passed, 1 failed, 4 skipped); that failure interrupts the other test groups.
+Rebased formatting, source/test typechecking, documentation and boundary checks pass.
 
-The SDK upload gate has no room parameter and is not server admission. Repo 0.21.1 retains the
-sanitized `payload_protection_error` message but coarsens the error code to `internal`.
+The SDK upload gate has no room parameter and is not server admission. Repo retains the
+sanitized `payload_protection_error` message and coarse `internal` error code. Main's
+0.21.2 upgrade additionally preserves safe Streams context and explicit retryability.
 The upstream `encodeStreamsRoomAdditionalData` helper and readonly
 `payloadProtectionReason` field were inspected in source but are not consumed here;
 their release and dependency adoption remain separate work. Trusted host snapshot
