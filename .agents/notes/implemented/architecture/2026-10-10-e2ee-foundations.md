@@ -3,6 +3,7 @@
 Date: 2026-10-10
 Status: implemented
 Translation: current
+PR: [#1405](https://github.com/LodyAI/Lody/pull/1405)
 
 [中文](2026-10-10-e2ee-foundations.zh.md)
 
@@ -67,7 +68,7 @@ Format, docs (zero errors), frozen install and boundary checks pass. Full
 `pnpm check` reaches a baseline CLI Git fixture failure (`context_unreadable`):
 CLI 3707 pass / 1 fail / 4 skip. The exact main source fixture reproduces 5 pass /
 1 fail in a disposable directory. Earlier sandbox socket failures disappear with
-loopback permission: shared 1365/1365 pass. Components pass 5033/5033. This is not
+loopback permission: shared 1365/1365 pass. Components pass 5033/5033; Electron passes 215/215. This is not
 a full-green repository result; remaining checks and CI are recorded in the PR.
 
 This is not production, platform custody, browser/mobile device, AEAD, snapshot

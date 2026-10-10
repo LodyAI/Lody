@@ -3,6 +3,7 @@
 Date: 2026-10-10
 Status: implemented
 Translation: current
+PR: [#1405](https://github.com/LodyAI/Lody/pull/1405)
 
 [English](2026-10-10-e2ee-foundations.md)
 
@@ -54,7 +55,7 @@ A/R 额外扭转分量回归用例验证：即使库的带余因子方程接受�
 格式、文档（零错误）、冻结安装和边界检查通过。全仓 `pnpm check` 停在基线已有的
 CLI Git 用例 `context_unreadable`：CLI 3707 通过、1 失败、4 跳过。
 固定 main 的原始源码在临时目录也复现 5 通过、1 失败。此前沙箱 socket 失败在允许监听后消失，
-shared 1365/1365 通过；components 5033/5033 通过。这不是全仓全绿；后续检查与 CI 记录在 PR 中。
+shared 1365/1365 通过；components 5033/5033、Electron 215/215 通过。这不是全仓全绿；后续检查与 CI 记录在 PR 中。
 
 这不是生产、平台存钥、浏览器／手机真机、AEAD、快照恢复或完整安全验收。
 历史失败继续由所属模块处理。本次不发布、部署、开放功能或启用全平台 Beta。
