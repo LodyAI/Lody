@@ -738,8 +738,11 @@ export class MessageHandler {
   private readonly permissionRequestStartTimes = new Map<string, number>();
   private readonly pendingPermissionRequests = new Map<SessionId, Set<string>>();
   private static readonly MACHINE_ACCESS_REGISTRATION_CACHE_TTL_MS = 20 * 60_000;
+  private static readonly MACHINE_ACCESS_REGISTRATION_RETRY_MAX_DELAY_MS = 5 * 60_000;
   private machineAccessRegistrationInFlight: Promise<void> | null = null;
   private machineAccessRegistrationExpiresAtMs = 0;
+  private machineAccessRegistrationRetryAttempt = 0;
+  private machineAccessRegistrationRetryTimer: ReturnType<typeof setTimeout> | null = null;
   /** Late-bound memory pressure eviction, set by MachineRuntime after GC init */
   private evictForMemoryPressureFn: (
     excludeSessionId?: SessionId
@@ -5755,14 +5758,34 @@ export class MessageHandler {
   }
 
   private async attemptMachineAccessRegistration(): Promise<void> {
+    if (this.cleanedUp) return;
     try {
       await this.registerMachineAccess();
+      this.machineAccessRegistrationRetryAttempt = 0;
+      if (this.machineAccessRegistrationRetryTimer) {
+        clearTimeout(this.machineAccessRegistrationRetryTimer);
+        this.machineAccessRegistrationRetryTimer = null;
+      }
     } catch (error) {
-      this.logger.warn(
-        `Failed to register backend machine access: ${formatErrorMessage(error, {
-          includeStack: true,
-        })}`
+      if (this.cleanedUp || this.machineAccessRegistrationRetryTimer) return;
+      const attempt = ++this.machineAccessRegistrationRetryAttempt;
+      const delayMs = Math.min(
+        1_000 * 2 ** Math.min(attempt - 1, 9),
+        MessageHandler.MACHINE_ACCESS_REGISTRATION_RETRY_MAX_DELAY_MS
       );
+      this.logger.warn(
+        `Failed to register backend machine access (attempt=${attempt}; retrying in ${delayMs}ms): ${formatErrorMessage(
+          error,
+          {
+            includeStack: true,
+          }
+        )}`
+      );
+      this.machineAccessRegistrationRetryTimer = setTimeout(() => {
+        this.machineAccessRegistrationRetryTimer = null;
+        void this.attemptMachineAccessRegistration();
+      }, delayMs);
+      this.machineAccessRegistrationRetryTimer.unref?.();
     }
   }
 
@@ -9711,6 +9734,10 @@ export class MessageHandler {
     if (this.machineRpcServerRetryTimer) {
       clearTimeout(this.machineRpcServerRetryTimer);
       this.machineRpcServerRetryTimer = null;
+    }
+    if (this.machineAccessRegistrationRetryTimer) {
+      clearTimeout(this.machineAccessRegistrationRetryTimer);
+      this.machineAccessRegistrationRetryTimer = null;
     }
     // Stop scheduling/retrying local-file backfill; in-flight uploads finish but
     // no new attempts start. Pending blobs are recovered on next startup scan.

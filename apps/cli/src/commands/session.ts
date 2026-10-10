@@ -2417,28 +2417,52 @@ export function resolveSessionCreateOwnerUserId(
 }
 
 export function selectTargetMachineForCreate(args: {
-  authorizedMachines: readonly MachineMeta[];
+  machineAccess: readonly { machine: MachineMeta; access: MachineAccessCheckResult }[];
   authMachineId: MachineId;
   machineSelector?: string;
   defaultMachineId?: MachineId;
   parentMachineId?: MachineId;
 }): MachineMeta {
-  const machines = [...args.authorizedMachines];
+  const machines = args.machineAccess.filter((row) => row.access.allowed).map((row) => row.machine);
+  const requireAccess = (machine: MachineMeta): MachineMeta => {
+    const access = args.machineAccess.find((row) => row.machine.id === machine.id)?.access;
+    if (!access?.allowed) {
+      const reason = access?.reason ?? 'machine_not_registered';
+      const guidance =
+        reason === 'machine_not_registered'
+          ? ' Check daemon logs for machine access registration failures.'
+          : '';
+      throw new Error(`Machine access denied for ${machine.id}: ${reason}.${guidance}`);
+    }
+    return machine;
+  };
+  const select = (selector: string): MachineMeta => {
+    // A denied exact id is known to the caller, but other denied machines must
+    // not become name candidates in the selector error.
+    const denied = args.machineAccess.find(
+      (row) => row.machine.id === selector && !row.access.allowed
+    );
+    if (denied) return requireAccess(denied.machine);
+    if (machines.length === 0) {
+      throw new Error('No authorized machines are available in this workspace.');
+    }
+    return selectUniqueMachineByIdOrName(machines, selector);
+  };
   if (args.parentMachineId) {
     if (args.machineSelector) {
-      const explicit = selectUniqueMachineByIdOrName(machines, args.machineSelector);
+      const explicit = select(args.machineSelector);
       if (explicit.id !== args.parentMachineId) {
         throw new Error('Child session target machine must match the parent session machine.');
       }
-      return explicit;
+      return requireAccess(explicit);
     }
-    return selectUniqueMachineByIdOrName(machines, args.parentMachineId);
+    return select(args.parentMachineId);
   }
   if (args.machineSelector) {
-    return selectUniqueMachineByIdOrName(machines, args.machineSelector);
+    return select(args.machineSelector);
   }
   const defaultMachineId = normalizeCliValue(args.defaultMachineId) ?? args.authMachineId;
-  return selectUniqueMachineByIdOrName(machines, defaultMachineId);
+  return select(defaultMachineId);
 }
 
 async function listAuthorizedMachineMetasForCreate(args: {
@@ -2446,7 +2470,7 @@ async function listAuthorizedMachineMetasForCreate(args: {
   workspaceId: WorkspaceId;
   machines: readonly MachineMeta[];
   requester: ResolvedSessionRequester;
-}): Promise<MachineMeta[]> {
+}): Promise<{ machine: MachineMeta; access: MachineAccessCheckResult }[]> {
   const rows = await Promise.all(
     args.machines.map(async (machine) => ({
       machine,
@@ -2458,10 +2482,7 @@ async function listAuthorizedMachineMetasForCreate(args: {
       }),
     }))
   );
-  return filterAuthorizedMachineMetas(
-    rows.map((row) => row.machine),
-    new Set(rows.filter((row) => row.access.allowed).map((row) => row.machine.id))
-  );
+  return rows;
 }
 
 async function filterAuthorizedLocalProjectsForCreate<
@@ -2504,20 +2525,17 @@ async function resolveTargetMachineForCreate(args: {
   if (machines.length === 0) {
     throw new Error('No machines are registered in this workspace.');
   }
-  const authorizedMachines = await listAuthorizedMachineMetasForCreate({
+  const machineAccess = await listAuthorizedMachineMetasForCreate({
     auth: args.auth,
     workspaceId: args.workspaceId,
     machines,
     requester: args.requester,
   });
-  if (authorizedMachines.length === 0) {
-    throw new Error('No authorized machines are available in this workspace.');
-  }
   const parent = args.parentSessionId
     ? await resolveSessionMetaOrThrow(args.manager, args.parentSessionId)
     : undefined;
   return selectTargetMachineForCreate({
-    authorizedMachines,
+    machineAccess,
     authMachineId: args.auth.machineId,
     machineSelector: args.machineSelector,
     defaultMachineId: args.defaultMachineId,

@@ -381,7 +381,10 @@ describe('session command helpers', () => {
 
     expect(
       selectTargetMachineForCreate({
-        authorizedMachines: [authMachine, currentSessionMachine],
+        machineAccess: [authMachine, currentSessionMachine].map((machine) => ({
+          machine,
+          access: { allowed: true as const },
+        })),
         authMachineId: authMachine.id,
         defaultMachineId: currentSessionMachine.id,
       })
@@ -389,12 +392,70 @@ describe('session command helpers', () => {
 
     expect(
       selectTargetMachineForCreate({
-        authorizedMachines: [authMachine, currentSessionMachine],
+        machineAccess: [authMachine, currentSessionMachine].map((machine) => ({
+          machine,
+          access: { allowed: true as const },
+        })),
         authMachineId: authMachine.id,
         defaultMachineId: currentSessionMachine.id,
         machineSelector: authMachine.id,
       })
     ).toEqual(authMachine);
+  });
+
+  it('reports a registered but unauthorized create target as an access denial', () => {
+    const authorizedMachine = createMachineMeta({ id: 'authorized-machine' as MachineId });
+    const localMachine = createMachineMeta({ id: 'local-machine' as MachineId });
+    const machineAccess = [
+      { machine: authorizedMachine, access: { allowed: true as const } },
+      {
+        machine: localMachine,
+        access: { allowed: false as const, reason: 'machine_not_registered' as const },
+      },
+    ];
+
+    expect(() =>
+      selectTargetMachineForCreate({
+        machineAccess,
+        authMachineId: localMachine.id,
+        machineSelector: localMachine.id,
+      })
+    ).toThrow(`Machine access denied for ${localMachine.id}: machine_not_registered.`);
+    expect(() =>
+      selectTargetMachineForCreate({
+        machineAccess,
+        authMachineId: localMachine.id,
+        machineSelector: 'missing-machine',
+      })
+    ).toThrow('Machine not found: missing-machine.');
+    expect(() =>
+      selectTargetMachineForCreate({
+        machineAccess,
+        authMachineId: localMachine.id,
+        machineSelector: 'missing-machine',
+      })
+    ).not.toThrow(localMachine.id);
+  });
+
+  it('keeps the empty authorized-workspace diagnostic for an unknown create target', () => {
+    const localMachine = createMachineMeta({ id: 'local-machine' as MachineId });
+    const machineAccess = [
+      {
+        machine: localMachine,
+        access: { allowed: false as const, reason: 'machine_not_registered' as const },
+      },
+    ];
+
+    expect(() =>
+      selectTargetMachineForCreate({
+        machineAccess,
+        authMachineId: localMachine.id,
+        machineSelector: 'missing-machine',
+      })
+    ).toThrow('No authorized machines are available in this workspace.');
+    expect(() =>
+      selectTargetMachineForCreate({ machineAccess, authMachineId: localMachine.id })
+    ).toThrow(`Machine access denied for ${localMachine.id}: machine_not_registered.`);
   });
 
   it('binds session command requester identity to CLI auth', () => {
