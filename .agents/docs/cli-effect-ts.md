@@ -132,6 +132,18 @@ mapError can select only the Fail reason. This is not native manager/setup/GC or
 daemon runtime completion. Decision:
 [worktree Git](../notes/implemented/architecture/2026-10-10-effect-worktree-git-execution.md).
 
+## Worktree observations
+
+`WorktreeObservations` composes official FileSystem, WorktreeGit and the owning
+FileLocks instance. Inspection/listing acquire the repo lease; information reads
+inside mutations reuse their caller's lock. Failed Git observations do not become
+phantom dirty records or null HEAD. Queued cancellation and command cleanup remain
+structured inside this kernel. The Promise manager's `runObservationLegacy` executes
+through the existing `fileLocksLegacy` runtime, with no second lock coordinator.
+Delete it when the mutation owner receives native services. Synchronous manager
+path/existence methods, setup, GC and the daemon runtime still need migration. See
+[the decision](../notes/implemented/architecture/2026-10-10-effect-worktree-observations.md).
+
 ## Temporary Promise facades
 
 A migrated layer is consumed by callers that are still Promise-based. Such a

@@ -382,3 +382,10 @@ The synthetic [history benchmark](../../benchmarks/roost-history.mts) exercises
 these production backends and the shared view; `BENCH_STRUCTURAL=1` also measures
 the complete directory and a guarded last-user edit. Its timing excludes renderer
 transport, IndexedDB and paint.
+
+Worktree observations use the native `WorktreeObservations` service: official
+filesystem, WorktreeGit and the existing FileLocks coordinator. The Promise manager
+executes them through `runObservationLegacy`; list/inspect own repo leases, while
+mutation information reads reuse the caller's lock. Missing and unborn state remain
+distinct from repository/infrastructure failures. See the
+[decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-worktree-observations.md).

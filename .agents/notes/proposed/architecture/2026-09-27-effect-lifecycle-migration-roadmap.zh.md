@@ -156,7 +156,7 @@ CLI process-options 只组合 Layer，旧 promise-facade 已删除。Sandbox 失
 成功命令在配置完成、整棵树退出和 stdio 关闭后释放子 Scope；所有进程消费保留 Legacy 可见。
 
 文件锁是之后第一个依赖单元，见[文件锁决定](../../implemented/architecture/2026-10-10-effect-file-lock-lifecycle.zh.md)：
-真实文件协议、公平且可取消的本地登记、可观察的清理失败。Git、worktree setup/GC、
+真实文件协议、公平且可取消的本地登记、可观察的清理失败。LocalProjects 和 WorktreeGit 执行已有待审的原生内核；worktree 变更/setup/GC、
 登录环境等待、runtime 安装、启动闸门、SDK 请求、Session 与 Turn 仍需迁移；进程统一
 不代表这些生命周期或 daemon 所有权已完成。
 
@@ -265,7 +265,10 @@ flowchart TD
   P --> C["Scope 释放失败与恢复租约：#1379"]
   C --> F
   C --> G["LocalProjects 原生 Git"]
-  F --> J["worktree setup / GC"]
+  C --> Q["WorktreeGit 执行：#1389"]
+  F --> O["WorktreeObservations"]
+  Q --> O
+  O --> J["worktree 变更 / setup / GC"]
   G --> J
   F --> R["Runtime 下载 / 安装"]
   P --> E["登录环境 / 启动闸门"]
@@ -274,6 +277,7 @@ flowchart TD
   R --> S
   E --> S
   A --> S
+  N["已合并 #1385：运行实例凭据 / 预热 TTL 叶子"] --> S
   K["Lody Flock 持久化已实现；仍需核实发布 / 消费"] --> L["streams-crdt / loro-repo Effect 内核：分别跨仓库 PR"]
   L --> D["文档 / 历史 / presence"]
   S --> T["Turn / steer / 停止 / 收尾"]
@@ -284,7 +288,11 @@ flowchart TD
   M --> X["Electron / supervisor 上层编排"]
 ```
 
-文件锁门面的原生程序错误投影同样依赖 #1379，内核仍使用既有 pid 探测；文件锁由 [#1377](https://github.com/LodyAI/Lody/pull/1377) 审查。原生 Git 验证发现 Scope 释放失败曾被吞掉，独立修复 [#1379](https://github.com/LodyAI/Lody/pull/1379) 保留恢复租约。LocalProjects 在 #1379 之上的 [#1381](https://github.com/LodyAI/Lody/pull/1381) 审查，其内核不依赖 FileLocks；worktree setup/GC 需要同时集成两者。这些仍是 draft PR，不能标为已合并。
+文件锁门面的原生程序错误投影同样依赖 #1379，内核仍使用既有 pid 探测；文件锁由 [#1377](https://github.com/LodyAI/Lody/pull/1377) 审查。原生 Git 验证发现 Scope 释放失败曾被吞掉，独立修复 [#1379](https://github.com/LodyAI/Lody/pull/1379) 保留恢复租约。LocalProjects 在 #1379 之上的 [#1381](https://github.com/LodyAI/Lody/pull/1381) 审查，其内核不依赖 FileLocks；worktree setup/GC 需要同时集成两者。WorktreeGit 执行由 [#1389](https://github.com/LodyAI/Lody/pull/1389) 审查，内核只依赖进程基础和文件系统；为避免重复管理器改动，评审 base 包含 LocalProjects。
+原生 [worktree 观察单元](../../implemented/architecture/2026-10-10-effect-worktree-observations.zh.md)
+在包含刷新 main 的基础上组合 FileLocks 和 WorktreeGit，不代表变更、setup 或 GC 所有权完成。
+#1385 已合并，仅提供运行实例凭据租约和预热 TTL/控制；底层 ACP/worktree 启动及完整会话所有权仍未完成。
+这些后续迁移单元仍是 draft PR，不能标为已合并。
 
 接入首个真正长生命周期服务时建立统一 daemon ManagedRuntime 与根 Scope，随单元迁移扩展；
 最终集成继续保留两阶段关停。已登记删除条件的临时上游适配可解除 Lody 集成阻塞，但不能

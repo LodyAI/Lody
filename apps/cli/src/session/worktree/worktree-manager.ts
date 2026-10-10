@@ -1,3 +1,4 @@
+import { Context, Effect } from 'effect';
 import { GITHUB_CREDENTIAL_ENV_KEYS } from '@/lib/gh-token-env';
 import { RepoId, SessionId } from '@lody/shared';
 import { localProjectsLegacy } from '@lody/shared/node/local-project';
@@ -5,13 +6,20 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '@/utils/logger';
 import { fileLocksLegacy } from '@/utils/file-lock';
+import {
+  LockIoError,
+  LockReentrant,
+  LockReleaseFailed,
+  LockTimeout,
+} from '@lody/shared/node/file-lock';
 import { redactUrlAuth } from '@/utils/github';
 import { getCredentialHelperHostPath } from '@/lib/git-credential-helper-script';
 import { formatErrorMessage } from '@/utils/format-error';
 
 import type { NodeProcessApi } from '@lody/shared/node/process';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
-import { WorktreeGitExecutionFailed } from './git-execution';
+import { WorktreeGitCommandFailed, WorktreeGitExecutionFailed } from './git-execution';
+import { WorktreeObservations, worktreeObservationLayer } from './worktree-observations';
 import { worktreeGitLegacy, rethrowWorktreeGitInfrastructureFailure } from './git-execution-legacy';
 import {
   getAllocatedSessionBranchName,
@@ -1371,63 +1379,63 @@ export class WorktreeManager {
     });
   }
 
-  /**
-   * Get information about a worktree
-   */
-  private async getWorktreeInfo(sessionId: SessionId): Promise<WorktreeInfo> {
-    assertSafeSessionId(sessionId);
-    const worktreePath = this.getWorktreeHostPath(sessionId);
-
-    // Get the actual branch name from git (handles renamed branches and short session IDs)
-    const branchName =
-      (await this.getCurrentBranchName(sessionId)) ?? this.getDefaultSessionBranchName(sessionId);
-
-    let isClean = true;
-    try {
-      const status = await this.runGit(['status', '--porcelain'], worktreePath);
-      isClean = status.trim() === '';
-    } catch (error) {
-      rethrowWorktreeGitInfrastructureFailure(error);
-      isClean = false;
-    }
-
-    let headSha: string | null = null;
-    try {
-      headSha = await this.runGit(['rev-parse', 'HEAD'], worktreePath);
-    } catch (error) {
-      rethrowWorktreeGitInfrastructureFailure(error);
-      headSha = null;
-    }
-
-    return {
-      sessionId,
-      hostPath: worktreePath,
-      branch: branchName,
-      headSha,
-      isClean,
+  /** @deprecated Execute only while this manager's mutation owner remains Promise-based. */
+  private runObservationLegacy<A, E>(
+    query: (
+      observations: Context.Service.Shape<typeof WorktreeObservations>,
+      source: {
+        repoId: RepoId;
+        worktreesDir: string;
+        localShared: boolean;
+      }
+    ) => Effect.Effect<A, E>
+  ): Promise<A> {
+    const source = {
+      repoId: this.repoId,
+      worktreesDir: this.worktreesDir,
+      localShared: this.isLocalSharedSource(),
     };
+    return fileLocksLegacy
+      .runPromise(
+        Effect.flatMap(WorktreeObservations, (observations) => query(observations, source)).pipe(
+          Effect.provide(
+            worktreeObservationLayer({
+              logger: this.logger,
+              logPrefix: `[${this.repoId}]`,
+              nodeProcess: this.nodeProcess,
+            })
+          )
+        )
+      )
+      .catch((error: unknown) => {
+        rethrowWorktreeGitInfrastructureFailure(error);
+        if (
+          error instanceof WorktreeGitCommandFailed ||
+          error instanceof LockIoError ||
+          error instanceof LockReentrant ||
+          error instanceof LockReleaseFailed ||
+          error instanceof LockTimeout
+        )
+          throw error;
+        throw new WorktreeGitExecutionFailed({
+          message: error instanceof Error ? error.message : 'Worktree observation failed',
+          cause: error,
+        });
+      });
+  }
+
+  /** Read information while the mutation caller holds the repo lock. */
+  private getWorktreeInfo(sessionId: SessionId): Promise<WorktreeInfo> {
+    return this.runObservationLegacy((observations, source) =>
+      observations.info(source, sessionId)
+    );
   }
 
   /** Read a session worktree's current state without creating or mutating it. */
-  async inspectWorktree(sessionId: SessionId): Promise<WorktreeInspection> {
-    return withRepoLock(this.repoId, async () => {
-      assertSafeSessionId(sessionId);
-      const worktreePath = this.getWorktreeHostPath(sessionId);
-      if (!fs.existsSync(worktreePath)) {
-        return { state: 'missing', path: worktreePath };
-      }
-      try {
-        const info = await this.getWorktreeInfo(sessionId);
-        return { state: info.isClean ? 'clean' : 'dirty', path: worktreePath, info };
-      } catch (error) {
-        rethrowWorktreeGitInfrastructureFailure(error);
-        return {
-          state: 'failed',
-          path: worktreePath,
-          message: error instanceof Error ? error.message : String(error),
-        };
-      }
-    });
+  inspectWorktree(sessionId: SessionId): Promise<WorktreeInspection> {
+    return this.runObservationLegacy((observations, source) =>
+      observations.inspect(source, sessionId)
+    );
   }
 
   /**
@@ -1593,37 +1601,8 @@ export class WorktreeManager {
   /**
    * List all worktrees for this repository
    */
-  async listWorktrees(): Promise<WorktreeInfo[]> {
-    return withRepoLock(this.repoId, async () => {
-      if (!fs.existsSync(this.worktreesDir)) {
-        return [];
-      }
-
-      const entries = fs.readdirSync(this.worktreesDir, { withFileTypes: true });
-      const worktrees: WorktreeInfo[] = [];
-
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const sessionId = entry.name as SessionId;
-          if (!SAFE_SESSION_ID_RE.test(sessionId)) {
-            this.logger.debug(
-              `[${this.repoId}] Skipping invalid worktree directory name: ${JSON.stringify(sessionId)}`
-            );
-            continue;
-          }
-          try {
-            worktrees.push(await this.getWorktreeInfo(sessionId));
-          } catch (error) {
-            rethrowWorktreeGitInfrastructureFailure(error);
-            this.logger.debug(
-              `[${this.repoId}] Failed to get info for worktree ${sessionId}: ${error instanceof Error ? error.message : 'Unknown error'}`
-            );
-          }
-        }
-      }
-
-      return worktrees;
-    });
+  listWorktrees(): Promise<WorktreeInfo[]> {
+    return this.runObservationLegacy((observations, source) => observations.list(source));
   }
 
   /**
@@ -1741,28 +1720,10 @@ export class WorktreeManager {
    * This resolves the actual branch name from git, which may differ from `session/<sessionId>`
    * if the branch was renamed.
    */
-  async getCurrentBranchName(sessionId: SessionId): Promise<string | null> {
-    assertSafeSessionId(sessionId);
-    const worktreePath = this.getWorktreeHostPath(sessionId);
-
-    if (!fs.existsSync(worktreePath)) {
-      return null;
-    }
-
-    try {
-      const branchName = await this.runGit(['branch', '--show-current'], worktreePath);
-      return branchName.trim() || null;
-    } catch (error) {
-      rethrowWorktreeGitInfrastructureFailure(error);
-      // Fallback to rev-parse
-      try {
-        const ref = await this.runGit(['rev-parse', '--abbrev-ref', 'HEAD'], worktreePath);
-        return ref.trim() || null;
-      } catch (fallbackError) {
-        rethrowWorktreeGitInfrastructureFailure(fallbackError);
-        return null;
-      }
-    }
+  getCurrentBranchName(sessionId: SessionId): Promise<string | null> {
+    return this.runObservationLegacy((observations, source) =>
+      observations.currentBranch(source, sessionId)
+    );
   }
 }
 
