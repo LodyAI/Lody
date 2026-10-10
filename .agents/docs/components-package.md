@@ -4,6 +4,11 @@ Scope: `packages/components`. The binding rules live in
 [that package's AGENTS.md](../../packages/components/AGENTS.md) and its child scopes;
 this page keeps the reasoning that would otherwise crowd them out.
 
+Workspace durable synchronization is composed by `providers/workspace-streams-transport.ts`.
+Its [content boundary](../../specs/workspace-streams-content.md) keeps ordinary SDK bytes
+and persistence intact while exposing protection and snapshot handling to future callers.
+The protected seam is not a product E2EE entry point or a persisted-mode resolver.
+
 ## Crash surfaces
 
 Recovery and diagnostic contracts, including callers outside `lib/`, are owned by
