@@ -3,7 +3,10 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { applyTextRewrites, type MessageTextSpan } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { userTextCollapsedHeight } from '@/components/ai-gui/conversation-font-size-classes';
+import {
+  conversationReadingFontSizeStyle,
+  userTextCollapsedStyle,
+} from '@/components/ai-gui/conversation-font-size-classes';
 import { getUserTextRenderSlice } from '@/components/ai-gui/message-copy';
 
 /**
@@ -97,10 +100,13 @@ function Bubble({
       <div className="min-w-0 max-w-full rounded-2xl bg-foreground/[0.05] px-4 py-2.5">
         <div
           className={cn(
-            'min-w-0 max-w-full whitespace-pre-wrap text-sm [overflow-wrap:anywhere]',
+            'min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]',
             collapsed && 'overflow-hidden'
           )}
-          style={collapsed ? { maxHeight: userTextCollapsedHeight(14) } : undefined}
+          style={{
+            ...conversationReadingFontSizeStyle(14),
+            ...(collapsed ? userTextCollapsedStyle(14) : {}),
+          }}
         >
           <MessageTextWithChips text={slice?.text ?? text} spans={slice ? slice.spans : spans} />
         </div>
@@ -110,7 +116,7 @@ function Bubble({
 }
 
 /**
- * Long enough that `UserPlainTextBlock` collapses it under its fixed
+ * Long enough that `UserPlainTextBlock` collapses it under its
  * `maxHeight`. That height is a whole number of line boxes, so anything that
  * makes one line taller than the rest shows up here as a half-clipped row —
  * which no short fixture can reveal.
