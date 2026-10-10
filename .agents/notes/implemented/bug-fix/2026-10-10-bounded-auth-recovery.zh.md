@@ -27,3 +27,11 @@ Convex 认证。期限也覆盖 Convex 没有发出加载状态变化的情况�
 虚拟时钟测试覆盖拒绝、挂起请求、缺失的认证重置状态、晚返回、session 更换、
 离线切换、短暂认证成功、耗尽和主动重试。相关查询、session 与 token provider 测试通过。
 确定性测试不代表真实凭据到期的端到端验证，本次也不部署。
+
+## 消融依据
+
+[PR #1382](https://github.com/LodyAI/Lody/pull/1382) 中，移除缓存的 pending Promise
+和第二处进行中检查后，36 项认证/session/query 测试仍通过。调度 effect 是唯一
+调用方，已经检查进行中的尝试，因此删除这份重复状态。反向对照中，移除最后一个
+非空 session 的保留逻辑，会使临时 session 消失时的预算测试失败；移除 generation
+隔离，会使 session 更换测试失败。这两项保护保留。各变体均从恢复后的基线独立测试。

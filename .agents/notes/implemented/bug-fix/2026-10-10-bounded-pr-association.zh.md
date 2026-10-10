@@ -31,3 +31,11 @@ Translation: current
 确定性测试通过注入时钟和延迟完成的 fetch 验证冷却、耗尽、跨会话共享、隔离、
 容量、并发、成功恢复和运行时重建。本改动扩展了[观测约定](../../../../specs/local-github-pr-observation.zh.md)。
 真实 GitHub 安装修复和部署不属于本地测试范围。
+
+## 消融依据
+
+[PR #1382](https://github.com/LodyAI/Lody/pull/1382) 中，删除旧 Map 的先删除再插入
+操作后，13 项关联测试全部通过：不再淘汰条目，也就不依赖插入顺序。仅移除独立
+pending Set 会导致并发 session 测试失败；改用现有预留 Map 条目，在请求完成前
+将重试期限设为 Infinity，13 项测试（含并发和容量）全部通过，因此删除重复的
+Set 和 finally 清理。各变体独立测试；失败说明要保留门控，而非第二份容器。

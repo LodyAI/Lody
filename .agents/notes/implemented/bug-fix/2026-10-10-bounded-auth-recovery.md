@@ -35,3 +35,13 @@ transitions, stale completions, session replacement, offline transitions,
 transient authentication success, exhaustion and explicit retry. Related query,
 session and token-provider tests pass. Live credential expiry remains outside
 these deterministic tests; deployment is not performed by this change.
+
+## Ablation evidence
+
+In [PR #1382](https://github.com/LodyAI/Lody/pull/1382), removing the cached
+pending Promise and the second in-flight guard kept all 36 auth/session/query
+tests passing. The scheduling effect is the sole caller and already checks the
+pending attempt, so that duplicate bookkeeping was removed. As negative controls,
+removing last-non-null session retention failed the transient-session-budget test;
+removing generation fencing failed the session-replacement test. Both protections
+remain. Each variant was tested independently against the restored baseline.

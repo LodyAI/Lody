@@ -23,7 +23,6 @@ export function createCloudPrAssociationPort(options: {
   const nowMs = options.nowMs ?? getServerNow;
   const failures = new Map<string, { attempts: number; delayMs: number; retryAtMs: number }>();
   let capacityReported = false;
-  const pending = new Set<string>();
 
   return {
     async associatePullRequest(input) {
@@ -31,13 +30,10 @@ export function createCloudPrAssociationPort(options: {
       // sessions must not inherit a successful association from an in-flight call.
       const key = JSON.stringify([input.workspaceId, input.repoFullName.trim().toLowerCase()]);
       const previous = failures.get(key);
-      if (
-        pending.has(key) ||
-        (previous && (previous.attempts >= MAX_ATTEMPTS || nowMs() < previous.retryAtMs))
-      )
+      if (previous && (previous.attempts >= MAX_ATTEMPTS || nowMs() < previous.retryAtMs))
         return false;
       // Exhausted entries must not be evicted and silently given another budget.
-      // Reserve capacity before I/O so concurrent repositories cannot overflow it.
+      // Reserve capacity before I/O; Infinity blocks this repo until settlement.
       if (!previous && failures.size >= MAX_FAILURES) {
         if (!capacityReported) {
           capacityReported = true;
@@ -48,8 +44,7 @@ export function createCloudPrAssociationPort(options: {
         return false;
       }
       const attempts = (previous?.attempts ?? 0) + 1;
-      failures.set(key, { attempts, delayMs: previous?.delayMs ?? 0, retryAtMs: 0 });
-      pending.add(key);
+      failures.set(key, { attempts, delayMs: previous?.delayMs ?? 0, retryAtMs: Infinity });
       let status = 0;
       let repositoryNotLinked = false;
       try {
@@ -73,8 +68,6 @@ export function createCloudPrAssociationPort(options: {
         ).success;
       } catch {
         // Transport failures (including timeout) use the same bounded retry path.
-      } finally {
-        pending.delete(key);
       }
 
       // Older servers report this rejection as 500: they still back off. New
@@ -83,7 +76,6 @@ export function createCloudPrAssociationPort(options: {
         status === 401 || status === 403
           ? RETRY_MAX_MS
           : Math.min(RETRY_MAX_MS, previous ? previous.delayMs * 2 : RETRY_BASE_MS);
-      failures.delete(key);
       failures.set(key, { attempts, delayMs, retryAtMs: nowMs() + delayMs });
       if (attempts === MAX_ATTEMPTS) {
         const reason = repositoryNotLinked

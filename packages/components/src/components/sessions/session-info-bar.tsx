@@ -1,3 +1,7 @@
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
+import { UserAvatar } from '@/components/user-avatar';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { LockKeyhole, MonitorPlay, Smartphone } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -35,6 +39,12 @@ export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'scheduleSource' |
 
 export type SessionInfoBarProps = {
   status: SessionStatusStripState | null;
+  /** Execution-machine identity. Independent of Session ownership and stage selection. */
+  executionMachine?: {
+    name: string;
+    owner?: { id?: string; name: string; image?: string | null } | null;
+    isMine?: boolean;
+  } | null;
   /** The schedule that started this session; the chip is the way back to it. */
   scheduleSource?: { title: string; onOpen: () => void } | null;
   /**
@@ -94,7 +104,7 @@ export type SessionInfoBarProps = {
 };
 
 /**
- * Desktop-only info bar glued above the composer, following the
+ * Shared desktop/mobile info bar glued above the composer, following the
  * "canonical cluster + fixed stage" model:
  *
  *   [☁][⏰][◎]  │  ⑂#2857 loro-dev/lody · branch · ±diff [CI] ↗
@@ -106,7 +116,8 @@ export type SessionInfoBarProps = {
  *   reshuffling, spatial memory stays intact. The CI verdict is NOT a cluster
  *   item: it rides inside the context item as a "CI" pill and is therefore
  *   only visible when the PR is expanded on the stage.
- * - Invariants: with no items the bar hides entirely; with items, exactly
+ * - Execution-machine identity stays visible outside the cluster/stage model.
+ * - Invariants: without identity/actions/sync or items the bar hides; with items, exactly
  *   ONE is always expanded on the stage (the rightmost item IS the expanded
  *   one — there is no fully-collapsed state). Clicking a cluster chip
  *   promotes it; the STAGE ICON is an inert marker (clicking it must never
@@ -127,8 +138,45 @@ export type SessionInfoBarProps = {
    (the bar pill or the composer), so its square bottom meets a straight edge. */
 const QUEUE_SHEET_INSET_CLASS = 'mx-3';
 
+const machineStyles = stylex.create({
+  surface: { height: 'auto', minHeight: 32, flexWrap: 'wrap', paddingBlock: space[1] },
+  identity: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1.5],
+    minWidth: 0,
+    flexShrink: 0,
+    maxWidth: { default: '42%', '@container (max-width: 600px)': '100%' },
+    flexBasis: { default: 'auto', '@container (max-width: 600px)': '100%' },
+    height: 22,
+    color: colors.label,
+  },
+  owner: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '12em',
+    flexShrink: 0,
+    fontWeight: 500,
+  },
+  separator: { color: colors.tertiaryLabel, flexShrink: 0 },
+  machine: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+    color: colors.secondaryLabel,
+  },
+  items: { display: 'flex', alignItems: 'center', gap: space[1.5], flex: 1, minWidth: 0 },
+  itemsWithMachine: {
+    flexBasis: { default: 0, '@container (max-width: 600px)': '100%' },
+    ':empty': { display: 'none' },
+  },
+});
+
 export function SessionInfoBar({
   status,
+  executionMachine,
   goal,
   goalCommands,
   goalPendingCommand,
@@ -241,7 +289,8 @@ export function SessionInfoBar({
     !onOpenBrowser &&
     !onOpenIosSimulator &&
     !ambientSync &&
-    !privateAccessStatus
+    !privateAccessStatus &&
+    !executionMachine
   ) {
     return queue ? (
       <div className="w-full shrink-0 bg-background">
@@ -342,77 +391,114 @@ export function SessionInfoBar({
           className={cn(
             '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs dark:border-input-border/45 dark:bg-input/70',
             INFO_BAR_ELEVATION_CLASS,
+            stylex.props(executionMachine && machineStyles.surface).className,
             // With the queue sheet seated on top, clip the shadow's upward bleed
             // (its 1px spread) at the top edge only; sides and bottom keep it.
             queue && '[clip-path:inset(0_-6px_-6px_-6px)]'
           )}
         >
-          {privateAccessStatus ? (
-            <button
-              type="button"
-              className="inline-flex h-6 max-w-[11rem] shrink-0 items-center gap-1 rounded-md px-1 text-amber-700 transition-colors hover:bg-muted-foreground/10 dark:text-amber-300"
-              title={privateAccessStatus.description}
-              aria-label={privateAccessStatus.description}
-              onClick={privateAccessStatus.onAction}
+          {executionMachine ? (
+            <div
+              {...stylex.props(machineStyles.identity)}
+              data-execution-machine=""
+              title={t(
+                'sessions.executionMachine.description',
+                'Execution machine: {{owner}} · {{machine}}',
+                {
+                  owner: executionMachine.isMine
+                    ? t('sessions.executionMachine.you', 'You')
+                    : (executionMachine.owner?.name ??
+                      t('sessions.executionMachine.unknownOwner', 'Unknown owner')),
+                  machine: executionMachine.name,
+                }
+              )}
             >
-              <LockKeyhole className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate font-medium">{privateAccessStatus.label}</span>
-            </button>
-          ) : null}
-          {privateAccessStatus &&
-          (clusterKeys.length > 0 ||
-            relations ||
-            onOpenBrowser ||
-            onOpenIosSimulator ||
-            stagedKey) ? (
-            <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
-          ) : null}
-          {clusterKeys.map((key) => renderItem(key, 'cluster'))}
-          {/* Relations and Browser are plain actions with no stage form. */}
-          {relations}
-          {onOpenBrowser ? (
-            <ActionChip
-              icon={MonitorPlay}
-              label={t('sessions.browser.openPreview', 'Open preview')}
-              textClassName="text-emerald-600 dark:text-emerald-400"
-              onAction={onOpenBrowser}
-            />
-          ) : null}
-          {onOpenIosSimulator ? (
-            <ActionChip
-              icon={Smartphone}
-              label={t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
-              textClassName="text-emerald-600 dark:text-emerald-400"
-              onAction={onOpenIosSimulator}
-            />
-          ) : null}
-          {/* The divider is what marks the staged item as active (the stage
-              icon has no highlight bg), so it must stay clearly visible —
-              plain bg-border melts into the pill in light theme. */}
-          {stagedKey && clusterNonEmpty ? (
-            <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
-          ) : null}
-          {/* key remounts the stage per item so any open popover state resets
-              on hand-off. */}
-          {stagedKey ? (
-            <div key={stagedKey} className="flex min-w-0 flex-1 items-center">
-              {renderItem(stagedKey, 'stage')}
+              <UserAvatar user={executionMachine.owner} size="mini" />
+              <span {...stylex.props(machineStyles.owner)}>
+                {executionMachine.isMine
+                  ? t('sessions.executionMachine.you', 'You')
+                  : (executionMachine.owner?.name ??
+                    t('sessions.executionMachine.unknownOwner', 'Unknown owner'))}
+              </span>
+              <span {...stylex.props(machineStyles.separator)} aria-hidden="true">
+                ·
+              </span>
+              <span {...stylex.props(machineStyles.machine)}>{executionMachine.name}</span>
             </div>
           ) : null}
-          {/* Ambient sync state hugs the right edge, outside the
+          <div
+            {...stylex.props(
+              machineStyles.items,
+              executionMachine && machineStyles.itemsWithMachine
+            )}
+          >
+            {privateAccessStatus ? (
+              <button
+                type="button"
+                className="inline-flex h-6 max-w-[11rem] shrink-0 items-center gap-1 rounded-md px-1 text-amber-700 transition-colors hover:bg-muted-foreground/10 dark:text-amber-300"
+                title={privateAccessStatus.description}
+                aria-label={privateAccessStatus.description}
+                onClick={privateAccessStatus.onAction}
+              >
+                <LockKeyhole className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span className="truncate font-medium">{privateAccessStatus.label}</span>
+              </button>
+            ) : null}
+            {privateAccessStatus &&
+            (clusterKeys.length > 0 ||
+              relations ||
+              onOpenBrowser ||
+              onOpenIosSimulator ||
+              stagedKey) ? (
+              <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
+            ) : null}
+            {clusterKeys.map((key) => renderItem(key, 'cluster'))}
+            {/* Relations and Browser are plain actions with no stage form. */}
+            {relations}
+            {onOpenBrowser ? (
+              <ActionChip
+                icon={MonitorPlay}
+                label={t('sessions.browser.openPreview', 'Open preview')}
+                textClassName="text-emerald-600 dark:text-emerald-400"
+                onAction={onOpenBrowser}
+              />
+            ) : null}
+            {onOpenIosSimulator ? (
+              <ActionChip
+                icon={Smartphone}
+                label={t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
+                textClassName="text-emerald-600 dark:text-emerald-400"
+                onAction={onOpenIosSimulator}
+              />
+            ) : null}
+            {/* The divider is what marks the staged item as active (the stage
+              icon has no highlight bg), so it must stay clearly visible —
+              plain bg-border melts into the pill in light theme. */}
+            {stagedKey && clusterNonEmpty ? (
+              <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
+            ) : null}
+            {/* key remounts the stage per item so any open popover state resets
+              on hand-off. */}
+            {stagedKey ? (
+              <div key={stagedKey} className="flex min-w-0 flex-1 items-center">
+                {renderItem(stagedKey, 'stage')}
+              </div>
+            ) : null}
+            {/* Ambient sync state hugs the right edge, outside the
               cluster/stage model. Under squeeze the label yields first
               (spinner stays) so the stage's diffstat never clips. In
               sync-only mode nothing else consumes the row's free space, so
               ml-auto keeps the spinner pinned right; with a stage present
               its flex-1 has already eaten the space (no-op). */}
-          {ambientSync ? (
-            <span className="ml-auto inline-flex shrink-0 items-center">
-              <SessionSyncingIndicator
-                variant={ambientSync}
-                labelClassName="hidden @[560px]:inline"
-              />
-            </span>
-          ) : null}
+            {ambientSync ? (
+              <span className="ml-auto inline-flex shrink-0 items-center">
+                <SessionSyncingIndicator
+                  variant={ambientSync}
+                  labelClassName="hidden @[560px]:inline"
+                />
+              </span>
+            ) : null}
+          </div>
         </div>
       </ConversationColumn>
     </div>

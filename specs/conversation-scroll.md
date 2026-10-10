@@ -1,7 +1,9 @@
 # Conversation scroll
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](conversation-scroll.zh.md)
 
 ## Scenario
 
@@ -19,7 +21,9 @@ for, and never move unless the user or the arrival of new output asks it to.
   code block or terminal inside a message is not scrolling the conversation. The
   "scroll to latest" control returns to following. When live Agent output is below the
   reader, that control shows the working indicator; while the Agent is waiting for
-  permission, or when there is no live work, it shows the down arrow.
+  permission, or when there is no live work, it shows the down arrow. Hovering or
+  keyboard-focusing the control reveals the down arrow even during live work;
+  leaving it restores the working indicator. Its scroll action is unchanged.
 - **Sending a message** while the agent is idle smoothly scrolls the sent message to
   the top of the viewport (instantly when the system asks for reduced motion) and
   leaves the space below it empty for the reply. The reply fills that space without

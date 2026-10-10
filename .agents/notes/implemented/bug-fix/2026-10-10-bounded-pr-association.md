@@ -37,3 +37,13 @@ Deterministic tests use an injected clock and deferred fetches to cover cooldown
 exhaustion, cross-session sharing, isolation, capacity, concurrency, success and
 runtime recreation. This extends the [observation contract](../../../../specs/local-github-pr-observation.md).
 Live GitHub installation repair and deployment are not part of the local tests.
+
+## Ablation evidence
+
+In [PR #1382](https://github.com/LodyAI/Lody/pull/1382), removing the old
+Map delete/reinsert operation preserved all 13 association tests: insertion order
+is no longer used for eviction. Removing only the separate pending Set failed the
+concurrent-session test. Using the existing reserved Map entry with an infinite
+retry deadline until settlement passed all 13 tests, including concurrency and
+capacity, and replaced the duplicate Set/finally cleanup. Each variant was tested
+independently; the failure is evidence to retain the gate, not the second container.

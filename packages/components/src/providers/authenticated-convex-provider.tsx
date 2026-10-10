@@ -17,7 +17,6 @@ import { AuthRecoveryError } from '@/components/auth-recovery-error';
 import { useRestartConvexAuth } from './convex-provider';
 
 type PendingRecovery = {
-  promise: Promise<void>;
   resolve: () => void;
   restartRequested: boolean;
   sawConvexReset: boolean;
@@ -85,16 +84,12 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
     if (confirmedUnauthenticated) {
       return Promise.resolve();
     }
-    if (pendingRecoveryRef.current) {
-      return pendingRecoveryRef.current.promise;
-    }
 
     let resolveRequest!: () => void;
     const promise = new Promise<void>((resolve) => {
       resolveRequest = resolve;
     });
     const pending: PendingRecovery = {
-      promise,
       resolve: resolveRequest,
       restartRequested: false,
       sawConvexReset: false,
