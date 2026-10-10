@@ -29,6 +29,7 @@ import {
   findFreshSessionPresenceState,
   machineSupportsLocalProjectRemovalProtocol,
   resolveProjectGitHubRepo,
+  resolveSessionHistoryBackendKind,
   type LocalProjectId,
   type LocalProjectMeta,
   type LocalProjectWorktreeCleanupPreflightResult,
@@ -961,6 +962,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           repoFullName={prRepoFullName}
           folderName={projectName}
           machineName={machineName}
+          historyBackend={resolveSessionHistoryBackendKind(session)}
           branchName={session.branchName}
           prStatus={showPr ? prStatus : undefined}
           prCiState={prInfo.ciState}
@@ -2562,6 +2564,7 @@ export function LoroAppSidebar({
         sectionLabel: chatsLabel,
         subtitle: null,
         machineName: task.machineName ?? null,
+        historyBackend: task.historyBackend,
         latestMessageAt: task.latestMessageAt,
         isPinned: task.isPinned,
         isWorking: task.isWorking,
@@ -2588,6 +2591,7 @@ export function LoroAppSidebar({
         repoFullName: repoName || null,
         branchName: task.branchName,
         machineName: task.machineName ?? null,
+        historyBackend: task.historyBackend,
         latestMessageAt: task.latestMessageAt,
         isPinned: task.isPinned,
         isWorking: task.isWorking,
@@ -2636,6 +2640,7 @@ export function LoroAppSidebar({
             subtitle: project.name,
             repoFullName: resolveProjectGitHubRepo(session.project) ?? null,
             machineName: section.machineDisplayName,
+            historyBackend: resolveSessionHistoryBackendKind(session),
             owner: resolveSessionAuthor(session),
             latestMessageAt: activity.latestMessageAt,
             isPinned: Boolean(session.isPinned),

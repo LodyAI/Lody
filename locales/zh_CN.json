@@ -2098,6 +2098,7 @@
   "sessions.infoCard.chat": "对话",
   "sessions.infoCard.copy": "复制",
   "sessions.infoCard.folder": "文件夹",
+  "sessions.infoCard.historyBackend": "历史后端",
   "sessions.infoCard.pullRequest": "Pull Request",
   "sessions.infoCard.repository": "仓库",
   "sessions.infoCard.updated": "更新于",

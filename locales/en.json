@@ -2098,6 +2098,7 @@
   "sessions.infoCard.chat": "Chat",
   "sessions.infoCard.copy": "Copy",
   "sessions.infoCard.folder": "Folder",
+  "sessions.infoCard.historyBackend": "History backend",
   "sessions.infoCard.pullRequest": "Pull request",
   "sessions.infoCard.repository": "Repository",
   "sessions.infoCard.updated": "Updated",
