@@ -7,6 +7,7 @@ import {
   shouldRenewAcpCapabilityFetchTime,
   getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheStaleReason,
+  getBuiltinRuntimeOverrideSourceVersionSuffix,
   getReadableAcpCapabilityCacheEntry,
   getReadableAcpCapabilityCacheEntryForRuntimeOverrides,
   isAcpCapabilityCacheEntryCurrent,
@@ -53,6 +54,54 @@ describe('ACP capability cache compatibility', () => {
     const plain = { ...capability, sourceVersion: 'builtin-pi:test' };
     expect(getReadableAcpCapabilityCacheEntryForRuntimeOverrides(plain, undefined)).toEqual(plain);
   });
+  it('matches one Pi launch configuration regardless of override key order', () => {
+    const overrides = { piExtensions: [' /fixture/plugin.ts'], piPath: '/opt/pi' };
+    // Session creation re-parses overrides in schema order with trimmed paths;
+    // older rows stamped that form verbatim.
+    const legacy: AcpCapabilityCacheEntry = {
+      ...entry(ACP_CAPABILITY_CACHE_VERSION),
+      agentType: 'pi',
+      sourceVersion:
+        'builtin-pi:test+override:{"piPath":"/opt/pi","piExtensions":["/fixture/plugin.ts"]}',
+    };
+    expect(getReadableAcpCapabilityCacheEntryForRuntimeOverrides(legacy, overrides)).toEqual(
+      legacy
+    );
+    expect(
+      getBuiltinRuntimeOverrideSourceVersionSuffix(overrides) ===
+        getBuiltinRuntimeOverrideSourceVersionSuffix({
+          piPath: '/opt/pi',
+          piExtensions: ['/fixture/plugin.ts'],
+        })
+    ).toBe(true);
+    for (const changed of [
+      { piExtensions: ['/fixture/plugin.ts'] },
+      { piExtensions: ['/fixture/plugin.ts'], piPath: '/opt/other-pi' },
+      { piExtensions: ['/fixture/plugin.ts', '/fixture/other.ts'], piPath: '/opt/pi' },
+    ]) {
+      expect(
+        getReadableAcpCapabilityCacheEntryForRuntimeOverrides(legacy, changed)
+      ).toBeUndefined();
+    }
+  });
+  it.each([
+    'builtin-pi:test+override:not-json',
+    'builtin-pi:test+override:{}',
+    'builtin-pi:test+override:{"piPath":"  "}',
+    'builtin-pi:test+override:["/opt/pi"]',
+  ])('rejects the unreadable Pi override suffix %s', (sourceVersion) => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...entry(ACP_CAPABILITY_CACHE_VERSION),
+      agentType: 'pi',
+      sourceVersion,
+    };
+    for (const overrides of [{ piPath: '/opt/pi' }, undefined]) {
+      expect(
+        getReadableAcpCapabilityCacheEntryForRuntimeOverrides(capability, overrides)
+      ).toBeUndefined();
+    }
+  });
+
   it.each([undefined, ACP_CAPABILITY_CACHE_VERSION - 1, ACP_CAPABILITY_CACHE_VERSION + 1])(
     'keeps a parsed cache-version %s entry readable',
     (cacheVersion) => {

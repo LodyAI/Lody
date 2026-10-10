@@ -87,6 +87,26 @@ behavior and the hooks README explains the shared catalog ownership.
 Validation: `pnpm check`, `pnpm format`, and `pnpm run docs check` passed.
 [PR #1285](https://github.com/LodyAI/Lody/pull/1285).
 
+### Pickers after the first turn (2026-10-08)
+
+After the first Pi turn the persisted composer could still show only Role and
+Agent. Two paths emptied its catalog while the stored row was correct. Session
+creation re-parses `runtimeOverrides` through the message schema, which emits keys
+in schema order and trims extension paths; probes and readers serialize the
+Provider row's own order. With more than one override (`piPath` plus
+`piExtensions`) the first session start overwrote the probe row with a suffix the
+reader rejected. Separately, an absent Provider row (not yet materialized, or
+dropped from the client cache) blanked even an ordinary Pi.
+
+Override suffixes are now canonical (sorted keys, trimmed values) when stamped,
+and the reader compares parsed overrides, so rows stamped in either order stay
+readable without a re-probe. An absent Provider reads with no overrides: the
+unchanged gate then serves only an override-free catalog, so plain Pi keeps Model
+and Thinking while an extension-launched catalog stays hidden. A row bound to
+another machine or type still exposes nothing. Coverage mounts the shared hook
+with the row a session start writes (no extensions, extensions, extensions plus
+a Pi binary in legacy schema order) and asserts both pickers.
+
 ## History import follow-up (2026-09-25)
 
 History sync failed with "does not advertise sessionCapabilities.list": the adapter
