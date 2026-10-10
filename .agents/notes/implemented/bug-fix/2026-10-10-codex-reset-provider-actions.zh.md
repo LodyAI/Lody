@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1407
 
 [English](2026-10-10-codex-reset-provider-actions.md)
 
