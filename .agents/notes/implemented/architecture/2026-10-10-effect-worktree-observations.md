@@ -22,7 +22,7 @@ mutation, setup, GC and daemon ownership remain separate work.
 The service captures FileSystem, WorktreeGit and FileLocks through Layer.effect. It
 owns no background work or cache. `inspect` and `list` acquire the existing repo lock
 with the existing 120-second cross-process timeout; local admission remains unbounded
-as defined by the [file-lock contract](../../../../specs/file-lock-lifecycle.md).
+as defined by the [file-lock decision](2026-10-10-effect-file-lock-lifecycle.md).
 `info` deliberately does not acquire another repo lock: creation and rename callers
 already hold it. `currentBranch` preserves the previous unlocked read boundary.
 A failed bounded process release retains its recovery lease in the error; releasing

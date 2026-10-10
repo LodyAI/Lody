@@ -26,6 +26,30 @@ Layer finalization retries unresolved releases and surfaces an aggregate failure
 any remain. The acquisition timestamp is refreshed for each publication attempt,
 so cross-process waiting does not shorten the existing stale-age window. Missing files are already gone; unreadable files fail rather than becoming stale. Malformed readable metadata and the 30-minute takeover policy remain unchanged. Reclamation rechecks observed content before removal; this preserves a cooperative file protocol, not a compare-and-unlink kernel primitive or an advisory-lock guarantee across expired-owner takeover.
 
+## Preserved lock policy
+
+Directory precedence remains explicit `locksDir`, `LODY_LOCKS_DIR`, then the
+installation profile's `locks` directory. Names replace characters outside
+letters, digits, underscore and hyphen with underscore and append `.lock`.
+Same-context acquisition of the same resolved path, including sanitized aliases
+and child fibers, fails immediately; different names may nest.
+
+The default 30-second `timeout` starts after local FIFO admission. It bounds only
+contention on another file owner, not local queue waiting, body execution or
+filesystem I/O. Retry delays start at 100 ms, grow by 1.5 and cap at two seconds;
+a configured first delay is used unchanged even above the cap, with subsequent
+delays capped. Negative or non-finite delays fail with `LockIoError` before
+admission. Elapsed time is checked after a failed attempt, so a retry may overshoot
+by its delay; this is not a strict I/O deadline.
+
+A fresh pid belonging to this user keeps its lock. Missing or foreign-user pids,
+malformed readable metadata and age over 30 minutes permit stale reclamation.
+There is no heartbeat; expired live holders remain subject to the existing
+takeover policy. Stale cleanup scans `.lock` files without opening documents or
+starting work, and filesystem failures remain observable. Hard-link support is
+required; unsupported filesystems fail visibly. This remains a cooperative
+file protocol, not a kernel advisory lock or a crash transaction.
+
 ## Consumer boundary and deletion conditions
 
 ```text
