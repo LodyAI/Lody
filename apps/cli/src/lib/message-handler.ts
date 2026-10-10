@@ -19,7 +19,6 @@ import crypto from 'crypto';
 import { pathToFileURL } from 'url';
 
 import { v4 as uuidV4 } from 'uuid';
-import { Effect } from 'effect';
 import {
   createLoroStreamsJsonStreamClient,
   LoroStreamsMachineRpcServer,
