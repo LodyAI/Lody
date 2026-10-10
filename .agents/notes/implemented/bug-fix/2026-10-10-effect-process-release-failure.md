@@ -45,6 +45,16 @@ implementation is introduced. Existing ordinary command errors remain unchanged
 when cleanup succeeds. Native Effect owners inspect the full Cause; compatibility
 owners retain the projected failure. Repeating Scope.close is not recovery.
 
+Correction from independent review: the first version retained leases after
+successful acquisition, but failed setup could close the spawner's child Scope
+before its handle reached the caller. The resulting mixed Fail/Die Cause passed
+through `Effect.mapError`, which in installed 4.0.2 selects the typed Fail and
+drops the release defect. `spawnProcess` and `runCommand` now convert errors with
+`catchCause` and `failCause(Cause.map(...))`: only typed failures change, while
+every defect and interruption survives. The receiver can recover that tree even
+though acquisition itself failed; ordinary setup errors remain unchanged when
+release succeeds.
+
 The [draft Spec](../../../../specs/process-scope-release.md) names the receiver's
 responsibility. No root registry, automatic retry service or Session coordinator
 is claimed by this unit. A caller discarding its failure can still abandon that
@@ -58,8 +68,12 @@ retry retaining its lease, forced recovery during a graceful retry, observed-gon
 identifier reuse, multiple leases crossing the Promise boundary and timeout plus
 release failure. It uses injected process tables, Deferred readiness and TestClock.
 Native Git's additional cancellation and failed-release cases exposed the bug and
-remain in that later unit. The final owning suite passes 40 cases; shared passes all 113 files / 1376
-cases and Electron passes 214 cases. Seven ablations are rejected by these behavioral
+remain in that later unit. The owning suite now passes 43 cases, including both native acquisition APIs and
+the actual Legacy command boundary when setup and termination fail together.
+The three regressions all failed before the correction. Independently restoring
+the old spawn conversion loses one recovery owner; restoring the old command
+conversion loses the native and Legacy owners. Both mutations fail, while the
+fixed and restored baselines pass. Seven original ablations are rejected by these behavioral
 tests: swallowed Scope failure, dropped Promise leases, missing retirement,
 pretend retry success, logger failure discarding the owner, an active retry ignoring retirement and
 masked recovery wait. Baseline and restored source pass. The cancellation case uses an explicit
@@ -68,8 +82,9 @@ masked sleep interruptible, so plain sleep did not distinguish the mask mutant.
 
 The full check uses main 339eede8592e237320e72f6f63c07aaa44591197. Publication refresh found main 385f1a7278ad8a461919981494836fbdc9c980e6; its intervening documentation/UI changes do not overlap this unit.
 
-Final pnpm check passes, including the full CLI suite (317 files / 3694 cases,
-one skipped), shared, Electron and all guards. Type-aware lint reports zero
+The original PR passed pnpm check on its recorded baseline, including the full CLI
+suite (317 files / 3694 cases, one skipped), shared (113 files / 1376 cases),
+Electron (214 cases) and all guards. Type-aware lint reports zero
 errors; format, format:check and docs check pass. Validation child processes
 isolate injected Git configuration, temporary-package type and lock-directory
 overrides without changing user-global configuration. The previously reproduced
@@ -77,3 +92,13 @@ Roost signed-prefix timeout passed in the final complete runs. These results do 
 or production behavior. Windows descendants after root exit still need separate
 Job Object ownership work. Lease recovery establishes tree absence, not drained
 stdio or complete external-resource release.
+
+The acquisition correction integrates main a79613633c3cb19e0d31a693c92331c4da1b769c.
+All workspace types and lint pass (zero errors). The complete check is not green:
+CLI passes 3660 tests, skips one and times out in two unchanged Roost cases.
+Three component suites also hit their five-second limits under that load; all
+100 cases pass when those exact suites run separately without changing deadlines.
+Shared, Electron and all five boundary guards pass in the supplemental run.
+Format, format:check, the additional Shared formatter check and docs check pass.
+Independent review confirms the original acquisition leak is fixed and ordinary
+setup-error identity is preserved across the three actual API boundaries.

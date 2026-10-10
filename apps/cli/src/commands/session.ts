@@ -1,3 +1,8 @@
+import { normalizeSessionTurnInputConfig } from '@lody/shared';
+import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
+import { buildCommandInputBlocks, type SessionInputAttachment } from '@/lib/session-input-content';
+import { createCommandAttachmentTransfer } from '@/lib/cloud-cli-port';
+import { inputBlocksToHistoryItems, type SessionInputBlock } from '@lody/shared';
 import { resolveSessionConversationConfig } from '@lody/shared';
 import type { MessageAuthor, AgentMessageAuthor } from '@lody/shared';
 import {
@@ -167,12 +172,14 @@ const parseSessionHistoryBackend = (value: string): SessionHistoryBackendKind =>
 };
 
 type PromptOptions = {
+  attach?: string[];
   prompt?: string;
   promptFile?: string;
 };
 
 export type CreateOptions = CommonOptions &
   PromptOptions & {
+    inputAttachments?: SessionInputAttachment[];
     title?: string;
     machine?: string;
     agent?: string;
@@ -708,6 +715,8 @@ async function readPromptText(
       return resolved;
     }
   }
+
+  if (options.attach?.length) return '';
 
   throw new Error(
     'Missing prompt. Pass a positional prompt, --prompt, --prompt-file, or pipe stdin.'
@@ -1302,12 +1311,13 @@ async function resolveRunningAssistantTurnId(
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
-async function appendUserPromptHistory(args: {
+export async function appendUserPromptHistory(args: {
   sessionDoc: SessionDocument;
   prompt: string;
   userId: string;
   inputConfig?: SessionHistoryInput['inputConfig'];
   author?: MessageAuthor;
+  inputBlocks?: SessionInputBlock[];
   preallocatedId?: string;
   /** History the caller already read, so the idempotency check can skip a re-read. */
   knownHistory?: readonly SessionHistory[];
@@ -1319,12 +1329,20 @@ async function appendUserPromptHistory(args: {
     const history = args.knownHistory ?? (await backend.readHistory());
     const existing = history.find((entry) => entry.id === historyId);
     if (existing) {
-      const existingText = existing.items?.find((item) => item.type === 'text');
       if (
         existing.role !== 'user' ||
-        existingText?.type !== 'text' ||
-        existingText.text !== prompt ||
-        !isDeepStrictEqual(existing.inputConfig ?? {}, inputConfig ?? {})
+        !isDeepStrictEqual(
+          JSON.parse(JSON.stringify(existing.items)),
+          JSON.parse(
+            JSON.stringify(
+              inputBlocksToHistoryItems(args.inputBlocks ?? buildCommandInputBlocks(prompt))
+            )
+          )
+        ) ||
+        !isDeepStrictEqual(
+          JSON.parse(JSON.stringify(normalizeSessionTurnInputConfig(existing.inputConfig) ?? {})),
+          JSON.parse(JSON.stringify(normalizeSessionTurnInputConfig(inputConfig) ?? {}))
+        )
       ) {
         throw new Error(`Preallocated user turn id is already used: ${historyId}`);
       }
@@ -1344,7 +1362,7 @@ async function appendUserPromptHistory(args: {
     status: 'pending',
     read: false,
     userId,
-    items: [{ type: 'text', text: prompt }],
+    items: inputBlocksToHistoryItems(args.inputBlocks ?? buildCommandInputBlocks(prompt)),
     inputConfig,
     fileDiff: [],
     finished: true,
@@ -1358,6 +1376,7 @@ async function appendUserPromptHistory(args: {
 }
 
 function buildCliHistoryInputConfig(args: {
+  inputBlocks?: SessionInputBlock[];
   memory?: import('@lody/shared').MemoryBinding;
   prompt: string;
   cliType: SessionMeta['cliType'];
@@ -1370,6 +1389,9 @@ function buildCliHistoryInputConfig(args: {
 }): NonNullable<SessionHistoryInput['inputConfig']> {
   return {
     memory: args.memory,
+    ...(args.inputBlocks?.some((block) => block.type !== 'text')
+      ? { inputBlocks: args.inputBlocks }
+      : {}),
     prompt: args.prompt,
     cliType: args.cliType,
     agentType: args.agentType,
@@ -3170,6 +3192,25 @@ export async function prepareSessionInput(
   });
 
   const sessionId = options.sessionId ?? (uuidV4() as SessionId);
+  const attachments =
+    options.inputAttachments ??
+    (await prepareSessionInputAttachments({
+      paths: options.attach ?? [],
+      cwd: process.cwd(),
+      workspaceId: workspace.id as WorkspaceId,
+      sessionId,
+      sourceMachineId: auth.machineId,
+      targetMachineId: targetMachine.id,
+      ...(options.attach?.length
+        ? {
+            relay: createCommandAttachmentTransfer(
+              auth.token,
+              Boolean(getSessionCommandEnvironment())
+            ),
+          }
+        : {}),
+    }));
+  const inputBlocks = buildCommandInputBlocks(prompt, attachments);
   const repoFullName = resolveProjectGitHubRepo(project);
   const baseBranch = project?.kind === 'local' ? undefined : project?.branch?.trim();
   // An explicit title is final: `user` blocks both the agent-pushed and the
@@ -3220,7 +3261,7 @@ export async function prepareSessionInput(
     read: !!ownerTarget || machineSupportsPreparedSessionInputProtocol(targetMachine),
     userId: requesterUserId,
     author: options.delegatedRequester?.author ?? { v: 1, kind: 'human', userId: requesterUserId },
-    items: [{ type: 'text', text: prompt }],
+    items: inputBlocksToHistoryItems(inputBlocks),
     inputConfig: {
       ...(options.agentRoleId
         ? {
@@ -3231,6 +3272,7 @@ export async function prepareSessionInput(
         : {}),
       ...buildCliHistoryInputConfig({
         prompt: buildAgentPrompt(prompt, agentConfig.prompt ?? ''),
+        inputBlocks,
         cliType: agentConfig.cliType,
         agentType: agentConfig.agentType,
         memory: effectiveDispatchConfig.memory,
@@ -3426,7 +3468,8 @@ export async function sendSessionChatResult(
     chainDepth: number;
     bypassSessionQuota?: boolean;
   },
-  delegatedRequester?: DelegatedSessionRequester
+  delegatedRequester?: DelegatedSessionRequester,
+  input?: { paths?: string[]; attachments?: SessionInputAttachment[] }
 ): Promise<{
   sessionId: SessionId;
   machineId: MachineId;
@@ -3500,7 +3543,27 @@ export async function sendSessionChatResult(
     !dispatchConfig.runConfig
       ? resolveSessionConversationConfig(historyForDefaults)
       : undefined;
+  const attachments =
+    input?.attachments ??
+    (await prepareSessionInputAttachments({
+      paths: input?.paths ?? [],
+      cwd: process.cwd(),
+      workspaceId: workspace.id as WorkspaceId,
+      sessionId,
+      sourceMachineId: auth.machineId,
+      targetMachineId: session.machineId,
+      ...(input?.paths?.length
+        ? {
+            relay: createCommandAttachmentTransfer(
+              auth.token,
+              Boolean(getSessionCommandEnvironment())
+            ),
+          }
+        : {}),
+    }));
+  const inputBlocks = buildCommandInputBlocks(prompt, attachments);
   const userTurn = await appendUserPromptHistory({
+    inputBlocks,
     sessionDoc,
     prompt,
     userId: requesterUserId,
@@ -3510,6 +3573,7 @@ export async function sendSessionChatResult(
       agentRoleRevision: roleSelection?.agentRoleRevision,
       agentRoleSnapshot: roleSelection?.agentRoleSnapshot,
       ...buildCliHistoryInputConfig({
+        inputBlocks,
         prompt,
         cliType: session.cliType,
         agentType: session.agentType,
@@ -3995,6 +4059,7 @@ const sessionCreateCommand = new Command('create')
     collectListOption,
     []
   )
+  .option('--attach <path>', 'Attach a file from this machine; repeatable', collectListOption, [])
   .option('--prompt <text>', 'Prompt text')
   .option('--prompt-file <path>', 'Read prompt text from file, or - for stdin')
   .option('--json', 'Print JSON output')
@@ -4163,6 +4228,7 @@ const sessionChatCommand = new Command('chat')
     collectListOption,
     []
   )
+  .option('--attach <path>', 'Attach a file from this machine; repeatable', collectListOption, [])
   .option('--prompt <text>', 'Prompt text')
   .option('--prompt-file <path>', 'Read prompt text from file, or - for stdin')
   .option('--json', 'Print JSON output')
@@ -4195,11 +4261,13 @@ const sessionChatCommand = new Command('chat')
           sessionIdArg,
           promptArg,
           envSessionId: process.env.LODY_SESSION_ID,
-          hasNonPositionalPromptSource: hasNonPositionalPromptSource({
-            prompt: options.prompt,
-            promptFile: options.promptFile,
-            stdinText: stdinState.text,
-          }),
+          hasNonPositionalPromptSource:
+            Boolean(options.attach?.length) ||
+            hasNonPositionalPromptSource({
+              prompt: options.prompt,
+              promptFile: options.promptFile,
+              stdinText: stdinState.text,
+            }),
         });
 
         const workspace = await resolveWorkspaceForSessionOrThrow(
@@ -4229,7 +4297,11 @@ const sessionChatCommand = new Command('chat')
                   timeoutMs: resolveStructuredOutputTimeoutMs(options.timeout),
                   onEvent: outputMode === 'jsonl' ? (event) => printJson(event) : undefined,
                 }
-              : undefined
+              : undefined,
+            undefined,
+            undefined,
+            undefined,
+            { paths: options.attach }
           );
           const completionPromise = result.completionPromise;
           const response = {

@@ -8,7 +8,8 @@ import { Button } from '@lody/ui/button';
  * (`ai-gui/view.tsx`) and the Code Collab file preview
  * (`sessions/session-file-image-preview.tsx`) both mount it, so the gestures
  * stay identical: pinch-to-zoom, double-tap zoom, wheel zoom, drag-to-pan, and
- * a close button in the top-right corner.
+ * a close button in the top-right corner. Touch holds open the image action menu;
+ * move or add a second finger before 500 ms to keep panning/pinching instead.
  */
 const meta = {
   title: 'Shared/ZoomableImageViewer',
@@ -105,4 +106,11 @@ export const Gallery: Story = {
 export const KeyboardGallery: Story = {
   args: { open: false, onClose: () => {}, images: GALLERY_IMAGES, index: 0 },
   render: () => <ViewerHarness images={GALLERY_IMAGES} initiallyOpen={false} />,
+};
+
+/** Use touch emulation or a device: hold the photo, then test menu dismissal and pinch cancellation. */
+export const TouchGallery: Story = {
+  args: { open: true, onClose: () => {}, images: GALLERY_IMAGES, index: 0 },
+  globals: { viewport: { value: 'mobile1', isRotated: false } },
+  render: () => <ViewerHarness images={GALLERY_IMAGES} />,
 };

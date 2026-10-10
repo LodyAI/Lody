@@ -5,6 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore, type Store } from 'jotai';
 
+import { ExperimentalFeaturesSection } from '../src/components/settings/experimental-features-setting';
+import {
+  experimentalFeaturesEnabledAtom,
+  roostHistoryFeatureEnabledAtom,
+} from '../src/atoms/settings';
 import { bugReportDialogOpenAtom } from '../src/atoms/bug-report';
 import { SettingsCategoryList } from '../src/components/settings/settings-category-list';
 import { initI18n } from '../src/i18n';
@@ -74,6 +79,27 @@ describe('SettingsCategoryList', () => {
       );
     });
   }
+
+  it('keeps Roost selectable without exposing the retired review experiment', async () => {
+    store?.set(experimentalFeaturesEnabledAtom, true);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <ExperimentalFeaturesSection />
+        </Provider>
+      );
+    });
+    expect(container.textContent).not.toContain('Review agent');
+    const roostSwitch = container.querySelector<HTMLElement>(
+      '[role="switch"][aria-label="Roost history"]'
+    );
+    expect(roostSwitch).not.toBeNull();
+    await act(async () => roostSwitch?.click());
+    expect(store?.get(roostHistoryFeatureEnabledAtom)).toBe(true);
+  });
 
   it('renders a bottom bug report action that opens the report dialog state', async () => {
     await renderList();

@@ -3,7 +3,7 @@
 Status: proposed
 Type: feature
 Translation: current
-PR: [#1329](https://github.com/LodyAI/Lody/pull/1329)
+PR: [#1329](https://github.com/LodyAI/Lody/pull/1329), [#1391](https://github.com/LodyAI/Lody/pull/1391)
 
 [English](2026-10-08-roost-history-feature-gate.md)
 
@@ -27,6 +27,11 @@ Experimental features 区域包含一个总开关和一个 Roost history 开关�
 开关不迁移历史、不重写会话 metadata，也不提供按消息切换 backend 的 fallback。backend 选择
 仍然是不可变的会话边界。
 
+桌面会话 hover 卡片用一行中性的数据库图标与 Roost 或 Loro，展示会话保存的选择，方便
+用户识别该对话的历史后端。工作区、按更新时间排列和置顶列表传递相同的 metadata 值；
+旧 metadata 缺少 discriminator 时解析为 Loro。卡片接收已有行数据，不订阅设置或加载历史。
+显示契约记录在[会话历史写入](../../../../specs/session-history-writes.zh.md)中。
+
 CLI 保留 npm 发布的 `@loro-dev/roost@0.1.2`，锁文件记录 registry 校验值，不再依赖
 相邻源码目录。[原生运行时接入](../architecture/2026-10-09-roost-native-runtime.zh.md)
 使用已发布的 `@loro-dev/roost-node@0.1.1` 代替另行复制的 owner 可执行文件，并保留此会话开关。
@@ -39,6 +44,9 @@ session-actions 契约测试覆盖两个开关：只有两个开关都打开时�
 
 创建回归还覆盖目标能力缺失/较旧、显式 Roost 在副作用前拒绝，以及显式 Loro 覆盖。
 renderer 两个创建入口与 CLI 复用同一个能力解析函数。
+
+hover 卡片改动通过 components 类型检查和现有的 23 个列表/hover 测试。Storybook 中的
+Chromium 验证覆盖 Roost 与 Loro、中英文、深浅色，以及鼠标悬停行时打开卡片。
 
 原生接入已通过完整工作区检查和实际 macOS arm64 打包，无须另行提供 owner 产物。
 它也修正了此前四个过期 CLI 测试：等待异步 runtime-config 写入，并在机器注册预期中包含

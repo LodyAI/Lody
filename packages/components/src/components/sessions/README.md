@@ -65,7 +65,6 @@ describes the shared parsing and persistence boundary.
 | `pr-tab-container.tsx`, `pr-tab-view.tsx`                                     | PR side-panel tab                                                |
 | `create-pr-prompt.ts`, `session-pr-prompts.ts`, `session-pr-agent-action.ts`  | Agent prompts behind Create PR / Fix CI / Resolve Conflicts      |
 | `diff-pr-analytics.ts`                                                        | Analytics for diff and PR surfaces                               |
-| `auto-review-menu-item.tsx`, `auto-review-info.tsx`, `auto-review-status.tsx` | Auto review checkbox, setup explanation, and run banner          |
 | `use-capacity-auto-retry.ts`                                                  | Capacity-error retry behaviour                                   |
 
 ## File, diff, and browser surfaces
@@ -100,7 +99,7 @@ describes the shared parsing and persistence boundary.
 - [Run config and Agent Roles](../../../../../.agents/docs/sessions-run-config.md)
 - [Live status and dispatch](../../../../../.agents/docs/sessions-live-status.md)
 - [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)
-- [Auto review and status slot](../../../../../.agents/docs/sessions-auto-review.md)
+- [Session status slot](../../../../../.agents/docs/sessions-auto-review.md)
 - [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
 - [Render-cost invariants](../../../../../.agents/docs/sessions-render-cost.md)
 - [Stories and Storybook fidelity](../../../../../.agents/docs/sessions-stories.md)

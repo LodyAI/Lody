@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process';
 
 import {
   getAcpCapabilitySourceVersion,
+  mergeACPProcessEnv,
   mergeLoginShellEnv,
   resolveACPSetting,
   resolveExpectedAcpCapabilitySourceVersion,
@@ -283,20 +284,22 @@ describe('resolveBuiltinACPSetting', () => {
     }
   });
 
-  it('resolves Dimcode to a pinned npx ACP launch understood by cache recovery', async () => {
+  it('launches the user-installed Dimcode without npx or automatic updates', async () => {
     for (const extraArgs of [undefined, ['--verbose']]) {
       const input = { cliType: 'builtin' as const, agentType: 'dimcode', extraArgs };
       const launch = await resolveACPProcessLaunchAsync(input);
       expect(launch).toEqual({
-        command: 'npx',
-        args: ['--prefer-offline', '-y', 'dimcode@0.5.10', 'acp', ...(extraArgs ?? [])],
+        command: 'dimcode',
+        args: ['acp', ...(extraArgs ?? [])],
+        env: { DIMCODE_DISABLE_AUTOUPDATE: '1', DIMCODE_AUTOUPDATE: '0' },
         capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
       });
-      expect(parseNpxPackageSpecFromArgs(launch.args)).toEqual({
-        name: 'dimcode',
-        version: '0.5.10',
+      expect(launch.capabilitySourceVersion).toBe('builtin-dimcode:local-acp');
+      expect(mergeACPProcessEnv(launch, { DIMCODE_AUTOUPDATE: '1', PATH: '/user/bin' })).toEqual({
+        PATH: '/user/bin',
+        DIMCODE_DISABLE_AUTOUPDATE: '1',
+        DIMCODE_AUTOUPDATE: '0',
       });
-      expect(launch.capabilitySourceVersion).toBe('builtin-dimcode:0.5.10');
     }
     expect(() => resolveBuiltinACPSetting('dimcode')).toThrow(/resolveACPProcessLaunchAsync/);
   });

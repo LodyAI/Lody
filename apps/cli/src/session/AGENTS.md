@@ -87,11 +87,11 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Sagas
 
-- Preparation peek/claim are synchronous; peek never transfers ownership. Cold/replacement starts
-  await same-session cleanup, even after lease removal or late creation. Publish before `start()`.
-  Before adoption: marked worktree creation and `newSession` only; no doc, setup, history or events.
-- Dispatch/claim rescan current config using canonical `buildSessionLaunchConfig`; reject changed
-  compatibility and await incompatible-resource cleanup.
+- Peek/claim are synchronous; publish before `start()`. Peek never transfers ownership.
+  Cold/replacement starts await same-session cleanup; failures block, including late creation.
+  Before adoption: marked worktree and `newSession` only; no doc, setup, history or events.
+- Credentials are runtime leases: adopt retains, dispose releases that generation; local has none.
+- Dispatch/claim rescan `buildSessionLaunchConfig`; await incompatible cleanup.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
 - Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder

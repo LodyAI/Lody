@@ -21,7 +21,9 @@ same numeric identifier. Identifier reuse before observed absence remains outsid
 this guarantee.
 
 A timeout or body error and release failures may coexist. Promise compatibility
-must preserve all recovery leases along with the primary failure. Calling
+must preserve all recovery leases along with the primary failure.
+Scope acquisition can also fail after spawning a process; any simultaneous
+release failure and its recovery lease must survive error conversion. Calling
 Scope.close again is not a cleanup retry. Confirmed tree absence does not imply
 stdio drainage, successful document flush or complete Session/daemon shutdown.
 Successful commands retain helpers deliberately left running under the existing
