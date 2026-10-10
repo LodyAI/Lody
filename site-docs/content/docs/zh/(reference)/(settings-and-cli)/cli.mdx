@@ -311,6 +311,22 @@ LODY_SESSION_ID=<sessionId> lody session chat --prompt "继续处理上一个 pa
 lody session chat --help
 ```
 
+
+### 输入附件
+
+创建和继续会话都支持重复传入 `--attach <path>`：
+
+```bash
+lody session create --machine remote --prompt "分析这份数据" --attach ./data.csv
+lody session chat <sessionId> --prompt "再参考这张截图" --attach ./screen.png
+```
+
+文件从运行命令的机器读取，相对路径基于当前工作目录。全部附件准备成功后才发送消息，
+任意附件失败都会终止本次发送。每条消息最多八个非空文件，每个不超过 100 MiB。
+符合图片大小限制的受支持图片保留视觉输入；超限图片作为文件发送。
+有附件时可以省略文本。`--prompt-file` 仍然用于读取提示词。
+重新运行独立 CLI 命令会发送一条新消息。
+
 ### session cancel
 
 取消某个本地 session 当前正在运行的 turn。

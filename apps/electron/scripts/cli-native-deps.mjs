@@ -262,13 +262,30 @@ function copyPackageDir(fromDir, toDir, { isTopLevel }) {
   }
 }
 
+export function stageLoroRuntimePackage(fromDir, toDir) {
+  // CLI workers resolve the Node entry, which loads its adjacent WASM. Browser,
+  // bundler, web and base64 distributions belong to renderer builds, not here.
+  fs.mkdirSync(toDir, { recursive: true })
+  for (const name of ['package.json', 'LICENSE']) {
+    fs.copyFileSync(path.join(fromDir, name), path.join(toDir, name))
+  }
+  copyPackageDir(path.join(fromDir, 'nodejs'), path.join(toDir, 'nodejs'), {
+    isTopLevel: false
+  })
+}
+
 export function stageCliRuntimePackages() {
   fs.rmSync(stagedNodeModulesDir, { recursive: true, force: true })
   const resolvedDirs = { cli: cliAppRoot }
   for (const { name, from, entry } of CLI_RUNTIME_PACKAGE_CHAIN) {
     const fromDir = resolvePackageDir(name, resolvedDirs[from], entry)
     resolvedDirs[name] = fromDir
-    copyPackageDir(fromDir, path.join(stagedNodeModulesDir, name), { isTopLevel: true })
+    const toDir = path.join(stagedNodeModulesDir, name)
+    if (name === 'loro-crdt') {
+      stageLoroRuntimePackage(fromDir, toDir)
+    } else {
+      copyPackageDir(fromDir, toDir, { isTopLevel: true })
+    }
   }
 }
 

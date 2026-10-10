@@ -1,7 +1,14 @@
+import { Effect } from 'effect';
+import type { SessionPreparationSpec } from '@lody/shared';
+import type { GitCredentialLease } from '../src/lib/git-credential-broker';
+import {
+  acquireSessionCredentialsLegacy,
+  type SessionCredentials,
+} from '../src/session/session-credentials';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import os from 'os';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { Session } from '../src/session/session';
 
@@ -14,10 +21,7 @@ import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { Logger } from '../src/utils/logger';
 import type { SessionSandbox, SessionSandboxLimits } from '../src/session/session-sandbox';
 import type { GitHubTokenManager } from '../src/lib/github-token-manager';
-import {
-  GitCredentialBroker,
-  LODY_GIT_CRED_CONTEXT_TOKEN_ENV,
-} from '../src/lib/git-credential-broker';
+import { GitCredentialBroker } from '../src/lib/git-credential-broker';
 import { createTestCloudPort } from './test-cloud-port';
 
 const GIB = 1024 * 1024 * 1024;
@@ -161,7 +165,7 @@ describe('SessionManager sandbox rebalance', () => {
       }),
     } as unknown as GitHubTokenManager;
     const broker = new GitCredentialBroker({ tokenManager, logger: createSilentLogger() });
-    const originalToken = broker.activateSessionContext({
+    const credentials = acquireSessionCredentialsLegacy(broker, {
       sessionId: 'session-1',
       requesterUserId: 'user-1',
       machineId: 'machine-1',
@@ -176,22 +180,20 @@ describe('SessionManager sandbox rebalance', () => {
     const session = {
       sessionId: 'session-1' as SessionId,
       updateEnv,
-      updateGitHubCredentialPolicy: () => {},
+      getGitHubCredentials: () => credentials,
     } as unknown as ISession;
 
-    await manager.refreshGhTokenForSession(session, 'owner/repo', 'user-2');
-
-    const rotatedToken = env[LODY_GIT_CRED_CONTEXT_TOKEN_ENV];
-    expect(rotatedToken).toEqual(expect.any(String));
-    expect(rotatedToken).toBe(originalToken);
-    expect(env).toEqual({ [LODY_GIT_CRED_CONTEXT_TOKEN_ENV]: rotatedToken });
-    expect(
-      broker.refreshSessionContext({
-        sessionId: 'session-1',
-        requesterUserId: 'user-1',
-        machineId: 'machine-1',
-      })
-    ).toBe(rotatedToken);
+    try {
+      await manager.validateSessionCredentials(session, 'user-2');
+      expect(credentials.mode).toBe('managed');
+      if (credentials.mode === 'managed') {
+        expect(credentials.lease.active).toBe(true);
+        expect(credentials.lease.context.requesterUserId).toBe('user-1');
+      }
+      expect(env).toEqual({});
+    } finally {
+      await credentials.release();
+    }
   });
 
   it('scrubs the new owner environment and retires the old runtime on ownership transfer', async () => {
@@ -216,16 +218,13 @@ describe('SessionManager sandbox rebalance', () => {
       workspaceId: 'workspace-1',
       ownerUserId: 'user-1',
     });
-    const original = broker.activateSessionContext({
+    const credentials = acquireSessionCredentialsLegacy(broker, {
       sessionId: 'session-1',
       requesterUserId: 'user-1',
       machineId: 'machine-1',
     });
     Object.assign(manager, { githubTokenManager: tokenManager, gitCredentialBroker: broker });
-    const config = {
-      ...createConfig('session-1'),
-      githubCredentialPolicy: { allowLocalAuth: true, stateFilePath: broker.getStateFilePath() },
-    };
+    const config = createConfig('session-1');
     const sandbox = createSandbox();
     const child = Object.assign(new EventEmitter(), {
       pid: 1234,
@@ -258,7 +257,7 @@ describe('SessionManager sandbox rebalance', () => {
         },
       };
     });
-    const session = new Session(config, createSilentLogger(), directory, sandbox);
+    const session = new Session(config, createSilentLogger(), directory, sandbox, credentials);
     session.acpSessionId = 'old-owner-acp' as ACPSessionId;
     await session.terminalManager.createTerminal(
       session.acpSessionId,
@@ -274,10 +273,10 @@ describe('SessionManager sandbox rebalance', () => {
       terminated = true;
     });
     try {
-      await expect(
-        manager.refreshGhTokenForSession(session, 'owner/repo', 'user-2')
-      ).rejects.toThrow('github_owner_changed');
-      expect(config.githubCredentialPolicy.allowLocalAuth).toBe(false);
+      await expect(manager.validateSessionCredentials(session, 'user-2')).rejects.toThrow(
+        'github_owner_changed'
+      );
+      expect(credentials.mode === 'managed' && credentials.lease.active).toBe(false);
       expect(shell.buildShellEnv().GH_TOKEN).toBeUndefined();
       expect(shell.buildShellEnv().GITHUB_TOKEN).toBeUndefined();
       expect(terminated).toBe(true);
@@ -286,20 +285,198 @@ describe('SessionManager sandbox rebalance', () => {
       await expect(session.exec('git', ['status'], directory, false)).rejects.toThrow(
         'not running'
       );
-      expect(broker.getSessionOwner('session-1')).toBe('user-2');
-      expect(
-        broker.refreshSessionContext({
-          sessionId: 'session-1',
-          requesterUserId: 'user-2',
-          machineId: 'machine-1',
-        })
-      ).not.toBe(original);
     } finally {
       await broker.shutdown();
       vi.unstubAllEnvs();
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it.each(['sandbox-failure', 'discard-before-start', 'adopt'] as const)(
+    'owns speculative credentials through %s',
+    async (stage) => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'lody-prepared-credentials-'));
+      vi.stubEnv('LODY_DATA_DIR', directory);
+      const document = createWorkspaceDocument();
+      Object.assign(document, {
+        getAgentConfigById: async () => ({
+          machineId: 'machine-1',
+          cliType: 'custom',
+          agentType: 'fixture',
+          customAcp: { command: 'fixture', args: [] },
+        }),
+      });
+      const manager = new SessionManager(
+        createSilentLogger(),
+        'token',
+        'machine-1',
+        'workspace-1',
+        document,
+        {
+          cloudPort: createTestCloudPort(),
+          sessionSandboxFactory: async () => {
+            if (stage === 'sandbox-failure') throw new Error('fixture sandbox failure');
+            return createSandbox();
+          },
+        }
+      );
+      const broker = new GitCredentialBroker({
+        tokenManager: {} as GitHubTokenManager,
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1',
+        ownerUserId: 'user-1',
+      });
+      vi.spyOn(broker, 'ensureStarted').mockResolvedValue({ url: '', token: '', port: 0 });
+      let acquired: GitCredentialLease | undefined;
+      const acquire = broker.acquireContext.bind(broker);
+      vi.spyOn(broker, 'acquireContext').mockImplementation((context) =>
+        acquire(context).pipe(
+          Effect.tap((lease) =>
+            Effect.sync(() => {
+              acquired = lease;
+            })
+          )
+        )
+      );
+      Object.assign(manager, {
+        githubTokenManager: {},
+        gitCredentialBroker: broker,
+        preparationUserResolver: {
+          resolve: async () => ({ name: 'Fixture', email: 'fixture@example.test' }),
+        },
+      });
+      const spec = {
+        sessionId: 'prepared-credentials' as SessionId,
+        preparationId: 'prepare-1',
+        agentConfigId: 'fixture-agent',
+        requestedByUserId: 'user-1',
+        cliType: 'custom',
+        agentType: 'fixture',
+      } as SessionPreparationSpec;
+      const internals = manager as unknown as {
+        createPreparedSessionRuntime(
+          spec: SessionPreparationSpec,
+          signal: AbortSignal
+        ): Promise<{
+          session: Session;
+          start(): void;
+          agentResult: Promise<string>;
+          adopt(): Promise<void>;
+          dispose(): Promise<void>;
+        }>;
+      };
+      vi.spyOn(Session.prototype, 'createAgent').mockResolvedValue('fixture-acp');
+      try {
+        if (stage === 'sandbox-failure') {
+          await expect(
+            internals.createPreparedSessionRuntime(spec, new AbortController().signal)
+          ).rejects.toThrow('fixture sandbox failure');
+        } else {
+          const prepared = await internals.createPreparedSessionRuntime(
+            spec,
+            new AbortController().signal
+          );
+          expect(acquired?.active).toBe(true);
+          if (stage === 'adopt') {
+            prepared.start();
+            await prepared.agentResult;
+            await prepared.adopt();
+            expect(acquired?.active).toBe(true);
+            expect(prepared.session.getGitHubCredentials().mode).toBe('managed');
+            await prepared.session.terminate(true);
+          }
+          await prepared.dispose();
+          await prepared.dispose();
+        }
+        expect(acquired).toBeDefined();
+        expect(acquired?.active).toBe(false);
+        expect(acquired?.contextFilePath && existsSync(acquired.contextFilePath)).toBe(false);
+      } finally {
+        await broker.shutdown();
+        vi.unstubAllEnvs();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each(['before-session', 'agent-start', 'after-agent-start', 'success'] as const)(
+    'owns managed credentials across cold startup: %s',
+    async (stage) => {
+      const directory = mkdtempSync(path.join(os.tmpdir(), 'lody-credential-lifetime-'));
+      vi.stubEnv('LODY_DATA_DIR', directory);
+      const doc = createWorkspaceDocument();
+      const persisted = {
+        setRepoFullName: async () => {},
+        setACPSessionId: async () => {
+          if (stage === 'after-agent-start') throw new Error('fixture persistence failed');
+        },
+      };
+      vi.mocked(doc.getOrCreateSessionDoc).mockImplementation(async () => {
+        if (stage === 'before-session') throw new Error('fixture document unavailable');
+        return persisted as never;
+      });
+      const manager = new SessionManager(
+        createSilentLogger(),
+        'token',
+        'machine-1',
+        'workspace-1',
+        doc,
+        {
+          cloudPort: createTestCloudPort(),
+          sessionSandboxFactory: async () => createSandbox(),
+        }
+      );
+      const broker = new GitCredentialBroker({
+        tokenManager: {} as GitHubTokenManager,
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1',
+        ownerUserId: 'user-1',
+      });
+      vi.spyOn(broker, 'ensureStarted').mockResolvedValue({ url: '', token: '', port: 0 });
+      Object.assign(manager, { githubTokenManager: {}, gitCredentialBroker: broker });
+      const config: SessionConfig = {
+        ...createConfig('runtime-lifetime'),
+        assumeDocExisting: true,
+        agentCliType: 'custom',
+        agentType: 'custom-fixture',
+        customAcp: { command: 'fixture', args: [] },
+        workdir: directory,
+      };
+      const create = vi.spyOn(Session.prototype, 'createAgent').mockImplementation(async () => {
+        if (stage === 'agent-start') throw new Error('fixture spawn failed');
+        return 'fixture-acp';
+      });
+      try {
+        if (stage === 'success') {
+          const session = await manager.createSession(config);
+          const credentials = session.getGitHubCredentials();
+          expect(credentials.mode).toBe('managed');
+          if (credentials.mode !== 'managed') throw new Error('expected managed runtime');
+          const file = credentials.lease.contextFilePath;
+          expect(file && existsSync(file)).toBe(true);
+          await manager.validateSessionCredentials(session, 'user-1');
+          await manager.validateSessionCredentials(session, 'another-participant');
+          await session.terminate(true);
+          expect(credentials.lease.active).toBe(false);
+          expect(file && existsSync(file)).toBe(false);
+          await expect(manager.validateSessionCredentials(session, 'user-1')).rejects.toThrow(
+            'github_runtime_context_invalid'
+          );
+        } else {
+          await expect(manager.createSession(config)).rejects.toThrow('fixture');
+          expect(manager.getSession(config.sessionId!)).toBeNull();
+          const file = config.env?.LODY_GIT_CRED_CONTEXT_FILE;
+          expect(typeof file).toBe('string');
+          expect(file && existsSync(file)).toBe(false);
+        }
+      } finally {
+        create.mockRestore();
+        await broker.shutdown();
+        vi.unstubAllEnvs();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  );
 
   it.each([false, true])(
     'keeps local project native credentials (worktree=%s)',
@@ -318,9 +495,9 @@ describe('SessionManager sandbox rebalance', () => {
         },
       } as unknown as GitHubTokenManager;
       const broker = new GitCredentialBroker({ tokenManager, logger: createSilentLogger() });
-      // Another managed session already exists in this workspace.
-      broker.activateSessionContext({
-        sessionId: 'github-session',
+      // An obsolete managed preparation has the SAME logical Session ID.
+      const stale = acquireSessionCredentialsLegacy(broker, {
+        sessionId: 'local-session',
         requesterUserId: 'user-1',
         machineId: 'machine-1',
       });
@@ -349,26 +526,23 @@ describe('SessionManager sandbox rebalance', () => {
         env: { ...nativeEnv },
       };
       const prepare = manager as unknown as {
-        prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void>;
+        prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials>;
       };
-      await prepare.prepareGitHubRepoSessionConfig(config);
+      const credentials = await prepare.prepareGitHubRepoSessionConfig(config);
       expect(config.env).toEqual(nativeEnv);
-      expect(config.githubCredentialPolicy).toBeUndefined();
+      expect(credentials.mode).toBe('native');
       expect(config.githubRepoUrl).toBe('git@github.com:owner/repo.git');
       const session = {
         sessionId: config.sessionId,
+        getGitHubCredentials: () => credentials,
         updateEnv: (env: Record<string, string | undefined>) =>
           Object.assign(config.env ?? {}, env),
       } as ISession;
-      await manager.refreshGhTokenForSession(session, 'owner/repo', 'user-2');
+      await manager.validateSessionCredentials(session, 'user-2');
       expect(config.env).toEqual(nativeEnv);
-      expect(
-        broker.refreshSessionContext({
-          sessionId: 'local-session',
-          requesterUserId: 'user-2',
-          machineId: 'machine-1',
-        })
-      ).toBeUndefined();
+      await manager.validateSessionCredentials(session, 'user-2');
+      await stale.release();
+      expect(config.env).toEqual(nativeEnv);
     }
   );
 });

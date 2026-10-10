@@ -37,6 +37,9 @@ the reasoning behind those rules.
   [Decision and synthetic acceptance evidence](../../../../../.agents/notes/implemented/bug-fix/2026-10-07-session-search-literal-punctuation.md).
   Conversation paragraphs use start alignment during and after streaming; see
   [conversation Markdown alignment](../../../../../specs/conversation-markdown-alignment.md).
+  Rendering and search extraction share CJK-friendly emphasis parsing, so bold
+  sentences ending in punctuation can touch subsequent prose without exposing
+  their markers; see [CJK emphasis](../../../../../specs/markdown-cjk-emphasis.md).
   `markdown-code-block.tsx` owns fenced
   blocks, wrap, and Markdown-fence preview (`markdown-code-highlight.ts` the Shiki
   tokens); `markdown-diff-block.tsx` is the inline diff; `markdown-mermaid-block.tsx`

@@ -668,7 +668,9 @@ describe('MessageHandler image upload flow', () => {
       const validatePath = harness.host.validateSessionImageUploadPath as (
         filePath: string
       ) => Promise<unknown>;
-      await expect(validatePath(linkPath)).rejects.toThrow(/must not be a symlink/);
+      await expect(validatePath.call(harness.handler, linkPath)).rejects.toThrow(
+        /must not be a symlink/
+      );
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }

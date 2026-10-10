@@ -45,7 +45,7 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 - `session-manager.ts` / `session.ts` / `session-sandbox.ts` / `terminal-manager.ts` —
   session and process lifecycle, workdirs, worktrees, sandboxed spawning, ACP terminals.
   Managed GitHub credential preparation excludes local projects and their worktrees;
-  context refresh only rotates sessions already enrolled during preparation.
+  each managed runtime owns a scoped credential lease, retained across adoption.
 - `session-preparation-service.ts` — process-local speculative ACP lease/state owner.
 - `session-fork-service.ts` / `session-fork-operation-store.ts` — the fork saga and its
   machine-local marker store.
@@ -92,7 +92,7 @@ Fast-path turns that finish before their history entry syncs are reconciled by
 `lastMissingHistoryUserMsgId`, and a stale activation whose entry is already terminal is
 retired into `settledActivationUserMsgId`. Both slots retire an activation while deliberately
 leaving `latestUserMsgId` and `lastHandledUserMsgId` unequal, so a consumer that compares the
-two pointers itself sees pending work forever: auto review waits on a finished session, GC
+two pointers itself sees pending work forever: GC
 never reclaims it, MCP reports a phantom queued turn. That is why
 `hasPendingUserTurnActivation` in `@lody/shared` is the single answer, and why
 `packages/shared/tests/dispatch-activation-predicate.test.ts` fails on any new comparison.
@@ -264,9 +264,21 @@ lookup. The broker supplies optional managed tokens; owner-local credentials rem
 available during token-service failure. Native Git helpers use `GIT_EXEC_PATH`;
 standard URLs remain standard. Host operations pin the same owner snapshot through
 checkout. Managed credential helpers also cover checkout filters and LFS; non-owner
-host children scrub inherited GitHub tokens. Owner refresh updates shell eligibility
-and retires the old runtime on transfer, since running children retain their old
-environments. The interrupted operation is not replayed. See [the contract](../../../../specs/github-identity-fallback.md) and
+host children scrub inherited GitHub tokens. `session-credentials.ts` bridges the
+broker's Effect-scoped acquisition into the existing Promise Session lifecycle.
+Each acquisition has its own token and pinned file; neither enrollment nor release
+uses a Session ID lookup. `SessionConfig` carries no credential policy. Preparation
+owns the lease until adoption transfers it to the same Session; failures before
+Session creation release it too. Validation on create, continue, recovery and steer
+checks that runtime's lease and trusted owner. Owner changes revoke it and retire
+the old runtime, since children retain their old environments. Operations are not replayed.
+
+`preparation-control.ts` owns the Effect TTL fiber separately from runtime resources.
+Claim closes this control scope without closing the adopted runtime's credentials.
+The synchronous admission/claim facade remains; raw ACP/worktree creation is still
+owned by the existing Promise lifecycle, not treated as automatically interruptible
+by Effect. Retirement stays visible until cleanup succeeds; a failed cleanup blocks
+same-session replacement rather than pretending resources were released. See [the contract](../../../../specs/github-identity-fallback.md) and
 [worktree rules](worktree/AGENTS.md) for ownership, write non-replay and isolation.
 
 ### Commit identity

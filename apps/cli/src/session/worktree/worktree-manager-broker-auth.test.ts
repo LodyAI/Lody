@@ -1,3 +1,5 @@
+import { Effect } from 'effect';
+import type { SessionCredentials } from '../session-credentials';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -303,16 +305,28 @@ process.exit(result.status ?? 1);
         githubTokenManager: {},
         gitCredentialBroker: {
           ensureStarted: async () => ({ url: `http://${context}.test`, token: context, port: 0 }),
-          activateSessionContext: () => context,
+          acquireContext: () =>
+            Effect.acquireRelease(
+              Effect.sync(() => ({
+                context: { sessionId: context, requesterUserId: context, machineId: 'machine' },
+                contextToken: context,
+                stateFilePath,
+                contextFilePath: stateFilePath + '.contexts/' + context + '.json',
+                allowLocalAuth: false,
+                active: true,
+                revoke: () => {},
+              })),
+              () => Effect.void
+            ),
           getStateFilePath: () => stateFilePath,
-          getSessionContextFilePath: () => undefined,
         },
       });
       const production = sessionManager as unknown as {
-        prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<void>;
+        prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials>;
         resolveHostGitBrokerAuth(
           source: { kind: 'github'; repoUrl: string },
-          config: SessionConfig
+          config: SessionConfig,
+          credentials: SessionCredentials
         ): Promise<GitCredentialBrokerAuth>;
       };
       const config = {
@@ -322,10 +336,11 @@ process.exit(result.status ?? 1);
         githubRepo: 'owner/repo',
         env: {},
       } as SessionConfig;
-      await production.prepareGitHubRepoSessionConfig(config);
+      const credentials = await production.prepareGitHubRepoSessionConfig(config);
       const prepared = await production.resolveHostGitBrokerAuth(
         { kind: 'github', repoUrl: REPO_URL },
-        config
+        config,
+        credentials
       );
       // Only repository filter configuration is fixture-specific. Credentials,
       // routing and pinned authority come from the actual production preparation.

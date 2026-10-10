@@ -1168,8 +1168,10 @@ function StoryInfoBar({
   session,
   queued,
   reading = false,
+  executionMachine,
 }: {
   session: SessionMeta;
+  executionMachine?: import('@/components/sessions/session-info-bar').SessionInfoBarProps['executionMachine'];
   /** Queued turns stacked on the bar, or on the composer when the bar is empty. */
   queued?: 'with-info-bar' | 'without-info-bar';
   /** The reading review: a merged PR with passing CI and the line totals. */
@@ -1212,6 +1214,7 @@ function StoryInfoBar({
   return (
     <SessionInfoBar
       queue={queue}
+      executionMachine={executionMachine}
       status={null}
       goal={{
         type: 'goal',
@@ -1305,6 +1308,7 @@ export function SessionConversationStoryHarness({
   showCapacityRetry = false,
   shareImage = false,
   showCollaborators = false,
+  executionMachine,
   queued,
   wide = false,
 }: {
@@ -1319,6 +1323,7 @@ export function SessionConversationStoryHarness({
   showCapacityRetry?: boolean;
   shareImage?: boolean;
   showCollaborators?: boolean;
+  executionMachine?: import('@/components/sessions/session-info-bar').SessionInfoBarProps['executionMachine'];
   queued?: 'with-info-bar' | 'without-info-bar';
   /** Mirrors the Settings > Appearance "Full width" switch. */
   wide?: boolean;
@@ -1675,6 +1680,7 @@ export function SessionConversationStoryHarness({
                               {/* Mirrors the production info bar (cluster + stage)
                               glued above the composer — desktop AND mobile. */}
                               <StoryInfoBar
+                                executionMachine={executionMachine}
                                 session={session}
                                 queued={queued}
                                 reading={state === 'reading'}
@@ -2027,5 +2033,23 @@ export const MobileAgentQuestion: Story = {
 export const MobilePlanFlow: Story = {
   args: { frame: 'mobile', state: 'plan' },
   globals: { theme: 'dark' },
+  decorators: [withMobileViewport],
+};
+
+/** Synthetic team identity; the composer and info bar are production components. */
+export const DesktopExecutionMachine: Story = {
+  args: { executionMachine: { name: 'Mac Studio', owner: { id: 'fixture-owner', name: '张三' } } },
+  globals: { theme: 'dark', locale: 'zh_CN' },
+  decorators: [withDesktopViewport],
+};
+export const MobileExecutionMachine: Story = {
+  args: {
+    frame: 'mobile',
+    executionMachine: {
+      name: 'Mac Studio · Development workstation',
+      owner: { id: 'fixture-owner', name: '张三' },
+    },
+  },
+  globals: { theme: 'dark', locale: 'zh_CN' },
   decorators: [withMobileViewport],
 };

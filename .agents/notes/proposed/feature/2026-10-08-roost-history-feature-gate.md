@@ -3,7 +3,7 @@
 Status: proposed
 Type: feature
 Translation: current
-PR: [#1329](https://github.com/LodyAI/Lody/pull/1329)
+PR: [#1329](https://github.com/LodyAI/Lody/pull/1329), [#1391](https://github.com/LodyAI/Lody/pull/1391)
 
 [中文](2026-10-08-roost-history-feature-gate.zh.md)
 
@@ -32,6 +32,13 @@ An existing discriminator remains immutable regardless of later preference chang
 The switch does not migrate history, rewrite session metadata, or provide a
 per-message fallback. A backend choice remains an immutable session boundary.
 
+The desktop session hover card exposes that persisted choice as a neutral database
+fact row, Roost or Loro, so users can identify a conversation's history backend.
+Workspace, Updated and Pinned rows carry the same metadata-derived value;
+legacy metadata without a discriminator resolves to Loro. The card receives the
+existing row data rather than subscribing to settings or loading history.
+The display contract is recorded in [session history writes](../../../../specs/session-history-writes.md).
+
 The CLI pins the published `@loro-dev/roost@0.1.2` npm package. Its lockfile uses
 registry integrity instead of a sibling source directory. Only the pinned browser,
 native main and six matching platform package versions are exempt from the
@@ -49,6 +56,10 @@ states.
 Creation regressions additionally cover unavailable/older target capabilities,
 explicit Roost refusal before side effects, and explicit Loro overrides. Both
 renderer entry points and the CLI use the same capability resolver.
+
+The hover-card change passes the components typecheck and 23 existing list/hover
+tests. Chromium verification in Storybook covers Roost and Loro, English and
+Chinese, light and dark themes, and opening the card by hovering a row.
 
 The native integration now passes the full workspace checks and actual macOS
 arm64 packaging, removing the earlier dependency on a separately supplied owner

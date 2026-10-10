@@ -20,6 +20,11 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Session, auth, and app shell
 
+- Cloud auth recovery has a per-session attempt budget and per-attempt deadline.
+  Loading/visibility transitions must not reset it; exhausted recovery requires
+  explicit retry or sign-in. Preserve mounted routes and local data.
+  [Contract](../../../../specs/auth-recovery.md).
+
 - Session ACP catalogs use the bound Provider's runtime overrides.
 
 - History uses SessionData commands.

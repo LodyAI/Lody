@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useConvexAuth } from 'convex/react';
 import {
   getConvexAuthRecoveryDelayMs,
+  CONVEX_AUTH_RECOVERY_MAX_ATTEMPTS,
+  CONVEX_AUTH_RECOVERY_TIMEOUT_MS,
+  CONVEX_AUTH_HEALTHY_RESET_MS,
   resolveAuthenticatedConvexState,
   shouldRecoverConvexAuthMismatch,
 } from '@/lib/authed-convex-query';
@@ -10,13 +13,14 @@ import {
   type AuthenticatedConvexContextValue,
 } from '@/hooks/use-authenticated-convex';
 import { useStableSession } from '@/hooks/useStableSession';
+import { AuthRecoveryError } from '@/components/auth-recovery-error';
 import { useRestartConvexAuth } from './convex-provider';
 
 type PendingRecovery = {
-  promise: Promise<void>;
   resolve: () => void;
   restartRequested: boolean;
   sawConvexReset: boolean;
+  timeoutId: ReturnType<typeof setTimeout>;
 };
 
 function canRecoverAuthNow(): boolean {
@@ -43,6 +47,12 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
   const [recoveryRequested, setRecoveryRequested] = useState(false);
   const pendingRecoveryRef = useRef<PendingRecovery | null>(null);
   const authSessionId = rawData?.session?.id ?? null;
+  // Raw session data can disappear while refetching. Absence is not a new
+  // login and must not replenish the outage budget.
+  const recoverySessionRef = useRef(authSessionId);
+  if (authSessionId !== null) recoverySessionRef.current = authSessionId;
+  const recoverySessionId = recoverySessionRef.current;
+  const recoveryGenerationRef = useRef(0);
   const authSessionIdRef = useRef<string | null>(authSessionId);
   const automaticCommandRegistryRef = useRef({
     sessionId: authSessionIdRef.current,
@@ -74,19 +84,20 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
     if (confirmedUnauthenticated) {
       return Promise.resolve();
     }
-    if (pendingRecoveryRef.current) {
-      return pendingRecoveryRef.current.promise;
-    }
 
     let resolveRequest!: () => void;
     const promise = new Promise<void>((resolve) => {
       resolveRequest = resolve;
     });
     const pending: PendingRecovery = {
-      promise,
       resolve: resolveRequest,
       restartRequested: false,
       sawConvexReset: false,
+      timeoutId: setTimeout(() => {
+        if (pendingRecoveryRef.current !== pending) return;
+        pendingRecoveryRef.current = null;
+        pending.resolve();
+      }, CONVEX_AUTH_RECOVERY_TIMEOUT_MS),
     };
     pendingRecoveryRef.current = pending;
 
@@ -124,6 +135,7 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
     if (!pending.sawConvexReset) return;
 
     pendingRecoveryRef.current = null;
+    clearTimeout(pending.timeoutId);
     if (isConvexAuthenticated) {
       setRecoveryRequested(false);
     }
@@ -136,16 +148,25 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
     const pending = pendingRecoveryRef.current;
     if (!pending) return;
     pendingRecoveryRef.current = null;
+    clearTimeout(pending.timeoutId);
     pending.resolve();
   }, [confirmedUnauthenticated]);
 
-  useEffect(
-    () => () => {
-      pendingRecoveryRef.current?.resolve();
+  // A new account/session owns a new budget. Retire old requests before their
+  // callbacks can restart Convex or charge the next session's budget.
+  useEffect(() => {
+    setRecoveryAttempt(0);
+    setRecoveryRequested(false);
+    return () => {
+      recoveryGenerationRef.current += 1;
+      const pending = pendingRecoveryRef.current;
       pendingRecoveryRef.current = null;
-    },
-    []
-  );
+      if (pending) {
+        clearTimeout(pending.timeoutId);
+        pending.resolve();
+      }
+    };
+  }, [recoverySessionId]);
 
   const shouldRecoverMismatch = shouldRecoverConvexAuthMismatch({
     isConvexAuthenticated,
@@ -153,29 +174,43 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
     hasRawSessionUser: hasRawUser,
     confirmedUnauthenticated,
   });
-  const isRecovering = recoveryRequested || shouldRecoverMismatch;
+  // Keep the outage latched through Convex's intermediate loading state.
+  // Visibility/network changes pause scheduling, never reset the budget.
+  useEffect(() => {
+    if (shouldRecoverMismatch) setRecoveryRequested(true);
+  }, [shouldRecoverMismatch, recoverySessionId]);
+  const needsRecovery = !confirmedUnauthenticated && (recoveryRequested || shouldRecoverMismatch);
+  const recoveryExhausted = needsRecovery && recoveryAttempt >= CONVEX_AUTH_RECOVERY_MAX_ATTEMPTS;
+  const isRecovering = needsRecovery && !recoveryExhausted;
 
   useEffect(() => {
-    if (!isRecovering) {
-      setRecoveryAttempt(0);
-      return undefined;
-    }
-    if (!recoveryAllowed) return undefined;
+    if (!isRecovering || !recoveryAllowed || pendingRecoveryRef.current) return undefined;
 
-    let cancelled = false;
+    const generation = recoveryGenerationRef.current;
     const timeoutId = setTimeout(() => {
       void runRecovery().finally(() => {
-        if (!cancelled) {
+        if (recoveryGenerationRef.current === generation) {
           setRecoveryAttempt((attempt) => attempt + 1);
         }
       });
     }, getConvexAuthRecoveryDelayMs(recoveryAttempt));
 
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-    };
-  }, [isRecovering, recoveryAllowed, recoveryAttempt, runRecovery]);
+    return () => clearTimeout(timeoutId);
+  }, [isRecovering, recoveryAllowed, recoveryAttempt, runRecovery, recoverySessionId]);
+
+  // A transient "authenticated" edge is not proof of recovery: a protected
+  // query can still reject the fresh JWT. Require sustained health before
+  // forgiving previous attempts, so that loop is bounded too.
+  useEffect(() => {
+    if (needsRecovery || !isConvexAuthenticated || isConvexAuthLoading) return undefined;
+    const timeoutId = setTimeout(() => setRecoveryAttempt(0), CONVEX_AUTH_HEALTHY_RESET_MS);
+    return () => clearTimeout(timeoutId);
+  }, [needsRecovery, isConvexAuthenticated, isConvexAuthLoading]);
+
+  const retryAuthRecovery = useCallback(() => {
+    setRecoveryAttempt(0);
+    setRecoveryRequested(true);
+  }, []);
 
   const resolvedState = resolveAuthenticatedConvexState({
     isConvexAuthenticated,
@@ -186,8 +221,8 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
     isSessionRetrying,
     confirmedUnauthenticated,
   });
-  const isAuthenticated = resolvedState.isAuthenticated && !isRecovering;
-  const isLoading = resolvedState.isLoading || isRecovering;
+  const isAuthenticated = resolvedState.isAuthenticated && !needsRecovery;
+  const isLoading = !recoveryExhausted && (resolvedState.isLoading || isRecovering);
   const value = useMemo<AuthenticatedConvexContextValue>(
     () => ({
       authSessionId,
@@ -212,6 +247,7 @@ export function AuthenticatedConvexProvider({ children }: { children: ReactNode 
   return (
     <AuthenticatedConvexContext.Provider value={value}>
       {children}
+      {recoveryExhausted ? <AuthRecoveryError onRetry={retryAuthRecovery} /> : null}
     </AuthenticatedConvexContext.Provider>
   );
 }

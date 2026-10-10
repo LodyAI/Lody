@@ -18,9 +18,8 @@ an ordinary human turn starts at zero. The limit remains fixed in the shared
 protocol contract; changing it requires updating every producer, recovery path,
 executable model, and this Spec.
 
-Machine-side review automation runs outside this MCP delegation chain. It keeps
-its own round, token, and authority budgets while reacting to external review and
-CI state.
+The experimental Review agent automation is retired. It no longer runs outside
+this delegation chain; see [Review agent retirement](review-agent-retirement.md).
 
 ## Session creation configuration
 

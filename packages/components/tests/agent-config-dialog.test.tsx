@@ -859,9 +859,7 @@ describe('AgentConfigDialog', () => {
       );
       expect(document.body.textContent).toContain('Open install guide');
     } else {
-      expect(document.body.textContent).toContain(
-        'This runtime is not available on the target machine.'
-      );
+      expect(document.body.textContent).toContain('npm install -g dimcode');
       expect(document.body.textContent).not.toContain('Open install guide');
     }
     await act(async () => {

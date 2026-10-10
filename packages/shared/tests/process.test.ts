@@ -336,6 +336,111 @@ describe('process tree termination (real processes)', () => {
 });
 
 describe('failed Scope release ownership', () => {
+  for (const apiName of ['spawnProcess', 'runCommand'] as const) {
+    it.effect(`${apiName} retains a failed acquisition's unresolved process for recovery`, () => {
+      const table = new FakeProcessTable('linux');
+      const setupFailure = new Error('owner setup failed');
+      let deny = true;
+      const api = {
+        ...table.api,
+        kill: (target: number, signal: NodeJS.Signals | 0) => {
+          if (signal !== 0 && deny) throw Object.assign(new Error('denied'), { code: 'EPERM' });
+          table.api.kill(target, signal);
+        },
+      };
+      const spec = {
+        ...agentSpec,
+        onSpawned: () => {
+          throw setupFailure;
+        },
+      };
+      const work =
+        apiName === 'spawnProcess'
+          ? Effect.scoped(spawnProcess(spec)).pipe(Effect.asVoid)
+          : runCommand({
+              command: spec.command,
+              args: spec.args,
+              onSpawned: spec.onSpawned,
+              abandonPolicy: { graceMs: 0, killWaitMs: 0 },
+            }).pipe(Effect.asVoid);
+      return Effect.gen(function* () {
+        const exit = yield* Effect.exit(work).pipe(
+          Effect.provide(processLayer({ nodeProcess: api }))
+        );
+        if (!Exit.isFailure(exit)) throw new Error('Failed acquisition reported success');
+        const failure = failureOf(exit);
+        expect(failure).toBeInstanceOf(SpawnFailed);
+        if (!(failure instanceof SpawnFailed)) throw new Error('Missing setup failure');
+        expect(failure.cause).toBe(setupFailure);
+        const projected = squashProcessFailure(exit.cause);
+        expect(projected).toBeInstanceOf(ProcessCleanupFailed);
+        if (!(projected instanceof ProcessCleanupFailed))
+          throw new Error('Missing cleanup failure');
+        expect(projected.cause).toBe(failure);
+        expect(projected.releases).toHaveLength(1);
+        const [owner] = projected.releases;
+        if (!(owner instanceof ProcessReleaseFailed)) throw new Error('Missing recovery owner');
+        expect(table.isAlive(1000)).toBe(true);
+        expect(yield* owner.isAlive).toBe(true);
+        expect(Exit.isFailure(yield* Effect.exit(owner.retryTermination()))).toBe(true);
+        expect(yield* owner.isAlive).toBe(true);
+        deny = false;
+        yield* owner.retryTermination();
+        expect(table.isAlive(1000)).toBe(false);
+        expect(yield* owner.isAlive).toBe(false);
+      });
+    });
+  }
+
+  it.effect(
+    'the Legacy command transfers failed acquisition recovery to its Promise caller',
+    () => {
+      const table = new FakeProcessTable('linux');
+      const setupFailure = new Error('owner setup failed');
+      let deny = true;
+      const api = {
+        ...table.api,
+        kill: (target: number, signal: NodeJS.Signals | 0) => {
+          if (signal !== 0 && deny) throw Object.assign(new Error('denied'), { code: 'EPERM' });
+          table.api.kill(target, signal);
+        },
+      };
+      return Effect.gen(function* () {
+        const failure = yield* Effect.promise(() =>
+          runCommandTextLegacy(
+            {
+              command: 'agent',
+              args: [],
+              check: 'none',
+              abandonPolicy: { graceMs: 0, killWaitMs: 0 },
+              onSpawned: () => {
+                throw setupFailure;
+              },
+            },
+            { nodeProcess: api }
+          ).then(
+            () => new Error('Failed acquisition reported success'),
+            (error: unknown) => error
+          )
+        );
+        expect(failure).toBeInstanceOf(ProcessCleanupFailed);
+        if (!(failure instanceof ProcessCleanupFailed)) throw new Error('Missing cleanup failure');
+        expect(failure.cause).toBeInstanceOf(SpawnFailed);
+        if (!(failure.cause instanceof SpawnFailed)) throw new Error('Missing setup failure');
+        expect(failure.cause.cause).toBe(setupFailure);
+        expect(failure.releases).toHaveLength(1);
+        const [owner] = failure.releases;
+        if (!(owner instanceof ProcessReleaseFailed)) throw new Error('Missing recovery owner');
+        expect(table.isAlive(1000)).toBe(true);
+        expect(yield* owner.isAlive).toBe(true);
+        deny = false;
+        yield* owner.retryTermination();
+        expect(table.isAlive(1000)).toBe(false);
+        expect(yield* owner.isAlive).toBe(false);
+      });
+    }
+  );
+
   it.effect('fails a successful body and retains its tree for a forced retry', () => {
     const table = new FakeProcessTable('linux');
     table.queueSpawn({ ignores: ['SIGTERM'] });

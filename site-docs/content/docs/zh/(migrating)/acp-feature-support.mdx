@@ -50,7 +50,7 @@ Lody 客户端读到的结构都一致。自定义或注册表里的 ACP Agent �
 | <a href="https://github.com/LodyAI/acp-extension-kimi" target="_blank" rel="noreferrer"><strong>Kimi Code</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | HTTP+SSE | ✓ | ✓ | ✓ | ◐⁴ | ✓ | ✓ | ✓ | — | ✓¹ | ✓ | — | ✓ |
 | <a href="https://github.com/LodyAI/acp-extension-devin" target="_blank" rel="noreferrer"><strong>Devin</strong></a> | ✓ | ✓ | ✓ | — | — | ✓ | HTTP+SSE | — | ✓ | ✓ | — | — | — | — | — | — | — | — | ✓ |
 | <a href="https://github.com/LodyAI/acp-extension-pi" target="_blank" rel="noreferrer"><strong>Pi</strong></a> | ✓ | ✓ | ✓ | ✓ | — | — | — | — | ✓ | ✓ | — | ✓ | — | — | ✓ | — | ✓ | — | ✓ |
-| <a href="https://github.com/LodyAI/acp-extension-dsh" target="_blank" rel="noreferrer"><strong>DeepSeek Harness</strong></a> | ◐⁵ | — | — | — | — | — | HTTP | — | ✓ | ✓ | ✓ | ✓ | — | — | — | — | — | — | ✓ |
+| <a href="https://github.com/LodyAI/acp-extension-dsh" target="_blank" rel="noreferrer"><strong>DeepSeek Harness</strong></a> | ◐⁵ | — | ✓ | ✓ | ✓ | — | HTTP | — | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓¹ | ✓ | ✓ | ✓ |
 | <a href="https://github.com/bubbuild/bub" target="_blank" rel="noreferrer"><strong>Bub</strong></a> | — | — | ✓ | ✓ | — | — | HTTP+SSE | — | ✓ | — | — | — | — | — | ✓ | — | — | — | — |
 | <a href="https://github.com/arcships/dimcode" target="_blank" rel="noreferrer"><strong>Dimcode</strong></a> | ✓ | ✓ | ✓ | ✓ | ✓ | — | HTTP+SSE | — | ✓ | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
@@ -79,8 +79,8 @@ Lody 客户端读到的结构都一致。自定义或注册表里的 ACP Agent �
 
 注释：
 
-1. **任务：** Claude Code、Codex、Kimi Code 声明的是后台任务；Grok 声明的是定时任务。没有
-   provider 同时声明两者。
+1. **任务：** Claude Code、Codex、Kimi Code、DeepSeek Harness 声明的是后台任务；Grok 声明的
+   是定时任务。没有 provider 同时声明两者。
 2. **子代理：** Claude Code 和 Codex 只声明生命周期，不声明列表、取消或输出查询。
 3. **Grok 任务**只有定时任务。
 4. **Kimi Code 会话标题**仅在安装的 Kimi 引擎支持其标题功能时才会声明；否则由 Lody 自己

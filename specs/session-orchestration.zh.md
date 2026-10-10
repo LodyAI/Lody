@@ -16,8 +16,8 @@ Session、向另一个 Session 发送工作、以及投递 Operation 完成通�
 协议中的固定值；修改它必须同步更新所有生产者、恢复路径、可执行模型和本
 Spec。
 
-机器侧 Review Automation 在这条 MCP 委派链之外运行。它自己管理轮数、
-Token 和权限预算，并根据外部的 Review 与 CI 状态推进。
+实验性的 Review agent 自动化已移除，不再在 MCP 委派链之外运行。
+参见 [Review agent 移除](review-agent-retirement.zh.md)。
 
 ## 会话创建配置
 

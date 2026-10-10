@@ -74,6 +74,12 @@ boundary also has a body error. This tree recovery does not certify drained stdi
 or complete Session shutdown. See the
 [release decision](../notes/implemented/bug-fix/2026-10-10-effect-process-release-failure.md).
 
+In pinned 4.0.2, `Effect.mapError` selects a typed failure and can discard other
+reasons in a mixed Cause. Resource-owning error conversions use `catchCause` and
+`failCause(Cause.map(...))` to retain defects and interruptions. In particular,
+failed process acquisition can already have closed its child Scope: its release
+lease must reach the caller alongside the setup failure.
+
 Never wrap the shared Promise functions back into an Effect. A runner creates a
 separate root fiber. For an unmigrated entry point, the shared facade accepts an
 explicit AbortSignal; pass it when the entry point supports cancellation. This
@@ -123,6 +129,14 @@ migrated layer. Current facades:
 `pnpm check:cli-process-boundary` fails when code in those packages bypasses
 these and reaches `child_process`, `cross-spawn`, `node-pty`, `process.kill` or
 a child's `kill` directly.
+
+Session credential acquisition also has a temporary `acquireSessionCredentialsLegacy`
+facade (`session/session-credentials.ts`): the Effect broker lease's scope follows
+preparation into the live Session and closes on failure/termination. The separate
+`makePreparationControlLegacy` facade owns only the preparation TTL and its awaited
+close receipt. Claim stops that control without closing runtime resources. These
+are bounded resource migrations; Session/ACP/worktree Promise orchestration has
+not become Effect-native merely by using these facades.
 
 Execution facades carry a `Legacy` suffix and `@deprecated`; keep that suffix
 visible in imports and calls. New Effect workflows compose core APIs and leave

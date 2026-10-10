@@ -124,7 +124,7 @@ removal rules live in [../AGENTS.md](../AGENTS.md).
 
 `connection-recovery.ts` has TWO signals. `onStreamsOnline` is cheap, unthrottled, and
 fires on every health rising edge — it RELEASES work parked while offline (dirty
-Machine Flock docs, which arm no timer of their own, plus the task/review automation
+Machine Flock docs, which arm no timer of their own, plus the scheduled automation
 queues). `onMetaRoomSynced` is the EXPENSIVE "rescan the workspace index" signal whose
 listeners do O(rooms) work: it waits for meta catch-up and is rate-limited to one
 fan-out per `LODY_LORO_META_SYNCED_MIN_INTERVAL_MS` (30s), deferred and never dropped,
