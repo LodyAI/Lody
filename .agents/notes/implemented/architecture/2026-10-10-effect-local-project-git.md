@@ -78,9 +78,8 @@ with the same noninteractive Git settings. Updates remain visible after runtime
 initialization, preserving native Git environment configuration. Explicit injection makes a later login-environment
 service possible without pretending that service has already migrated.
 
-The [draft Spec](../../../../specs/local-project-git-lifecycle.md) records the
-changed failure guarantee. Cleanup success is not a cross-process Git mutation
-transaction. This unit adds no implicit file-lock serialization or rollback of
+The failure guarantees above describe this migration. Cleanup success is not a
+cross-process Git mutation transaction. This unit adds no implicit file-lock serialization or rollback of
 Git operations already performed before cancellation.
 
 ## Validation and limits

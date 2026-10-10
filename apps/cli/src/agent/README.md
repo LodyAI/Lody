@@ -55,7 +55,7 @@ context/message-flow.md "Upstream".
   startup health, analytics.
 - `login-shell-env.ts` — explicit Legacy cache over the shared native
   LoginShellEnvironment probe; the three-second pending wait is distinct from
-  retained failure. [Contract](../../../../specs/login-shell-environment-lifecycle.md).
+  retained failure. [Decision](../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).
 - `fixtures/` — synthetic test fixtures.
 
 ## Background

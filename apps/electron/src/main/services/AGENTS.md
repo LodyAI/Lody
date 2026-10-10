@@ -79,4 +79,4 @@ bypasses unrelated `beforeunload` guards such as unsaved editors.
 Login-shell environment uses the shared native probe through the explicit
 `getUserShellEnvCachedLegacy` cache. Preserve failures and recovery owners rather
 than returning null for failed cleanup. Before changing it, read the
-[contract](../../../../../specs/login-shell-environment-lifecycle.md).
+[decision](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-login-shell-probe.md).

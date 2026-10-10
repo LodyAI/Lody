@@ -29,8 +29,7 @@ delimiter、8 MiB 输出上限和从调用快照恢复探测专用环境变量�
 只有单一已结束的 CommandFailed，或候选 executable 缺失 ENOENT 才允许 fallback。
 已知候选耗尽后的不支持/缺失环境返回 null；Windows 不求值 POSIX host 环境。权限、
 启动、stream/输出上限、超时和释放失败仍然失败，混合 Cause 原样传播，不变成可选缺失。
-[draft 契约](../../../../specs/login-shell-environment-lifecycle.zh.md) 明确记录从静默
-fallback 到可观察失败的变化。
+此决定将基础设施或清理失败后的静默 fallback 改为可观察失败。
 
 probeLoginShellEnvLegacy 是此内核唯一 Promise 门面，转发入口 signal 并通过
 runPromiseSquashedLegacy 保留全部进程租约。原来的无标记 Promise 名称现在表示原生

@@ -37,8 +37,8 @@ Only a single completed CommandFailed or absent candidate executable (ENOENT) pe
 fallback. An unsupported/absent environment after known candidates returns null;
 Windows returns null without evaluating a POSIX host environment. Permission/startup,
 stream/output-limit, timeout and release failures remain failures. Mixed Cause is
-re-emitted, never reduced to optional absence. The [draft contract](../../../../specs/login-shell-environment-lifecycle.md)
-records the intentional change from silently falling back after failed probes.
+re-emitted, never reduced to optional absence. This intentionally replaces silent
+fallback after infrastructure or cleanup failure with observable failure.
 
 probeLoginShellEnvLegacy is the only Promise door for this kernel. It forwards the
 entry signal and uses runPromiseSquashedLegacy to preserve all process leases.
