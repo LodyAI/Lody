@@ -52,3 +52,5 @@ bridge reports `context_unreadable`. A focused rerun reproduced it (5 other case
 passed); CLI reported 3707 passing tests. `pnpm format` passed.
 
 Companion adapter PR: [acp-extension-codex #68](https://github.com/LodyAI/acp-extension-codex/pull/68).
+
+The adapter branch incorporates upstream failure-diagnostic history from #67; the removed generator and its diagnostics are superseded by client-owned generation. The merged adapter passed its typecheck and 28 scoped tests again.

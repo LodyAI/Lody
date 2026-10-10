@@ -42,3 +42,5 @@ Full access 仅配置在独立标题会话，其现有临时工作目录和客�
 `pnpm format` 通过。
 
 配套适配器 PR: [acp-extension-codex #68](https://github.com/LodyAI/acp-extension-codex/pull/68).
+
+适配器分支已合入上游 #67 的故障诊断历史；被移除的生成器及其诊断由客户端标题生成替代。合并后重新通过适配器类型检查和 28 项相关测试。
