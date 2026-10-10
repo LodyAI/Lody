@@ -79,16 +79,6 @@ const styles = stylex.create({
    */
   actions: { display: 'flex', alignItems: 'center', gap: space[2] },
   reveal: {
-    // Laid over the row's end rather than kept in its flow, so at rest the
-    // row's own facts reach the edge instead of stopping short of two
-    // invisible buttons. The fill is the row's hover fill, faded at its start.
-    position: 'absolute',
-    insetInlineEnd: space[3],
-    top: '50%',
-    transform: 'translateY(-50%)',
-    paddingInlineStart: space[2],
-    backgroundColor: ROW_HOVER,
-    boxShadow: `-16px 0 12px -4px ${ROW_HOVER}`,
     opacity: {
       default: 0,
       [stylex.when.ancestor(':hover')]: 1,
@@ -99,6 +89,17 @@ const styles = stylex.create({
       [stylex.when.ancestor(':hover')]: 'auto',
       [stylex.when.ancestor(':focus-within')]: 'auto',
     },
+  },
+  // Only passive facts may sit under hover actions. A forecast button needs
+  // its own space, including while the actions are hidden.
+  actionsOverlay: {
+    position: 'absolute',
+    insetInlineEnd: space[3],
+    top: '50%',
+    transform: 'translateY(-50%)',
+    paddingInlineStart: space[2],
+    backgroundColor: ROW_HOVER,
+    boxShadow: `-16px 0 12px -4px ${ROW_HOVER}`,
   },
   /** The meters sit beside the name when the row has room, and under it when not. */
   metersInline: {
@@ -355,7 +356,13 @@ export function ProviderRow({
           {refreshing && binaryProgressText ? (
             <span {...stylex.props(styles.progress)}>{binaryProgressText}</span>
           ) : null}
-          <span {...stylex.props(styles.actions, compact && !refreshing && styles.reveal)}>
+          <span
+            {...stylex.props(
+              styles.actions,
+              compact && !refreshing && styles.reveal,
+              compact && !refreshing && !showResetForecast && styles.actionsOverlay
+            )}
+          >
             {onRefresh && (
               <Button
                 variant="ghost"

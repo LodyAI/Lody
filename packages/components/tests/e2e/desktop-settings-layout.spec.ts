@@ -202,3 +202,53 @@ test('fits translated header actions in a narrow dark settings panel', async ({ 
   await expectInside(settings.getByRole('button', { name: '添加角色', exact: true }), settings);
   await expectInside(settings.getByRole('button', { name: '关闭', exact: true }), settings);
 });
+
+for (const locale of ['en', 'zh_CN']) {
+  for (const story of [
+    'active-forecast-with-actions',
+    'active-forecast-narrow-with-actions',
+    'no-active-watch-with-actions',
+  ]) {
+    test(`keeps the Codex forecast clear of hover and focus actions: ${story}, ${locale}`, async ({
+      page,
+    }) => {
+      await page.goto(
+        `/iframe.html?id=codexreset-codexresetforecastentry--${story}&viewMode=story&globals=locale:${locale};theme:dark`
+      );
+      const chip = page.getByRole('button', { name: /Reset forecast|重置预测/ });
+      const refresh = page.getByRole('button', { name: /Refresh models and modes|刷新模型和模式/ });
+      const remove = page.getByRole('button', { name: /^(Delete|删除)$/ });
+      const row = refresh.locator('xpath=../../..');
+      await expect(chip).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+
+      const expectClear = async () => {
+        await expectInside(chip, row);
+        const chipBox = (await chip.boundingBox())!;
+        for (const action of [refresh, remove]) {
+          await expectInside(action, row);
+          const actionBox = (await action.boundingBox())!;
+          expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(actionBox.x);
+          await action.click({ trial: true });
+        }
+        await chip.click({ trial: true });
+      };
+
+      await row.hover();
+      await expectClear();
+      await chip.click();
+      const dialog = page.getByRole('dialog', { name: /Codex reset forecast|Codex 重置预测/ });
+      await expect(dialog).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+
+      await page.mouse.move(0, 0);
+      await refresh.focus();
+      await expect(refresh.locator('..')).toHaveCSS('opacity', '1');
+      await expectClear();
+      await chip.focus();
+      await page.keyboard.press('Enter');
+      await expect(dialog).toBeVisible();
+    });
+  }
+}
