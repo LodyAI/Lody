@@ -2,6 +2,7 @@
 
 Status: proposed
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1403
 
 [中文](2026-10-10-host-identity-keys.zh.md)
 
