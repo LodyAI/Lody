@@ -8,9 +8,9 @@ Translation: current
 ## 摘要
 
 Lody 的生命周期缺陷集中在少数几类手写机制上：定时器驱动的退避与 watchdog、代际计数器、
-手写 disposed 标志、按 key 的 promise 链和被吞掉的 `.catch`。仓库已依赖 effect 3.18，
-但只以"在类方法里构造 Effect、在边界 `runPromise`"的孤岛方式使用。本路线图确立自底向上的
-迁移原则：从平台层到入口层分为七层，一层只有在其全部依赖都已是 Effect 服务后才算完成；
+手写 disposed 标志、按 key 的 promise 链和被吞掉的 `.catch`。原调查描述 Effect 3.18 孤岛；
+已合并的基础现在使用 Effect 4.0.2 与官方进程服务及 Lody 有界后端，上层编排仍有大量 Promise。本路线图确立自底向上的
+迁移原则：从平台层到入口层分为七层，每个单元只有在其真实依赖都已是 Effect 服务后才算完成，层号不要求全局串行；
 自己的 Promise 模块必须重写，只有真正的第三方 I/O 边界允许包装一次。按这一原则，Loro 同步
 栈的生命周期应在库内部解决：loro-repo 与 streams-crdt 在 Flock 持久化迁移之后改为 Effect
 内核，同时提供 Effect 与 Promise 两个入口。第一步是平台层与进程叶子层。排序依据是 fix 提交与
@@ -56,10 +56,11 @@ issue 分类，不是运行时测量；各单元开工时需要各自的详细�
 
 一个模块只有同时满足以下条件才算 Effect 化完成：
 
-- 公开 API 只返回 `Effect`，失败是带标签的错误类型；
+- 原生公开 API 返回 `Effect`，失败是带标签的错误类型；单一内核的 Legacy 门面只能在
+  记录具体调用方和删除条件后暂时保留；
 - 依赖全部出现在 `R` 中，由 `Layer` 提供，且这些依赖本身已完成；
 - 不使用 `setTimeout`/`setInterval`、`AbortController`、生命周期 `EventEmitter` 或模块级可变单例；
-- 资源只通过 `acquireRelease`、Scope、`RcMap` 获取；
+- 资源通过 `acquireRelease`、`acquireUseRelease`、Scope 或明确验证过的资源容器获取；
 - 内部不调用 `run*`；
 - 测试通过替换 Layer 与 TestClock 断言可观察结果。
 
@@ -73,7 +74,8 @@ issue 分类，不是运行时测量；各单元开工时需要各自的详细�
 
 ### 迁移期规则
 
-- 严格自底向上：下层完成前，上层不开始重写。
+- 按真实依赖自底向上：层号不是全局串行要求。ACP transport 与 Loro 可独立推进；
+  上层只等待它实际消费的能力完成。
 - 尚未迁移的上层调用方经 `runtime.runPromise` 门面使用新服务；门面标注为临时，并在对应上层
   迁移时删除。
 - 当依赖属于另一个仓库且尚未完成时，允许在本仓库先定义与其未来 Effect 接口一致的 Tag，
@@ -92,12 +94,12 @@ issue 分类，不是运行时测量；各单元开工时需要各自的详细�
 
 ### Lody 侧的四个服务
 
-| 服务             | Effect 概念                                                                                                                        | 取代                                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| SessionDocuments | `RcMap<SessionId, DocHandle>`，lookup 为 `acquireRelease(打开并加入 room, 先 unload 再 invalidate)`，带 idle TTL                   | `getOrCreateSessionDoc` 的 `sessions`、`pendingSessionDocs`、`withLocalDocOwnership`、`isDestroyed` 与手写 GC |
-| SessionHistory   | 执行 `HistoryAction`/`MetaPatch` 值的写入器；`commit(batch)` 在一次提交、不可中断区域内完成必须原子的序列；变化以 `Stream` 暴露    | `sessionData.commands.applyHistoryAction` 等 Promise 写入与 `subscribeSessionChanges` 回调                    |
-| SessionPresence  | `hold(sessionId, phase)` 为 `acquireRelease` 租约，心跳为作用域内的 `Effect.repeat(Schedule.spaced)`；机器三态用 `SubscriptionRef` | 分散的 start/clear 调用与十个定时器                                                                           |
-| CloudPort        | 能力接口，方法返回带标签错误的 Effect；超时与重试由调用方用 `timeout`/`Schedule` 组合；local 与 cloud 各一个 Layer                 | 接收 `timeoutMs` 的 Promise 方法                                                                              |
+| 服务             | Effect 概念                                                                                                                                                | 取代                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| SessionDocuments | `RcMap<SessionId, DocHandle>`，lookup 为 `acquireRelease(打开并加入 room, 先 unload 再 invalidate)`，带 idle TTL                                           | `getOrCreateSessionDoc` 的 `sessions`、`pendingSessionDocs`、`withLocalDocOwnership`、`isDestroyed` 与手写 GC |
+| SessionHistory   | 执行 `HistoryAction`/`MetaPatch` 值的写入器；`commit(batch)` 避免本地取消打断写入序列；不可中断本身不提供崩溃恢复或跨 peer CRDT 事务；变化以 `Stream` 暴露 | `sessionData.commands.applyHistoryAction` 等 Promise 写入与 `subscribeSessionChanges` 回调                    |
+| SessionPresence  | `hold(sessionId, phase)` 为 `acquireRelease` 租约，心跳为作用域内的 `Effect.repeat(Schedule.spaced)`；机器三态用 `SubscriptionRef`                         | 分散的 start/clear 调用与十个定时器                                                                           |
+| CloudPort        | 能力接口，方法返回带标签错误的 Effect；超时与重试由调用方用 `timeout`/`Schedule` 组合；local 与 cloud 各一个 Layer                                         | 接收 `timeoutMs` 的 Promise 方法                                                                              |
 
 turn 代码只产出 `HistoryAction`/`MetaPatch` 这类数据，看不到 `LoroDoc` 或 loro-repo；只有
 SessionHistory 与 SessionDocuments 的实现能接触 `LoroDoc`，handle 对外只暴露 Effect 方法。
@@ -144,12 +146,19 @@ Lody 这一层的缺陷（#4 unload/invalidate 顺序、#774 join 永久停在 c
 
 ## 迁移单元
 
-### L0 + L1：平台与进程叶子层
+### 进程基础：已实现，但不代表整个 L0/L1 完成
 
-由 [Turn 执行与 ACP 进程所有权](2026-09-27-effect-turn-execution-and-acp-process-ownership.zh.md)
-的第一、二个 PR 交付，是所有上层的共同前提。其余约 35 个直接 spawn 的文件（git、worktree
-setup runner、终端、登录 shell 环境、MCP、preview、code-collab 扫描等）在第二个 PR 起迁到
-同一个 ProcessService；setup 脚本超时只 SIGTERM shell、子孙泄漏的问题在此解决。
+[#1065](https://github.com/LodyAI/Lody/pull/1065)、
+[#1069](https://github.com/LodyAI/Lody/pull/1069)、
+[#1348](https://github.com/LodyAI/Lody/pull/1348) 均已合并。共享核心使用 Effect 4.0.2、
+官方 ChildProcess/ChildProcessSpawner 与 Node Stream/Sink，保留 Lody 有界进程树后端。
+CLI process-options 只组合 Layer，旧 promise-facade 已删除。Sandbox 失败或中断回滚，
+成功命令在配置完成、整棵树退出和 stdio 关闭后释放子 Scope；所有进程消费保留 Legacy 可见。
+
+文件锁是之后第一个依赖单元，见[文件锁决定](../../implemented/architecture/2026-10-10-effect-file-lock-lifecycle.zh.md)：
+真实文件协议、公平且可取消的本地登记、可观察的清理失败。Git、worktree setup/GC、
+登录环境等待、runtime 安装、启动闸门、SDK 请求、Session 与 Turn 仍需迁移；进程统一
+不代表这些生命周期或 daemon 所有权已完成。
 
 ### L2 与 Loro 同步栈
 
@@ -245,18 +254,36 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 - #553：历史同步 single-flight 改为加入进行中的那一次。
 - 核实后关闭：#296、#828 的下载部分。
 
-## 建议顺序
+## 交付依赖图
 
-1. L0 + L1 ProcessService，迁移全部 ACP 相关进程（Turn 提案第一个 PR，#1065）。
-2. CLI 其余调用方（#1069），随后单独迁移 Electron main、supervisor 与 shared 辅助模块；
-   核心从 #1065 起就在 shared，不再搬迁。
-3. 与 1–2 并行：loro-repo Flock 持久化迁移。
-4. loro-repo 与 streams-crdt 的 Effect 内核与 `loro-repo/effect` 入口（各自仓库）。
-5. Lody L2：可在第 2 步后基于临时 `LoroRepo` Layer 开始，第 4 步完成后替换 Layer；同期完成
-   托管 runtime、worktree 与文件锁。
-6. L3 → L4 → L5（Turn 提案）。
-7. L6 与编排投递。
-8. Renderer workspace runtime（第 4 步之后），然后 Electron 与 supervisor。
+箭头表示前置依赖，不是全局串行顺序。文件锁是第一份新 PR；后续单元从最新 main 或
+明确的新依赖分支开始。
+
+```mermaid
+flowchart TD
+  P["已合并进程基础"] --> F["FileSystem + FileLocks"]
+  F --> G["Git → worktree setup / GC"]
+  F --> R["Runtime 下载 / 安装"]
+  P --> E["登录环境 / 启动闸门"]
+  P --> A["可独立的 ACP transport → 领域操作"]
+  G --> S["AgentSession / 会话池"]
+  R --> S
+  E --> S
+  A --> S
+  K["Lody Flock 持久化已实现；仍需核实发布 / 消费"] --> L["streams-crdt / loro-repo Effect 内核：分别跨仓库 PR"]
+  L --> D["文档 / 历史 / presence"]
+  S --> T["Turn / steer / 停止 / 收尾"]
+  D --> T
+  T --> H["dispatch / MessageHandler / 编排投递"]
+  H --> M["Daemon 最终集成：停止 → flush → 文档拆除"]
+  L --> W["Renderer runtime"]
+  M --> X["Electron / supervisor 上层编排"]
+```
+
+接入首个真正长生命周期服务时建立统一 daemon ManagedRuntime 与根 Scope，随单元迁移扩展；
+最终集成继续保留两阶段关停。已登记删除条件的临时上游适配可解除 Lody 集成阻塞，但不能
+把同步栈宣称为完成。库侧工作前核实 Flock 发布/消费版本和各仓库规则；原本地检出版本与
+规模调查仅为历史。
 
 ## 验证边界
 
@@ -270,8 +297,6 @@ preview 代理、`packages/loro-streams-rpc`、PR poller、Electron updater：�
 已合入 main。[#1057](https://github.com/LodyAI/Lody/pull/1057) 合入了原基础分支而非 main；
 [#1355](https://github.com/LodyAI/Lody/pull/1355) 只将这两份中英文计划恢复到 main。
 
-剩余 stack 为 #1355 → #1065 → #1069 → #1348。#1065 直接在 shared 中引入 v4 进程核心、
-sandbox 与 ACP 调用方；#1069 迁移其余 CLI 调用方和 CLI 守卫；#1348 迁移 Electron、
-supervisor、shared 辅助模块与 review helper，并扩大守卫。所有层均基于 v4，核心不再经历
-CLI 到 shared 的搬迁。使用 GitHub 原生 stack 的合并流程；合并底部 PR 后，它会 rebase
-剩余层。继续合并前，核对下一层的 base 和差异。
+旧 #1355 → #1065 → #1069 → #1348 stack 已全部合并，不继续修改其分支。文件锁及之后
+可独立审查的单元从刷新后的 main 开始，仅按实际依赖组成新的 stack。固定 catalog 当前
+为 4.0.2，每次交付前刷新版本和 GitHub 状态；余下工作按上图推进，不继承旧 stack 的完成标签。

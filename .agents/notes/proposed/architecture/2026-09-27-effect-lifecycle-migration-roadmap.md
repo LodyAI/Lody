@@ -15,13 +15,14 @@ Lody's lifecycle defects cluster around a few hand-written mechanisms:
 - keyed promise chains;
 - swallowed `.catch` handlers.
 
-The repository already depends on effect 3.18, but only as islands: an Effect is built inside
-a class method and run with `runPromise` at the boundary.
+The original survey described Effect 3.18 islands. The merged foundation now uses
+Effect 4.0.2 and the official process service with Lody's bounded backend; much of
+the daemon's upper orchestration is still Promise-based.
 
 This roadmap sets a bottom-up migration rule:
 
 - seven layers run from the platform to the entry points;
-- a layer is done only when every dependency below it is already an Effect service;
+- a unit is done only when its actual dependencies are already Effect services; layer numbers do not impose a global serial schedule;
 - our own Promise modules are rewritten, and only real third-party I/O boundaries may be
   wrapped once.
 
@@ -85,11 +86,13 @@ Dependencies point downward only.
 
 A module is fully Effect-ified only when every one of these holds:
 
-- its public API returns only `Effect`, and failures are tagged error types;
+- its native public API returns Effect with tagged errors; a single-kernel Legacy
+  facade may remain only with named callers and an explicit deletion condition;
 - every dependency appears in `R` and is provided by a `Layer`, and each dependency is itself done;
 - it uses no `setTimeout`/`setInterval`, no `AbortController`, no lifecycle `EventEmitter`, and
   no module-level mutable singletons;
-- resources are acquired only through `acquireRelease`, Scope, or `RcMap`;
+- resources are acquired through `acquireRelease`, `acquireUseRelease`, Scope, or an
+  explicitly verified resource container;
 - it never calls `run*` internally;
 - tests replace Layers and use TestClock to assert observable outcomes.
 
@@ -106,7 +109,9 @@ A module is fully Effect-ified only when every one of these holds:
 
 ### Rules during migration
 
-- **Strictly bottom-up.** Do not start rewriting an upper layer before the layer below is done.
+- **Follow actual dependencies bottom-up.** Layer numbers are a map, not a global
+  serial schedule. Independent ACP transport and Loro work can proceed separately;
+  an upper unit waits for the particular capabilities it consumes.
 - **Temporary facades.** Upper-layer callers not yet migrated use a new service through a
   `runtime.runPromise` facade. The facade is marked temporary and deleted when that upper
   layer migrates.
@@ -137,12 +142,12 @@ add these boundary requirements:
 
 ### Lody's four services
 
-| Service          | Effect concept                                                                                                                                                                                 | Replaces                                                                                                                |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| SessionDocuments | `RcMap<SessionId, DocHandle>` whose lookup is `acquireRelease(open and join the room, unload then invalidate)`, with an idle TTL                                                               | `getOrCreateSessionDoc`'s `sessions`, `pendingSessionDocs`, `withLocalDocOwnership`, `isDestroyed`, and hand-written GC |
-| SessionHistory   | An interpreter of `HistoryAction`/`MetaPatch` values. `commit(batch)` performs sequences that must be atomic in one commit inside an uninterruptible region; changes are exposed as a `Stream` | Promise writes such as `sessionData.commands.applyHistoryAction`, and the `subscribeSessionChanges` callback            |
-| SessionPresence  | `hold(sessionId, phase)` is an `acquireRelease` lease with its heartbeat as an in-scope `Effect.repeat(Schedule.spaced)`; machine three-state liveness is a `SubscriptionRef`                  | Scattered start/clear calls and ten timers                                                                              |
-| CloudPort        | A capability interface whose methods return Effects with tagged errors; callers compose timeouts and retries with `timeout`/`Schedule`; one Layer each for local and cloud                     | Promise methods that take `timeoutMs`                                                                                   |
+| Service          | Effect concept                                                                                                                                                                                                                        | Replaces                                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| SessionDocuments | `RcMap<SessionId, DocHandle>` whose lookup is `acquireRelease(open and join the room, unload then invalidate)`, with an idle TTL                                                                                                      | `getOrCreateSessionDoc`'s `sessions`, `pendingSessionDocs`, `withLocalDocOwnership`, `isDestroyed`, and hand-written GC |
+| SessionHistory   | An interpreter of `HistoryAction`/`MetaPatch` values. `commit(batch)` shields local write sequences from cancellation; this alone provides neither crash recovery nor cross-peer CRDT transactions; changes are exposed as a `Stream` | Promise writes such as `sessionData.commands.applyHistoryAction`, and the `subscribeSessionChanges` callback            |
+| SessionPresence  | `hold(sessionId, phase)` is an `acquireRelease` lease with its heartbeat as an in-scope `Effect.repeat(Schedule.spaced)`; machine three-state liveness is a `SubscriptionRef`                                                         | Scattered start/clear calls and ten timers                                                                              |
+| CloudPort        | A capability interface whose methods return Effects with tagged errors; callers compose timeouts and retries with `timeout`/`Schedule`; one Layer each for local and cloud                                                            | Promise methods that take `timeoutMs`                                                                                   |
 
 Turn code only produces data such as `HistoryAction`/`MetaPatch` and never sees `LoroDoc` or
 loro-repo. Only the SessionHistory and SessionDocuments implementations touch `LoroDoc`, and
@@ -213,16 +218,23 @@ reconnection under Effect, so the decision is to go inside the libraries:
 
 ## Migration units
 
-### L0 + L1: platform and process leaf
+### Process foundation: implemented, not completion of L0/L1
 
-Delivered by the first and second PRs of
-[turn execution and ACP process ownership](2026-09-27-effect-turn-execution-and-acp-process-ownership.md).
-This is the shared prerequisite for every upper layer.
+[#1065](https://github.com/LodyAI/Lody/pull/1065),
+[#1069](https://github.com/LodyAI/Lody/pull/1069) and
+[#1348](https://github.com/LodyAI/Lody/pull/1348) are merged. The shared core uses
+Effect 4.0.2, official ChildProcess/ChildProcessSpawner and Node Stream/Sink
+adapters with Lody's bounded tree backend. The CLI process-options module only
+composes Layers, and the obsolete promise-facade is deleted. Sandbox acquisition
+rolls back and successful command Scopes retire after configuration, whole-tree
+exit and drained stdio. Legacy imports stay visible across all process consumers.
 
-From the second PR on, the other ~35 files that spawn processes directly move onto the same
-ProcessService: git, the worktree setup runner, terminals, login-shell environment, MCP,
-preview, code-collab scans, and others. This fixes a setup-script timeout signalling only the
-shell (SIGTERM), which leaks its descendants.
+File locks are the first subsequent dependency unit; see the
+[file-lock decision](../../implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
+They supply a real filesystem protocol, fair interruptible local admission and
+observable cleanup failures. Git, worktree setup/GC, login-shell waiting, managed
+runtime installation, startup gates, SDK requests, Sessions and Turns remain to
+migrate. Process unification does not finish those lifecycles or daemon ownership.
 
 ### L2 and the Loro sync stack
 
@@ -363,19 +375,38 @@ Migrate these only when touched:
 - **#553:** make the history-sync single-flight join the in-flight run.
 - **Close after checking:** #296, and the download half of #828.
 
-## Suggested order
+## Delivery dependency graph
 
-1. L0 + L1 ProcessService, migrating every ACP-related process (the turn proposal's first PR, #1065).
-2. The remaining CLI spawn callers (#1069), then cross-runtime consumers in their own PR.
-   The core already lives in shared from #1065; no relocation is needed.
-3. In parallel with 1–2: the loro-repo Flock persistence migration.
-4. The Effect core and `loro-repo/effect` entry for loro-repo and streams-crdt, each in its own
-   repository.
-5. Lody L2. It can start after step 2 on the temporary `LoroRepo` Layer, and swaps that Layer
-   once step 4 lands. Managed runtime and worktrees/file locks finish in the same period.
-6. L3 → L4 → L5 (the turn proposal).
-7. L6 and orchestration delivery.
-8. The renderer workspace runtime (after step 4), then Electron and the supervisor.
+Arrows mean prerequisites, not a global serial ordering. File locks are the first
+new PR; later units start from latest main or an explicit new dependent branch.
+
+```mermaid
+flowchart TD
+  P["Merged process foundation"] --> F["FileSystem + FileLocks"]
+  F --> G["Git → worktree setup / GC"]
+  F --> R["Runtime download / installation"]
+  P --> E["Login environment / startup gate"]
+  P --> A["Independent ACP transport → domain operations"]
+  G --> S["AgentSession / session pool"]
+  R --> S
+  E --> S
+  A --> S
+  K["Flock persistence: implemented in Lody; verify release / consumption"] --> L["streams-crdt / loro-repo Effect kernels: separate repositories"]
+  L --> D["Documents / history / presence"]
+  S --> T["Turn / steer / stop / finalization"]
+  D --> T
+  T --> H["dispatch / MessageHandler / delivery"]
+  H --> M["Daemon final integration: stop → flush → document teardown"]
+  L --> W["Renderer runtime"]
+  M --> X["Electron / supervisor upper orchestration"]
+```
+
+Introduce one daemon ManagedRuntime and root Scope when the first real long-lived
+services enter composition; extend it as units migrate. The final integration
+still preserves the two-phase shutdown contract. A registered temporary upstream
+adapter can unblock Lody integration, but does not mark the sync stack complete.
+Verify Flock's published and consumed versions and each repository's rules before
+library work; the initial local-checkout size/version survey is historical.
 
 ## Verification limits
 
@@ -396,10 +427,8 @@ migration to v4, is merged into main. [#1057](https://github.com/LodyAI/Lody/pul
 merged into its former base branch rather than main; [#1355](https://github.com/LodyAI/Lody/pull/1355)
 restores only these bilingual plans onto main.
 
-The remaining stack is #1355 → #1065 → #1069 → #1348. #1065 introduces the v4 process
-core directly in shared, CLI containers and ACP consumers; #1069 migrates the remaining
-CLI consumers and adds the CLI guard. #1348 migrates Electron, supervisor, shared helpers
-and the review helper and expands the guard. Every layer uses v4; the core is not first
-introduced in CLI and then relocated. Use GitHub's native stack merge workflow; it
-rebases the remaining layers after merging the bottom PR. Verify the next layer's
-base and diff before continuing.
+The old #1355 → #1065 → #1069 → #1348 stack is fully merged. Do not edit its
+branches. Start the file-lock unit and subsequent independently reviewable units
+from refreshed main, stacking only actual dependencies. The current fixed catalog
+is 4.0.2; refresh it and GitHub state before each delivery. Remaining work follows
+the dependency graph above, not completion labels inherited from the old stack.

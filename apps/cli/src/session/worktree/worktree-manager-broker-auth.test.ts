@@ -18,7 +18,7 @@ import type { GitCredentialBrokerAuth } from './worktree-manager';
 import { isGitExecutableNotFoundError } from './git-process-error';
 
 vi.mock('@/utils/file-lock', () => ({
-  withFileLock: async <T>(_name: string, fn: () => Promise<T>): Promise<T> => fn(),
+  fileLocksLegacy: { withLock: async <T>(_name: string, fn: () => Promise<T>): Promise<T> => fn() },
 }));
 
 type SpawnCall = { command: string; args: readonly string[]; options: SpawnOptions };
