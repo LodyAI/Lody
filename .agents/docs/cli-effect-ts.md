@@ -35,7 +35,9 @@ catch })` and pass the signal on, so interruption aborts the work.
   `Effect.promise` turns a rejection into a defect.
 - Surface failures to Promise callers as the typed error itself: run with
   `Effect.runPromiseExit` and throw `Cause.squash(exit.cause)`, not the
-  `FiberFailure` wrapper `Effect.runPromise` rejects with.
+  `FiberFailure` wrapper `Effect.runPromise` rejects with. For programs owning
+  processes, use `squashProcessFailure`: plain `Cause.squash` can discard a
+  simultaneous release defect and its recovery lease.
 - An interrupt is owned by a scope or awaited. `void Effect.runPromise(Fiber.interrupt(f))`
   returns before the fiber's finalizers run.
 - Put a timeout on the waiter, not on uninterruptible work:
@@ -62,6 +64,21 @@ policy and official Node Stream/Sink adapters. `processLayer` composes it with
 requires the official spawner, and `spawnProcess` requires Scope. See the
 [backend decision](../notes/implemented/architecture/2026-10-09-effect-official-process-service.md)
 for why the default Node spawner is not used unchanged.
+
+If bounded Scope termination fails, its Exit contains a `ProcessReleaseFailed`
+defect with a recovery lease for the unresolved tree. The owner retains that
+lease, observes `isAlive` and retries `retryTermination` before declaring the tree
+gone. Scope closure itself is already finished and cannot perform that retry.
+`squashProcessFailure` preserves all these leases when an unmigrated Promise
+boundary also has a body error. This tree recovery does not certify drained stdio
+or complete Session shutdown. See the
+[release decision](../notes/implemented/bug-fix/2026-10-10-effect-process-release-failure.md).
+
+In pinned 4.0.2, `Effect.mapError` selects a typed failure and can discard other
+reasons in a mixed Cause. Resource-owning error conversions use `catchCause` and
+`failCause(Cause.map(...))` to retain defects and interruptions. In particular,
+failed process acquisition can already have closed its child Scope: its release
+lease must reach the caller alongside the setup failure.
 
 Never wrap the shared Promise functions back into an Effect. A runner creates a
 separate root fiber. For an unmigrated entry point, the shared facade accepts an
