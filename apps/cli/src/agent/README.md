@@ -141,7 +141,9 @@ builds copy the extension's pinned official presets beside `deepseek-acp.js`; th
 roster also discovers `$DSH_HOME/.agent-presets`. The host mounts Harness's file settings
 provider for `$DSH_HOME/settings.yaml` (default `~/.dsh/settings.yaml`); refresh provider
 capabilities after editing the model catalog. An explicit `DEEPSEEK_BASE_URL` still uses
-the endpoint's `/models` list rather than local catalog additions. Harness JSONL roots are single-encoding
+the endpoint's `/models` list rather than local catalog additions. Official Chat-era
+URLs are normalized by the extension to the Messages `/anthropic` root before provider
+construction; official model discovery always uses `https://api.deepseek.com/models`. Harness JSONL roots are single-encoding
 stores: an empty or zstd root uses upstream's `zstd`, a raw-only legacy root keeps `none`,
 and a mixed root fails with both paths named.
 

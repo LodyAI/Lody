@@ -35,3 +35,12 @@ Config schema，并保留 `agent-presets.default` 与 `.agent-presets` 下的用
 - [宿主启动封装](../apps/cli/src/agent/deepseek-harness-runtime.ts)
 
 此修订以草案记录所需集成，尚无该规范修订的人工批准链接。
+
+## 官方 Messages 地址兼容
+
+新增官方配置使用 `https://api.deepseek.com/anthropic`。已有官方根地址和
+`/v1` 地址无需手动重配：生成的 profile 在创建原生 provider 前将已知官方
+地址归一为 Messages 根地址，保留 settings 优先于环境变量的顺序，不修改
+持久配置。官方模型发现独立使用 `https://api.deepseek.com/models`，新旧官方
+地址均保留官方计费。自定义地址保持原样；此兼容不会将仅支持 Chat 的网关
+转换为 Messages 接口。凭证仍通过宿主环境传入，不写入生成配置。

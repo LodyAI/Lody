@@ -33,7 +33,15 @@ updated choices. This does not promise live selector updates in existing session
 
 An explicit `DEEPSEEK_BASE_URL` retains endpoint-driven model discovery. Local
 catalog additions are not merged into the endpoint's `/models` response by this
-change. Credentials remain host environment inputs, and generated compositions
+change. For the official API, new host configurations use
+`https://api.deepseek.com/anthropic`. Existing official root and `/v1` URLs must
+continue working without manual reconfiguration: the generated profile resolves
+known official aliases to the Messages root before provider construction while
+preserving settings-over-environment precedence and leaving stored configuration
+untouched. Official model discovery uses `https://api.deepseek.com/models`, and
+both old and new official URLs retain official pricing. Custom URLs are preserved;
+this compatibility does not convert a Chat-only gateway to Messages.
+Credentials remain host environment inputs, and generated compositions
 must not embed them. No product UI or telemetry service is introduced.
 
 ## Evidence

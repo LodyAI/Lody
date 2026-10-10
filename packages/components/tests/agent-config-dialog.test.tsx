@@ -1095,7 +1095,7 @@ describe('AgentConfigDialog', () => {
           agentType: 'deepseek',
           env: {
             DEEPSEEK_API_KEY: 'sk-deepseek-test',
-            DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+            DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
           },
         })
       );
@@ -1176,13 +1176,36 @@ describe('AgentConfigDialog', () => {
       label: 'a /v1 trailing slash',
       env: { DEEPSEEK_API_KEY: 'sk-old', DEEPSEEK_BASE_URL: 'https://api.deepseek.com/v1/' },
     },
-  ])('opens the official DeepSeek tab when editing a config with $label', async ({ env }) => {
-    await renderDeepSeekEdit(env);
+    {
+      label: 'a Messages root',
+      env: { DEEPSEEK_API_KEY: 'sk-old', DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic' },
+    },
+    {
+      label: 'a versioned Messages root',
+      env: {
+        DEEPSEEK_API_KEY: 'sk-old',
+        DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic/v1/',
+      },
+    },
+  ])('opens and saves the official DeepSeek endpoint with $label', async ({ env }) => {
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    await renderDeepSeekEdit(env, onSubmit);
 
     expect(getTabByName('DeepSeek official').getAttribute('aria-selected')).toBe('true');
     expect(getVisibleDeepSeekEndpointInput()).toBeNull();
     expect(document.body.querySelector<HTMLInputElement>('#deepseek-api-key')?.value).toBe(
       'sk-old'
+    );
+    await act(async () => {
+      getPrimaryAction('Save').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: {
+          DEEPSEEK_API_KEY: 'sk-old',
+          DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
+        },
+      })
     );
   });
 
@@ -1239,7 +1262,7 @@ describe('AgentConfigDialog', () => {
       expect.objectContaining({
         env: {
           DEEPSEEK_API_KEY: 'sk-updated',
-          DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+          DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
         },
       })
     );
@@ -1282,7 +1305,7 @@ describe('AgentConfigDialog', () => {
         env: {
           EXTRA_FLAG: '1',
           DEEPSEEK_API_KEY: 'sk-deepseek-test',
-          DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+          DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
         },
       })
     );
