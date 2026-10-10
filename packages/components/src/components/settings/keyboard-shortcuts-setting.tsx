@@ -1,7 +1,8 @@
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
-import { type ReactNode, useCallback, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Trash2 } from 'lucide-react';
+import type { TFunction } from 'i18next';
+import { Keyboard, Search, Trash2 } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
 import { SettingsPageActions, SettingsPageLead } from './settings-page-header';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -12,6 +13,8 @@ import {
   type GlobalShortcutSetError,
 } from '@lody/shared';
 import { Button } from '@lody/ui/button';
+import { Input, InputShell } from '@lody/ui/input';
+import { field } from '@lody/ui/field/field.tokens.stylex';
 import {
   canonicalizeBinding,
   commands,
@@ -27,6 +30,11 @@ import type { GlobalShortcutBinding } from '@lody/shared';
 import { useGlobalShortcuts } from '@/hooks/use-global-shortcuts';
 import { Kbd } from '@/components/commands/kbd';
 import { CompactRow, CompactSection } from './compact-layout';
+import {
+  isShortcutFilterActive,
+  matchesShortcutFilter,
+  type ShortcutFilter,
+} from './keyboard-shortcuts-filter';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
 
@@ -48,6 +56,27 @@ const pulse = stylex.keyframes({
 
 const styles = stylex.create({
   error: { color: colors.destructive },
+  searchIcon: { width: '16px', height: '16px', flexShrink: 0 },
+  toggleOff: { color: field.icon },
+  toggleOn: { color: colors.accent },
+  /** The keystroke field's value: it fills the well and leaves the ring to it. */
+  keystrokeValue: {
+    display: 'flex',
+    alignItems: 'center',
+    flexGrow: 1,
+    minWidth: 0,
+    alignSelf: 'stretch',
+    boxShadow: 'none',
+    outlineStyle: 'none',
+    cursor: 'pointer',
+  },
+  keystrokePlaceholder: {
+    color: field.placeholder,
+    fontWeight: 500,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
   controls: { display: 'flex', alignItems: 'center' },
   // Fixed widths so the shortcut and trash columns line up across rows. The shortcut
   // slot holds up to ~4 chips comfortably; the trash slot stays present even when the
@@ -100,6 +129,15 @@ const styles = stylex.create({
 /** The row the unbind action waits on: its hover and focus reveal it. */
 const ROW_MARKER = stylex.props(stylex.defaultMarker()).className;
 
+/**
+ * A command's display label: its i18n key when it has one (built-in placeholders), else
+ * the already-translated/static `title`. The row, its conflict notes, the palette, and
+ * the search all read the same label.
+ */
+function commandLabel(t: TFunction<'translation', undefined>, cmd: Command): string {
+  return cmd.titleKey ? t(cmd.titleKey, { defaultValue: cmd.title }) : cmd.title;
+}
+
 export function KeyboardShortcutsSetting() {
   const { t } = useTranslation();
   const all = useCommands();
@@ -129,6 +167,55 @@ export function KeyboardShortcutsSetting() {
     commands.resetAllUserKeybindings();
   }, []);
 
+  const [query, setQuery] = useState('');
+  const [keyFilter, setKeyFilter] = useState<string | null>(null);
+  const filter: ShortcutFilter = { query, keyFilter };
+  const filterActive = isShortcutFilterActive(filter);
+
+  // Bindings are read on every render rather than memoized: a rebind publishes a new
+  // command snapshot, and the key filter has to see the row's current bindings.
+  const visibleGroups = grouped
+    .map(([category, items]) => {
+      const matching = items.filter((cmd) =>
+        matchesShortcutFilter(
+          {
+            label: commandLabel(t, cmd),
+            title: cmd.title,
+            id: cmd.id,
+            bindings: commands.getKeybindingsFor(cmd.id),
+          },
+          filter
+        )
+      );
+      return [category, matching] as const;
+    })
+    .filter(([, items]) => items.length > 0);
+
+  const visibleGlobalShortcuts = showGlobalShortcuts
+    ? GLOBAL_SHORTCUTS.flatMap((shortcut) => {
+        const live = globalBindings.find((entry) => entry.id === shortcut.id);
+        const row = {
+          shortcut,
+          label: t(shortcut.titleKey, shortcut.defaultTitle),
+          binding: live ? live.binding : shortcut.binding,
+          defaultBinding: live ? live.defaultBinding : shortcut.binding,
+        };
+        const matches = matchesShortcutFilter(
+          {
+            label: row.label,
+            title: shortcut.defaultTitle,
+            id: shortcut.id,
+            bindings: [row.binding],
+          },
+          filter
+        );
+        return matches ? [row] : [];
+      })
+    : [];
+
+  const noMatches =
+    filterActive && visibleGroups.length === 0 && visibleGlobalShortcuts.length === 0;
+
   // A combo that matches an OS global shortcut can't be bound to an in-app command —
   // surface which global shortcut occupies it so recording rejects it instead of saving.
   const findGlobalConflictTitle = useCallback(
@@ -155,13 +242,26 @@ export function KeyboardShortcutsSetting() {
         </Button>
       </SettingsPageActions>
 
-      {grouped.length === 0 && (
+      <ShortcutSearchBar
+        query={query}
+        onQueryChange={setQuery}
+        keyFilter={keyFilter}
+        onKeyFilterChange={setKeyFilter}
+      />
+
+      {grouped.length === 0 && !filterActive && (
         <CompactSection>
           <p {...stylex.props(surface.cardNote)}>{t('settings.keyboardShortcuts.empty')}</p>
         </CompactSection>
       )}
 
-      {grouped.map(([category, items]) => (
+      {noMatches && (
+        <CompactSection>
+          <p {...stylex.props(surface.cardNote)}>{t('settings.keyboardShortcuts.noMatches')}</p>
+        </CompactSection>
+      )}
+
+      {visibleGroups.map(([category, items]) => (
         <CompactSection
           key={category}
           title={t(`settings.keyboardShortcuts.category.${category}`, { defaultValue: category })}
@@ -176,24 +276,158 @@ export function KeyboardShortcutsSetting() {
         </CompactSection>
       ))}
 
-      {showGlobalShortcuts && (
+      {visibleGlobalShortcuts.length > 0 && (
         <CompactSection title={t('settings.keyboardShortcuts.globalSection')}>
-          {GLOBAL_SHORTCUTS.map((shortcut) => {
-            const live = globalBindings.find((entry) => entry.id === shortcut.id);
-            return (
-              <GlobalShortcutRow
-                key={shortcut.id}
-                id={shortcut.id}
-                label={t(shortcut.titleKey, shortcut.defaultTitle)}
-                binding={live ? live.binding : shortcut.binding}
-                defaultBinding={live ? live.defaultBinding : shortcut.binding}
-                onSet={setGlobalBinding}
-              />
-            );
-          })}
+          {visibleGlobalShortcuts.map(({ shortcut, label, binding, defaultBinding }) => (
+            <GlobalShortcutRow
+              key={shortcut.id}
+              id={shortcut.id}
+              label={label}
+              binding={binding}
+              defaultBinding={defaultBinding}
+              onSet={setGlobalBinding}
+            />
+          ))}
         </CompactSection>
       )}
     </div>
+  );
+}
+
+/**
+ * Narrows the list by name, or — with the toggle at the field's end on — by keystroke.
+ * The two never combine: switching modes drops the other mode's filter. Keystrokes use
+ * the same capture the rows use, so command dispatch and OS global shortcuts stay paused
+ * while the field listens, and starting it stops any row that was recording.
+ */
+function ShortcutSearchBar({
+  query,
+  onQueryChange,
+  keyFilter,
+  onKeyFilterChange,
+}: {
+  query: string;
+  onQueryChange: (query: string) => void;
+  keyFilter: string | null;
+  onKeyFilterChange: (binding: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const [keystrokeMode, setKeystrokeMode] = useState(false);
+  const textRef = useRef<HTMLInputElement>(null);
+  const keysRef = useRef<HTMLDivElement>(null);
+  const modeChanged = useRef(false);
+
+  const leaveKeystrokeMode = () => {
+    modeChanged.current = true;
+    setKeystrokeMode(false);
+    onKeyFilterChange(null);
+  };
+
+  const { status, preview, start, cancel } = useKeyCapture({
+    // Rejecting every combo keeps the capture listening, so the next combo replaces
+    // this one without the registry un-pausing in between.
+    onCapture: (binding) => {
+      onKeyFilterChange(binding);
+      return false;
+    },
+    // Only Escape leaves the mode. A row taking over the capture, or the window losing
+    // focus, keeps the filter: the user may be rebinding one of the rows it shows.
+    onCancel: (reason) => {
+      if (reason === 'escape') leaveKeystrokeMode();
+    },
+  });
+  const listening = status === 'recording';
+
+  // Focus follows the mode so the field the user just switched to is the one typed into.
+  useEffect(() => {
+    if (!modeChanged.current) return;
+    modeChanged.current = false;
+    if (keystrokeMode) keysRef.current?.focus();
+    else textRef.current?.focus();
+  }, [keystrokeMode]);
+
+  const toggleKeystrokeMode = () => {
+    if (keystrokeMode) {
+      cancel();
+      leaveKeystrokeMode();
+      return;
+    }
+    modeChanged.current = true;
+    onQueryChange('');
+    setKeystrokeMode(true);
+    start();
+  };
+
+  const resumeListening = () => {
+    if (!listening) start();
+  };
+
+  const searchLabel = t('settings.keyboardShortcuts.searchPlaceholder');
+  const keystrokeLabel = t('settings.keyboardShortcuts.keystrokePlaceholder');
+  const toggleLabel = t('settings.keyboardShortcuts.searchByKeystroke');
+  const shown = listening ? (preview ?? keyFilter) : keyFilter;
+
+  const toggle = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="mini"
+      icon
+      onClick={toggleKeystrokeMode}
+      aria-pressed={keystrokeMode}
+      aria-label={toggleLabel}
+      title={toggleLabel}
+    >
+      <Keyboard
+        {...stylex.props(styles.glyph, keystrokeMode ? styles.toggleOn : styles.toggleOff)}
+      />
+    </Button>
+  );
+
+  if (keystrokeMode) {
+    return (
+      <InputShell
+        leading={<Keyboard {...stylex.props(styles.searchIcon)} aria-hidden="true" />}
+        trailing={toggle}
+      >
+        <div
+          ref={keysRef}
+          role="textbox"
+          aria-readonly="true"
+          aria-label={keystrokeLabel}
+          tabIndex={0}
+          onClick={resumeListening}
+          onFocus={resumeListening}
+          {...stylex.props(styles.keystrokeValue)}
+        >
+          {shown ? (
+            <Kbd binding={shown} size="medium" />
+          ) : (
+            <span {...stylex.props(styles.keystrokePlaceholder)}>{keystrokeLabel}</span>
+          )}
+        </div>
+      </InputShell>
+    );
+  }
+
+  return (
+    <Input
+      ref={textRef}
+      type="search"
+      value={query}
+      onChange={(event) => onQueryChange(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && query !== '') {
+          event.preventDefault();
+          event.stopPropagation();
+          onQueryChange('');
+        }
+      }}
+      placeholder={searchLabel}
+      aria-label={searchLabel}
+      leading={<Search {...stylex.props(styles.searchIcon)} aria-hidden="true" />}
+      trailing={toggle}
+    />
   );
 }
 
@@ -297,13 +531,8 @@ function ShortcutRow({
   findGlobalConflictTitle: (binding: string) => string | null;
 }) {
   const { t } = useTranslation();
-  // Resolve a command's display label: prefer its i18n key (set by built-in placeholders),
-  // fall back to the already-translated/static `title`. Keeps labels correct across languages
-  // and consistent between the row, the conflict notes, and the command palette.
-  const resolveTitle = (cmd: Command | undefined, fallback: string): string => {
-    if (!cmd) return fallback;
-    return cmd.titleKey ? t(cmd.titleKey, { defaultValue: cmd.title }) : cmd.title;
-  };
+  const resolveTitle = (cmd: Command | undefined, fallback: string): string =>
+    cmd ? commandLabel(t, cmd) : fallback;
 
   const currentBindings = commands.getKeybindingsFor(command.id);
   const defaultBindings = commands.getDefaultKeybindingsFor(command.id);
