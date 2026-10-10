@@ -84,11 +84,11 @@ Shared mention primitive used by composer autocomplete surfaces.
   match the search term against each item's `value` hides rows whose payload
   happens not to contain it, and a hidden row renders null, which strips its node
   from the collection and breaks arrow-key movement across groups.
-- Desktop `MentionContent` follows the current query caret using mirrored
-  textarea wrapping/scroll. Its virtual `contextElement` is the textarea, so
-  layout shifts update an open popup. Default bottom menus flip to fit; an
-  explicit top menu stays above while a row fits and scrolls within that room.
-  Both stay within the virtual collision boundary and `--mention-input-width`.
+- Desktop `MentionContent` mirrors textarea wrapping/scroll to follow the caret;
+  its `contextElement` is the textarea for layout shifts. Measure
+  outside app transforms, before `<body>`, preserving body's `:last-child` state.
+  Bottom menus flip; explicit top menus stay above while a row fits and
+  scroll within that room. Both obey the virtual boundary and `--mention-input-width`.
 - `positionAnchor="composer"` anchors to the input's nearest `[data-mention-frame]`
   (else its wrapper), left-aligned and no wider. It picks its side once per open
   — above unless there is no room — and never flips: a level change resizes it
