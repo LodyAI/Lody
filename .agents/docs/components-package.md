@@ -18,7 +18,7 @@ Authenticated cloud queries retry opaque server failures before reaching a bound
 with a shared, finite budget. Pending retries return loading rather than stale access
 rows. Structured application failures and exhausted retries still throw; the runtime
 provider has its own page boundary because it sits above the Outlet boundary. See the
-[query recovery contract](../../specs/cloud-query-recovery.md).
+[query adapter](../../packages/components/src/hooks/README.md#cloud-query-recovery).
 
 Both cache-recovery levels defer their asynchronous deletes to the next boot because
 `deleteDatabase()` blocks while the runtime still holds a connection; synchronous

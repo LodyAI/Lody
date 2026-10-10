@@ -30,7 +30,8 @@ React 边界，因为它会卸载运行时并移除诊断；耗尽之后仍遵�
 根层认证失效副作用保留在运行时边界之外，因此运行时失败不会阻止已确认
 session 失效后的清理。
 
-[行为约定](../../../../specs/cloud-query-recovery.zh.md)保持 draft。此次只覆盖
+[hook README](../../../../packages/components/src/hooks/README.md#cloud-query-recovery)
+记录实现行为，不再为此单独维护 Spec。此次只覆盖
 已认证的只读查询，公开查询及 mutation/action 错误处理保持原行为。没有诊断
 或修改托管机器可见性查询的实现。
 

@@ -36,7 +36,8 @@ still applies once retries are exhausted. Optional features still need their
 Root auth-invalidation effects remain outside the runtime boundary, so a
 runtime failure does not disable confirmed-session-rejection cleanup.
 
-The [behavior contract](../../../../specs/cloud-query-recovery.md) is a draft.
+The [hook README](../../../../packages/components/src/hooks/README.md#cloud-query-recovery)
+owns the implementation behavior; it does not require a separate Spec.
 This change covers authenticated read queries only and leaves public query and
 mutation/action handling unchanged. It neither diagnoses nor changes the hosted
 implementation of machine visibility.
