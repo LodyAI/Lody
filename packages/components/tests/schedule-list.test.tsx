@@ -259,6 +259,26 @@ describe('schedule list rows', () => {
     // apply the StyleX sheet, so the class change is the check.
     expect(header().className).not.toBe(embeddedClass);
   });
+
+  it('uses the home search text and hides the standalone header', () => {
+    act(() =>
+      root.render(
+        <ScheduleListView
+          hideHeader
+          query="night"
+          rows={[manual, timed]}
+          runtimes={[]}
+          ready
+          now={NOW}
+          contextForRow={context}
+          {...handlers}
+        />
+      )
+    );
+    expect(container.querySelector('header')).toBeNull();
+    expect(container.textContent).toContain('Nightly review');
+    expect(container.textContent).not.toContain('Deploy checklist');
+  });
 });
 
 describe('schedule list sidebar chrome', () => {

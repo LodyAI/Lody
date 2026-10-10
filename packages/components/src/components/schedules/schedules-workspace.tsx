@@ -4,7 +4,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { useAtom, useAtomValue } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { toast } from '@/lib/toast';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
@@ -38,6 +38,7 @@ import {
 } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { scheduleListColumnWidthsAtom, scheduleSplitListWidthAtom } from '@/atoms/schedules';
+import { mobileHomeReturnTabAtom } from '@/atoms/mobile-home-state';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import {
   onlineMachineIdsAtom,
@@ -212,6 +213,9 @@ const styles = stylex.create({
 export function SchedulesWorkspace({
   scheduleId,
   insetSafeArea = false,
+  hideHeader = false,
+  query,
+  createScheduleRef,
 }: {
   scheduleId?: string;
   /**
@@ -219,6 +223,12 @@ export function SchedulesWorkspace({
    * already clears the status bar with its own header, so it leaves this off.
    */
   insetSafeArea?: boolean;
+  /** Home tab supplies the search field and the new-schedule button. */
+  hideHeader?: boolean;
+  /** Home search text. Omit so the list keeps its own field. */
+  query?: string;
+  /** Home header plus button calls this. Assigned while this list is mounted. */
+  createScheduleRef?: { current: (() => void) | null };
 }) {
   const { t } = useTranslation();
   const activeRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -228,6 +238,7 @@ export function SchedulesWorkspace({
   const user = useAtomValue(userAtom);
   const slug = useAtomValue(currentWorkspaceSlugAtom);
   const navigate = useNavigate();
+  const setReturnTab = useSetAtom(mobileHomeReturnTabAtom);
   const registry = useSchedules();
   const agents = useAtomValue(getAllAgentConfigAtom);
   const localProjects = useVisibleLocalProjects({ includeMachineFlock: true });
@@ -256,17 +267,36 @@ export function SchedulesWorkspace({
     () => (runtime ? new ScheduleRepository(runtime.repo, runtime.workspaceId) : null),
     [runtime]
   );
+  // Phone list lives on the home schedules tab (workspace switch, search,
+  // settings, bottom bar). Closing or saving replaces this page with that
+  // tab. Desktop still returns to the schedules route.
   const open = (id?: string) => {
-    if (slug)
-      void navigate(
-        id
-          ? {
-              to: '/$workspaceName/schedules/$scheduleId',
-              params: { workspaceName: slug, scheduleId: id },
-            }
-          : { to: '/$workspaceName/schedules', params: { workspaceName: slug } }
-      );
+    if (!slug) return;
+    if (!id && mobile) {
+      setReturnTab('schedules');
+      void navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: slug },
+        replace: true,
+      });
+      return;
+    }
+    void navigate(
+      id
+        ? {
+            to: '/$workspaceName/schedules/$scheduleId',
+            params: { workspaceName: slug, scheduleId: id },
+          }
+        : { to: '/$workspaceName/schedules', params: { workspaceName: slug } }
+    );
   };
+  if (createScheduleRef) createScheduleRef.current = () => open('new');
+  useEffect(() => {
+    if (!createScheduleRef) return undefined;
+    return () => {
+      createScheduleRef.current = null;
+    };
+  }, [createScheduleRef]);
   const mutate = async (action: () => Promise<void>) => {
     try {
       setError(undefined);
@@ -354,8 +384,8 @@ export function SchedulesWorkspace({
       if (row) toggle(row);
     },
   });
-  // Saving or closing always lands on the list: the list is the page, and a
-  // schedule opens beside it (a sliding panel on desktop, a pushed page on mobile).
+  // Saving or closing returns to the list: beside the editor on desktop, and
+  // the home schedules tab on a phone.
   const content = !scheduleId ? null : scheduleId === 'new' ? (
     <ScheduleEditor
       key={`${runtime?.workspaceId}:new`}
@@ -466,6 +496,8 @@ export function SchedulesWorkspace({
       onColumnWidthsChange={setColumnWidths}
       onOpenSession={openSession}
       insetSafeArea={mobile && insetSafeArea}
+      hideHeader={hideHeader}
+      query={query}
       contextForRow={(item) => ({
         machine: machines.get(item.machineId as never)?.name ?? item.machineId,
         timeZone: machines.get(item.machineId as never)?.timeZone,

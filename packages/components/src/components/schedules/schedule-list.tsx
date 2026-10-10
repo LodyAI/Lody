@@ -766,6 +766,8 @@ export function ScheduleListView({
   renderBody,
   onBlankClick,
   insetSafeArea = false,
+  hideHeader = false,
+  query: controlledQuery,
   now = getServerNow(),
 }: {
   rows: ScheduleRegistryRow[];
@@ -789,6 +791,10 @@ export function ScheduleListView({
   onBlankClick?: () => void;
   /** Phone page that draws under the status bar. The home tab leaves this off. */
   insetSafeArea?: boolean;
+  /** Home tab draws search and the new button in its own header. */
+  hideHeader?: boolean;
+  /** When set, the home search field filters this list. */
+  query?: string;
   /** The schedule open beside the list, highlighted. */
   selectedId?: string;
   /** Injected so stories and tests render a fixed "next run" column. */
@@ -814,7 +820,8 @@ export function ScheduleListView({
   ]
     .filter(Boolean)
     .join(' ');
-  const [query, setQuery] = useState('');
+  const [localQuery, setLocalQuery] = useState('');
+  const query = controlledQuery ?? localQuery;
   const [localWidths, setLocalWidths] = useState(DEFAULT_COLUMN_WIDTHS);
   const widths = controlledWidths ?? localWidths;
   const resize = (key: keyof ScheduleColumnWidths, value: number) => {
@@ -846,55 +853,60 @@ export function ScheduleListView({
       >
         {/* Joins the Electron window's drag strip, which would otherwise swallow
             clicks on the search and New button under it. */}
-        <header
-          {...withClassName(
-            stylex.props(
-              styles.listHeader,
-              insetSafeArea && styles.listHeaderSafeArea,
-              showSidebarToggle && hasMacOSTitlebarInset && styles.headerBesideTrafficLights
-            ),
-            headerChromeClassName
-          )}
-          data-safe-area-inset={insetSafeArea ? '' : undefined}
-          data-beside-traffic-lights={showSidebarToggle && hasMacOSTitlebarInset ? '' : undefined}
-        >
-          {showSidebarToggle ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="small"
-              icon
-              onClick={() => showNavigationSidebar()}
-              aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
-              className={cn(stylex.props(styles.sidebarToggle).className, WINDOW_DRAG_EXEMPT_CLASS)}
-            >
-              <PanelLeft {...stylex.props(styles.glyph)} />
-            </Button>
-          ) : null}
-          <h1 {...stylex.props(styles.pageTitle)}>{t('schedules.title', 'Schedules')}</h1>
-          <Input
-            size="small"
-            leading={<Search {...stylex.props(styles.mutedIcon)} aria-hidden="true" />}
-            aria-label={t('schedules.search', 'Search schedules')}
-            placeholder={t('schedules.search', 'Search schedules')}
-            className={cn(stylex.props(styles.search).className, WINDOW_DRAG_EXEMPT_CLASS)}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <Button
-            variant="primary"
-            size="small"
-            className={cn(stylex.props(styles.actionButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
-            onClick={onNew}
-            // The label is the only text and it is hidden on narrow screens.
-            aria-label={t('schedules.new', 'New schedule')}
+        {hideHeader ? null : (
+          <header
+            {...withClassName(
+              stylex.props(
+                styles.listHeader,
+                insetSafeArea && styles.listHeaderSafeArea,
+                showSidebarToggle && hasMacOSTitlebarInset && styles.headerBesideTrafficLights
+              ),
+              headerChromeClassName
+            )}
+            data-safe-area-inset={insetSafeArea ? '' : undefined}
+            data-beside-traffic-lights={showSidebarToggle && hasMacOSTitlebarInset ? '' : undefined}
           >
-            <Plus {...stylex.props(styles.icon14)} />
-            <span {...stylex.props(styles.newButtonLabel)}>
-              {t('schedules.new', 'New schedule')}
-            </span>
-          </Button>
-        </header>
+            {showSidebarToggle ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="small"
+                icon
+                onClick={() => showNavigationSidebar()}
+                aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
+                className={cn(
+                  stylex.props(styles.sidebarToggle).className,
+                  WINDOW_DRAG_EXEMPT_CLASS
+                )}
+              >
+                <PanelLeft {...stylex.props(styles.glyph)} />
+              </Button>
+            ) : null}
+            <h1 {...stylex.props(styles.pageTitle)}>{t('schedules.title', 'Schedules')}</h1>
+            <Input
+              size="small"
+              leading={<Search {...stylex.props(styles.mutedIcon)} aria-hidden="true" />}
+              aria-label={t('schedules.search', 'Search schedules')}
+              placeholder={t('schedules.search', 'Search schedules')}
+              className={cn(stylex.props(styles.search).className, WINDOW_DRAG_EXEMPT_CLASS)}
+              value={query}
+              onChange={(event) => setLocalQuery(event.target.value)}
+            />
+            <Button
+              variant="primary"
+              size="small"
+              className={cn(stylex.props(styles.actionButton).className, WINDOW_DRAG_EXEMPT_CLASS)}
+              onClick={onNew}
+              // The label is the only text and it is hidden on narrow screens.
+              aria-label={t('schedules.new', 'New schedule')}
+            >
+              <Plus {...stylex.props(styles.icon14)} />
+              <span {...stylex.props(styles.newButtonLabel)}>
+                {t('schedules.new', 'New schedule')}
+              </span>
+            </Button>
+          </header>
+        )}
 
         {(renderBody ?? ((table: ReactNode) => table))(
           // Header and rows scroll together, sideways too when the columns do
