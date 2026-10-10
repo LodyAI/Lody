@@ -63,6 +63,7 @@ import {
   type PersistedMentionRange,
 } from '@/components/mentions/mention-persistence';
 import { useTranslation } from 'react-i18next';
+import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { captureAgentRoleMentionsApplied } from '@/lib/agent-role-analytics';
@@ -95,7 +96,12 @@ import type {
   AcpConfigOptionSelector,
   AcpConfigOptionValue,
 } from '@/components/shared/acp-selector-options';
-import { currentWorkspaceIdAtom, mobileKeyboardActionAtom } from '@/atoms';
+import {
+  currentWorkspaceIdAtom,
+  mobileKeyboardActionAtom,
+  queuedMessageBehaviorAtom,
+  type QueuedMessageBehavior,
+} from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
@@ -532,8 +538,8 @@ export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
 
 export type SessionSendMessageOptions = {
   attachments?: SessionAttachmentDraft[];
-  /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
-  invertSubmitBehavior?: boolean;
+  /** Replaces the configured busy-send behavior (queue or steer) for this send. */
+  submitBehavior?: QueuedMessageBehavior;
 };
 
 export type SessionChatInputAreaHandle = {
@@ -621,6 +627,7 @@ export const SessionChatInputArea = memo(
     );
     const isMobile = useIsMobile();
     const mobileKeyboardAction = useAtomValue(mobileKeyboardActionAtom);
+    const queuedMessageBehavior = useAtomValue(queuedMessageBehaviorAtom);
     const usesMobileKeyboardAction = isMobile || isNativeAppShell();
     const promptEnterKeyHint = resolveMobileKeyboardEnterKeyHint(
       mobileKeyboardAction,
@@ -1755,14 +1762,17 @@ export const SessionChatInputArea = memo(
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key !== 'Enter' || isImeComposingKeyboardEvent(e)) {
+        // A rebound app shortcut (e.g. Send and Steer on Mod+Enter) already handled it.
+        if (e.key !== 'Enter' || e.defaultPrevented || isImeComposingKeyboardEvent(e)) {
           return;
         }
         // Mod+Shift+Enter sends through the opposite busy-send behavior:
         // a queue default steers, a steer default queues.
         if (e.shiftKey && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
-          void sendMessage({ invertSubmitBehavior: true });
+          void sendMessage({
+            submitBehavior: queuedMessageBehavior === 'guide' ? 'queue' : 'guide',
+          });
           return;
         }
         if (
@@ -1777,7 +1787,29 @@ export const SessionChatInputArea = memo(
         e.preventDefault();
         void sendMessage();
       },
-      [mobileKeyboardAction, sendMessage, usesMobileKeyboardAction]
+      [mobileKeyboardAction, queuedMessageBehavior, sendMessage, usesMobileKeyboardAction]
+    );
+
+    // Only the focused composer owns the binding, so a user binding such as Mod+Enter
+    // keeps its meaning in other text fields and never sends a draft the user can't see.
+    // An open mention menu keeps a rebound plain Enter for selecting its item.
+    useCommand(
+      {
+        id: 'session.sendSteer',
+        title: t('commands.session.sendSteer', 'Send and Steer'),
+        category: 'Session',
+        keybindings: getCommandKeybindings('session.sendSteer'),
+        when: () => {
+          const textarea = textareaRef.current;
+          return (
+            textarea !== null &&
+            document.activeElement === textarea &&
+            textarea.getAttribute('aria-expanded') !== 'true'
+          );
+        },
+        run: () => void sendMessage({ submitBehavior: 'guide' }),
+      },
+      isVisible
     );
 
     const hasDraft =

@@ -19,6 +19,7 @@ import {
   sendSessionFileToLocalRuntime,
 } from '../src/lib/electron-session-file-sender';
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
+import { queuedMessageBehaviorAtom } from '../src/atoms/settings';
 import { computeSha256Hex, uploadSessionFile } from '../src/lib/session-file-upload';
 import { uploadSessionImage } from '../src/lib/session-image-upload';
 import { createRoot, type Root } from 'react-dom/client';
@@ -102,6 +103,9 @@ import {
 import { initI18n } from '../src/i18n';
 import { MAX_PASTED_TEXT_BYTE_SIZE } from '../src/lib/pasted-text-draft';
 import { toast } from '@/lib/toast';
+import { commands } from '../src/lib/commands';
+import { __resetPlatformCacheForTests } from '../src/lib/commands/platform';
+import { CommandShortcutHost } from '../src/lib/commands/shortcut-host';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -304,6 +308,7 @@ describe('SessionChatInputArea submission feedback', () => {
     getDefaultStore().set(localProbeResultAtom, null);
     getDefaultStore().set(authTokenAtom, null);
     getDefaultStore().set(currentWorkspaceIdAtom, null);
+    getDefaultStore().set(queuedMessageBehaviorAtom, 'queue');
     vi.restoreAllMocks();
     Reflect.deleteProperty(window, '__LODY_NATIVE__');
     Reflect.deleteProperty(window.navigator, 'userAgent');
@@ -564,33 +569,40 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(submissions[1][2]?.attachments).toEqual(submissions[0][2]?.attachments);
   });
 
-  it('retains queue inversion for attachment-only draft handoff', async () => {
-    const composerRef = createRef<SessionChatInputAreaHandle>();
-    const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
-    const textarea = await renderComposer({
-      composerRef,
-      onSendMessage: async (...args) => {
-        submissions.push(args);
-        return true;
-      },
-    });
-    await attachDrafts(composerRef);
-    await act(async () => composerRef.current!.setInputText(''));
-    await act(async () =>
-      textarea.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'Enter',
-          ctrlKey: true,
-          shiftKey: true,
-          bubbles: true,
-        })
-      )
-    );
-    expect(submissions).toHaveLength(1);
-    expect(submissions[0][0]).toEqual([]);
-    expect(submissions[0][2]?.invertSubmitBehavior).toBe(true);
-    expect(submissions[0][2]?.attachments).toHaveLength(2);
-  });
+  it.each([
+    ['queue', 'guide'],
+    ['guide', 'queue'],
+  ] as const)(
+    'inverts a %s default to %s for attachment-only draft handoff',
+    async (configured, expected) => {
+      getDefaultStore().set(queuedMessageBehaviorAtom, configured);
+      const composerRef = createRef<SessionChatInputAreaHandle>();
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      const textarea = await renderComposer({
+        composerRef,
+        onSendMessage: async (...args) => {
+          submissions.push(args);
+          return true;
+        },
+      });
+      await attachDrafts(composerRef);
+      await act(async () => composerRef.current!.setInputText(''));
+      await act(async () =>
+        textarea.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            ctrlKey: true,
+            shiftKey: true,
+            bubbles: true,
+          })
+        )
+      );
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][0]).toEqual([]);
+      expect(submissions[0][2]?.submitBehavior).toBe(expected);
+      expect(submissions[0][2]?.attachments).toHaveLength(2);
+    }
+  );
 
   it.each([
     { isMachineRemoved: true },
@@ -1026,5 +1038,139 @@ describe('SessionChatInputArea submission feedback', () => {
     await act(async () => acceptance.resolve(true));
     const textarea = await renderComposer(props);
     expect(textarea.value).toBe('newer unsent draft');
+  });
+
+  describe('Send and Steer shortcut', () => {
+    let hostRoot: Root | null = null;
+    let hostContainer: HTMLDivElement | null = null;
+
+    beforeEach(async () => {
+      Object.assign(window, { __LODY_ELECTRON__: true, __LODY_PLATFORM__: { os: 'linux' } });
+      __resetPlatformCacheForTests();
+      hostContainer = document.createElement('div');
+      document.body.appendChild(hostContainer);
+      hostRoot = createRoot(hostContainer);
+      await act(async () => hostRoot!.render(createElement(CommandShortcutHost)));
+    });
+
+    afterEach(async () => {
+      await act(async () => hostRoot?.unmount());
+      hostContainer?.remove();
+      hostRoot = null;
+      hostContainer = null;
+      commands.resetAllUserKeybindings();
+      Reflect.deleteProperty(window, '__LODY_ELECTRON__');
+      Reflect.deleteProperty(window, '__LODY_PLATFORM__');
+      __resetPlatformCacheForTests();
+    });
+
+    const pressCtrlEnter = async (target: EventTarget) => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      await act(async () => target.dispatchEvent(event));
+      return event;
+    };
+
+    const recordSubmissions = () => {
+      const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
+      const onSendMessage: SessionChatInputAreaProps['onSendMessage'] = async (...args) => {
+        submissions.push(args);
+        return true;
+      };
+      return { submissions, onSendMessage };
+    };
+
+    it('lists the command unbound by default so plain Mod+Enter keeps sending normally', async () => {
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage });
+      expect(commands.getKeybindingsFor('session.sendSteer')).toEqual([]);
+      textarea.focus();
+      await pressCtrlEnter(textarea);
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][2]?.submitBehavior).toBeUndefined();
+    });
+
+    it('sends the focused draft once as a forced steer through the user binding', async () => {
+      commands.setUserKeybindings('session.sendSteer', ['Mod+Enter']);
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage });
+      textarea.focus();
+      const event = await pressCtrlEnter(textarea);
+      expect(event.defaultPrevented).toBe(true);
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][0]).toEqual([{ type: 'text', text: 'focus regression draft' }]);
+      expect(submissions[0][2]?.submitBehavior).toBe('guide');
+      expect(textarea.value).toBe('');
+    });
+
+    it('wins over the built-in inversion when rebound to Mod+Shift+Enter', async () => {
+      commands.setUserKeybindings('session.sendSteer', ['Mod+Shift+Enter']);
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage });
+      textarea.focus();
+      await act(async () =>
+        textarea.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            code: 'Enter',
+            ctrlKey: true,
+            shiftKey: true,
+            bubbles: true,
+            cancelable: true,
+          })
+        )
+      );
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0][2]?.submitBehavior).toBe('guide');
+    });
+
+    it('ignores the binding while focus is outside the composer', async () => {
+      commands.setUserKeybindings('session.sendSteer', ['Mod+Enter']);
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage });
+      const other = document.createElement('textarea');
+      document.body.appendChild(other);
+      other.focus();
+      const event = await pressCtrlEnter(other);
+      other.remove();
+      expect(event.defaultPrevented).toBe(false);
+      expect(submissions).toEqual([]);
+      expect(textarea.value).toBe('focus regression draft');
+    });
+
+    it('ignores the binding for a hidden composer', async () => {
+      commands.setUserKeybindings('session.sendSteer', ['Mod+Enter']);
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage, isVisible: false });
+      textarea.focus();
+      await pressCtrlEnter(textarea);
+      expect(submissions).toEqual([]);
+    });
+
+    it('leaves a key still composing in an IME to the input method', async () => {
+      commands.setUserKeybindings('session.sendSteer', ['Mod+Enter']);
+      const { submissions, onSendMessage } = recordSubmissions();
+      const textarea = await renderComposer({ onSendMessage });
+      textarea.focus();
+      await act(async () =>
+        textarea.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Enter',
+            code: 'Enter',
+            ctrlKey: true,
+            isComposing: true,
+            bubbles: true,
+            cancelable: true,
+          })
+        )
+      );
+      expect(submissions).toEqual([]);
+      expect(textarea.value).toBe('focus regression draft');
+    });
   });
 });
