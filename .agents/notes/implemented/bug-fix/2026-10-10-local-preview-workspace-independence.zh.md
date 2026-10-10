@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1372](https://github.com/LodyAI/Lody/pull/1372)
 
 [English](2026-10-10-local-preview-workspace-independence.md)
 
