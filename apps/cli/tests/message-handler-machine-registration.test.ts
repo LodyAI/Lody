@@ -206,6 +206,7 @@ describe('MessageHandler machine registration', () => {
       subagentEvents: 1,
       schedules: 2,
       preparedSessionInput: 1,
+      sessionInputAttachments: 1,
     });
 
     await handler.cleanup();

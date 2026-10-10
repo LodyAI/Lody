@@ -1,3 +1,7 @@
+import { getMachineRoomId } from '@lody/shared';
+import { machineSupportsProtocolCapability, MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
+import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
+import { createCommandAttachmentTransfer } from '@/lib/cloud-cli-port';
 import { toShared } from '@/platform/process-options';
 import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
@@ -381,14 +385,26 @@ const SessionCreateOptionsToolInputSchema = z
   })
   .strict();
 
+const InputAttachmentPathsSchema = z
+  .array(z.string().min(1))
+  .max(SESSION_FILE_MAX_COUNT)
+  .optional()
+  .describe(
+    'Files on the calling machine, absolute or relative to the calling Session workspace; must remain inside that workspace. Uploaded as input to the target Session.'
+  );
 const SessionCreateCommandInputShape = {
+  attachments: InputAttachmentPathsSchema,
   deadlineSeconds: z
     .number()
     .int()
     .min(LODY_OPERATION_MIN_DEADLINE_SECONDS)
     .max(LODY_OPERATION_MAX_DEADLINE_SECONDS)
     .optional(),
-  prompt: z.string().trim().min(1).describe('Initial user prompt for the new session.'),
+  prompt: z
+    .string()
+    .trim()
+    .default('')
+    .describe('Initial user prompt; may be omitted when attachments are provided.'),
   agentRoleId: z
     .string()
     .trim()
@@ -493,7 +509,8 @@ const SessionCreateRuntimeInputSchema = z.xor([
 const SessionCreateToolInputSchema = z
   .object({
     ...SessionCreateCommandInputShape,
-    prompt: SessionCreateCommandInputShape.prompt.optional(),
+    // Preserve absence for resume: the runtime command branches apply the default.
+    prompt: z.string().trim().optional(),
     operationId: LodyOperationIdSchema.optional().describe(
       'Caller-chosen durable Operation id, or the id of an Operation to resume.'
     ),
@@ -524,6 +541,18 @@ const SessionCreateToolInputSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.attachments?.length && !value.operationId)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['operationId'],
+        message: 'Attachments require a durable operationId',
+      });
+    if (!value.resume && !value.prompt?.trim() && !value.attachments?.length)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['prompt'],
+        message: 'Text or attachments are required',
+      });
     const result = SessionCreateRuntimeInputSchema.safeParse(value);
     if (result.success) return;
     for (const issue of result.error.issues) {
@@ -543,7 +572,12 @@ const SessionChatToolInputSchema = z
       .max(LODY_OPERATION_MAX_DEADLINE_SECONDS)
       .optional(),
     sessionId: z.string().trim().min(1).describe('Target session id.'),
-    prompt: z.string().trim().min(1).describe('User prompt to append to the target session.'),
+    prompt: z
+      .string()
+      .trim()
+      .default('')
+      .describe('User prompt; may be omitted when attachments are provided.'),
+    attachments: InputAttachmentPathsSchema,
     wait: z.boolean().optional().describe('Wait for the assistant reply and return it.'),
     timeoutSeconds: z
       .number()
@@ -555,6 +589,18 @@ const SessionChatToolInputSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.attachments?.length && !value.operationId)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['operationId'],
+        message: 'Attachments require a durable operationId',
+      });
+    if (!value.prompt && !value.attachments?.length)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['prompt'],
+        message: 'Text or attachments are required',
+      });
     if (value.wait === true && value.operationId !== undefined) {
       ctx.addIssue({
         code: 'custom',
@@ -1388,6 +1434,7 @@ const buildResolvedMcpCreateCanonicalCommand = (
   deadlineSeconds?: number
 ): Record<string, unknown> => ({
   prompt: resolved.prompt,
+  ...(resolved.input.attachments?.length ? { attachments: resolved.input.attachments } : {}),
   ...(resolved.input.machineId ? { machineId: resolved.input.machineId } : {}),
   ...(resolved.input.agentConfigId ? { agentConfigId: resolved.input.agentConfigId } : {}),
   ...(resolved.role
@@ -2694,6 +2741,36 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     }
     const preallocatedSessionId = randomUUID() as SessionId;
     const preallocatedUserTurnId = randomUUID();
+    if (args.attachments?.length) {
+      const sourceMachine = await manager.repo.getDocMeta(
+        getMachineRoomId(ctx.machineId as MachineId)
+      );
+      if (
+        !machineSupportsProtocolCapability(
+          sourceMachine?.meta as MachineMeta | undefined,
+          MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments
+        )
+      ) {
+        throw new Error('Update the calling machine daemon before sending input attachments');
+      }
+    }
+    const inputAttachments = await prepareSessionInputAttachments({
+      paths: args.attachments ?? [],
+      cwd: ctx.workdir,
+      containWithin: ctx.workdir,
+      workspaceId: workspace.id as WorkspaceId,
+      sessionId: preallocatedSessionId,
+      sourceMachineId: ctx.machineId as MachineId,
+      targetMachineId,
+      ...(args.attachments?.length
+        ? {
+            relay: createCommandAttachmentTransfer(
+              auth.token,
+              Boolean(getSessionCommandEnvironment())
+            ),
+          }
+        : {}),
+    });
     await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
@@ -2707,6 +2784,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
           author: invoking.identity.author,
           operationId: args.operationId!,
           kind: 'session_create',
+          ...(inputAttachments.length ? { targetInputAttachments: [inputAttachments] } : {}),
           targetRoleSnapshots: [resolved.role ? snapshotAgentRole(resolved.role) : null],
           canonicalCommand,
           frozenContinuationConfig: {
@@ -2734,6 +2812,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     if (!pendingItem.inputDurable && accepted.claimedItemIndexes.includes(0)) {
       createOptions.delegatedRequester = toDelegatedSessionRequester(invoking.identity);
       createOptions.sessionId = pendingItem.target.sessionId;
+      createOptions.inputAttachments = accepted.operation.targetInputAttachments?.[0];
       createOptions.userTurnId = pendingItem.target.userTurnId;
       createOptions.chainDepth = invoking.chainDepth + 1;
       let result;
@@ -2803,6 +2882,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
     const canonicalCommand = {
       sessionId: args.sessionId,
       prompt: args.prompt,
+      ...(args.attachments?.length ? { attachments: args.attachments } : {}),
       ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
     };
     const retry = await withOperationStore((store) =>
@@ -2851,6 +2931,36 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       throw new LodyOperationStoreError('COMMAND_REJECTED', formatMcpErrorMessage(error), false);
     }
     const preallocatedUserTurnId = randomUUID();
+    if (args.attachments?.length) {
+      const sourceMachine = await manager.repo.getDocMeta(
+        getMachineRoomId(ctx.machineId as MachineId)
+      );
+      if (
+        !machineSupportsProtocolCapability(
+          sourceMachine?.meta as MachineMeta | undefined,
+          MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments
+        )
+      ) {
+        throw new Error('Update the calling machine daemon before sending input attachments');
+      }
+    }
+    const inputAttachments = await prepareSessionInputAttachments({
+      paths: args.attachments ?? [],
+      cwd: ctx.workdir,
+      containWithin: ctx.workdir,
+      workspaceId: workspace.id as WorkspaceId,
+      sessionId: targetSession.id,
+      sourceMachineId: ctx.machineId as MachineId,
+      targetMachineId: targetSession.machineId,
+      ...(args.attachments?.length
+        ? {
+            relay: createCommandAttachmentTransfer(
+              auth.token,
+              Boolean(getSessionCommandEnvironment())
+            ),
+          }
+        : {}),
+    });
     await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
@@ -2864,6 +2974,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           author: invoking.identity.author,
           operationId: args.operationId!,
           kind: 'session_chat',
+          ...(inputAttachments.length ? { targetInputAttachments: [inputAttachments] } : {}),
           canonicalCommand,
           frozenContinuationConfig: {
             ...(currentSession.agentConfigId
@@ -2900,7 +3011,8 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           userTurnId: pendingItem.target.userTurnId,
           chainDepth: invoking.chainDepth + 1,
         },
-        toDelegatedSessionRequester(invoking.identity)
+        toDelegatedSessionRequester(invoking.identity),
+        { attachments: accepted.operation.targetInputAttachments?.[0] }
       );
       if (result.userTurnId !== pendingItem.target.userTurnId) {
         throw new Error('Chat result did not preserve the preallocated target turn id.');
