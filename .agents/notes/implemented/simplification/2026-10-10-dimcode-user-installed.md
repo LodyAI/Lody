@@ -54,3 +54,5 @@ All three renders had no page exceptions or horizontal overflow.
 The narrow layout's existing reserved action columns still truncate the provider name;
 that separate issue is unresolved. This verifies the component, not the packaged app or
 real machine installation. Screenshots are temporary review artifacts, not committed files.
+
+Pull request: [#1380](https://github.com/LodyAI/Lody/pull/1380) (draft).
