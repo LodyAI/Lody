@@ -9,6 +9,10 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   `(sessions)/` and `(agents-and-cli)/`. Keep both locale trees and every folder's
   `meta.json` in sync. Parenthesized group names are intentional: they provide
   physical/sidebar hierarchy without changing established docs URLs.
+- `content/docs/{en,zh}/compare/` is crawler-only SEO: real `/docs/compare/…`
+  URLs, omitted from the root and Features `meta.json` `pages` arrays so the
+  folder does not appear in the docs sidebar. Do not add `compare` to those
+  arrays.
 - Reference public document images as URLs, `<img src="/_docs-assets/name.png" />`.
   Do not use Markdown image syntax here; Vite will treat it as a JS import from
   `public/`.

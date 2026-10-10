@@ -1,3 +1,7 @@
+import { getMachineRoomId } from '@lody/shared';
+import { machineSupportsProtocolCapability, MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
+import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
+import { createCommandAttachmentTransfer } from '@/lib/cloud-cli-port';
 import { toShared } from '@/platform/process-options';
 import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
@@ -66,9 +70,6 @@ import {
   resolveProjectGitHubRepo,
   type LodyOperationItemResult,
   type SessionTurnInputConfig,
-  REVIEW_SEVERITY_VALUES,
-  REVIEW_VERDICT_VALUES,
-  ReviewSubmissionSchema,
   hasPendingUserTurnActivation,
   normalizeSessionTurnInputConfig,
 } from '@lody/shared';
@@ -89,12 +90,6 @@ import {
   classifyLocalDaemonIpcError,
 } from '@/lib/command-runtime';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
-import {
-  findReviewRunByReviewerSession,
-  syncReviewFlockOnce,
-  writeReviewRun,
-} from '@/lib/review-automation/review-automation-store';
-import { applyReviewSubmission } from '@/lib/review-automation/review-automation-submit';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
 import { listWorkspaceGitHubRepositoriesForCliToken } from '@/lib/workspace';
@@ -167,7 +162,6 @@ const SESSION_RENAME_TOOL_NAME = 'lody_session_rename';
 const SESSION_RENAME_MANY_TOOL_NAME = 'lody_session_rename_many';
 const OPERATION_GET_TOOL_NAME = 'lody_operation_get';
 const OPERATION_CANCEL_TOOL_NAME = 'lody_operation_cancel';
-const REVIEW_SUBMIT_TOOL_NAME = 'lody_review_submit';
 const SESSION_FILE_MAX_SIZE_MB = Math.floor(SESSION_FILE_MAX_SIZE_BYTES / (1024 * 1024));
 const SESSION_CONTROL_TIMEOUT_MS = 30_000;
 const LODY_CLI_DEFAULT_TIMEOUT_MS = 10 * 60_000;
@@ -381,14 +375,26 @@ const SessionCreateOptionsToolInputSchema = z
   })
   .strict();
 
+const InputAttachmentPathsSchema = z
+  .array(z.string().min(1))
+  .max(SESSION_FILE_MAX_COUNT)
+  .optional()
+  .describe(
+    'Files on the calling machine, absolute or relative to the calling Session workspace; must remain inside that workspace. Uploaded as input to the target Session.'
+  );
 const SessionCreateCommandInputShape = {
+  attachments: InputAttachmentPathsSchema,
   deadlineSeconds: z
     .number()
     .int()
     .min(LODY_OPERATION_MIN_DEADLINE_SECONDS)
     .max(LODY_OPERATION_MAX_DEADLINE_SECONDS)
     .optional(),
-  prompt: z.string().trim().min(1).describe('Initial user prompt for the new session.'),
+  prompt: z
+    .string()
+    .trim()
+    .default('')
+    .describe('Initial user prompt; may be omitted when attachments are provided.'),
   agentRoleId: z
     .string()
     .trim()
@@ -493,7 +499,8 @@ const SessionCreateRuntimeInputSchema = z.xor([
 const SessionCreateToolInputSchema = z
   .object({
     ...SessionCreateCommandInputShape,
-    prompt: SessionCreateCommandInputShape.prompt.optional(),
+    // Preserve absence for resume: the runtime command branches apply the default.
+    prompt: z.string().trim().optional(),
     operationId: LodyOperationIdSchema.optional().describe(
       'Caller-chosen durable Operation id, or the id of an Operation to resume.'
     ),
@@ -524,6 +531,18 @@ const SessionCreateToolInputSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.attachments?.length && !value.operationId)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['operationId'],
+        message: 'Attachments require a durable operationId',
+      });
+    if (!value.resume && !value.prompt?.trim() && !value.attachments?.length)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['prompt'],
+        message: 'Text or attachments are required',
+      });
     const result = SessionCreateRuntimeInputSchema.safeParse(value);
     if (result.success) return;
     for (const issue of result.error.issues) {
@@ -543,7 +562,12 @@ const SessionChatToolInputSchema = z
       .max(LODY_OPERATION_MAX_DEADLINE_SECONDS)
       .optional(),
     sessionId: z.string().trim().min(1).describe('Target session id.'),
-    prompt: z.string().trim().min(1).describe('User prompt to append to the target session.'),
+    prompt: z
+      .string()
+      .trim()
+      .default('')
+      .describe('User prompt; may be omitted when attachments are provided.'),
+    attachments: InputAttachmentPathsSchema,
     wait: z.boolean().optional().describe('Wait for the assistant reply and return it.'),
     timeoutSeconds: z
       .number()
@@ -555,6 +579,18 @@ const SessionChatToolInputSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.attachments?.length && !value.operationId)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['operationId'],
+        message: 'Attachments require a durable operationId',
+      });
+    if (!value.prompt && !value.attachments?.length)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['prompt'],
+        message: 'Text or attachments are required',
+      });
     if (value.wait === true && value.operationId !== undefined) {
       ctx.addIssue({
         code: 'custom',
@@ -1388,6 +1424,7 @@ const buildResolvedMcpCreateCanonicalCommand = (
   deadlineSeconds?: number
 ): Record<string, unknown> => ({
   prompt: resolved.prompt,
+  ...(resolved.input.attachments?.length ? { attachments: resolved.input.attachments } : {}),
   ...(resolved.input.machineId ? { machineId: resolved.input.machineId } : {}),
   ...(resolved.input.agentConfigId ? { agentConfigId: resolved.input.agentConfigId } : {}),
   ...(resolved.role
@@ -2694,6 +2731,36 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     }
     const preallocatedSessionId = randomUUID() as SessionId;
     const preallocatedUserTurnId = randomUUID();
+    if (args.attachments?.length) {
+      const sourceMachine = await manager.repo.getDocMeta(
+        getMachineRoomId(ctx.machineId as MachineId)
+      );
+      if (
+        !machineSupportsProtocolCapability(
+          sourceMachine?.meta as MachineMeta | undefined,
+          MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments
+        )
+      ) {
+        throw new Error('Update the calling machine daemon before sending input attachments');
+      }
+    }
+    const inputAttachments = await prepareSessionInputAttachments({
+      paths: args.attachments ?? [],
+      cwd: ctx.workdir,
+      containWithin: ctx.workdir,
+      workspaceId: workspace.id as WorkspaceId,
+      sessionId: preallocatedSessionId,
+      sourceMachineId: ctx.machineId as MachineId,
+      targetMachineId,
+      ...(args.attachments?.length
+        ? {
+            relay: createCommandAttachmentTransfer(
+              auth.token,
+              Boolean(getSessionCommandEnvironment())
+            ),
+          }
+        : {}),
+    });
     await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
@@ -2707,6 +2774,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
           author: invoking.identity.author,
           operationId: args.operationId!,
           kind: 'session_create',
+          ...(inputAttachments.length ? { targetInputAttachments: [inputAttachments] } : {}),
           targetRoleSnapshots: [resolved.role ? snapshotAgentRole(resolved.role) : null],
           canonicalCommand,
           frozenContinuationConfig: {
@@ -2734,6 +2802,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
     if (!pendingItem.inputDurable && accepted.claimedItemIndexes.includes(0)) {
       createOptions.delegatedRequester = toDelegatedSessionRequester(invoking.identity);
       createOptions.sessionId = pendingItem.target.sessionId;
+      createOptions.inputAttachments = accepted.operation.targetInputAttachments?.[0];
       createOptions.userTurnId = pendingItem.target.userTurnId;
       createOptions.chainDepth = invoking.chainDepth + 1;
       let result;
@@ -2803,6 +2872,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
     const canonicalCommand = {
       sessionId: args.sessionId,
       prompt: args.prompt,
+      ...(args.attachments?.length ? { attachments: args.attachments } : {}),
       ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
     };
     const retry = await withOperationStore((store) =>
@@ -2851,6 +2921,36 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       throw new LodyOperationStoreError('COMMAND_REJECTED', formatMcpErrorMessage(error), false);
     }
     const preallocatedUserTurnId = randomUUID();
+    if (args.attachments?.length) {
+      const sourceMachine = await manager.repo.getDocMeta(
+        getMachineRoomId(ctx.machineId as MachineId)
+      );
+      if (
+        !machineSupportsProtocolCapability(
+          sourceMachine?.meta as MachineMeta | undefined,
+          MACHINE_PROTOCOL_CAPABILITIES.sessionInputAttachments
+        )
+      ) {
+        throw new Error('Update the calling machine daemon before sending input attachments');
+      }
+    }
+    const inputAttachments = await prepareSessionInputAttachments({
+      paths: args.attachments ?? [],
+      cwd: ctx.workdir,
+      containWithin: ctx.workdir,
+      workspaceId: workspace.id as WorkspaceId,
+      sessionId: targetSession.id,
+      sourceMachineId: ctx.machineId as MachineId,
+      targetMachineId: targetSession.machineId,
+      ...(args.attachments?.length
+        ? {
+            relay: createCommandAttachmentTransfer(
+              auth.token,
+              Boolean(getSessionCommandEnvironment())
+            ),
+          }
+        : {}),
+    });
     await freezeInvokingAuthor(manager, currentSession, invoking);
     const materializationClaimToken = randomUUID();
     const timing = operationDeadline(args.deadlineSeconds);
@@ -2864,6 +2964,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           author: invoking.identity.author,
           operationId: args.operationId!,
           kind: 'session_chat',
+          ...(inputAttachments.length ? { targetInputAttachments: [inputAttachments] } : {}),
           canonicalCommand,
           frozenContinuationConfig: {
             ...(currentSession.agentConfigId
@@ -2900,7 +3001,8 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
           userTurnId: pendingItem.target.userTurnId,
           chainDepth: invoking.chainDepth + 1,
         },
-        toDelegatedSessionRequester(invoking.identity)
+        toDelegatedSessionRequester(invoking.identity),
+        { attachments: accepted.operation.targetInputAttachments?.[0] }
       );
       if (result.userTurnId !== pendingItem.target.userTurnId) {
         throw new Error('Chat result did not preserve the preallocated target turn id.');
@@ -3543,57 +3645,6 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
     return snapshotOperation(ctx.sessionId as SessionId, args.operationId);
   });
 };
-
-/**
- * Mirrors `ReviewSubmissionSchema` as a plain object so the MCP SDK can publish
- * the JSON Schema. The shared schema's `superRefine` (a blocking finding must
- * carry a failure scenario) is re-applied on the parsed value below: a refinement
- * does not survive JSON Schema generation, but it is the one rule that keeps a
- * reviewer from labelling every opinion blocking, so it is enforced anyway.
- */
-const ReviewSubmitToolInputSchema = z
-  .object({
-    verdict: z
-      .enum(REVIEW_VERDICT_VALUES)
-      .describe('`approve` only when nothing blocking remains.'),
-    findings: z
-      .array(
-        z.object({
-          file: z.string().trim().min(1),
-          line: z.number().int().positive().optional(),
-          severity: z.enum(REVIEW_SEVERITY_VALUES),
-          title: z.string().trim().min(1).max(200),
-          detail: z.string().trim().min(1).max(4000),
-          failureScenario: z
-            .string()
-            .trim()
-            .max(2000)
-            .optional()
-            .describe(
-              'Required for blocking findings: specific inputs or state, and the wrong result they produce.'
-            ),
-        })
-      )
-      .max(100)
-      .optional(),
-    resolutions: z
-      .array(
-        z.object({
-          findingId: z.string().trim().min(1),
-          state: z.enum(['resolved', 'unresolved', 'disputed']),
-          note: z.string().trim().max(2000).optional(),
-        })
-      )
-      .max(100)
-      .optional()
-      .describe(
-        'Verdict on each previously raised finding. Use `disputed` to escalate to a human.'
-      ),
-    summary: z.string().trim().max(2000).optional(),
-  })
-  .strict();
-
-type ReviewSubmitToolInput = z.infer<typeof ReviewSubmitToolInputSchema>;
 
 export const __lodyMcpServerInternals = {
   FeedbackToolInputSchema,
@@ -4470,136 +4521,6 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     async (args: SessionHistoryToolInput) => {
       try {
         return jsonTextResult(await buildSessionHistory(args));
-      } catch (error) {
-        return mcpErrorResult(error);
-      }
-    }
-  );
-
-  server.registerTool(
-    REVIEW_SUBMIT_TOOL_NAME,
-    {
-      title: 'Submit a code review',
-      description:
-        'Report the result of reviewing a branch. Call this exactly once per review round. Only a session acting as a review agent can use it.',
-      inputSchema: ReviewSubmitToolInputSchema,
-    },
-    async (args: ReviewSubmitToolInput) => {
-      try {
-        const ctx = getSessionContext();
-        const auth = getCliAuthContextOrThrow('mcp');
-        const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-        return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-          const workspaceId = workspace.id as WorkspaceId;
-          const reviewerSessionId = ctx.sessionId as SessionId;
-          const run = await findReviewRunByReviewerSession(
-            manager.repo,
-            workspaceId,
-            reviewerSessionId
-          );
-          if (!run) {
-            return jsonTextResult(
-              {
-                ok: false,
-                error: makeLodyError(
-                  'REVIEW_RUN_NOT_FOUND',
-                  'This session is not acting as a review agent for any branch.',
-                  false
-                ),
-              },
-              true
-            );
-          }
-          // An agent-callable tool must not write outside the state it belongs
-          // to: a submission arriving while the run is merging or already
-          // finished would record findings nothing will ever act on.
-          if (run.state !== 'reviewing') {
-            return jsonTextResult(
-              {
-                ok: false,
-                error: makeLodyError(
-                  'REVIEW_NOT_AWAITING_SUBMISSION',
-                  `This review is not waiting for a submission (state: ${run.state}).`,
-                  false
-                ),
-              },
-              true
-            );
-          }
-          // "Exactly once" is otherwise only prompt-enforced, and the run stays
-          // in `reviewing` until the engine's next pass — so a second call would
-          // append a duplicate set of findings with fresh ids.
-          if (run.submittedRound === run.round) {
-            // The submission may be durable here but never uploaded — exactly
-            // what a previous call that failed to sync leaves behind. Retrying
-            // is the reviewer's only repair, so push before refusing.
-            try {
-              await syncReviewFlockOnce(manager.repo, workspaceId);
-              return jsonTextResult({
-                ok: true,
-                round: run.round,
-                findings: run.findings.length,
-                note: 'This round was already submitted; the pending write has now been synced.',
-              });
-            } catch {
-              return jsonTextResult(
-                {
-                  ok: false,
-                  error: makeLodyError(
-                    'REVIEW_SUBMIT_NOT_SYNCED',
-                    'A review for this round is saved locally but could not be uploaded. Call the tool again.',
-                    true
-                  ),
-                },
-                true
-              );
-            }
-          }
-
-          // Re-apply the shared refinement the published JSON Schema cannot carry.
-          const parsed = ReviewSubmissionSchema.safeParse(args);
-          if (!parsed.success) {
-            const message =
-              parsed.error.issues[0]?.message ?? 'The submission did not match the expected shape.';
-            return jsonTextResult(
-              { ok: false, error: makeLodyError('REVIEW_SUBMISSION_INVALID', message, true) },
-              true
-            );
-          }
-
-          const applied = applyReviewSubmission(run, parsed.data);
-          try {
-            // Confirmed, not best-effort: this process is about to exit, so an
-            // unsynced write is a lost submission that the engine would later
-            // read as "the reviewer never submitted".
-            await writeReviewRun(manager.repo, workspaceId, applied.run, { confirmSync: true });
-          } catch (error) {
-            return jsonTextResult(
-              {
-                ok: false,
-                error: makeLodyError(
-                  'REVIEW_SUBMIT_NOT_SYNCED',
-                  `The review could not be saved: ${
-                    error instanceof Error ? error.message : String(error)
-                  }. Call the tool again.`,
-                  true
-                ),
-              },
-              true
-            );
-          }
-          return jsonTextResult({
-            ok: true,
-            round: applied.run.round,
-            findings: applied.run.findings.length,
-            ...(applied.droppedSuggestions > 0
-              ? {
-                  droppedSuggestions: applied.droppedSuggestions,
-                  note: 'A re-check round cannot raise new suggestions; those were dropped.',
-                }
-              : {}),
-          });
-        });
       } catch (error) {
         return mcpErrorResult(error);
       }

@@ -68,7 +68,7 @@ and file responsibilities: [../README.md](../README.md).
   A PR-linked session that ends with unpublished work is reported through
   `SessionMeta.workspaceDirty` AND `workspaceUnpushed`, which raise the Info Bar's
   `Commit & Push` action; the agent is asked to keep the branch current by the Create PR
-  prompt (`packages/shared/src/review-prompts.ts`), which the user can override in
+  prompt (`packages/shared/src/pr-prompts.ts`), which the user can override in
   conversation. Do not re-add an automatic post-turn commit/push.
 - Publish BOTH flags or the signal has a hole: `git status` goes clean the moment the agent
   commits, so a commit whose push failed reads as "all clear" and the Info Bar offers Merge

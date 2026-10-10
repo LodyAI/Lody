@@ -3,8 +3,7 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only. File index:
 [README.md](README.md). Scoped rules: [acp](acp/AGENTS.md),
 [code-collab](code-collab/AGENTS.md), [file-preview](file-preview/AGENTS.md),
-[loro](loro/AGENTS.md), [pr-poller](pr-poller/AGENTS.md),
-[review-automation](review-automation/AGENTS.md).
+[loro](loro/AGENTS.md), [pr-poller](pr-poller/AGENTS.md).
 
 **Before touching message dispatch/sync here, read context/message-flow.md**, the
 end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
@@ -70,14 +69,12 @@ never pushed to renderers as local room health.
   anything looks like pressure; re-check with a short delay before failing a turn; keep
   eviction bounded per call. The threshold is a safety MARGIN, never "what a turn
   needs". [Per-OS signals](../../../../.agents/docs/cli-lib-memory-pressure.md).
-- **Session file attachments** (spec: `specs/session-files.md`): read the
-  [lifecycle rules](../../../../.agents/docs/cli-lib-session-files.md) before changing
-  upload, dispatch materialization, or backfill. Dispatch sends ACP `resource_link`
-  blocks with `file://` URIs; never degrade this to text-only paths. Backfill commits
-  are gated by an authorization generation plus an AbortController owned by
-  `MessageHandler`, so `disableRemoteBackfill` (offline/revoke) aborts the in-flight
-  upload and supersedes started tasks (S5/D10). Accept agent `resource_link file://...`
-  output only inside the session workspace.
+- **Session attachments**: before changing preparation, transfer, materialization,
+  or backfill, read the [lifecycle rules](../../../../.agents/docs/cli-lib-session-files.md).
+  CLI/MCP input preparation must finish before history/dispatch; recovery uses frozen
+  references, never source paths. [Input contract](../../../../specs/cli-session-attachments.md).
+  Keep ACP `resource_link` file URIs, workspace-contained agent output, and
+  MessageHandler-owned authorization-generation/AbortController backfill fencing.
 - [acp/AGENTS.md](acp/AGENTS.md) specifies ACP buffering/flush in `message-handler.ts`,
   turn-evidence persistence, shutdown ordering, the non-expiring late-ACP target in
   `session-transient-store.ts`, and the `awaitTurnHistoryGate` requirement for

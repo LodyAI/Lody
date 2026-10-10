@@ -8,6 +8,10 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./loro-sync-errors": {
+      "types": "./src/loro-sync-errors/index.ts",
+      "import": "./src/loro-sync-errors/index.ts"
+    },
     "./session-link-export": {
       "types": "./src/session-link-export.ts",
       "import": "./src/session-link-export.ts"

@@ -74,6 +74,12 @@ boundary also has a body error. This tree recovery does not certify drained stdi
 or complete Session shutdown. See the
 [release decision](../notes/implemented/bug-fix/2026-10-10-effect-process-release-failure.md).
 
+In pinned 4.0.2, `Effect.mapError` selects a typed failure and can discard other
+reasons in a mixed Cause. Resource-owning error conversions use `catchCause` and
+`failCause(Cause.map(...))` to retain defects and interruptions. In particular,
+failed process acquisition can already have closed its child Scope: its release
+lease must reach the caller alongside the setup failure.
+
 Never wrap the shared Promise functions back into an Effect. A runner creates a
 separate root fiber. For an unmigrated entry point, the shared facade accepts an
 explicit AbortSignal; pass it when the entry point supports cancellation. This
