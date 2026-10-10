@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-10-dsh-electron-runtime.zh.md)
 
+PR: https://github.com/LodyAI/Lody/pull/1367
+
 ## Abstract
 
 DeepSeek Harness 0.2.0-rc.2 exits before ACP initialization under Electron 43.7.6:
