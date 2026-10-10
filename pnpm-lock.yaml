@@ -193,6 +193,9 @@ patchedDependencies:
   '@tanstack/router-generator@1.159.4':
     hash: 14fe630c2d7f306f8e60169e6a0116cf02de74368af213699cb449aeeecc663a
     path: patches/@tanstack__router-generator@1.159.4.patch
+  '@xterm/xterm@5.5.0':
+    hash: fd59e0a8e8288550716da73193d2628f900136d296c3c76d54df2397d5411a85
+    path: patches/@xterm__xterm@5.5.0.patch
   app-builder-lib@26.15.3:
     hash: 80637977dda4ea924da866a67751774a621195429af5af0f103e9129b3bec57f
     path: patches/app-builder-lib@26.15.3.patch
@@ -1197,10 +1200,10 @@ importers:
         version: 0.1.0(react@19.2.0)
       '@xterm/addon-fit':
         specifier: ^0.10.0
-        version: 0.10.0(@xterm/xterm@5.5.0)
+        version: 0.10.0(@xterm/xterm@5.5.0(patch_hash=fd59e0a8e8288550716da73193d2628f900136d296c3c76d54df2397d5411a85))
       '@xterm/xterm':
         specifier: ^5.5.0
-        version: 5.5.0
+        version: 5.5.0(patch_hash=fd59e0a8e8288550716da73193d2628f900136d296c3c76d54df2397d5411a85)
       '@zumer/snapdom':
         specifier: ^2.24.15
         version: 2.24.15
@@ -20808,11 +20811,11 @@ snapshots:
 
   '@xmldom/xmldom@0.8.11': {}
 
-  '@xterm/addon-fit@0.10.0(@xterm/xterm@5.5.0)':
+  '@xterm/addon-fit@0.10.0(@xterm/xterm@5.5.0(patch_hash=fd59e0a8e8288550716da73193d2628f900136d296c3c76d54df2397d5411a85))':
     dependencies:
-      '@xterm/xterm': 5.5.0
+      '@xterm/xterm': 5.5.0(patch_hash=fd59e0a8e8288550716da73193d2628f900136d296c3c76d54df2397d5411a85)
 
-  '@xterm/xterm@5.5.0': {}
+  '@xterm/xterm@5.5.0(patch_hash=fd59e0a8e8288550716da73193d2628f900136d296c3c76d54df2397d5411a85)': {}
 
   '@zag-js/dismissable@1.42.0':
     dependencies:

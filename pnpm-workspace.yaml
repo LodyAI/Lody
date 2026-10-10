@@ -252,6 +252,7 @@ packageExtensions:
 packageManagerStrictVersion: true
 
 patchedDependencies:
+  '@xterm/xterm@5.5.0': patches/@xterm__xterm@5.5.0.patch
   '@shinyoshiaki/binary-data@0.6.1': patches/@shinyoshiaki__binary-data@0.6.1.patch
   werift@0.24.4: patches/werift@0.24.4.patch
   '@radix-ui/react-scroll-area@1.2.10': patches/@radix-ui__react-scroll-area@1.2.10.patch
