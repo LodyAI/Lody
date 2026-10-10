@@ -147,3 +147,30 @@ export const InactiveXlsxWorkbook: Story = {
 export const PptxPresentation: Story = {
   args: { path: '/tmp/quarterly-report.pptx', bytes: samplePptx() },
 };
+
+// Synthetic 160x90 VP8 color pattern; no captured user media.
+export const WebmVideo: Story = {
+  args: { path: 'clip.webm' },
+  loaders: [
+    async () => ({
+      bytes: new Uint8Array(
+        await (
+          await fetch(new URL('./fixtures/video-preview.webm', import.meta.url).href)
+        ).arrayBuffer()
+      ),
+    }),
+  ],
+  render: (args, { loaded }) => <SessionFileBinaryPreview {...args} bytes={loaded.bytes} />,
+};
+
+export const UnsupportedVideo: Story = {
+  args: {
+    path: 'broken.webm',
+    bytes: Uint8Array.of(1, 2, 3),
+    fileActions: { onCopyPath: fn(), onShare: fn() },
+  },
+};
+
+export const InactiveVideo: Story = {
+  args: { path: 'clip.webm', bytes: Uint8Array.of(1), active: false },
+};

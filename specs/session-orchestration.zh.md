@@ -47,6 +47,14 @@ Operation id 下更改选择返回 `OPERATION_ID_REUSED`。接受时冻结各目
 配置。重试和恢复使用冻结配置，不重新计算 requester 默认值或 Role 配置。
 不需要 Operation 存储迁移。
 
+## 运行时拒绝模型
+
+请求被接受后，如果 agent 拒绝所请求的模型，必须产生 GUI 可见的
+`agent_warning`，标明被拒绝的模型；Codex 和 Claude 同样适用。创建会话及后续
+Turn（包括 resume）均遵守这一规则，无论模型通过 `modelId` 还是 agent 公布的
+config option 传入。运行时状态仍反映 agent 确认的实际模型。报告复用现有异步
+警告路径，不中止 Turn，也不保证在 prompt 开始前完成显示。
+
 ## 冻结 turn 输入
 
 带 Role 的首次启动失败后，即使重试走不同执行路径，也必须保留已接受的指令和附件。

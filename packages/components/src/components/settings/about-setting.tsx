@@ -128,6 +128,81 @@ function UpdateStatusText({
   return null;
 }
 
+function DefaultLinkHandlerSetting() {
+  const { t } = useTranslation();
+  const [isDefault, setIsDefault] = useState<boolean | null>(null);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [app] = useState(() => getIpcServices()?.app);
+  useEffect(() => {
+    if (!app) return undefined;
+    let disposed = false;
+    const refresh = () =>
+      void app
+        .getDefaultLinkHandler()
+        .then((state) => {
+          if (!disposed) setIsDefault(state.isDefault);
+        })
+        .catch(() => {
+          if (!disposed) setIsDefault(false);
+        });
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      disposed = true;
+      window.removeEventListener('focus', refresh);
+    };
+  }, [app]);
+  if (!app) return null;
+  return (
+    <CompactRow
+      label={t('deepLink.defaultHandler', 'Open Lody links with this app')}
+      helper={
+        message ??
+        t(
+          'deepLink.defaultHandlerHelp',
+          'Choose which installed version opens links from other apps.'
+        )
+      }
+    >
+      <Button
+        size="small"
+        variant="secondary"
+        disabled={pending || isDefault === true}
+        onClick={() => {
+          setPending(true);
+          void app
+            .setDefaultLinkHandler()
+            .then((state) => {
+              setIsDefault(state.isDefault);
+              setMessage(
+                state.isDefault
+                  ? null
+                  : t(
+                      'deepLink.defaultHandlerPending',
+                      'If prompted, confirm your choice in system settings.'
+                    )
+              );
+            })
+            .catch(() =>
+              setMessage(
+                t(
+                  'deepLink.defaultHandlerFailed',
+                  'Unable to change the default app. Choose it in system settings.'
+                )
+              )
+            )
+            .finally(() => setPending(false));
+        }}
+      >
+        {isDefault
+          ? t('deepLink.defaultHandlerActive', 'Default app')
+          : t('deepLink.makeDefault', 'Set as default')}
+      </Button>
+    </CompactRow>
+  );
+}
+
 function DevbarSettingsControls() {
   const { t } = useTranslation();
   const [config, setConfig] = useState<DevbarConfig | null>(null);
@@ -324,6 +399,7 @@ export function AboutSettingsComponent() {
       {/* What is running is one fact: the version, and the build it came
         from as its detail; the update check acts on exactly that. */}
       <CompactSection>
+        <DefaultLinkHandlerSetting />
         <CompactRow
           label={
             displayVersion

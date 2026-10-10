@@ -86,7 +86,7 @@ never pushed to renderers as local room health.
 
 ## Projects, providers, tasks
 
-- Builtin Codex local-project history import is read-only: require
+- Builtin Codex/DeepSeek local-project history import is read-only: require
   `_meta.lody.sessionHistory` v1 and call the Core-defined history method; never fall
   back to `loadSession`, which resumes the thread. Publish an imported Session only
   after history and its cursor are durable; legacy `metadata_only` shells stay

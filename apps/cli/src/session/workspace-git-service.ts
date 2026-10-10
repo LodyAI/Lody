@@ -1,14 +1,13 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { toShared } from '@/platform/process-options';
 import { getLocalProjectGitHubRepoAtRootPath } from '@lody/shared/node/local-project';
 import type { SessionId } from '@lody/shared';
 import { resolveGitBranch, type SessionExec } from '@/lib/git/resolve-git-branch-name';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import type { ISession } from './session-manager';
-
-const execFileAsync = promisify(execFile);
 
 /** Git checkout facts, without provider API calls or credentials. */
 export class WorkspaceGitService {
@@ -41,12 +40,17 @@ export class WorkspaceGitService {
       ownerSessionId,
       workspaceRoot,
       async (command, args, cwd) => {
-        const { stdout } = await execFileAsync(command, args, {
-          cwd,
-          encoding: 'utf8',
-          timeout: 10_000,
-          maxBuffer: 64 * 1024,
-        });
+        const { stdout } = await runCommandTextLegacy(
+          {
+            command,
+            args,
+            cwd,
+            timeout: 10_000,
+            maxOutputBytes: 64 * 1024,
+            check: 'exit-0',
+          },
+          toShared()
+        );
         return stdout;
       },
       true

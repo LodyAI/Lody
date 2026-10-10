@@ -23,19 +23,24 @@ function createLogger(): Logger {
 
 describe('applyAcpSessionRunConfig', () => {
   it('applies mode, model, and remaining options to an established ACP session', async () => {
-    const setSessionMode = vi.fn(async () => undefined);
-    const setSessionModel = vi.fn(async () => undefined);
-    const setSessionConfigOption = vi.fn(async () => undefined);
+    const options = [
+      { id: 'permission-mode', category: 'mode', type: 'select', currentValue: 'default' },
+      { id: 'engine', category: 'model', type: 'select', currentValue: 'model-b' },
+      { id: 'effort', category: 'thought_level', type: 'select', currentValue: 'low' },
+    ];
+    const select = async (configId: string, value: string) => {
+      const option = options.find((candidate) => candidate.id === configId);
+      if (!option || value === 'ignored-duplicate') throw new Error('Invalid selection');
+      option.currentValue = value;
+    };
     const agentClient = {
       isCreated: () => true,
-      getConfigOptions: () => [
-        { id: 'permission-mode', category: 'mode', type: 'select', currentValue: 'default' },
-        { id: 'engine', category: 'model', type: 'select', currentValue: 'model-a' },
-        { id: 'effort', category: 'thought_level', type: 'select', currentValue: 'high' },
-      ],
-      setSessionMode,
-      unstable_setSessionModel: setSessionModel,
-      setSessionConfigOption,
+      getConfigOptions: () => options,
+      setSessionMode: async (_sessionId: string, value: string) => select('permission-mode', value),
+      unstable_setSessionModel: async (_sessionId: string, value: string) =>
+        select('engine', value),
+      setSessionConfigOption: async (_sessionId: string, configId: string, value: string) =>
+        select(configId, value),
     } as unknown as AgentClient;
 
     await expect(
@@ -70,11 +75,6 @@ describe('applyAcpSessionRunConfig', () => {
         },
       },
     });
-
-    expect(setSessionMode).toHaveBeenCalledWith('acp-1', 'agent');
-    expect(setSessionModel).toHaveBeenCalledWith('acp-1', 'model-a');
-    expect(setSessionConfigOption).toHaveBeenCalledTimes(1);
-    expect(setSessionConfigOption).toHaveBeenCalledWith('acp-1', 'effort', 'high');
   });
 
   it('redacts sensitive values in logs and preserves rejected selections', async () => {
@@ -111,7 +111,7 @@ describe('applyAcpSessionRunConfig', () => {
   });
 
   it.each(['codex', 'claude'])(
-    'suppresses known %s run-config mismatch warnings while retaining rejection diagnostics',
+    'exposes %s model rejection while suppressing effort, Fast, and Plan warnings',
     async (agentType) => {
       const reject = vi.fn(async () => {
         throw new Error('rejected');
@@ -159,8 +159,53 @@ describe('applyAcpSessionRunConfig', () => {
           'collaboration_mode="plan"',
           'custom-option="enabled"',
         ],
-        warningSelections: ['custom-option="enabled"'],
+        warningSelections: ['model="model-a"', 'custom-option="enabled"'],
         runtimeConfigPatch: { acpSessionId: 'acp-3', configOptionValues: {} },
+      });
+    }
+  );
+
+  it.each(
+    ['codex', 'claude', 'other-agent'].flatMap((agentType) =>
+      ['modelId', 'configOptionValues'].map((source) => ({ agentType, source }))
+    )
+  )(
+    'reports $agentType model rejection from $source and retains the active model',
+    async ({ agentType, source }) => {
+      const options = [
+        { id: 'engine', category: 'model', type: 'select', currentValue: 'active-model' },
+      ];
+      const agentClient = {
+        isCreated: () => true,
+        getConfigOptions: () => options,
+        unstable_setSessionModel: async () => {
+          throw new Error('Requested model is unavailable');
+        },
+      } as unknown as AgentClient;
+
+      const result = await applyAcpSessionRunConfig({
+        session: {
+          sessionId: 'session-model-rejection' as SessionId,
+          acpSessionId: 'acp-model-rejection' as ACPSessionId,
+          agentClient,
+        },
+        config: {
+          agentType,
+          ...(source === 'modelId'
+            ? { modelId: 'requested-model', configOptionValues: { engine: 'duplicate-model' } }
+            : { configOptionValues: { engine: 'requested-model' } }),
+        },
+        logger: createLogger(),
+      });
+
+      expect(result).toEqual({
+        rejectedSelections: ['model="requested-model"'],
+        warningSelections: ['model="requested-model"'],
+        runtimeConfigPatch: {
+          acpSessionId: 'acp-model-rejection',
+          modelId: 'active-model',
+          configOptionValues: { engine: 'active-model' },
+        },
       });
     }
   );

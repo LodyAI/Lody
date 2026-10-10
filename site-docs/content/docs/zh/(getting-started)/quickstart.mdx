@@ -3,19 +3,32 @@ title: 快速开始
 description: 完成 Lody 的基础安装与初始化，包括桌面端启动、CLI 启动方式、GitHub 集成与后续配置。
 ---
 
-import { MonitorDown, TabletSmartphone, Compass } from 'lucide-react';
+import { MonitorDown, TabletSmartphone, Compass, SquareTerminal } from 'lucide-react';
 
 # 快速开始
 
 Lody 全面支持了所有平台浏览器访问和客户端应用，包括 macOS、Windows、Linux 桌面端，也可以在 iOS 和 Android 手机上使用移动端，或者在远程服务器上使用 CLI。
 
 <Cards>
-    <Card href="/zh/download" title="下载桌面客户端" icon={<MonitorDown />}>macOS, Windows, Linux</Card>
-    <Card href="/zh/download" title="下载移动客户端" icon={<TabletSmartphone />}>iOS, Android</Card>
-  <Card  href="/login" icon={<Compass />} title="登录 Lody" >
+  <Card href="/zh/download" title="下载桌面客户端" icon={<MonitorDown />}>
+    macOS, Windows, Linux
+  </Card>
+  <Card href="/zh/download" title="下载移动客户端" icon={<TabletSmartphone />}>
+    iOS, Android
+  </Card>
+  <Card href="/login" icon={<Compass />} title="登录 Lody">
     去 Web 端登录
   </Card>
+  <Card href="#cli-方式启动" icon={<SquareTerminal />} title="启动 CLI">
+    从服务器使用 Lody
+  </Card>
 </Cards>
+
+在服务器上运行：
+
+```bash
+npx lody daemon start
+```
 
 ## 桌面端方式启动
 
@@ -38,6 +51,7 @@ Lody 全面支持了所有平台浏览器访问和客户端应用，包括 macOS
 ```bash tab="守护进程（推荐）"
 npx lody daemon start
 ```
+
 ```bash tab="前台运行"
 npx lody login
 npx lody start
@@ -47,31 +61,29 @@ npx lody start
 
 守护进程会在 CLI 异常退出后自动恢复。如果你完全不方便访问浏览器，可以使用 `npx lody daemon start --auth <cli_token>` 直接启动，`cli_token` 可以在桌面端的 **设置** -> **账户** -> **CLI Token** 中查看和生成。如果你更习惯把登录作为单独一步，`npx lody login` 依然可用。
 
-
 <Callout title="将桌面端作为纯远程控制端">
 桌面端默认会启动内置的本地 CLI，以便在当前电脑运行 Agent。如果你只想控制其他机器上的 Agent，可以
 进入 **设置** -> **通用** -> **启动**，关闭 **运行本地 Agent**。
 
 关闭后，桌面端会停止自动管理的 CLI，并在下次启动时继续保持关闭；其他机器上运行的 Agent 不受影响。
-</Callout>
 
+</Callout>
 
 ## 添加项目
 
 ### 添加本地项目
 
-<Accordions type="single">
-  <Accordion title="通过桌面端添加">
-  你可以在桌面端的 **设置** -> **项目** 中右上角的按钮添加本地项目，选择对应的机器后，Lody 将展示所有的目录，你可以选择一个目录作为项目的根目录。
-  </Accordion>
-    <Accordion title="通过移动端添加">
-    你可以在移动端的 **项目** 中右上角的按钮添加本地项目，选择对应的机器后，Lody 将展示所有的目录，你可以选择一个目录作为项目的根目录。
-    </Accordion>
-      <Accordion title="通过 CLI 添加">
-      你可以在 CLI 中使用 `npx lody project add <path>` 命令添加本地项目，`<path>` 是项目的根目录。
-      </Accordion>
-</Accordions>
-
+<Tabs items={['桌面端', '移动端', 'CLI']}>
+<Tab value="桌面端">
+你可以在桌面端的 **设置** -> **项目** 中右上角的按钮添加本地项目，选择对应的机器后，Lody 将展示所有的目录，你可以选择一个目录作为项目的根目录。
+</Tab>
+<Tab value="移动端">
+你可以在移动端的 **项目** 中右上角的按钮添加本地项目，选择对应的机器后，Lody 将展示所有的目录，你可以选择一个目录作为项目的根目录。
+</Tab>
+<Tab value="CLI">
+你可以在 CLI 中使用 `npx lody project add <path>` 命令添加本地项目，`<path>` 是项目的根目录。
+</Tab>
+</Tabs>
 
 ### 关联你的 GitHub 仓库
 
@@ -79,9 +91,9 @@ npx lody start
 
 ## 配置 Agent
 
-Lody 支持多种 Agent，包括 Claude Code、Codex、Grok、OpenCode、Kimi、自定义 ACP Agent，以及所有支持 [ACP Registry](https://agentclientprotocol.com/get-started/registry) 的 CLI。你可以在桌面端或移动端的 **设置** -> **Agent** 中添加和配置 Agent。
+Lody 内置的 ACP Provider 包括 Claude Code、Codex、Grok、Kimi Code、Devin、Pi、DeepSeek Harness、Bub 和 Dimcode；你也可以使用自定义 ACP Agent，以及所有支持 [ACP Registry](https://agentclientprotocol.com/get-started/registry) 的 CLI。你可以在桌面端或移动端的 **设置** -> **Agent** 中添加和配置 Agent。
 
-其中 [Claude Code 和 Codex](/zh/docs/claude-codex-capabilities) 是 Lody 内置的自行维护的 Agent，有着超出 ACP 协议范围之外的完整能力，未来将支持自行维护更多的 Agent。
+其中 [Claude Code 和 Codex](/zh/docs/claude-codex-capabilities) 由 Lody 直接维护，具备超出 ACP 协议范围之外的完整能力。
 
 ### 常见问题
 
@@ -111,7 +123,9 @@ Lody 支持多种 Agent，包括 Claude Code、Codex、Grok、OpenCode、Kimi、
 
 🎉 你已经完成了所有的基础配置，接下来可以了解更多 Lody 的功能
 
+- [跑通第一次会话](/zh/docs/first-session) - 用一个小任务走完从提问到审阅结果
+- [阅读概念与术语表](/zh/docs/concepts) - 理解每个界面背后的对象
 - [CLI 命令](/zh/docs/cli) - 查看 `lody` 的全部命令和参数
 - [了解工作树](/zh/docs/worktrees) - 理解 Lody 如何隔离任务
-- [配置代理](/zh/docs/agents) - 设置 Claude Code、Codex 或 Claude 兼容端点
+- [CLI 运行时类型](/zh/docs/cli-runtimes) - 添加 ACP Registry 运行时或自定义 ACP Agent
 - [移动端访问](/zh/docs/mobile) - 在手机上审查和批准更改

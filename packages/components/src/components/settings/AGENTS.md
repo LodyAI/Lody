@@ -46,8 +46,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
-  `https://api.deepseek.com`) and never a new AgentConfigMeta field. Model ids come from
-  the endpoint's OpenAI-compatible discovery response during live verification; do not
+  `https://api.deepseek.com/anthropic`) and never a new AgentConfigMeta field. Model ids come from
+  the endpoint's OpenAI-compatible discovery response during live verification; official
+  Messages and legacy Chat roots share the provider's official `/models` endpoint. Do not
   add a parallel manual catalog field. Additional env cannot override either connection
   key, and changing endpoint or credential invalidates the dialog's prior live
   verification.

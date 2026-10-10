@@ -877,6 +877,32 @@ export type SessionExternalHistoryCursorDocState = {
   storedHistoryBaseline?: string;
 };
 
+/** Durable notification cursor for a Roost-backed session history. The cursor
+ * lives in the session control document so every renderer can observe a
+ * history commit without polling the history store. */
+export type SessionHistoryChange =
+  | { readonly kind: 'structure'; readonly from: number; readonly to: number }
+  | { readonly kind: 'changed'; readonly ids: readonly string[] };
+
+export type SessionRoostHistoryCursorDocState = {
+  cursor: string;
+  operationId?: string;
+  historyRevision?: number;
+  historyCount?: number;
+  historyChangeJson?: string;
+};
+
+const sessionRoostHistoryCursorDocSchema = schema.LoroMap(
+  {
+    cursor: schema.String(),
+    operationId: schema.String({ required: false }),
+    historyRevision: schema.Number({ required: false }),
+    historyCount: schema.Number({ required: false }),
+    historyChangeJson: schema.String({ required: false }),
+  },
+  { required: false }
+);
+
 /**
  * Legacy/fallback launch config shape. New writers must not persist this per session;
  * resolve customAcp/env from AgentConfigMeta and worktree scripts from project config.
@@ -934,11 +960,18 @@ export type PendingScheduledTask = {
 
 export type SessionHistoryBackendKind = 'loro' | 'roost';
 
-/** Backend selected for newly created sessions. Flip only after its adapter is ready. */
-export const NEW_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
-
 /** Missing discriminator means a legacy session and must remain pinned to Loro. */
 export const LEGACY_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+
+/** Explicit backend selected by the renderer when the Roost experiment is enabled. */
+export const ROOST_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'roost';
+
+/**
+ * Default for creation paths without a renderer feature-gate decision.
+ * Existing sessions keep their persisted choice; only an explicit opt-in selects Roost.
+ */
+export const NEW_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind =
+  LEGACY_SESSION_HISTORY_BACKEND;
 
 /**
  * Resolve the immutable history backend choice for an opened session.
@@ -1320,6 +1353,7 @@ export const sessionDocSchema = schema({
   forkOperation: sessionForkOperationDocSchema,
   preview: sessionPreviewDocSchema,
   externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
+  roostHistoryCursor: sessionRoostHistoryCursorDocSchema,
   acpRuntimeConfig: sessionAcpRuntimeConfigDocSchema,
 });
 

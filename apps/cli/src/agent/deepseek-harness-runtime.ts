@@ -22,8 +22,8 @@ export const DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION =
   ACP_EXTENSION_DSH_CAPABILITY_SOURCE_VERSION;
 export const DEEPSEEK_HARNESS_HOME_ENV = 'DSH_HOME';
 
-const RAW_SESSION_ARTIFACT = 'session.jsonl';
-const ZSTD_SESSION_ARTIFACT = 'session.jsonl.zstd';
+const RAW_SESSION_ARTIFACT = /^session(?:\.v[1-9]\d*)?\.jsonl$/;
+const ZSTD_SESSION_ARTIFACT = /^session(?:\.v[1-9]\d*)?\.jsonl\.zstd$/;
 const DSH_NODE_EXECUTABLE_ENV = 'LODY_DSH_NODE_EXECUTABLE';
 const DSH_NODE_ARGS_ENV = 'LODY_DSH_NODE_ARGS';
 
@@ -262,9 +262,9 @@ export async function resolveDeepSeekHarnessSessionCompression(
       const sessionPath = join(projectPath, sessionEntry.name);
       const artifactEntries = await readdir(sessionPath, { withFileTypes: true });
       for (const artifactEntry of artifactEntries) {
-        if (artifactEntry.name === RAW_SESSION_ARTIFACT) {
+        if (RAW_SESSION_ARTIFACT.test(artifactEntry.name)) {
           rawArtifact ??= join(sessionPath, artifactEntry.name);
-        } else if (artifactEntry.name === ZSTD_SESSION_ARTIFACT) {
+        } else if (ZSTD_SESSION_ARTIFACT.test(artifactEntry.name)) {
           zstdArtifact ??= join(sessionPath, artifactEntry.name);
         }
       }

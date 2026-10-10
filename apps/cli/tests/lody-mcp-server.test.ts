@@ -22,7 +22,33 @@ const {
   postSessionControl,
   resolveUploadPath,
   resolveMcpSessionId,
+  readMcpSessionStatusTargets,
 } = __lodyMcpServerInternals;
+
+it('isolates invalid/foreign status targets while preserving valid sibling results and order', async () => {
+  const ctx = { sessionId: 'current-session', workspaceId: 'ws' } as ReturnType<
+    typeof getSessionContext
+  >;
+  const readable = { id: 'valid' } as import('@lody/shared').SessionMeta;
+  const ids = [
+    'valid',
+    'bad/id',
+    'lody://session/foreign?workspace=elsewhere',
+    'lody://session/root?tab=child',
+    'missing',
+    'lody://session/valid?workspace=ws',
+  ];
+  const results = await readMcpSessionStatusTargets(ids, ctx, async (id) => {
+    if (id === 'valid') return readable;
+    if (id === 'missing') return undefined;
+    throw new Error('An invalid reference reached the workspace reader');
+  });
+  expect(results).toEqual([
+    { sessionId: 'valid', session: readable },
+    ...ids.slice(1, 5).map((sessionId) => ({ sessionId, session: undefined })),
+    { sessionId: 'valid', session: readable },
+  ]);
+});
 
 const ENV_KEYS = [
   'LODY_MCP_MACHINE_ID',
@@ -300,7 +326,9 @@ describe('lody MCP server internals', () => {
 });
 
 describe('resolveMcpSessionId', () => {
-  const ctx = { sessionId: 'current-session' } as ReturnType<typeof getSessionContext>;
+  const ctx = { sessionId: 'current-session', workspaceId: 'workspace-1' } as ReturnType<
+    typeof getSessionContext
+  >;
 
   it('accepts a bare session id', () => {
     expect(resolveMcpSessionId('ses_abc', ctx)).toBe('ses_abc');
@@ -308,6 +336,15 @@ describe('resolveMcpSessionId', () => {
 
   it('strips a session:// mention URI', () => {
     expect(resolveMcpSessionId('session://ses_abc', ctx)).toBe('ses_abc');
+  });
+
+  it('resolves common links only in the authorized workspace', () => {
+    expect(resolveMcpSessionId(`lody://session/ses_abc?workspace=${ctx.workspaceId}`, ctx)).toBe(
+      'ses_abc'
+    );
+    expect(() => resolveMcpSessionId('lody://session/ses_abc?workspace=another', ctx)).toThrow(
+      'different workspace'
+    );
   });
 
   it('falls back to the current session', () => {

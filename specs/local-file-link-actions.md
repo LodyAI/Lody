@@ -15,7 +15,12 @@ readable regular local file, including files outside the session workspace and i
 another worktree. Worktree prefixes must not redirect these links into the current
 workspace. This applies to both Markdown links and tool file entries. External
 files remain readonly, and genuinely missing files still show a not-found error.
-Remote preview authorization remains restricted to its existing allowed roots.
+Same-machine preview uses the local communication channel and does not require a
+running agent. Absolute and home-rooted paths remain previewable when the session's
+working directory is unavailable, after validating session and machine ownership.
+These files remain readonly. Relative paths require the original workspace; they
+must never be resolved against a substitute directory. Remote preview authorization
+remains restricted to its existing allowed roots.
 
 For a binary file without an inline viewer, the preview explains that it cannot
 render the file in the shared rounded notice card, with full-width stacked actions
@@ -31,6 +36,15 @@ always, and Copy absolute path only once the machine path is known. Remote
 sessions never open a path on the
 viewer's machine. Clicking the assistant link itself only opens the preview;
 opening the OS application requires a separate user click.
+
+Session and mobile project file previews offer native video controls for WebM,
+MP4/M4V, MOV, and OGV when the browser can decode the file. Playback is inline on
+mobile and starts only after a user action. Hiding or closing the viewer stops
+playback and releases its source; returning does not automatically resume it.
+Backgrounding the app pauses playback. Read/decode failures show a localized
+notice with the file actions available on that surface. File authorization and
+provider transfer limits remain unchanged, including the 5 MiB remote binary
+limit. This does not promise transcoding or playback of every codec in a container.
 
 Session PDFs open in a paged viewer at fit-width zoom. The toolbar supports direct
 page entry, previous/next page, a toggleable thumbnail sidebar, quarter-turn

@@ -1,6 +1,5 @@
+import { toShared } from '@/platform/process-options';
 import { resolveSessionConversationConfig } from '@lody/shared';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import {
   getServerNow,
   resolveSessionAcpTargetId,
@@ -26,6 +25,8 @@ import {
 } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { SessionManager } from './session-manager';
@@ -39,7 +40,6 @@ import {
 import { createSessionBackend, type SessionBackendForkSnapshot } from './session-backend';
 
 type ForkWarning = SessionForkResponse['warnings'][number];
-const execFileAsync = promisify(execFile);
 
 /** Recovery opens only store-listed docs; keep even that small fan-out bounded. */
 const FORK_RECOVERY_CONCURRENCY = 4;
@@ -964,16 +964,26 @@ export class SessionForkService {
   }
 
   private async inspectGitWorkdir(workdir: string): Promise<{ dirty: boolean; headSha: string }> {
-    const status = await execFileAsync('git', ['status', '--porcelain'], {
-      cwd: workdir,
-      windowsHide: true,
-      timeout: 10_000,
-    });
-    const head = await execFileAsync('git', ['rev-parse', '--verify', 'HEAD^{commit}'], {
-      cwd: workdir,
-      windowsHide: true,
-      timeout: 10_000,
-    });
+    const status = await runCommandTextLegacy(
+      {
+        command: 'git',
+        args: ['status', '--porcelain'],
+        cwd: workdir,
+        timeout: 10_000,
+        check: 'exit-0',
+      },
+      toShared()
+    );
+    const head = await runCommandTextLegacy(
+      {
+        command: 'git',
+        args: ['rev-parse', '--verify', 'HEAD^{commit}'],
+        cwd: workdir,
+        timeout: 10_000,
+        check: 'exit-0',
+      },
+      toShared()
+    );
     return { dirty: status.stdout.trim().length > 0, headSha: head.stdout.trim() };
   }
 
@@ -1038,11 +1048,16 @@ export class SessionForkService {
       const resolvedBranch = this.deps.resolveGitBranch
         ? await this.deps.resolveGitBranch(sessionWorkdir)
         : (
-            await execFileAsync('git', ['branch', '--show-current'], {
-              cwd: sessionWorkdir,
-              windowsHide: true,
-              timeout: 10_000,
-            })
+            await runCommandTextLegacy(
+              {
+                command: 'git',
+                args: ['branch', '--show-current'],
+                cwd: sessionWorkdir,
+                timeout: 10_000,
+                check: 'exit-0',
+              },
+              toShared()
+            )
           ).stdout.trim() || undefined;
       const targetAcpSessionId = targetSession.acpSessionId;
       const branchName = resolvedBranch ?? targetMeta.baseBranch;

@@ -165,6 +165,60 @@ describe('MessageHandler file preview workspace lifecycle', () => {
     }
   );
 
+  it.each(['root', 'child'] as const)(
+    'resolves an absolute local artifact without the %s workspace directory',
+    async (kind) => {
+      if (kind === 'child') {
+        records.set(getSessionRoomId(sessionId), {
+          meta: { machineId, parentSessionId: parentId },
+        });
+      }
+      const file = path.join(dataDir, 'external.txt');
+      fs.writeFileSync(file, content);
+      expect(
+        await request('file/resolve-local', file, kind === 'child' ? parentId : sessionId)
+      ).toMatchObject({
+        ok: true,
+        result: { status: 'local-file', absolutePath: file, path: file, external: true },
+      });
+      expect(await request('file/preview', file)).toMatchObject({
+        ok: true,
+        result: { status: 'error', code: 'workspace_root_unavailable' },
+      });
+      expect(await request('file/resolve-local', 'external.txt')).toMatchObject({
+        ok: true,
+        result: { status: 'error', code: 'workspace_root_unavailable' },
+      });
+      expect(fs.existsSync(path.join(dataDir, 'chats'))).toBe(false);
+    }
+  );
+
+  it('checks local owner identity before resolving an absolute artifact without a workspace', async () => {
+    const file = path.join(dataDir, 'external.txt');
+    fs.writeFileSync(file, content);
+    records.set(getSessionRoomId(sessionId), { meta: { machineId, parentSessionId: parentId } });
+    expect(await request('file/resolve-local', file, sessionId)).toMatchObject({
+      ok: true,
+      result: { status: 'error', code: 'permission_denied' },
+    });
+    for (const meta of [
+      { machineId: 'another-machine' },
+      { machineId, isArchived: true },
+      { machineId, parentSessionId: 'nested-parent' as SessionId },
+    ]) {
+      records.set(getSessionRoomId(parentId), { meta });
+      expect(await request('file/resolve-local', file, parentId)).toMatchObject({
+        ok: true,
+        result: { status: 'error', code: 'permission_denied' },
+      });
+    }
+    records.delete(getSessionRoomId(parentId));
+    expect(await request('file/resolve-local', file, parentId)).toMatchObject({
+      ok: true,
+      result: { status: 'error', code: 'session_not_found' },
+    });
+  });
+
   it('reports a missing file in an existing chat as file_not_found', async () => {
     writeArtifact();
     expect(await request('file/preview', 'missing.txt')).toMatchObject({

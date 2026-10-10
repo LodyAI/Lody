@@ -3,6 +3,8 @@ import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 import {
+  stagedRoostBindingPath,
+  stagedRoostDir,
   stagedNodePtyBindingPath,
   stagedNodePtySpawnHelperPath,
   stagedNodeModulesDir,
@@ -20,7 +22,7 @@ const SMOKE_TIMEOUT_MS = 120_000
 const DEEPSEEK_PACKAGED_ASSETS = [
   'deepseek-acp.js',
   ...['standard', 'ptc', 'minimal', 'cordis'].map((preset) =>
-    path.join('deepseek-agent-presets', preset, 'agent.cordis.yml')
+    path.join('deepseek-agent-presets', `${preset}.yml`)
   )
 ]
 
@@ -133,6 +135,16 @@ export default async function afterPack(context) {
       )
     }
   }
+  const packedRoostDir = packedFromStaged(stagedRoostDir)
+  for (const file of ['package.json', 'client.mjs', 'worker.mjs', 'binding.cjs']) {
+    if (!fs.existsSync(path.join(packedRoostDir, file))) {
+      throw new Error(`[roost] packaged runtime is missing ${file} in ${packedRoostDir}`)
+    }
+  }
+  const packedRoostBinding = packedFromStaged(stagedRoostBindingPath(nativeTarget))
+  if (!fs.existsSync(packedRoostBinding)) {
+    throw new Error(`[roost] packaged binding missing: ${packedRoostBinding}`)
+  }
   console.log(`[embedded-cli] copied runtime node_modules into ${packedCliDir}`)
 
   if (
@@ -199,6 +211,29 @@ export default async function afterPack(context) {
         `the packaged app would crash-loop on CLI autostart.\n${detail}`
     )
   }
+
+  const roostProbe = spawnSync(
+    cliRuntimePath,
+    [path.join(import.meta.dirname, 'roost-runtime-probe.mjs'), packedRoostDir],
+    {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      encoding: 'utf8',
+      timeout: SMOKE_TIMEOUT_MS,
+      windowsHide: true
+    }
+  )
+  if (
+    roostProbe.error ||
+    roostProbe.status !== 0 ||
+    !roostProbe.stdout.includes('roost-binding-ok')
+  ) {
+    const detail = [roostProbe.error?.message, roostProbe.stderr, roostProbe.stdout]
+      .filter(Boolean)
+      .join('\n')
+      .slice(-4000)
+    throw new Error(`[roost] packaged SQLite/Worker probe failed: ${detail}`)
+  }
+  console.log('[roost] packaged native Worker wrote and reopened SQLite history')
 
   const nodePtyProbe = [
     `const { createRequire } = require('node:module');`,

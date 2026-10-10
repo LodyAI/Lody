@@ -26,6 +26,7 @@ export interface SessionConfig {
   agentCliType: AgentConfigCliType;
   agentType: string;
   /** Config selected by the driving turn and carried into ACP session startup. */
+  modelId?: SessionTurnInputConfig['modelId'];
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
   /** Selection carried by the dispatching turn; ACP startup must not re-read history for it. */
   memory?: import('@lody/shared').MemoryBinding;

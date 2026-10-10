@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
   buildSessionPreparationRunConfig,
@@ -104,7 +104,7 @@ import {
   focusFirstChatLandingOption,
   useChatLandingKeyboardNav,
 } from '@/hooks/use-chat-landing-keyboard-nav';
-import { useFireOnKeyChange, useFireOncePerKey } from '@/hooks/use-fire-once';
+import { useFireOncePerKey } from '@/hooks/use-fire-once';
 import {
   isArchivedLocalProjectRestoreUnavailableError,
   SessionCreateBillingError,
@@ -363,6 +363,7 @@ import {
   mobileHomeChatExcludedRunningAtom,
   mobileHomeChatViewModeAtom,
   mobileHomeProjectsSubTabAtom,
+  mobileHomeReturnTabAtom,
   useMobileHomeExcludedSetAtom,
 } from '@/atoms/mobile-home-state';
 import {
@@ -1152,10 +1153,7 @@ function WorkspaceChatLanding({
   });
   const landingLoadStartMsRef = useRef(getPerformanceNowMs());
   const fireLandingViewedOnce = useFireOncePerKey();
-  const fireProjectSourceReadyOnce = useFireOncePerKey();
   const previousContextTypeRef = useRef(contextType);
-  const fireProjectSelectedOnChange = useFireOnKeyChange();
-  const fireAgentConfigOnChange = useFireOnKeyChange();
   const preSelectionAppliedRef = useRef<string | null>(null);
   const previousPreSelectionKeyRef = useRef<string | null>(null);
   // False while a just-applied URL intent has not rendered yet; the selection
@@ -2278,105 +2276,6 @@ function WorkspaceChatLanding({
     userId,
     workspaceId,
   ]);
-
-  useEffect(() => {
-    if (!postHog || !userId || !workspaceId) return;
-    // Wait until the GitHub repo query has settled (undefined = still loading)
-    if (repositories === undefined) return;
-    if (visibleLocalProjectsLoading) return;
-    const githubRepoCount = repositories.length;
-    if (githubRepoCount === 0 && localProjectCount === 0) return;
-    if (!fireProjectSourceReadyOnce(`${userId}:${workspaceId}`)) return;
-    const sourceKind =
-      githubRepoCount > 0 && localProjectCount > 0
-        ? 'mixed'
-        : githubRepoCount > 0
-          ? 'github'
-          : 'local';
-    capturePostHogEvent(postHog, 'onboarding/project_source_ready', {
-      user_id: userId,
-      workspace_id: workspaceId,
-      source_kind: sourceKind,
-      github_repo_count: githubRepoCount,
-      local_project_count: localProjectCount,
-    });
-  }, [
-    fireProjectSourceReadyOnce,
-    localProjectCount,
-    postHog,
-    repositories,
-    userId,
-    visibleLocalProjectsLoading,
-    workspaceId,
-  ]);
-
-  useEffect(() => {
-    if (!postHog || !userId || !workspaceId) return;
-    if (contextType === 'chat') return;
-    if (contextType === 'github' && !selectedRepo) return;
-    if (contextType === 'local' && !selectedLocalProject) return;
-    if (
-      contextType === 'local' &&
-      selectedLocalProject &&
-      activeLocalGitState === null &&
-      !localGitStateError
-    ) {
-      return;
-    }
-
-    const selectionKey =
-      contextType === 'github'
-        ? `github:${selectedRepo}`
-        : `local:${selectedLocalProject?.machineId}:${selectedLocalProject?.localProjectId}`;
-    const analyticsKey = `${userId}:${workspaceId}:${selectionKey}`;
-    if (!fireProjectSelectedOnChange(analyticsKey)) return;
-    capturePostHogEvent(postHog, 'onboarding/project_selected', {
-      user_id: userId,
-      workspace_id: workspaceId,
-      project_kind: contextType,
-      repo_id_hash: contextType === 'github' ? hashAnalyticsId(selectedRepo) : null,
-      local_project_id:
-        contextType === 'local' ? (selectedLocalProject?.localProjectId ?? null) : null,
-      machine_id: contextType === 'local' ? (selectedLocalProject?.machineId ?? null) : null,
-      has_git_branch:
-        contextType === 'local'
-          ? localGitStateError
-            ? null
-            : (activeLocalGitState?.git ?? null)
-          : true,
-    });
-  }, [
-    activeLocalGitState,
-    contextType,
-    fireProjectSelectedOnChange,
-    localGitStateError,
-    postHog,
-    selectedLocalProject,
-    selectedRepo,
-    userId,
-    workspaceId,
-  ]);
-
-  useEffect(() => {
-    if (!postHog || !userId || !workspaceId || !selectedAgent || !selectedConfig) return;
-    const analyticsKey = [
-      userId,
-      workspaceId,
-      selectedAgent.machineId,
-      selectedAgent.agentId,
-      selectedConfig.cliType,
-      selectedConfig.agentType,
-    ].join(':');
-    if (!fireAgentConfigOnChange(analyticsKey)) return;
-    capturePostHogEvent(postHog, 'onboarding/agent_config_selected', {
-      user_id: userId,
-      workspace_id: workspaceId,
-      machine_id: selectedAgent.machineId,
-      agent_config_id: selectedAgent.agentId,
-      cli_type: selectedConfig.cliType,
-      agent_type: selectedConfig.agentType,
-    });
-  }, [fireAgentConfigOnChange, postHog, selectedAgent, selectedConfig, userId, workspaceId]);
 
   // ── GitHub branch loading ──
   useLayoutEffect(() => {
@@ -5181,7 +5080,11 @@ function WorkspaceChatLanding({
   const [persistedProjectsSubTab, setPersistedProjectsSubTab] = useAtom(
     mobileHomeProjectsSubTabAtom
   );
+  const jotaiStore = useStore();
   const [selectedMobileHomeTab, setSelectedMobileHomeTab] = useState<MobileHomeTab>(() => {
+    // Read without clearing. React invokes this initializer twice in dev;
+    // the effect below consumes the handoff after the tab is committed.
+    if (isMobile && jotaiStore.get(mobileHomeReturnTabAtom) === 'schedules') return 'schedules';
     if (preSelectedContext === 'chat') return 'chat';
     const hasProjectPreselection = Boolean(
       preSelectedRepo || (preSelectedMachine && preSelectedProject)
@@ -5196,6 +5099,11 @@ function WorkspaceChatLanding({
     if (isMobile) return 'chat';
     return contextType === 'chat' ? 'chat' : 'projects';
   });
+  useEffect(() => {
+    if (jotaiStore.get(mobileHomeReturnTabAtom) === 'schedules') {
+      jotaiStore.set(mobileHomeReturnTabAtom, null);
+    }
+  }, [jotaiStore]);
   /* A developer-only beta gate (plus the team-workspace gate) drives the
      Inbox dock tab on mobile home. When it is off, a stale selection must
      render as Chat — as if the tab were never built. */
@@ -5359,18 +5267,15 @@ function WorkspaceChatLanding({
     (nextTab: MobileHomeTab) => {
       setSelectedMobileHomeTab(nextTab);
       /* Per-tab sync rules:
-         - 'inbox': purely visual — Inbox isn't a session-context type
-           and doesn't drive the composer's contextType. We also don't
-           write the URL: refreshing into Inbox would be confusing
-           since the feature isn't shipping yet and the user's actual
-           "data context" is still whichever Chat / Projects state
-           they were on.
+         - 'inbox' and 'schedules': purely visual. Neither is a
+           session-context type, so they must not rewrite the composer
+           context or the chat URL.
          - 'chat': mirror to `contextType` + URL so the composer's
            selectors line up with the visible list.
          - 'projects': delegate to whichever sub-tab is remembered
            (`persistedProjectsSubTab`), since 项目 isn't itself a
            contextType. */
-      if (nextTab === 'inbox') return;
+      if (nextTab === 'inbox' || nextTab === 'schedules') return;
       const nextContext: SessionContextType = nextTab === 'chat' ? 'chat' : persistedProjectsSubTab;
       setContextType(nextContext);
       void navigate({
@@ -6420,6 +6325,7 @@ function WorkspaceChatLanding({
             ),
             chatTab: t('chat.contextSwitch.chat', 'Chat'),
             schedulesTab: t('schedules.title', 'Schedules'),
+            newSchedule: t('schedules.new', 'New schedule'),
             recentProjectsHeading: t('chat.mobileHome.recentProjectsHeading', '最近常用'),
             settingsTab: t('settings.title', 'Settings'),
             projectRemoving: t('sidebar.localProjects.remove.removing', 'Removing…'),
@@ -6441,9 +6347,11 @@ function WorkspaceChatLanding({
                 ? t('chat.mobileHome.searchPlaceholderInbox', 'Search')
                 : selectedMobileHomeTab === 'chat'
                   ? t('chat.mobileHome.searchPlaceholderChat', 'Search conversations')
-                  : selectedProjectsSubTab === 'github'
-                    ? t('chat.mobileHome.searchPlaceholderGithub', 'Search repositories')
-                    : t('chat.mobileHome.searchPlaceholderLocal', 'Search projects'),
+                  : selectedMobileHomeTab === 'schedules'
+                    ? t('schedules.search', 'Search schedules')
+                    : selectedProjectsSubTab === 'github'
+                      ? t('chat.mobileHome.searchPlaceholderGithub', 'Search repositories')
+                      : t('chat.mobileHome.searchPlaceholderLocal', 'Search projects'),
             recentReposHeading: t('chat.mobileHome.recentReposHeading', '最近常用'),
             recentLocalProjectsHeading: t('chat.mobileHome.recentLocalProjectsHeading', '最近常用'),
             allLocalProjectsHeading: t('chat.mobileHome.allLocalProjectsHeading', '全部项目'),

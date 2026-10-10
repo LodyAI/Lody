@@ -492,7 +492,9 @@ pre,
        Mermaid sequence diagrams are often taller than a phone viewport too. */
     max-height: min(70vh, 36rem) !important;
     overflow: auto !important;
-    overscroll-behavior: contain;
+    /* Let wheel/touch scrolling continue into the conversation at either edge,
+       including when the diagram fits and has no vertical scroll range. */
+    overscroll-behavior: auto;
     padding: 1rem;
     /* An inactive preview does not pan, it activates on click
        (`use-mermaid-diagram-canvas.tsx` tags it `role="button"`). */

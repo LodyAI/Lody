@@ -33,23 +33,23 @@ const createDocument = () => {
 };
 
 describe('SessionDocument ACP runtime config', () => {
-  it('merges same-turn patches and makes replay idempotent', () => {
+  it('merges same-turn patches and makes replay idempotent', async () => {
     const doc = createDocument();
 
     expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-1' as never,
         configOptionValues: { collaboration_mode: 'default' },
       })
     ).toBe(true);
     expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-1' as never,
         modelId: 'gpt-5.6-sol',
       })
     ).toBe(true);
     expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-1' as never,
         modelId: 'gpt-5.6-sol',
       })
@@ -67,13 +67,13 @@ describe('SessionDocument ACP runtime config', () => {
   it('rejects missing and stale turns, then starts a clean snapshot for the latest turn', async () => {
     const doc = createDocument();
     expect(
-      doc.applyAcpRuntimeConfigPatch('missing', {
+      await doc.applyAcpRuntimeConfigPatch('missing', {
         acpSessionId: 'acp-1' as never,
         modeId: 'plan',
       })
     ).toBe(false);
     expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-1' as never,
         modeId: 'plan',
         configOptionValues: { collaboration_mode: 'plan' },
@@ -87,13 +87,13 @@ describe('SessionDocument ACP runtime config', () => {
     ]);
 
     expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-1' as never,
         modeId: 'default',
       })
     ).toBe(false);
     expect(
-      doc.applyAcpRuntimeConfigPatch('turn-2', {
+      await doc.applyAcpRuntimeConfigPatch('turn-2', {
         acpSessionId: 'acp-2' as never,
         modeId: 'default',
       })
@@ -106,11 +106,11 @@ describe('SessionDocument ACP runtime config', () => {
     });
   });
 
-  it('never persists sensitive option ids even when a caller passes them directly', () => {
+  it('never persists sensitive option ids even when a caller passes them directly', async () => {
     const doc = createDocument();
 
     expect(
-      doc.applyAcpRuntimeConfigPatch('turn-1', {
+      await doc.applyAcpRuntimeConfigPatch('turn-1', {
         acpSessionId: 'acp-sensitive' as never,
         configOptionValues: {
           api_token: 'secret-value',

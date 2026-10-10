@@ -27,7 +27,7 @@ export const LLMS_ANSWERS = [
       { title: 'Agent Session Control', sitePath: '/docs/session-orchestration' },
       { title: 'Worktrees', sitePath: '/docs/worktrees' },
       { title: 'Team Features', sitePath: '/docs/team' },
-      { title: 'Agent Config', sitePath: '/docs/agents' },
+      { title: 'Quick Start', sitePath: '/docs/quickstart' },
     ],
   },
   {
@@ -37,7 +37,7 @@ export const LLMS_ANSWERS = [
       'Members pick a config per session. The team workspace, session list, and sharing rules stay the same across those runtimes.',
     ].join('\n\n'),
     links: [
-      { title: 'Agent Config', sitePath: '/docs/agents' },
+      { title: 'Quick Start', sitePath: '/docs/quickstart' },
       { title: 'CLI Runtime Types', sitePath: '/docs/cli-runtimes' },
       { title: 'Team Features', sitePath: '/docs/team' },
     ],

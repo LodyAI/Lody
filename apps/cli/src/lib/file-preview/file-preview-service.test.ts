@@ -63,6 +63,7 @@ function createService(args: {
   });
   return new FilePreviewService({
     resolveWorkspace,
+    resolveLocalWorkspace: resolveWorkspace,
     extraRoots: args.extraRoots ?? [],
     ...(args.limits === undefined ? {} : { limits: args.limits }),
   });
@@ -537,6 +538,11 @@ describe('FilePreviewService', () => {
   it('propagates a workspace resolution failure as a typed error', async () => {
     const service = new FilePreviewService({
       resolveWorkspace: async () => ({
+        ok: false,
+        code: 'session_not_found',
+        message: 'Session not found.',
+      }),
+      resolveLocalWorkspace: async () => ({
         ok: false,
         code: 'session_not_found',
         message: 'Session not found.',

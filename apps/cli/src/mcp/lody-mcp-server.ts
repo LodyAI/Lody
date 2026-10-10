@@ -1,6 +1,7 @@
+import { toShared } from '@/platform/process-options';
 import { snapshotAgentRole, readMessageAuthor, type AgentMessageAuthor } from '@lody/shared';
 import { resolveSessionMessageAuthor } from '@/session/message-author';
-import { spawn } from 'child_process';
+import { resolveSessionLinkId } from '@lody/shared/session-link';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'path';
@@ -9,6 +10,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { Effect } from 'effect';
 import { z } from 'zod';
 import { requestSessionShare } from '@/lib/session-share-delivery';
+import { startProcessLegacy } from '@lody/shared/node/process';
+
+import { formatErrorMessage } from '@/utils/format-error';
 import {
   ACP_CAPABILITY_ROW_FAMILIES,
   getAcpCapabilityCacheKey,
@@ -838,7 +842,7 @@ const SessionHistoryToolInputSchema = z
       .min(1)
       .optional()
       .describe(
-        'Target session id, or current. Defaults to current. Also accepts a `session://<sessionId>` URI from a session mention link.'
+        'Target session id, or current. Defaults to current. Accepts a full lody://session/<sessionId>?workspace=<workspaceId> link (workspace must match this tool context), or a legacy session:// URI.'
       ),
     cursor: z.string().trim().min(1).optional(),
     limit: z
@@ -1120,30 +1124,57 @@ const resolveCliEntrypoint = (): string => {
   return entrypoint;
 };
 
+/** A timed-out `lody` subcommand gets SIGTERM, then SIGKILL if it lingers. */
+const LODY_CLI_TIMEOUT_TERMINATION = { graceMs: 2_000, killWaitMs: 2_000 };
+
 const runLodyCli = async (
   args: string[],
   timeoutMs = LODY_CLI_DEFAULT_TIMEOUT_MS
-): Promise<{ stdout: string; stderr: string }> =>
-  await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [resolveCliEntrypoint(), ...args], {
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
+): Promise<{ stdout: string; stderr: string }> => {
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  const cli = startProcessLegacy(
+    {
+      command: process.execPath,
+      args: [resolveCliEntrypoint(), ...args],
+      options: {
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      },
+      // Stays in this server's process group: ending the agent tree that runs
+      // the MCP server must end its in-flight `lody` subcommands too.
+      processGroup: false,
+      onSpawned: (child) => {
+        child.stdout?.on('data', (chunk: Buffer) => stdout.push(chunk));
+        child.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
+      },
+    },
+    toShared()
+  );
+  return await new Promise((resolve, reject) => {
+    let timedOut = false;
     const timeout = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`lody ${args.join(' ')} timed out after ${timeoutMs}ms`));
+      // The timeout owns the outcome: the exit it causes is not a CLI failure.
+      timedOut = true;
+      void cli.terminate(LODY_CLI_TIMEOUT_TERMINATION).then(
+        () => reject(new Error(`lody ${args.join(' ')} timed out after ${timeoutMs}ms`)),
+        (error: unknown) =>
+          reject(
+            new Error(
+              `lody ${args.join(' ')} timed out after ${timeoutMs}ms and could not be stopped: ${formatErrorMessage(error)}`
+            )
+          )
+      );
     }, timeoutMs);
 
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
-    child.on('error', (error) => {
+    cli.child.on('error', (error) => {
+      if (timedOut) return;
       clearTimeout(timeout);
       reject(error);
     });
-    child.on('close', (code, signal) => {
+    cli.child.on('close', (code, signal) => {
+      if (timedOut) return;
       clearTimeout(timeout);
       const stdoutText = Buffer.concat(stdout).toString('utf8');
       const stderrText = Buffer.concat(stderr).toString('utf8');
@@ -1158,6 +1189,7 @@ const runLodyCli = async (
       resolve({ stdout: stdoutText, stderr: stderrText });
     });
   });
+};
 
 const parseJsonCliOutput = (stdout: string): unknown => {
   const line = stdout
@@ -1174,11 +1206,6 @@ const parseJsonCliOutput = (stdout: string): unknown => {
 const runLodyCliJson = async (args: string[], timeoutMs?: number): Promise<unknown> =>
   parseJsonCliOutput((await runLodyCli(args, timeoutMs)).stdout);
 
-const SESSION_URI_PREFIX = 'session://';
-
-const stripSessionUriPrefix = (value: string): string =>
-  value.startsWith(SESSION_URI_PREFIX) ? value.slice(SESSION_URI_PREFIX.length) : value;
-
 const resolveMcpSessionId = (
   sessionId: string | undefined,
   ctx: ReturnType<typeof getSessionContext>
@@ -1187,8 +1214,8 @@ const resolveMcpSessionId = (
   if (!normalized || normalized === 'current') {
     return ctx.sessionId;
   }
-  // Mentions arrive as `session://<id>`; accept that form as well as a bare id.
-  return stripSessionUriPrefix(normalized);
+  // Preserve the explicit workspace boundary when dereferencing copied links.
+  return resolveSessionLinkId(normalized, ctx.workspaceId);
 };
 
 const getMcpWorkspaceId = (ctx: ReturnType<typeof getSessionContext>) =>
@@ -1876,6 +1903,25 @@ const buildSessionList = async (input: SessionListToolInput): Promise<unknown> =
   });
 };
 
+const readMcpSessionStatusTargets = async (
+  ids: readonly string[],
+  ctx: ReturnType<typeof getSessionContext>,
+  read: (id: SessionId) => Promise<SessionMeta | undefined>
+) =>
+  Promise.all(
+    ids.map(async (rawSessionId) => {
+      let sessionId: SessionId;
+      try {
+        sessionId = resolveMcpSessionId(rawSessionId, ctx) as SessionId;
+      } catch {
+        // Status-many is ordered and independently fallible. Invalid/foreign references
+        // must neither abort valid siblings nor reach the authorized workspace reader.
+        return { sessionId: rawSessionId, session: undefined };
+      }
+      return { sessionId, session: await read(sessionId) };
+    })
+  );
+
 const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promise<unknown> => {
   assertBatchSize(input.sessionIds.length, MAX_MCP_STATUS_BATCH_SIZE);
   const ctx = getSessionContext();
@@ -1883,24 +1929,21 @@ const buildSessionStatusMany = async (input: SessionStatusManyToolInput): Promis
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
     await syncWorkspaceMetaForRead(manager, `mcp.session_status_many:${ctx.sessionId}`);
-    const sessions = await Promise.all(
-      input.sessionIds.map(
-        async (rawSessionId) =>
-          await readCurrentSessionMeta(manager, resolveMcpSessionId(rawSessionId, ctx) as SessionId)
-      )
+    const targets = await readMcpSessionStatusTargets(input.sessionIds, ctx, (id) =>
+      readCurrentSessionMeta(manager, id)
     );
     const liveStatuses = await readSessionLiveStatusesMany({
       auth,
       workspaceId: workspace.id as WorkspaceId,
-      sessions: sessions.filter((session): session is SessionMeta => session !== undefined),
+      sessions: targets
+        .map(({ session }) => session)
+        .filter((session): session is SessionMeta => session !== undefined),
     });
     const presence = manager.getPresenceStates() ?? {};
     const nowMs = getServerNow();
     const viewed = collectViewedSessionIdsFromPresence(presence, nowMs);
     const items = await Promise.all(
-      input.sessionIds.map(async (rawSessionId, index) => {
-        const sessionId = resolveMcpSessionId(rawSessionId, ctx) as SessionId;
-        const session = sessions[index];
+      targets.map(async ({ sessionId, session }) => {
         if (!session) {
           return {
             sessionId,
@@ -3601,6 +3644,7 @@ export const __lodyMcpServerInternals = {
   truncateUtf8HeadTail,
   SESSION_CONTROL_TIMEOUT_MS,
   resolveMcpSessionId,
+  readMcpSessionStatusTargets,
 };
 
 export function buildLodyMcpServer(): McpServer {
@@ -3619,8 +3663,8 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     },
     {
       instructions: [
-        'Session mentions in user messages may appear as markdown links of the form [@Title](session://<sessionId>).',
-        'To read that conversation, call lody_session_history with sessionId set to the <sessionId> (the part after session://), or pass the full session:// URI.',
+        'Session mentions use [@Title](lody://session/<sessionId>?workspace=<workspaceId>); old transcripts may use session://<sessionId>.',
+        'To read that conversation, pass the full URI as sessionId to lody_session_history. The workspace must match this tool context. Bare session IDs are also accepted; use the exact child session ID to read a child conversation.',
         'Paginate with nextCursor when you need older turns.',
       ].join(' '),
     }
@@ -3658,10 +3702,10 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
               },
               { timeoutMs: SESSION_CONTROL_TIMEOUT_MS }
             )
-            .pipe(Effect.either)
+            .pipe(Effect.result)
         );
-        if (outcome._tag === 'Left') throw classifyLocalDaemonIpcError(outcome.left);
-        const response = outcome.right;
+        if (outcome._tag === 'Failure') throw classifyLocalDaemonIpcError(outcome.failure);
+        const response = outcome.success;
         if (!response.ok) throw new Error(response.error);
         if (!('type' in response.result) || response.result.type !== 'session/tool-result')
           throw new Error('Unexpected Session tool response');
@@ -4420,7 +4464,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     SESSION_HISTORY_TOOL_NAME,
     {
       title: 'Read Lody session history',
-      description: `Read one bounded visible transcript page, oldest-to-newest. Use this for [@Title](session://<sessionId>) mention links: pass sessionId as the <sessionId> or the full session:// URI. Omit cursor for the newest page; nextCursor reads older entries. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}, max ${MAX_MCP_SESSION_HISTORY_LIMIT}, with a 128 KiB response cap.`,
+      description: `Read one bounded visible transcript page, oldest-to-newest. For session mentions pass the full lody://session/<sessionId>?workspace=<workspaceId> URI as sessionId; its workspace must match this tool context. Bare IDs and legacy session:// URIs are also accepted. Omit cursor for the newest page; nextCursor reads older entries. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}, max ${MAX_MCP_SESSION_HISTORY_LIMIT}, with a 128 KiB response cap.`,
       inputSchema: SessionHistoryToolInputSchema,
     },
     async (args: SessionHistoryToolInput) => {

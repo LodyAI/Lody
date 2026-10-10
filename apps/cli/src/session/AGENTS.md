@@ -2,9 +2,8 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Rules only; rationale: [README.md](README.md). Worktrees and git
-credentials: [worktree/AGENTS.md](worktree/AGENTS.md). Architecture: context/message-flow.md.
-Contract: specs/session-orchestration.md.
+Module map and contracts: [README.md](README.md).
+Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Authorization and identity
 
@@ -73,6 +72,8 @@ Contract: specs/session-orchestration.md.
   semantics, and `session-diff-stats-target.ts` skips rather than overwrites a good total.
 
 ## Lifecycle
+
+- For Roost reads and writes, follow [paging rules](README.md#roost-history-paging).
 
 - `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
   protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup

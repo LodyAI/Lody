@@ -11,6 +11,27 @@ import type { SessionHistoryInput } from '../src/schema';
 
 let nextId = 0;
 
+it('skips partial text/thought records without breaking conversation copy', () => {
+  const history = [
+    entry('assistant', [
+      { type: 'text' },
+      { type: 'thought' },
+      textItem('Kept'),
+    ] as MessageContent[]),
+  ];
+  expect(buildConversationMarkdown({ history, workspaceId: 'ws' }).markdown).toContain('Kept');
+});
+
+it('exports workspace-scoped links while leaving source history untouched', () => {
+  const history = [entry('user', [textItem('See [Old](session://child) and `session://example`')])];
+  const snapshot = structuredClone(history);
+  const result = buildConversationMarkdown({ history, workspaceId: 'ws_1' });
+  expect(result.markdown).toContain('[Old](lody://session/child?workspace=ws_1)');
+  expect(result.markdown).toContain('`session://example`');
+  expect(result.stats.chars).toBe(result.markdown.length);
+  expect(history).toEqual(snapshot);
+});
+
 function entry(
   role: 'user' | 'assistant' | 'system',
   items: MessageContent[]

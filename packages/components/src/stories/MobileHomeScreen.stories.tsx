@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useState } from 'react';
 import { fn } from 'storybook/test';
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 
 import type { FilterPill } from '@/components/mobile/mobile-filter-pill-bar';
 import { StuckConnectionBanner } from '@/components/stuck-connection-banner';
@@ -198,6 +201,7 @@ function MobileHomeScreenStory({
   initialTab = 'chat',
   showInboxTab = false,
   inboxItems: inboxItemsProp = [],
+  workspaceSwitcher = false,
 }: {
   theme: 'ios' | 'material';
   connectionUiState?: 'online' | 'loading' | 'offline' | 'reconnecting';
@@ -219,6 +223,7 @@ function MobileHomeScreenStory({
   initialTab?: MobileHomeTab;
   showInboxTab?: boolean;
   inboxItems?: MobileInboxItem[];
+  workspaceSwitcher?: boolean;
 }) {
   const [selectedTab, setSelectedTab] = useState<MobileHomeTab>(initialTab);
   const [selectedProjectsSubTab, setSelectedProjectsSubTab] =
@@ -270,6 +275,8 @@ function MobileHomeScreenStory({
             localTab: '本地',
             githubTab: 'GitHub',
             chatTab: 'Chat',
+            schedulesTab: '定时任务',
+            newSchedule: '新建定时任务',
             settingsTab: '设置',
             newChatAriaLabel: '新建对话',
             recentProjectsHeading: '最近常用',
@@ -301,6 +308,7 @@ function MobileHomeScreenStory({
             },
           }}
           onWorkspaceSelect={fn()}
+          onWorkspaceMenuOpen={workspaceSwitcher ? fn() : undefined}
           onTabSelect={setSelectedTab}
           onLocalProjectSelect={fn()}
           onGitHubRepositorySelect={fn()}
@@ -313,6 +321,37 @@ function MobileHomeScreenStory({
     </div>
   );
 }
+
+/* Schedules tab mounts the real workspace, which asks the platform for
+   machine rows. The local platform has no cloud capabilities, so those
+   queries skip instead of throwing. */
+const schedulesStoryPlatform = createLocalPlatformProvider({
+  session: createStaticStore({ status: 'authenticated', user: { id: 'owner', name: 'Lody' } }),
+  workspaces: createStaticStore({
+    status: 'ready',
+    workspaces: [{ id: 'lody', name: 'Lody', slug: null, role: 'owner' }],
+    activeWorkspaceId: 'lody',
+  }),
+});
+
+/** Phone schedules tab: home header and bottom dock, not the standalone list. */
+export const SchedulesTab: Story = {
+  args: {
+    workspace: { id: 'lody', name: 'Lody' },
+    machines,
+    selectedTab: 'schedules',
+    localProjects,
+    githubRepositories,
+    chats,
+  },
+  render: () => (
+    <ForceMobileLayoutProvider force>
+      <PlatformContext.Provider value={schedulesStoryPlatform}>
+        <MobileHomeScreenStory theme="ios" initialTab="schedules" workspaceSwitcher />
+      </PlatformContext.Provider>
+    </ForceMobileLayoutProvider>
+  ),
+};
 
 export const IOS: Story = {
   args: {

@@ -11,6 +11,7 @@ import { createElectronAppIconService } from './services/app-icon-service'
 import { handleDeepLink, initializeAuthDeepLinks } from './deep-link'
 import type { DesktopLaunchEvent } from './services/desktop-launch-buffer'
 import { registerLodyProtocolClient } from './protocol-client'
+import { getDesktopCallbackProtocol } from './desktop-channel'
 import { registerIpcServices } from './ipc/register-services'
 import {
   openMainWindow,
@@ -151,7 +152,7 @@ export function startApplication(executionHost?: DesktopExecutionHost): void {
   }
 
   registerLodyProtocolClient({
-    protocol: LODY_PROTOCOL,
+    protocol: getDesktopCallbackProtocol(desktopInstallationProfile),
     productName: PRODUCT_NAME,
     desktopFileName: DESKTOP_FILE_NAME,
     iconPath: icon,

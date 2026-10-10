@@ -1,13 +1,18 @@
+import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { EventEmitter } from 'node:events';
-import type { ChildProcess } from 'node:child_process';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PassThrough } from 'node:stream';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { startProcessLegacy } from '@lody/shared/node/process';
+
+import type { NodeProcessApi } from '@lody/shared/node/process';
+import { FakeProcessTable } from '@lody/shared/node/process-testing';
 import {
   interpretDaemonRunnerLaunchOutcome,
   readPidFileRecord,
   removePidFile,
+  spawnDaemonRunnerAndAwaitReady,
   terminateSpawnedDaemonRunner,
   writePidFile,
 } from './daemon-shared';
@@ -21,28 +26,31 @@ function createPidPath(): string {
 }
 
 afterEach(() => {
-  vi.useRealTimers();
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-class FakeRunnerChild extends EventEmitter {
-  exitCode: number | null = null;
-  signalCode: NodeJS.Signals | null = null;
-  readonly signals: NodeJS.Signals[] = [];
-  onKill: (signal: NodeJS.Signals) => void = () => {};
-
-  kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
-    this.signals.push(signal);
-    this.onKill(signal);
-    return true;
-  }
-
-  finish(signal: NodeJS.Signals): void {
-    this.signalCode = signal;
-    this.emit('exit', null, signal);
-    this.emit('close', null, signal);
-  }
+/**
+ * The fake table's runner, given the fd 3 readiness pipe and `unref` a real
+ * detached spawn has. Each spawn's pipe is handed to the test to report on.
+ */
+function runnerProcessTable(platform: NodeJS.Platform = 'linux') {
+  const table = new FakeProcessTable(platform);
+  const readyPipes: PassThrough[] = [];
+  const api: NodeProcessApi = {
+    ...table.api,
+    spawn: (command, args, options) => {
+      const child = table.api.spawn(command, args, options);
+      if (command === 'taskkill') return child;
+      const readyPipe = new PassThrough();
+      readyPipes.push(readyPipe);
+      return Object.assign(child, { stdio: [null, null, null, readyPipe], unref: () => child });
+    },
+  };
+  return { table, api, readyPipes };
 }
+
+const runnerSpawns = (table: FakeProcessTable) =>
+  table.spawned.filter((call) => call.command !== 'taskkill');
 
 describe('daemon PID ownership', () => {
   it('atomically replaces stale diagnostics after Host ownership is acquired', () => {
@@ -74,6 +82,8 @@ describe('daemon PID ownership', () => {
 });
 
 describe('daemon runner launch cleanup', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
   it.each(['1.2.2', undefined])(
     'rejects and drains a replacement reporting version %s',
     (cliVersion) => {
@@ -131,30 +141,98 @@ describe('daemon runner launch cleanup', () => {
     });
   });
 
-  it('waits for a timed-out spawned runner to stop gracefully', async () => {
-    const child = new FakeRunnerChild();
-    child.onKill = (signal) => child.finish(signal);
+  it('leaves a ready runner running, detached from the launching terminal', async () => {
+    const { table, api, readyPipes } = runnerProcessTable();
+    const launch = spawnDaemonRunnerAndAwaitReady([], {
+      nodeProcess: api,
+      pidFilePath: createPidPath(),
+    });
+    const [runnerSpawn] = runnerSpawns(table);
+    readyPipes[0]?.write(
+      `${JSON.stringify({ status: 'ready', pid: 1, instanceId: 'runner-a' })}\n`
+    );
 
-    await expect(
-      terminateSpawnedDaemonRunner(child as unknown as ChildProcess, 999_001)
-    ).resolves.toBe(true);
-    expect(child.signals).toEqual(['SIGTERM']);
+    const result = await launch;
+
+    expect(result).toMatchObject({ status: 'ready', instanceId: 'runner-a' });
+    const runnerPid = result.status === 'ready' ? result.pid : -1;
+    expect(table.isAlive(runnerPid)).toBe(true);
+    expect(runnerSpawn?.options).toMatchObject({
+      detached: true,
+      windowsHide: true,
+      stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+    });
   });
 
-  it('force-kills the spawned runner when graceful shutdown does not finish', async () => {
-    vi.useFakeTimers();
-    const child = new FakeRunnerChild();
-    child.onKill = (signal) => {
-      if (signal === 'SIGKILL') child.finish(signal);
-    };
-
-    const stopped = terminateSpawnedDaemonRunner(child as unknown as ChildProcess, 999_002, {
-      shutdownGraceMs: 10,
-      forceKillWaitMs: 10,
+  it('ends the runner and its Worker when the readiness report is invalid', async () => {
+    const { table, api, readyPipes } = runnerProcessTable();
+    const launch = spawnDaemonRunnerAndAwaitReady([], {
+      nodeProcess: api,
+      pidFilePath: createPidPath(),
     });
-    await vi.advanceTimersByTimeAsync(10);
+    const runnerPid = 1000;
+    const workerPid = table.addDescendant(runnerPid);
+    readyPipes[0]?.write('not json\n');
 
-    await expect(stopped).resolves.toBe(true);
-    expect(child.signals).toEqual(['SIGTERM', 'SIGKILL']);
+    const result = await launch;
+
+    expect(result).toEqual({ status: 'error', runnerPid, message: 'invalid readiness report' });
+    expect(table.isAlive(runnerPid)).toBe(false);
+    expect(table.isAlive(workerPid)).toBe(false);
+  });
+
+  it('detaches the runner on Windows too and ends its tree after a failed launch', async () => {
+    const { table, api, readyPipes } = runnerProcessTable('win32');
+    const launch = spawnDaemonRunnerAndAwaitReady([], {
+      nodeProcess: api,
+      pidFilePath: createPidPath(),
+    });
+    readyPipes[0]?.end();
+
+    const result = await launch;
+
+    expect(result).toEqual({ status: 'runner_exited', runnerPid: 1000 });
+    expect(runnerSpawns(table)[0]?.options.detached).toBe(true);
+    expect(table.isAlive(1000)).toBe(false);
+  });
+
+  it('force-kills the runner tree when graceful shutdown does not finish', async () => {
+    const table = new FakeProcessTable();
+    table.queueSpawn({ ignores: ['SIGTERM'] });
+    const runner = startProcessLegacy(
+      { command: 'runner', args: [], options: {}, processGroup: true },
+      toShared({ nodeProcess: table.api })
+    );
+    const runnerPid = runner.child.pid ?? -1;
+    const workerPid = table.addDescendant(runnerPid, { ignores: ['SIGTERM'] });
+
+    const stopped = terminateSpawnedDaemonRunner(runner, runnerPid, {
+      shutdownGraceMs: 10,
+      forceKillWaitMs: 1_000,
+      pidFilePath: createPidPath(),
+    });
+    await vi.advanceTimersByTimeAsync(1_020);
+    expect(await stopped).toBe(true);
+
+    expect(table.isAlive(runnerPid)).toBe(false);
+    expect(table.isAlive(workerPid)).toBe(false);
+    expect(table.delivered.map((delivery) => delivery.signal)).toEqual(['SIGTERM', 'SIGKILL']);
+  });
+
+  it('reports a runner tree that survives SIGKILL instead of claiming it stopped', async () => {
+    const table = new FakeProcessTable();
+    table.queueSpawn({ ignores: ['SIGTERM', 'SIGKILL'] });
+    const runner = startProcessLegacy(
+      { command: 'runner', args: [], options: {}, processGroup: true },
+      toShared({ nodeProcess: table.api })
+    );
+
+    const stopped = terminateSpawnedDaemonRunner(runner, runner.child.pid ?? -1, {
+      shutdownGraceMs: 0,
+      forceKillWaitMs: 10,
+      pidFilePath: createPidPath(),
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(await stopped).toBe(false);
   });
 });

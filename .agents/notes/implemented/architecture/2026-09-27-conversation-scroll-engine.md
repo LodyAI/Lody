@@ -992,3 +992,52 @@ reproduces "Maximum update depth exceeded" without the pause and passes with it.
 - Reviews on 2026-09-27: Codex (GPT-6 Astra), session
   `0bc8379d-78b4-4a13-bee7-4ec862c9bf52`, five rounds; Claude session `dfd4a856`, three
   rounds.
+
+## Touch input and delayed scroll delivery (2026-10-07)
+
+A model reproduction found that an upward offset first observed after `touchend` was
+classified as unknown: follow wrote the bottom back on every native step. The adapter
+also waited for an offset before releasing follow, allowing a streaming commit to
+overwrite a pending touch scroll. This violates the existing reading contract and is
+separate from the accepted WebKit compensation cost above.
+
+The adapter now releases on single-touch upward conversation input, checking the
+final touch position as well as move events. Nested scrollers, taps, horizontal input,
+pinches and cancellation do not arm conversation momentum. The controller recognizes
+post-touch momentum during scroll and resize sampling; a new touch, cancellation,
+`scrollend`, or entering follow supersedes the previous evidence. No timer, delayed
+compensation or extra scroll writer was introduced.
+
+The existing model and adapter suites reproduce four failures on the old code and
+pass with the fix. They cover continuous momentum, new output while reading, returning
+to follow and non-scroll touches; the model retains its 40 seeded sequences. The two
+suites and keyed-layout suites pass 102 tests; scoped strict type and lint checks pass.
+Full-package checks are blocked by missing dependencies and outdated borrowed workspace
+packages. Validation uses synthetic events and simulated layout, not an iOS compositor.
+Real-device verification remains open; layout compensation can still interrupt an iOS fling.
+
+Follow-up validation on 2026-10-09 compared base `72b118b58` with code commit
+`343c78f41` in Chromium and desktop WebKit. An isolated synthetic fixture bundled
+the real React adapter and controller, with 40 keyed 80px rows, a 400px viewport,
+real DOM measurement and ResizeObserver. At the 2800px bottom, inject one-finger
+start/move/end (y=120 to 160), then set the DOM scrollTop by -80px and
+-60px, awaiting six animation frames after each step. Grow the final row by 20px;
+repeat with an additional 20px growth before the first offset. Both old builds
+write each offset back to the bottom (2800px, or 2820px after growth); both fixed
+builds retain 2720px, then 2660px, and remain at 2660px after output growth, with
+no programmatic scroll writes. All eight engine/version/scenario cases satisfy
+these assertions. One fixed WebKit case emits the browser's "ResizeObserver loop
+completed with undelivered notifications" warning; its position assertions pass,
+and no other page errors occur. This probe uses injected event data and DOM offset
+steps; it does not generate native touchscreen movement or compositor momentum.
+
+At documentation head `a2429a57e`, GitHub CI's static checks, all test shards and
+Conversation browser tests pass. The original recording has no touch/scroll event
+trace and no matched before/after capture on its phone. An available iOS simulator
+was booted, but no native touch experiment was completed: the Simulator UI is
+absent on this host and the current Lody panel could not be controlled. The original
+recording's complete symptom therefore remains unverified; the measured result
+establishes the delayed-input/follow overwrite fix, not a claim that every iOS
+scrolling vibration is gone.
+
+PR: [#1342](https://github.com/LodyAI/Lody/pull/1342).
