@@ -9,3 +9,6 @@ Parent instructions apply. `CLAUDE.md` is a symlink; edit `AGENTS.md` only.
   points or connect cryptographic, authorization or recovery services here.
 - Recovery evidence belongs to each workspace and a specific key update, not to
   account login or file creation. See [README](README.md) for preview and checks.
+- Announce result changes by workspace ID, including its name. Initial/new rows,
+  reordering and unchanged results stay silent; announcements must not move focus
+  or imply that the whole recovery completed.

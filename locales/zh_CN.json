@@ -1,4 +1,8 @@
 {
+  "e2ee.recovery.changed": "{{name}}：{{result}}。",
+  "e2ee.recovery.verifiedChange": "第 {{update}} 次密钥更新的恢复检查通过",
+  "e2ee.preview.applyUpdate": "应用下一次示例更新",
+  "e2ee.preview.updateStep": "示例更新 {{step}}",
   "e2ee.scope.document": "受影响文档：{{name}}",
   "e2ee.scope.workspace": "受影响工作区：{{name}}",
   "e2ee.access.pendingApproval.title": "等待批准",

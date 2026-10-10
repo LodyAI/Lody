@@ -1,6 +1,70 @@
 import { expect, test } from '@playwright/test';
 
 for (const locale of ['en', 'zh_CN']) {
+  test(`${locale} announces only changed recovery results by id`, async ({ page }) => {
+    await page.goto(
+      `/iframe.html?id=e2ee-status--recovery-changes&viewMode=story&globals=locale:${locale}`
+    );
+    const region = page.getByRole('region', {
+      name: locale === 'en' ? 'Recovery is partially complete' : '部分恢复已完成',
+    });
+    const live = region.locator('[aria-live="polite"]');
+    const overall = region.getByRole('status').first();
+    await expect(region).toBeVisible();
+    await expect(live).toBeEmpty();
+    await expect(live).toHaveAttribute('aria-atomic', 'true');
+    const initialOverall = await overall.textContent();
+    await live.evaluate((element) => {
+      const updates: string[] = [];
+      Reflect.set(element, 'observedUpdates', updates);
+      new MutationObserver(() => updates.push(element.textContent ?? '')).observe(element, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+      });
+    });
+    const button = page.getByRole('button', {
+      name: locale === 'en' ? 'Apply next example update' : '应用下一次示例更新',
+    });
+    await button.focus();
+    const failed =
+      locale === 'en'
+        ? 'Example workspace A: Recovery check failed.'
+        : '示例工作区甲：恢复检查失败。';
+    const verified =
+      locale === 'en'
+        ? 'Example workspace C: Recovery check passed for key update 4.'
+        : '示例工作区丙：第 4 次密钥更新的恢复检查通过。';
+    const expected: string[] = [];
+    // Same-name IDs change separately, then only reorder, clone unchanged props,
+    // update an already-verified row's key evidence, and render unchanged again.
+    for (let step = 1; step <= 6; step++) {
+      await page.keyboard.press('Enter');
+      await expect(page.locator('[data-committed-step]')).toHaveAttribute(
+        'data-committed-step',
+        String(step)
+      );
+      if (step <= 2) expected.push(failed);
+      if (step === 5) expected.push(verified);
+      await expect(live).toHaveText(expected.at(-1)!);
+      expect(await live.evaluate((element) => Reflect.get(element, 'observedUpdates'))).toEqual(
+        expected
+      );
+      await expect(button).toBeFocused();
+      await expect(overall).toHaveText(initialOverall!);
+      if (step <= 2) {
+        await expect(
+          region
+            .getByRole('listitem')
+            .filter({ hasText: locale === 'en' ? 'Recovery check failed' : '恢复检查失败' })
+        ).toHaveCount(step);
+      }
+    }
+    await expect(region.getByRole('listitem').first()).toContainText(
+      locale === 'en' ? 'key update 4' : '第 4 次密钥更新'
+    );
+  });
+
   for (const width of [360, 1280]) {
     test(`${locale} states remain readable at ${width}px`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 900 });

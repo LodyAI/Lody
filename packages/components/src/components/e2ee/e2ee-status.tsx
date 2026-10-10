@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { useId, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
@@ -44,7 +44,57 @@ const styles = stylex.create({
     borderTopColor: colors.separator,
   },
   rowName: { margin: 0, fontWeight: 500 },
+  announcement: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    padding: 0,
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'nowrap',
+  },
 });
+
+function RecoveryChanges({ workspaces }: { workspaces: readonly E2eeRecoveryWorkspace[] }) {
+  const { t } = useTranslation();
+  const previous = useRef<Map<string, string> | null>(null);
+  const [announcement, setAnnouncement] = useState({ sequence: 0, text: '' });
+
+  useEffect(() => {
+    const next = new Map<string, string>();
+    const changes: string[] = [];
+    for (const workspace of workspaces) {
+      const result =
+        workspace.state === 'verified'
+          ? `verified:${workspace.verifiedKeyUpdate}`
+          : workspace.state;
+      next.set(workspace.id, result);
+      // New IDs seed the baseline. Names, ordering and object identity are not results.
+      if (previous.current?.has(workspace.id) && previous.current.get(workspace.id) !== result) {
+        changes.push(
+          t('e2ee.recovery.changed', {
+            name: workspace.name,
+            result:
+              workspace.state === 'verified'
+                ? t('e2ee.recovery.verifiedChange', { update: workspace.verifiedKeyUpdate })
+                : t(`e2ee.recovery.workspace.${workspace.state}`),
+          })
+        );
+      }
+    }
+    previous.current = next;
+    if (changes.length > 0) {
+      setAnnouncement((current) => ({ sequence: current.sequence + 1, text: changes.join(' ') }));
+    }
+  }, [workspaces, t]);
+
+  return (
+    <div role="status" aria-live="polite" aria-atomic="true" {...stylex.props(styles.announcement)}>
+      {/* Replace the child for distinct changes with identical wording (e.g. same-name IDs). */}
+      <span key={announcement.sequence}>{announcement.text}</span>
+    </div>
+  );
+}
 
 function StatusCard({
   title,
@@ -140,6 +190,7 @@ export function E2eeRecoveryStatus({
       pending={state === 'importing' || action.pending}
     >
       <p {...stylex.props(styles.context)}>{t('e2ee.recovery.explanation')}</p>
+      <RecoveryChanges workspaces={workspaces} />
       {workspaces.length > 0 ? (
         <ul aria-label={t('e2ee.recovery.workspaces')} {...stylex.props(styles.list)}>
           {workspaces.map((workspace) => (

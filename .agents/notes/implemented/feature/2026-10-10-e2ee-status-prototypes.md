@@ -26,6 +26,14 @@ recovery identity per workspace. Saved material is distinct from a recovery chec
 for a particular key update. Later updates are not silently marked verified.
 Account login and button activation never imply permission or key possession.
 
+Per-workspace result changes have a separate, initially empty polite live region.
+Compare committed results by ID, not name or array order. Only changed state or
+verified key-update evidence is announced, with the workspace name; new IDs seed
+the baseline. Reordering and equivalent props leave its DOM unchanged. Distinct
+changes with identical text replace the child node so same-name workspaces do not
+hide each other's updates. This is notification state only: it changes neither
+focus nor the caller's overall partial/pending state.
+
 The single-document versus workspace-wide failure policy remains unresolved.
 Examples show both caller-provided scopes and label the decision as pending.
 Recovery-list partial completion does not select that error policy. No cryptographic,
@@ -47,7 +55,7 @@ suite covers English/Chinese, narrow/desktop layout, accessible structure and
 keyboard retries. The pending button stays focusable but cannot activate; the
 failure remains until the caller changes it. No timers or real data are used.
 
-Validation: 8 browser tests passed; the existing components suite passed 556 files /
+Initial validation: 8 browser tests passed; the existing components suite passed 556 files /
 5010 tests. Component typecheck, `pnpm check:quick`, `pnpm format`, scoped Oxfmt
 and `pnpm run docs check` passed. Light desktop and dark narrow screenshots were
 visually inspected, including the partial recovery card.
@@ -62,6 +70,14 @@ Electron tests, was not completed. Reproduce those environment checks with:
 NODE_ENV=test pnpm --filter @lody/shared test tests/local-ipc.test.ts tests/local-cli-host-lease.test.ts
 NODE_ENV=test pnpm --filter lody test src/preview/preview-service.test.ts src/session/worktree/worktree-manager-broker-auth.test.ts --maxWorkers=2
 ```
+
+The announcement follow-up starts at `9b4e10996185b74514185194c3560389ac8fc0a1`.
+Four focused browser cases passed (two languages, result changes and recovery
+keyboard behavior), including live-region MutationObserver evidence for separate
+same-name IDs, initial silence, reordered/equivalent props and a changed verified
+key update. Component typecheck, quick/static, format and docs checks passed.
+The unchanged visual/full local test matrices were not rerun for this follow-up.
+Use the focused command in the README; CI runs against the new commit separately.
 
 Actual VoiceOver/NVDA speech, 200% zoom, native platforms, real recovery files, services and
 persistence are not established by these tests. Production integration and the

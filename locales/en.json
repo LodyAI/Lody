@@ -1,4 +1,8 @@
 {
+  "e2ee.recovery.changed": "{{name}}: {{result}}.",
+  "e2ee.recovery.verifiedChange": "Recovery check passed for key update {{update}}",
+  "e2ee.preview.applyUpdate": "Apply next example update",
+  "e2ee.preview.updateStep": "Example update {{step}}",
   "e2ee.scope.document": "Affected document: {{name}}",
   "e2ee.scope.workspace": "Affected workspace: {{name}}",
   "e2ee.access.pendingApproval.title": "Waiting for approval",

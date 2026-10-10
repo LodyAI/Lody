@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import * as stylex from '@stylexjs/stylex';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { colors } from '@lody/ui/tokens/colors.stylex';
@@ -144,6 +144,44 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const AllStates: Story = {};
+export const RecoveryChanges: Story = { render: () => <RecoveryChangesExample /> };
+
+function RecoveryChangesExample() {
+  const { t } = useTranslation();
+  const [step, setStep] = useState(0);
+  const [committedStep, setCommittedStep] = useState(0);
+  // A visible acknowledgement after the child has processed this props update;
+  // browser tests can observe completion without arbitrary waits.
+  useEffect(() => setCommittedStep(step), [step]);
+  const workspaces: E2eeRecoveryWorkspace[] = [
+    { id: 'a', name: t('e2ee.preview.workspaceA'), state: step >= 1 ? 'failed' : 'waitingKey' },
+    { id: 'b', name: t('e2ee.preview.workspaceA'), state: step >= 2 ? 'failed' : 'waitingKey' },
+    {
+      id: 'c',
+      name: t('e2ee.preview.workspaceC'),
+      state: 'verified',
+      verifiedKeyUpdate: step >= 5 ? 4 : 3,
+    },
+  ];
+  if (step >= 3) workspaces.reverse();
+  return (
+    <main {...stylex.props(styles.page)}>
+      <h1 {...stylex.props(styles.title)}>
+        <PreviewNotice />
+      </h1>
+      <E2eeRecoveryStatus state="partial" pending={false} workspaces={workspaces} />
+      <div>
+        <Button variant="secondary" onClick={() => setStep((current) => current + 1)}>
+          {t('e2ee.preview.applyUpdate')}
+        </Button>
+      </div>
+      <p data-committed-step={committedStep} {...stylex.props(styles.copy)}>
+        {t('e2ee.preview.updateStep', { step: committedStep })}
+      </p>
+    </main>
+  );
+}
+
 export const RecoveryRetry: Story = {
   render: () => (
     <main {...stylex.props(styles.page)}>
