@@ -15,7 +15,12 @@ readable regular local file, including files outside the session workspace and i
 another worktree. Worktree prefixes must not redirect these links into the current
 workspace. This applies to both Markdown links and tool file entries. External
 files remain readonly, and genuinely missing files still show a not-found error.
-Remote preview authorization remains restricted to its existing allowed roots.
+Same-machine preview uses the local communication channel and does not require a
+running agent. Absolute and home-rooted paths remain previewable when the session's
+working directory is unavailable, after validating session and machine ownership.
+These files remain readonly. Relative paths require the original workspace; they
+must never be resolved against a substitute directory. Remote preview authorization
+remains restricted to its existing allowed roots.
 
 For a binary file without an inline viewer, the preview explains that it cannot
 render the file in the shared rounded notice card, with full-width stacked actions

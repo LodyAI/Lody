@@ -158,6 +158,52 @@ describe('resolveFilePreviewPath tolerant resolution against a real filesystem',
     created.push(dir);
     return dir;
   };
+  it('resolves absolute and home-rooted local paths without a workspace, but never guesses a relative base', async () => {
+    const homeDir = await makeDir('preview-home-');
+    const file = path.join(homeDir, 'notes.md');
+    await writeFile(file, '# Synthetic note');
+    const absolutePath = fs.realpathSync(file);
+    for (const requestedPath of [file, '~/notes.md']) {
+      expect(
+        resolveFilePreviewPath({
+          workspaceRoot: null,
+          requestedPath,
+          extraRoots: [],
+          options: { allowArbitraryPaths: true, homeDir },
+        })
+      ).toMatchObject({
+        ok: true,
+        resolved: { absolutePath, reportedPath: absolutePath, external: true },
+      });
+      expect(
+        resolveFilePreviewPath({ workspaceRoot: null, requestedPath, extraRoots: [] })
+      ).toMatchObject({ ok: false, rejection: { code: 'workspace_root_unavailable' } });
+    }
+    for (const requestedPath of ['notes.md', '../notes.md']) {
+      expect(
+        resolveFilePreviewPath({
+          workspaceRoot: null,
+          requestedPath,
+          options: { allowArbitraryPaths: true, homeDir },
+        })
+      ).toMatchObject({ ok: false, rejection: { code: 'workspace_root_unavailable' } });
+    }
+    expect(
+      resolveFilePreviewPath({
+        workspaceRoot: null,
+        requestedPath: '~/missing.md',
+        options: { allowArbitraryPaths: true, homeDir },
+      })
+    ).toMatchObject({ ok: false, rejection: { code: 'file_not_found' } });
+    expect(
+      resolveFilePreviewPath({
+        workspaceRoot: null,
+        requestedPath: homeDir,
+        options: { allowArbitraryPaths: true, homeDir },
+      })
+    ).toMatchObject({ ok: false, rejection: { code: 'not_a_file' } });
+  });
+
   const authorize = (workspaceRoot: string, requestedPath: string) =>
     resolveFilePreviewPath({
       workspaceRoot,

@@ -347,7 +347,10 @@ import {
   type CodeCollabV2WorkspaceResolveOptions,
   type CodeCollabV2WorkspaceResolver,
 } from '@/lib/code-collab/code-collab-v2-service';
-import { FilePreviewService } from '@/lib/file-preview/file-preview-service';
+import {
+  FilePreviewService,
+  type FilePreviewLocalWorkspaceResolver,
+} from '@/lib/file-preview/file-preview-service';
 import {
   CodeCollabV2DiffStore,
   type CodeCollabV2DiffStoreEvent,
@@ -3036,6 +3039,7 @@ export class MessageHandler {
       },
     });
     this.filePreviewService = new FilePreviewService({
+      resolveLocalWorkspace: this.resolveLocalFilePreviewWorkspace,
       resolveWorkspace: async (sessionId) => {
         const resolved = await this.resolveCodeCollabV2Workspace(sessionId);
         return resolved.ok
@@ -6438,6 +6442,50 @@ export class MessageHandler {
     }
   };
 
+  private readonly resolveLocalFilePreviewWorkspace: FilePreviewLocalWorkspaceResolver = async (
+    sessionId
+  ) => {
+    // Local IPC grants filesystem reads, but must retain the session/machine and
+    // child-owner checks without requiring a live agent or an existing directory.
+    const meta = await this.resolveCodeCollabOwnerSessionMeta(sessionId);
+    if (!meta)
+      return {
+        ok: false,
+        code: 'session_not_found',
+        message: 'Session metadata is not available.',
+      };
+    const ownerSessionId = meta.parentSessionId ?? sessionId;
+    const ownerMeta =
+      ownerSessionId === sessionId
+        ? meta
+        : await this.resolveCodeCollabOwnerSessionMeta(ownerSessionId);
+    if (!ownerMeta)
+      return {
+        ok: false,
+        code: 'session_not_found',
+        message: 'Owner session metadata is not available.',
+      };
+    if (
+      meta.isArchived ||
+      ownerMeta.isArchived ||
+      meta.machineId !== this.machineId ||
+      ownerMeta.machineId !== this.machineId ||
+      ownerMeta.parentSessionId
+    ) {
+      return {
+        ok: false,
+        code: 'permission_denied',
+        message: 'Local file preview session ownership is invalid.',
+      };
+    }
+    const resolved = await this.resolveCodeCollabV2Workspace(sessionId);
+    if (resolved.ok) return { ok: true, ownerSessionId, workspaceRoot: resolved.workspaceRoot };
+    if (resolved.code === 'workspace_root_unavailable') {
+      return { ok: true, ownerSessionId, workspaceRoot: null };
+    }
+    return resolved;
+  };
+
   private readonly resolveCodeCollabV2OwnerSessionId = async (
     sessionId: SessionId
   ): Promise<SessionId> => {
@@ -6644,8 +6692,10 @@ export class MessageHandler {
         await assertOwner(request.params.sessionId as SessionId);
         return await this.filePreviewService.previewFile(request.params);
       case 'file/resolve-local':
-        await assertOwner(request.params.sessionId as SessionId);
-        return await this.filePreviewService.resolveLocalFile(request.params);
+        return await this.filePreviewService.resolveLocalFile(
+          request.params,
+          request.ownerSessionId
+        );
       case 'session/get-active-invocation-context': {
         const sessionId = request.params.sessionId as SessionId;
         const invocation = this.executionService.getActiveInvocationContext(sessionId);

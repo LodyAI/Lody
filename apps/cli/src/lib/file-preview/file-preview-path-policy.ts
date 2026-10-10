@@ -22,6 +22,7 @@ export const FILE_PREVIEW_EXTRA_ROOTS_ENV_VAR = 'LODY_FILE_PREVIEW_EXTRA_ROOTS';
 
 export type FilePreviewPathRejection =
   | { readonly code: 'invalid_path'; readonly message: string }
+  | { readonly code: 'workspace_root_unavailable'; readonly message: string }
   | { readonly code: 'path_not_allowed'; readonly message: string }
   | { readonly code: 'file_not_found'; readonly message: string }
   | { readonly code: 'not_a_file'; readonly message: string }
@@ -155,9 +156,14 @@ function expandHome(input: string, homeDir: string): string {
   return input;
 }
 
-function toLexicalPath(input: string, workspaceRoot: string, homeDir: string): string {
+function toLexicalPath(
+  input: string,
+  workspaceRoot: string | null,
+  homeDir: string
+): string | null {
   const expanded = expandHome(input, homeDir);
-  return path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(workspaceRoot, expanded);
+  if (path.isAbsolute(expanded)) return path.resolve(expanded);
+  return workspaceRoot === null ? null : path.resolve(workspaceRoot, expanded);
 }
 
 /**
@@ -169,14 +175,14 @@ function toLexicalPath(input: string, workspaceRoot: string, homeDir: string): s
  */
 function buildLexicalCandidates(
   requested: string,
-  workspaceRoot: string,
+  workspaceRoot: string | null,
   homeDir: string
 ): readonly string[] {
   const spellings = requested.trim() === requested ? [requested] : [requested, requested.trim()];
   const candidates: string[] = [];
   for (const spelling of spellings) {
     const lexicalPath = toLexicalPath(spelling, workspaceRoot, homeDir);
-    if (!candidates.includes(lexicalPath)) candidates.push(lexicalPath);
+    if (lexicalPath !== null && !candidates.includes(lexicalPath)) candidates.push(lexicalPath);
   }
   return candidates;
 }
@@ -298,7 +304,7 @@ function resolveWorkspacePathTolerantly(
  * use not-found vs not-allowed as an existence probe outside the boundary.
  */
 export function resolveFilePreviewPath(args: {
-  readonly workspaceRoot: string;
+  readonly workspaceRoot: string | null;
   readonly requestedPath: string;
   readonly extraRoots?: readonly string[];
   readonly options?: FilePreviewPathPolicyOptions;
@@ -316,11 +322,30 @@ export function resolveFilePreviewPath(args: {
   }
 
   const homeDir = args.options?.homeDir ?? os.homedir();
-  const workspaceRoot = path.resolve(args.workspaceRoot);
+  const workspaceRoot = args.workspaceRoot === null ? null : path.resolve(args.workspaceRoot);
+  if (workspaceRoot === null && !args.options?.allowArbitraryPaths) {
+    return {
+      ok: false,
+      rejection: {
+        code: 'workspace_root_unavailable',
+        message: 'Session workspace is unavailable.',
+      },
+    };
+  }
   const lexicalCandidates = buildLexicalCandidates(requested, workspaceRoot, homeDir);
+  if (!lexicalCandidates.length) {
+    return {
+      ok: false,
+      rejection: {
+        code: 'workspace_root_unavailable',
+        message: 'Session workspace is unavailable. Use an absolute or home-rooted file path.',
+      },
+    };
+  }
 
   const extraRoots = args.extraRoots ?? getDefaultFilePreviewExtraRoots(args.options);
-  const realWorkspaceRoot = resolveRealPathOrNull(workspaceRoot) ?? workspaceRoot;
+  const realWorkspaceRoot =
+    workspaceRoot === null ? null : (resolveRealPathOrNull(workspaceRoot) ?? workspaceRoot);
   // Authorization compares symlink-resolved paths only.
   const realRoots = [realWorkspaceRoot, ...extraRoots.map(resolveRealPathOrNull)].filter(
     (root): root is string => root !== null
@@ -333,7 +358,11 @@ export function resolveFilePreviewPath(args: {
   // reported as "outside the workspace" instead of "not found". Widening here is
   // safe: the file does not exist on either spelling, so this only picks the
   // error message, never grants a read.
-  const classificationRoots = [...realRoots, workspaceRoot, ...extraRoots];
+  const classificationRoots = [
+    ...realRoots,
+    ...(workspaceRoot === null ? [] : [workspaceRoot]),
+    ...extraRoots,
+  ];
 
   const notAllowed: FilePreviewPathResolution = {
     ok: false,
@@ -361,8 +390,9 @@ export function resolveFilePreviewPath(args: {
     // lexical candidate is built from the unresolved one, so on macOS
     // `/var/folders/…` vs `/private/var/folders/…` only one of them contains
     // it). Passing the same string twice runs the whole synchronous walk twice.
-    const tolerantRoots =
-      realWorkspaceRoot === workspaceRoot ? [workspaceRoot] : [realWorkspaceRoot, workspaceRoot];
+    const tolerantRoots = [realWorkspaceRoot, workspaceRoot].filter(
+      (root, index, roots): root is string => root !== null && roots.indexOf(root) === index
+    );
     const reader = args.options?.directoryReader ?? NODE_DIRECTORY_READER;
     for (const candidate of lexicalCandidates) {
       const tolerant = resolveWorkspacePathTolerantly(candidate, tolerantRoots, reader);
@@ -422,13 +452,17 @@ export function resolveFilePreviewPath(args: {
     };
   }
 
-  const workspaceRelative = path.relative(realWorkspaceRoot, realTarget);
-  const external = !isWithinRoot(realWorkspaceRoot, realTarget);
+  const workspaceRelative =
+    realWorkspaceRoot === null ? null : path.relative(realWorkspaceRoot, realTarget);
+  const external = realWorkspaceRoot === null || !isWithinRoot(realWorkspaceRoot, realTarget);
   return {
     ok: true,
     resolved: {
       absolutePath: realTarget,
-      reportedPath: external ? realTarget : workspaceRelative.split(path.sep).join('/'),
+      reportedPath:
+        external || workspaceRelative === null
+          ? realTarget
+          : workspaceRelative.split(path.sep).join('/'),
       external,
       sizeBytes: stat.size,
     },
