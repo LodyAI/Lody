@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-10-markdown-cjk-emphasis.md)
 
+PR: [#1375](https://github.com/LodyAI/Lody/pull/1375)
+
 ## 摘要
 
 中文粗体句子以标点结尾且结束标记紧贴下一句时，可能显示为字面 Markdown。

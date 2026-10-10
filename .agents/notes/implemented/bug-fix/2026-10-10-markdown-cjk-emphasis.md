@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-10-markdown-cjk-emphasis.zh.md)
 
+PR: [#1375](https://github.com/LodyAI/Lody/pull/1375)
+
 ## Abstract
 
 Chinese bold sentences ending in punctuation can remain literal Markdown when the
