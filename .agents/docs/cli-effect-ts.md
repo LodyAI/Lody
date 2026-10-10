@@ -35,7 +35,9 @@ catch })` and pass the signal on, so interruption aborts the work.
   `Effect.promise` turns a rejection into a defect.
 - Surface failures to Promise callers as the typed error itself: run with
   `Effect.runPromiseExit` and throw `Cause.squash(exit.cause)`, not the
-  `FiberFailure` wrapper `Effect.runPromise` rejects with.
+  `FiberFailure` wrapper `Effect.runPromise` rejects with. For programs owning
+  processes, use `squashProcessFailure`: plain `Cause.squash` can discard a
+  simultaneous release defect and its recovery lease.
 - An interrupt is owned by a scope or awaited. `void Effect.runPromise(Fiber.interrupt(f))`
   returns before the fiber's finalizers run.
 - Put a timeout on the waiter, not on uninterruptible work:
@@ -63,6 +65,15 @@ requires the official spawner, and `spawnProcess` requires Scope. See the
 [backend decision](../notes/implemented/architecture/2026-10-09-effect-official-process-service.md)
 for why the default Node spawner is not used unchanged.
 
+If bounded Scope termination fails, its Exit contains a `ProcessReleaseFailed`
+defect with a recovery lease for the unresolved tree. The owner retains that
+lease, observes `isAlive` and retries `retryTermination` before declaring the tree
+gone. Scope closure itself is already finished and cannot perform that retry.
+`squashProcessFailure` preserves all these leases when an unmigrated Promise
+boundary also has a body error. This tree recovery does not certify drained stdio
+or complete Session shutdown. See the
+[release decision](../notes/implemented/bug-fix/2026-10-10-effect-process-release-failure.md).
+
 Never wrap the shared Promise functions back into an Effect. A runner creates a
 separate root fiber. For an unmigrated entry point, the shared facade accepts an
 explicit AbortSignal; pass it when the entry point supports cancellation. This
@@ -86,12 +97,12 @@ They provide the service Layers and apply the failure rule above. A facade is te
 it is deleted when its caller migrates, and it never appears inside an already
 migrated layer. Current facades:
 
-| Facade                                                                                                                                                                                                                                                                                                                                                                                                       | Used by                                                                                                 | Replaced when                                               |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `apps/cli/src/session/session-sandbox.ts` (`SessionSandbox`)                                                                                                                                                                                                                                                                                                                                                 | `Session`, `TerminalManager`                                                                            | the session resource layer owns process containers directly |
-| `terminateAcpProcessTree` in `apps/cli/src/agent/acp-runner.ts`                                                                                                                                                                                                                                                                                                                                              | auxiliary ACP agents                                                                                    | auxiliary ACP agents become scoped processes                |
+| Facade                                                                                                                                                                                                                                                                                                                                                                         | Used by                                                                                                 | Replaced when                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `apps/cli/src/session/session-sandbox.ts` (`SessionSandbox`)                                                                                                                                                                                                                                                                                                                   | `Session`, `TerminalManager`                                                                            | the session resource layer owns process containers directly |
+| `terminateAcpProcessTree` in `apps/cli/src/agent/acp-runner.ts`                                                                                                                                                                                                                                                                                                                | auxiliary ACP agents                                                                                    | auxiliary ACP agents become scoped processes                |
 | `runCommandTextLegacy` / `runCommandTextSyncLegacy` / `startProcessLegacy` / `terminateChildTreeLegacy` / `signalChildTreeNowLegacy` / `isPidAliveSyncLegacy` / `probePidSyncLegacy` and the runners `makeProcessRunnerLegacy` / `runPromiseSquashedLegacy` in `@lody/shared/node/process` (CLI: `process-options.ts` composes its logger; worker bundles use shared defaults) | every other process caller in the CLI, Electron main, the CLI supervisor and `packages/shared/src/node` | each caller's own layer migrates                            |
-| `terminatePtyProcessGroup` in `apps/cli/src/lib/terminal-pty-service.ts`                                                                                                                                                                                                                                                                                                                                     | local terminal PTYs                                                                                     | terminal/PTY ownership becomes an Effect layer              |
+| `terminatePtyProcessGroup` in `apps/cli/src/lib/terminal-pty-service.ts`                                                                                                                                                                                                                                                                                                       | local terminal PTYs                                                                                     | terminal/PTY ownership becomes an Effect layer              |
 
 `pnpm check:cli-process-boundary` fails when code in those packages bypasses
 these and reaches `child_process`, `cross-spawn`, `node-pty`, `process.kill` or

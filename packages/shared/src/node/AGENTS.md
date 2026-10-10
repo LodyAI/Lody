@@ -36,8 +36,11 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   `process.ts` with a test and a facade; never work around the layer in a caller.
 - End processes through the official Effect handle or `terminateTree`; never add another
   SIGTERM→wait→SIGKILL loop. Every wait is bounded, and a tree that cannot be
-  proven gone fails with `TerminationFailed`, never success. A caller that
-  cannot act on it logs it at `warn`, naming the tree.
+  proven gone fails with `TerminationFailed`, never success. Scope release failure
+  is a `ProcessReleaseFailed` defect carrying the unresolved tree's recovery lease;
+  retain it until `isAlive` proves absence or `retryTermination` succeeds. Logging
+  alone cannot turn that failure into success. Promise boundaries must use
+  `squashProcessFailure` to preserve every lease alongside the primary failure.
 - Termination often runs in a finalizer, where nothing is interruptible: bound
   its waits by the clock (`waitUntilGone`), never by `timeout*` or a race.
 - Never signal a child without a pid (pid 0 is the caller's own group), and
