@@ -257,7 +257,7 @@ override entries still apply only when their source-version suffix matches the s
 
 ### Session titles
 
-Providers advertising Core `agentCapabilities._meta.lody.sessionTitle: { version: 1 }`
+Except for builtin Codex, Providers advertising Core `agentCapabilities._meta.lody.sessionTitle: { version: 1 }`
 own automatic title generation. After the main ACP session initializes, dispatch
 uses its live capability to skip `title-generator.ts`; capability cache freshness
 cannot cause a duplicate process on the first launch. Probes and normal session
@@ -271,11 +271,18 @@ tags are rejected; user titles are preserved. The generated tag requires the
 capability. Legacy explicit tags remain compatible. Failed provider generation
 leaves the draft title; there is no timeout-triggered duplicate generation.
 
-The builtin Claude/Codex/Grok identity table remains compatibility for older
+The builtin Claude/Grok identity table remains compatibility for older
 managed runtimes. Overrides revoke that fallback, but can independently advertise
 the new capability. Only legacy Claude/Grok titles are trusted without a tag.
 See the [contract](../../../../specs/acp-session-titles.md) and
 [original compatibility decision](../../../../.agents/notes/implemented/architecture/2026-09-08-acp-owned-session-titles.md).
+
+Builtin Codex always uses `title-generator.ts`, including with an old title capability
+cache. Its Provider settings expose title configuration; absent a non-empty override,
+the isolated session selects `gpt-5.6-luna`, low reasoning, and full access. Unsupported
+requested options fail to the existing prompt-derived fallback. The bundled adapter
+has no automatic generator, so neither the main nor title session starts an extra
+naming turn. Main conversation settings and Provider authentication are preserved.
 
 The daemon does not name branches. A worktree session starts on the temporary branch
 `worktree-manager.ts` created for it (`session/<id>` for GitHub, `lody/<id>` for shared-local

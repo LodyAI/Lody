@@ -92,6 +92,7 @@ export async function applyTitleConfigOptions(options: {
   acpSessionId: ACPSessionId;
   sessionResponse: unknown;
   configOptionValues: Record<string, AcpConfigOptionValue>;
+  requireAvailable?: boolean;
   logger: Logger;
 }): Promise<void> {
   const sessionResponse = options.sessionResponse as {
@@ -127,6 +128,9 @@ export async function applyTitleConfigOptions(options: {
       continue;
     }
 
+    if (options.requireAvailable) {
+      throw new Error(`Unavailable title config option ${key}=${String(value)}`);
+    }
     options.logger.debug(
       `[title-generator] Skipping unavailable title config option ${key}=${String(value)}`
     );
@@ -363,6 +367,7 @@ export const generateTitleIsolated = async (
             acpSessionId,
             sessionResponse,
             configOptionValues,
+            requireAvailable: options.cliType === 'builtin' && options.agentType === 'codex',
             logger: options.logger,
           });
         }

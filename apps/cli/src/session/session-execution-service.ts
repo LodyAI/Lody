@@ -1,4 +1,5 @@
 import {
+  acpOwnsSessionTitleGeneration,
   type AcpModelControls,
   type ACPSessionId,
   type AgentConfigId,
@@ -5874,7 +5875,14 @@ export class SessionExecutionService {
           self.scheduleCreatedSessionCapabilityUpdate(session, sessionConfig);
           yield* abortIfCancelled({ terminateSession: true });
           // Use the live initialize result, including on the first uncached launch.
-          if (session.getAcpCapabilities?.()?.sessionTitle !== true) {
+          if (
+            !acpOwnsSessionTitleGeneration(
+              sessionConfig.agentCliType,
+              sessionConfig.agentType,
+              acpSessionConfig.runtimeOverrides,
+              session.getAcpCapabilities?.()?.sessionTitle
+            )
+          ) {
             void self.deps.maybeGenerateAndStoreSessionTitle(
               sessionId,
               sessionConfig.agentCliType,

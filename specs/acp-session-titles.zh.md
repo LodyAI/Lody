@@ -5,12 +5,12 @@ Translation: current
 
 [English](acp-session-titles.md)
 
-Provider 自行生成 Session 标题时，Lody 不应为同一工作再启动 ACP 进程。
+除下述 builtin Codex 外，Provider 自行生成 Session 标题时，Lody 不应为同一工作再启动 ACP 进程。
 Provider 通过 Core 初始化能力
 `agentCapabilities._meta.lody.sessionTitle: { version: 1 }` 声明接管。
 
 主 Session 完成初始化后才判断标题归属。实时能力适用于 builtin、registry、custom
-Provider 及运行时覆盖，即使尚无探测缓存也生效。旧版托管 Claude/Codex/Grok
+Provider 及运行时覆盖，即使尚无探测缓存也生效。旧版托管 Claude/Grok
 继续使用身份兼容名单；运行时覆盖禁用该兼容路径。其他运行时保留独立生成。
 
 Provider 推送标准 `session_info_update`，包含 `title` 和 `_meta.lody.titleSource`。
@@ -23,6 +23,18 @@ Provider 生成失败时保留草稿标题，不通过超时启动重复生成�
 设置页面在匹配的能力数据表明 Provider 接管标题时隐藏独立生成选项，仍检查
 自定义命令和运行时覆盖的来源匹配。缓存版本仅影响刷新，不影响已知字段可读性；
 执行时以实时初始化结果为准。
+
+## Builtin Codex
+
+Lody 负责 builtin Codex 标题，即使旧缓存或运行时仍声明自行生成标题。
+Provider 配置页展示现有标题模型、推理和权限选项。非空的已保存标题配置优先；
+否则独立标题会话使用 `gpt-5.6-luna`、`low` 和 `agent-full-access`。
+这些设置不改变主聊天配置。所需选项不可用时，标题生成失败并保留现有的提示词
+衍生兜底标题，不静默换用其他模型或权限模式。
+
+随 Lody 打包的 Codex 适配器不再生成标题，也不声明 `sessionTitle`。
+它保留原生显式命名事件与带标签的提示词预览。标题模型请求只由 Lody 独立会话
+执行，使用 Provider 原有认证。其他 Provider 继续遵循协商的标题归属。
 
 ## 证据
 

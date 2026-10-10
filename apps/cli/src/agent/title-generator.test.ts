@@ -82,6 +82,29 @@ describe('sanitizeGeneratedTitle', () => {
 });
 
 describe('applyTitleConfigOptions', () => {
+  it('rejects an unavailable required model instead of generating with another model', async () => {
+    const active = { model: 'other-model' };
+    await expect(
+      applyTitleConfigOptions({
+        client: {
+          setSessionConfigOption: async (_session, _key, value) => {
+            active.model = String(value);
+            return [];
+          },
+          unstable_setSessionModel: async (_session, model) => {
+            active.model = model;
+          },
+        },
+        acpSessionId: 'title-session' as ACPSessionId,
+        sessionResponse: { configOptions: [] },
+        configOptionValues: { model: 'gpt-5.6-luna' },
+        requireAvailable: true,
+        logger: { debug: vi.fn() } as never,
+      })
+    ).rejects.toThrow('Unavailable title config option model=gpt-5.6-luna');
+    expect(active.model).toBe('other-model');
+  });
+
   it('applies a synthetic legacy model selection before title prompting', async () => {
     const setSessionConfigOption = vi.fn(async () => undefined);
     const unstableSetSessionModel = vi.fn(async () => {});

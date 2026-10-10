@@ -9042,7 +9042,7 @@ export class MessageHandler {
     runtimeOverrides?: BuiltinRuntimeOverrides,
     titleConfig?: TitleGenerationConfig
   ): Promise<void> {
-    // Builtin Claude, Codex and Grok generate their own titles and publish them
+    // Builtin Claude and Grok generate their own titles and publish them
     // as session_info_update; the isolated agent would only duplicate that work.
     if (acpOwnsSessionTitleGeneration(cliType, agentType, runtimeOverrides)) {
       return;

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import {
+  getStaticBuiltinAcpCapabilities,
   ACP_CAPABILITY_CACHE_VERSION,
   PROVIDER_SETUP_PROTOCOL_VERSION,
   getAcpCapabilityCacheKey,
@@ -1708,9 +1709,9 @@ describe('AgentConfigDialog', () => {
     expect(findSignInAgainButton()).toBeUndefined();
   });
 
-  // Claude, Codex and Grok generate their own title over ACP, so the setting is
+  // Claude and Grok generate their own title over ACP, so the setting is
   // obsolete for them. Kimi keeps it (covered by the normalization test below).
-  it.each(['claude', 'codex', 'grok'])(
+  it.each(['claude', 'grok'])(
     'hides the title generation section for builtin %s',
     async (agentType) => {
       await renderDialog(
@@ -1719,6 +1720,46 @@ describe('AgentConfigDialog', () => {
       );
 
       expect(document.body.textContent).not.toContain('Title generation');
+    }
+  );
+
+  it.each([undefined, { model: 'gpt-5.6-sol', reasoning_effort: 'high', mode: 'read-only' }])(
+    'shows and saves Codex title configuration even with an old ownership cache: %j',
+    async (configured) => {
+      const config = createBuiltinConfig({
+        agentType: 'codex',
+        titleGeneration: configured ? { configOptionValues: configured } : undefined,
+      });
+      const machine = createMachine('Workstation');
+      machine.acpCapabilities = {
+        [getAcpCapabilityCacheKey(config.id)]: {
+          ...createTitleConfigMachine().acpCapabilities![getAcpCapabilityCacheKey(kimiConfigId)]!,
+          agentType: 'codex',
+          sessionTitle: true,
+          ...getStaticBuiltinAcpCapabilities('builtin', 'codex'),
+        },
+      };
+      const onSubmit = vi.fn(async () => {});
+      await renderDialog({ kind: 'edit', config }, machine, onSubmit);
+      expect(document.body.textContent).toContain('Title generation');
+      await act(async () => {
+        Array.from(document.body.querySelectorAll('button'))
+          .find((button) => button.textContent?.trim() === 'Save')!
+          .click();
+      });
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          titleGeneration: {
+            configOptionValues: expect.objectContaining(
+              configured ?? {
+                model: 'gpt-5.6-luna',
+                reasoning_effort: 'low',
+                mode: 'agent-full-access',
+              }
+            ),
+          },
+        })
+      );
     }
   );
 

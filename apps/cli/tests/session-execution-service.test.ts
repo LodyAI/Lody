@@ -3588,22 +3588,36 @@ describe('SessionExecutionService', () => {
           ]
         : ['allocated']
       ).flatMap((branchState) =>
-        [true, false].map((sessionTitle) => ({
-          name,
-          kind,
-          worktree,
-          child,
-          prior,
-          resume,
-          rename: rename && ['allocated', 'collision', 'namespace collision'].includes(branchState),
-          branchState,
-          sessionTitle,
-        }))
+        ['codex', 'kimi'].flatMap((titleAgentType) =>
+          [true, false].map((sessionTitle) => ({
+            name,
+            kind,
+            worktree,
+            child,
+            prior,
+            resume,
+            rename:
+              rename && ['allocated', 'collision', 'namespace collision'].includes(branchState),
+            branchState,
+            sessionTitle,
+            titleAgentType,
+          }))
+        )
       )
     )
   )(
-    'starts $name on $branchState with title capability $sessionTitle and the appropriate first-task prompt',
-    async ({ kind, worktree, child, prior, resume, rename, branchState, sessionTitle }) => {
+    'starts $name on $branchState with $titleAgentType title capability $sessionTitle and the appropriate first-task prompt',
+    async ({
+      kind,
+      worktree,
+      child,
+      prior,
+      resume,
+      rename,
+      branchState,
+      sessionTitle,
+      titleAgentType,
+    }) => {
       const generatedTitles: string[] = [];
       const allocatedBranch = kind === 'github' ? 'session/session-' : 'lody/session-loca';
       const initialBranch =
@@ -3757,7 +3771,7 @@ describe('SessionExecutionService', () => {
         acpSessionConfig: {
           prompt: 'hello',
           cliType: 'builtin',
-          agentType: 'codex',
+          agentType: titleAgentType,
           ...(resume ? { resume: 'acp-requested' } : {}),
         },
         userTurnId: 'turn-local-code-collab',
@@ -3776,7 +3790,9 @@ describe('SessionExecutionService', () => {
       expect(branchAtPrompt).toBe(initialBranch);
       if (rename) expect(text).toContain(`git branch -m ${initialBranch} <name>`);
       expect(publishedBranch).toBe('feature/local-finished');
-      expect(generatedTitles).toEqual(sessionTitle ? [] : ['Local title']);
+      expect(generatedTitles).toEqual(
+        sessionTitle && titleAgentType !== 'codex' ? [] : ['Local title']
+      );
       expect(sessionManager.createSession).toHaveBeenCalledWith(
         expect.objectContaining({
           ...(kind === 'local' ? { workdir: '/local/repo' } : {}),
@@ -3788,7 +3804,7 @@ describe('SessionExecutionService', () => {
           machineId,
           capabilityConfigId,
           'builtin',
-          'codex',
+          titleAgentType,
           [{ id: 'agent', name: 'Agent' }],
           [{ modelId: 'gpt-5', name: 'GPT-5' }],
           [
@@ -3820,7 +3836,11 @@ describe('SessionExecutionService', () => {
           machineId,
           workspaceId: 'workspace-1' as WorkspaceId,
           project,
-          acpSessionConfig: { prompt: 'Continue the task', cliType: 'builtin', agentType: 'codex' },
+          acpSessionConfig: {
+            prompt: 'Continue the task',
+            cliType: 'builtin',
+            agentType: titleAgentType,
+          },
           userTurnId: 'turn-local-followup',
           userId: 'user-2',
           userName: 'User 2',

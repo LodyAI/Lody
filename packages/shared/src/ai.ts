@@ -52,26 +52,18 @@ export type AgentType = string;
 /**
  * How each builtin agent's ACP adapter handles the session title.
  *
- * - `none` — no usable title over ACP, so Lody runs its isolated title agent and
- *   keeps the title-generation config for it. Kimi's pushed title is only the
- *   first prompt truncated to 200 chars; the Harness never mounts its upstream
- *   title plugin.
- * - `untagged` — pushes one authoritative `session_info_update` carrying no
- *   `_meta`, so it can only be trusted on identity. Claude asks the Agent SDK via
- *   its `generate_session_title` control request; Grok's official runtime
- *   generates one in its own ACP session impl and the proxy forwards it untouched.
- * - `tagged` — labels every title with `_meta.lody.titleSource`, so only an
- *   `explicit` one may be stored. Codex (>= 1.8.0) emits a first-prompt `fallback`
- *   preview before its generated title, and storing that would make the raw prompt
- *   the session title.
+ * - `none` — Lody generates titles unless the runtime advertises ownership.
+ *   Builtin Codex always uses Lody's configurable isolated title session.
+ * - `untagged` — legacy Claude/Grok runtimes publish authoritative untagged titles.
+ *   Claude uses its SDK; Grok generates titles in the official runtime.
  *
  * Exhaustive on purpose: adding a builtin agent must not silently default it.
  */
-const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' | 'tagged'> = {
+const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged'> = {
   pi: 'none',
   devin: 'none',
   claude: 'untagged',
-  codex: 'tagged',
+  codex: 'none',
   grok: 'untagged',
   kimi: 'none',
   deepseek: 'none',
@@ -84,13 +76,13 @@ const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' 
 const builtinAcpTitleOwnership = (
   cliType: AgentConfigCliType | null | undefined,
   agentType: AgentType | null | undefined
-): 'none' | 'untagged' | 'tagged' =>
+): 'none' | 'untagged' =>
   cliType === 'builtin' && agentType && isBuiltinAgentType(agentType)
     ? BUILTIN_ACP_TITLE_OWNERSHIP[agentType]
     : 'none';
 
 /**
- * Advertised title ownership or legacy builtin adapters that generate titles, so Lody never
+ * Except for builtin Codex, advertised ownership or legacy builtin identity means Lody never
  * starts its isolated title agent for them and hides the title-generation config
  * from their agent settings.
  *
@@ -110,9 +102,10 @@ export const acpOwnsSessionTitleGeneration = (
   runtimeOverrides?: BuiltinRuntimeOverrides,
   sessionTitle?: boolean
 ): boolean =>
-  sessionTitle === true ||
-  (!hasBuiltinRuntimeOverrideValues(runtimeOverrides) &&
-    builtinAcpTitleOwnership(cliType, agentType) !== 'none');
+  !(cliType === 'builtin' && agentType === 'codex') &&
+  (sessionTitle === true ||
+    (!hasBuiltinRuntimeOverrideValues(runtimeOverrides) &&
+      builtinAcpTitleOwnership(cliType, agentType) !== 'none'));
 
 /**
  * Adapters whose pushed titles are authoritative without a `titleSource` tag.
@@ -1262,15 +1255,18 @@ const selectByLowestRank = (
 /**
  * Computes runtime title-generation configOptionValues from current ACP capabilities.
  *
- * These are not agent-specific hardcoded defaults. When the user has not configured title
- * generation, choose the least-privileged mode, the last listed model, and the smallest
- * reasoning effort from the agent's current configOptions.
+ * Builtin Codex defaults to Luna, low reasoning, and full access. Other providers
+ * choose the least-privileged mode, last listed model, and smallest reasoning effort
+ * from their current configOptions when the user has not configured title generation.
  */
 export function computeTitleGenerationDefaults(
-  _cliType: AgentConfigCliType,
-  _agentType: AgentType,
+  cliType: AgentConfigCliType,
+  agentType: AgentType,
   configOptions: AcpConfigOptionSummary[]
 ): Record<string, AcpConfigOptionValue> {
+  if (cliType === 'builtin' && agentType === 'codex') {
+    return { model: 'gpt-5.6-luna', reasoning_effort: 'low', mode: 'agent-full-access' };
+  }
   const defaults: Record<string, AcpConfigOptionValue> = {};
   for (const opt of configOptions) {
     if (opt.type !== 'select') {
