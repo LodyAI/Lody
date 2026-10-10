@@ -3,6 +3,7 @@
 Status: implemented
 Date: 2026-10-10
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1404
 
 [中文](2026-10-10-modal-host-touch-scope.zh.md)
 
