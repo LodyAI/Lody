@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1389](https://github.com/LodyAI/Lody/pull/1389)
+
 [English](2026-10-10-effect-worktree-git-execution.md)
 
 ## 摘要
@@ -71,7 +73,7 @@ Git 缺失、吞掉 cwd 权限错误、吞掉管理器基础设施失败、丢�
 随后停在此前已在干净 main 复现的 Roost signed-prefix 30 秒超时：CLI 3707 通过、
 1 失败、1 跳过。独立 FileLocks/LocalProjects 合并基础的完整检查全绿，但那只验证
 这些依赖，不能代表本修订全绿。补充 shared 测试通过 113 文件 / 1386 用例，Electron 通过 214 用例，进程、平台、
-公共、import、i18n 守卫通过。独立完整 CLI 重跑仍待完成。Git 污染仅在验证子进程
+公共、import、i18n 守卫通过。独立完整 CLI 重跑仍只有同一超时（3707 通过、1 失败、1 跳过）。Git 污染仅在验证子进程
 隔离，不修改全局 Git 配置或原工作区 dirty 子模块 gitlink。
 
 本地 Linux 测试不能证明真实 Windows 根退出后的后代归属、委派 cgroup、打包安装或

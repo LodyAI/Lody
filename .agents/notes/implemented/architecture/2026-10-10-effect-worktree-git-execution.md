@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1389](https://github.com/LodyAI/Lody/pull/1389)
+
 [中文](2026-10-10-effect-worktree-git-execution.zh.md)
 
 ## Abstract
@@ -93,7 +95,7 @@ The independent FileLocks/LocalProjects integration foundation has a green compl
 check; that is evidence for those dependencies, not a green check for this revision.
 Supplemental shared testing passes 113 files / 1386 cases, Electron passes 214
 cases, and process/platform/public/import/i18n guards pass. The isolated full CLI
-rerun is still pending. Git contamination is isolated only in validation children;
+rerun repeats the same sole timeout (3707 pass, one fail, one skipped). Git contamination is isolated only in validation children;
 no global Git configuration or original dirty submodule gitlinks are changed.
 
 Local Linux tests cannot establish real Windows descendant ownership after root
