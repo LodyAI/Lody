@@ -232,7 +232,8 @@ exit and drained stdio. Legacy imports stay visible across all process consumers
 File locks are the first subsequent dependency unit; see the
 [file-lock decision](../../implemented/architecture/2026-10-10-effect-file-lock-lifecycle.md).
 They supply a real filesystem protocol, fair interruptible local admission and
-observable cleanup failures. Git, worktree setup/GC, login-shell waiting, managed
+observable cleanup failures. LocalProjects and WorktreeGit execution have native
+kernels under draft review; worktree mutation/setup/GC, login-shell waiting, managed
 runtime installation, startup gates, SDK requests, Sessions and Turns remain to
 migrate. Process unification does not finish those lifecycles or daemon ownership.
 
@@ -387,7 +388,10 @@ flowchart TD
   P --> C["Scope release failure and recovery leases: #1379"]
   C --> F
   C --> G["LocalProjects native Git"]
-  F --> J["worktree setup / GC"]
+  C --> Q["WorktreeGit execution: #1389"]
+  F --> O["WorktreeObservations"]
+  Q --> O
+  O --> J["worktree mutations / setup / GC"]
   G --> J
   F --> R["Runtime download / installation"]
   P --> E["Login environment / startup gate"]
@@ -396,6 +400,7 @@ flowchart TD
   R --> S
   E --> S
   A --> S
+  N["Merged #1385: runtime credentials / preparation TTL leaves"] --> S
   K["Flock persistence: implemented in Lody; verify release / consumption"] --> L["streams-crdt / loro-repo Effect kernels: separate repositories"]
   L --> D["Documents / history / presence"]
   S --> T["Turn / steer / stop / finalization"]
@@ -412,8 +417,16 @@ Native Git validation exposed swallowed Scope release failure; the independent
 correction [#1379](https://github.com/LodyAI/Lody/pull/1379) retains recovery leases.
 LocalProjects is reviewed in [#1381](https://github.com/LodyAI/Lody/pull/1381)
 above #1379. Its kernel does not depend on FileLocks; worktree setup/GC must
-integrate both.
-These are draft PRs, not merged work.
+integrate both. WorktreeGit execution is reviewed in
+[#1389](https://github.com/LodyAI/Lody/pull/1389); its kernel needs the process
+foundation and filesystem, while its review base includes LocalProjects to avoid
+repeating manager changes. The native
+[worktree observation unit](../../implemented/architecture/2026-10-10-effect-worktree-observations.md)
+integrates FileLocks and WorktreeGit on a foundation containing refreshed main.
+It does not complete mutation/setup/GC ownership. #1385 is merged and supplies
+runtime credential leases and preparation TTL/control only; raw ACP/worktree
+startup and full session ownership remain unfinished.
+These subsequent migration units are draft PRs, not merged work.
 
 Introduce one daemon ManagedRuntime and root Scope when the first real long-lived
 services enter composition; extend it as units migrate. The final integration

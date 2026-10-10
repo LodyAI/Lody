@@ -12,10 +12,15 @@ and file responsibilities: [../README.md](../README.md).
   Layers supply official filesystem, host environment and the existing process
   spawner. Preserve the complete Cause when mapping command failure; pinned v4
   `mapError`/`catch` can discard release defects alongside a typed failure.
-- `worktreeGitLegacy` is the sole temporary manager execution facade; keep Legacy
+- `worktreeGitLegacy` is the temporary command facade; keep Legacy
   visible and delete it when the manager becomes native. Infrastructure and
   unresolved-release failures must escape fallback/forced-removal catches.
-  Setup, GC, manager filesystem/HTTP orchestration remain under migration.
+  Native observations compose `WorktreeObservations` with the owner-provided
+  FileLocks. `inspect`/`list` own the repo lease; `info` reads under the mutation's
+  already-held lock. Preserve explicit missing/unborn/corrupt outcomes and mixed
+  Cause. `runObservationLegacy` executes through the existing `fileLocksLegacy`
+  runtime until the mutation owner migrates; never create a second coordinator.
+  Setup, GC, mutation filesystem/HTTP orchestration remain under migration.
   Decision: [worktree Git](../../../../../.agents/notes/implemented/architecture/2026-10-10-effect-worktree-git-execution.md).
 
 ## Git credential broker

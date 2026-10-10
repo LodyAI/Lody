@@ -51,6 +51,23 @@ bounded tree cleanup; failure retains recovery ownership rather than claiming re
 The native command boundary does not yet give Promise session/setup/GC callers
 end-to-end structured cancellation.
 
+## Worktree observations
+
+Inspection distinguishes a missing directory, a healthy clean/dirty worktree, and
+a completed Git failure. Startup, timeout, filesystem and unresolved cleanup failures
+remain errors. Listing must not report an incomplete successful result by hiding an
+existing corrupt repository or unreadable root. Null HEAD represents a genuinely
+unborn named branch, not arbitrary Git failure; detached commits still report their
+commit. Listing keeps its directory-only policy and excludes symbolic-link entries
+and unsafe Session names.
+
+Inspection and listing share the mutation owner's repo lock. A cancelled queued
+query cannot later acquire it. A running query keeps its lease until command cleanup
+completes, including failure and interruption, so the successor cannot overlap that
+cleanup. Internal information reads under a mutation's existing lock must not acquire
+it again; same-context recursive lock acquisition still fails immediately. A bounded cleanup failure retains external process recovery ownership; file lease
+release is not proof that the process has gone. These observations do not provide an atomic snapshot across commands or Git rollback.
+
 ## Responsibilities
 
 The daemon that owns a machine is the only actor that touches that machine's disk.
