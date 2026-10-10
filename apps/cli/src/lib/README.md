@@ -86,7 +86,5 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   are repaired on the next history change or flush.
 - `pr-poller/` — PR discovery, lifecycle, CI rollup, and merge-state reconciliation
   ([AGENTS.md](pr-poller/AGENTS.md)).
-- `review-automation/` — "Auto review and merge"
-  ([AGENTS.md](review-automation/AGENTS.md)).
 - `analytics/`, `git/`, `notifications/`, `session-export/`, `usage/` — supporting
   services.

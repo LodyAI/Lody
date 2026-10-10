@@ -92,7 +92,7 @@ Fast-path turns that finish before their history entry syncs are reconciled by
 `lastMissingHistoryUserMsgId`, and a stale activation whose entry is already terminal is
 retired into `settledActivationUserMsgId`. Both slots retire an activation while deliberately
 leaving `latestUserMsgId` and `lastHandledUserMsgId` unequal, so a consumer that compares the
-two pointers itself sees pending work forever: auto review waits on a finished session, GC
+two pointers itself sees pending work forever: GC
 never reclaims it, MCP reports a phantom queued turn. That is why
 `hasPendingUserTurnActivation` in `@lody/shared` is the single answer, and why
 `packages/shared/tests/dispatch-activation-predicate.test.ts` fails on any new comparison.

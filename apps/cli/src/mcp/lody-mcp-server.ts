@@ -66,9 +66,6 @@ import {
   resolveProjectGitHubRepo,
   type LodyOperationItemResult,
   type SessionTurnInputConfig,
-  REVIEW_SEVERITY_VALUES,
-  REVIEW_VERDICT_VALUES,
-  ReviewSubmissionSchema,
   hasPendingUserTurnActivation,
   normalizeSessionTurnInputConfig,
 } from '@lody/shared';
@@ -89,12 +86,6 @@ import {
   classifyLocalDaemonIpcError,
 } from '@/lib/command-runtime';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
-import {
-  findReviewRunByReviewerSession,
-  syncReviewFlockOnce,
-  writeReviewRun,
-} from '@/lib/review-automation/review-automation-store';
-import { applyReviewSubmission } from '@/lib/review-automation/review-automation-submit';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import { readMachineLocalProjects } from '@/lib/local-project-meta';
 import { listWorkspaceGitHubRepositoriesForCliToken } from '@/lib/workspace';
@@ -167,7 +158,6 @@ const SESSION_RENAME_TOOL_NAME = 'lody_session_rename';
 const SESSION_RENAME_MANY_TOOL_NAME = 'lody_session_rename_many';
 const OPERATION_GET_TOOL_NAME = 'lody_operation_get';
 const OPERATION_CANCEL_TOOL_NAME = 'lody_operation_cancel';
-const REVIEW_SUBMIT_TOOL_NAME = 'lody_review_submit';
 const SESSION_FILE_MAX_SIZE_MB = Math.floor(SESSION_FILE_MAX_SIZE_BYTES / (1024 * 1024));
 const SESSION_CONTROL_TIMEOUT_MS = 30_000;
 const LODY_CLI_DEFAULT_TIMEOUT_MS = 10 * 60_000;
@@ -3544,57 +3534,6 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
   });
 };
 
-/**
- * Mirrors `ReviewSubmissionSchema` as a plain object so the MCP SDK can publish
- * the JSON Schema. The shared schema's `superRefine` (a blocking finding must
- * carry a failure scenario) is re-applied on the parsed value below: a refinement
- * does not survive JSON Schema generation, but it is the one rule that keeps a
- * reviewer from labelling every opinion blocking, so it is enforced anyway.
- */
-const ReviewSubmitToolInputSchema = z
-  .object({
-    verdict: z
-      .enum(REVIEW_VERDICT_VALUES)
-      .describe('`approve` only when nothing blocking remains.'),
-    findings: z
-      .array(
-        z.object({
-          file: z.string().trim().min(1),
-          line: z.number().int().positive().optional(),
-          severity: z.enum(REVIEW_SEVERITY_VALUES),
-          title: z.string().trim().min(1).max(200),
-          detail: z.string().trim().min(1).max(4000),
-          failureScenario: z
-            .string()
-            .trim()
-            .max(2000)
-            .optional()
-            .describe(
-              'Required for blocking findings: specific inputs or state, and the wrong result they produce.'
-            ),
-        })
-      )
-      .max(100)
-      .optional(),
-    resolutions: z
-      .array(
-        z.object({
-          findingId: z.string().trim().min(1),
-          state: z.enum(['resolved', 'unresolved', 'disputed']),
-          note: z.string().trim().max(2000).optional(),
-        })
-      )
-      .max(100)
-      .optional()
-      .describe(
-        'Verdict on each previously raised finding. Use `disputed` to escalate to a human.'
-      ),
-    summary: z.string().trim().max(2000).optional(),
-  })
-  .strict();
-
-type ReviewSubmitToolInput = z.infer<typeof ReviewSubmitToolInputSchema>;
-
 export const __lodyMcpServerInternals = {
   FeedbackToolInputSchema,
   FileUploadToolInputSchema,
@@ -4470,136 +4409,6 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     async (args: SessionHistoryToolInput) => {
       try {
         return jsonTextResult(await buildSessionHistory(args));
-      } catch (error) {
-        return mcpErrorResult(error);
-      }
-    }
-  );
-
-  server.registerTool(
-    REVIEW_SUBMIT_TOOL_NAME,
-    {
-      title: 'Submit a code review',
-      description:
-        'Report the result of reviewing a branch. Call this exactly once per review round. Only a session acting as a review agent can use it.',
-      inputSchema: ReviewSubmitToolInputSchema,
-    },
-    async (args: ReviewSubmitToolInput) => {
-      try {
-        const ctx = getSessionContext();
-        const auth = getCliAuthContextOrThrow('mcp');
-        const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
-        return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-          const workspaceId = workspace.id as WorkspaceId;
-          const reviewerSessionId = ctx.sessionId as SessionId;
-          const run = await findReviewRunByReviewerSession(
-            manager.repo,
-            workspaceId,
-            reviewerSessionId
-          );
-          if (!run) {
-            return jsonTextResult(
-              {
-                ok: false,
-                error: makeLodyError(
-                  'REVIEW_RUN_NOT_FOUND',
-                  'This session is not acting as a review agent for any branch.',
-                  false
-                ),
-              },
-              true
-            );
-          }
-          // An agent-callable tool must not write outside the state it belongs
-          // to: a submission arriving while the run is merging or already
-          // finished would record findings nothing will ever act on.
-          if (run.state !== 'reviewing') {
-            return jsonTextResult(
-              {
-                ok: false,
-                error: makeLodyError(
-                  'REVIEW_NOT_AWAITING_SUBMISSION',
-                  `This review is not waiting for a submission (state: ${run.state}).`,
-                  false
-                ),
-              },
-              true
-            );
-          }
-          // "Exactly once" is otherwise only prompt-enforced, and the run stays
-          // in `reviewing` until the engine's next pass — so a second call would
-          // append a duplicate set of findings with fresh ids.
-          if (run.submittedRound === run.round) {
-            // The submission may be durable here but never uploaded — exactly
-            // what a previous call that failed to sync leaves behind. Retrying
-            // is the reviewer's only repair, so push before refusing.
-            try {
-              await syncReviewFlockOnce(manager.repo, workspaceId);
-              return jsonTextResult({
-                ok: true,
-                round: run.round,
-                findings: run.findings.length,
-                note: 'This round was already submitted; the pending write has now been synced.',
-              });
-            } catch {
-              return jsonTextResult(
-                {
-                  ok: false,
-                  error: makeLodyError(
-                    'REVIEW_SUBMIT_NOT_SYNCED',
-                    'A review for this round is saved locally but could not be uploaded. Call the tool again.',
-                    true
-                  ),
-                },
-                true
-              );
-            }
-          }
-
-          // Re-apply the shared refinement the published JSON Schema cannot carry.
-          const parsed = ReviewSubmissionSchema.safeParse(args);
-          if (!parsed.success) {
-            const message =
-              parsed.error.issues[0]?.message ?? 'The submission did not match the expected shape.';
-            return jsonTextResult(
-              { ok: false, error: makeLodyError('REVIEW_SUBMISSION_INVALID', message, true) },
-              true
-            );
-          }
-
-          const applied = applyReviewSubmission(run, parsed.data);
-          try {
-            // Confirmed, not best-effort: this process is about to exit, so an
-            // unsynced write is a lost submission that the engine would later
-            // read as "the reviewer never submitted".
-            await writeReviewRun(manager.repo, workspaceId, applied.run, { confirmSync: true });
-          } catch (error) {
-            return jsonTextResult(
-              {
-                ok: false,
-                error: makeLodyError(
-                  'REVIEW_SUBMIT_NOT_SYNCED',
-                  `The review could not be saved: ${
-                    error instanceof Error ? error.message : String(error)
-                  }. Call the tool again.`,
-                  true
-                ),
-              },
-              true
-            );
-          }
-          return jsonTextResult({
-            ok: true,
-            round: applied.run.round,
-            findings: applied.run.findings.length,
-            ...(applied.droppedSuggestions > 0
-              ? {
-                  droppedSuggestions: applied.droppedSuggestions,
-                  note: 'A re-check round cannot raise new suggestions; those were dropped.',
-                }
-              : {}),
-          });
-        });
       } catch (error) {
         return mcpErrorResult(error);
       }
