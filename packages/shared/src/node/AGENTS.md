@@ -55,6 +55,8 @@ record: [process tree layer](../../../../.agents/notes/implemented/architecture/
   retain it until `isAlive` proves absence or `retryTermination` succeeds. Logging
   alone cannot turn that failure into success. Promise boundaries must use
   `squashProcessFailure` to preserve every lease alongside the primary failure.
+  Acquisition error conversions preserve the full Cause, including release
+  defects from the spawner's failed child Scope, before reaching that boundary.
 - Termination often runs in a finalizer, where nothing is interruptible: bound
   its waits by the clock (`waitUntilGone`), never by `timeout*` or a race.
 - Never signal a child without a pid (pid 0 is the caller's own group), and

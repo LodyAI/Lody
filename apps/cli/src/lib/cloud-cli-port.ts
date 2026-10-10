@@ -1,3 +1,6 @@
+import { SessionAttachmentTransfer } from './session-attachment-transfer';
+import { getCliPlatformKind } from './cli-platform';
+import { LODY_SERVER_URL } from '@/utils/const';
 import { SimulatorIceServersSchema } from '@/ios-simulator/webrtc-protocol';
 import { ConvexClient, ConvexHttpClient } from 'convex/browser';
 import { z } from 'zod';
@@ -300,4 +303,14 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
       await subscriptionClient.close();
     },
   };
+}
+
+/** One-shot command composition; local builds never construct a cloud transfer. */
+export function createCommandAttachmentTransfer(
+  token: string,
+  localWorkspace = false
+): SessionAttachmentTransfer | undefined {
+  if (localWorkspace || getCliPlatformKind() === 'local') return undefined;
+  if (!LODY_SERVER_URL?.trim()) throw new Error('cloud_attachment_upload_unavailable');
+  return new SessionAttachmentTransfer(token, LODY_SERVER_URL);
 }

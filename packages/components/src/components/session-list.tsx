@@ -52,6 +52,7 @@ import type {
   LocalProjectHistoryProvider,
   MachineId,
   PrStatus,
+  SessionHistoryBackendKind,
   SessionId,
   SessionPullRequestCiState,
   SessionPullRequestReadiness,
@@ -139,6 +140,7 @@ export type SessionListRow = {
   machineId?: MachineId;
   /** Resolved machine display name, surfaced in the desktop hover info card. */
   machineName?: string | null;
+  historyBackend?: SessionHistoryBackendKind;
   repoFullName?: string | null;
   branchName: string;
   prUrl?: string | null;
@@ -1039,6 +1041,7 @@ const SessionGroupRow = memo(function SessionGroupRow({
       latestMessageAt={session.latestMessageAt}
       repoFullName={groupRepoFullName}
       machineName={session.machineName}
+      historyBackend={session.historyBackend}
       branchName={session.branchName}
       prStatus={hasPr ? prStatus : undefined}
       prCiState={session.prCiState}
