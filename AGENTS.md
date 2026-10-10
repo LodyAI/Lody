@@ -29,6 +29,14 @@ Repository map and entry points: [README.md](README.md#repository).
 - Keep binding rules in the nearest `AGENTS.md` (<8 KiB; new scopes need a
   `CLAUDE.md` symlink). Keep explanations and rationale in their owning docs/notes.
 
+## Effect reference
+
+Before Effect work, read the [Effect skill](.agents/skills/effect-ts/SKILL.md) and
+consuming package's resolved `effect/AGENTS.md` completely, following required
+links. Preserve locked versions and Lody's behavioral acceptance rules.
+Explicit v3 migrations also use the
+[migration skill](.agents/skills/effect-v3-to-v4/SKILL.md).
+
 ## Repository boundary
 
 - Public source: `apps/{cli,electron}` and their packages. Exclude hosted backends,
