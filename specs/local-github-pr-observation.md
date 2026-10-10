@@ -33,15 +33,23 @@ only successful association and publication commit a discovery success stamp.
 The hosted client additionally cools down failed association requests per workspace
 and repository across callers. Permission rejection waits 15 minutes; transient
 failures back off from one minute up to 15 minutes. This gate neither blocks GitHub
-observation/publication nor confirms a skipped association. A later eligible call
-rechecks access; no timer replays an old request. Cooldowns are bounded runtime
-state and reset when that client is recreated.
+observation/publication nor confirms a skipped association. Before exhaustion, a later eligible call
+rechecks access; no timer replays an old request. Six consecutive failures exhaust
+the shared workspace/repository budget. Further association calls return unconfirmed
+without network I/O, and one actionable error is logged. Success before exhaustion
+resets the budget. After exhaustion, fix access in Settings > GitHub and restart
+the machine's Lody background agent to recreate the client and retry; re-login alone
+does not establish repository linkage. The PR identity error explains this path.
+Tracking is bounded to 256 outstanding repository gates, including in-flight calls.
+A full tracker refuses new repository requests rather than evicting an exhausted
+gate; an existing successful association frees its slot.
 An older discovery fingerprint must not suppress this retry after a terminal PR
 is published. Successful associations are remembered for the workspace runtime;
 after restart, eligible discoveries can idempotently re-establish them.
 Missing authentication, inaccessible repositories and failed queries
 never invent a PR or erase a previously successful observation. Login and access
-changes take effect at a subsequent eligible polling attempt, respecting cooldowns.
+changes take effect at a subsequent eligible polling attempt, respecting cooldowns
+and exhaustion. GitHub observation remains independent of this hosted linkage budget.
 
 The desktop reads the same metadata for local and hosted projects. Without hosted
 GitHub integration, PR links open GitHub in the browser; detailed checks, review

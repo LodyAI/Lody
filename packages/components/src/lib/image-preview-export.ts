@@ -1,4 +1,5 @@
 import type { ImagePreviewMenuAction, ShowImagePreviewMenuInput } from '@lody/shared/electron-ipc';
+import { isNativeAppShell } from './native-platform';
 import { isElectronRenderer } from '@/lib/electron';
 import { getIpcServices, type IpcServices } from '@/lib/electron-ipc-client';
 
@@ -187,5 +188,104 @@ export async function runImagePreviewContextMenu(options: {
       : { kind: 'save-failed', error: result.error };
   } catch (error) {
     return { kind: 'save-failed', error: describeError(error) };
+  }
+}
+
+/** Prepare before the menu action so Web Share keeps the click's user activation. */
+export async function prepareImagePreviewFile(
+  src: string,
+  fileName?: string,
+  signal?: AbortSignal
+): Promise<File> {
+  const response = await fetch(src, signal ? { signal } : undefined);
+  if (!response.ok) throw new Error(`image request failed with ${response.status}`);
+  const blob = await response.blob();
+  return new File([blob], resolveExportFileName(fileName, blob.type), { type: blob.type });
+}
+
+export function canCopyImagePreview(): boolean {
+  return Boolean(
+    getImagePreviewExportBridge() ||
+    (typeof navigator.clipboard?.write === 'function' && typeof ClipboardItem !== 'undefined')
+  );
+}
+
+export function canShareImagePreview(file: File): boolean {
+  if (isNativeAppShell()) return true;
+  try {
+    return (
+      typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] }) === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+export type TouchImagePreviewOutcome =
+  | ImagePreviewExportOutcome
+  | { kind: 'shared' | 'download-started' }
+  | { kind: 'share-failed'; error: string };
+
+/** No URL/text clipboard substitute: an unsupported bitmap copy is a failure. */
+export async function runTouchImagePreviewAction(
+  action: 'copy' | 'save' | 'share',
+  src: string,
+  file: File
+): Promise<TouchImagePreviewOutcome> {
+  try {
+    const bridge = getImagePreviewExportBridge();
+    if (action === 'copy') {
+      if (bridge) {
+        const result = await bridge.copyToClipboard({ pngBytes: await encodePngBytes(src, file) });
+        return result.copied
+          ? { kind: 'copied' }
+          : { kind: 'copy-failed', error: result.error ?? 'copy_failed' };
+      }
+      if (!canCopyImagePreview()) throw new Error('Image clipboard is unavailable');
+      // Start in the click handler; WebKit must not lose transient activation.
+      const png = encodePngBytes(src, file).then(
+        (bytes) => new Blob([bytes], { type: PNG_MIME_TYPE })
+      );
+      await navigator.clipboard.write([new ClipboardItem({ [PNG_MIME_TYPE]: png })]);
+      return { kind: 'copied' };
+    }
+    if (action === 'save' && bridge) {
+      const result = await bridge.saveAs({ fileName: file.name, bytes: await file.arrayBuffer() });
+      if (result.saved) return { kind: 'saved' };
+      return result.canceled
+        ? { kind: 'save-canceled' }
+        : { kind: 'save-failed', error: result.error };
+    }
+    if (isNativeAppShell()) {
+      const { shareFileBytesNatively } = await import('./session-file-native-save');
+      const { shared } = await shareFileBytesNatively(
+        file.name,
+        new Uint8Array(await file.arrayBuffer())
+      );
+      // Save routes through the same OS sheet; it cannot promise an album write.
+      return { kind: shared ? 'shared' : 'dismissed' };
+    }
+    if (action === 'share') {
+      if (!canShareImagePreview(file)) throw new Error('Image sharing is unavailable');
+      await navigator.share({ files: [file] });
+      return { kind: 'shared' };
+    }
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file.name;
+    document.body.appendChild(link);
+    try {
+      link.click();
+    } finally {
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    return { kind: 'download-started' };
+  } catch (error) {
+    if (action === 'share' && error instanceof DOMException && error.name === 'AbortError') {
+      return { kind: 'dismissed' };
+    }
+    return { kind: `${action}-failed`, error: describeError(error) };
   }
 }

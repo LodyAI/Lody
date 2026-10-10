@@ -78,6 +78,10 @@ to RouterLink; only the pathname may be affected by `trailingSlash`.
 
 ## Static content and client startup
 
+Docs render one page-title H1. The title reuses the first depth-1 entry's
+Fumadocs-generated TOC anchor because the MDX H1 itself is suppressed. This keeps
+existing title links working even when frontmatter and body titles differ.
+
 Every published URL is prerendered. `src/client.tsx` prepares the current router
 and runs its loaders to populate browser MDX caches before calling React hydration.
 `lib/prepare-hydration.ts` also observes Vite preload errors, since TanStack lazy

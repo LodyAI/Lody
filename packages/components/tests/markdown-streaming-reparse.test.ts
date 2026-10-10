@@ -154,6 +154,47 @@ describe('MarkdownRenderer streaming rendering', () => {
   };
 
   it.each([false, true])(
+    'renders CJK emphasis next to punctuation and prose while streaming=%s',
+    async (isStreaming) => {
+      const source =
+        '“**示例流程正确。**”\n\n**检查完成。**接着执行下一步。\n\n前文**“重点”**后文\n\n前文*“提示”*后文';
+      await renderMarkdown(source, { isStreaming });
+
+      expect(Array.from(container!.querySelectorAll('strong'), (node) => node.textContent)).toEqual(
+        ['示例流程正确。', '检查完成。', '“重点”']
+      );
+      expect(container?.querySelector('em')?.textContent).toBe('“提示”');
+      expect(container?.textContent).not.toContain('*');
+
+      await renderMarkdown(source, { isStreaming: false });
+      expect(container?.querySelectorAll('strong')).toHaveLength(3);
+      expect(container?.textContent).not.toContain('*');
+    }
+  );
+
+  it.each([false, true])(
+    'preserves escaped and code CJK emphasis while streaming=%s',
+    async (isStreaming) => {
+      const literal = '**检查完成。**接着执行下一步。';
+      await renderMarkdown(
+        [
+          String.raw`\*\*检查完成。\*\*接着执行下一步。`,
+          '`' + literal + '`',
+          '```text\n' + literal + '\n```',
+          '**Done.**Next',
+        ].join('\n\n'),
+        { isStreaming }
+      );
+      expect(container?.querySelector('strong')).toBeNull();
+      expect(container?.querySelector('em')).toBeNull();
+      expect(container?.querySelector('p')?.textContent).toBe(literal);
+      expect(container?.querySelector('p code')?.textContent).toBe(literal);
+      expect(container?.querySelector('pre code')?.textContent).toBe(literal);
+      expect(container?.textContent).toContain('**Done.**Next');
+    }
+  );
+
+  it.each([false, true])(
     'preserves the rest of a math document after a less-than comparison while streaming=%s',
     async (isStreaming) => {
       await renderMarkdown(

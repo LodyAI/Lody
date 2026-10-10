@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
 import {
+  SessionPreparationCleanupError,
   SessionPreparationService,
   type SessionPreparationResource,
 } from './session-preparation-service';
@@ -386,7 +387,31 @@ describe('SessionPreparationService', () => {
     });
   });
 
-  it('releases retirement after creation or disposal rejects', async () => {
+  it('retains failed rollback before resource publication to fence replacement', async () => {
+    const service = createService();
+    const createStarted = deferred();
+    const releaseCreate = gate();
+    service.start({
+      ...lease,
+      requestKey: 'key',
+      create: async () => {
+        createStarted.resolve();
+        await releaseCreate.promise;
+        throw new SessionPreparationCleanupError(new Error('process termination failed'));
+      },
+    });
+    await createStarted.promise;
+    const cleanup = service.discard(sessionId);
+    releaseCreate.resolve();
+    await expect(cleanup).rejects.toThrow('process termination failed');
+    expect(service.discard(sessionId)).toBe(cleanup);
+    expect(service.claim({ ...identity, isCompatible: () => true })).toEqual({
+      status: 'miss',
+      cleanup,
+    });
+  });
+
+  it('releases failed creation but retains failed disposal to fence replacement', async () => {
     const service = createService();
     const createStarted = deferred();
     const releaseCreate = gate();
@@ -410,10 +435,13 @@ describe('SessionPreparationService', () => {
     prepared.resource.dispose = async () => {
       throw new Error('disposal failed');
     };
-    await service.discard(sessionId);
-    expect(service.discard(sessionId)).toBeNull();
-    const replacement = start(service);
-    await replacement.started.promise;
-    expect(service.claim({ ...identity, isCompatible: () => true }).status).toBe('claimed');
+    const failedRelease = service.discard(sessionId);
+    await expect(failedRelease).rejects.toThrow('disposal failed');
+    expect(service.discard(sessionId)).toBe(failedRelease);
+    expect(service.claim({ ...identity, isCompatible: () => true })).toEqual({
+      status: 'miss',
+      cleanup: failedRelease,
+    });
+    expect(service.peek(identity)).toBeNull();
   });
 });

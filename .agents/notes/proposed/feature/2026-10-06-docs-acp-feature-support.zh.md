@@ -58,3 +58,6 @@ Language: [English](2026-10-06-docs-acp-feature-support.md)
   `test` 和生产构建均通过；静态浏览器套件仍只有原先两个移动端 no-js 导航超时，没有新增失败。
 - 矩阵是已发布适配器与外部 ACP 服务版本当时的快照。provider 升级后，实际协商结果可能在本页
   重新核对之前就发生变化。
+- 依据 `acp-extension-dsh` 0.2.0（`8cf61ea`，acp-extension-core 0.1.9）刷新了
+  `DeepSeek Harness` 一行：新增声明标准加载、恢复、Fork，以及 Core 的按轮 Fork、转向、
+  子代理、持久目标与后台任务；图片输入仍取决于模型，定时任务与速率限制仍未声明。

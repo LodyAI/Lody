@@ -1,3 +1,4 @@
+import { nativeSessionCredentials, type SessionCredentials } from './session-credentials';
 import { memoryEnvironment } from '@/lib/memory-providers';
 import EventEmitter from 'eventemitter3';
 import { clearGitHubTokenEnv } from '@/lib/gh-token-env';
@@ -133,6 +134,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private agentProcess: SessionProcessHandle | null = null;
   private termination: SessionTermination | null = null;
   private readonly sandbox: SessionSandbox;
+  private personalIdentityEnabled = false;
   private gitIdentity: { id: string; name: string; email: string };
   public agentClient: AgentClient | null = null;
   public acpSessionId: ACPSessionId | null = null;
@@ -144,7 +146,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     config: SessionConfig,
     logger: Logger,
     workdir?: string,
-    sandbox: SessionSandbox = createNoopSessionSandbox()
+    sandbox: SessionSandbox = createNoopSessionSandbox(),
+    private readonly credentials: SessionCredentials = nativeSessionCredentials
   ) {
     super();
     this.config = config;
@@ -370,6 +373,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       );
     }
 
+    await this.credentials.release();
     this.activeProcess = null;
     this.agentProcess = null;
     this.agentClient = null;
@@ -400,11 +404,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     options: { preferMachineIdentity: boolean; personalIdentityEnabled?: boolean }
   ): void {
     const configEnv = this.config.env ?? {};
-    if (this.config.githubCredentialPolicy) {
-      // Commit attribution follows the turn; network credentials belong to the session owner.
-      if (options.personalIdentityEnabled !== undefined) {
-        this.config.githubCredentialPolicy.personalEnabled = options.personalIdentityEnabled;
-      }
+    if (options.personalIdentityEnabled !== undefined) {
+      this.personalIdentityEnabled = options.personalIdentityEnabled;
     }
     // Set git identity using Git's recognized environment variables directly.
     // The env is per agent process, so a shared machine never mixes requesters.
@@ -412,10 +413,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       { name: userName, email: userEmail },
       {
         preferMachineIdentity: options.preferMachineIdentity,
-        personalIdentityEnabled:
-          options.personalIdentityEnabled ??
-          this.config.githubCredentialPolicy?.personalEnabled ??
-          false,
+        personalIdentityEnabled: options.personalIdentityEnabled ?? this.personalIdentityEnabled,
       }
     );
     configEnv.GIT_AUTHOR_NAME = name;
@@ -435,9 +433,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return this.gitIdentity.id === userId ? { ...this.gitIdentity } : null;
   }
 
-  updateGitHubCredentialPolicy(allowLocalAuth: boolean): void {
-    if (!this.config.githubCredentialPolicy) throw new Error('github_context_missing');
-    this.config.githubCredentialPolicy.allowLocalAuth = allowLocalAuth;
+  getGitHubCredentials(): SessionCredentials {
+    return this.credentials;
   }
 
   getMemoryBinding(): SessionConfig['memory'] {
@@ -527,9 +524,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const finalEnv = withLoopbackNoProxy(
       withDefaultAcpPathEntries(agentEnv, this.config.agentType)
     );
-    const policy = this.config.githubCredentialPolicy;
+    const policy = this.credentials.mode === 'managed' ? this.credentials.lease : undefined;
     if (policy) {
-      if (!policy.allowLocalAuth) {
+      if (!policy.active || !policy.allowLocalAuth) {
         clearGitHubTokenEnv(finalEnv);
         applyNonOwnerShellEnv(finalEnv, policy.stateFilePath);
       } else if (policy.stateFilePath) {
@@ -920,7 +917,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             cleanup();
             void processHandle
               .inspectExit(code, signal)
-              .then((violation) => {
+              .then(async (violation) => {
                 if (violation) {
                   const error = createSessionResourceLimitError(this.sessionId, violation);
                   void this.handleResourceLimitExceeded(error);
@@ -957,6 +954,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
                   }
                 }
                 if (isAI) {
+                  await this.credentials.release();
                   this.emit('exit', { sessionId: this.sessionId, exitCode });
                 }
                 // stderr is decoded but not used in return value (only logged above)

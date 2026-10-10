@@ -1076,7 +1076,7 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
     value: 'builtin:dimcode',
     label: 'Dimcode',
     descriptionKey: 'settings.agent.dialog.option.dimcode.description',
-    descriptionDefault: 'Dimcode coding agent over ACP',
+    descriptionDefault: 'Use your installed Dimcode (you manage its version)',
     cliType: 'builtin',
     agentType: 'dimcode',
     searchKeys: 'dimcode dim dimagent acp',

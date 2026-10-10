@@ -248,7 +248,11 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
             }),
         }),
     },
-    prAssociation: createCloudPrAssociationPort({ token: options.token, authSiteUrl }),
+    prAssociation: createCloudPrAssociationPort({
+      token: options.token,
+      authSiteUrl,
+      logger: options.logger,
+    }),
     attachmentUpload: { serverBaseUrl },
     remotePreview: {
       simulatorIceServers: async (input) => {

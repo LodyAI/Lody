@@ -13,6 +13,12 @@ vi.mock('react-i18next', () => ({
 
 import { getVideoMimeTypeForPath } from '../src/lib/video-file-preview';
 import { SessionFileBinaryPreview } from '../src/components/sessions/session-file-binary-preview';
+import Papa from 'papaparse';
+import { readXlsxSelectionClipboard } from '../src/components/sessions/session-file-xlsx-clipboard';
+import {
+  createSpreadsheetClipboard,
+  writeSpreadsheetClipboard,
+} from '../src/components/sessions/session-file-spreadsheet-clipboard';
 import {
   getOfficePreviewKind,
   MAX_OFFICE_PREVIEW_BYTES,
@@ -100,6 +106,121 @@ describe('office preview source', () => {
         },
       })
     ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+describe('spreadsheet clipboard', () => {
+  it('preserves rectangular values in text and HTML without interpreting cell markup', () => {
+    const rows = [
+      ['line 1\nline 2', 'tab\there', '"quoted"', ''],
+      ['<img src=x>&', '', '0', ''],
+    ];
+    const data = createSpreadsheetClipboard(rows);
+    expect(Papa.parse(data.text, { delimiter: '\t' }).data).toEqual(rows);
+    const table = new DOMParser().parseFromString(data.html, 'text/html');
+    expect(
+      Array.from(table.querySelectorAll('tr'), (row) =>
+        Array.from(row.querySelectorAll('td'), (cell) => cell.textContent)
+      )
+    ).toEqual(rows);
+    expect(table.querySelector('img')).toBeNull();
+  });
+
+  it('rejects oversized copies rather than silently truncating', () => {
+    expect(() => createSpreadsheetClipboard([Array(200_001).fill('')])).toThrow(RangeError);
+    expect(() => createSpreadsheetClipboard([['x'.repeat(10 * 1024 * 1024 + 1)]])).toThrow(
+      RangeError
+    );
+  });
+
+  it('reports clipboard permission failures to the caller', async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new DOMException('Denied', 'NotAllowedError')) },
+    });
+    try {
+      await expect(
+        writeSpreadsheetClipboard(createSpreadsheetClipboard([['value']]))
+      ).rejects.toMatchObject({ name: 'NotAllowedError' });
+    } finally {
+      if (original) Object.defineProperty(navigator, 'clipboard', original);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+});
+
+describe('worker-backed XLSX clipboard', () => {
+  const controller = (): Parameters<typeof readXlsxSelectionClipboard>[0] => ({
+    activeCell: null,
+    activeSheet: {
+      workbookSheetIndex: 2,
+      rowCount: 3,
+      colCount: 3,
+      cachedFormulaValues: { B2: '42' },
+    } as Parameters<typeof readXlsxSelectionClipboard>[0]['activeSheet'],
+    selection: { start: { row: 2, col: 2 }, end: { row: 0, col: 0 } },
+    getActiveWorksheet: () => null,
+    getCellDisplayValue: () => {
+      throw new Error('Worker cells must use batches');
+    },
+    getRowsBatchAsync: async () => [
+      {
+        index: 0,
+        cells: [
+          { col: 0, value: 'R&amp;D' },
+          { col: 2, value: '125,000.00' },
+        ],
+      },
+      {
+        index: 1,
+        cells: [
+          { col: 1, value: '#VALUE!', formula: 'A1+1' },
+          { col: 2, value: 'line 1\nline 2' },
+        ],
+      },
+      {
+        index: 2,
+        cells: [
+          { col: 0, value: 'Merged' },
+          { col: 1, value: 'unused', isMergedSecondary: true },
+        ],
+      },
+    ],
+  });
+
+  it('copies formatted and cached formula values with rectangular blanks from a worker', async () => {
+    const data = await readXlsxSelectionClipboard(controller());
+    expect(Papa.parse(data.text, { delimiter: '\t' }).data).toEqual([
+      ['R&D', '', '125,000.00'],
+      ['', '42', 'line 1\nline 2'],
+      ['Merged', '', ''],
+    ]);
+    const table = new DOMParser().parseFromString(data.html, 'text/html');
+    expect(
+      Array.from(table.querySelectorAll('tr'), (row) => row.querySelectorAll('td').length)
+    ).toEqual([3, 3, 3]);
+  });
+
+  it('rejects too-large selections without fetching rows', async () => {
+    const value = controller();
+    value.selection = { start: { row: 0, col: 0 }, end: { row: 200_000, col: 0 } };
+    value.getRowsBatchAsync = async () => {
+      throw new Error('An oversized copy must not fetch rows');
+    };
+    await expect(readXlsxSelectionClipboard(value)).rejects.toBeInstanceOf(RangeError);
+  });
+
+  it('discards a worker result when the preview is closed or replaced', async () => {
+    const value = controller();
+    const abort = new AbortController();
+    value.getRowsBatchAsync = async () => {
+      abort.abort();
+      return [{ index: 0, cells: [{ col: 0, value: 'stale' }] }];
+    };
+    await expect(readXlsxSelectionClipboard(value, abort.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
   });
 });
 
