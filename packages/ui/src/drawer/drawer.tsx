@@ -21,7 +21,11 @@ import {
 } from '../dialog/surface';
 import { appendClassName } from '../internal/class-name';
 import { CrossGlyph } from '../internal/glyphs';
-import { PopupContainerProvider, type PopupContainer } from '../popup/portal-container';
+import {
+  useModalContainer,
+  PopupContainerProvider,
+  type PopupContainer,
+} from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 
 export type { DrawerSide };
@@ -36,7 +40,7 @@ type PopupBaseProps = ComponentProps<typeof BaseDrawer.Popup>;
  * `style` or `className` callback typed for one cannot be handed to the other.
  */
 export interface DrawerContentProps extends Omit<PopupBaseProps, 'className' | 'render'> {
-  /** Where the drawer mounts. Defaults to the document body. */
+  /** Where the drawer mounts. Defaults to the enclosing modal host, or the document body. */
   container?: PopupContainer;
   /**
    * Content laid over the backdrop rather than in the panel — a desktop shell's
@@ -125,6 +129,7 @@ export const DrawerContent = forwardRef<HTMLDivElement, DrawerContentProps>(func
   },
   ref
 ) {
+  const modalContainer = useModalContainer();
   const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
   const palette = useForcedThemeClassNames();
   // Same suppression as the dialog backdrop: a drawer nested inside a modal
@@ -132,7 +137,7 @@ export const DrawerContent = forwardRef<HTMLDivElement, DrawerContentProps>(func
   const nested = useModalDepth() > 0;
   return (
     <BaseDrawer.Portal
-      container={container}
+      container={container === undefined ? modalContainer : container}
       className={[stylex.props(styles.portal).className, ...palette].filter(Boolean).join(' ')}
     >
       <BaseDrawer.Backdrop
