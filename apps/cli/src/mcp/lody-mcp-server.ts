@@ -87,6 +87,7 @@ import {
   withWorkspaceManager,
   getCommandSessionSharingPort,
   WorkspaceSyncUnavailableError,
+  WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
   classifyLocalDaemonIpcError,
 } from '@/lib/command-runtime';
 import { listMergedAgentConfigs } from '@/lib/agent-config-machine-flock';
@@ -1025,6 +1026,9 @@ const normalizeMcpError = (error: unknown) => {
   if (error instanceof WorkspaceSyncUnavailableError) {
     return error.toLodyError();
   }
+  if (error instanceof TypeError && error.message === 'fetch failed') {
+    return makeLodyError('SYNC_UNAVAILABLE', WORKSPACE_SYNC_UNAVAILABLE_MESSAGE, true);
+  }
   const machineAccessError = toMachineAccessMcpError(error);
   if (machineAccessError) {
     return makeLodyError(
@@ -1038,6 +1042,25 @@ const normalizeMcpError = (error: unknown) => {
 
 const mcpErrorResult = (error: unknown) =>
   jsonTextResult({ ok: false, error: normalizeMcpError(error) }, true);
+
+const unacceptedSyncError = () =>
+  new LodyOperationStoreError(
+    'SYNC_UNAVAILABLE',
+    'Workspace synchronization is temporarily unavailable. No Operation was accepted; resend the full request with the same operationId and without resume.',
+    true
+  );
+
+const syncBeforeOperationAcceptance = async (
+  manager: Parameters<typeof syncWorkspaceMetaForRead>[0],
+  reason: string
+) => {
+  try {
+    await syncWorkspaceMetaForRead(manager, reason);
+  } catch (error) {
+    if (error instanceof WorkspaceSyncUnavailableError) throw unacceptedSyncError();
+    throw error;
+  }
+};
 const postSessionControl = async (
   request:
     | PreviewCandidateReportRequestPayload
@@ -2666,7 +2689,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_create:${ctx.sessionId}:operation`);
+    await syncBeforeOperationAcceptance(manager, `mcp.session_create:${ctx.sessionId}:operation`);
     const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
     if (!currentSession) {
       throw new LodyOperationStoreError(
@@ -2719,6 +2742,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       if (error instanceof LocalDaemonAvailabilityError) {
         throw error;
       }
+      if (error instanceof WorkspaceSyncUnavailableError) throw unacceptedSyncError();
       const machineAccessError = toMachineAccessMcpError(error);
       if (machineAccessError) {
         throw new LodyOperationStoreError(
@@ -2859,7 +2883,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_chat:${ctx.sessionId}:operation`);
+    await syncBeforeOperationAcceptance(manager, `mcp.session_chat:${ctx.sessionId}:operation`);
     const currentSession = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
     if (!currentSession) {
       throw new LodyOperationStoreError(
@@ -2908,7 +2932,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       });
     } catch (error) {
       if (error instanceof WorkspaceSyncUnavailableError) {
-        throw error;
+        throw unacceptedSyncError();
       }
       const machineAccessError = toMachineAccessMcpError(error);
       if (machineAccessError) {
@@ -3166,7 +3190,7 @@ const startSessionCreateManyOperation = async (
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_create_many:${ctx.sessionId}`);
+    await syncBeforeOperationAcceptance(manager, `mcp.session_create_many:${ctx.sessionId}`);
     const requester = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
     if (!requester) {
       throw new LodyOperationStoreError(
@@ -3325,6 +3349,13 @@ const startSessionCreateManyOperation = async (
               dispatchConfig: null,
             };
           }
+          if (error instanceof WorkspaceSyncUnavailableError) {
+            const failure = error.toLodyError();
+            return {
+              operationItem: batchFailure(failure.code, failure.message, failure.retryable, label),
+              dispatchConfig: null,
+            };
+          }
           const machineAccessError = toMachineAccessMcpError(error);
           if (machineAccessError) {
             return {
@@ -3462,7 +3493,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
   const auth = getCliAuthContextOrThrow('mcp');
   const workspace = await resolveWorkspaceOrThrow(auth, getMcpWorkspaceId(ctx));
   return await withWorkspaceManager(auth, workspace, 'mcp', async (manager) => {
-    await syncWorkspaceMetaForRead(manager, `mcp.session_chat_many:${ctx.sessionId}`);
+    await syncBeforeOperationAcceptance(manager, `mcp.session_chat_many:${ctx.sessionId}`);
     const requester = await readCurrentSessionMeta(manager, ctx.sessionId as SessionId);
     if (!requester) {
       throw new LodyOperationStoreError(
@@ -3538,7 +3569,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
           });
         } catch (error) {
           if (error instanceof WorkspaceSyncUnavailableError) {
-            throw error;
+            throw unacceptedSyncError();
           }
           const machineAccessError = toMachineAccessMcpError(error);
           if (machineAccessError) {
@@ -3663,6 +3694,7 @@ export const __lodyMcpServerInternals = {
   SessionStatusManyToolInputSchema,
   SessionCancelToolInputSchema,
   mcpErrorResult,
+  syncBeforeOperationAcceptance,
   buildWaitErrorResponse,
   buildMcpCreateOptions,
   bindMcpCreateContext,

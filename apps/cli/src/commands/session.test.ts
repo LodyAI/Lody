@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
+import { WorkspaceSyncUnavailableError } from '@/lib/command-runtime';
 import {
   getMachineFlockDocId,
   getSessionRoomId,
@@ -1645,6 +1646,27 @@ describe('session command helpers', () => {
     } finally {
       rmSync(rootPath, { recursive: true, force: true });
     }
+  });
+
+  it('classifies a failed machine document sync as an unavailable dependency', async () => {
+    const failure = new Error('Streams sync failed: network_error');
+    const manager = {
+      syncFlockDocOrThrow: vi.fn(async () => {
+        throw failure;
+      }),
+    } as unknown as Parameters<typeof resolveLocalProjectRefOrThrow>[0];
+
+    await expect(
+      resolveLocalProjectRefOrThrow(
+        manager,
+        'workspace-1' as WorkspaceId,
+        'machine-id' as MachineId,
+        'lody'
+      )
+    ).rejects.toMatchObject({
+      _tag: 'WorkspaceSyncUnavailableError',
+      cause: failure,
+    } satisfies Partial<WorkspaceSyncUnavailableError>);
   });
 
   it('does not synthesize a branch for non-git local projects', async () => {
