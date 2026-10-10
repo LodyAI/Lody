@@ -5229,7 +5229,7 @@ export const AssistantTurnFooter = ({
           {showFinishedMetadata && !isMobile && showDuration && durationLabel ? (
             <>
               {completionTimestampLabel ? <span aria-hidden="true">·</span> : null}
-              <span className="font-mono tabular-nums">{durationLabel}</span>
+              <span className="tabular-nums">{durationLabel}</span>
             </>
           ) : null}
         </div>
