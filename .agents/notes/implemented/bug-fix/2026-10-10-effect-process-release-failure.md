@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1379](https://github.com/LodyAI/Lody/pull/1379)
+
 [中文](2026-10-10-effect-process-release-failure.zh.md)
 
 ## Abstract
