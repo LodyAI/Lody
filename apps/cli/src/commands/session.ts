@@ -25,9 +25,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { v4 as uuidV4 } from 'uuid';
 import {
-  getLocalProjectGitStateAtRootPath,
-  normalizeLocalProjectRootPath,
-  resolveLocalProjectBranchAtRootPath,
+  localProjectsLegacy,
   selectLocalProjectBranchSelector,
 } from '@lody/shared/node/local-project';
 import {
@@ -1111,7 +1109,7 @@ export async function resolveLocalProjectBranchForCreate(
     return undefined;
   }
 
-  const gitState = await getLocalProjectGitStateAtRootPath(project.rootPath);
+  const gitState = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(project.rootPath);
   if (!gitState.git) {
     if (options.requireGit === true) {
       throw new Error('Cannot use --worktree with a local project that is not a git repository.');
@@ -1140,7 +1138,7 @@ export async function resolveLocalProjectBranchForCreate(
   // `branch` is either a selector this project reported or a name a human typed
   // as `--branch`. A typed `main` may match both refs/heads/main and
   // refs/remotes/origin/main, so validate it the way git resolves it.
-  await resolveLocalProjectBranchAtRootPath(project.rootPath, branch, {
+  await localProjectsLegacy.resolveLocalProjectBranchAtRootPath(project.rootPath, branch, {
     preferLocalOnCollision: true,
   });
   return branch;
@@ -1165,7 +1163,7 @@ export function normalizeLocalProjectPathSelector(selector: string): string | un
   if (!normalizedSelector || !isPathLikeLocalProjectSelector(normalizedSelector)) {
     return undefined;
   }
-  return normalizeLocalProjectRootPath(normalizedSelector);
+  return localProjectsLegacy.normalizeLocalProjectRootPath(normalizedSelector);
 }
 
 export function selectLocalProjectsBySelector<T extends LocalProjectSelectorCandidate>(
@@ -1186,7 +1184,8 @@ export function selectLocalProjectsBySelector<T extends LocalProjectSelectorCand
       projectRootPath === normalizedSelector ||
       (normalizedPathSelector !== undefined &&
         projectRootPath !== undefined &&
-        normalizeLocalProjectRootPath(projectRootPath) === normalizedPathSelector)
+        localProjectsLegacy.normalizeLocalProjectRootPath(projectRootPath) ===
+          normalizedPathSelector)
     );
   });
 }
@@ -2600,14 +2599,17 @@ export async function readLocalProjectGitStateOnMachine(args: {
   localRootPath: string;
   requesterUserId: string;
 }): Promise<
-  | { success: true; state: Awaited<ReturnType<typeof getLocalProjectGitStateAtRootPath>> }
+  | {
+      success: true;
+      state: Awaited<ReturnType<typeof localProjectsLegacy.getLocalProjectGitStateAtRootPath>>;
+    }
   | { success: false; error: string; message?: string }
 > {
   if (args.machineId === args.auth.machineId) {
     try {
       return {
         success: true,
-        state: await getLocalProjectGitStateAtRootPath(args.localRootPath),
+        state: await localProjectsLegacy.getLocalProjectGitStateAtRootPath(args.localRootPath),
       };
     } catch (error) {
       return { success: false, error: formatErrorMessage(error) };

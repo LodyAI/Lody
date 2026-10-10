@@ -21,7 +21,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
-import { normalizeLocalProjectRootPath } from '@lody/shared/node/local-project';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 
 import { getDefaultSessionWorkdir, Session } from './session';
 import { SessionManager, type ISession } from './session-manager';
@@ -757,7 +757,7 @@ describe('SessionManager worktree setup', () => {
 
   it('runs setup only after a speculative worktree is adopted by durable creation', async () => {
     const sourceDir = createLocalRepo(tempHome);
-    const originalRootPath = normalizeLocalProjectRootPath(sourceDir);
+    const originalRootPath = localProjectsLegacy.normalizeLocalProjectRootPath(sourceDir);
     const sessionId = 'setup-prepared-session' as SessionId;
     const localProjectId = 'local-project-prepared' as LocalProjectId;
     const repoId = deriveRepoIdFromLocalProjectPath(originalRootPath);
@@ -826,7 +826,7 @@ describe('SessionManager worktree setup', () => {
 
   it('retries setup after a durable create fails with a prepared worktree', async () => {
     const sourceDir = createLocalRepo(tempHome);
-    const originalRootPath = normalizeLocalProjectRootPath(sourceDir);
+    const originalRootPath = localProjectsLegacy.normalizeLocalProjectRootPath(sourceDir);
     const sessionId = 'setup-prepared-retry' as SessionId;
     const localProjectId = 'local-project-prepared-retry' as LocalProjectId;
     const repoId = deriveRepoIdFromLocalProjectPath(originalRootPath);
@@ -897,7 +897,7 @@ describe('SessionManager worktree setup', () => {
 
   it('rebuilds a prepared worktree whose directory disappeared before adoption', async () => {
     const sourceDir = createLocalRepo(tempHome);
-    const originalRootPath = normalizeLocalProjectRootPath(sourceDir);
+    const originalRootPath = localProjectsLegacy.normalizeLocalProjectRootPath(sourceDir);
     const sessionId = 'setup-prepared-vanished' as SessionId;
     const localProjectId = 'local-project-prepared-vanished' as LocalProjectId;
     const repoId = deriveRepoIdFromLocalProjectPath(originalRootPath);

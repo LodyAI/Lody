@@ -248,7 +248,7 @@ import {
   resolveContainedUploadPath,
 } from '@/lib/session-file-attachments';
 import { deriveRepoIdFromGitHubRepo } from '@/utils/github';
-import { getLocalProjectGitStateAtRootPath } from '@lody/shared/node/local-project';
+import { localProjectsLegacy } from '@lody/shared/node/local-project';
 import { deriveRepoIdFromLocalProjectPath } from '@lody/shared/node/worktree-paths';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import {
@@ -2612,7 +2612,7 @@ export class MessageHandler {
     }
 
     try {
-      const state = await getLocalProjectGitStateAtRootPath(rootPath);
+      const state = await localProjectsLegacy.getLocalProjectGitStateAtRootPath(rootPath);
       return {
         type: 'local-project/git-state_response',
         machineId: this.machineId,
