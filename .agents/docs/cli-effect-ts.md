@@ -110,6 +110,21 @@ facade shares a process-lifetime ManagedRuntime so local queue waiting retains i
 old deadline meaning. Remove it when those entrypoints use the daemon runtime.
 Catalog read caching, Git/worktrees and downloads are still under migration.
 
+## Local-project Git
+
+`LocalProjects` / `LocalProjectsLive` own native repository observation and branch
+workflows. Their dependencies are `LocalProjectPaths` (official FileSystem),
+`LocalProjectHost` (an Effect reading each command's environment), and the official
+process spawner. `localProjectLayer` only composes Layers. Existing CLI command,
+control, session and worktree-observation entrypoints execute this same kernel
+through the one deprecated `localProjectsLegacy` facade. Keep that name visible;
+new Effect callers yield native methods. Remove the facade when those application
+owners provide LocalProjects. Its synchronous identity methods remain blocking.
+Expected Git absence remains a domain result; process, deadline, corruption,
+filesystem and release failures propagate. This does not complete worktree
+setup/GC or the daemon's root runtime. Decision and limits:
+[local-project Git](../notes/implemented/architecture/2026-10-10-effect-local-project-git.md).
+
 ## Temporary Promise facades
 
 A migrated layer is consumed by callers that are still Promise-based. Such a
