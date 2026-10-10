@@ -31,10 +31,11 @@ context/message-flow.md "Upstream".
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
   `Session.createAgent`, `startLocalAcpAgent`, and history-catalog ACP spawn.
-- `setting.ts` — launch resolution for every agent kind, including the pinned
-  `npx --prefer-offline -y dimcode@0.5.10 acp` builtin. Dimcode reuses the
-  profile-owned npm cache and startup recovery; credentials remain in its own
-  configuration or provider environment.
+- `setting.ts` — launch resolution for every agent kind, including the user-installed
+  `dimcode acp` builtin. Users manage Dimcode installation and versions; Lody disables
+  upstream auto-update in its child process and never downloads a fallback. Credentials
+  remain in Dimcode's own configuration or provider environment. Refresh capabilities
+  after upgrading. Existing registry configurations retain their saved launch contract.
 - `deepseek-harness-runtime.ts` — Harness-home (`DSH_HOME`, then `~/.dsh`), atomic-config,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
   the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
