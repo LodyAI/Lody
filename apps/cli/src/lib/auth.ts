@@ -1,6 +1,3 @@
-import * as fs from 'fs';
-import path from 'path';
-import { getConfigPath } from '@/utils';
 import chalk from 'chalk';
 import ora from 'ora';
 import os from 'os';
@@ -21,6 +18,11 @@ import { deviceAuthorizationClient } from 'better-auth/client/plugins';
 import { convexClient } from '@convex-dev/better-auth/client/plugins';
 import { deriveConvexSiteUrl, normalizeBaseUrl } from './convex-site-url';
 import { normalizeAppBasePath } from './site-app-base-path';
+import {
+  clearCliCredentials,
+  loadCliCredentials,
+  saveCliCredentials,
+} from './cli-credential-store';
 
 export interface UserInfo {
   id: string;
@@ -70,23 +72,6 @@ const UserInfoSchema = z
     id: z.string(),
     email: z.string(),
     name: z.string().nullable().optional(),
-  })
-  .passthrough();
-
-const MachineInfoSchema = z
-  .object({
-    machineName: z.string(),
-    machineId: z.string(),
-  })
-  .passthrough();
-
-const AuthInfoSchema = z
-  .object({
-    version: z.literal(3),
-    token: z.string(),
-    user: UserInfoSchema,
-    machine: MachineInfoSchema,
-    createdAt: z.string().optional(),
   })
   .passthrough();
 
@@ -667,22 +652,16 @@ export class AuthClient {
   }
 
   logout(): LogoutResult {
-    // 检查是否有认证信息
     const existingAuth = loadAuthInfo();
+    const cleared = clearCliCredentials();
+    if (!cleared.ok) {
+      this.logger.error('Failed to clear authentication state', { error: cleared.error });
+      return { success: false, error: cleared.error };
+    }
     if (!existingAuth) {
       this.logger.debug('No authentication found. You are not logged in.');
-      return { success: true, user: undefined };
     }
-
-    // 获取配置文件路径
-    const configPath = getConfigPath();
-    try {
-      fs.unlinkSync(configPath);
-    } catch (error) {
-      this.logger.error('Failed to remove auth file', { error });
-      return { success: false, error: 'Failed to clear authentication state' };
-    }
-    return { success: true, user: existingAuth.user };
+    return { success: true, user: existingAuth?.user };
   }
 
   clearRejectedToken(rejectedToken: string): 'cleared' | 'not_current' | 'failed' {
@@ -691,13 +670,12 @@ export class AuthClient {
       return 'not_current';
     }
 
-    try {
-      fs.unlinkSync(getConfigPath());
-      return 'cleared';
-    } catch (error) {
-      this.logger.error('Failed to remove rejected auth file', { error });
+    const cleared = clearCliCredentials();
+    if (!cleared.ok) {
+      this.logger.error('Failed to remove rejected auth file', { error: cleared.error });
       return 'failed';
     }
+    return 'cleared';
   }
 
   async getSessionUserFromSessionToken(sessionToken: string): Promise<UserInfo | null> {
@@ -753,55 +731,26 @@ export class AuthClient {
 }
 
 /**
- * 保存认证信息
+ * Saves the CLI cloud login. The token is copied to the OS credential store
+ * when that store is available; profile fields stay in the credentials file.
  */
 export async function saveAuthInfo(
   token: string,
   user: UserInfo,
   machine: { machineName: string; machineId: string }
 ): Promise<void> {
-  const configPath = getConfigPath();
-  const configDir = path.dirname(configPath);
-
-  // 确保目录存在
-  fs.mkdirSync(configDir, { recursive: true });
-
-  // 保存认证信息
-  const authData = {
-    version: 3,
-    token,
-    user,
-    machine,
-    createdAt: new Date().toISOString(),
-  };
-
-  fs.writeFileSync(configPath, JSON.stringify(authData, null, 2));
-  if (process.platform !== 'win32') {
-    try {
-      fs.chmodSync(configPath, 0o600);
-    } catch {
-      // best effort
-    }
-  }
+  await saveCliCredentials({ token, user, machine });
 }
 
-/**
- * 读取认证信息
- */
+/** Reads the CLI cloud login. A token in the credentials file takes precedence over the OS credential store. */
 export function loadAuthInfo(): AuthInfo | null {
-  try {
-    const configPath = getConfigPath();
-    const data = fs.readFileSync(configPath, 'utf-8');
-    const parsed = AuthInfoSchema.safeParse(JSON.parse(data));
-    if (!parsed.success) {
-      getLogger('auth').debug('Invalid credentials.json; please run `lody logout` + `lody login`');
-      return null;
-    }
-    return parsed.data;
-  } catch {
-    getLogger('auth').debug('Failed to load auth info from disk');
-    return null;
-  }
+  const loaded = loadCliCredentials();
+  if (!loaded) return null;
+  return {
+    token: loaded.token,
+    user: loaded.user,
+    machine: loaded.machine,
+  };
 }
 
 /**

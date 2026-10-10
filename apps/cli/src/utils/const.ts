@@ -25,7 +25,7 @@ const CREDENTIALS_FILE_NAME = 'credentials.json';
 const CredentialMachineIdSchema = z
   .object({
     version: z.literal(3),
-    token: z.string(),
+    token: z.string().optional(),
     user: z
       .object({
         id: z.string(),

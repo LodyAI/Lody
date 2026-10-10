@@ -125,6 +125,22 @@ describe('machine ID', () => {
     expect(fs.readFileSync(path.join(dataDir, 'machine-id'), 'utf-8')).toBe(machineId);
   });
 
+  it('reads the machine ID from a credential file that has no token field', () => {
+    const dataDir = useTemporaryDataDir();
+    const credentialsPath = path.join(dataDir, 'credentials.json');
+    fs.mkdirSync(path.dirname(credentialsPath), { recursive: true });
+    fs.writeFileSync(
+      credentialsPath,
+      JSON.stringify({
+        version: 3,
+        user: { id: 'user-1', email: 'user@example.com' },
+        machine: { machineName: 'Test Machine', machineId: 'keystore-backed-machine' },
+      })
+    );
+
+    expect(getSystemMachineId()).toBe('keystore-backed-machine');
+  });
+
   it('ignores invalid credentials even when they contain a machine ID', () => {
     const dataDir = useTemporaryDataDir();
     const credentialsPath = path.join(dataDir, 'credentials.json');

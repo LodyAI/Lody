@@ -4,6 +4,14 @@ Binding rules live in [AGENTS.md](AGENTS.md) and in the scoped `AGENTS.md` of ea
 subdirectory; this file is the navigation index. Cross-module explanations live in
 [`.agents/docs/`](../../../../.agents/docs/AGENTS.md).
 
+## Credentials
+
+- `cli-credential-store.ts` — CLI cloud login persistence. The access token is
+  copied to the OS credential store when that store is available; profile and
+  machine id stay in `credentials.json`. The file keeps the token unless
+  `LODY_CLI_DROP_FILE_TOKEN=1`. Decision:
+  [CLI credential keystore](../../../../.agents/notes/implemented/architecture/2026-10-10-cli-credential-keystore.md).
+
 ## Resource discovery
 
 - `discovery-query.ts` — strict query schemas, scope-bound keyset pagination and

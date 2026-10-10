@@ -15,6 +15,8 @@ end-to-end map. The WS/DO control-plane path is DEPRECATED; do not add to it.
   machine eligibility. Never persist managed tokens or replay uncertain writes.
   Checkout/LFS share the pinned helper context. Contract: [identity fallback](../../../../specs/github-identity-fallback.md).
 
+- CLI token: OS keystore when available, else `credentials.json` ([note](../../../../.agents/notes/implemented/architecture/2026-10-10-cli-credential-keystore.md)).
+
 - `cloud-cli-port.ts` is the sole official-build composition root for cloud clients and
   endpoint-derived adapters. Daemon runtime modules must not construct cloud SDK
   clients or read `LODY_AUTH_URL` / `LODY_AUTH_SITE_URL` / `LODY_SERVER_URL`. The local
