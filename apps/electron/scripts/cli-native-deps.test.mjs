@@ -4,13 +4,62 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { roostPrebuildFileName, stageRoostBinding } from './cli-native-deps.mjs'
+import { Worker } from 'node:worker_threads'
+import {
+  roostPrebuildFileName,
+  stageRoostBinding,
+  stageLoroRuntimePackage
+} from './cli-native-deps.mjs'
 import { probeRoostRuntime } from './roost-runtime-probe.mjs'
 
 const publishedSource = path.resolve(
   import.meta.dirname,
   '../../cli/node_modules/@loro-dev/roost-node'
 )
+
+test('staged Loro supports CommonJS resolution and ESM worker snapshot round trips without browser distributions', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'lody-loro-stage-'))
+  try {
+    const destination = path.join(directory, 'node_modules/loro-crdt')
+    stageLoroRuntimePackage(
+      path.resolve(import.meta.dirname, '../../cli/node_modules/loro-crdt'),
+      destination
+    )
+    assert.deepEqual((await readdir(destination)).sort(), ['LICENSE', 'nodejs', 'package.json'])
+    const require = createRequire(path.join(directory, 'probe.cjs'))
+    const { LoroDoc } = require('loro-crdt')
+    assert.equal(require.resolve('loro-crdt'), require.resolve('loro-crdt/nodejs'))
+    const doc = new LoroDoc()
+    doc.getText('text').insert(0, 'staged runtime')
+    const workerPath = path.join(directory, 'worker.mjs')
+    await writeFile(
+      workerPath,
+      `
+      import { parentPort, workerData } from 'node:worker_threads'
+      import { LoroDoc } from 'loro-crdt'
+      const doc = new LoroDoc()
+      doc.import(workerData)
+      doc.getText('text').insert(14, ' works')
+      parentPort.postMessage(doc.export({ mode: 'snapshot' }))
+    `
+    )
+    const worker = new Worker(workerPath, { workerData: doc.export({ mode: 'snapshot' }) })
+    try {
+      const snapshot = await new Promise((resolve, reject) => {
+        worker.once('message', resolve)
+        worker.once('error', reject)
+        worker.once('exit', (code) => reject(new Error(`Loro worker exited before reply: ${code}`)))
+      })
+      const restored = new LoroDoc()
+      restored.import(snapshot)
+      assert.equal(restored.getText('text').toString(), 'staged runtime works')
+    } finally {
+      await worker.terminate()
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
 
 async function packageFixture(directory, layout = 'split') {
   const source = path.join(directory, 'source')

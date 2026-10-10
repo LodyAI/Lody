@@ -60,7 +60,7 @@ Root rules apply. For `src/**`, read module, IPC and window contracts in
 
 - The embedded CLI runs built JavaScript, never source-loader/Jiti. Development
   and packaged builds share the output layout.
-- `@loro-dev/roost-node`, `better-sqlite3`, `@lydell/node-pty`, and `loro-crdt` remain external and must be
+- `@loro-dev/roost-node`, `better-sqlite3`, `@lydell/node-pty`, and Node-only `loro-crdt` remain external and must be
   staged under `resources/cli/node_modules` by `scripts/sync-cli-dist.mjs` and
   `scripts/cli-native-deps.mjs`.
   Roost's client, Worker, and binding retain relative paths; stage only the target prebuild,
