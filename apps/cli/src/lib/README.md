@@ -36,6 +36,14 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   conservatively requires write access. Credential probes precede the single
   native transfer.
 
+- `gh-pr-create-script.ts` — REST creation for managed `gh pr create/new` with
+  explicit title and body/body-file; retains the selected credential for metadata.
+  Infers a current head only when its SHA is already published in the target repo,
+  and base from `branch.<current>.gh-merge-base` or the repository default.
+  Fill, interactive, attachment and push/fork modes retain native gh with an App
+  attribution warning. Creation outcomes are never replayed; print the created
+  URL before optional metadata can fail. See the [decision](../../../../.agents/notes/implemented/bug-fix/2026-10-11-github-pr-app-attribution.md).
+
 - `usage/usage-tracking-service.ts` — cumulative usage snapshot staging and
   acknowledgement-based retry retention; deltas are never added again.
   Scope and limits: [usage delivery](../../../../specs/usage-delivery.md).
