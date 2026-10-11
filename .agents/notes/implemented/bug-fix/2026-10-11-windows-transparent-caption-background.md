@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-11-windows-transparent-caption-background.zh.md)
 
+PR: [#1437](https://github.com/LodyAI/Lody/pull/1437)
+
 ## Abstract
 
 Windows native caption buttons kept an opaque theme background when a Modal or

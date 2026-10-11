@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-11-windows-transparent-caption-background.md)
 
+PR: [#1437](https://github.com/LodyAI/Lody/pull/1437)
+
 ## 摘要
 
 Modal 或 Dialog 遮罩使页面变暗时，Windows 原生窗口控制按钮仍保留不透明的主题背景，右上角因此出现明显色块。深浅主题现均使用 Electron 透明 Window Controls Overlay 背景，让原生按钮下方能够显示页面遮罩。36px 高度、按主题选择的图标颜色和原生按钮行为保持不变。配置和主题切换已通过单元测试，Windows 真机视觉效果仍待验证。
