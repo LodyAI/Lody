@@ -15,7 +15,7 @@ const styles = stylex.create({
   overview: {
     display: 'flex',
     flexWrap: 'wrap',
-    alignItems: 'center',
+    alignItems: 'baseline',
     gap: space[2],
     minWidth: 0,
     maxWidth: '100%',
@@ -23,14 +23,15 @@ const styles = stylex.create({
   summary: {
     display: 'flex',
     flexWrap: 'wrap',
-    alignItems: 'center',
+    alignItems: 'baseline',
     gap: space[2],
     minWidth: 0,
     maxWidth: '100%',
-    fontSize: text.captionSize,
+    fontSize: text.footnoteSize,
+    lineHeight: 1,
   },
   muted: { color: colors.secondaryLabel },
-  meter: { display: 'flex', alignItems: 'center', gap: space[1.5] },
+  meter: { display: 'flex', alignItems: 'baseline', gap: space[1.5] },
   windowLabel: {
     maxWidth: '6em',
     overflow: 'hidden',
@@ -42,6 +43,7 @@ const styles = stylex.create({
     fontVariantNumeric: 'tabular-nums',
   },
   track: {
+    alignSelf: 'center',
     width: '28px',
     height: '4px',
     overflow: 'hidden',
@@ -120,7 +122,7 @@ export function ProviderUsageSummary({
             aria-haspopup="dialog"
             onClick={() => setForecastOpen(true)}
           >
-            {t('codexReset.entry', 'Reset forecast')}
+            <span>{t('codexReset.entry', 'Reset forecast')}</span>
           </Button>
         ) : null}
       </div>

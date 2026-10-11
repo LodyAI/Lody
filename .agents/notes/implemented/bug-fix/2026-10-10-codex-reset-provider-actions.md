@@ -18,9 +18,11 @@ The original layout reproduced a 60px overlap between forecast and refresh contr
 
 Eligible Codex rows retain that direct action when usage or an active forecast is absent. Listing rows does not request forecast data; the action uses the existing shared store when opening the dialog. The dialog explains the third-party source and returns focus to its stable entry when closed. Composer forecast behavior is unchanged.
 
+Quota text uses the mini button's footnote size and unit line height. The overview, quota group, and individual meters align text by baseline; only graphical tracks center themselves. Chromium measured an approximately 1px text-baseline offset with the former 11px quota text and centered layout, and identical baselines after this correction.
+
 ## Verification and limits
 
 - 92 tests across Provider row, machine detail, and forecast suites pass. A real-store integration test observes idle state on listing and loaded state only after selecting the direct forecast action.
-- Eight English/Chinese Chromium cases cover direct opening by mouse and keyboard, no intermediate quota UI, wide/narrow panels, missing quota, probability confined to the dialog, focus return, refresh results, and delete confirmation. A three-window Claude fixture verifies every meter remains visible and inside a narrow row.
+- Eight English/Chinese Chromium cases cover direct opening by mouse and keyboard, no intermediate quota UI, wide/narrow panels, missing quota, probability confined to the dialog, shared text baselines, focus return, refresh results, and delete confirmation. A three-window Claude fixture verifies every meter remains visible and inside a narrow row.
 - Playwright screenshots inspect the final wide/narrow rows with synthetic quota data and the direct forecast dialog.
 - Full `pnpm check` remains limited by uninitialized ACP adapter submodules during CLI typechecking. Packaged Windows Electron verification is outstanding.

@@ -238,6 +238,33 @@ for (const locale of ['en', 'zh_CN']) {
       }
       await expect(row).not.toContainText('65%');
       await page.evaluate(() => document.fonts.ready);
+      if (story === 'active-forecast-with-actions') {
+        const baselines = await row.evaluate((el) => {
+          const group = el.querySelector('[role="group"]')!;
+          const button = el.querySelector('button[aria-haspopup="dialog"]')!;
+          const labels = [
+            group.firstElementChild!,
+            ...Array.from(group.querySelectorAll('[role="meter"]')).flatMap((meter) => [
+              meter.firstElementChild!,
+              meter.lastElementChild!,
+            ]),
+            button.querySelector('span')!,
+          ];
+          // A zero-size inline marker sits on the actual text baseline,
+          // unlike the center or bottom of a font's bounding rectangle.
+          return labels.map((label) => {
+            const marker = document.createElement('span');
+            marker.style.cssText =
+              'display:inline-block;width:0;height:0;padding:0;margin:0;border:0;vertical-align:baseline;';
+            label.append(marker);
+            const baseline = marker.getBoundingClientRect().top;
+            marker.remove();
+            return baseline;
+          });
+        });
+        expect(baselines).toHaveLength(6);
+        expect(Math.max(...baselines) - Math.min(...baselines)).toBeLessThan(0.25);
+      }
       const idleEntry = await entry.boundingBox();
       const idleManage = await manage.boundingBox();
       await row.hover();
