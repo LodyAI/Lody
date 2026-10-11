@@ -126,7 +126,7 @@
   ],
   "dependencies": {
     "@effect/platform-node-shared": "catalog:",
-    "@loro-dev/roost-node": "0.1.1",
+    "@loro-dev/roost-node": "0.1.2",
     "@lydell/node-pty": "1.2.0-beta.14",
     "@napi-rs/keyring": "2.1.0",
     "better-sqlite3": "catalog:",

@@ -17,7 +17,7 @@ CLI 现在接入已发布的 Node-API 包，在 Worker 内运行 SQLite 实现�
 
 ## 决策与边界
 
-CLI 运行依赖固定为 `@loro-dev/roost-node@0.1.1`，发布冷却期仅豁免该版本及
+CLI 运行依赖固定为 `@loro-dev/roost-node@0.1.2`，发布冷却期仅豁免该版本及
 六个精确匹配的平台包版本。
 保留 `@loro-dev/roost@0.1.2` 的身份、应用 JSON 和 `NodeLodyHistory` 适配器。
 安装、构建和打包 Lody 无须 Rust 源码或旁边的 Roost 仓库。
@@ -39,6 +39,26 @@ Web/移动应用源码不属于本公开仓库范围。
 
 [功能开关](../feature/2026-10-08-roost-history-feature-gate.zh.md) 继续决定新会话选择。
 Loro 仍是默认后端；既有会话的后端标识、历史、Loro 控制元数据及传输授权保持原契约。
+
+## 失败诊断
+
+已发布的 0.1.2 host 通过公开的 `failure` 和 `Error.cause` API 保留 Worker
+`error` 事件、绑定加载异常和 fault 原因。Lody 直接依赖该正式包，无须 pnpm SDK 补丁；
+请求结果分类和重试策略仍由 SDK 管理。所属机器通过既有本地 logger，以同一诊断编号
+关联初始化、写入、RPC 和退出证据，并记录 CLI、Node、Electron 及编译期桌面构建信息。
+内部调用方仍收到原来的异常；RPC 只返回安全的阶段/错误码/编号字符串，渲染端补上本地化
+说明。Worker 原始异常不进入历史或远程报错响应。本次修复的是证据丢失，并没有确认此前 Nightly
+故障的底层原因，也不因此引入后端回退、重放、遥测上传或存储迁移。
+
+验证通过真实 Node Worker 注入启动、绑定加载、请求执行故障及显式异常退出，
+检查原始异常、编号关联和已发出/排队请求的结果分类。所属 SQLite/RPC 测试检查
+安全报错响应和保留的 Roost 历史；渲染端测试覆盖本地、远程 bridge 的中英文说明。
+既有 toast 的 Storybook 用例验证中英文及明暗主题下的呈现。这些检查没有复现
+报告中的 Nightly 故障，也没有执行打包后的 Nightly 应用。
+
+正式 0.1.2 包通过冻结安装、完整仓库检查、2 GiB 公开 CLI 构建及 OSS 桌面构建。
+六个实际 npm 平台包均正确暂存唯一匹配的绑定；本机 Worker 在 Node 24.14.0 和
+Electron 44.7.0 下通过签名 SQLite 关闭/重开。其他平台桌面执行及发行签名不属于本次验收。
 
 ## 历史修改与命令路由
 

@@ -147,6 +147,12 @@ control metadata 与投递状态仍由 Loro 保存。本地历史接受不表示
 backend，标为 Roost 或 Loro。旧会话没有 backend 字段时按 Loro 显示；当前实验开关偏好
 不决定这个标签。显示标签不读取历史正文。
 
+Roost 初始化或存储失败不得把既有会话切回 Loro，也不得重放结果未知的写入。
+保留“尚未发出请求”和“已发出但结果不确定”的区别。所属机器在本地日志记录
+Worker 原始异常、异常退出及运行时/构建信息。渲染端和远程历史 RPC 报告这些故障时只携带
+不含内容的失败阶段、稳定错误码和诊断编号；不返回原始异常、路径、凭据或历史正文。
+界面说明写入未获确认，并显示可在所属机器本地日志中查找的编号。
+
 性能优化必须保留原有 Lody 对话身份及 owner 流程。Edit & Resend 可以通过存储 SDK
 内部的分支操作复用不可变前缀，但不能创建或跳转到另一条 Lody 对话。旧 writer 必须
 继续被阻止写入；确认丢失后须刷新到已提交分支；回滚须保留后续追加，或拒绝覆盖
@@ -193,6 +199,8 @@ UI）不在本次实现；本次只是保证将来出现这类骨架轮次时不
 - `apps/cli/src/lib/local-project-history-sync-service.ts`
 - `apps/cli/src/session/{roost-node-session,roost-history-generation,roost-rpc-session}.ts`
 - `apps/cli/tests/roost-session-backend-contract.test.ts`
+- `apps/cli/src/session/roost-history-diagnostics.ts` 与 `apps/cli/tests/roost-history-local-owner.test.ts`
+- `packages/components/src/lib/roost-history-error.ts` 与 `packages/components/tests/conversation-session-backend-factory.test.ts`
 - `packages/shared/tests/history-writer.test.ts`、`history-writer.contract.ts`、
   `history-storage-policy.test.ts` 与 `session-history-import-port.test.ts`
 - `apps/cli/tests/local-project-history-sync-service.test.ts` 与 `local-project-history-sync-writer.test.ts`

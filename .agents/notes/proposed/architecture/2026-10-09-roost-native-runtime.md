@@ -21,7 +21,7 @@ history coverage and device-level responsiveness remain validation limits.
 
 ## Decision and boundaries
 
-Pin `@loro-dev/roost-node@0.1.1` as a CLI runtime dependency and exempt only that
+Pin `@loro-dev/roost-node@0.1.2` as a CLI runtime dependency and exempt only that
 version and its six exact platform dependencies from the release-age policy.
 Keep `@loro-dev/roost@0.1.2` for identity,
 application JSON, and `NodeLodyHistory`. Neither Rust source nor a sibling Roost
@@ -50,6 +50,34 @@ application sources are outside this repository's boundary.
 The [feature gate](../feature/2026-10-08-roost-history-feature-gate.md) still controls
 new-session selection. Loro remains the default; existing backend discriminators,
 history, Loro control metadata, and transport authorization remain unchanged.
+
+## Failure diagnostics
+
+The published 0.1.2 host retains Worker `error` events, binding-load exceptions
+and fault causes through its public `failure` and `Error.cause` APIs. Lody consumes
+that release directly, without a pnpm SDK patch. Request outcome codes and retry
+policy remain SDK-owned. The owner correlates initialization,
+write, RPC and exit evidence with one diagnostic ID and records CLI, Node,
+Electron and compiled desktop provenance through the existing local logger.
+Internal callers still receive their original errors; RPC sends only the safe
+stage/code/ID string, and the renderer supplies localized context. Raw Worker causes
+never enter history or the remote error envelope. This is a repair of lost
+evidence; it does not identify the cause of a previously reported Nightly failure
+or authorize a fallback, replay, telemetry upload or storage migration.
+
+Verification injects failures into real Node Workers at startup, binding load and
+request execution, including an explicit abnormal exit. It checks original causes,
+correlated IDs and dispatched/queued outcome semantics. The owning SQLite/RPC suite
+checks safe responses and retained Roost history; renderer tests cover local and
+remote bridges in English and Chinese. The existing toast Storybook story verifies
+the error presentation in both languages and light/dark themes. These checks do
+not reproduce the reported Nightly failure or execute a packaged Nightly app.
+
+The published 0.1.2 package passes frozen installation, the complete repository
+check, the 2 GiB public CLI build and the OSS desktop build. All six actual npm
+platform packages stage one matching binding; the host Worker passes signed SQLite
+close/reopen under Node 24.14.0 and Electron 44.7.0. Foreign desktop execution and
+release signing remain outside this acceptance.
 
 ## History mutation and command routing
 

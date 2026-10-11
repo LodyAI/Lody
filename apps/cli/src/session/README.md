@@ -29,6 +29,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   page cache; `roost-session-backend.ts` joins it to the existing Loro control plane.
 - `roost-history-generation.ts` — stages structural replacements privately and
   atomically activates them, fencing writes through superseded handles.
+- `roost-history-diagnostics.ts` — correlates local Worker causes and runtime details
+  with the safe error reference returned by history RPC.
 - `roost-rpc-session.ts` — one-shot Cloud CLI history services backed by owner RPC;
   `lib/command-runtime.ts` supplies the same composition for sessions, export and MCP.
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns. Created in
@@ -331,6 +333,13 @@ The shared renderer uses the existing local IPC or remote history RPC bridge;
 Web/iOS clients need no Node addon. The owning machine must be available for RPC
 reads; browser-local IndexedDB replicas and offline sync are separate work.
 Runtime packaging and verification: [native runtime note](../../../../.agents/notes/proposed/architecture/2026-10-09-roost-native-runtime.md).
+
+Initialization, Worker exit and failed writes retain their original error and outcome
+classification. The owner's local log records causes, exit status and runtime/build
+details under a diagnostic ID. For these failures, history RPC returns only the ID,
+stage and error code in its existing error string; the shared renderer explains the failure in the
+selected language. Failures neither change the stored backend nor replay a write whose
+outcome is unknown.
 
 Renderer read replies bind logical page bodies, count and history revision to
 one durable observation. The RPC waits for local writes before and after the

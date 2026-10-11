@@ -2429,6 +2429,8 @@
   "sessions.freeTurnLimitReachedTitle": "Free plan turn limit reached",
   "sessions.freeTurnLimitUpgrade": "Upgrade to Plus",
   "sessions.sendError": "Failed to send message",
+  "sessions.roostHistoryReadError": "Roost conversation history could not be read. Use this error reference to find details in the conversation machine’s local logs. {{detail}}",
+  "sessions.roostHistoryWriteError": "Roost could not confirm that the conversation history was saved. Use this error reference to find details in the conversation machine’s local logs. {{detail}}",
   "sessions.sendFailed": "Failed to send message",
   "sessions.share": "Share",
   "sessions.shareAsImage": "Share as image…",

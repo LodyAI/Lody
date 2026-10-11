@@ -9,12 +9,19 @@ import { createSessionBackend, type SessionBackendFactory } from '../src/session
 import { NodeLodyHistory } from '@loro-dev/roost/lody-history';
 import {
   CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   getMachineRoomId,
   getSessionRoomId,
   SessionStatusFactory,
   type SessionId,
   type SessionHistoryInput,
+  type SessionHistoryReadResponse,
+  type SessionHistoryWriteResponse,
 } from '@lody/shared';
+import { MessageHandler } from '../src/lib/message-handler';
+import { getDefaultLogger } from '../src/utils/logger';
+import { createTestCloudPort } from './test-cloud-port';
 import { createCommandSessionHistoryFactory, type AuthContext } from '../src/lib/command-runtime';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import {
@@ -23,7 +30,8 @@ import {
   type HistoryImportInput,
 } from '@lody/shared/session-data';
 import { Identity } from '@loro-dev/roost';
-import { RoostNativeClient } from '@loro-dev/roost-node';
+import { RoostNativeClient, RoostHostError } from '@loro-dev/roost-node';
+import { describeRoostHistoryFailure } from '../src/session/roost-history-diagnostics';
 import { RoostHistoryGeneration } from '../src/session/roost-history-generation';
 import { encodeRoostContent } from '../src/session/roost-history-port';
 import { readGoalProjection } from '../src/session/roost-goal-projection';
@@ -95,7 +103,14 @@ async function nativeFixture(
       timestamp: '2026-10-09T00:00:00.000Z',
       acpSessionConfig: {},
     });
-  const backend = await createSessionBackend(doc, { historyBackend: 'roost' });
+  let backend: Awaited<ReturnType<typeof createSessionBackend>>;
+  try {
+    backend = await createSessionBackend(doc, { historyBackend: 'roost' });
+  } catch (error) {
+    await doc.destroy({ preserveStatus: true }).catch(() => undefined);
+    await repo.destroy();
+    throw error;
+  }
   let closed = false;
   const result = {
     repo,
@@ -163,6 +178,117 @@ const nativeContractFixture: SessionBackendContractFixtureFactory = async (optio
 defineSessionBackendContract('Production Roost SQLite', nativeContractFixture);
 
 describe('Production Roost history semantics', () => {
+  it('distinguishes history initialization failure without changing the selected backend', async () => {
+    const workerFailure = new RoostHostError('workerFailed');
+    workerFailure.cause = new Error('synthetic bootstrap Worker failure');
+    const request = vi.spyOn(RoostNativeClient.prototype, 'request');
+    request.mockRejectedValueOnce(workerFailure);
+    const failure = await nativeFixture().catch((error: unknown) => error);
+    expect(failure).toBe(workerFailure);
+    const detail = describeRoostHistoryFailure(failure, { stage: 'write' });
+    expect(detail).toContain('initialize failed (code=workerFailed; diagnostic=');
+    expect(detail).not.toContain('synthetic bootstrap Worker failure');
+    request.mockRestore();
+    const healthy = await nativeFixture();
+    expect(healthy.backend.kind).toBe('roost');
+    expect((await healthy.doc.getMetaState())?.historyBackend).toBe('roost');
+  });
+
+  it.each(['read', 'write'] as const)(
+    'returns a safe diagnostic through the real history %s RPC',
+    async (kind) => {
+      const fixture = await nativeFixture();
+      await fixture.backend.appendHistoryTurn(nativeUser('rpc-retained-user'));
+      const workerFailure = new RoostHostError('workerFailed');
+      workerFailure.cause = new Error('synthetic private Worker path');
+      const request = vi.spyOn(RoostNativeClient.prototype, 'request');
+      request.mockRejectedValueOnce(workerFailure);
+      const noop = () => undefined;
+      const handler = new MessageHandler(
+        {
+          on: noop,
+          setRequestPermissionHandler: noop,
+          getSession: () => undefined,
+          cleanUp: async () => undefined,
+        } as never,
+        {
+          repo: fixture.repo,
+          getOrCreateSessionDoc: async () => fixture.doc,
+          isTransportConnected: () => false,
+          markMachineFlockDocDirty: noop,
+          publishSessionPresence: noop,
+          clearSessionPresence: noop,
+          sendMachineHeartbeat: async () => undefined,
+        } as never,
+        getDefaultLogger(),
+        {
+          machineId: 'test-machine',
+          workspaceId: 'test-workspace' as never,
+          token: 'synthetic-token',
+          userId: 'test-user',
+          machineName: 'synthetic',
+          cliVersion: '0.0.0',
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const rpc = handler as unknown as {
+        readSessionHistoryForRpc(
+          sessionId: SessionId,
+          query: { kind: 'readAll' }
+        ): Promise<SessionHistoryReadResponse>;
+        writeSessionHistoryForRpc(
+          sessionId: SessionId,
+          operation: 'append',
+          payload: Record<string, unknown>
+        ): Promise<SessionHistoryWriteResponse>;
+      };
+      const response =
+        kind === 'read'
+          ? await rpc.readSessionHistoryForRpc(fixture.doc.sessionId, { kind: 'readAll' })
+          : await rpc.writeSessionHistoryForRpc(fixture.doc.sessionId, 'append', {
+              entry: nativeUser('rpc-failed-user'),
+            });
+      const parsed =
+        kind === 'read'
+          ? SessionHistoryReadResponseSchema.parse(response)
+          : SessionHistoryWriteResponseSchema.parse(response);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error).toContain('code=workerFailed; diagnostic=');
+      expect(JSON.stringify(parsed)).not.toContain('synthetic private Worker path');
+      request.mockRestore();
+      expect((await fixture.doc.getMetaState())?.historyBackend).toBe('roost');
+      expect((await fixture.backend.readHistory()).map((turn) => turn.id)).toEqual([
+        'rpc-retained-user',
+      ]);
+      expect(fixture.doc.handle?.doc.getList('history').length).toBe(0);
+      await handler.cleanup();
+    }
+  );
+
+  it('reports a failed native write without switching backend or writing Loro history', async () => {
+    const fixture = await nativeFixture();
+    await fixture.backend.appendHistoryTurn(nativeUser('retained-user'));
+    const workerFailure = new RoostHostError('workerFailed');
+    workerFailure.cause = new Error('synthetic private loader detail');
+    const request = vi.spyOn(RoostNativeClient.prototype, 'request');
+    request.mockRejectedValueOnce(workerFailure);
+    const failure = await fixture.backend
+      .appendHistoryTurn(nativeUser('failed-user'))
+      .catch((error: unknown) => error);
+    expect(failure).toBe(workerFailure);
+    const detail = describeRoostHistoryFailure(failure, {
+      stage: 'write',
+      sessionId: fixture.doc.sessionId,
+    });
+    expect(detail).toContain('write failed (code=workerFailed; diagnostic=');
+    expect(detail).not.toContain('synthetic private loader detail');
+    request.mockRestore();
+    expect(fixture.backend.kind).toBe('roost');
+    expect((await fixture.doc.getMetaState())?.historyBackend).toBe('roost');
+    expect((await fixture.backend.readHistory()).map((turn) => turn.id)).toEqual(['retained-user']);
+    expect(fixture.doc.handle?.doc.getList('history').length).toBe(0);
+  });
+
   it('uses the target owner RPC factory instead of the installed native factory and propagates owner failures', async () => {
     const owner = await nativeFixture();
     await owner.backend.appendHistoryTurn(nativeUser('remote-u'));

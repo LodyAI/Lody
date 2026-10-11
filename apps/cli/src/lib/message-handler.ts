@@ -19,6 +19,7 @@ import crypto from 'crypto';
 import { pathToFileURL } from 'url';
 
 import { v4 as uuidV4 } from 'uuid';
+import { describeRoostHistoryFailure } from '@/session/roost-history-diagnostics';
 import {
   createLoroStreamsJsonStreamClient,
   LoroStreamsMachineRpcServer,
@@ -6926,12 +6927,18 @@ export class MessageHandler {
       }
       throw new Error('History changed during the read; retry the observation');
     } catch (error) {
-      this.logger.debug(`[${sessionId}] History read failed: ${formatErrorMessage(error)}`);
+      const detail =
+        describeRoostHistoryFailure(error, {
+          stage: 'read',
+          sessionId,
+          operation: query.kind,
+        }) ?? formatErrorMessage(error);
+      this.logger.debug(`[${sessionId}] History read failed: ${detail}`);
       return {
         type: 'session/history-read_response',
         sessionId,
         success: false,
-        error: formatErrorMessage(error),
+        error: detail,
       };
     }
   }
@@ -7046,15 +7053,19 @@ export class MessageHandler {
             }),
       };
     } catch (error) {
-      this.logger.debug(
-        `[${sessionId}] History write failed (${operation}): ${formatErrorMessage(error)}`
-      );
+      const detail =
+        describeRoostHistoryFailure(error, {
+          stage: 'write',
+          sessionId,
+          operation,
+        }) ?? formatErrorMessage(error);
+      this.logger.debug(`[${sessionId}] History write failed (${operation}): ${detail}`);
       return {
         type: 'session/history-write_response',
         sessionId,
         operation,
         success: false,
-        error: formatErrorMessage(error),
+        error: detail,
       };
     }
   }

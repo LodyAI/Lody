@@ -73,7 +73,8 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Lifecycle
 
-- For Roost reads and writes, follow [paging rules](README.md#roost-history-paging).
+- Roost: [paging](README.md#roost-history-paging); keep backend/outcome codes.
+  Worker causes stay local; RPC carries stage/code/diagnostic ID.
 
 - `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
   protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup
@@ -82,8 +83,8 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
   the machine publishes `['dotlodyPath']` for frontends to derive them.
 - INVARIANT: any `sandbox.spawn` whose OUTPUT is the result must pass `captureOutput: true` (ACP
   stdio deliberately does not), and the capture buffer stays capped at 4 MiB.
-- Shutdown is two-phase: `cleanUp({ keepWorkspaceDocumentOpen: true })`, then plain `cleanUp()`
-  after MessageHandler's final flush. Never tear the document down first.
+- Shutdown: `cleanUp({ keepWorkspaceDocumentOpen: true })`, MessageHandler's final flush,
+  then `cleanUp()`; never close the doc first.
 
 ## Sagas
 

@@ -2429,6 +2429,8 @@
   "sessions.freeTurnLimitReachedTitle": "已达到 Free plan 对话轮数上限",
   "sessions.freeTurnLimitUpgrade": "去升级 Plus",
   "sessions.sendError": "发送消息失败",
+  "sessions.roostHistoryReadError": "无法读取 Roost 对话记录。可用以下错误编号在会话所在机器的本地日志中定位：{{detail}}",
+  "sessions.roostHistoryWriteError": "Roost 未能确认对话记录是否写入。可用以下错误编号在会话所在机器的本地日志中定位：{{detail}}",
   "sessions.sendFailed": "消息发送失败",
   "sessions.share": "分享",
   "sessions.shareAsImage": "分享为图片…",
