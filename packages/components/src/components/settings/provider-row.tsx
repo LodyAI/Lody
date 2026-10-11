@@ -304,29 +304,23 @@ export function ProviderRow({
                   </Button>
                 }
               />
-              <Menu.Content align="end">
-                <Menu.Group>
-                  <Menu.GroupLabel>{config.name}</Menu.GroupLabel>
-                  {onRefresh ? (
-                    <Menu.Item
-                      icon={RefreshCw}
-                      onClick={() => {
-                        void handleRefresh();
-                      }}
-                    >
-                      {t(
-                        'agents.acpCapabilities.refreshModelsAndModes',
-                        'Refresh models and modes'
-                      )}
-                    </Menu.Item>
-                  ) : null}
-                  {onRefresh && onDelete ? <Menu.Separator /> : null}
-                  {onDelete ? (
-                    <Menu.Item icon={Trash2} tone="destructive" onClick={() => setDeleteOpen(true)}>
-                      {t('common.delete', 'Delete')}
-                    </Menu.Item>
-                  ) : null}
-                </Menu.Group>
+              <Menu.Content align="end" width="compact">
+                {onRefresh ? (
+                  <Menu.Item
+                    icon={RefreshCw}
+                    onClick={() => {
+                      void handleRefresh();
+                    }}
+                  >
+                    {t('agents.acpCapabilities.refreshModelsAndModes', 'Refresh models and modes')}
+                  </Menu.Item>
+                ) : null}
+                {onRefresh && onDelete ? <Menu.Separator /> : null}
+                {onDelete ? (
+                  <Menu.Item icon={Trash2} tone="destructive" onClick={() => setDeleteOpen(true)}>
+                    {t('common.delete', 'Delete')}
+                  </Menu.Item>
+                ) : null}
               </Menu.Content>
             </Menu.Root>
           ) : null}

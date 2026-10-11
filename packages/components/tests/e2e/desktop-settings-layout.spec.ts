@@ -288,7 +288,8 @@ for (const locale of ['en', 'zh_CN']) {
       await expect(forecast).toBeHidden();
       await manage.click();
       const menu = page.getByRole('menu');
-      await expect(menu.getByText('Codex', { exact: true })).toBeVisible();
+      await expect(menu.getByText('Codex', { exact: true })).toHaveCount(0);
+      await expect(menu.getByRole('menuitem')).toHaveCount(2);
       await menu.getByRole('menuitem', { name: /Refresh models and modes|刷新模型和模式/ }).click();
       await expect(page.getByRole('status', { name: 'Provider action result' })).toHaveText(
         'Refreshed Codex'
