@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-10-11-composer-machine-info-card.zh.md)
 
+PR: [#1468](https://github.com/LodyAI/Lody/pull/1468)
+
 ## Abstract
 
 A persistent owner avatar and name made the composer busy, while menu-only machine

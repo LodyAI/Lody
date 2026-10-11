@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-10-11-composer-machine-info-card.md)
 
+PR: [#1468](https://github.com/LodyAI/Lody/pull/1468)
+
 ## 摘要
 
 常驻的主人头像与姓名让输入框显得拥挤，但只在菜单里展示机器信息，又让执行目标
