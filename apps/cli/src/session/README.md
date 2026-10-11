@@ -377,3 +377,11 @@ The synthetic [history benchmark](../../benchmarks/roost-history.mts) exercises
 these production backends and the shared view; `BENCH_STRUCTURAL=1` also measures
 the complete directory and a guarded last-user edit. Its timing excludes renderer
 transport, IndexedDB and paint.
+
+## Conversation-tree stop
+
+The related-conversations action persists `collaborationStopped` on the creation tree.
+Execution reads inherited flags before setup and ACP dispatch. Metadata updates
+cancel exact active turns with pending input preserved, while late completions are
+recorded without continuation. Users must explicitly restore collaboration; offline
+machines enforce the state after sync. See the [orchestration contract](../../../../specs/session-orchestration.md#user-controlled-conversation-tree-stop).

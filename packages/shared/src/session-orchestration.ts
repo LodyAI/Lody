@@ -283,6 +283,7 @@ export type OperationCompletionContent = {
     status: 'not_started' | 'uncertain';
     reason: {
       code:
+        | 'COLLABORATION_STOPPED'
         | 'CONFIGURATION_UNAVAILABLE'
         | 'DELIVERY_ATTEMPTS_EXHAUSTED'
         | 'DELIVERY_EXECUTION_UNCERTAIN';

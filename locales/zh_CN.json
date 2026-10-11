@@ -1,4 +1,12 @@
 {
+  "sessions.relations.stopCollaboration": "终止全部对话协作",
+  "sessions.relations.resumeCollaboration": "恢复协作",
+  "sessions.relations.stopConfirmation": "这将一键停止对话树中全部对话",
+  "sessions.relations.stopDetails": "恢复协作前，这些对话不会继续执行。离线机器将在重新连接后停止。",
+  "sessions.relations.stopped": "协作已终止，继续前请在此恢复协作。离线机器将在重新连接后执行停止。",
+  "sessions.relations.controlFailed": "未能更新整棵对话树，请检查连接并更新所有机器后重试。",
+  "sessions.relations.confirm": "确认",
+  "sessions.relations.cancel": "取消",
   "e2ee.recovery.changed": "{{name}}：{{result}}。",
   "e2ee.recovery.verifiedChange": "第 {{update}} 次密钥更新的恢复检查通过",
   "e2ee.preview.applyUpdate": "应用下一次示例更新",

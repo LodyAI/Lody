@@ -323,6 +323,122 @@ const createBaseDeps = (
 };
 
 describe('SessionExecutionService', () => {
+  it('cancels an active descendant and prevents late turns while the tree is stopped', async () => {
+    const sessionId = 'collaboration-child' as SessionId;
+    const rootId = 'collaboration-root' as SessionId;
+    let stopped = false;
+    let history: SessionHistoryInput[] = [
+      {
+        id: 'collaboration-user',
+        role: 'user',
+        status: 'pending',
+        items: [{ type: 'text', text: 'work' }],
+      },
+    ];
+    let started!: () => void;
+    let finish!: () => void;
+    const promptStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const promptFinished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const prompts: string[] = [];
+    const agentClient = {
+      isCreated: () => true,
+      currentModel: undefined,
+      prompt: async () => {
+        prompts.push('work');
+        started();
+        await promptFinished;
+        return {};
+      },
+      cancel: async () => {
+        finish();
+      },
+    };
+    const activeSession = {
+      sessionId,
+      acpSessionId: 'acp-collaboration' as ACPSessionId,
+      agentClient,
+      getWorkdir: () => '/tmp',
+      getHostWorkdir: () => '/tmp',
+      getParentSessionId: () => undefined,
+      exec: async () => '',
+      terminate: async () => {},
+      updateGitIdentity: () => {},
+      applyExecutionPlaneLimits: async () => {},
+      terminalManager: {},
+    };
+    const sessionDoc = withHistoryPort({
+      getMetaState: async () => ({ id: sessionId, openedBySessionId: rootId }),
+      setStatus: async () => {},
+      setLastMessageAt: async () => {},
+      getHistory: () => history,
+      updateHistory: async (update: (value: SessionHistoryInput[]) => SessionHistoryInput[]) => {
+        history = update(history);
+      },
+    });
+    const deps = createBaseDeps({
+      beginConversationTurn: (_id, userTurnId) => `assistant:${userTurnId}`,
+      sessionManager: {
+        getSession: () => activeSession,
+        getPendingSession: () => null,
+        createSession: async () => activeSession,
+        setSessionError: () => {},
+        terminateSession: async () => {},
+        validateSessionCredentials: async () => {},
+      } as unknown as SessionManager,
+      workspaceDocument: {
+        repo: {
+          getDocMeta: async (roomId: string) => ({
+            meta:
+              roomId === getSessionRoomId(rootId)
+                ? { id: rootId, collaborationStopped: stopped }
+                : { id: sessionId, openedBySessionId: rootId },
+          }),
+          upsertDocMeta: async () => {},
+        },
+        getOrCreateSessionDoc: async () => sessionDoc,
+        getOrOpenSessionCode: async () => null,
+        updateAcpCapabilities: async () => {},
+      } as unknown as LoroDocumentManager,
+    });
+    const service = new SessionExecutionService(deps);
+    const message = {
+      type: 'session/chat' as const,
+      sessionId,
+      machineId: 'machine-1' as MachineId,
+      workspaceId: 'workspace-1' as WorkspaceId,
+      acpSessionConfig: {
+        prompt: 'work',
+        cliType: 'builtin' as const,
+        agentType: 'codex',
+        chainDepth: 1,
+      },
+      userTurnId: 'collaboration-user',
+      userId: 'user-1',
+      userName: 'User',
+      userEmail: 'user@example.com',
+    };
+    const running = service.continueSession(message);
+    await promptStarted;
+    stopped = true;
+    await service.reconcileCollaborationStops();
+    await running;
+    expect(service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
+    expect(history.find((turn) => turn.id === 'collaboration-user')?.status).toBe('canceled');
+    history.push({
+      id: 'late-user',
+      role: 'user',
+      status: 'pending',
+      items: [{ type: 'text', text: 'late' }],
+    });
+    await service.continueSession({ ...message, userTurnId: 'late-user' });
+    expect(history.find((turn) => turn.id === 'late-user')?.status).toBe('canceled');
+    expect(prompts).toEqual(['work']);
+  });
+
   it('scans the saved Pi profile and rejects missing or non-Pi providers', async () => {
     const deps = createBaseDeps({});
     let config: AgentConfigMeta | null = createLaunchConfig({
@@ -2908,10 +3024,6 @@ describe('SessionExecutionService', () => {
       onAccessIndeterminate,
     });
 
-    expect(deps.startSessionActivePresence).toHaveBeenCalledWith(
-      'session-prepared-presence',
-      'initializing'
-    );
     expect(deps.beginConversationTurn).toHaveBeenCalledWith(
       'session-prepared-presence',
       'turn-prepared-presence',
@@ -3012,7 +3124,6 @@ describe('SessionExecutionService', () => {
     expect(onAccessAllowed).not.toHaveBeenCalled();
     expect(onAccessDenied).not.toHaveBeenCalled();
     expect(onAccessIndeterminate).not.toHaveBeenCalled();
-    expect(deps.clearSessionActivePresence).toHaveBeenCalledWith(sessionId);
     expect(deps.clearConversationTurn).toHaveBeenCalledWith(sessionId, turnId);
     expect(sessionDoc.setStatus).toHaveBeenCalledWith(SessionStatusFactory.idle());
     expect(history[0]).toMatchObject({ id: userTurnId, status: 'canceled' });

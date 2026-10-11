@@ -29,6 +29,7 @@ import {
   machineFlockKeys,
   type LocalProjectId,
   readSessionOperationTargets,
+  isSessionCollaborationStopped,
   type MachineId,
   type SessionHistory,
   type SessionId,
@@ -559,6 +560,49 @@ describe('useSessionActions', () => {
     }
     return actions;
   };
+
+  it('stops and restores the whole authoritative tree from a leaf, including hidden descendants', async () => {
+    const tree = createContainmentSessions('collaboration', false);
+    const unrelated = { ...tree.rootSession, id: 'unrelated' as SessionId };
+    const metaRepo = createSessionMetaRepo([...tree.sessions, unrelated]);
+    for (const session of [...tree.sessions, unrelated]) {
+      metaRepo.setMeta(getMachineRoomId(session.machineId), {
+        id: session.machineId,
+        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      });
+    }
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+      sessionMetaCache: {},
+    });
+    await actions.setTreeCollaborationStopped(tree.openedFromTabSession.id, true);
+    for (const session of tree.sessions) {
+      expect(metaRepo.getSession(session.id)?.collaborationStopped).toBe(true);
+    }
+    expect(metaRepo.getSession(unrelated.id)?.collaborationStopped).toBeUndefined();
+    const lateChild = 'late-child' as SessionId;
+    metaRepo.setMeta(getSessionRoomId(lateChild), {
+      ...tree.openedSession,
+      id: lateChild,
+      openedBySessionId: tree.rootSession.id,
+    });
+    expect(await isSessionCollaborationStopped(metaRepo.repo, lateChild)).toBe(true);
+    await actions.setTreeCollaborationStopped(tree.rootSession.id, false);
+    for (const id of [...tree.sessions.map((session) => session.id), lateChild]) {
+      expect(await isSessionCollaborationStopped(metaRepo.repo, id)).toBe(false);
+    }
+  });
+
+  it('rejects collaboration control before writes when a target daemon lacks support', async () => {
+    const tree = createContainmentSessions('unsupported-collaboration', false);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
+    await expect(actions.setTreeCollaborationStopped(tree.rootSession.id, true)).rejects.toThrow(
+      'Update every machine'
+    );
+    expect(
+      tree.sessions.map((session) => metaRepo.getSession(session.id)?.collaborationStopped)
+    ).toEqual([undefined, undefined, undefined, undefined]);
+  });
 
   it('does not block session creation on remote stream pre-creation', async () => {
     const sessionId = 'session-create-stream-pending' as SessionId;

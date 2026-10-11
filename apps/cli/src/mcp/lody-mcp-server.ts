@@ -1,3 +1,4 @@
+import { isSessionCollaborationStopped } from '@lody/shared';
 import { getMachineRoomId } from '@lody/shared';
 import { machineSupportsProtocolCapability, MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
 import { prepareSessionInputAttachments } from '@/lib/session-input-attachments';
@@ -2281,8 +2282,18 @@ const freezeInvokingAuthor = async (
   invoking.identity.author = author;
 };
 
-const resolveInvokingTurnContext = async (session: SessionMeta): Promise<InvokingTurnContext> => {
+const resolveInvokingTurnContext = async (
+  session: SessionMeta,
+  manager: LoroDocumentManager
+): Promise<InvokingTurnContext> => {
   const source = await resolveInvokingTurnSource();
+  if (await isSessionCollaborationStopped(manager.repo, session.id)) {
+    throw new LodyOperationStoreError(
+      'COLLABORATION_STOPPED',
+      'The user stopped this conversation tree. Only the user can restore collaboration.',
+      false
+    );
+  }
   const chainDepth = source.inputConfig.chainDepth ?? 0;
   if (chainDepth >= LODY_MAX_CHAIN_DEPTH) {
     throw new LodyOperationStoreError(
@@ -2527,7 +2538,7 @@ const buildSessionCreateOptions = async (
     if (!currentSession) {
       throw new Error(`Session not found: ${ctx.sessionId}`);
     }
-    const invoking = await resolveInvokingTurnContext(currentSession);
+    const invoking = await resolveInvokingTurnContext(currentSession, manager);
     const requesterUserId = invoking.identity.userId;
     const delegatedRequester = toDelegatedSessionRequester(invoking.identity);
     const machineEntries = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
@@ -2675,7 +2686,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
         false
       );
     }
-    const invoking = await resolveInvokingTurnContext(currentSession);
+    const invoking = await resolveInvokingTurnContext(currentSession, manager);
     const roleCatalog = args.agentRoleId
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
@@ -2868,7 +2879,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
         false
       );
     }
-    const invoking = await resolveInvokingTurnContext(currentSession);
+    const invoking = await resolveInvokingTurnContext(currentSession, manager);
     const canonicalCommand = {
       sessionId: args.sessionId,
       prompt: args.prompt,
@@ -3176,7 +3187,7 @@ const startSessionCreateManyOperation = async (
       );
     }
     const expanded = args.items.map((item) => ({ ...(args.defaults ?? {}), ...item }));
-    const invoking = await resolveInvokingTurnContext(requester);
+    const invoking = await resolveInvokingTurnContext(requester, manager);
     const roleCatalog = expanded.some((item) => Boolean(item.agentRoleId))
       ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
       : undefined;
@@ -3472,7 +3483,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
       );
     }
     const expanded = args.items.map((item) => ({ ...(args.defaults ?? {}), ...item }));
-    const invoking = await resolveInvokingTurnContext(requester);
+    const invoking = await resolveInvokingTurnContext(requester, manager);
     const canonicalCommand = {
       items: expanded,
       ...(args.deadlineSeconds !== undefined ? { deadlineSeconds: args.deadlineSeconds } : {}),
@@ -4118,7 +4129,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           if (!currentSession) {
             throw new Error(`Session not found: ${ctx.sessionId}`);
           }
-          const invoking = await resolveInvokingTurnContext(currentSession);
+          const invoking = await resolveInvokingTurnContext(currentSession, manager);
           const roleCatalog = args.agentRoleId
             ? await loadWorkspaceAgentRoleCatalog(manager, workspace.id as WorkspaceId)
             : undefined;
@@ -4213,7 +4224,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
             throw new Error(`Session not found: ${sessionId}`);
           }
           assertDifferentMcpSession(currentSession, targetSession);
-          const invoking = await resolveInvokingTurnContext(currentSession);
+          const invoking = await resolveInvokingTurnContext(currentSession, manager);
           await freezeInvokingAuthor(manager, currentSession, invoking);
           const result = await sendSessionChatResult(
             auth,

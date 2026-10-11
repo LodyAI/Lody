@@ -189,6 +189,17 @@ highlighted. Tab pills navigate with root + exact tab ids. The page reads only
 a boolean (`useHasSessionRelations`); the chip builds the tree in the leaf.
 Decision: [relations note](../notes/implemented/feature/2026-09-24-session-relations-chip.md).
 
+The tree header provides **Stop all conversation collaboration**, with a nested
+confirmation popover and Cancel/Confirm actions. The user-owned stop flag is
+persisted across the authoritative tree (including hidden descendants); the root
+is stopped first and restored last. All participating machines must advertise
+`sessionCollaborationControl`. Runtime entry and MCP delegation check inherited
+flags, active turns are canceled, and late completions are recorded without waking
+the requester. **Restore collaboration** explicitly removes the barrier. Offline
+machines act after metadata sync; this is not an instantaneous cross-machine stop.
+The scope follows creation/containment edges, not every unrelated session that
+has exchanged a message. See the [decision](../notes/implemented/feature/2026-10-11-stop-conversation-tree.md).
+
 ## Execution-machine identity (review patch)
 
 The optional `executionMachine` identity stays outside cluster/stage selection.

@@ -3846,6 +3846,19 @@ export class MessageHandler {
       repo.watch(
         (event) => {
           if (event.kind !== 'doc-metadata') return;
+          if (!getSessionIdFromRoomId(event.docId)) return;
+          if ((event.patch as Partial<SessionMeta>).collaborationStopped !== true) return;
+          void this.executionService.reconcileCollaborationStops().catch((error: unknown) => {
+            this.logger.warn(
+              `[session-collaboration] Stop reconciliation failed: ${formatErrorMessage(error)}`
+            );
+          });
+        },
+        { kinds: ['doc-metadata'], metadataFields: ['collaborationStopped'] }
+      ),
+      repo.watch(
+        (event) => {
+          if (event.kind !== 'doc-metadata') return;
           const sessionId = getSessionIdFromRoomId(event.docId);
           if (!sessionId) return;
           if ((event.patch as Partial<SessionMeta>).isArchived !== true) return;

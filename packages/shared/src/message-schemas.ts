@@ -3592,6 +3592,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
               'CONFIGURATION_UNAVAILABLE',
               'DELIVERY_ATTEMPTS_EXHAUSTED',
               'DELIVERY_EXECUTION_UNCERTAIN',
+              'COLLABORATION_STOPPED',
             ]),
             message: z.string(),
           })

@@ -1,4 +1,12 @@
 {
+  "sessions.relations.stopCollaboration": "Stop all conversation collaboration",
+  "sessions.relations.resumeCollaboration": "Restore collaboration",
+  "sessions.relations.stopConfirmation": "This will stop all conversations in the conversation tree.",
+  "sessions.relations.stopDetails": "Execution stays blocked until you restore collaboration. Offline machines stop after reconnecting.",
+  "sessions.relations.stopped": "Collaboration stopped. Restore it here before continuing. Offline machines apply the stop after reconnecting.",
+  "sessions.relations.controlFailed": "Could not update the whole tree. Check the connection and update all machines, then retry.",
+  "sessions.relations.confirm": "Confirm",
+  "sessions.relations.cancel": "Cancel",
   "e2ee.recovery.changed": "{{name}}: {{result}}.",
   "e2ee.recovery.verifiedChange": "Recovery check passed for key update {{update}}",
   "e2ee.preview.applyUpdate": "Apply next example update",

@@ -1027,6 +1027,8 @@ export type SessionMeta = {
   userId: string;
   status?: SessionStatus;
   isArchived?: boolean;
+  /** User-owned tree execution barrier; inherited through containment and precise opener links. */
+  collaborationStopped?: boolean;
   /** Shared tab visibility only; closing never changes the session lifecycle. */
   isTabClosed?: boolean;
   origin?: 'lody' | 'external-acp';

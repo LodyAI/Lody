@@ -97,6 +97,21 @@ existing materialization claim. Missing cloud connectivity never counts as local
 authority in a cloud workspace. Completion uses the existing single-owner Delivery
 protocol. No persisted schema or hosted API changes are required.
 
+## User-controlled conversation-tree stop
+
+The related-conversations tree exposes a confirmed stop action for the whole
+creation/containment tree. A durable user-owned barrier blocks execution, MCP
+delegation and automatic completion wake-ups until the user explicitly restores
+collaboration. Active turns stop through normal cancellation; pending input is
+preserved without promotion. Late completions retain their result and record
+`COLLABORATION_STOPPED` without replaying that continuation after restoration.
+Descendants created after the snapshot inherit stopped ancestors. This does not
+include unrelated existing conversations merely contacted through MCP.
+
+Every target machine must advertise the control capability before the UI writes
+metadata. Offline machines enforce the barrier after receiving it; the UI must
+not promise simultaneous cancellation or rollback of already performed work.
+
 ## Implementation evidence
 
 The implementation guard is `apps/cli/src/mcp/lody-mcp-server.ts`, the shared
