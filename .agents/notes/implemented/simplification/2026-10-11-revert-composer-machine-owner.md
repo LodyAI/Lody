@@ -24,3 +24,9 @@ The existing context-less/syncing cases remain in the owning info-bar suite.
 The focused Vitest suite could not run because this checkout has no installed
 workspace dependencies (`vitest` is unavailable). Live UI verification remains
 unperformed.
+
+`git diff --check` passed. Root `pnpm check` and `pnpm format` were attempted
+but could not finish without `tsgo` / `oxfmt`. Documentation checks report
+existing links to missing ACP submodule files; no protected topics are registered.
+
+PR: [#1431](https://github.com/LodyAI/Lody/pull/1431).

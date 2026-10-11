@@ -20,3 +20,9 @@ Translation: current
 
 此检出未安装工作区依赖，无法运行定向 Vitest 测试（`vitest` 不可用）。
 尚未进行真实界面验证。
+
+`git diff --check` 通过。已尝试根目录 `pnpm check` 和 `pnpm format`，
+因缺少 `tsgo` / `oxfmt` 无法完成。文档检查报告现有文档引用的 ACP 子模块
+文件缺失；未注册受 SHA 保护的主题。
+
+PR：[ #1431](https://github.com/LodyAI/Lody/pull/1431)。
