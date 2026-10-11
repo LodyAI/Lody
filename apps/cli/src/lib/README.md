@@ -30,6 +30,12 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 
 ## Message hub and transports
 
+- `github-git-transport.ts` — generated Git wrapper and HTTP credential adapters.
+  HTTP helper redispatch preserves the parent operation's read/write context;
+  independent commands classify themselves, and missing/invalid helper context
+  conservatively requires write access. Credential probes precede the single
+  native transfer.
+
 - `usage/usage-tracking-service.ts` — cumulative usage snapshot staging and
   acknowledgement-based retry retention; deltas are never added again.
   Scope and limits: [usage delivery](../../../../specs/usage-delivery.md).

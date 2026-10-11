@@ -162,7 +162,13 @@ for (let i = 0; i < args.length; i++) {
   if (!args[i].startsWith('-')) { command = args[i]; break; }
 }
 const reads = ['fetch', 'clone', 'pull', 'ls-remote', 'submodule'];
-const operation = reads.includes(command) ? 'read' : 'write';
+// Git redispatches HTTP helpers through this wrapper for both reads and pushes.
+// Only those helpers inherit context; independent commands classify themselves.
+const inherited = process.env.LODY_GIT_OPERATION;
+const isHttpHelper = command === 'remote-http' || command === 'remote-https';
+const operation = isHttpHelper && (inherited === 'read' || inherited === 'write')
+  ? inherited
+  : reads.includes(command) ? 'read' : 'write';
 const env = process.env.LODY_GIT_NATIVE === '1' ? process.env : {
   ...process.env, GIT_EXEC_PATH: __dirname,
   PATH: process.env.PATH + path.delimiter + ${JSON.stringify(execPath)},
