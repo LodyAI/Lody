@@ -131,7 +131,7 @@ export function ProviderUsageDetails({
           <Popover.Trigger
             render={
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="mini"
                 aria-label={title}
                 aria-description={summaryDescription || undefined}
