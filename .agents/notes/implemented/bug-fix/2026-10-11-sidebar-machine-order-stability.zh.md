@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1488](https://github.com/LodyAI/Lody/pull/1488)
 
 [English](2026-10-11-sidebar-machine-order-stability.md)
 
