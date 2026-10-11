@@ -109,6 +109,20 @@ describe('selectCurrentPullRequestUrl', () => {
 });
 
 describe('planAssociation', () => {
+  it('retries a published winner until its webhook association is confirmed', () => {
+    const args = {
+      meta: makeMeta({ pullRequests: [{ url: URL_1, status: 'open' }] }),
+      observations: [],
+      discovered: [obs(1)],
+      runtimeBranch: 'feat/x',
+    };
+    expect(planAssociation({ ...args, confirmedAssociationUrls: new Set() })).toEqual({
+      url: URL_1,
+      prNumber: 1,
+      status: 'open',
+    });
+    expect(planAssociation({ ...args, confirmedAssociationUrls: new Set([URL_1]) })).toBeNull();
+  });
   it('plans association when a discovered PR wins current-PR selection', () => {
     const meta = makeMeta({ pullRequests: [{ url: URL_1, status: 'open' }] });
     const discovered = obs(2, { updatedAt: '2026-07-18T00:00:00Z' });
@@ -295,7 +309,7 @@ describe('planPullRequestMetaWrite', () => {
     expect(plan?.pullRequestState).toEqual({ [URL_2]: { s: 's', m: 'c', t: NOW_SEC } });
   });
 
-  it('ignores observations for URLs that are not associated (association-first invariant)', () => {
+  it('ignores status-only observations for URLs that are not published', () => {
     const meta = makeMeta({ pullRequests: [{ url: URL_1, status: 'open' }] });
 
     const plan = planPullRequestMetaWrite({

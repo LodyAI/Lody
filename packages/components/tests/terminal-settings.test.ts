@@ -15,12 +15,6 @@ import {
   buildTerminalFontLoadSpec,
   buildTerminalFontPreviewFamily,
 } from '../src/components/terminal/terminal-theme';
-import {
-  conversationMonoFontSizeStyle,
-  conversationTextFontSizeStyle,
-  terminalTextFontSizeStyle,
-  userTextCollapsedHeight,
-} from '../src/components/ai-gui/conversation-font-size-classes';
 
 describe('terminal appearance settings', () => {
   it('normalizes persisted font values to bounded settings', () => {
@@ -62,12 +56,5 @@ describe('conversation appearance settings', () => {
     expect(normalizeConversationFontSize('default')).toBe(DEFAULT_CONVERSATION_FONT_SIZE);
     expect(normalizeConversationFontSize('large')).toBe(16);
     expect(normalizeConversationFontSize(undefined)).toBe(DEFAULT_CONVERSATION_FONT_SIZE);
-  });
-
-  it('scales every conversation text variant from a custom size', () => {
-    expect(conversationTextFontSizeStyle(24)).toEqual({ fontSize: '24px' });
-    expect(conversationMonoFontSizeStyle(24)).toEqual({ fontSize: '16px' });
-    expect(terminalTextFontSizeStyle(24)).toEqual({ fontSize: '20px' });
-    expect(userTextCollapsedHeight(24)).toBe(274);
   });
 });

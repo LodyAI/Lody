@@ -1,9 +1,18 @@
+import { IosSimulatorCommandSchema } from './ios-simulator';
 import { z } from 'zod';
+import { RpcSecretPublicKeySchema } from './rpc-secret';
 import { PreviewTargetSchema } from './message-schemas';
 
 const identifier = z.string().min(1).max(200);
 
 export const PreviewControlOperationSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('ios-simulator'),
+      command: IosSimulatorCommandSchema,
+      responseKey: RpcSecretPublicKeySchema,
+    })
+    .strict(),
   z
     .object({ action: z.literal('create'), target: PreviewTargetSchema, restart: z.boolean() })
     .strict(),

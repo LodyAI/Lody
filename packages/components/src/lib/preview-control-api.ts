@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import type { PreviewControlIntent, PreviewControlProof } from '@lody/shared';
+import {
+  PreviewControlIntentSchema,
+  type PreviewControlIntent,
+  type PreviewControlProof,
+} from '@lody/shared';
 import { requireCloudAuthBaseUrl } from './cloud-http-port';
 
 const TokenResponse = z
@@ -12,13 +16,17 @@ export async function mintPreviewControlProof(
 ): Promise<PreviewControlProof> {
   const baseUrl = requireCloudAuthBaseUrl('remotePreview');
   if (!sessionToken) throw new Error('Sign in before managing a remote preview.');
-  const { requesterUserId, ...request } = intent;
+  const { requesterUserId, ...request } = PreviewControlIntentSchema.parse(intent);
   const response = await fetch(new URL('/api/session-preview/request-token', baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
     body: JSON.stringify(request),
     signal: AbortSignal.timeout(10_000),
   });
+  if (response.status === 400 && intent.operation.action === 'ios-simulator')
+    throw new Error(
+      'Preview authorization failed (400): the Cloud authorization service rejected the validated iOS Simulator protocol. Update the connected Cloud backend to the matching version.'
+    );
   if (!response.ok) throw new Error(`Preview authorization failed (${response.status}).`);
   const token = TokenResponse.parse(await response.json());
   if (token.requesterUserId !== requesterUserId) throw new Error('Preview user identity changed.');

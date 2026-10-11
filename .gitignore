@@ -143,6 +143,7 @@ bun.lockb
 
 # Electron (generated)
 apps/electron/resources/cli/
+apps/electron/resources/roost/
 .gstack/
 
 # Claude Code local settings

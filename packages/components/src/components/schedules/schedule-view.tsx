@@ -1,4 +1,5 @@
 import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle } from 'lucide-react';
 import {
@@ -15,12 +16,241 @@ import {
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
 import { Tooltip } from '@lody/ui/tooltip';
-import { cn } from '@/lib/utils';
 import { formatUpcoming, triggerTimeZone } from './schedule-format';
 import { PropertyRow, scheduleCardProps } from './schedule-property-row';
 import { FieldIssueMark } from './schedule-field-issue-mark';
 import type { ScheduleSaveIssue } from './schedule-save-blockers';
 import { ScheduleRecurrenceEditor } from './schedule-recurrence-editor';
+
+const WIDE = '@media (min-width: 40rem)';
+const DARK =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+const COLOR_MIX = '@supports (color: color-mix(in lab, red, red))';
+
+const styles = stylex.create({
+  form: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 5)',
+    width: '100%',
+    maxWidth: '42rem',
+    marginInline: 'auto',
+    paddingInline: { default: 'calc(var(--spacing) * 4)', [WIDE]: 'calc(var(--spacing) * 6)' },
+    paddingBlock: 'calc(var(--spacing) * 5)',
+  },
+  composer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'calc(var(--spacing) * 2)',
+  },
+  composerBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--foreground) / 1) 8%, transparent)',
+      ':focus-within': {
+        default: 'hsl(var(--foreground) / 1)',
+        [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--foreground) / 1) 16%, transparent)',
+      },
+      [DARK]: {
+        default: 'color-mix(in srgb, #fff 8%, transparent)',
+        [COLOR_MIX]: 'color-mix(in oklab, var(--color-white) 8%, transparent)',
+        ':focus-within': {
+          default: 'color-mix(in srgb, #fff 16%, transparent)',
+          [COLOR_MIX]: 'color-mix(in oklab, var(--color-white) 16%, transparent)',
+        },
+      },
+    },
+    borderRadius: 'var(--radius-xl)',
+    backgroundColor: {
+      default: 'hsl(var(--card) / 1)',
+      [DARK]: {
+        default: 'hsl(var(--foreground) / 1)',
+        [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--foreground) / 1) 3%, transparent)',
+      },
+    },
+    transitionProperty:
+      'color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to',
+    transitionDuration: 'var(--tw-duration, var(--default-transition-duration))',
+    transitionTimingFunction: 'var(--tw-ease, var(--default-transition-timing-function))',
+  },
+  titleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 2)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2.5)',
+  },
+  titleInput: {
+    minWidth: 0,
+    flex: '1',
+    backgroundColor: 'transparent',
+    fontSize: '1.2em',
+    fontWeight: 600,
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
+    color: {
+      default: 'hsl(var(--foreground) / 1)',
+      '::placeholder': {
+        default: 'hsl(var(--muted-foreground) / 1)',
+        [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 60%, transparent)',
+      },
+    },
+    boxShadow: {
+      default: null,
+      ':focus-visible':
+        'var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), 0 0 #0000',
+    },
+  },
+  separator: {
+    marginInline: 'calc(var(--spacing) * 3)',
+    borderTopWidth: '0.5px',
+    borderTopStyle: 'solid',
+    borderColor: {
+      default: 'hsl(var(--foreground) / 1)',
+      [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--foreground) / 1) 10%, transparent)',
+      [DARK]: {
+        default: 'color-mix(in srgb, #fff 10%, transparent)',
+        [COLOR_MIX]: 'color-mix(in oklab, var(--color-white) 10%, transparent)',
+      },
+    },
+  },
+  promptWrap: {
+    position: 'relative',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingTop: 'calc(var(--spacing) * 2.5)',
+    paddingBottom: 'calc(var(--spacing) * 1)',
+  },
+  prompt: {
+    display: 'block',
+    boxSizing: 'border-box',
+    width: '100%',
+    minHeight: 'calc(4lh)',
+    maxHeight: 'calc(6lh)',
+    resize: 'none',
+    overflowY: 'auto',
+    backgroundColor: 'transparent',
+    padding: 0,
+    fontSize: '0.95em',
+    lineHeight: 1.625,
+    fieldSizing: 'content',
+    outlineStyle: { default: 'none', '@media (forced-colors: active)': 'solid' },
+    outlineWidth: { default: null, '@media (forced-colors: active)': '2px' },
+    outlineColor: { default: null, '@media (forced-colors: active)': 'transparent' },
+    outlineOffset: { default: null, '@media (forced-colors: active)': '2px' },
+    color: {
+      default: 'hsl(var(--foreground) / 1)',
+      '::placeholder': {
+        default: 'hsl(var(--muted-foreground) / 1)',
+        [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 60%, transparent)',
+      },
+    },
+    boxShadow: {
+      default: null,
+      ':focus-visible':
+        'var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), 0 0 #0000',
+    },
+  },
+  promptIssueSpace: { paddingRight: 'calc(var(--spacing) * 6)' },
+  promptIssue: {
+    position: 'absolute',
+    top: 'calc(var(--spacing) * 3)',
+    right: 'calc(var(--spacing) * 3)',
+  },
+  agentBar: {
+    containerName: 'composer-face',
+    containerType: 'inline-size',
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: 'calc(var(--spacing) * 1.5)',
+    paddingInline: 'calc(var(--spacing) * 1.5)',
+    paddingBottom: 'calc(var(--spacing) * 1.5)',
+  },
+  contextBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1)',
+    paddingInline: 'calc(var(--spacing) * 1)',
+  },
+  contextNote: {
+    margin: 0,
+    paddingInline: 'calc(var(--spacing) * 1.5)',
+    fontSize: '0.8em',
+    lineHeight: 1.375,
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  manualHelp: {
+    display: 'flex',
+    minHeight: 'calc(var(--spacing) * 11)',
+    alignItems: 'center',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: '0.9em',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  nextRuns: {
+    display: 'flex',
+    minHeight: 'calc(var(--spacing) * 11)',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: 'calc(var(--spacing) * 2)',
+    rowGap: 'calc(var(--spacing) * 0.5)',
+    paddingInline: 'calc(var(--spacing) * 3)',
+    paddingBlock: 'calc(var(--spacing) * 2)',
+    fontSize: '0.85em',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  nextRunsWarning: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'calc(var(--spacing) * 1.5)',
+    color: 'hsl(var(--status-warning) / 1)',
+  },
+  nextRunsValue: { color: 'hsl(var(--foreground) / 1)' },
+  footer: {
+    display: 'flex',
+    flexDirection: { default: 'column', [WIDE]: 'row' },
+    alignItems: { default: 'normal', [WIDE]: 'center' },
+    justifyContent: { default: 'normal', [WIDE]: 'space-between' },
+    gap: 'calc(var(--spacing) * 2)',
+    borderTopWidth: '0.5px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 1)',
+    paddingTop: 'calc(var(--spacing) * 4)',
+  },
+  footerNote: { minWidth: 0, flex: '1', paddingInline: 'calc(var(--spacing) * 3)' },
+  footerMessage: { margin: 0, fontSize: '0.85em', color: 'hsl(var(--destructive) / 1)' },
+  footerIssues: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: 'calc(var(--spacing) * 1.5)',
+    margin: 0,
+    fontSize: '0.85em',
+    color: 'hsl(var(--muted-foreground) / 1)',
+  },
+  warningIcon: {
+    marginTop: 'calc(var(--spacing) * 0.5)',
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+    color: 'hsl(var(--status-warning) / 1)',
+  },
+  upcomingIcon: {
+    width: 'calc(var(--spacing) * 3.5)',
+    height: 'calc(var(--spacing) * 3.5)',
+    flexShrink: 0,
+  },
+  footerHint: { margin: 0, fontSize: '0.85em', color: 'hsl(var(--muted-foreground) / 1)' },
+  saveButton: { flexShrink: 0, alignSelf: { default: 'flex-end', [WIDE]: 'auto' } },
+});
 
 export {
   ScheduleListView,
@@ -153,7 +383,7 @@ export function ScheduleForm({
         // Light themes lift the grouped cards to the popover fill, like settings.
         data-settings-surface=""
         noValidate
-        className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 py-5 sm:px-6"
+        {...stylex.props(styles.form)}
         onSubmit={(event) => {
           event.preventDefault();
           if (saving) return;
@@ -166,14 +396,9 @@ export function ScheduleForm({
           if (resolved.trigger) onSave({ ...value, trigger: resolved.trigger });
         }}
       >
-        <div className="flex flex-col gap-2">
-          <div
-            className={cn(
-              'flex flex-col rounded-xl border border-foreground/[0.08] bg-card transition-colors',
-              'focus-within:border-foreground/[0.16] dark:border-white/[0.08] dark:bg-foreground/[0.03] dark:focus-within:border-white/[0.16]'
-            )}
-          >
-            <div className="flex items-center gap-2 px-3 py-2.5">
+        <div {...stylex.props(styles.composer)}>
+          <div {...stylex.props(styles.composerBox)}>
+            <div {...stylex.props(styles.titleRow)}>
               <input
                 ref={titleRef}
                 required
@@ -183,7 +408,7 @@ export function ScheduleForm({
                 aria-label={t('schedules.name', 'Name')}
                 aria-invalid={attempted && titleMissing ? true : undefined}
                 placeholder={t('schedules.namePlaceholder', 'Name this scheduled task')}
-                className="min-w-0 flex-1 bg-transparent text-[1.2em] font-semibold text-foreground outline-hidden placeholder:text-muted-foreground/60 focus-visible:shadow-none"
+                {...stylex.props(styles.titleInput)}
                 value={value.title}
                 onChange={(event) => setValue({ ...value, title: event.target.value })}
               />
@@ -191,8 +416,8 @@ export function ScheduleForm({
                 <FieldIssueMark messages={[t('schedules.requireName', 'Enter a schedule name.')]} />
               ) : null}
             </div>
-            <div className="mx-3 border-t-[0.5px] border-foreground/[0.10] dark:border-white/[0.10]" />
-            <div className="relative px-3 pb-1 pt-2.5">
+            <div {...stylex.props(styles.separator)} />
+            <div {...stylex.props(styles.promptWrap)}>
               {/* A bare field inside the composer-style box, like the title
                   input: the box is the edge, so this is not a styled Textarea. */}
               <textarea
@@ -207,9 +432,9 @@ export function ScheduleForm({
                 )}
                 // Grows with its text from 4 to 6 lines, then scrolls; no
                 // resize handle. `field-sizing` is CSS-only (Chromium).
-                className={cn(
-                  'block min-h-[calc(4lh)] max-h-[calc(6lh)] w-full resize-none overflow-y-auto bg-transparent p-0 text-[0.95em] leading-relaxed text-foreground outline-hidden [field-sizing:content] placeholder:text-muted-foreground/60 focus-visible:shadow-none',
-                  attempted && promptMissing && 'pr-6'
+                {...stylex.props(
+                  styles.prompt,
+                  attempted && promptMissing && styles.promptIssueSpace
                 )}
                 value={value.prompt}
                 onChange={(event) => setValue({ ...value, prompt: event.target.value })}
@@ -217,7 +442,7 @@ export function ScheduleForm({
               {attempted && promptMissing ? (
                 // Floats in the corner so it never narrows the text.
                 <FieldIssueMark
-                  className="absolute right-3 top-3"
+                  className={stylex.props(styles.promptIssue).className}
                   messages={[t('schedules.requirePrompt', 'Describe what the Agent should do.')]}
                 />
               ) : null}
@@ -225,19 +450,15 @@ export function ScheduleForm({
             {agentBar ? (
               // The composer face: the same controls and the same container
               // query that drops their labels in a narrow panel.
-              <div className="@container/composer-face flex flex-wrap items-center gap-x-1.5 px-1.5 pb-1.5">
-                {agentBar({ revealMissing: attempted })}
-              </div>
+              <div {...stylex.props(styles.agentBar)}>{agentBar({ revealMissing: attempted })}</div>
             ) : null}
           </div>
           {contextBar ? (
-            <div className="flex flex-wrap items-center gap-1 px-1">
+            <div {...stylex.props(styles.contextBar)}>
               {contextBar({ revealMissing: attempted })}
             </div>
           ) : null}
-          {contextNote ? (
-            <p className="px-1.5 text-[0.8em] leading-snug text-muted-foreground">{contextNote}</p>
-          ) : null}
+          {contextNote ? <p {...stylex.props(styles.contextNote)}>{contextNote}</p> : null}
         </div>
 
         {/* One card for how it runs: where each run goes, then when. Timed or
@@ -258,7 +479,7 @@ export function ScheduleForm({
             </Tabs.Root>
           </PropertyRow>
           {mode === 'manual' ? (
-            <p className="flex min-h-11 items-center px-3 py-2 text-[0.9em] text-muted-foreground">
+            <p {...stylex.props(styles.manualHelp)}>
               {t(
                 'schedules.trigger.manualHelp',
                 'Runs only when you press Run. Keep the prompt and target ready for whenever you need it.'
@@ -272,20 +493,16 @@ export function ScheduleForm({
                 now={now}
                 timeZone={timeZone}
               />
-              <div
-                className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2 text-[0.85em] text-muted-foreground"
-                aria-live="polite"
-                aria-atomic="true"
-              >
+              <div {...stylex.props(styles.nextRuns)} aria-live="polite" aria-atomic="true">
                 {resolved.error ? (
-                  <span className="flex items-center gap-1.5 text-status-warning" role="alert">
-                    <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span {...stylex.props(styles.nextRunsWarning)} role="alert">
+                    <AlertCircle {...stylex.props(styles.upcomingIcon)} aria-hidden="true" />
                     {resolved.error}
                   </span>
                 ) : resolved.times?.length ? (
                   <>
                     <span>{t('schedules.nextRuns', 'Next runs')}</span>
-                    <span className="text-foreground">
+                    <span {...stylex.props(styles.nextRunsValue)}>
                       {resolved.times
                         .slice(0, 3)
                         .map((at) => formatUpcoming(at, zone, now, i18n.language))
@@ -305,22 +522,19 @@ export function ScheduleForm({
           )}
         </div>
 
-        <div className="flex flex-col gap-2 border-t-[0.5px] border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <div id={noteId} aria-live="polite" className="min-w-0 flex-1 px-3">
+        <div {...stylex.props(styles.footer)}>
+          <div id={noteId} aria-live="polite" {...stylex.props(styles.footerNote)}>
             {error ? (
-              <p className="text-[0.85em] text-destructive" role="alert">
+              <p {...stylex.props(styles.footerMessage)} role="alert">
                 {error}
               </p>
             ) : formIssues.length ? (
-              <p className="flex items-start gap-1.5 text-[0.85em] text-muted-foreground">
-                <AlertCircle
-                  className="mt-0.5 size-3.5 shrink-0 text-status-warning"
-                  aria-hidden="true"
-                />
+              <p {...stylex.props(styles.footerIssues)}>
+                <AlertCircle {...stylex.props(styles.warningIcon)} aria-hidden="true" />
                 <span>{formIssues.map((issue) => issue.message).join(' ')}</span>
               </p>
             ) : attempted && blocked ? (
-              <p className="text-[0.85em] text-muted-foreground">
+              <p {...stylex.props(styles.footerHint)}>
                 {t('schedules.fixMarked', 'Fix the marked items to save.')}
               </p>
             ) : null}
@@ -329,7 +543,7 @@ export function ScheduleForm({
             type="submit"
             variant="primary"
             size="small"
-            className="shrink-0 self-end sm:self-auto"
+            {...stylex.props(styles.saveButton)}
             disabled={saving || formIssues.length > 0}
             aria-describedby={noteId}
           >

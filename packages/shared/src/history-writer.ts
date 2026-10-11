@@ -45,6 +45,44 @@ export interface StoredHistorySnapshot {
 }
 const storedHistories = new WeakMap<StoredHistorySnapshot, SessionHistoryInput[]>();
 
+/** Capture a backend's stored values using the writer's common provenance registry. */
+export function captureStoredHistory(
+  history: readonly SessionHistoryInput[]
+): StoredHistorySnapshot {
+  const stored = structuredClone(history) as SessionHistoryInput[];
+  const snapshot = Object.freeze({
+    get history() {
+      return structuredClone(stored);
+    },
+  }) as StoredHistorySnapshot;
+  storedHistories.set(snapshot, stored);
+  return snapshot;
+}
+
+/** Preflight the complete copy before either backend changes its target. */
+export function prepareStoredHistoryCopy(
+  snapshot: StoredHistorySnapshot,
+  selection: readonly SessionHistoryInput[],
+  previous: readonly SessionHistoryInput[]
+): SessionHistoryInput[] {
+  const source = storedHistories.get(snapshot);
+  if (!source) throw new HistoryWriteError([{ path: ['history'], code: 'invalid_snapshot' }]);
+  const ids = new Set(previous.map((entry) => entry.id));
+  for (const entry of selection) {
+    if (ids.has(entry.id))
+      throw new HistoryWriteError([{ path: ['history'], code: 'copy_target_conflict' }]);
+    ids.add(entry.id);
+  }
+  const sourceById = new Map<string, SessionHistoryInput>();
+  for (const old of source) if (!sourceById.has(old.id)) sourceById.set(old.id, old);
+  return selection.map((entry) => {
+    const old = sourceById.get(entry.id);
+    return (
+      old ? prepareReplacement(old, entry) : cleanNew(HistoryEntryWriteSchema, entry)
+    ) as SessionHistoryInput;
+  });
+}
+
 /** Ignore Mirror's transport identity, never the contents of a historical item. */
 export function historyValuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -80,9 +118,13 @@ function preserveUnknown(
     // A different union variant is a new value, not a carrier for the old one's extensions.
     if (
       record(old) &&
-      typeof old.type === 'string' &&
-      typeof parsed.type === 'string' &&
-      old.type !== parsed.type
+      Object.entries(schema.shape).some(
+        ([key, field]) =>
+          field instanceof z.ZodLiteral &&
+          record(old) &&
+          Object.hasOwn(old, key) &&
+          old[key] !== parsed[key]
+      )
     )
       old = undefined;
     const result: Record<string, unknown> = Object.create(null);
@@ -199,7 +241,7 @@ function prepareToolState(old: unknown, input: unknown): Record<string, unknown>
 }
 
 /** Only a read acknowledgement on a newly inserted pending user row is benign. */
-function matchesRollbackReceipt(
+export function matchesRollbackReceipt(
   before: readonly unknown[],
   after: readonly unknown[],
   current: readonly unknown[]
@@ -446,34 +488,13 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
     },
     capture() {
       // Read the actual document, not a normalized projection or caller-owned array.
-      const history = writer.readStored();
-      const snapshot = Object.freeze({
-        get history() {
-          return structuredClone(history);
-        },
-      }) as StoredHistorySnapshot;
-      storedHistories.set(snapshot, history);
-      return snapshot;
+      return captureStoredHistory(writer.readStored());
     },
     copyFrom(snapshot, history) {
-      const source = storedHistories.get(snapshot);
-      if (!source) throw new HistoryWriteError([{ path: ['history'], code: 'invalid_snapshot' }]);
       const previous = list.toJSON() as SessionHistory[];
-      const ids = new Set(previous.filter(record).map((entry) => entry.id));
-      for (const entry of history) {
-        if (ids.has(entry.id))
-          throw new HistoryWriteError([{ path: ['history'], code: 'copy_target_conflict' }]);
-        ids.add(entry.id);
-      }
       // Incoming ids were proven unique above. Match each to the first stored
       // occurrence once instead of rescanning the entire source for every turn.
-      const sourceById = new Map<string, SessionHistoryInput>();
-      for (const old of source) if (!sourceById.has(old.id)) sourceById.set(old.id, old);
-      const values = history.map((entry) => {
-        const old = sourceById.get(entry.id);
-        if (!old) return cleanNew(HistoryEntryWriteSchema, entry);
-        return prepareReplacement(old, entry);
-      });
+      const values = prepareStoredHistoryCopy(snapshot, history, previous);
       // Values are either unchanged stored data or preflighted authored changes.
       planWrite(previous, [...values, ...previous] as SessionHistory[], (_old, value) => value)();
     },
@@ -712,10 +733,16 @@ export function createHistoryWriter(doc: LoroDoc, readHistory?: () => readonly S
           // Only the matching turn enters the validated local-update path. The
           // "write the outcome" rule itself is the shared planner, so the Loro
           // and in-memory backends cannot drift.
-          return writer.updateEntry(id, (turn) => {
-            applyRespondPermission(turn as unknown as Record<string, unknown>, requestId, outcome);
+          let applied = false;
+          const updated = writer.updateEntry(id, (turn) => {
+            applied = applyRespondPermission(
+              turn as unknown as Record<string, unknown>,
+              requestId,
+              outcome
+            );
             return turn;
           });
+          return updated && applied;
         }
       }
       return false;

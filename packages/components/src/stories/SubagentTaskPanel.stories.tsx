@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { SubagentTaskPanel, type SubagentTask } from '@/components/ai-gui/subagent-task-panel';
+import { SubagentRunHistory } from '@/components/ai-gui/view';
+import { DEFAULT_CONVERSATION_FONT_SIZE } from '@/atoms/settings';
 import { Drawer, DrawerContent, DrawerTitle } from '@/ui/drawer';
 
 const running: SubagentTask[] = [
@@ -162,9 +164,13 @@ const streamedRuns: SubagentTask[] = [
         {
           type: 'tool_call',
           toolCallId: 'c2',
-          title: 'Grep "refreshCapabilities"',
-          kind: 'search',
+          title: 'Run rg refreshCapabilities',
+          kind: 'execute',
           status: 'in_progress',
+          content: [
+            { type: 'terminal_command', command: 'rg refreshCapabilities apps/cli/src' },
+            { type: 'terminal_output', output: 'apps/cli/src/agent/acp-capabilities.ts:42' },
+          ],
         },
       ],
     },
@@ -276,15 +282,8 @@ const longRun: SubagentTask[] = [
   },
 ];
 
-/** Storybook stand-in for the conversation renderers `view.tsx` passes in. */
 const renderHistory = (task: SubagentTask) => (
-  <ol className="m-0 flex list-none flex-col gap-1 p-0 text-[12.5px] text-muted-foreground">
-    {task.run?.items.map((item, index) => (
-      <li key={index}>
-        {item.type === 'tool_call' ? item.title : 'text' in item ? item.text : item.type}
-      </li>
-    ))}
-  </ol>
+  <SubagentRunHistory task={task} fontSize={DEFAULT_CONVERSATION_FONT_SIZE} />
 );
 
 const meta = {

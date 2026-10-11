@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
@@ -28,7 +29,6 @@ import { Kbd } from '@/components/commands/kbd';
 import { CompactRow, CompactSection } from './compact-layout';
 import { settingsSurface as surface } from './surface';
 import { settingContainerClass } from '.';
-import { settingsType as type } from './type.stylex';
 
 const CATEGORY_ORDER: CommandCategory[] = [
   'Navigation',
@@ -76,7 +76,7 @@ const styles = stylex.create({
   },
   glyph: { width: '100%', height: '100%' },
   unbound: {
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontStyle: 'italic',
     fontWeight: 400,
     color: colors.tertiaryLabel,

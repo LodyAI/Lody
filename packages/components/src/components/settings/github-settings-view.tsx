@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -16,7 +17,6 @@ import type { GitHubPersonalIdentitySettingsCardProps } from './integrations-set
 import type { SettingsWorkspaceRepoWithStatus } from './settings-data-cache';
 import { settingsMaterial as material } from './material.stylex';
 import { settingsCatalog as catalog, settingsSurface as surface } from './surface';
-import { settingsType as type } from './type.stylex';
 
 const INSTALLATIONS_URL = 'https://github.com/settings/installations';
 
@@ -55,7 +55,7 @@ const styles = stylex.create({
     columnGap: space[1],
     margin: 0,
     paddingInline: material.headingInset,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.4,
     color: colors.secondaryLabel,
   },

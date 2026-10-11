@@ -1,7 +1,5 @@
-import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import type {
   CodeCollabV2AllChangesState,
@@ -9,17 +7,18 @@ import type {
   CodeCollabV2FileTreeValue,
 } from '@lody/shared';
 
+// The shared facade directly: the CLI one loads the daemon's winston logger.
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { countTextLines } from './diff-line-counts';
 import { gitDiffBaseRefCandidates } from '../git/git-diff-base';
 
 // Pure Git-backed scanning + All Changes computation shared by the file-index
 // Tinypool worker (`file-index-scan-worker.ts`) and the main-thread fallback in
-// `code-collab-v2-service.ts`. Keep this module dependency-light (node builtins +
-// `@lody/shared` types only) so the worker bundle stays free of wasm/top-level-await
-// imports. The filesystem (`opendir`) directory-scan fallback is intentionally NOT
+// `code-collab-v2-service.ts`. Keep this module dependency-light (node builtins,
+// `@lody/shared` types and the shared process facade only) so the worker bundle stays
+// free of wasm/top-level-await imports. The filesystem (`opendir`) directory-scan fallback is intentionally NOT
 // here: its error classification differs between the worker and the service.
-
-const execFileAsync = promisify(execFile);
 
 const GIT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
 
@@ -58,9 +57,9 @@ async function runGitLsFiles(
 ): Promise<{ readonly ok: true; readonly paths: readonly string[] } | { readonly ok: false }> {
   try {
     const [{ stdout }, deleted] = await Promise.all([
-      execFileAsync(
-        'git',
-        [
+      runCommandTextLegacy({
+        command: 'git',
+        args: [
           '-C',
           cwd,
           'ls-files',
@@ -72,8 +71,9 @@ async function runGitLsFiles(
           '--',
           '.',
         ],
-        { maxBuffer: GIT_MAX_BUFFER_BYTES }
-      ),
+        maxOutputBytes: GIT_MAX_BUFFER_BYTES,
+        check: 'exit-0',
+      }),
       runGit(cwd, ['ls-files', '--deleted', '-z', '--', '.']),
     ]);
     const deletedPaths = deleted.ok
@@ -246,8 +246,11 @@ async function runGit(
   args: readonly string[]
 ): Promise<{ readonly ok: true; readonly stdout: string } | { readonly ok: false }> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, ...args], {
-      maxBuffer: GIT_MAX_BUFFER_BYTES,
+    const { stdout } = await runCommandTextLegacy({
+      command: 'git',
+      args: ['-C', cwd, ...args],
+      maxOutputBytes: GIT_MAX_BUFFER_BYTES,
+      check: 'exit-0',
     });
     return { ok: true, stdout };
   } catch {

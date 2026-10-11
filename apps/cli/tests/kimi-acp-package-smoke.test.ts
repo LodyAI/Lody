@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -49,6 +48,9 @@ describe('locked Kimi ACP package', () => {
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+      const closed = new Promise<void>((resolveClosed) => {
+        child.once('close', () => resolveClosed());
+      });
       let stderr = '';
       child.stderr.on('data', (chunk) => {
         stderr = `${stderr}${String(chunk)}`.slice(-8_192);
@@ -68,9 +70,7 @@ describe('locked Kimi ACP package', () => {
         });
 
         expect(initialized.authMethods).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ type: 'terminal', args: ['--login'] }),
-          ])
+          expect.arrayContaining([expect.objectContaining({ type: 'terminal', args: ['--login'] })])
         );
 
         const authError = await connection
@@ -81,11 +81,9 @@ describe('locked Kimi ACP package', () => {
       } catch (error) {
         throw new Error(`Kimi ACP smoke failed. stderr: ${stderr}`, { cause: error });
       } finally {
-        child.kill('SIGTERM');
-        await Promise.race([
-          once(child, 'exit'),
-          new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 1_000)),
-        ]);
+        // Stop all writes before removing HOME; a timeout is not an exit barrier.
+        child.kill('SIGKILL');
+        await closed;
         await rm(home, { recursive: true, force: true });
       }
     },

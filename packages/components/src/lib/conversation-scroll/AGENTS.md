@@ -15,8 +15,10 @@ Design, invariants I1–I8 and the coverage lemma:
   frames interpolate `screenY`). Layout compensation in `read` is relative
   (`scrollBy`), navigation absolute. No deferred compensation, no origin shift.
 - A transaction ends within two passes of at most two supplementary commits;
-  `lastObserved` records only covered positions. Never add timers, frame retries or a
-  hidden/reveal gate; the viewport is never hidden.
+  `lastObserved` records only covered positions, and `onScroll` fires only for those.
+  A React re-render that did not change the list must not start a new cycle (that
+  layout-effect `onScroll` → setState loop is React #185). Never add timers, frame
+  retries or a hidden/reveal gate; the viewport is never hidden.
 - Keep the layout contract: viewport `overflow-anchor: none` and
   `scrollbar-gutter: stable`; rows container `overflow-y: clip`; no row may use
   `content-visibility: auto` or size itself from the container or its position. Rows
@@ -28,6 +30,10 @@ Design, invariants I1–I8 and the coverage lemma:
   A host that keeps a stream mounted off screen must pass it.
 - Reading anchors are separate from React row keys: resolve through `anchor.ts`
   rules, never by list index.
+- Upward conversation touch input releases follow before the first scroll event;
+  post-touch momentum is reader input too. Taps, pinches, horizontal gestures,
+  cancelled touches and nested scrolling must not arm conversation momentum.
+  Explicit follow navigation supersedes old momentum even without `scrollend`.
 - `keyed-layout/` came from Lody's removed Virtua fork with its tests; engine
   extensions are marked `Engine:`. It is engine-owned: keep its MIT `LICENSE`.
 - Change the transaction logic only with a model test in

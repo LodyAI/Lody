@@ -187,7 +187,6 @@ function CloudMainLayoutComponent({ workspaceName }: { workspaceName: string }) 
       ...getAppLaunchPerformanceProperties(),
     };
     capturePostHogActiveUser(postHog, authReadyProperties);
-    capturePostHogEvent(postHog, 'app/auth_ready', authReadyProperties);
   }, [
     analyticsUserWorkspaceKey,
     currentUser,

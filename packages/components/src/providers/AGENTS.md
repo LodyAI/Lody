@@ -65,9 +65,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   state into the existing repo document; never replace unsent local edits or share
   the UI repo's persistence/cursors with the worker. Intent:
   [background prefetch](../../../../specs/session-background-prefetch.zh.md).
-- `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
-  target ownership and transport selection; do not restore a second writer or a
-  proxy-authoring/write-intent mirror.
+- Keep one Repo view; `WorkspaceTargetRouter` owns target/transport selection.
+  Never restore a second writer or proxy-authoring/write-intent mirror.
+- Runtime close cancels auth, joins attach/reconnect work, then destroys Repo.
+  Failed startup shares this close path.
 - Local-only window bootstrap may exchange same-workspace CRDT snapshots from
   already owned documents. Merge into the receiving Repo; never treat peer state
   as authoritative sync or open stores solely to answer bootstrap requests.
@@ -77,11 +78,11 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
   adoption; storage-loaded versions must be durable before cursor advancement. Never
   replace a live document. Import before constructing the history reader to avoid
   replaying bulk-import events through an initialized projection.
-- Repo storage, LoroDoc Streams cursors, and eager-sync high-water state must use the
-  same per-renderer cache namespace. A checkpoint must never be shared by independently
-  persisted Repo views. Meta/Flock cursors are replica-bound
-  (`workspace-streams-transport.ts`): never route them through a separate cursor store;
-  delete Meta progress via `repo.getReplicaCheckpointStore`.
+- Repo storage, LoroDoc cursors and eager-sync high-water state share a per-renderer
+  cache namespace. Independently persisted replicas must not share checkpoints.
+  Meta/Flock cursors stay repo-owned; delete Meta progress via `repo.getReplicaCheckpointStore`.
+- Required Streams protection rejects missing providers or plaintext rooms
+  ([contract](../../../../specs/workspace-streams-content.md)).
 - Transport state is selected per room, never merged. Runtime stores use
   `getReadinessTransportForRoom`; hooks without the router use the structural binding in
   `src/lib/room-readiness.ts`. Keep those selection rules aligned.
@@ -113,8 +114,8 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 ## Attachment transfer ownership
 
 Workspace `sendResources` owns preparation, cancellation and store borrows across
-React unmount. Dispose before transports/caches; join noncancelable IPC. Only the
-cache disposes stores. Cancel I/O, fence late results, await multipart cleanup.
+React unmount. Close before transports/caches; join IPC, cancel I/O, fence late
+results and await multipart cleanup. Only the cache disposes stores.
 
 Ready sends: local commits, then best-effort RPC; no persistence or retry. Unready
 sends live only in `pendingSends`; archive/delete cancel/join them. Never

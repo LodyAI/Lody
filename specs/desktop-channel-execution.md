@@ -44,7 +44,7 @@ apps, opening the localized standalone `/download/nightly` page. The normal down
 page MUST NOT embed Nightly downloads. The standalone page MUST distinguish Nightly
 visually, explain shared live data and manual switching, and use immutable installer
 links from a complete Nightly manifest. Missing or invalid metadata MUST NOT produce
-Stable fallback links or guessed aliases. The manifest and download page MUST identify
+Stable fallback links or guessed aliases. The desktop manifest and download page MUST identify
 the verified minimum Stable version; this floor requires packaged compatibility evidence,
 not just a version comparison.
 Nightly manifest versions MUST accept the first release in a cycle, `-nightly.0`,
@@ -54,6 +54,13 @@ About, copied crash reports and submitted bug reports MUST identify the reportin
 desktop's channel, version and both source revisions when injected by its distribution
 composition. Build metadata MUST remain distinct from a remote machine's logs and
 MUST NOT expand into ambient environment, account or filesystem collection.
+
+The page MUST load desktop and Android manifests independently, with separate
+availability, retry state and displayed versions. Android downloads use
+`android-version.json`; both of its file lists MUST name the same immutable APK
+for its own Nightly version. Missing or failed desktop metadata MUST NOT suppress
+a valid Android download, and vice versa. The page MUST NOT guess an Android URL
+or substitute Stable. Desktop process-switching guidance remains desktop-only.
 
 ## Evidence and limits
 

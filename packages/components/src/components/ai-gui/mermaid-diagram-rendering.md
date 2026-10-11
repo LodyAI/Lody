@@ -16,6 +16,12 @@ why they read the way they do. Coverage:
   untouched, which keeps the scroll engine's follow (`lib/conversation-scroll`) and outline
   jumps (`view.tsx`) working. An earlier bundled pan/zoom canvas took every wheel
   and turned a page scroll into a zoom; nothing may reintroduce that.
+- Native scrolling must also chain from the bounded preview to the conversation
+  at either edge, including when the diagram has no vertical overflow. The
+  preview uses `overscroll-behavior: auto`; letting the wheel event bubble alone
+  cannot undo CSS scroll containment. Browser coverage lives in
+  `tests/e2e/conversation-scroll-engine.spec.ts`; see the
+  [scroll-chaining decision](../../../../../.agents/notes/implemented/bug-fix/2026-10-09-mermaid-scroll-chaining.md).
 - Clicking a diagram with a mouse, pen, or the keyboard ACTIVATES it: that one
   diagram becomes a canvas, where a trackpad pinch (a ctrl- or meta-modified
   wheel) zooms around the pointer and a held button drags. Escape, a press

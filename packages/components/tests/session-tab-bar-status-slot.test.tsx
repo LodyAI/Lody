@@ -177,9 +177,7 @@ describe('SessionTabBar status slot', () => {
 
     expect(unreadDot('session-child')).toBeNull();
     expect(
-      container.querySelector(
-        '#session-tab-session-child .animate-spin, #session-tab-session-child [data-slot="spinner"]'
-      )
+      container.querySelector('#session-tab-session-child [data-slot="spinner"]')
     ).not.toBeNull();
   });
 
@@ -188,14 +186,11 @@ describe('SessionTabBar status slot', () => {
       presence: { 'session-child': 'requestPermission' },
     });
 
-    expect(
-      container.querySelector(
-        '#session-tab-session-child .animate-spin, #session-tab-session-child [data-slot="spinner"]'
-      )
-    ).toBeNull();
+    expect(container.querySelector('#session-tab-session-child [data-slot="spinner"]')).toBeNull();
     expect(unreadDot('session-child')).toBeNull();
-    expect(
-      container.querySelector('#session-tab-session-child .text-status-warning')
-    ).not.toBeNull();
+    const waitingMarker = container.querySelector(
+      '#session-tab-session-child svg.lucide-hand[aria-hidden="true"]'
+    );
+    expect(waitingMarker).not.toBeNull();
   });
 });

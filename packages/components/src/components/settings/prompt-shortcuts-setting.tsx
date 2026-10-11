@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import React, { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { SettingsPageActions, SettingsPageLead, useSettingsPane } from './settings-page-header';
@@ -64,7 +65,7 @@ const styles = stylex.create({
   slug: {
     flexShrink: 0,
     fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   scope: { flexShrink: 0, marginInlineStart: 'auto' },
@@ -79,7 +80,7 @@ const styles = stylex.create({
   warning: {
     flexShrink: 0,
     marginInlineStart: 'auto',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: type.leading,
     color: colors.warning,
   },

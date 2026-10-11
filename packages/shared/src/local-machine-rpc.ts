@@ -1,3 +1,9 @@
+import { MemoryProviderRequestSchema, MemoryProviderResponseSchema } from './memory-provider';
+import {
+  IosSimulatorCommandSchema,
+  IosSimulatorRequestSchema,
+  IosSimulatorResponseSchema,
+} from './ios-simulator';
 import { isWorkspaceMcpServerMeta, type WorkspaceMcpServerMeta } from './workspace-mcp';
 import { LocalFileResolutionSchema } from './local-file-preview';
 import { MachinePiExtensionsResponseSchema } from './pi-extensions';
@@ -102,6 +108,14 @@ export const SessionToolResultSchema = z
   .strict();
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('ios-simulator/agent-control'),
+    params: z.object({ sessionId: SessionIdSchema, command: IosSimulatorCommandSchema }).strict(),
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('ios-simulator/control'),
+    params: IosSimulatorRequestSchema,
+  }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('mcp/list-tools'),
     params: z
@@ -315,6 +329,10 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .strict(),
   }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/memory'),
+    params: MemoryProviderRequestSchema,
+  }).strict(),
+  BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('machine/pi-extensions'),
     params: z
       .object({
@@ -328,6 +346,8 @@ export type LocalMachineRpcRequest = z.infer<typeof LocalMachineRpcRequestSchema
 export type LocalMachineRpcRequestValidated = LocalMachineRpcRequest;
 
 export const LocalMachineRpcResultSchema = z.union([
+  MemoryProviderResponseSchema,
+  IosSimulatorResponseSchema,
   McpToolListResultSchema,
   SessionToolResultSchema,
   SessionActiveInvocationContextResultSchema,

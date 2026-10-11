@@ -26,8 +26,10 @@ export interface SessionConfig {
   agentCliType: AgentConfigCliType;
   agentType: string;
   /** Config selected by the driving turn and carried into ACP session startup. */
+  modelId?: SessionTurnInputConfig['modelId'];
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
   /** Selection carried by the dispatching turn; ACP startup must not re-read history for it. */
+  memory?: import('@lody/shared').MemoryBinding;
   mcpServerIds: McpServerId[];
   /** Launch spec for this execution request; durable default lives on the agent config. */
   customAcp?: CustomAcpLaunchSpec;
@@ -38,13 +40,6 @@ export interface SessionConfig {
   sessionId?: SessionId;
   // promptBuildConfig: PromptBuildConfig;
   env?: Record<string, string>;
-  /** Runtime-only policy, derived from the driving requester (never environment flags). */
-  githubCredentialPolicy?: {
-    allowLocalAuth: boolean;
-    /** Requester enabled "Act as you"; commits and credentials prefer their identity. */
-    personalEnabled?: boolean;
-    stateFilePath?: string;
-  };
   assumeDocExisting?: boolean;
   // for local session
   title?: string;

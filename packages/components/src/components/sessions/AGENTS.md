@@ -103,11 +103,8 @@ Read parent rules and each heading's linked context before edits.
   priority-ordered (dirty ⇒ Commit & Push), collapse into one, never duplicated
   below the reply.
 
-## [Auto review, status slot](../../../../../.agents/docs/sessions-auto-review.md)
+## [Session status slot](../../../../../.agents/docs/sessions-auto-review.md)
 
-- Auto review needs a usable reviewer row before a run starts; turning it ON
-  confirms, turning it OFF does not. The banner is NOT gated on the
-  experiment atom. Engine: `apps/cli/src/lib/review-automation/AGENTS.md`
 - One priority-ordered status slot (browser-offline > machine-removed >
   machine-offline): states hand off, never stack; machine-offline never blocks
   sends; doc-stream degradation is never re-added.
@@ -133,7 +130,7 @@ Read parent rules and each heading's linked context before edits.
   genuinely workspace-relative path; `lib/session-local-file-path.ts` rejects
   absolute and `..` paths.
 - Keep viewer shells static; load Office engines on activation/idle only.
-  Local PDFs use 64 KiB ranges and 8 MP canvases.
+  Stop hidden video; local PDFs use 64 KiB ranges and 8 MP canvases.
 
 ## [Stories](../../../../../.agents/docs/sessions-stories.md)
 

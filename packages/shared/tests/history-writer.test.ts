@@ -1,3 +1,5 @@
+import { getAgentRoleEmoji } from '../src/agent-role';
+import { buildAgentMessageAuthor, snapshotAgentRole } from '../src/message-author';
 import { describe, expect, it, vi } from 'vitest';
 import { Loro, LoroList, LoroMap, LoroText } from 'loro-crdt';
 import { Mirror } from 'loro-mirror';
@@ -24,6 +26,74 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
+  it('freezes the same default emoji displayed by the Role catalog', () => {
+    const role = snapshotAgentRole({ id: 'reviewer' as never, revision: 1, name: 'Reviewer' });
+    const author = buildAgentMessageAuthor({
+      sessionId: 'source',
+      turnId: 'turn',
+      cliType: 'builtin',
+      agentType: 'codex',
+      role,
+    });
+    expect(role.emoji).toBe(getAgentRoleEmoji({}));
+    expect(author.role?.emoji).toBe(getAgentRoleEmoji({}));
+    expect(author.agentType).toBe('codex');
+  });
+  it('retains frozen Agent authors through streaming, snapshots and invalid writes', () => {
+    const doc = new Loro();
+    const mirror = open(doc);
+    const author = buildAgentMessageAuthor({
+      sessionId: 'source',
+      turnId: 'source-turn',
+      agentConfigId: 'agent-a',
+      name: 'Agent A',
+      inputConfig: {
+        modelId: 'model-a',
+        configOptionValues: { api_key: 'never-store', reasoning_effort: 'high' },
+      },
+      role: { id: 'reviewer' as never, revision: 1, name: 'Reviewer', emoji: '🔎' },
+    });
+    mirror.historyWriter.append({
+      ...entry(),
+      userId: 'human',
+      author,
+      inputConfig: { modelId: 'model-b' },
+    });
+    mirror.historyWriter.updateEntry('turn', (turn) => {
+      turn.items = [{ type: 'text', text: 'updated' }];
+      return turn;
+    });
+    const stored = mirror.getState().history[0];
+    expect(stored).toMatchObject({
+      userId: 'human',
+      author: { name: 'Agent A', model: { id: 'model-a' }, role: { name: 'Reviewer' } },
+      inputConfig: { modelId: 'model-b' },
+    });
+    expect(JSON.stringify(stored)).not.toContain('never-store');
+    const restoredDoc = new Loro();
+    restoredDoc.import(doc.export({ mode: 'snapshot' }));
+    const restored = open(restoredDoc);
+    expect(restored.getState().history[0]?.author).toEqual(author);
+    expect(() =>
+      mirror.historyWriter.updateEntry('turn', (turn) => ({
+        ...turn,
+        author: { ...author, sessionId: '' },
+      }))
+    ).toThrow();
+    expect(mirror.getState().history[0]?.author).toEqual(author);
+    const map = doc.getList('history').get(0) as LoroMap;
+    expect((map.get('author') as LoroMap).get('name')).toBe('Agent A');
+    const copied = open(new Loro());
+    const snapshot = mirror.historyWriter.capture();
+    copied.historyWriter.copyFrom(snapshot, snapshot.history);
+    expect(copied.getState().history[0]?.author).toEqual(author);
+    mirror.historyWriter.updateEntry('turn', (turn) => ({
+      ...turn,
+      author: { v: 1, kind: 'human', userId: 'editor' },
+    }));
+    expect(mirror.getState().history[0]?.author).toEqual({ v: 1, kind: 'human', userId: 'editor' });
+  });
+
   it('retains child message identities and scalar tool output without altering root identity', () => {
     const writer = open(new Loro()).historyWriter;
     writer.append({ ...entry('first'), role: 'assistant', acpTurnId: 'parent', items: [] });

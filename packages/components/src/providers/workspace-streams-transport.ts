@@ -1,4 +1,10 @@
-import type { RemoteCursorStore } from '@loro-dev/streams-crdt';
+import type {
+  RemoteCursorStore,
+  SnapshotCodec,
+  SnapshotUploadOptions,
+} from '@loro-dev/streams-crdt';
+import { createLoroSyncErrorTools } from '@lody/shared/loro-sync-errors';
+import { RepoSyncError, RepoTransportError } from 'loro-repo';
 import {
   createLoroStreamUrl,
   getLoroMetaStreamId,
@@ -9,7 +15,32 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroRepo } from 'loro-repo';
-import { StreamsTransportAdapter, createRepoStreamsPersistence } from 'loro-repo/transport/streams';
+import {
+  StreamsTransportAdapter,
+  createRepoStreamsPersistence,
+  type StreamsRoomPayloadProtectionResolver,
+} from 'loro-repo/transport/streams';
+
+/** Transport configuration, not a persisted workspace mode or an E2EE capability verdict. */
+export type WorkspaceStreamsContent =
+  | { mode: 'plaintext' }
+  | {
+      mode: 'protected';
+      /** Trusted application identity; never derive it from a packet or routing URL. */
+      namespace: string;
+      /** Every Meta, document and named Flock room must select protected content. */
+      resolve: StreamsRoomPayloadProtectionResolver;
+      /** Explicit admission is required; protection never inherits the plaintext allow gate. */
+      snapshotUpload: SnapshotUploadOptions;
+      /** Compression only. The SDK protects both updates and snapshots with the provider. */
+      snapshotCodec?: SnapshotCodec;
+    };
+
+export class WorkspaceStreamsConfigurationError extends Error {
+  override readonly name = 'WorkspaceStreamsConfigurationError';
+}
+
+const { getLoroSyncDiagnostic } = createLoroSyncErrorTools({ RepoSyncError, RepoTransportError });
 
 export type WorkspaceStreamsTransportOptions = {
   repo: LoroRepo;
@@ -23,6 +54,8 @@ export type WorkspaceStreamsTransportOptions = {
   auth: ConstructorParameters<typeof StreamsTransportAdapter>[0]['auth'];
   streamsBaseUrl: string;
   shardHostSuffix: string | undefined;
+  /** Omission preserves the existing ordinary-workspace transport. */
+  content?: WorkspaceStreamsContent;
 };
 
 /** The key under which the transport checkpoints this workspace's Meta room. */
@@ -39,8 +72,34 @@ export const getWorkspaceMetaStreamUrl = (
 /** The renderer's durable Streams transport for one workspace repo. */
 export const createWorkspaceStreamsTransport = (
   options: WorkspaceStreamsTransportOptions
-): StreamsTransportAdapter =>
-  new StreamsTransportAdapter({
+): StreamsTransportAdapter => {
+  const content = options.content;
+  if (content !== undefined && content?.mode !== 'plaintext' && content?.mode !== 'protected') {
+    throw new WorkspaceStreamsConfigurationError('Unsupported workspace Streams content mode');
+  }
+  if (
+    content?.mode === 'protected' &&
+    (typeof content.namespace !== 'string' ||
+      content.namespace.length === 0 ||
+      typeof content.resolve !== 'function' ||
+      typeof content.snapshotUpload?.canUpload !== 'function' ||
+      (content.snapshotCodec !== undefined &&
+        (typeof content.snapshotCodec?.compress !== 'function' ||
+          typeof content.snapshotCodec?.decompress !== 'function')))
+  ) {
+    throw new WorkspaceStreamsConfigurationError('Incomplete workspace Streams content protection');
+  }
+
+  return new StreamsTransportAdapter({
+    diagnostics: (event) => {
+      const diagnostic = getLoroSyncDiagnostic(event);
+      if (diagnostic) {
+        console[diagnostic.level]('[loro-streams] transport failure', {
+          workspaceId: options.workspaceId,
+          ...diagnostic,
+        });
+      }
+    },
     bucketId: LORO_STREAMS_BUCKET_ID,
     metaStreamId: getLoroMetaStreamId(options.workspaceId),
     docStreamId: (docId) => getLoroStreamIdForDocId(options.workspaceId, docId),
@@ -50,10 +109,27 @@ export const createWorkspaceStreamsTransport = (
     persistence: createRepoStreamsPersistence(options.repo, {
       documentRemoteCursorStore: options.documentRemoteCursorStore,
     }),
-    snapshotCodec: streamsSnapshotCodec,
+    snapshotCodec:
+      content?.mode === 'protected'
+        ? (content.snapshotCodec ?? streamsSnapshotCodec)
+        : streamsSnapshotCodec,
     baseUrl: options.streamsBaseUrl,
     shardUrls: getLoroStreamsShardUrls(options.streamsBaseUrl, options.shardHostSuffix),
-    snapshotUpload: {
-      canUpload: async () => true,
-    },
+    snapshotUpload:
+      content?.mode === 'protected' ? content.snapshotUpload : { canUpload: async () => true },
+    ...(content?.mode === 'protected'
+      ? {
+          payloadProtectionNamespace: content.namespace,
+          payloadProtection: ((room) => {
+            const selection = content.resolve(room);
+            if (selection?.mode !== 'protected') {
+              throw new WorkspaceStreamsConfigurationError(
+                'Workspace Streams room requires content protection'
+              );
+            }
+            return selection;
+          }) satisfies StreamsRoomPayloadProtectionResolver,
+        }
+      : { payloadProtection: undefined }),
   });
+};

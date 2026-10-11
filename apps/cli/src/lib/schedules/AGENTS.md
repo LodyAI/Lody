@@ -39,6 +39,9 @@
   The tool description tells the agent to ask rather than guess when the
   prompt, rule or destination is unclear — that guidance is the product
   behaviour, so keep it in step with what the card can resolve.
+- Schedule v2 preserves ACP string/boolean values. Legacy boolean strings are
+  projected against target capability types at handoff, never migrated in the
+  definition/ledger (their fingerprints authorize execution).
 - Schedules use ordinary Session run-config defaults and validation; do not add
   a schedule-specific explicit-permission or capability-cache gate. No credentials
   or provider exception content may enter Registry runtime rows or Schedule logs.

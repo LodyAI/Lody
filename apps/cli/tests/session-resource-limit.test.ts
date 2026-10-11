@@ -154,7 +154,7 @@ const createProcessHandle = (
 const createSandbox = (
   handles: SessionProcessHandle[]
 ): SessionSandbox & {
-  spawn: ReturnType<typeof vi.fn>;
+  spawn: ReturnType<typeof vi.fn<SessionSandbox['spawn']>>;
   terminate: ReturnType<typeof vi.fn>;
   cleanup: ReturnType<typeof vi.fn>;
 } => ({

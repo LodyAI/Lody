@@ -19,7 +19,7 @@ export function SessionWindowMenuItem({
   const Item = dropdown ? Menu.Item : ContextMenu.Item;
   return (
     <Item
-      icon={<AppWindow />}
+      icon={AppWindow}
       onClick={() =>
         openDesktopWindow(sessionId, undefined, dropdown ? 'session_menu' : 'context_menu')
       }

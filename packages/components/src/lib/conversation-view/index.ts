@@ -1,4 +1,7 @@
-export { createConversationSession } from './create-conversation-session';
+export {
+  createConversationSession,
+  type ConversationSessionDataFactory,
+} from './create-conversation-session';
 export * from './types';
 export { isEmptyAssistantIndexRow } from './index-row';
 export {

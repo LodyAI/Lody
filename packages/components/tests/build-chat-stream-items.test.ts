@@ -41,6 +41,34 @@ const renderedIds = (items: ReturnType<typeof buildChatStreamItems>['items']): s
   items.map((item) => (item.type === 'message' ? item.message.id : 'empty'));
 
 describe('buildChatStreamItems', () => {
+  it('preserves authors through projection and refreshes cached identity when metadata arrives', () => {
+    const human = { v: 1, kind: 'human', userId: 'human' } as const;
+    const agent = {
+      v: 1,
+      kind: 'agent',
+      sessionId: 'source',
+      turnId: 'source-turn',
+      name: 'Agent',
+      role: { id: 'reviewer', revision: 1, name: 'Reviewer', emoji: '🔎' },
+    } as const;
+    const turns = [
+      { ...entry({ id: 'input', role: 'user', items: [text('task')] }), author: human },
+      { ...entry({ id: 'output', role: 'assistant', items: [text('answer')] }), author: agent },
+    ] as SessionHistory[];
+    const first = buildChatStreamItems(turns, sessionId);
+    expect(first.items.map((item) => item.type === 'message' && item.message.author)).toEqual([
+      human,
+      agent,
+    ]);
+    // A live mirror can retain the entry object while replacing metadata.
+    Object.assign(turns[0]!, { author: agent });
+    const second = buildChatStreamItems(turns, sessionId, first.cache);
+    expect(second.items.map((item) => item.type === 'message' && item.message.author)).toEqual([
+      agent,
+      agent,
+    ]);
+    expect(first.items[0]?.type === 'message' && first.items[0].message.author).toEqual(human);
+  });
   it('keeps offscreen bodies as placeholders while inheriting their user configuration', () => {
     const question = {
       ...entry({ id: 'question', role: 'user', items: [text('question')] }),

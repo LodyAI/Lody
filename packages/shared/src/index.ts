@@ -19,7 +19,6 @@ export type {
   MachineId,
   McpServerId,
   RepoId,
-  ReviewRunId,
   SessionId,
   TaskId,
   WorkspaceId,
@@ -99,8 +98,7 @@ export * from './preview-comment-types';
 export * from './preview-comment-schema';
 export * from './task-types';
 export * from './task-index';
-export * from './review';
-export * from './review-prompts';
+export * from './pr-prompts';
 export * from './preview-comment-mutation';
 export * from './account-data';
 export * from './visual-annotation-types';
@@ -490,5 +488,8 @@ export interface Attachment {
 
 export * from './schedule-control';
 export * from './codex-auth-profile';
-
+export * from './ios-simulator';
 export * from './session-acp-identity';
+
+export * from './memory-provider';
+export * from './message-author';

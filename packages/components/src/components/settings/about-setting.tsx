@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
@@ -22,7 +23,6 @@ import { developerModeEnabledAtom } from '@/atoms/settings';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MobileAboutSettings } from '@/components/mobile/mobile-about-settings';
 import { collectClientBuildInfo } from '@/lib/client-build-info';
-import { settingsType as type } from './type.stylex';
 
 const buildInfo = collectClientBuildInfo();
 const BUILD_DATE = buildInfo.buildDate ?? 'development';
@@ -38,7 +38,7 @@ const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 const styles = stylex.create({
   /** A fact the build states: read, not set, so it is quiet and fixed-width. */
-  value: { fontSize: type.caption, fontFamily: MONO, color: colors.secondaryLabel },
+  value: { fontSize: uiText.footnoteSize, fontFamily: MONO, color: colors.secondaryLabel },
   /** The build's facts on one line, set apart by middle dots. */
   facts: {
     display: 'flex',
@@ -51,7 +51,7 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[1],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   statusError: { color: colors.destructive },
@@ -67,7 +67,7 @@ const styles = stylex.create({
     gap: '2px',
     textAlign: 'end',
   },
-  endpoint: { fontSize: type.caption, fontFamily: MONO, color: colors.secondaryLabel },
+  endpoint: { fontSize: uiText.footnoteSize, fontFamily: MONO, color: colors.secondaryLabel },
 });
 
 type AppIpc = NonNullable<ReturnType<typeof getIpcServices>>['app'];
@@ -126,6 +126,81 @@ function UpdateStatusText({
   }
 
   return null;
+}
+
+function DefaultLinkHandlerSetting() {
+  const { t } = useTranslation();
+  const [isDefault, setIsDefault] = useState<boolean | null>(null);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [app] = useState(() => getIpcServices()?.app);
+  useEffect(() => {
+    if (!app) return undefined;
+    let disposed = false;
+    const refresh = () =>
+      void app
+        .getDefaultLinkHandler()
+        .then((state) => {
+          if (!disposed) setIsDefault(state.isDefault);
+        })
+        .catch(() => {
+          if (!disposed) setIsDefault(false);
+        });
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      disposed = true;
+      window.removeEventListener('focus', refresh);
+    };
+  }, [app]);
+  if (!app) return null;
+  return (
+    <CompactRow
+      label={t('deepLink.defaultHandler', 'Open Lody links with this app')}
+      helper={
+        message ??
+        t(
+          'deepLink.defaultHandlerHelp',
+          'Choose which installed version opens links from other apps.'
+        )
+      }
+    >
+      <Button
+        size="small"
+        variant="secondary"
+        disabled={pending || isDefault === true}
+        onClick={() => {
+          setPending(true);
+          void app
+            .setDefaultLinkHandler()
+            .then((state) => {
+              setIsDefault(state.isDefault);
+              setMessage(
+                state.isDefault
+                  ? null
+                  : t(
+                      'deepLink.defaultHandlerPending',
+                      'If prompted, confirm your choice in system settings.'
+                    )
+              );
+            })
+            .catch(() =>
+              setMessage(
+                t(
+                  'deepLink.defaultHandlerFailed',
+                  'Unable to change the default app. Choose it in system settings.'
+                )
+              )
+            )
+            .finally(() => setPending(false));
+        }}
+      >
+        {isDefault
+          ? t('deepLink.defaultHandlerActive', 'Default app')
+          : t('deepLink.makeDefault', 'Set as default')}
+      </Button>
+    </CompactRow>
+  );
 }
 
 function DevbarSettingsControls() {
@@ -324,6 +399,7 @@ export function AboutSettingsComponent() {
       {/* What is running is one fact: the version, and the build it came
         from as its detail; the update check acts on exactly that. */}
       <CompactSection>
+        <DefaultLinkHandlerSetting />
         <CompactRow
           label={
             displayVersion

@@ -378,6 +378,39 @@ describe('local-host actions vs a resolvable host path', () => {
     expect(openLocalPath).toHaveBeenLastCalledWith(artifact);
   });
 
+  it('expands a home-rooted Markdown link against the local home directory', async () => {
+    const actions = await resolveActions();
+    const homeRooted = '~/Code/my-spells/better-readme/SKILL.md';
+    const expanded = '/home/dev/Code/my-spells/better-readme/SKILL.md';
+    expect(actions.resolveHostPath(homeRooted)).toBe(expanded);
+
+    const items = actions.buildMarkdownLinkMenuItems(homeRooted);
+    const reveal = items.find((item) => item.id === 'reveal');
+    if (!reveal || reveal.kind !== 'action') throw new Error('Missing reveal action');
+    await act(async () => {
+      reveal.run();
+      await Promise.resolve();
+    });
+    expect(revealLocalPath).toHaveBeenLastCalledWith(expanded);
+  });
+
+  it('never resolves a home-rooted path against a remote workspace', async () => {
+    localMachineId = 'another-machine';
+    const actions = await resolveActions();
+    expect(actions.resolveHostPath('~/Code/app/SKILL.md')).toBeNull();
+
+    const items = actions.buildMarkdownLinkMenuItems('~/Code/app/SKILL.md');
+    expect(items.map((item) => item.id)).toEqual(['copy-path']);
+    await act(async () => {
+      const item = items[0];
+      if (item?.kind === 'action') item.run();
+      await Promise.resolve();
+    });
+    expect(writeTextToClipboard).toHaveBeenLastCalledWith('~/Code/app/SKILL.md');
+    expect(openLocalPath).not.toHaveBeenCalled();
+    expect(revealLocalPath).not.toHaveBeenCalled();
+  });
+
   it.each(['/tmp/build/Lody.zip', '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/Lody.zip'])(
     'keeps the local Markdown-link target and removes line anchors: %s',
     async (artifact) => {

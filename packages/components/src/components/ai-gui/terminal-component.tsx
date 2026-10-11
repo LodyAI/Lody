@@ -9,6 +9,8 @@ import {
 } from 'react';
 import Anser from 'anser';
 import { Terminal } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { cn } from '@/lib/utils';
 import {
   CONVERSATION_PANEL_FRAME_CLASS,
@@ -22,13 +24,14 @@ import {
 } from '@/lib/vscode-theme';
 import { useActiveVSCodeTheme } from '../../theme-provider';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
-import {
-  conversationTextFontSizeStyle,
-  terminalTextFontSizeStyle,
-} from './conversation-font-size-classes';
+import { terminalTextFontSizeStyle } from './conversation-font-size-classes';
 import { prepareTerminalPreview } from './terminal-preview';
 
 export { prepareTerminalPreview } from './terminal-preview';
+
+const typography = stylex.create({
+  caption: { fontSize: textScale.captionSize, lineHeight: textScale.captionLeading },
+});
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -156,7 +159,14 @@ export const TerminalComponent = memo(function TerminalComponent({
   const headerContent = (
     <>
       <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1 truncate text-[11px] font-medium">{title}</div>
+      <div
+        className={cn(
+          'min-w-0 flex-1 truncate font-medium',
+          stylex.props(typography.caption).className
+        )}
+      >
+        {title}
+      </div>
     </>
   );
 
@@ -212,10 +222,7 @@ export const TerminalComponent = memo(function TerminalComponent({
                   hasOutput ? 'border-b border-border/50' : null
                 )}
               >
-                <span
-                  className="leading-none text-muted-foreground"
-                  style={conversationTextFontSizeStyle(fontSize)}
-                >
+                <span className="text-muted-foreground" style={terminalTextFontSizeStyle(fontSize)}>
                   $
                 </span>
                 <pre
@@ -249,7 +256,7 @@ export const TerminalComponent = memo(function TerminalComponent({
                 }}
               >
                 <pre
-                  className="px-3 py-2 font-terminal leading-relaxed whitespace-pre-wrap break-words"
+                  className="px-3 py-2 font-terminal whitespace-pre-wrap break-words"
                   style={terminalTextFontSizeStyle(fontSize)}
                 >
                   {renderAnsiToReactNodes({ value: outputTextForDisplay, terminalTheme })}

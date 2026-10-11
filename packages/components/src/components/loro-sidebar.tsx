@@ -28,6 +28,9 @@ import {
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { control, radius, space, text } from '@lody/ui/tokens/scales.stylex';
 import { Kbd } from '@lody/ui/kbd';
 import { Tooltip } from '@lody/ui/tooltip';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
@@ -73,6 +76,12 @@ import { WorkspaceAvatar } from './workspace-avatar';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
+import {
+  SIDEBAR_ROW_TEXT_CLASS,
+  SIDEBAR_CAPTION_TEXT_CLASS,
+  SIDEBAR_HELPER_TEXT_CLASS,
+  SIDEBAR_CONTROL_TEXT_CLASS,
+} from './sidebar-row-shared';
 
 export type LoroSidebarNavKey = 'home' | 'archive' | 'schedules';
 
@@ -293,6 +302,40 @@ export interface LoroSidebarProps {
  */
 const COLLAPSE_DRAG_THRESHOLD = 160;
 
+const footerStyles = stylex.create({
+  desktop: { columnGap: space[1] },
+  workspaceControl: {
+    width: '100%',
+    minWidth: 0,
+    justifyContent: 'flex-start',
+    gap: space[2],
+    textAlign: 'start',
+  },
+  workspaceNameplate: {
+    display: 'flex',
+    alignItems: 'center',
+    height: control.small,
+    paddingInline: space[2],
+    boxSizing: 'border-box',
+    fontSize: text.subheadlineSize,
+    lineHeight: 1,
+    color: colors.secondaryLabel,
+    userSelect: 'none',
+  },
+  actions: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: space[1],
+  },
+  selectedAction: {
+    display: 'inline-flex',
+    backgroundColor: colors.selectedFill,
+    borderRadius: radius.small,
+  },
+  selectedMobileAction: { borderRadius: radius.large },
+});
+
 const defaultLabels: LoroSidebarLabels = {
   home: 'Home',
   schedules: 'Schedules',
@@ -487,18 +530,34 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
   ref
 ) {
   const isMobile = useIsMobile();
-  return (
+  const button = (
     <Button
       ref={ref}
       type="button"
       variant="ghost"
-      icon
-      className={cn(getLoroSidebarFooterIconButtonClassName(isMobile, active), className)}
+      size="small"
+      icon={!isMobile}
+      aria-label={label}
+      aria-current={active ? 'page' : undefined}
+      className={cn(isMobile && 'h-12 w-12', className)}
       {...buttonProps}
     >
-      {children}
+      {isMobile ? (
+        <span className="flex size-5 items-center justify-center">{children}</span>
+      ) : (
+        children
+      )}
       <span className="sr-only">{label}</span>
     </Button>
+  );
+  return active ? (
+    <span
+      {...stylex.props(footerStyles.selectedAction, isMobile && footerStyles.selectedMobileAction)}
+    >
+      {button}
+    </span>
+  ) : (
+    button
   );
 });
 
@@ -654,7 +713,8 @@ function NavButton({
         className={cn(
           // Same size as the session titles below: a smaller label reads as
           // undersized next to its 16px icon.
-          'group flex w-full select-none items-center rounded-lg py-1.5 text-left text-sm outline-hidden transition',
+          SIDEBAR_ROW_TEXT_CLASS,
+          'group flex w-full select-none items-center rounded-lg py-1.5 text-left outline-hidden transition',
           // Desktop rows share a +15px icon and +37px text column with the
           // project, repository, and session rows below them.
           isMobile ? 'gap-2 px-2' : 'gap-1.5 px-[9px]',
@@ -676,7 +736,12 @@ function NavButton({
         </span>
         <span className="truncate">{label}</span>
         {badge !== undefined && badge > 0 ? (
-          <span className="ml-auto shrink-0 text-[0.8em] tabular-nums text-muted-foreground">
+          <span
+            className={cn(
+              SIDEBAR_CAPTION_TEXT_CLASS,
+              'ml-auto shrink-0 tabular-nums text-muted-foreground'
+            )}
+          >
             {badge > 99 ? '99+' : badge}
           </span>
         ) : null}
@@ -693,20 +758,6 @@ export function getLoroSidebarFooterClassName(isMobile: boolean): string {
       ? 'pl-[calc(6px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-1 pb-2'
       : 'px-1.5 py-1',
     'border-sidebar-border'
-  );
-}
-
-export function getLoroSidebarFooterIconButtonClassName(isMobile: boolean, active = false): string {
-  return cn(
-    isMobile
-      ? 'h-12 w-12 rounded-xl [&_svg]:h-5 [&_svg]:w-5'
-      : 'h-6 w-6 rounded-md [&_svg]:h-3.5 [&_svg]:w-3.5',
-    'transition-colors focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
-    // A 12% foreground fill: the row selection token is tuned for full-width
-    // rows and nearly vanishes behind a 24px icon.
-    active
-      ? 'bg-foreground/[0.12] text-sidebar-selection-foreground hover:bg-foreground/[0.16]'
-      : 'text-sidebar-foreground dark:text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
   );
 }
 
@@ -945,10 +996,20 @@ export const LoroSidebar = memo(function LoroSidebar({
           <ClipboardList className="size-4" strokeWidth={1.8} aria-hidden="true" />
         )}
       </div>
-      <p className="mt-3 max-w-[220px] text-[13px] font-medium leading-5 text-sidebar-foreground">
+      <p
+        className={cn(
+          SIDEBAR_CONTROL_TEXT_CLASS,
+          'mt-3 max-w-[220px] font-medium text-sidebar-foreground'
+        )}
+      >
         {chatScope === 'my' ? mergedLabels.filter.emptyMyTasks : mergedLabels.filter.emptyAllTasks}
       </p>
-      <p className="mt-0.5 max-w-[220px] text-xs leading-[18px] text-sidebar-foreground-muted">
+      <p
+        className={cn(
+          SIDEBAR_HELPER_TEXT_CLASS,
+          'mt-0.5 max-w-[220px] text-sidebar-foreground-muted'
+        )}
+      >
         {chatScope === 'my'
           ? mergedLabels.filter.emptyMyTasksHint
           : mergedLabels.filter.emptyAllTasksHint}
@@ -958,7 +1019,10 @@ export const LoroSidebar = memo(function LoroSidebar({
           type="button"
           variant="secondary"
           size="small"
-          className="mt-3 h-7 rounded-full border-sidebar-border bg-sidebar px-3 text-xs font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground"
+          className={cn(
+            SIDEBAR_HELPER_TEXT_CLASS,
+            'mt-3 h-7 rounded-full border-sidebar-border bg-sidebar px-3 font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
+          )}
           onClick={() => onChatScopeChange('team')}
         >
           <Users className="mr-1.5 size-3.5" strokeWidth={1.8} aria-hidden="true" />
@@ -991,9 +1055,10 @@ export const LoroSidebar = memo(function LoroSidebar({
     </>
   );
   const windowDrag = isElectron && !isElectronFullscreen;
-  const workspaceIdentityClassName = cn(
-    'flex w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.9em]',
-    isMobile ? 'h-9' : 'h-8',
+  const mobileWorkspaceIdentityClassName = cn(
+    SIDEBAR_CONTROL_TEXT_CLASS,
+    'flex w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left',
+    'h-9',
     'text-sidebar-foreground dark:text-sidebar-foreground/75',
     workspaceSwitcherEnabled &&
       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:bg-sidebar-hover'
@@ -1010,30 +1075,52 @@ export const LoroSidebar = memo(function LoroSidebar({
   const renderWorkspaceControl = (menuSide: 'top' | 'bottom') =>
     workspaceSwitcherEnabled ? (
       <Menu.Root modal={!isMobile}>
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1">
           <Menu.Trigger
             render={
-              <button
-                type="button"
-                className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
-                data-workspace-switcher-trigger
-                data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
-                aria-busy={workspaceSyncing || undefined}
-              >
-                {workspaceIdentity}
-              </button>
+              isMobile ? (
+                <button
+                  type="button"
+                  className={cn(
+                    mobileWorkspaceIdentityClassName,
+                    windowDrag && WINDOW_DRAG_EXEMPT_CLASS
+                  )}
+                  data-workspace-switcher-trigger
+                  data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
+                  aria-busy={workspaceSyncing || undefined}
+                >
+                  {workspaceIdentity}
+                </button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="small"
+                  className={cn(
+                    stylex.props(footerStyles.workspaceControl).className,
+                    windowDrag && WINDOW_DRAG_EXEMPT_CLASS
+                  )}
+                  data-workspace-switcher-trigger
+                  data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
+                  aria-busy={workspaceSyncing || undefined}
+                >
+                  {workspaceIdentity}
+                </Button>
+              )
             }
           />
         </div>
         <Menu.Content align="start" side={menuSide} className="w-64">
-          <Menu.GroupLabel className="normal-case text-xs font-normal tracking-normal">
+          <Menu.GroupLabel
+            className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'normal-case font-normal tracking-normal')}
+          >
             {userEmail}
           </Menu.GroupLabel>
           <Menu.Separator />
 
           {workspaces.length > 0 ? (
             <>
-              <Menu.GroupLabel className="text-xs font-medium">
+              <Menu.GroupLabel className={cn(SIDEBAR_HELPER_TEXT_CLASS, 'font-medium')}>
                 {mergedLabels.switchWorkspace}
               </Menu.GroupLabel>
               <Menu.RadioGroup
@@ -1065,7 +1152,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                                   <ContextMenu.Trigger render={<div {...props} />} />
                                   <ContextMenu.Content>
                                     <ContextMenu.Item
-                                      icon={<AppWindow />}
+                                      icon={AppWindow}
                                       onClick={() => {
                                         openDesktopWindow(undefined, workspaceSlug, 'context_menu');
                                       }}
@@ -1096,7 +1183,12 @@ export const LoroSidebar = memo(function LoroSidebar({
                             // The checked row is the current workspace — it
                             // carries the richer plan/members line that used to
                             // need a separate header card.
-                            <span className="truncate text-[0.75em] text-muted-foreground">
+                            <span
+                              className={cn(
+                                SIDEBAR_CAPTION_TEXT_CLASS,
+                                'truncate text-muted-foreground'
+                              )}
+                            >
                               {typeof ws.memberCount === 'number'
                                 ? t('workspace.switcher.planAndMembers', {
                                     plan: getPlanLabel(ws.planTier),
@@ -1138,32 +1230,28 @@ export const LoroSidebar = memo(function LoroSidebar({
 
           {/* Icon boxes match the radio rows' avatars, so both row kinds
               share one leading column and one text column. */}
-          <Menu.Item
-            className="gap-1.5"
-            icon={<Plus className="h-4 w-4" />}
-            onClick={() => onCreateWorkspaceClicked?.()}
-          >
+          <Menu.Item className="gap-1.5" icon={Plus} onClick={() => onCreateWorkspaceClicked?.()}>
             {mergedLabels.createWorkspace}
           </Menu.Item>
-          <Menu.Item
-            className="gap-1.5"
-            icon={<Users className="h-4 w-4" />}
-            onClick={() => onInviteClicked?.()}
-          >
+          <Menu.Item className="gap-1.5" icon={Users} onClick={() => onInviteClicked?.()}>
             {mergedLabels.inviteMembers}
           </Menu.Item>
-          <Menu.Item
-            className="gap-1.5"
-            icon={<Link2 className="h-4 w-4" />}
-            onClick={() => onLinkRepoClicked?.()}
-          >
+          <Menu.Item className="gap-1.5" icon={Link2} onClick={() => onLinkRepoClicked?.()}>
             {mergedLabels.connectGithubRepo}
           </Menu.Item>
         </Menu.Content>
       </Menu.Root>
     ) : (
       <div className="min-w-0 flex-1">
-        <div className={workspaceIdentityClassName} data-workspace-identity>
+        <div
+          className={
+            isMobile
+              ? mobileWorkspaceIdentityClassName
+              : stylex.props(footerStyles.workspaceControl, footerStyles.workspaceNameplate)
+                  .className
+          }
+          data-workspace-identity
+        >
           {workspaceIdentity}
         </div>
       </div>
@@ -1439,7 +1527,12 @@ export const LoroSidebar = memo(function LoroSidebar({
               <div className="space-y-3 pt-1">
                 {repoSections.map((section, sectionIndex) => (
                   <div key={section.id} className="space-y-2">
-                    <div className="flex items-center gap-2 px-1 text-[0.9em] font-medium text-sidebar-foreground-muted">
+                    <div
+                      className={cn(
+                        SIDEBAR_CONTROL_TEXT_CLASS,
+                        'flex items-center gap-2 px-1 font-medium text-sidebar-foreground-muted'
+                      )}
+                    >
                       <Github className="h-3.5 w-3.5" />
                       <span className="truncate">{section.repoFullName}</span>
                       {sectionIndex === 0 && sectionHeaderFilterAction ? (
@@ -1455,7 +1548,8 @@ export const LoroSidebar = memo(function LoroSidebar({
                             <li key={item.id}>
                               <div
                                 className={cn(
-                                  'flex items-center gap-2 rounded-lg px-2 py-2 text-[1em]',
+                                  SIDEBAR_ROW_TEXT_CLASS,
+                                  'flex items-center gap-2 rounded-lg px-2 py-2',
                                   item.isSelected
                                     ? 'bg-sidebar-selection text-sidebar-selection-foreground'
                                     : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
@@ -1464,7 +1558,12 @@ export const LoroSidebar = memo(function LoroSidebar({
                                 <span className="h-2 w-2 rounded-full bg-sidebar-border" />
                                 <span className="min-w-0 flex-1 truncate">{item.title}</span>
                                 {item.ageLabel ? (
-                                  <span className="shrink-0 text-[0.75em] text-sidebar-foreground-muted">
+                                  <span
+                                    className={cn(
+                                      SIDEBAR_CAPTION_TEXT_CLASS,
+                                      'shrink-0 text-sidebar-foreground-muted'
+                                    )}
+                                  >
                                     {item.ageLabel}
                                   </span>
                                 ) : null}
@@ -1503,36 +1602,37 @@ export const LoroSidebar = memo(function LoroSidebar({
           </div>
         ) : null}
 
-        <div className={getLoroSidebarFooterClassName(isMobile)}>
+        <div
+          className={cn(
+            getLoroSidebarFooterClassName(isMobile),
+            !isMobile && stylex.props(footerStyles.desktop).className
+          )}
+          data-sidebar-footer
+        >
           {!isMobile ? renderWorkspaceControl('top') : null}
-          <div className={cn('flex items-center gap-1', !isMobile && 'ml-auto shrink-0 gap-2')}>
+          <div {...stylex.props(footerStyles.actions)}>
             <Menu.Root>
               <Menu.Trigger
                 render={
                   <IconButton label={t('menu.help', 'Help')}>
-                    <CircleHelp strokeWidth={1.5} />
+                    <CircleHelp className="size-full" strokeWidth={1.5} />
                   </IconButton>
                 }
               />
               <Menu.Content side="top" align="end" className="min-w-[160px]">
-                <Menu.Item onClick={() => onDocsClicked?.()}>
-                  <BookOpen className="h-4 w-4" />
+                <Menu.Item icon={BookOpen} onClick={() => onDocsClicked?.()}>
                   {mergedLabels.docs}
                 </Menu.Item>
-                <Menu.Item onClick={() => onGithubClicked?.()}>
-                  <Github className="h-4 w-4" />
+                <Menu.Item icon={Github} onClick={() => onGithubClicked?.()}>
                   {t('sidebar.github', 'GitHub')}
                 </Menu.Item>
-                <Menu.Item onClick={() => onJoinCommunityClicked?.()}>
-                  <Users className="h-4 w-4" />
+                <Menu.Item icon={Users} onClick={() => onJoinCommunityClicked?.()}>
                   {mergedLabels.joinCommunity}
                 </Menu.Item>
-                <Menu.Item onClick={() => onFeedbackClicked?.()}>
-                  <MessageSquareMore className="h-4 w-4" />
+                <Menu.Item icon={MessageSquareMore} onClick={() => onFeedbackClicked?.()}>
                   {mergedLabels.feedback}
                 </Menu.Item>
-                <Menu.Item onClick={() => onBugReportClicked?.()}>
-                  <Bug className="h-4 w-4" />
+                <Menu.Item icon={Bug} onClick={() => onBugReportClicked?.()}>
                   {mergedLabels.bugReport}
                 </Menu.Item>
               </Menu.Content>
@@ -1557,21 +1657,21 @@ export const LoroSidebar = memo(function LoroSidebar({
               >
                 <Archive
                   strokeWidth={1.5}
-                  className="group-hover:hidden group-focus-visible:hidden"
+                  className="size-full group-hover:hidden group-focus-visible:hidden"
                 />
                 <ArrowLeft
                   strokeWidth={1.5}
-                  className="hidden group-hover:block group-focus-visible:block"
+                  className="hidden size-full group-hover:block group-focus-visible:block"
                 />
               </IconButton>
             ) : (
               <IconButton label={t('archive.title', 'Archive')} onClick={onArchiveClicked}>
-                <Archive strokeWidth={1.5} />
+                <Archive className="size-full" strokeWidth={1.5} />
               </IconButton>
             )}
 
             <IconButton label={t('settings.title', 'Settings')} onClick={onSettingsClicked}>
-              <Settings strokeWidth={1.5} />
+              <Settings className="size-full" strokeWidth={1.5} />
             </IconButton>
           </div>
 

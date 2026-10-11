@@ -1,9 +1,11 @@
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { diffLines } from 'diff';
+
+// The shared facade directly: the CLI one loads the daemon's winston logger.
+import { runCommandTextSyncLegacy } from '@lody/shared/node/process';
 
 /**
  * Added/deleted line counts for a single file change, as `[add, del]`.
@@ -21,8 +23,8 @@ import { diffLines } from 'diff';
  *      git numbers (when git is available);
  *   3. otherwise the cheap prefix/suffix estimate as a last resort.
  *
- * This module is intentionally dependency-light (only `diff` + node builtins) so
- * it can be bundled into the standalone diff worker entry.
+ * This module is intentionally dependency-light (`diff`, node builtins and the
+ * shared process facade) so it can be bundled into the standalone diff worker entry.
  */
 
 /**
@@ -42,6 +44,13 @@ const MAX_LINES_FOR_JSDIFF = 200_000;
 
 /** `git diff --no-index` capture cap; turn snapshots are already <= ~1MiB. */
 const GIT_NUMSTAT_MAX_BUFFER = 64 * 1024 * 1024;
+
+/**
+ * Both git calls block the worker thread, so each is bounded. A timed-out numstat
+ * falls through to the prefix/suffix estimate like any other git failure.
+ */
+const GIT_VERSION_TIMEOUT_MS = 10_000;
+const GIT_NUMSTAT_TIMEOUT_MS = 30_000;
 
 export function countTextLines(text: string): number {
   if (text.length === 0) return 0;
@@ -112,7 +121,12 @@ function isGitAvailable(): boolean {
   if (gitAvailable === undefined) {
     try {
       gitAvailable =
-        spawnSync('git', ['--version'], { stdio: 'ignore', windowsHide: true }).status === 0;
+        runCommandTextSyncLegacy({
+          command: 'git',
+          args: ['--version'],
+          timeout: GIT_VERSION_TIMEOUT_MS,
+          check: 'none',
+        }).code === 0;
     } catch {
       gitAvailable = false;
     }
@@ -137,19 +151,21 @@ function gitNumstatLineCounts(oldText: string, newText: string): [number, number
     const newPath = path.join(dir, 'new');
     writeFileSync(oldPath, oldText);
     writeFileSync(newPath, newText);
-    const result = spawnSync('git', ['diff', '--no-index', '--numstat', '--', oldPath, newPath], {
-      encoding: 'utf8',
-      maxBuffer: GIT_NUMSTAT_MAX_BUFFER,
-      windowsHide: true,
+    const result = runCommandTextSyncLegacy({
+      command: 'git',
+      args: ['diff', '--no-index', '--numstat', '--', oldPath, newPath],
+      maxOutputBytes: GIT_NUMSTAT_MAX_BUFFER,
+      timeout: GIT_NUMSTAT_TIMEOUT_MS,
+      check: 'none',
     });
     // Exit 0 = identical, 1 = differences (expected), >1 = real error.
-    if (result.status !== 0 && result.status !== 1) {
+    if (result.code !== 0 && result.code !== 1) {
       return null;
     }
-    const match = NUMSTAT_LINE.exec(result.stdout ?? '');
+    const match = NUMSTAT_LINE.exec(result.stdout);
     if (!match) {
       // No diff line: identical content.
-      return result.status === 0 ? [0, 0] : null;
+      return result.code === 0 ? [0, 0] : null;
     }
     if (match[1] === '-' || match[2] === '-') {
       // Binary diff: git reports no line counts.

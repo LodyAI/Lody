@@ -3,6 +3,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
+import { setSessionRunConfigDraftAccountAtom } from '@/atoms/session-run-config-drafts';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
 import {
   clearDocMetaCacheAtom,
@@ -41,6 +42,7 @@ import { isElectronRenderer } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { usePlatform } from '@lody/platform/react';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
+import { subscribeLocalAuthStateCleared } from '@/lib/auth';
 
 const isExpectedRuntimeShutdownError = (error: unknown): boolean => {
   if (!(error instanceof Error)) {
@@ -123,6 +125,28 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   // implicit workspace — no cached/server id arbitration, no auth involved.
   const isLocalPlatform = platform.sync.mode === 'local';
   const accountId = currentUser?.id ?? (isLocalPlatform ? 'local' : null);
+  const draftAccountId = currentUser?.id ?? null;
+  const setRunConfigDraftAccount = useSetAtom(setSessionRunConfigDraftAccountAtom);
+  useEffect(() => {
+    // An absent auth snapshot can be hydration. Only confirmed logout below
+    // ends ownership; a positive identity also handles direct account changes.
+    if (draftAccountId) setRunConfigDraftAccount(draftAccountId);
+  }, [draftAccountId, setRunConfigDraftAccount]);
+  useEffect(() => {
+    // A fresh authenticated token can establish a new login for the same user
+    // even when the cached user id never changed. Merely clearing the owner
+    // must not re-arm it from the unchanged, pre-logout identity/token.
+    if (token && draftAccountId) setRunConfigDraftAccount(draftAccountId);
+  }, [token, draftAccountId, setRunConfigDraftAccount]);
+  useEffect(() => {
+    const unsubscribe = subscribeLocalAuthStateCleared(() => setRunConfigDraftAccount(null));
+    return () => {
+      unsubscribe();
+      setRunConfigDraftAccount(null);
+    };
+    // This is the app owner, not the workspace runtime. Route/workspace changes
+    // and transport restarts must preserve unsent drafts.
+  }, [setRunConfigDraftAccount]);
   const telemetryEnabled = platform.capabilities.has('telemetry');
   const implicitLocalWorkspace = useImplicitLocalWorkspace();
   // Start the local Repo and metadata sync while the spare still has no route.
@@ -243,6 +267,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
 
     let disposed = false;
+    const initializationAbort = new AbortController();
     let workspaceRuntime: Awaited<ReturnType<typeof createWorkspaceRuntime>> | null = null;
     // Logging-only workspace id resolution inputs intentionally stay out of
     // this effect's dependency list. A cached id can create the runtime before
@@ -272,6 +297,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           eagerSyncSurface,
         });
         workspaceRuntime = await createWorkspaceRuntime({
+          signal: initializationAbort.signal,
           accountId,
           workspaceSlug,
           workspaceId: effectiveWorkspaceId,
@@ -364,6 +390,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         workspaceSlug,
       });
       disposed = true;
+      initializationAbort.abort();
       setRuntime(null);
       setControlConnectionState('idle');
       // Reset to true for next initialization cycle

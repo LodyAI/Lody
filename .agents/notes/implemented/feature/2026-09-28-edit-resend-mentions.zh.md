@@ -61,3 +61,17 @@ Esc 分层、Cmd/Ctrl/Shift+Enter、删除触发符、自适应高度上限、�
 开关、窗口 resize、CSS zoom、mention 内 `@`、readOnly）发现并修复了上面所述的
 修饰 Enter 被吞的问题，其余行为与 Composer 语义一致。尚未在 Electron 应用里对
 真实 Session 做端到端验证。
+
+## 编辑入口条件修正（2026-10-06）
+
+mention 展开包装函数曾在会话上层未传 `onEditLastUser` 时，仍向最后一条用户消息
+传入可调用的 `onEdit`。因此不支持的 provider 及其他不满足编辑条件的会话也会
+显示编辑器，但保存只返回 `false`。消息流现在仅在上层提供编辑动作时传递包装
+函数，保留既有资格检查与 mention 展开逻辑。首条用户消息仍是 fork 要求的明确
+例外：替换走 `session/new`；后续消息要求权威缓存中的 `sessionFork` 能力，且
+前一条 assistant 消息已完成并带 ACP ID。此修复只纠正回调透传，不改变编辑重发意图。
+
+此次修正的验证：`git diff --check` 通过。当前 worktree 未安装依赖，缺少
+`tsgo`、`oxlint`、`oxfmt`，因此未能运行类型检查、lint 和格式化。
+`pnpm run docs check` 报错为本次改动范围外、指向缺失 ACP 子模块文件的链接。
+未运行运行时测试。

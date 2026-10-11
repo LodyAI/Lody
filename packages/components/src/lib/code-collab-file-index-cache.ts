@@ -1,4 +1,4 @@
-import { Duration, Effect, Exit, Scope, ScopedCache } from 'effect';
+import { Cause, Duration, Effect, Exit, Scope, ScopedCache } from 'effect';
 import type { Flock } from '@loro-dev/flock-wasm';
 import { ResourceBusyError, type RepoRoomSubscription } from 'loro-repo';
 import {
@@ -250,14 +250,16 @@ export function createCodeCollabFileIndexCache(
   runtimeRepo: CodeCollabFileIndexRuntimeRepo
 ): CodeCollabFileIndexCache {
   const ownerScope = Effect.runSync(Scope.make());
-  const borrowerScopes = new Set<Scope.CloseableScope>();
-  const borrowerKeys = new Map<Scope.CloseableScope, string>();
-  const borrowersByKey = new Map<string, Set<Scope.CloseableScope>>();
+  const borrowerScopes = new Set<Scope.Closeable>();
+  const borrowerKeys = new Map<Scope.Closeable, string>();
+  const borrowersByKey = new Map<string, Set<Scope.Closeable>>();
   const accessOrder = new Map<string, true>();
   const failedKeys = new Set<string>();
   let disposed = false;
   let disposePromise: Promise<void> | null = null;
   let evictionQueue = Promise.resolve();
+  // v4 ScopedCache bulk release joins finalizer Exits without failing its owner.
+  const ownerCleanupErrors: unknown[] = [];
 
   const cache = Effect.runSync(
     ScopedCache.make({
@@ -274,7 +276,14 @@ export function createCodeCollabFileIndexCache(
               }),
             catch: (error) => error,
           }),
-          (resource) => Effect.promise(() => resource.dispose())
+          (resource) =>
+            Effect.promise(() => resource.dispose()).pipe(
+              Effect.tapCause((cause) =>
+                Effect.sync(() => {
+                  if (disposed) ownerCleanupErrors.push(Cause.squash(cause));
+                })
+              )
+            )
         ),
     }).pipe(Effect.provideService(Scope.Scope, ownerScope))
   );
@@ -291,7 +300,7 @@ export function createCodeCollabFileIndexCache(
       if ((borrowersByKey.get(flockDocId)?.size ?? 0) > 0) continue;
       failedKeys.delete(flockDocId);
       accessOrder.delete(flockDocId);
-      await Effect.runPromise(cache.invalidate(flockDocId));
+      await Effect.runPromise(ScopedCache.invalidate(cache, flockDocId));
     }
 
     while (accessOrder.size > FILE_INDEX_CACHE_CAPACITY) {
@@ -307,7 +316,7 @@ export function createCodeCollabFileIndexCache(
       if (candidate === undefined) return;
       accessOrder.delete(candidate);
       failedKeys.delete(candidate);
-      await Effect.runPromise(cache.invalidate(candidate));
+      await Effect.runPromise(ScopedCache.invalidate(cache, candidate));
     }
   };
 
@@ -317,7 +326,7 @@ export function createCodeCollabFileIndexCache(
     return next;
   };
 
-  const closeScope = async (scope: Scope.CloseableScope): Promise<void> => {
+  const closeScope = async (scope: Scope.Closeable): Promise<void> => {
     if (!borrowerScopes.delete(scope)) return;
     const flockDocId = borrowerKeys.get(scope);
     try {
@@ -340,13 +349,13 @@ export function createCodeCollabFileIndexCache(
       const borrowerScope = Effect.runSync(Scope.make());
       borrowerScopes.add(borrowerScope);
       borrowerKeys.set(borrowerScope, flockDocId);
-      const keyBorrowers = borrowersByKey.get(flockDocId) ?? new Set<Scope.CloseableScope>();
+      const keyBorrowers = borrowersByKey.get(flockDocId) ?? new Set<Scope.Closeable>();
       keyBorrowers.add(borrowerScope);
       borrowersByKey.set(flockDocId, keyBorrowers);
       let resource: MutableFileIndexResource;
       try {
         resource = await Effect.runPromise(
-          cache.get(flockDocId).pipe(Effect.provideService(Scope.Scope, borrowerScope))
+          ScopedCache.get(cache, flockDocId).pipe(Effect.provideService(Scope.Scope, borrowerScope))
         );
       } catch (error) {
         const cleanupErrors: unknown[] = [];
@@ -356,7 +365,7 @@ export function createCodeCollabFileIndexCache(
           cleanupErrors.push(cleanupError);
         }
         try {
-          await Effect.runPromise(cache.invalidate(flockDocId));
+          await Effect.runPromise(ScopedCache.invalidate(cache, flockDocId));
         } catch (cleanupError) {
           cleanupErrors.push(cleanupError);
         }
@@ -417,6 +426,7 @@ export function createCodeCollabFileIndexCache(
           accessOrder.clear();
           failedKeys.clear();
         }
+        errors.push(...ownerCleanupErrors);
         if (errors.length > 0) throw errors[0];
       })();
       return disposePromise;

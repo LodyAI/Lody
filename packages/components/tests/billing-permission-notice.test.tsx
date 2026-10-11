@@ -102,6 +102,22 @@ describe('BillingSettingsView upgrade permission', () => {
     ) as HTMLButtonElement | undefined;
   }
 
+  function planNameText(): string | undefined {
+    return Array.from(container?.querySelectorAll('p') ?? [])
+      .map((paragraph) => paragraph.textContent?.trim())
+      .find((text) => text === 'Free' || text === 'Plus' || text === 'Enterprise');
+  }
+
+  it('shows the activating Plus plan instead of falling back to Free after checkout', async () => {
+    await renderView({ overview: freeOverview, paymentProcessing: true });
+
+    expect(planNameText()).toBe('Plus');
+    expect(container?.textContent).toContain('Payment received');
+    // The upgrade offer overlaps the activation banner; it must not offer a
+    // second checkout while the first one is still awaiting confirmation.
+    expect(upgradeButton()).toBeUndefined();
+  });
+
   it.each([true, false])(
     'gates changing cards on billing permission (%s)',
     async (canManageBilling) => {

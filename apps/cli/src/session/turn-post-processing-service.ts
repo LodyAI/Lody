@@ -23,6 +23,7 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import type { ISession } from '@/session/session-manager';
 import type { CloudPrAssociationPort } from '@lody/platform';
+import { createSessionBackend } from './session-backend';
 
 export type TurnPostProcessingServiceDeps = {
   logger: Logger;
@@ -205,7 +206,8 @@ export class TurnPostProcessingService {
     if (options.skipHistoryFileDiff !== true) {
       try {
         const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        await sessionDoc.sessionData.commands.applyHistoryAction({
+        const backend = await createSessionBackend(sessionDoc, await sessionDoc.getMetaState());
+        await backend.applyHistoryAction({
           kind: 'assistant-file-diff',
           change: { kind: 'set', value: fileDiff },
           turnId: options.turnId,
@@ -263,7 +265,7 @@ export class TurnPostProcessingService {
         workspaceId: this.deps.workspaceId,
       });
       if (!associated) {
-        this.deps.logger.debug(`[${sessionId}] PR association backend call was rejected`);
+        this.deps.logger.trace(`[${sessionId}] PR association backend call was rejected or paused`);
         return detected;
       }
       this.deps.logger.debug(`[${sessionId}] Associated PR #${detected.prNumber} with session`);

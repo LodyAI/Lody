@@ -1,5 +1,5 @@
 import { getServerNow, type MessageContent, type ScheduleProposalMeta } from '@lody/shared';
-import { readSessionHistory, type SessionTurn } from '@lody/shared/session-data';
+import type { SessionBackend } from '@/session/session-backend';
 
 export type ScheduleProposalDraft = Pick<
   ScheduleProposalMeta,
@@ -13,13 +13,7 @@ export type ScheduleProposalPublishResult =
   | { pending: false; outcome: 'created'; scheduleId?: string }
   | { pending: false; outcome: 'dismissed' };
 
-type ProposalDocument = {
-  roomId: string;
-  sessionData: {
-    history: { readAll(): readonly unknown[] };
-    commands: { appendTurn(turn: SessionTurn): Promise<void> };
-  };
-};
+type ProposalBackend = Pick<SessionBackend, 'readTurn' | 'appendHistoryTurn'>;
 
 const sameDraft = (current: ScheduleProposalMeta, desired: ScheduleProposalMeta): boolean =>
   JSON.stringify({
@@ -38,7 +32,7 @@ const sameDraft = (current: ScheduleProposalMeta, desired: ScheduleProposalMeta)
  * being rewritten.
  */
 export async function publishScheduleProposal(
-  doc: ProposalDocument,
+  backend: ProposalBackend,
   draft: ScheduleProposalDraft,
   actor: ScheduleProposalActor,
   now: () => number = getServerNow
@@ -53,11 +47,10 @@ export async function publishScheduleProposal(
   };
   const item: MessageContent = { type: 'system_notice', name: 'schedule_proposal', meta: desired };
   const entryId = `schedule-proposal-${draft.proposalId}`;
-  const existing = readSessionHistory(doc.sessionData.history).find(
-    (entry) => entry.id === entryId
-  );
+  const read = await backend.readTurn(entryId);
+  const existing = read.state === 'ready' ? read.turn : undefined;
   if (!existing) {
-    await doc.sessionData.commands.appendTurn({
+    await backend.appendHistoryTurn({
       id: entryId,
       role: 'system',
       timestamp: new Date(now()).toISOString(),

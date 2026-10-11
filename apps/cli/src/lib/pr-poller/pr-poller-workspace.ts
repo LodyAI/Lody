@@ -59,7 +59,7 @@ export interface PrPollerWorkspaceHandle {
   waitForInitialSync(timeoutMs?: number): Promise<boolean>;
   resolveCredential(repoFullName: string): Promise<ResolvedGitHubCredential | null>;
   invalidateCredential(repoFullName: string, credential: ResolvedGitHubCredential): void;
-  /** Optional hosted webhook association, required before publication when present. */
+  /** Optional hosted webhook linkage; failure does not block summary publication. */
   associatePullRequest: ((args: AssociatePullRequestArgs) => Promise<boolean>) | null;
   /** Release owned resources (token manager). Idempotent. */
   dispose(): Promise<void>;
@@ -174,7 +174,7 @@ export function createLodyPrPollerWorkspace(options: {
               }),
             ]);
             if (!associated) {
-              logger.debug(`[pr-poller] PR association was rejected for ${args.prUrl}`);
+              logger.trace(`[pr-poller] PR association was rejected or paused for ${args.prUrl}`);
               return false;
             }
             return true;

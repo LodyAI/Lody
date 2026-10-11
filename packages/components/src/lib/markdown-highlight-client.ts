@@ -1,6 +1,11 @@
 import type { MarkdownTokens } from './markdown-highlighter';
 
-export type MarkdownHighlightRequest = { id: number; code: string; language: string };
+export type MarkdownHighlightRequest = {
+  id: number;
+  code: string;
+  language: string;
+  extendedLanguagesEnabled?: boolean;
+};
 export type MarkdownHighlightResponse =
   | { id: number; tokens: MarkdownTokens }
   | { id: number; error: string };
@@ -15,7 +20,11 @@ export type MarkdownHighlightWorkerLike = {
 
 export type MarkdownHighlightClient = {
   /** Tokens for `code`; identical in-flight requests share one worker round trip. */
-  highlight(code: string, language: string): Promise<MarkdownTokens>;
+  highlight(
+    code: string,
+    language: string,
+    extendedLanguagesEnabled?: boolean
+  ): Promise<MarkdownTokens>;
   /** False once the worker failed; callers then highlight on the main thread. */
   readonly usable: boolean;
   dispose(): void;
@@ -62,9 +71,9 @@ export function createMarkdownHighlightClient(
     get usable() {
       return usable;
     },
-    highlight(code, language) {
+    highlight(code, language, extendedLanguagesEnabled = false) {
       if (!usable) return Promise.reject(new Error('Markdown highlight worker is unavailable'));
-      const key = `${language}\0${code}`;
+      const key = `${extendedLanguagesEnabled ? 'extended' : 'core'}\0${language}\0${code}`;
       const existing = inFlight.get(key);
       if (existing) return existing;
       const id = nextId++;
@@ -72,7 +81,7 @@ export function createMarkdownHighlightClient(
         pending.set(id, { key, resolve, reject });
       });
       inFlight.set(key, promise);
-      worker.postMessage({ id, code, language });
+      worker.postMessage({ id, code, language, extendedLanguagesEnabled });
       return promise;
     },
     dispose() {

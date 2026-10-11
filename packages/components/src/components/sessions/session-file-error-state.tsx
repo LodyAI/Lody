@@ -1,11 +1,80 @@
 import type { CodeCollabContentUnavailableReason } from '@lody/shared';
+import * as stylex from '@stylexjs/stylex';
 import { Copy, ExternalLink, FolderOpen, Loader2, Share2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
 // The action model is shared with the file tree context menu and the side
 // panel ⋯ menu; the card is one consumer of it, not its owner.
 import type { SessionFileErrorActions } from '@/lib/session-file-actions';
 import { Button } from '@lody/ui/button';
+
+const spin = stylex.keyframes({ to: { transform: 'rotate(360deg)' } });
+const styles = stylex.create({
+  frame: {
+    display: 'flex',
+    minHeight: '100%',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingBlock: '24px',
+    paddingInline: '16px',
+  },
+  card: {
+    width: '100%',
+    maxWidth: '20rem',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    borderRadius: '0.75rem',
+    backgroundColor: 'hsl(var(--card))',
+    paddingBlock: '14px',
+    paddingInline: '16px',
+    boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
+  },
+  title: {
+    color: 'hsl(var(--foreground))',
+    fontSize: '0.875rem',
+    fontWeight: 600,
+    lineHeight: '1.25rem',
+  },
+  description: {
+    marginTop: '4px',
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '13px',
+    lineHeight: '1.25rem',
+  },
+  actions: { display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '12px' },
+  actionIcon: { width: '14px', height: '14px', flexShrink: 0 },
+  spinner: {
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    animationName: spin,
+    animationDuration: '1s',
+    animationTimingFunction: 'linear',
+    animationIterationCount: 'infinite',
+  },
+  technicalDetails: {
+    marginTop: '12px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    paddingTop: '10px',
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+  },
+  summary: {
+    cursor: 'pointer',
+    userSelect: 'none',
+    fontWeight: 500,
+    color: 'color-mix(in oklab, hsl(var(--foreground)) 80%, transparent)',
+  },
+  technicalText: {
+    marginTop: '8px',
+    overflowWrap: 'break-word',
+    fontFamily: 'var(--font-mono)',
+    lineHeight: '1.25rem',
+  },
+});
 
 type Translation = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
 
@@ -303,19 +372,14 @@ export function SessionFileNoticeCard({
   const localHost = actions?.localHost;
 
   return (
-    <div className="flex min-h-full items-start justify-center px-4 py-6">
+    <div {...stylex.props(styles.frame)}>
       {/* No status glyph: the card is one short paragraph and a stack of
           actions, and a 40px icon column indented all of it for decoration. */}
-      <section
-        data-testid="session-file-error-state"
-        className="w-full max-w-xs rounded-xl border border-border/70 bg-card px-4 py-3.5 shadow-sm"
-      >
-        <h2 className="text-sm font-semibold leading-5 text-foreground">{presentation.title}</h2>
-        <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-          {presentation.description}
-        </p>
+      <section data-testid="session-file-error-state" {...stylex.props(styles.card)}>
+        <h2 {...stylex.props(styles.title)}>{presentation.title}</h2>
+        <p {...stylex.props(styles.description)}>{presentation.description}</p>
         {actions ? (
-          <div className="mt-3 flex flex-col gap-0.5">
+          <div {...stylex.props(styles.actions)}>
             {actions.onShare ? (
               <Button
                 size="small"
@@ -325,9 +389,9 @@ export function SessionFileNoticeCard({
                 disabled={actions.sharing}
               >
                 {actions.sharing ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  <Loader2 {...stylex.props(styles.spinner)} aria-hidden="true" />
                 ) : (
-                  <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  <Share2 {...stylex.props(styles.actionIcon)} aria-hidden="true" />
                 )}
                 {t('sessions.fileActions.share', 'Share file…')}
               </Button>
@@ -341,7 +405,7 @@ export function SessionFileNoticeCard({
                   onClick={localHost.onOpen}
                   data-testid="session-file-error-open"
                 >
-                  <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <ExternalLink {...stylex.props(styles.actionIcon)} aria-hidden="true" />
                   {localHost.openTarget === 'browser'
                     ? t('sessions.fileActions.openInBrowser', 'Open in browser')
                     : t('sessions.fileActions.openInDefaultApp', 'Open in default app')}
@@ -353,7 +417,7 @@ export function SessionFileNoticeCard({
                   onClick={localHost.onReveal}
                   data-testid="session-file-error-reveal"
                 >
-                  <FolderOpen className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <FolderOpen {...stylex.props(styles.actionIcon)} aria-hidden="true" />
                   {localHost.revealLabel}
                 </Button>
               </>
@@ -363,21 +427,21 @@ export function SessionFileNoticeCard({
               // Without the local-host pair this is the only way out of the
               // card, so it leads instead of trailing them.
               variant={localHost || actions.onShare ? 'ghost' : 'secondary'}
-              className={cn(ACTION_BUTTON_CLASS)}
+              className={ACTION_BUTTON_CLASS}
               onClick={actions.onCopyPath}
               data-testid="session-file-error-copy-path"
             >
-              <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <Copy {...stylex.props(styles.actionIcon)} aria-hidden="true" />
               {t('sessions.fileViewer.copyPath', 'Copy file path')}
             </Button>
           </div>
         ) : null}
         {presentation.technicalDetails ? (
-          <details className="mt-3 border-t border-border/60 pt-2.5 text-xs text-muted-foreground">
-            <summary className="cursor-pointer select-none font-medium text-foreground/80">
+          <details {...stylex.props(styles.technicalDetails)}>
+            <summary {...stylex.props(styles.summary)}>
               {t('sessions.fileError.technicalDetails', 'Technical details')}
             </summary>
-            <p className="mt-2 break-words font-mono leading-5">{presentation.technicalDetails}</p>
+            <p {...stylex.props(styles.technicalText)}>{presentation.technicalDetails}</p>
           </details>
         ) : null}
       </section>

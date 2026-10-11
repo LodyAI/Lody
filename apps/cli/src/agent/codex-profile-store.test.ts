@@ -282,6 +282,100 @@ describe('Codex profile ownership and generation publication', () => {
     expect([...secrets.values()]).toEqual(['synthetic-first']);
   });
 
+  it.each([
+    { stage: 'save', ready: false },
+    { stage: 'save', ready: true },
+    { stage: 'verification', ready: false },
+    { stage: 'verification', ready: true },
+    { stage: 'cancellation', ready: false },
+    { stage: 'cancellation', ready: true },
+  ])(
+    'preserves $stage failure and retries cleanup after restart (ready=$ready)',
+    async ({ stage, ready }) => {
+      const { root, vault, resolved, config, secrets } = await fixture();
+      const originalError = new Error(`Synthetic ${stage} failure`);
+      const cleanupError = new Error('Synthetic credential deletion failure');
+      let failSave = false;
+      let failCleanup = false;
+      const failingVault: CodexCredentialVault = {
+        ...vault,
+        set: async (id, value) => {
+          await vault.set(id, value);
+          // A failed write may have stored the credential before returning an error.
+          if (failSave) throw originalError;
+        },
+        delete: async (id) => {
+          if (failCleanup) throw cleanupError;
+          await vault.delete(id);
+        },
+      };
+      const store = new CodexProfileStore(root, failingVault);
+      if (ready) await store.withApiKeyCandidate(resolved, 'synthetic-old', async () => {});
+      const recordPath = path.join(root, resolved.profile.profileId, 'profile.json');
+      const before = JSON.parse(await readFile(recordPath, 'utf8'));
+      const controller = new AbortController();
+      failSave = stage === 'save';
+      failCleanup = true;
+
+      await expect(
+        store.withApiKeyCandidate(
+          resolved,
+          'synthetic-candidate',
+          async () => {
+            if (stage === 'cancellation') controller.abort(originalError);
+            else throw originalError;
+          },
+          controller.signal
+        )
+      ).rejects.toBe(originalError);
+
+      const retained = JSON.parse(await readFile(recordPath, 'utf8'));
+      expect(retained.state).toBe(before.state);
+      expect(retained.activeGeneration).toBe(before.activeGeneration);
+      expect(retained.generations).toHaveLength(before.generations.length + 1);
+      expect([...secrets.values()]).toEqual(
+        ready ? ['synthetic-old', 'synthetic-candidate'] : ['synthetic-candidate']
+      );
+
+      const restarted = new CodexProfileStore(root, failingVault);
+      expect(await restarted.resolve('workspace-fixture', config, true)).toEqual(resolved);
+      expect(await restarted.isReady(resolved)).toBe(ready);
+      if (ready) expect(await restarted.apiKey(resolved)).toBe('synthetic-old');
+      else await expect(restarted.apiKey(resolved)).rejects.toThrow('Authenticate');
+      await expect(restarted.reconcileGenerations(resolved)).rejects.toBe(cleanupError);
+      expect(JSON.parse(await readFile(recordPath, 'utf8'))).toEqual(retained);
+
+      failCleanup = false;
+      failSave = false;
+      await restarted.reconcileGenerations(resolved);
+      expect(JSON.parse(await readFile(recordPath, 'utf8'))).toEqual(before);
+      expect([...secrets.values()]).toEqual(ready ? ['synthetic-old'] : []);
+      await restarted.withApiKeyCandidate(resolved, 'synthetic-retry', async () => {});
+      expect(await restarted.apiKey(resolved)).toBe('synthetic-retry');
+    }
+  );
+
+  it('reconciles an already deleted candidate after restart without changing the active key', async () => {
+    const { root, store, resolved, vault, secrets } = await fixture();
+    await store.withApiKeyCandidate(resolved, 'synthetic-old', async () => {});
+    const recordPath = path.join(root, resolved.profile.profileId, 'profile.json');
+    const before = JSON.parse(await readFile(recordPath, 'utf8'));
+    const originalError = new Error('Synthetic verification failure');
+    await expect(
+      store.withApiKeyCandidate(resolved, 'synthetic-candidate', async () => {
+        throw originalError;
+      })
+    ).rejects.toBe(originalError);
+    expect([...secrets.values()]).toEqual(['synthetic-old']);
+    const retained = JSON.parse(await readFile(recordPath, 'utf8'));
+    expect(retained.activeGeneration).toBe(before.activeGeneration);
+    expect(retained.generations).toHaveLength(before.generations.length + 1);
+    const restarted = new CodexProfileStore(root, vault);
+    await restarted.reconcileGenerations(resolved);
+    expect(JSON.parse(await readFile(recordPath, 'utf8'))).toEqual(before);
+    expect(await restarted.apiKey(resolved)).toBe('synthetic-old');
+  });
+
   it('rejects endpoint, owner, and runtime rewrites without retrieving the saved key', async () => {
     const { store, config, resolved } = await fixture();
     await store.withApiKeyCandidate(resolved, 'synthetic-first', async () => {});

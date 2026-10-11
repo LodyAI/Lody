@@ -47,3 +47,40 @@ transport, broker and gh suites pass. Existing gh transport limitations remain:
 its abort timer ends at response headers and fetch exceptions become a null
 response. Thus retries are bounded in count, not guaranteed end-to-end gh elapsed
 time, and gh connection diagnostics can still report generic broker unavailability.
+
+## Follow-up investigation (2026-10-03)
+
+Source inspection and deterministic VM fault injection confirm that this is retry
+mitigation, not removal of the availability dependency. One failed policy lookup
+followed by success selects owner-local credentials; two HTTP 500 responses stop
+before local credential selection. No network, real timers or user credentials
+were used in this follow-up. The deployed version and remote failure cause remain
+unverified.
+
+`GitHubTokenManager.getCredentialPolicy` makes a cloud action for each lookup.
+The broker awaits it without its own explicit deadline or request coalescing;
+its `/health` endpoint only reports local HTTP liveness. Generic upstream errors
+become `policy_unavailable` HTTP 500, so that status alone does not distinguish
+upstream authorization rejection from service failure. Restarting the HTTP listener
+cannot establish that cloud policy access recovered. Client timeouts do not wire
+cancellation into the upstream action in this implementation.
+
+The generated gh request function also clears its timer when response headers
+arrive. A controlled fetch response with an unresolved body confirmed that the
+timer is already cleared before JSON consumption. This reproduces the existing
+deadline limitation, not an observed cause on a deployed machine.
+
+MCP's `local control timed out` originates from local IPC session control or
+active-invocation lookup, with a default 30-second deadline. It is not a response
+from the GitHub credential broker. Concurrent failures justify correlating daemon
+and upstream logs, but do not prove broker restart flapping or a single cause.
+
+Next work remains proposed: preserve safe upstream failure classifications and
+request correlation, enforce end-to-end gh deadlines, and investigate daemon/IPC
+liveness separately. Retain personal → owner-local → App selection. Any offline
+policy lease or explicit native-auth mode needs a separate authorization and
+revocation design; neither is implemented by this retry fix. A completion hook
+must also be able to report an external blocker instead of demanding endless
+retries; the user's hook configuration and deployed hook behavior were not inspected.
+
+The subsequent replacement is recorded in [ordered identity fallback](../architecture/2026-10-03-github-identity-fallback.md); the investigation above describes the earlier retry implementation.

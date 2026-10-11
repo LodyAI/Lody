@@ -261,6 +261,13 @@ describe('agent run config selection', () => {
 
   it('summarizes what a caller may choose per agent', () => {
     expect(summarizeAgentRunConfigCapabilities(codexCapability())).toEqual({
+      modes: [
+        { id: 'agent', name: 'Agent' },
+        { id: 'read-only', name: 'Read-only' },
+      ],
+      configOptions: codexCapability().configOptions?.map(
+        ({ currentValue: _current, ...option }) => option
+      ),
       models: [
         { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
         { id: 'gpt-5.4-mini', name: 'GPT-5.4-Mini' },
@@ -272,6 +279,8 @@ describe('agent run config selection', () => {
     });
     expect(summarizeAgentRunConfigCapabilities(claudeCapability()).planMode).toBe(true);
     expect(summarizeAgentRunConfigCapabilities(undefined)).toEqual({
+      modes: [],
+      configOptions: [],
       models: [],
       reasoningEffortValues: [],
       fastMode: false,
@@ -380,12 +389,65 @@ describe('agent run config selection', () => {
       fetchedAt: 1,
     };
     expect(summarizeAgentRunConfigCapabilities(legacy)).toEqual({
+      modes: legacy.modes,
+      configOptions: [],
       models: [{ id: 'k2', name: 'Kimi K2' }],
       reasoningEffortValues: [],
       fastMode: false,
       planMode: true,
     });
     expect(resolveAgentRunConfigSelection({ planMode: true }, legacy)).toEqual({ modeId: 'plan' });
+  });
+
+  it('discovers all advertised option ids without categories or current values', () => {
+    const summary = summarizeAgentRunConfigCapabilities({
+      modes: [{ id: 'default', name: 'Agent' }],
+      models: [],
+      configOptions: [
+        {
+          id: 'permission_mode',
+          name: 'Permission',
+          type: 'select',
+          currentValue: 'ask',
+          options: [
+            { value: 'ask', name: 'Ask' },
+            { value: 'always-approve', name: 'Always approve' },
+          ],
+        },
+        { id: 'custom_toggle', name: 'Custom', type: 'boolean', currentValue: true, options: [] },
+        {
+          id: 'interaction',
+          name: 'Interaction',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'default',
+          options: [{ value: 'plan', name: 'Plan' }],
+        },
+      ],
+    });
+    expect(summary.modes).toEqual([
+      { id: 'default', name: 'Agent' },
+      { id: 'plan', name: 'Plan' },
+    ]);
+    expect(summary.configOptions).toEqual([
+      {
+        id: 'permission_mode',
+        name: 'Permission',
+        type: 'select',
+        options: [
+          { value: 'ask', name: 'Ask' },
+          { value: 'always-approve', name: 'Always approve' },
+        ],
+      },
+      { id: 'custom_toggle', name: 'Custom', type: 'boolean', options: [] },
+      {
+        id: 'interaction',
+        name: 'Interaction',
+        category: 'mode',
+        type: 'select',
+        options: [{ value: 'plan', name: 'Plan' }],
+      },
+    ]);
   });
 });
 

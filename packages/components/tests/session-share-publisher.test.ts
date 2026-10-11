@@ -85,3 +85,41 @@ it('drains acquisitions after a sibling fails before releasing their source refe
   expect(started).toBe(4);
   expect(held.size).toBe(0);
 });
+
+it('reports image download failures and still releases the source', async () => {
+  const release = vi.fn();
+  const releaseSync = vi.fn();
+  const runtime = {
+    workspaceId: 'workspace',
+    prepareSessionTarget: async () => {},
+    acquireSessionStore: async () => ({
+      sessionId: 'root',
+      firstSynced: Promise.resolve(),
+      acquireSync: () => releaseSync,
+      sessionData: {
+        history: {
+          readAll: async () => [
+            { id: 'turn', role: 'user', items: [{ type: 'image', imageId: 'image' }] },
+          ],
+        },
+      },
+    }),
+    releaseSessionStoreRef: release,
+  };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Missing', { status: 404 })));
+  try {
+    await expect(
+      captureSessionShare({
+        runtime,
+        sessions: [{ id: 'root', title: 'Root', machineId: 'machine' }],
+        rootSessionId: 'root',
+        token: 'test',
+        signal: new AbortController().signal,
+      } as unknown as Parameters<typeof captureSessionShare>[0])
+    ).rejects.toThrow('Share attachment unavailable');
+    expect(release).toHaveBeenCalledWith('root');
+    expect(releaseSync).toHaveBeenCalledOnce();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

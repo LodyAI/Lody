@@ -238,7 +238,7 @@ void test('14. site-docs public asset is site-docs test-only', () => {
 });
 
 void test('14a. site-docs MDX only is not skip-tests', () => {
-  const scope = select(['site-docs/content/docs/en/(features)/session-handoff.mdx']);
+  const scope = select(['site-docs/content/docs/en/(guides)/session-handoff.mdx']);
   assert.equal(scope.mode, 'affected');
   assert.deepEqual(scope.testPackages, ['@lody/site-docs']);
   assert.deepEqual(scope.fanoutPackages, []);

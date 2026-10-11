@@ -248,8 +248,11 @@ describe('LoroSidebar pinned section', () => {
     const exit = buttons.find((button) => button.textContent?.trim() === 'Leave Archive');
     expect(exit).toBeDefined();
     expect(
-      Array.from(exit!.parentElement!.children).map((button) => button.textContent?.trim())
+      Array.from(exit!.closest('[data-sidebar-footer]')!.querySelectorAll('button'))
+        .filter((button) => button.getAttribute('aria-label'))
+        .map((button) => button.getAttribute('aria-label'))
     ).toEqual(['Help', 'Leave Archive', 'Settings']);
+    expect(exit?.getAttribute('aria-current')).toBe('page');
     expect(exit?.querySelector('svg.lucide-archive')).not.toBeNull();
     expect(exit?.querySelector('svg.lucide-arrow-left')).not.toBeNull();
 

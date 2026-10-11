@@ -373,6 +373,14 @@ const MentionContent = React.forwardRef<ContentElement, MentionContentProps>(
       trackAnchor,
     });
 
+    // Resize observation can arrive a frame after new rows or a detail pane
+    // change the popup height. Reposition after the commit so an upward menu
+    // cannot paint its new height at the previous top coordinate.
+    const updatePosition = positionerContext.update;
+    React.useLayoutEffect(() => {
+      if (context.open && !isMobile) updatePosition();
+    }, [context.open, isMobile, contentProps.children, updatePosition]);
+
     const setFloatingRef = React.useRef(positionerContext.refs.setFloating);
     setFloatingRef.current = positionerContext.refs.setFloating;
     const handleFloatingRef = React.useCallback((node: ContentElement | null) => {

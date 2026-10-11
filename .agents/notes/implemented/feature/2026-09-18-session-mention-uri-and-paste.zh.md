@@ -39,6 +39,23 @@ mention（Cmd/Ctrl+Shift+V 除外），发送前的重写改为 `[@Title](sessio
   mention 时剪贴板是 `[@Title](session://…)`，而不是 chip 文本。pasted-text 展开
   共用同一 helper。
 
+## HTTPS 子对话目标修正（2026-10-10）
+
+HTTPS 粘贴识别原先只返回路径中的会话 ID，带有
+`?tab=session%3Ases_child` 的链接因此插入了主对话的 mention。解析器现在用
+`URLSearchParams` 解码查询参数，并复用已有的会话标签解析器选择子对话 ID，
+同时保留原始 URL。首页与会话输入框共用这个目标；非会话标签继续使用路径目标。
+这修复了[深链接决策](../architecture/2026-09-29-lody-deep-links.zh.md)中精确指向
+对话的既有意图，不改变该决策确立的现行 mention 格式。
+
+所属解析器测试在隔离的 Vitest 配置下通过全部 19 项，借用另一份本地检出的
+已安装依赖，并替换了草稿 ID 判断依赖。测试覆盖编码与未编码的子对话选择器、
+URL 保留及非会话标签。常规配置未能启动：本检出未安装依赖，借用的依赖又缺少
+StyleX 插件。真实浏览器剪贴板行为与完整类型检查仍未验证；文档检查报告的
+已有断链指向未检出的 ACP 子模块。
+
+对应 [PR #1371](https://github.com/LodyAI/Lody/pull/1371).
+
 ## 验证与限制
 
 - [`session-app-url.test.ts`](../../../../packages/components/tests/session-app-url.test.ts)

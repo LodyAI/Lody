@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ConvexError } from 'convex/values';
 import { POSTHOG_OPTIONS } from '../src/providers/posthog-provider';
 
 function runBeforeSend(event: {
@@ -156,5 +157,53 @@ describe('PostHog provider options', () => {
         },
       })
     ).toBeNull();
+  });
+
+  it('drops serialized auth errors from manual and automatic exception capture', () => {
+    const error = new ConvexError({ kind: 'lody.auth', code: 'unauthenticated' });
+    const wrapped = `[CONVEX A(promptShortcuts:getStreamToken)] [Request ID: test] Server Error
+Uncaught ConvexError: Uncaught ${error.toString()}
+    at handler (convex/promptShortcuts.ts:422:25)
+    Called by client`;
+    for (const message of [error.message, error.toString(), wrapped]) {
+      for (const properties of [
+        { $exception_message: message },
+        { $exception_description: message },
+        { $exception_list: [{ type: 'ConvexError', value: message }] },
+        { $exception_list: [{ type: 'ConvexError', message }] },
+      ]) {
+        expect(runBeforeSend({ event: '$exception', properties })).toBeNull();
+      }
+    }
+  });
+
+  it('keeps unrelated errors and malformed or unnamespaced auth messages', () => {
+    for (const message of [
+      'unauthenticated',
+      'ConvexError: unauthenticated',
+      'ConvexError: {"kind":"other.auth","code":"unauthenticated"}',
+      'ConvexError: {"kind":"lody.auth","code":"forbidden"}',
+      'ConvexError: {"kind":"lody.auth","code":"unauthenticated"',
+      'TypeError: Cannot read properties of undefined',
+    ]) {
+      const event = { event: '$exception', properties: { $exception_message: message } };
+      expect(runBeforeSend(event)).toEqual(event);
+    }
+    expect(runBeforeSend({ event: '$exception' })).not.toBeNull();
+  });
+
+  it('keeps mixed exception chains and non-exception analytics', () => {
+    const auth = new ConvexError({ kind: 'lody.auth', code: 'unauthenticated' }).toString();
+    const properties = {
+      $exception_message: auth,
+      $exception_list: [
+        { type: 'ConvexError', value: auth },
+        { type: 'TypeError', value: 'Cannot read properties of undefined' },
+      ],
+    };
+    const mixed = { event: '$exception', properties };
+    expect(runBeforeSend(mixed)).toEqual(mixed);
+    const analytics = { event: 'auth/recovery', properties: { $exception_message: auth } };
+    expect(runBeforeSend(analytics)).toEqual(analytics);
   });
 });

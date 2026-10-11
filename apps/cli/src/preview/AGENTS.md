@@ -44,7 +44,7 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   and clean up this endpoint, never a replacement created while the probe awaited.
 - `PreviewService` now creates only `QuickTunnelSession` remote owners. The owner
   releases its proxy and child on cancellation, failed readiness, idle expiry or
-  process exit. Its `closed` result is a cleanup barrier, not just a signal sent.
+  process exit. Its `closed` result joins cleanup; `cleanupFailed` distinguishes resource failure from a network error.
   Lifecycle writes are serialized per Session; revoke cancels acquisition before
   joining that queue. One-hour activity deadlines stay in memory. Machine slots
   span workspaces in the singleton Worker, never a PID registry on disk.
@@ -56,8 +56,8 @@ Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.m
   use the trusted local route without cloud authorization; no remote fallback.
 - Endpoint capabilities are checked on every HTTP request and WS upgrade. There
   is no global unlock: a matching Origin/tokenless Referer never grants access.
-  Local and remote listeners use different random tokens; remote token cookies
-  are Secure, HttpOnly, SameSite=None and Partitioned. A remote viewer origin must
+  Local and remote tokens differ; cookies are Secure, HttpOnly, SameSite=None and
+  Partitioned. Local cookie names are endpoint-specific. A remote viewer origin must
   be explicitly bound, never inferred from Host or forwarded headers.
 - A WS upgrade is acknowledged only after the upstream selects its subprotocol.
   Preserve text/binary frames and close shape; use socket backpressure, not an

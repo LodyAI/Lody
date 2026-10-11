@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue } from 'jotai';
 import { Plus, Trash2 } from 'lucide-react';
@@ -12,7 +12,7 @@ import {
   type AgentRoleAvailability,
   type MachineId,
 } from '@lody/shared';
-import { userAtom } from '@/atoms';
+import { userAtom, settingsSelectedMachineIdAtom } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { onlineMachineIdsAtom } from '@/atoms/presence';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
@@ -52,6 +52,12 @@ export function AgentRolesSetting() {
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const { machines } = useVisibleMachineMetas();
   const { roles, synced } = useWorkspaceAgentRoles();
+  const selectedMachineId = useAtomValue(settingsSelectedMachineIdAtom);
+  const targetMachineId =
+    selectedMachineId &&
+    (machines.has(selectedMachineId) || roles.some((role) => role.machineId === selectedMachineId))
+      ? selectedMachineId
+      : null;
   const { resolve } = useAgentRoleAvailability(roles);
   const { remove } = useWorkspaceAgentRoleActions();
 
@@ -77,7 +83,25 @@ export function AgentRolesSetting() {
       .sort((left, right) => left.machineLabel.localeCompare(right.machineLabel));
   }, [machines, roles, t]);
 
-  const openAdd = () => setEditor(openAgentRoleEditorForCreate({ ...EMPTY_AGENT_ROLE_FORM_VALUE }));
+  const groupElements = useRef(new Map<MachineId, HTMLDivElement>());
+  const positionedMachine = useRef<MachineId | null>(null);
+  useEffect(() => {
+    if (!targetMachineId) {
+      positionedMachine.current = null;
+      return;
+    }
+    if (positionedMachine.current === targetMachineId) return;
+    const group = groupElements.current.get(targetMachineId);
+    if (group) {
+      group.scrollIntoView({ block: 'nearest' });
+      positionedMachine.current = targetMachineId;
+    }
+  }, [targetMachineId, roleGroups]);
+
+  const openAdd = () =>
+    setEditor(
+      openAgentRoleEditorForCreate({ ...EMPTY_AGENT_ROLE_FORM_VALUE, machineId: targetMachineId })
+    );
   const openEdit = (role: AgentRole) => setEditor(openAgentRoleEditorForEdit(role));
 
   const confirmRemoval = async () => {
@@ -112,12 +136,19 @@ export function AgentRolesSetting() {
         </Button>
       </SettingsPageActions>
 
-      {roles.length === 0 ? (
+      {roleGroups.length === 0 ? (
         <SettingsEmptyList>{t('settings.agentRoles.empty')}</SettingsEmptyList>
       ) : (
         <div {...stylex.props(catalog.groups)}>
           {roleGroups.map((group) => (
-            <div key={group.machineId} {...stylex.props(catalog.group)}>
+            <div
+              key={group.machineId}
+              ref={(element) => {
+                if (element) groupElements.current.set(group.machineId, element);
+                else groupElements.current.delete(group.machineId);
+              }}
+              {...stylex.props(catalog.group)}
+            >
               {/* The machine leads its group instead of repeating on every row:
                   a Role binds one machine exactly, so it is what the list is
                   grouped BY, not a fact about each entry. */}

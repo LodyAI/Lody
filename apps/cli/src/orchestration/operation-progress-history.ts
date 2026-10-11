@@ -1,6 +1,6 @@
 import { getServerNow, type StoredLodyOperation } from '@lody/shared';
-import { type SessionData } from '@lody/shared/session-data';
 import type { OperationProgressStatusByTarget } from '@lody/shared/session-data';
+import type { SessionBackend } from '@/session/session-backend';
 export {
   getOperationProgressTurnId,
   getOperationProgressTargetKey,
@@ -8,14 +8,13 @@ export {
   mergeOperationProgressContent,
 } from '@lody/shared/session-data';
 export type { OperationProgressStatusByTarget } from '@lody/shared/session-data';
-export type OperationProgressHistoryDocument = { sessionData: SessionData };
 export const upsertOperationProgressHistory = async (
-  sessionDoc: OperationProgressHistoryDocument,
+  backend: Pick<SessionBackend, 'applyHistoryAction'>,
   operation: StoredLodyOperation,
   now: () => number = getServerNow,
   statusByTarget?: OperationProgressStatusByTarget
 ): Promise<void> => {
-  await sessionDoc.sessionData.commands.applyHistoryAction({
+  await backend.applyHistoryAction({
     kind: 'operation-progress',
     operation,
     timestamp: new Date(now()).toISOString(),

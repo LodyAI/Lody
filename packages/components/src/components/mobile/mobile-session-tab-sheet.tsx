@@ -9,6 +9,7 @@ import {
   Hand,
   MonitorPlay,
   Plus,
+  Smartphone,
   Undo2,
   X,
 } from 'lucide-react';
@@ -72,7 +73,7 @@ export type ArchivedConversationEntry = {
 export type ViewerTabEntry = {
   id: string;
   label: string;
-  kind: 'file' | 'diff' | 'pr' | 'browser' | 'files';
+  kind: 'file' | 'diff' | 'pr' | 'browser' | 'ios-simulator' | 'files';
   active: boolean;
 };
 
@@ -123,6 +124,7 @@ const VIEWER_ICON: Record<ViewerTabEntry['kind'], typeof FileIcon> = {
   diff: FileDiff,
   pr: GitPullRequest,
   browser: MonitorPlay,
+  'ios-simulator': Smartphone,
   files: FolderOpen,
 };
 

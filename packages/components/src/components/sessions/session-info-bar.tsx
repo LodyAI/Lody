@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { LockKeyhole, MonitorPlay } from 'lucide-react';
+import { LockKeyhole, MonitorPlay, Smartphone } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type {
   PendingScheduledTask,
@@ -74,6 +74,7 @@ export type SessionInfoBarProps = {
   /** Open the session Browser panel. Renders a
    *  plain action chip in the cluster zone (no stage form). */
   onOpenBrowser?: () => void;
+  onOpenIosSimulator?: () => void;
   /** Mobile team workspace: persistent effective privacy status. */
   privateAccessStatus?: { label: string; description: string; onAction?: () => void };
   diffStat?: { add: number; del: number } | null;
@@ -147,6 +148,7 @@ export function SessionInfoBar({
   onOpenAllChanges,
   relations,
   onOpenBrowser,
+  onOpenIosSimulator,
   privateAccessStatus,
   diffStat,
   syncing = false,
@@ -233,7 +235,14 @@ export function SessionInfoBar({
   // spacer): 8px under the pill, none under a queue sheet (it sits on the
   // composer), and the plain 4px when there is nothing to show.
   const ambientSync = syncStatus !== undefined ? syncStatus : syncing ? 'syncing' : null;
-  if (!defaultKey && !relations && !onOpenBrowser && !ambientSync && !privateAccessStatus) {
+  if (
+    !defaultKey &&
+    !relations &&
+    !onOpenBrowser &&
+    !onOpenIosSimulator &&
+    !ambientSync &&
+    !privateAccessStatus
+  ) {
     return queue ? (
       <div className="w-full shrink-0 bg-background">
         <ConversationColumn>
@@ -309,7 +318,8 @@ export function SessionInfoBar({
   const clusterKeys = (['status', 'goal', 'schedule', 'scheduleSource', 'context'] as const).filter(
     (key) => present[key] && key !== stagedKey
   );
-  const clusterNonEmpty = clusterKeys.length > 0 || !!relations || !!onOpenBrowser;
+  const clusterNonEmpty =
+    clusterKeys.length > 0 || !!relations || !!onOpenBrowser || !!onOpenIosSimulator;
 
   return (
     // Light: same fill and lift as the session composer. Dark: recessed input.
@@ -350,7 +360,11 @@ export function SessionInfoBar({
             </button>
           ) : null}
           {privateAccessStatus &&
-          (clusterKeys.length > 0 || relations || onOpenBrowser || stagedKey) ? (
+          (clusterKeys.length > 0 ||
+            relations ||
+            onOpenBrowser ||
+            onOpenIosSimulator ||
+            stagedKey) ? (
             <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-muted-foreground/25" />
           ) : null}
           {clusterKeys.map((key) => renderItem(key, 'cluster'))}
@@ -362,6 +376,14 @@ export function SessionInfoBar({
               label={t('sessions.browser.openPreview', 'Open preview')}
               textClassName="text-emerald-600 dark:text-emerald-400"
               onAction={onOpenBrowser}
+            />
+          ) : null}
+          {onOpenIosSimulator ? (
+            <ActionChip
+              icon={Smartphone}
+              label={t('sessions.detailTabs.iosSimulator', 'iOS Simulator')}
+              textClassName="text-emerald-600 dark:text-emerald-400"
+              onAction={onOpenIosSimulator}
             />
           ) : null}
           {/* The divider is what marks the staged item as active (the stage

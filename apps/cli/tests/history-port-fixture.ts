@@ -8,7 +8,12 @@ import type { SessionData, SessionEntry, HistoryAction } from '@lody/shared/sess
 /** Service-test storage owner. Preserve each fixture's injected persistence
  * failures while exposing the same data-only history commands as production.
  * Backend correctness is covered separately over real Loro storage. */
-export function withHistoryPort<T extends object>(fixture: T): T & { sessionData: SessionData } {
+export function withHistoryPort<T extends object>(
+  fixture: T
+): T & {
+  sessionData: SessionData;
+  applyHistoryAction: SessionData['commands']['applyHistoryAction'];
+} {
   const storage = fixture as T & {
     getHistory?: () => SessionEntry[];
     readHistorySnapshot?: () => SessionEntry[];
@@ -73,8 +78,17 @@ export function withHistoryPort<T extends object>(fixture: T): T & { sessionData
     },
     commands: { ...commands, ...storage.sessionData?.commands },
   } as SessionData;
+  // The production helper now accepts the backend command port directly. Keep
+  // this data-only fixture usable at that boundary without making tests fake a
+  // full SessionBackend implementation.
+  (
+    storage as T & { applyHistoryAction?: SessionData['commands']['applyHistoryAction'] }
+  ).applyHistoryAction = storage.sessionData.commands.applyHistoryAction;
   storage.subscribeAll ??= (listener) => storage.mirror?.subscribe(listener) ?? (() => {});
-  return fixture as T & { sessionData: SessionData };
+  return fixture as T & {
+    sessionData: SessionData;
+    applyHistoryAction: SessionData['commands']['applyHistoryAction'];
+  };
 }
 
 /** Test-only seed/edit helper; application code cannot receive a history callback. */

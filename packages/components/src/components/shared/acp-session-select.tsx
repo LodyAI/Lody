@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Check, ChevronDown } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
@@ -103,30 +103,31 @@ export function AcpSessionSelect({
     <Menu.Root>
       <Menu.Trigger render={trigger}>{trigger}</Menu.Trigger>
       <Menu.Content align={align} className={cn('min-w-[120px]', contentClassName)}>
-        {options.map((option) => {
-          const isSelected = option.value === value;
-          const menuItem = (
-            <Menu.Item
-              key={option.value}
-              disabled={option.disabled}
-              onClick={() => onChange(option.value)}
-              className="justify-between"
-            >
-              <span>{option.label}</span>
-              {isSelected ? <Check className="h-3 w-3 opacity-70" /> : null}
-            </Menu.Item>
-          );
-
-          if (showDescription && option.description) {
-            return (
-              <Tooltip.Root key={option.value}>
-                <Tooltip.Trigger delay={500} render={menuItem}/>
-                <Tooltip.Content side="right">{option.description}</Tooltip.Content>
-              </Tooltip.Root>
+        <Menu.RadioGroup value={value ?? ''} onValueChange={onChange}>
+          {options.map((option) => {
+            const menuItem = (
+              <Menu.RadioItem
+                key={option.value}
+                value={option.value}
+                disabled={option.disabled}
+                indicator="check"
+                indicatorSide="end"
+              >
+                {option.label}
+              </Menu.RadioItem>
             );
-          }
-          return menuItem;
-        })}
+
+            if (showDescription && option.description) {
+              return (
+                <Tooltip.Root key={option.value}>
+                  <Tooltip.Trigger delay={500} render={menuItem} />
+                  <Tooltip.Content side="right">{option.description}</Tooltip.Content>
+                </Tooltip.Root>
+              );
+            }
+            return menuItem;
+          })}
+        </Menu.RadioGroup>
       </Menu.Content>
     </Menu.Root>
   );

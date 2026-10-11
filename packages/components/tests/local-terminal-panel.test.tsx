@@ -5,7 +5,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { terminalFontFamilyAtom, terminalFontSizeAtom } from '../src/atoms/settings';
+import {
+  conversationFontSizeAtom,
+  terminalFontFamilyAtom,
+  terminalFontSizeAtom,
+} from '../src/atoms/settings';
 import { LocalTerminalPanel } from '../src/components/terminal/local-terminal-panel';
 import type { TerminalChannel } from '../src/components/terminal/terminal-channel';
 import { initI18n } from '../src/i18n';
@@ -198,6 +202,7 @@ describe('LocalTerminalPanel', () => {
 
   it('updates and refits the existing xterm instance', async () => {
     const store = createStore();
+    store.set(conversationFontSizeAtom, 14);
     const channel = createChannel();
 
     await act(async () => {
@@ -223,6 +228,19 @@ describe('LocalTerminalPanel', () => {
     expect(terminal.options.fontFamily).toContain('"Maple Mono"');
     expect(terminal.options.fontSize).toBe(16);
     expect(mocks.fit.mock.calls.length).toBeGreaterThan(initialFitCount);
+
+    terminal.selection = 'selected output';
+    for (const size of [12, 13, 14, 15, 16]) {
+      await act(async () => {
+        store.set(conversationFontSizeAtom, size);
+        await Promise.resolve();
+      });
+      expect(mocks.terminalInstances[0]).toBe(terminal);
+      expect(terminal.options.fontSize).toBeCloseTo((16 * size) / 14);
+      expect(terminal.options.fontFamily).toContain('"Maple Mono"');
+      expect(terminal.selection).toBe('selected output');
+      expect(store.get(terminalFontSizeAtom)).toBe(16);
+    }
   });
 
   it('reports each submitted shell line without exposing command text', async () => {

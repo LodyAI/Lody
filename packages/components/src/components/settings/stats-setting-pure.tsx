@@ -1,4 +1,5 @@
 import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
+import * as stylex from '@stylexjs/stylex';
 import NumberFlow from '@number-flow/react';
 import { useTranslation } from 'react-i18next';
 import { Coins, DollarSign, Share2 } from 'lucide-react';
@@ -6,7 +7,6 @@ import { Button } from '@lody/ui/button';
 import { Tooltip } from '@lody/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
-import { cn } from '@/lib/utils';
 import {
   UsageStackedAreaChart,
   type StackedAreaBucket,
@@ -61,6 +61,143 @@ export type StatsSettingsViewProps = {
 };
 
 const RANGE_ORDER: SettingsUsageRange[] = ['day', 'week', 'month', 'total'];
+const DARK_THEME =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+const COLOR_MIX = '@supports (color: color-mix(in lab, red, red))';
+
+const styles = stylex.create({
+  page: { display: 'flex', flexDirection: 'column', gap: '16px' },
+  header: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: '12px',
+  },
+  workspaceName: { minWidth: 0 },
+  workspaceHeading: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '1.125rem',
+    fontWeight: 400,
+    lineHeight: 1.25,
+    color: 'hsl(var(--foreground))',
+  },
+  windowCaption: {
+    marginTop: '2px',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  headerActions: { display: 'flex', alignItems: 'center', gap: '6px' },
+  rangeTray: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '2px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.6)',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'hsl(var(--muted) / 0.4)',
+    padding: '2px',
+  },
+  rangeTab: {
+    borderRadius: 'var(--radius-md)',
+    paddingInline: '12px',
+    paddingBlock: '4px',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    fontWeight: 400,
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':hover': 'hsl(var(--foreground))',
+    },
+  },
+  rangeTabSelected: {
+    backgroundColor: 'hsl(var(--background))',
+    color: 'hsl(var(--foreground))',
+    boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+  },
+  statGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' },
+  statTile: {
+    position: 'relative',
+    containerType: 'inline-size',
+    display: 'flex',
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: '12px',
+    overflow: 'hidden',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--border) / 0.7)',
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'hsl(var(--card) / 0.6)',
+    padding: '16px',
+  },
+  statLabel: { fontSize: '0.8rem', fontWeight: 400, color: 'hsl(var(--muted-foreground))' },
+  statContents: { marginTop: 'auto' },
+  statValue: {
+    display: 'flex',
+    minWidth: 0,
+    minHeight: '4.25rem',
+    alignItems: 'center',
+    whiteSpace: 'nowrap',
+    fontSize: 'clamp(1.5rem, 16cqw, 2.75rem)',
+    fontWeight: 400,
+    lineHeight: 1,
+    letterSpacing: '-0.025em',
+    fontVariantNumeric: 'tabular-nums',
+    color: 'hsl(var(--foreground))',
+  },
+  statFooter: { marginTop: '8px' },
+  watermarkTokens: {
+    position: 'absolute',
+    right: '-32px',
+    bottom: '-32px',
+    width: '15rem',
+    height: '15rem',
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 10%, transparent)',
+      [DARK_THEME]: {
+        default: 'hsl(var(--muted-foreground) / 1)',
+        [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 5%, transparent)',
+      },
+    },
+  },
+  watermarkCost: {
+    position: 'absolute',
+    right: '-40px',
+    bottom: '-20px',
+    width: '12.5rem',
+    height: '12.5rem',
+    transform: 'rotate(-25deg)',
+    color: {
+      default: 'hsl(var(--muted-foreground) / 1)',
+      [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 10%, transparent)',
+      [DARK_THEME]: {
+        default: 'hsl(var(--muted-foreground) / 1)',
+        [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--muted-foreground) / 1) 5%, transparent)',
+      },
+    },
+  },
+  workspaceRequired: {
+    borderWidth: '1px',
+    borderStyle: 'dashed',
+    borderColor: 'hsl(var(--border))',
+    borderRadius: 'var(--radius-md)',
+    padding: '16px',
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+    color: 'hsl(var(--muted-foreground))',
+  },
+});
 
 // The calendar's optional skyline view uses React Three Fiber. Keep it out of
 // consumers that only render the summary charts (including the public landing)
@@ -120,30 +257,21 @@ function CountUpValue({
 
 function StatTile({
   label,
-  className,
   children,
   footer,
 }: {
   label: string;
-  className?: string;
   children: ReactNode;
   footer?: ReactNode;
 }) {
   return (
-    <div
-      className={cn(
-        '@container relative flex min-w-0 flex-col gap-3 overflow-hidden rounded-lg border border-border/70 bg-card/60 p-4',
-        className
-      )}
-    >
-      <p className="text-[0.8rem] font-normal text-muted-foreground">{label}</p>
-      <div className="mt-auto">
+    <div {...stylex.props(styles.statTile)}>
+      <p {...stylex.props(styles.statLabel)}>{label}</p>
+      <div {...stylex.props(styles.statContents)}>
         {/* NumberFlow measures ~68px tall at the clamp's 2.75rem cap; reserve
            that height so the loading "—" cannot grow into it on resolve. */}
-        <div className="flex min-h-[4.25rem] min-w-0 items-center whitespace-nowrap text-3xl font-normal leading-none tracking-tight tabular-nums text-foreground text-[clamp(1.5rem,16cqw,2.75rem)]">
-          {children}
-        </div>
-        {footer ? <div className="mt-2">{footer}</div> : null}
+        <div {...stylex.props(styles.statValue)}>{children}</div>
+        {footer ? <div {...stylex.props(styles.statFooter)}>{footer}</div> : null}
       </div>
     </div>
   );
@@ -158,11 +286,7 @@ function RangeSelector({
 }) {
   const { t } = useTranslation();
   return (
-    <div
-      role="tablist"
-      aria-label={t('workspace.usage.range')}
-      className="inline-flex items-center gap-0.5 rounded-lg border border-border/60 bg-muted/40 p-0.5"
-    >
+    <div role="tablist" aria-label={t('workspace.usage.range')} {...stylex.props(styles.rangeTray)}>
       {RANGE_ORDER.map((value) => {
         const active = value === range;
         return (
@@ -172,12 +296,7 @@ function RangeSelector({
             role="tab"
             aria-selected={active}
             onClick={() => onRangeChange(value)}
-            className={cn(
-              'rounded-md px-3 py-1 text-xs font-normal transition-colors',
-              active
-                ? 'bg-background text-foreground shadow-xs'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
+            {...stylex.props(styles.rangeTab, active && styles.rangeTabSelected)}
           >
             {t(`workspace.usage.window.${value}.short`)}
           </button>
@@ -219,28 +338,32 @@ export function StatsSettingsView({
     [locale]
   );
   return (
-    <div className="space-y-4">
+    <div {...stylex.props(styles.page)}>
       {/* Page header — no redundant "Usage" title (the settings tab already
          says Usage). Workspace name + the time-window selector. */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-normal leading-tight text-foreground">
+      <div {...stylex.props(styles.header)}>
+        <div {...stylex.props(styles.workspaceName)}>
+          <h2 {...stylex.props(styles.workspaceHeading)}>
             {workspaceName || t('workspace.usage.title')}
           </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{windowCaption}</p>
+          <p {...stylex.props(styles.windowCaption)}>{windowCaption}</p>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div {...stylex.props(styles.headerActions)}>
           <RangeSelector range={range} onRangeChange={onRangeChange} />
           {shareCard && usageCalendar ? (
             <Tooltip.Root>
-              <Tooltip.Trigger render={<Button
-                  icon
-                  variant="ghost"
-                  aria-label={t('workspace.usage.shareImage.action')}
-                  onClick={() => setShareOpen(true)}
-                >
-                  <Share2 />
-                </Button>}/>
+              <Tooltip.Trigger
+                render={
+                  <Button
+                    icon
+                    variant="ghost"
+                    aria-label={t('workspace.usage.shareImage.action')}
+                    onClick={() => setShareOpen(true)}
+                  >
+                    <Share2 />
+                  </Button>
+                }
+              />
               <Tooltip.Content>{t('workspace.usage.shareImage.action')}</Tooltip.Content>
             </Tooltip.Root>
           ) : null}
@@ -261,12 +384,10 @@ export function StatsSettingsView({
       ) : null}
 
       {/* KPI overview band — 2 cards with icon watermarks. */}
-      <div className="grid grid-cols-2 gap-3">
+      <div {...stylex.props(styles.statGrid)}>
         <StatTile
           label={t('workspace.usage.tokens')}
-          footer={
-            <Coins className="absolute -bottom-8 -right-8 h-60 w-60 text-muted-foreground/10 dark:text-muted-foreground/5" />
-          }
+          footer={<Coins {...stylex.props(styles.watermarkTokens)} />}
         >
           <CountUpValue
             value={totals?.tokens ?? 0}
@@ -277,9 +398,7 @@ export function StatsSettingsView({
         </StatTile>
         <StatTile
           label={t('workspace.usage.cost')}
-          footer={
-            <DollarSign className="absolute -bottom-5 -right-10 h-50 w-50 text-muted-foreground/10 dark:text-muted-foreground/5 rotate-[-25deg]" />
-          }
+          footer={<DollarSign {...stylex.props(styles.watermarkCost)} />}
         >
           <CountUpValue
             value={totals?.costUSD ?? 0}
@@ -339,7 +458,7 @@ export function StatsSettingsView({
       />
 
       {!workspaceId && (
-        <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
+        <div {...stylex.props(styles.workspaceRequired)}>
           {t('workspace.usage.workspaceRequired', 'Select a workspace to view usage')}
         </div>
       )}

@@ -10,13 +10,13 @@ context/acp-agent-edit-evidence.md. Adapter source repositories and builtin prov
 [apps/cli/AGENTS.md](../../AGENTS.md). Where updates go after they arrive:
 context/message-flow.md "Upstream".
 
-| Boundary           | Owner                                                                    | Responsibility                                                                   |
-| ------------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| ACP connection     | [AgentClient](agent-client.ts)                                           | Negotiates capabilities, tracks raw requests, and classifies steer evidence.     |
-| Process startup    | [Runner](acp-runner.ts)                                                  | Spawns agents under the shared startup gate.                                     |
-| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts)                             | Resolves pinned distributions and verifies their artifacts.                      |
-| Codex credentials  | [Profiles](codex-profile-store.ts), [broker](codex-credential-broker.ts) | Host-bound homes and vault generations; redirect-denying user-side API requests. |
-| Codex process uses | [Usage records](codex-profile-process-usage.ts) | Independent process records for deletion cleanup; same-profile sessions remain concurrent. |
+| Boundary           | Owner                                                                    | Responsibility                                                                             |
+| ------------------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| ACP connection     | [AgentClient](agent-client.ts)                                           | Negotiates capabilities, tracks raw requests, and classifies steer evidence.               |
+| Process startup    | [Runner](acp-runner.ts)                                                  | Spawns agents under the shared startup gate.                                               |
+| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts)                             | Resolves pinned distributions and verifies their artifacts.                                |
+| Codex credentials  | [Profiles](codex-profile-store.ts), [broker](codex-credential-broker.ts) | Host-bound homes and vault generations; redirect-denying user-side API requests.           |
+| Codex process uses | [Usage records](codex-profile-process-usage.ts)                          | Independent process records for deletion cleanup; same-profile sessions remain concurrent. |
 
 ## Files
 
@@ -31,10 +31,11 @@ context/message-flow.md "Upstream".
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
   `Session.createAgent`, `startLocalAcpAgent`, and history-catalog ACP spawn.
-- `setting.ts` — launch resolution for every agent kind, including the pinned
-  `npx --prefer-offline -y dimcode@0.5.10 acp` builtin. Dimcode reuses the
-  profile-owned npm cache and startup recovery; credentials remain in its own
-  configuration or provider environment.
+- `setting.ts` — launch resolution for every agent kind, including the user-installed
+  `dimcode acp` builtin. Users manage Dimcode installation and versions; Lody disables
+  upstream auto-update in its child process and never downloads a fallback. Credentials
+  remain in Dimcode's own configuration or provider environment. Refresh capabilities
+  after upgrading. Existing registry configurations retain their saved launch contract.
 - `deepseek-harness-runtime.ts` — Harness-home (`DSH_HOME`, then `~/.dsh`), atomic-config,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
   the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
@@ -141,7 +142,9 @@ builds copy the extension's pinned official presets beside `deepseek-acp.js`; th
 roster also discovers `$DSH_HOME/.agent-presets`. The host mounts Harness's file settings
 provider for `$DSH_HOME/settings.yaml` (default `~/.dsh/settings.yaml`); refresh provider
 capabilities after editing the model catalog. An explicit `DEEPSEEK_BASE_URL` still uses
-the endpoint's `/models` list rather than local catalog additions. Harness JSONL roots are single-encoding
+the endpoint's `/models` list rather than local catalog additions. Official Chat-era
+URLs are normalized by the extension to the Messages `/anthropic` root before provider
+construction; official model discovery always uses `https://api.deepseek.com/models`. Harness JSONL roots are single-encoding
 stores: an empty or zstd root uses upstream's `zstd`, a raw-only legacy root keeps `none`,
 and a mixed root fails with both paths named.
 
@@ -210,6 +213,12 @@ stream; the target machine keeps the recipient private key in memory and decrypt
 immediately before stdin. Local UI and CLI state is in memory. Raw output progress remains
 only as a temporary old-renderer compatibility field.
 
+API-key staging preserves the previous active generation until verification commits.
+Failures propagate the original error and attempt credential deletion; inactive
+generation records remain available to the existing cleanup reconciler. The
+[recovery decision and ablations](../../../../.agents/notes/implemented/bug-fix/2026-10-07-codex-credential-failure-recovery.md)
+explain why failure handling does not restore the entire metadata snapshot.
+
 Grok and Codex authentication requirements come from ACP session creation because
 `codex login status` cannot account for custom model providers with
 `requires_openai_auth = false`. Because protocol authentication spans launch preparation,
@@ -248,7 +257,7 @@ override entries still apply only when their source-version suffix matches the s
 
 ### Session titles
 
-Providers advertising Core `agentCapabilities._meta.lody.sessionTitle: { version: 1 }`
+Except for builtin Codex, Providers advertising Core `agentCapabilities._meta.lody.sessionTitle: { version: 1 }`
 own automatic title generation. After the main ACP session initializes, dispatch
 uses its live capability to skip `title-generator.ts`; capability cache freshness
 cannot cause a duplicate process on the first launch. Probes and normal session
@@ -262,17 +271,32 @@ tags are rejected; user titles are preserved. The generated tag requires the
 capability. Legacy explicit tags remain compatible. Failed provider generation
 leaves the draft title; there is no timeout-triggered duplicate generation.
 
-The builtin Claude/Codex/Grok identity table remains compatibility for older
+The builtin Claude/Grok identity table remains compatibility for older
 managed runtimes. Overrides revoke that fallback, but can independently advertise
 the new capability. Only legacy Claude/Grok titles are trusted without a tag.
 See the [contract](../../../../specs/acp-session-titles.md) and
 [original compatibility decision](../../../../.agents/notes/implemented/architecture/2026-09-08-acp-owned-session-titles.md).
 
-The daemon does not name branches. A worktree session stays on the `session/<id>` branch
-`worktree-manager.ts` created for it. [WorkspaceGitService](../session/workspace-git-service.ts)
+Builtin Codex always uses `title-generator.ts`, including with an old title capability
+cache. Its Provider settings expose title configuration; absent a non-empty override,
+the isolated session selects `gpt-5.6-luna`, low reasoning, and full access. Unsupported
+requested options fail to the existing prompt-derived fallback. The bundled adapter
+has no automatic generator, so neither the main nor title session starts an extra
+naming turn. Main conversation settings and Provider authentication are preserved.
+
+The daemon does not name branches. A worktree session starts on the temporary branch
+`worktree-manager.ts` created for it (`session/<id>` for GitHub, `lody/<id>` for shared-local
+projects, with collision suffixes). [WorkspaceGitService](../session/workspace-git-service.ts)
 observes branch changes independently of GitHub; its lifecycle and activation triggers are
-defined by the [checkout branch contract](../../../../specs/workspace-branch-state.md). For GitHub projects the agent is asked to do exactly that — see
-`GITHUB_WORKTREE_SYSTEM_COMMANDS` in `session/session-execution-helpers.ts`.
+defined by the [checkout branch contract](../../../../specs/workspace-branch-state.md).
+`newWorktreeSystemCommands` in `session/session-execution-helpers.ts` asks the agent to
+rename that temporary ref before starting the first task in an ordinary new independent
+GitHub or local worktree. Execution verifies the actual checkout after setup against this
+Session's allocation, then directly requests renaming that ref without an agent inspection.
+It applies only on logical first use, including prepared-worktree adoption; direct local directories, child Tabs, prior/resumed ACP
+Sessions, later turns, and the separate Fork path are excluded. Existing descriptive
+branches are preserved, and rename failures do not block work. This prompt is guidance,
+not a daemon-enforced rename; title notifications do not trigger it.
 
 This used to be an automatic prompt-to-branch rename, removed because it could not be made
 safe. A branch name is a ref: it reaches the remote as soon as the session opens a PR, so
@@ -296,3 +320,7 @@ ACP cwd remains the actual worktree. This also covers local child sessions,
 whose execution directory comes from their parent but whose project identity
 comes from the local project record. GitHub-only and projectless sessions do not
 send a local project identity. See the [draft contract](../../../../specs/local-project-acp-identity.zh.md).
+
+### Startup model selection
+
+`SessionConfig.modelId` carries the driving Turn's choice through prepared and cold creation into `AgentClient`. Core's `_meta.lody.sessionConfig` includes it before new/load/resume/fork. Codex translates the model and reasoning into native startup configuration, so resume does not transiently use a different global model. Live configuration remains necessary for reused sessions and older adapters. See the [startup contract](../../../../specs/acp-startup-model.md).

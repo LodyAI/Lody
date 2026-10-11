@@ -36,6 +36,7 @@ export const clearField = <T>(): SessionFieldChange<T> => ({ kind: 'clear' });
  */
 export type OpenAssistantTurnInput = {
   readonly turnId: string;
+  readonly author?: SessionTurn['author'];
   /** Attached only when the stored turn has none (never overwrites a value). */
   readonly userTurnId?: string;
   /** Applied only when provided. */
@@ -119,6 +120,16 @@ export type SessionDataChange =
 
 export type SessionDataChangeListener = (change: SessionDataChange) => void;
 
+/** One bounded directory window from a backend with reverse pagination. */
+export type SessionHistoryDirectoryPage = {
+  readonly startPosition: number;
+  readonly totalCount: number;
+  readonly rows: readonly SessionDirectoryRow[];
+  readonly hasMoreOlder: boolean;
+  /** Opaque backend cursor for the next page toward the beginning. */
+  readonly cursor: string | null;
+};
+
 /**
  * A gap-free read-and-subscribe. The initial directory is captured at the same
  * point the listener becomes live, so a consumer never has to choose between
@@ -128,6 +139,8 @@ export type SessionDataChangeListener = (change: SessionDataChange) => void;
 export interface SessionObservation {
   /** Directory rows already including every change at or after subscribe. */
   readonly initial: Promise<readonly SessionDirectoryRow[]>;
+  /** Present when `initial` is a bounded latest window rather than the full directory. */
+  readonly initialPage?: Promise<SessionHistoryDirectoryPage>;
   /** Idempotent. */
   unsubscribe(): void;
 }
@@ -164,6 +177,10 @@ export interface SessionHistoryReader {
     from: number,
     to: number
   ): readonly SessionDirectoryRow[] | Promise<readonly SessionDirectoryRow[]>;
+  /** Latest bounded directory page for windowed-history backends. */
+  readLatestDirectoryPage?(limit: number): Promise<SessionHistoryDirectoryPage>;
+  /** Bounded page immediately older than `cursor`. */
+  readOlderDirectoryPage?(cursor: string, limit: number): Promise<SessionHistoryDirectoryPage>;
   /**
    * One consistent full read of the stored history, detached. Export/replay/hash
    * use this instead of stitching `count()` plus `readRange()` across a changing

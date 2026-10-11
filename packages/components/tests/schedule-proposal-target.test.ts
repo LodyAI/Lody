@@ -70,22 +70,32 @@ describe('where a proposed schedule runs', () => {
 
   it('carries the conversation’s options in the shape a schedule can store', () => {
     // Conversation options are ACP values (booleans too) and may include a
-    // credential; a schedule stores strings and never credentials. Handing them
-    // over as-is made Create throw.
+    // credential; the shared value types survive while credentials are removed.
     const result = resolveScheduleProposalTarget({
       meta: meta(),
       conversation: {
         session,
         runConfig: {
           modeId: 'acceptEdits',
-          configOptionValues: { fast: true, effort: 'high', api_key: 'secret' },
+          configOptionValues: {
+            fast: true,
+            plan_mode: false,
+            select_flag: 'false',
+            effort: 'high',
+            api_key: 'secret',
+          },
         },
       },
       agents,
       roles: [],
     });
     if (!result.ok) throw new Error(result.problem);
-    expect(result.target.agent.configOptionValues).toEqual({ fast: 'true', effort: 'high' });
+    expect(result.target.agent.configOptionValues).toEqual({
+      fast: true,
+      plan_mode: false,
+      select_flag: 'false',
+      effort: 'high',
+    });
     expect(ScheduleAgentSchema.safeParse(result.target.agent).success).toBe(true);
   });
 
@@ -103,7 +113,7 @@ describe('where a proposed schedule runs', () => {
           agentConfigId: 'writer',
           modeId: 'plan',
           modelId: 'sonnet',
-          configOptionValues: { verbose: 'true' },
+          configOptionValues: { verbose: true },
         },
         agentConfig: writer,
         source: { agent: 'role' },

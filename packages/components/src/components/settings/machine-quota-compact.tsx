@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MachineViewMeta } from '@lody/shared';
@@ -24,7 +25,6 @@ import {
   formatRateLimitWindowShortLabel,
   getAgentRateLimitWindows,
 } from '@/lib/session-usage';
-import { settingsType as type } from './type.stylex';
 
 type MachineUsageData = MachineViewMeta['raceLimits'][string];
 
@@ -221,7 +221,7 @@ const styles = stylex.create({
     display: 'inline-flex',
     alignItems: 'center',
     gap: space[1.5],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontWeight: 400,
     color: colors.label,
   },

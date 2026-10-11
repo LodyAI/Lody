@@ -1,10 +1,10 @@
 # Shared contracts
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+`CLAUDE.md` symlinks here. Edit `AGENTS.md` only.
 
-Discover archive/restore/delete targets from one ready Repo snapshot, never UI caches.
+Discover archive/restore/delete from one ready Repo snapshot, never UI caches.
 Archive uses `collectSessionArchiveTargets`; restore/delete keep direct containment.
-Exact deletion bypasses discovery. See [relations](../../specs/session-relations.md).
+Exact deletion bypasses discovery: [relations](../../specs/session-relations.md).
 
 ## Session history
 
@@ -92,7 +92,7 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
   provider name check. A goal turn carries no run configuration, so resuming cannot
   change model or mode. Behavior: [goal control Spec](../../specs/session-goal-control.md).
 
-## Workspace MCP and Agent Roles
+## Workspace MCP / Roles
 
 - Workspace MCP has exactly two durable layers: catalog entries in the workspace Flock
   document and selected ids in each user turn input config. Do not add machine bindings.
@@ -102,17 +102,18 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
   upload. Settings neither await nor report upload; upload failure must not fail or
   roll back a durable write. CLI reports its sync result. See
   [catalog explanation](../../.agents/docs/workspace-catalog-durability.md).
-- Roles use one workspace Flock `agentRole` family; sharing updates `visibility`.
-  Store no secrets, API keys, MCP selections, or memory; apply
-  `isSensitiveAgentRoleConfigOptionKey` on read and write. Roles pin permission via
-  `runConfig.modeId` or `_permission`; hide the separate composer permission button
-  when pinned, but keep warning-tone modes visibly marked on every such surface.
-  Role-level auto-approval policy is out of scope. Settings/mentions use
-  `canReadAgentRole`/`canManageAgentRole`; MCP resolves explicit Role ids from the
-  catalog without requiring mention-scoped authorization.
-- Roles bind exact `machineId + agentConfigId`, never fall back, and remain listed
-  with precise reasons but unmentionable when machine/config/model/mode is unavailable.
-  Before Operation acceptance, MCP resolves the current `agentRoleId` row and freezes
-  canonical Prompt, target, Role revision, and dispatch config into the Operation;
-  edits/deletion cannot change recovery or retry. `SessionMeta.agentRoleId` and
-  `agentRoleRevision` are display-only creation provenance.
+- Roles use one workspace Flock `agentRole` family; sharing changes `visibility`.
+  No secrets, API keys, MCP selections or memory contents. Apply
+  `isSensitiveAgentRoleConfigOptionKey` on read/write. Permission pins use
+  `runConfig.modeId` or `_permission`: hide the separate composer permission
+  button but retain warning-tone markings. No Role-level auto-approval policy.
+  Settings/mentions use `canReadAgentRole`/`canManageAgentRole`; explicit MCP
+  lookup needs no mention grant.
+- Roles bind `machineId + agentConfigId`; no fallback. Unavailable machine/config/model/mode
+  stays listed with reasons, unmentionable. Freeze Role prompt/target/revision/config
+  at acceptance; retries/recovery ignore edits/deletion. Session Role metadata:
+  provenance only. `resolveSessionExecutionInputBlocks` owns text; raw blocks supply attachments.
+- Memory stores provider/id references, frozen per turn. Daemon commands and env
+  mapping follow the [memory contract](../../specs/agent-role-memory.md).
+- Keep `author`, human `userId`, and recipient execution config separate.
+  [Contract](../../specs/message-author-identity.md).

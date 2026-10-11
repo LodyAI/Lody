@@ -3,7 +3,8 @@ import { AlertDialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useCommand } from '@/lib/commands';
 import { useEffect, useMemo, useState } from 'react';
-import { useAtom, useAtomValue } from 'jotai';
+import * as stylex from '@stylexjs/stylex';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { toast } from '@/lib/toast';
 import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
@@ -37,6 +38,7 @@ import {
 } from '@/atoms';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { scheduleListColumnWidthsAtom, scheduleSplitListWidthAtom } from '@/atoms/schedules';
+import { mobileHomeReturnTabAtom } from '@/atoms/mobile-home-state';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import {
   onlineMachineIdsAtom,
@@ -67,7 +69,167 @@ import { FieldIssueMark } from './schedule-field-issue-mark';
 import { pickScheduleAgent, seedScheduleAgentRunRef } from './schedule-agent-defaults';
 import { readChatLandingDefaults } from '@/lib/chat-landing-defaults';
 
-export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
+const DARK =
+  ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))';
+
+const styles = stylex.create({
+  mobileDetail: {
+    display: 'flex',
+    flexDirection: 'column',
+    boxSizing: 'border-box',
+    height: '100%',
+    minHeight: 0,
+    // Mobile detail owns its top edge; desktop insets belong to the workspace shell.
+    paddingTop: 'var(--safe-area-top, 0px)',
+  },
+  loadingMessage: { padding: '20px' },
+  readOnlyMessage: {
+    width: '100%',
+    maxWidth: '672px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    paddingLeft: {
+      default: '16px',
+      '@media (min-width: 640px)': '24px',
+    },
+    paddingRight: {
+      default: '16px',
+      '@media (min-width: 640px)': '24px',
+    },
+    paddingTop: '16px',
+    fontSize: '0.9em',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  blockedMessage: {
+    display: 'flex',
+    maxWidth: '672px',
+    alignItems: 'flex-start',
+    columnGap: '8px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    marginTop: '16px',
+    borderWidth: '0.5px',
+    borderStyle: 'solid',
+    borderColor: 'hsl(var(--status-warning) / 0.4)',
+    borderRadius: 'var(--radius-lg)',
+    paddingLeft: {
+      default: '12px',
+      '@media (min-width: 640px)': '16px',
+    },
+    paddingRight: {
+      default: '12px',
+      '@media (min-width: 640px)': '16px',
+    },
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    fontSize: '0.9em',
+  },
+  warningIcon: {
+    marginTop: '2px',
+    width: '14px',
+    height: '14px',
+    flexShrink: 0,
+    color: 'hsl(var(--status-warning))',
+  },
+  detailContent: { minHeight: 0, flex: '1 1 0%', overflow: 'auto' },
+  page: {
+    display: 'flex',
+    height: '100%',
+    minHeight: 0,
+    flexDirection: 'column',
+    backgroundColor: 'hsl(var(--background))',
+  },
+  errorNotice: {
+    paddingLeft: '20px',
+    paddingRight: '20px',
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    fontSize: '1em',
+    color: 'hsl(var(--destructive))',
+  },
+  content: { minHeight: 0, flex: '1 1 0%' },
+  history: {
+    width: '100%',
+    maxWidth: '672px',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    paddingLeft: {
+      default: '16px',
+      '@media (min-width: 640px)': '24px',
+    },
+    paddingRight: {
+      default: '16px',
+      '@media (min-width: 640px)': '24px',
+    },
+    paddingBottom: '32px',
+  },
+  historyTitle: {
+    marginBottom: '6px',
+    paddingLeft: '12px',
+    paddingRight: '12px',
+    fontSize: '0.8em',
+    fontWeight: 400,
+    color: 'hsl(var(--muted-foreground))',
+  },
+  noRuns: { padding: '12px', fontSize: '0.9em', color: 'hsl(var(--muted-foreground))' },
+  historyRow: {
+    display: 'flex',
+    width: '100%',
+    alignItems: 'center',
+    columnGap: '12px',
+    paddingLeft: '12px',
+    paddingRight: '12px',
+    paddingTop: '8px',
+    paddingBottom: '8px',
+    textAlign: 'left',
+    fontSize: '0.9em',
+    transitionProperty: 'background-color',
+    transitionDuration: '150ms',
+    transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': {
+        default: 'hsl(var(--foreground) / 0.03)',
+        [DARK]: 'hsl(0 0% 100% / 0.04)',
+      },
+    },
+  },
+  historyTitleText: {
+    minWidth: 0,
+    flex: '1 1 0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  historyMeta: { flexShrink: 0, fontSize: '0.85em', color: 'hsl(var(--muted-foreground))' },
+  historyTime: {
+    flexShrink: 0,
+    fontSize: '0.85em',
+    fontVariantNumeric: 'tabular-nums',
+    color: 'hsl(var(--muted-foreground))',
+  },
+});
+
+export function SchedulesWorkspace({
+  scheduleId,
+  insetSafeArea = false,
+  hideHeader = false,
+  query,
+  createScheduleRef,
+}: {
+  scheduleId?: string;
+  /**
+   * The `/schedules` route on a phone has no shell inset. The home tab
+   * already clears the status bar with its own header, so it leaves this off.
+   */
+  insetSafeArea?: boolean;
+  /** Home tab supplies the search field and the new-schedule button. */
+  hideHeader?: boolean;
+  /** Home search text. Omit so the list keeps its own field. */
+  query?: string;
+  /** Home header plus button calls this. Assigned while this list is mounted. */
+  createScheduleRef?: { current: (() => void) | null };
+}) {
   const { t } = useTranslation();
   const activeRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
   const scope = useResolvedWorkspaceScope();
@@ -76,6 +238,7 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
   const user = useAtomValue(userAtom);
   const slug = useAtomValue(currentWorkspaceSlugAtom);
   const navigate = useNavigate();
+  const setReturnTab = useSetAtom(mobileHomeReturnTabAtom);
   const registry = useSchedules();
   const agents = useAtomValue(getAllAgentConfigAtom);
   const localProjects = useVisibleLocalProjects({ includeMachineFlock: true });
@@ -104,17 +267,36 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
     () => (runtime ? new ScheduleRepository(runtime.repo, runtime.workspaceId) : null),
     [runtime]
   );
+  // Phone list lives on the home schedules tab (workspace switch, search,
+  // settings, bottom bar). Closing or saving replaces this page with that
+  // tab. Desktop still returns to the schedules route.
   const open = (id?: string) => {
-    if (slug)
-      void navigate(
-        id
-          ? {
-              to: '/$workspaceName/schedules/$scheduleId',
-              params: { workspaceName: slug, scheduleId: id },
-            }
-          : { to: '/$workspaceName/schedules', params: { workspaceName: slug } }
-      );
+    if (!slug) return;
+    if (!id && mobile) {
+      setReturnTab('schedules');
+      void navigate({
+        to: '/$workspaceName/chat',
+        params: { workspaceName: slug },
+        replace: true,
+      });
+      return;
+    }
+    void navigate(
+      id
+        ? {
+            to: '/$workspaceName/schedules/$scheduleId',
+            params: { workspaceName: slug, scheduleId: id },
+          }
+        : { to: '/$workspaceName/schedules', params: { workspaceName: slug } }
+    );
   };
+  if (createScheduleRef) createScheduleRef.current = () => open('new');
+  useEffect(() => {
+    if (!createScheduleRef) return undefined;
+    return () => {
+      createScheduleRef.current = null;
+    };
+  }, [createScheduleRef]);
   const mutate = async (action: () => Promise<void>) => {
     try {
       setError(undefined);
@@ -202,8 +384,8 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
       if (row) toggle(row);
     },
   });
-  // Saving or closing always lands on the list: the list is the page, and a
-  // schedule opens beside it (a sliding panel on desktop, a pushed page on mobile).
+  // Saving or closing returns to the list: beside the editor on desktop, and
+  // the home schedules tab on a phone.
   const content = !scheduleId ? null : scheduleId === 'new' ? (
     <ScheduleEditor
       key={`${runtime?.workspaceId}:new`}
@@ -211,13 +393,15 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
       onOpenSession={openSession}
     />
   ) : !detail.ready ? (
-    <p className="p-5">{t('schedules.loading', 'Loading schedules…')}</p>
+    <p {...stylex.props(styles.loadingMessage)}>{t('schedules.loading', 'Loading schedules…')}</p>
   ) : !detail.document || !row ? (
-    <p className="p-5">{t('schedules.notFound', 'This schedule is unavailable or deleted.')}</p>
+    <p {...stylex.props(styles.loadingMessage)}>
+      {t('schedules.notFound', 'This schedule is unavailable or deleted.')}
+    </p>
   ) : (
     <>
       {!canManage ? (
-        <p className="mx-auto max-w-2xl px-4 pt-4 text-[0.9em] text-muted-foreground sm:px-6">
+        <p {...stylex.props(styles.readOnlyMessage)}>
           {t(
             'schedules.readOnly',
             'Only the owner can edit this schedule, using a machine with Schedule support.'
@@ -227,11 +411,8 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
       {registry.runtimes
         .filter((r) => r === matchingScheduleRuntime(row, registry.runtimes) && r.blockedCode)
         .map((r) => (
-          <p
-            className="mx-auto mt-4 flex max-w-2xl items-start gap-2 rounded-lg border-[0.5px] border-status-warning/40 px-3 py-2 text-[0.9em] sm:px-4"
-            key={r.machineId}
-          >
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-status-warning" />
+          <p {...stylex.props(styles.blockedMessage)} key={r.machineId}>
+            <AlertTriangle {...stylex.props(styles.warningIcon)} />
             <span>
               {t(
                 `schedules.errors.${r.blockedCode}`,
@@ -283,7 +464,7 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
             : undefined
         }
       />
-      <div data-settings-surface="" className="min-h-0 flex-1 overflow-auto">
+      <div data-settings-surface="" {...stylex.props(styles.detailContent)}>
         {content}
       </div>
     </>
@@ -314,6 +495,9 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
       columnWidths={columnWidths ?? undefined}
       onColumnWidthsChange={setColumnWidths}
       onOpenSession={openSession}
+      insetSafeArea={mobile && insetSafeArea}
+      hideHeader={hideHeader}
+      query={query}
       contextForRow={(item) => ({
         machine: machines.get(item.machineId as never)?.name ?? item.machineId,
         timeZone: machines.get(item.machineId as never)?.timeZone,
@@ -342,7 +526,7 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
     />
   );
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background" data-settings-surface="">
+    <div {...stylex.props(styles.page)} data-settings-surface="">
       <AlertDialog.Root
         open={!!confirmation}
         onOpenChange={(isOpen) => {
@@ -369,13 +553,13 @@ export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
         </AlertDialog.Content>
       </AlertDialog.Root>
       {error ? (
-        <p className="px-5 py-2 text-[1em] text-destructive" role="alert">
+        <p {...stylex.props(styles.errorNotice)} role="alert">
           {error}
         </p>
       ) : null}
-      <div className="min-h-0 flex-1">
+      <div {...stylex.props(styles.content)}>
         {mobile && scheduleId ? (
-          <div className="flex h-full min-h-0 flex-col">{detailPane}</div>
+          <div {...stylex.props(styles.mobileDetail)}>{detailPane}</div>
         ) : (
           list
         )}
@@ -741,12 +925,10 @@ function ScheduleSessionHistory({ scheduleId }: { scheduleId: string }) {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   // Under the editor, at the bottom of the open schedule.
   return (
-    <section className="mx-auto w-full max-w-2xl px-4 pb-8 sm:px-6">
-      <h2 className="mb-1.5 px-3 text-[0.8em] font-normal text-muted-foreground">
-        {t('schedules.history', 'Run history')}
-      </h2>
+    <section {...stylex.props(styles.history)}>
+      <h2 {...stylex.props(styles.historyTitle)}>{t('schedules.history', 'Run history')}</h2>
       {linked.length === 0 ? (
-        <p {...scheduleCardProps('px-3 py-3 text-[0.9em] text-muted-foreground')}>
+        <p {...scheduleCardProps(stylex.props(styles.noRuns).className)}>
           {t('schedules.noRuns', 'No Sessions have been created yet.')}
         </p>
       ) : (
@@ -774,20 +956,16 @@ function ScheduleHistoryRow({ session: s, onOpen }: { session: SessionMeta; onOp
   const { t } = useTranslation();
   const liveStatus = useAtomValue(sessionLiveStatusAtomFamily(s.id));
   return (
-    <button
-      key={s.id}
-      className="flex w-full items-center gap-3 px-3 py-2 text-left text-[0.9em] transition-colors hover:bg-foreground/[0.03] dark:hover:bg-white/[0.04]"
-      onClick={onOpen}
-    >
-      <span className="min-w-0 flex-1 truncate">
+    <button key={s.id} {...stylex.props(styles.historyRow)} onClick={onOpen}>
+      <span {...stylex.props(styles.historyTitleText)}>
         {s.title || t('schedules.openRun', 'Open run')}
       </span>
-      <span className="shrink-0 text-[0.85em] text-muted-foreground">
+      <span {...stylex.props(styles.historyMeta)}>
         {liveStatus
           ? t(`schedules.sessionState.${liveStatus.type}`, liveStatus.type)
           : t('schedules.sessionState.inactive', 'Inactive')}
       </span>
-      <time className="shrink-0 text-[0.85em] tabular-nums text-muted-foreground">
+      <time {...stylex.props(styles.historyTime)}>
         {new Date(s.createdAt).toLocaleString(undefined, {
           dateStyle: 'short',
           timeStyle: 'short',

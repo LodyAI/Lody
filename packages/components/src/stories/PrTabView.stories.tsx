@@ -557,7 +557,20 @@ export const ErrorState: Story = {
     prNumber: 42,
     state: 'error',
     data: null,
-    error: 'GitHub returned 404. The PR may have been deleted.',
+    error: 'GitHub request failed: 404 Not Found',
+    ...storyCallbacks,
+  },
+};
+
+/** Association/identity not yet confirmed server-side: the verified cause stays inline. */
+export const ErrorIdentityBlocked: Story = {
+  args: {
+    repoFullName: 'loro-dev/lody',
+    prNumber: 42,
+    state: 'error',
+    data: null,
+    error:
+      'Cannot verify this session’s repository identity. GitHub operations are paused. Retry after reconnecting to Lody. If the repository was removed, reinstalled or renamed, ask a workspace administrator to verify the original repository and PR association; a matching name alone is not enough.',
     ...storyCallbacks,
   },
 };

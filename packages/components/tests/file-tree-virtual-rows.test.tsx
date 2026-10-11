@@ -66,6 +66,7 @@ describe('VirtualFileTree row mounting', () => {
 
   beforeEach(async () => {
     await initI18n('en');
+    vi.useFakeTimers();
     viewportHeightPx = VIEWPORT_HEIGHT_PX;
     installLayoutStubs();
   });
@@ -74,6 +75,10 @@ describe('VirtualFileTree row mounting', () => {
     if (root) {
       await act(async () => root?.unmount());
     }
+    // The virtualizer's scroll-end debounce outlives its event listeners.
+    // Drain it while jsdom still exists, before returning to the real clock.
+    await act(async () => vi.runOnlyPendingTimersAsync());
+    vi.useRealTimers();
     root = null;
     container?.remove();
     container = null;
@@ -169,6 +174,11 @@ describe('VirtualFileTree row mounting', () => {
 
     // The window actually followed the scroll instead of staying pinned at the top.
     expect(firstLabel()).not.toBe('file-0.ts');
+    const scrolledLabel = firstLabel();
+    await act(async () => vi.runOnlyPendingTimersAsync());
+    expect(firstLabel()).toBe(scrolledLabel);
+    expect(countRows(host)).toBeGreaterThan(0);
+    expect(countRows(host)).toBeLessThanOrEqual(ceiling);
   });
 
   it('renders every row without a spacer for a small tree', async () => {

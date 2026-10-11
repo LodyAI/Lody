@@ -11,6 +11,14 @@ this page is the full text of the rules summarised there.
   attachment-rich list case is `SessionChatStream` → `HumanAndAgentAttachments`;
   shared full-page session conversation coverage is `SessionConversationPage.stories.tsx`
   using `session-conversation-page.tsx`.
+- `SessionInfoBar` → `DiscoveredPrAssociationRejected` feeds synthetic owner
+  metadata through production PR selection/action gating into the real bar,
+  without hosted mutations. Run `pnpm --filter @lody/components exec playwright test
+  tests/e2e/session-info-bar-observation.spec.ts --workers=1` for its browser
+  regression and ignored screenshot output. The optional `B08_SCREENSHOT_FIXTURES`
+  directory supplies scheduler-captured `before.json` / `after.json` for comparison;
+  see the [observation decision](../notes/proposed/bug-fix/2026-10-01-pr-observation-association.md)
+  for evidence and acceptance limits.
 - Browser Preview has `States` (`SessionBrowserPreview.stories.tsx`) for deterministic
   presentation and `Controller` (`SessionBrowserPanel.stories.tsx`) for real Enter and
   restore handlers with synthetic RPC data. Both use production presentation:

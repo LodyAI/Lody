@@ -1,5 +1,5 @@
 export type NightlyDownload = {
-  platform: 'mac' | 'win' | 'linux';
+  platform: 'mac' | 'win' | 'linux' | 'android';
   label: string;
   href: string;
 };
@@ -28,7 +28,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** No latest aliases or metadata-provided absolute URLs: all six files must agree. */
+/** No latest aliases or metadata-provided absolute URLs; Android is additive. */
 export function parseNightlyRelease(value: unknown, base: string): NightlyRelease {
   const root = resolveNightlyDownloadBase(base);
   if (
@@ -61,5 +61,50 @@ export function parseNightlyRelease(value: unknown, base: string): NightlyReleas
     }
     return { platform, label, href: `${root}/${encodeURIComponent(file)}` };
   });
+  const apk = `Lody-${value.version}-android.apk`;
+  // Existing desktop-only releases remain downloadable during mobile rollout.
+  if (files.includes(apk) || Object.hasOwn(mapping, apk)) {
+    if (mapping[apk] !== apk || !files.includes(apk)) {
+      throw new Error('Incomplete Android Nightly release manifest');
+    }
+    downloads.push({
+      platform: 'android',
+      label: 'APK',
+      href: `${root}/${encodeURIComponent(apk)}`,
+    });
+  }
   return { version: value.version, minimumStableVersion: value.minimumStableVersion, downloads };
+}
+
+export type NightlyAndroidRelease = Pick<NightlyRelease, 'version' | 'downloads'>;
+
+/** Android can advance or remain available independently of the desktop release. */
+export function parseNightlyAndroidRelease(value: unknown, base: string): NightlyAndroidRelease {
+  const root = resolveNightlyDownloadBase(base);
+  if (
+    !root ||
+    !isRecord(value) ||
+    value.schema !== 1 ||
+    value.channel !== 'nightly' ||
+    value.target !== 'android' ||
+    typeof value.version !== 'string' ||
+    !/^\d{1,8}\.\d{1,8}\.\d{1,8}-nightly\.(0|[1-9]\d{0,7})$/u.test(value.version) ||
+    !isRecord(value.downloads) ||
+    !Array.isArray(value.files)
+  )
+    throw new Error('Invalid Android Nightly release manifest');
+  const apk = `Lody-${value.version}-android.apk`;
+  if (value.downloads[apk] !== apk || !value.files.includes(apk)) {
+    throw new Error('Incomplete Android Nightly release manifest');
+  }
+  return {
+    version: value.version,
+    downloads: [
+      {
+        platform: 'android',
+        label: 'APK',
+        href: `${root}/${encodeURIComponent(apk)}`,
+      },
+    ],
+  };
 }

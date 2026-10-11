@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import * as stylex from '@stylexjs/stylex';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -29,11 +30,11 @@ import { SettingsEmptyList, settingsRecordsCard } from './compact-layout';
 import { settingsType as type } from './type.stylex';
 
 const styles = stylex.create({
-  lead: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
-  notice: { margin: 0, fontSize: type.caption, color: colors.label },
-  error: { margin: 0, fontSize: type.caption, color: colors.destructive },
+  lead: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
+  notice: { margin: 0, fontSize: uiText.footnoteSize, color: colors.label },
+  error: { margin: 0, fontSize: uiText.footnoteSize, color: colors.destructive },
   toolbar: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: space[2] },
-  toggleLabel: { fontSize: type.caption, color: colors.secondaryLabel },
+  toggleLabel: { fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   /**
    * One share: the publisher's face, the title and when it was published. The
    * row is the hit area of its title button, through the button's `::after`.
@@ -70,7 +71,7 @@ const styles = stylex.create({
     WebkitBoxOrient: 'vertical',
     WebkitLineClamp: 2,
     overflow: 'hidden',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.label,
   },
   titleRevoked: { color: colors.secondaryLabel },
@@ -80,7 +81,7 @@ const styles = stylex.create({
     gap: space[1.5],
     margin: 0,
     marginTop: '2px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   /** Above the row's hit area, so the face opens its own popover. */

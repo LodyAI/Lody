@@ -60,7 +60,6 @@ const styles = stylex.create({
     flexShrink: 0,
     color: colors.tertiaryLabel,
     fontFamily: MONO,
-    lineHeight: 1.6,
     userSelect: 'none',
   },
   code: {
@@ -68,7 +67,6 @@ const styles = stylex.create({
     minWidth: 0,
     margin: 0,
     fontFamily: MONO,
-    lineHeight: 1.6,
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
     color: colors.label,
@@ -77,7 +75,6 @@ const styles = stylex.create({
   output: {
     margin: 0,
     fontFamily: MONO,
-    lineHeight: 1.6,
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
     color: colors.secondaryLabel,

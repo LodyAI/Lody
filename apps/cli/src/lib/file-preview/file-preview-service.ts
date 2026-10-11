@@ -49,8 +49,17 @@ export type FilePreviewWorkspaceResolver = (sessionId: SessionId) => Promise<
     }
 >;
 
+/** Local ownership is required even when the session's workspace is unavailable. */
+export type FilePreviewLocalWorkspaceResolver = (
+  sessionId: SessionId
+) => Promise<
+  | { readonly ok: true; readonly ownerSessionId: SessionId; readonly workspaceRoot: string | null }
+  | Extract<Awaited<ReturnType<FilePreviewWorkspaceResolver>>, { ok: false }>
+>;
+
 export type FilePreviewServiceOptions = {
   readonly resolveWorkspace: FilePreviewWorkspaceResolver;
+  readonly resolveLocalWorkspace: FilePreviewLocalWorkspaceResolver;
   readonly limits?: Partial<typeof FILE_PREVIEW_V3_LIMITS>;
   readonly pathPolicy?: FilePreviewPathPolicyOptions;
   /** Test seam: overrides the fixed extra roots entirely. */
@@ -76,10 +85,17 @@ export class FilePreviewService {
 
   /** Local IPC resolves identity; Electron owns content IO and resource lifetime. */
   async resolveLocalFile(
-    request: FilePreviewV3Request
+    request: FilePreviewV3Request,
+    expectedOwnerSessionId?: string
   ): Promise<LocalFileResolution | import('@lody/shared').FilePreviewV3Error> {
-    const workspace = await this.deps.resolveWorkspace(request.sessionId as SessionId);
+    const workspace = await this.deps.resolveLocalWorkspace(request.sessionId as SessionId);
     if (!workspace.ok) return filePreviewV3Error(workspace.code, { message: workspace.message });
+    if (expectedOwnerSessionId && workspace.ownerSessionId !== expectedOwnerSessionId) {
+      return filePreviewV3Error('permission_denied', {
+        message: 'Local file preview owner session mismatch.',
+        path: request.path,
+      });
+    }
     const resolution = resolveFilePreviewPath({
       workspaceRoot: workspace.workspaceRoot,
       requestedPath: request.path,

@@ -56,7 +56,8 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
 
 - Sidebar footer: Help (`?`), Archive, Settings, in that order. Help retains the
   documentation, GitHub repository, community, GitHub Issues feedback, and bug-report menu; Archive is a direct
-  button and becomes the return action while open. See the
+  button and becomes the return action while open. Desktop controls share the UI
+  primitive's small size; mobile actions retain their touch targets. See the
   [footer Spec](../../../../specs/sidebar-footer.md).
 
 - [Zen layout](../../../../specs/zen-layout.md): `AppCommands` dispatches the shared
@@ -65,6 +66,12 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
 - Sidebar Search, immediately below New Chat, opens the shared command palette
   through `lib/commands/palette-state.ts`; see the [Spec](../../../../specs/sidebar-search.md).
 - Chat landing: `chat/chat-landing.tsx`.
+- Desktop Settings: [`settings/desktop-settings-modal.tsx`](settings/desktop-settings-modal.tsx)
+  collapses its sidebar to an icon rail when the panel is at most 720px wide:
+  same rows and selection, labels and group headings fold away, and each icon
+  keeps an accessible name and a hover tooltip. The page and its editors stay
+  mounted through resizing; header actions wrap within the pane. [Decision and
+  verification](../../../../.agents/notes/implemented/bug-fix/2026-10-01-narrow-settings-panel.md).
 - Browser desktop sign-in handoff: `login-page.tsx` under `?client_id=electron`,
   the page the desktop app opens in the system browser. A desktop sign-out leaves
   this browser signed in as the previous account, so the page names that account

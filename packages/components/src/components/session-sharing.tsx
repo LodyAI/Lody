@@ -125,17 +125,22 @@ export function SessionSharingIndicator({
 
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger delay={300} render={<span
-          tabIndex={0}
-          aria-label={`${label}: ${description}`}
-          className={cn(
-            '-m-1 box-content inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-xs p-1',
-            'text-sidebar-foreground-muted outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50',
-            className
-          )}
-        >
-          <LockKeyhole className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
-        </span>}/>
+      <Tooltip.Trigger
+        delay={300}
+        render={
+          <span
+            tabIndex={0}
+            aria-label={`${label}: ${description}`}
+            className={cn(
+              '-m-1 box-content inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-xs p-1',
+              'text-sidebar-foreground-muted outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50',
+              className
+            )}
+          >
+            <LockKeyhole className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+          </span>
+        }
+      />
       <Tooltip.Content side="right" className="max-w-72 px-2.5 py-2">
         <div className="font-medium">{label}</div>
         <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
@@ -191,14 +196,19 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
 
   return (
     <Tooltip.Root>
-      <Tooltip.Trigger delay={300} render={<span
-          tabIndex={0}
-          aria-label={`${label}: ${description}`}
-          className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
-        >
-          <Archive className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>{label}</span>
-        </span>}/>
+      <Tooltip.Trigger
+        delay={300}
+        render={
+          <span
+            tabIndex={0}
+            aria-label={`${label}: ${description}`}
+            className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
+          >
+            <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{label}</span>
+          </span>
+        }
+      />
       <Tooltip.Content side="bottom" align="end" className="max-w-72 px-2.5 py-2">
         <div className="font-medium">{label}</div>
         <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
@@ -262,17 +272,22 @@ export function SessionAccessControl({
   if (!isPrivate) {
     return (
       <Tooltip.Root>
-        <Tooltip.Trigger delay={300} render={<button
-            type="button"
-            aria-label={isShared ? `${sharedLabel}: ${sharedDescription}` : shareLabel}
-            className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
-            onClick={() => {
-              publicShare?.onOpen();
-            }}
-          >
-            <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{isShared ? sharedLabel : shareLabel}</span>
-          </button>}/>
+        <Tooltip.Trigger
+          delay={300}
+          render={
+            <button
+              type="button"
+              aria-label={isShared ? `${sharedLabel}: ${sharedDescription}` : shareLabel}
+              className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
+              onClick={() => {
+                publicShare?.onOpen();
+              }}
+            >
+              <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{isShared ? sharedLabel : shareLabel}</span>
+            </button>
+          }
+        />
         <Tooltip.Content side="bottom" align="end" className="max-w-72 px-2.5 py-2">
           {isShared ? sharedDescription : shareDescription}
         </Tooltip.Content>
@@ -288,25 +303,29 @@ export function SessionAccessControl({
 
   return (
     <Menu.Root>
-      <Menu.Trigger render={<button
-          type="button"
-          aria-label={
-            isShared ? `${sharedLabel}: ${sharedDescription}` : `${title}: ${description}`
-          }
-          className={cn(
-            SESSION_HEADER_STATUS_PILL_CLASS,
-            'data-[state=open]:border-border data-[state=open]:text-foreground',
-            className
-          )}
-        >
-          {isShared ? (
-            <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : (
-            <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
-          )}
-          <span>{triggerLabel}</span>
-          <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
-        </button>}>
+      <Menu.Trigger
+        render={
+          <button
+            type="button"
+            aria-label={
+              isShared ? `${sharedLabel}: ${sharedDescription}` : `${title}: ${description}`
+            }
+            className={cn(
+              SESSION_HEADER_STATUS_PILL_CLASS,
+              'data-[state=open]:border-border data-[state=open]:text-foreground',
+              className
+            )}
+          >
+            {isShared ? (
+              <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            <span>{triggerLabel}</span>
+            <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
+          </button>
+        }
+      >
         <button
           type="button"
           aria-label={
@@ -355,25 +374,27 @@ export function SessionAccessControl({
           onClick={() => {
             void onShareWithTeam?.();
           }}
+          icon={
+            state.privateReason === 'machine-not-registered' ? (
+              <Monitor size="100%" />
+            ) : state.canManage ? (
+              Users
+            ) : (
+              LockKeyhole
+            )
+          }
         >
-          {state.privateReason === 'machine-not-registered' ? (
-            <Monitor className="h-3.5 w-3.5 shrink-0" />
-          ) : state.canManage ? (
-            <Users className="h-3.5 w-3.5 shrink-0" />
-          ) : (
-            <LockKeyhole className="h-3.5 w-3.5 shrink-0" />
-          )}
           {state.canManage
             ? getSessionShareActionLabel(t, state)
             : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
         </Menu.Item>
         {publicShare ? (
           <Menu.Item
+            icon={Share2}
             onClick={() => {
               publicShare.onOpen();
             }}
           >
-            <Share2 className="h-3.5 w-3.5 shrink-0" />
             {shareLabel}
           </Menu.Item>
         ) : null}
@@ -409,7 +430,9 @@ function ShareConfirmationDialog({
           <AlertDialog.Description>{description}</AlertDialog.Description>
         </AlertDialog.Header>
         <AlertDialog.Footer>
-          <AlertDialog.Cancel disabled={isSharing}>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+          <AlertDialog.Cancel disabled={isSharing}>
+            {t('common.cancel', 'Cancel')}
+          </AlertDialog.Cancel>
           <Button
             disabled={isSharing}
             onClick={() => {

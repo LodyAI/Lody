@@ -153,7 +153,7 @@ export class SessionForkPage {
     await expect
       .poll(
         async () => ({
-          terminals: await this.listTerminals(resources.targetSessionId),
+          terminals: await this.listTerminalsDuringCleanup(resources.targetSessionId),
           worktreeExists: existsSync(resources.targetWorktreePath),
           targetAgentAlive: isProcessAlive(resources.targetAgentPid),
         }),
@@ -276,6 +276,22 @@ export class SessionForkPage {
     return (await this.page.evaluate(async (targetSessionId) => {
       return await window.ipc!.invoke('terminal.list', targetSessionId);
     }, sessionId)) as TerminalSnapshot[];
+  }
+
+  private async listTerminalsDuringCleanup(
+    sessionId: string
+  ): Promise<TerminalSnapshot[] | { transportError: string }> {
+    try {
+      return await this.listTerminals(sessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/terminal_socket_closed|terminal_socket_unavailable|daemon_unavailable/u.test(message)) {
+        // Cleanup is proven only by a successful empty terminal list. A relay
+        // disconnect remains a nonmatching poll result until recovery or timeout.
+        return { transportError: message };
+      }
+      throw error;
+    }
   }
 
   private assistantResponse() {

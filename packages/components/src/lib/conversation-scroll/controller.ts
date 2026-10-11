@@ -36,6 +36,8 @@ const REARM_DISTANCE_PX = 4;
 const MAX_GESTURE_BOTTOMS = 32;
 /** How long a send (or a smooth jump) takes to glide to its target. */
 const GLIDE_MS = 360;
+/** Keep the previous message's tail visible above a newly sent message. */
+const SENT_CONTEXT_PX = 100;
 /** Differences below this are sub-pixel rounding, not movement. */
 const EPSILON_PX = 1;
 
@@ -206,6 +208,7 @@ export class ScrollController {
   /** Shown again since the last transaction: the DOM position is not the reader's. */
   private reshown = false;
   private readonly reportedMinRow = new Set<string>();
+  private lastReportedScroll: number | null = null;
 
   constructor(options: ControllerOptions) {
     this.host = options.host;
@@ -320,7 +323,13 @@ export class ScrollController {
     const previous = this.committedPlan;
     this.committedPlan = this.lastPlan;
     if (this.rows.length === 0 || this.hidden) return;
-    if (!this.tx) this.beginTransaction(this.reshown ? 'reshow' : 'commit', previous);
+    // A parent setState from `onScroll` (hydration, the top fade) re-commits
+    // the list with the same layout. Starting a fresh cycle every time, then
+    // reporting the offset again, is the React #185 nested-update loop.
+    if (!this.tx) {
+      if (this.isSettled()) return;
+      this.beginTransaction(this.reshown ? 'reshow' : 'commit', previous);
+    }
     this.continueTransaction();
   }
 
@@ -408,7 +417,7 @@ export class ScrollController {
       maxScrollTop: maxNow,
       geometryRevision: this.geometry.revision,
     };
-    this.callbacks.onScroll?.(scrollTop);
+    this.reportScroll(scrollTop);
     if (rangeMoved) this.host.requestCommit(false);
   }
 
@@ -431,14 +440,19 @@ export class ScrollController {
     this.pointerHeld = held;
   }
 
-  setTouchActive(active: boolean): void {
+  /** A tap, pinch or cancelled touch has no conversation momentum. */
+  setTouchActive(active: boolean, continuesAfterRelease = true): void {
     this.touchActive = active;
-    if (!active) this.momentum = true;
+    this.momentum = !active && continuesAfterRelease;
+    if (active || !continuesAfterRelease) {
+      this.gesture = null;
+      this.compensationPendingCheck = false;
+      this.momentumStats = { compensations: 0, interruptions: 0 };
+    }
   }
 
   /** The native `scrollend` event. */
   onScrollEnd(): void {
-    this.rearmAtGestureBottom();
     if (this.compensationPendingCheck && !this.scrolledSinceCompensation) {
       this.momentumStats.interruptions += 1;
     }
@@ -448,6 +462,7 @@ export class ScrollController {
     this.momentum = false;
     this.compensationPendingCheck = false;
     this.momentumStats = { compensations: 0, interruptions: 0 };
+    this.rearmAtGestureBottom();
   }
 
   // ---- Commands -----------------------------------------------------------
@@ -476,7 +491,7 @@ export class ScrollController {
     this.run('jump', true);
   }
 
-  /** Hold a just-sent row at the top with room reserved for the reply. */
+  /** Hold a just-sent row below the previous message's tail, with reply room. */
   anchorToRow(index: number): void {
     if (this.disposed) return;
     const row = this.rows[index];
@@ -489,7 +504,11 @@ export class ScrollController {
       return;
     }
     this.refreshViewport(false);
-    this.startGlide(row.key, this.contentTop, settle);
+    this.startGlide(
+      row.key,
+      this.contentTop + this.geometry.offset(index) - this.sentScrollTop(index),
+      settle
+    );
   }
 
   /** The sent row moved or vanished. Rows are keyed, so only a vanished row matters. */
@@ -647,7 +666,10 @@ export class ScrollController {
 
     if (this.intent.kind === 'sent') {
       const index = this.geometry.indexOfKey(this.intent.rowKey);
-      const usable = this.viewportHeight - this.contentTop - this.paddingBottom;
+      const destination = index < 0 ? 0 : this.sentScrollTop(index);
+      const screenY =
+        index < 0 ? this.contentTop : this.contentTop + this.geometry.offset(index) - destination;
+      const usable = this.viewportHeight - screenY - this.paddingBottom;
       if (index < 0) {
         this.cancelGlide();
         this.setIntent({ kind: 'follow' });
@@ -655,7 +677,6 @@ export class ScrollController {
         this.cancelGlide();
         this.setIntent({ kind: 'follow' });
       } else {
-        const destination = this.geometry.offset(index);
         const needed = destination + this.viewportHeight - this.paddingBottom - bottomLimit;
         if (needed <= 0) {
           this.cancelGlide();
@@ -734,12 +755,19 @@ export class ScrollController {
       return;
     }
     this.pendingExternalMove = false;
-    this.lastObserved = {
-      scrollTop: actual,
-      maxScrollTop: maxNow,
-      geometryRevision: this.geometry.revision,
-    };
-    this.finishTransaction(tx, clampedExpected, actual, true);
+    // I3: an uncovered position is never accepted. Write can move the target
+    // (sent → follow, reply-room) after the prospective coverage check; mount
+    // the worst-case window instead of reporting the hole to React.
+    const covered = this.isCovered(actual, this.committedPlan);
+    if (!covered && this.requestCoverageCommit(tx)) return;
+    if (covered) {
+      this.lastObserved = {
+        scrollTop: actual,
+        maxScrollTop: maxNow,
+        geometryRevision: this.geometry.revision,
+      };
+    }
+    this.finishTransaction(tx, clampedExpected, actual, covered);
   }
 
   private finishTransaction(
@@ -767,7 +795,52 @@ export class ScrollController {
       this.firstCycleComplete = true;
       this.callbacks.onFirstCycle?.();
     }
-    if (accepted) this.callbacks.onScroll?.(actual);
+    if (accepted) this.reportScroll(actual);
+  }
+
+  /**
+   * The last accepted cycle still holds: same geometry, the DOM is at that
+   * offset, the intent's target has not moved, and the viewport is covered.
+   * Used so a React re-render that did not change the list does not start a
+   * new cycle (and does not re-enter `onScroll` from a layout effect).
+   */
+  private isSettled(): boolean {
+    if (this.reshown || !this.firstCycleComplete || this.dirty.size > 0 || this.glide) {
+      return false;
+    }
+    const plan = this.committedPlan;
+    const last = this.lastObserved;
+    if (!plan || !last) return false;
+    if (last.geometryRevision !== this.geometry.revision) return false;
+    for (let i = 0; i < plan.keys.length; i += 1) {
+      const index = this.geometry.indexOfKey(plan.keys[i]!);
+      if (index < 0 || !this.geometry.isMeasured(index)) return false;
+    }
+    this.refreshViewport(true);
+    const scrollTop = this.host.readScrollTop();
+    if (Math.abs(scrollTop - last.scrollTop) >= 0.5) return false;
+    if (!this.isCovered(scrollTop, plan)) return false;
+    return Math.abs(this.targetScrollTop() - scrollTop) <= EPSILON_PX;
+  }
+
+  /** Expand the window and commit again; false when this pass is out of commits. */
+  private requestCoverageCommit(tx: Transaction): boolean {
+    if (tx.supplementary >= MAX_SUPPLEMENTARY_COMMITS) return false;
+    if (tx.supplementary === 0) {
+      tx.worstCase = true;
+      tx.freezeNextPlan = true;
+    }
+    tx.supplementary += 1;
+    this.host.requestCommit(true);
+    return true;
+  }
+
+  private reportScroll(offset: number): void {
+    if (this.lastReportedScroll !== null && Math.abs(this.lastReportedScroll - offset) < 0.5) {
+      return;
+    }
+    this.lastReportedScroll = offset;
+    this.callbacks.onScroll?.(offset);
   }
 
   /** Read the sizes of committed rows that are new, stale or reported dirty. */
@@ -822,6 +895,10 @@ export class ScrollController {
     );
   }
 
+  private sentScrollTop(index: number): number {
+    return Math.max(0, this.geometry.offset(index) - SENT_CONTEXT_PX);
+  }
+
   /** The scroll position the current intent (or glide frame) resolves to. */
   private targetScrollTop(): number {
     const max = this.maxScrollTop();
@@ -843,8 +920,7 @@ export class ScrollController {
       case 'sent': {
         const index = this.geometry.indexOfKey(this.intent.rowKey);
         if (index < 0) return max;
-        // The sent row rests where the first row rests: at the content top.
-        return clamp(this.geometry.offset(index));
+        return clamp(this.sentScrollTop(index));
       }
       case 'read': {
         const resolved = resolveAnchor(this.rows, this.intent.anchor, this.geometry);
@@ -939,7 +1015,10 @@ export class ScrollController {
     ) {
       return 'clamp';
     }
-    if (this.pointerHeld || this.touchActive) return 'reader';
+    // A fast touch scroll can deliver its first offset after the finger lifts.
+    // It is still the reader's movement, including when a resize samples it
+    // before its scroll event. Correcting it back to follow would fight the fling.
+    if (this.pointerHeld || this.touchActive || this.momentum) return 'reader';
     return 'unknown';
   }
 
@@ -950,8 +1029,7 @@ export class ScrollController {
   ): void {
     if (movement === 'none' || movement === 'own-write') return;
     const last = this.lastObserved;
-    // Scrollbar drags, selection auto-scroll and touch pans hold a pointer;
-    // upward movement without one is a clamp or a size correction.
+    // Reader evidence includes a held pointer and post-touch momentum.
     if (
       movement === 'reader' &&
       last &&
@@ -1056,6 +1134,9 @@ export class ScrollController {
 
   private setIntent(intent: Intent): void {
     this.intent = intent;
+    // Explicit navigation or reaching the bottom supersedes the old fling.
+    // This also bounds input evidence on hosts without `scrollend` support.
+    if (intent.kind !== 'read') this.momentum = false;
     const sticky = intent.kind !== 'read';
     if (sticky !== this.sticky) {
       this.sticky = sticky;

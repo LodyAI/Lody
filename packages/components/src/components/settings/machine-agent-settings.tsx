@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as stylex from '@stylexjs/stylex';
@@ -19,7 +20,7 @@ import { Check, ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { toast } from '@/lib/toast';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
-import { developerModeEnabledAtom, reviewAgentFeatureEnabledAtom } from '@/atoms/settings';
+import { developerModeEnabledAtom } from '@/atoms/settings';
 import { settingsDialogOpenAtom } from '@/atoms/settings';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
@@ -83,7 +84,6 @@ import {
   MachineConnectedResources,
   type MachineConnectedProject,
 } from './my-machine-connected-resources';
-import { ReviewPolicySection } from './review-policy-setting';
 import {
   AgentConfigDialog,
   type AgentConfigDialogMode,
@@ -120,7 +120,7 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: space[2],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   bannerSlot: { paddingInline: space[3], paddingTop: space[3] },
@@ -132,7 +132,7 @@ const styles = stylex.create({
     gap: space[2],
     height: '100%',
     padding: space[4],
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   column: { display: 'flex', flexDirection: 'column', width: '100%', minWidth: 0 },
@@ -187,7 +187,6 @@ const styles = stylex.create({
     paddingTop: space[2],
     paddingBottom: SHEET_BOTTOM,
   },
-  sheetPolicy: { flexGrow: 1, minHeight: 0, overflowY: 'auto', paddingBottom: SHEET_BOTTOM },
   /** A row of the machine picker: the whole line is the choice. */
   pickerRow: {
     boxSizing: 'border-box',
@@ -215,7 +214,7 @@ const styles = stylex.create({
     ...TRUNCATE,
     display: 'block',
     marginTop: '2px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   pickerCheck: {
@@ -242,7 +241,7 @@ const styles = stylex.create({
   headingSubtitle: {
     margin: 0,
     marginTop: '2px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   stack: { display: 'flex', flexDirection: 'column', gap: space[3] },
@@ -254,29 +253,29 @@ const styles = stylex.create({
     paddingInline: space[4],
     paddingBlock: space[8],
     textAlign: 'center',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   privateSection: { display: 'flex', flexDirection: 'column', gap: space[3], paddingTop: space[3] },
   privateHeading: { paddingInline: space[1] },
   privateTitleLine: { display: 'flex', alignItems: 'center', gap: space[2] },
-  privateTitle: { margin: 0, fontSize: type.caption, fontWeight: 400, color: colors.label },
+  privateTitle: { margin: 0, fontSize: uiText.footnoteSize, fontWeight: 400, color: colors.label },
   count: {
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontVariantNumeric: 'tabular-nums',
     color: colors.secondaryLabel,
   },
   privateHint: {
     margin: 0,
     marginTop: '2px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   selectPrompt: {
     paddingInline: space[1],
     paddingBlock: space[8],
     textAlign: 'center',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   /** The disclosure is the card's first line; the pointer fills the whole of it. */
@@ -293,7 +292,7 @@ const styles = stylex.create({
     borderWidth: 0,
     color: colors.label,
     fontFamily: 'inherit',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     fontWeight: 400,
     textAlign: 'start',
     cursor: 'pointer',
@@ -303,7 +302,7 @@ const styles = stylex.create({
     margin: 0,
     paddingInline: space[4],
     paddingBottom: '10px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.375,
     color: colors.secondaryLabel,
   },
@@ -321,11 +320,11 @@ const styles = stylex.create({
     borderWidth: 0,
     color: colors.label,
     fontFamily: 'inherit',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     textAlign: 'start',
     cursor: 'pointer',
   },
-  manage: { flexShrink: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  manage: { flexShrink: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
 });
 
 export type MachineAgentSettingsProps = {
@@ -415,7 +414,6 @@ export function MachineAgentSettings({
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const authToken = useAtomValue(authTokenAtom);
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
-  const reviewAgentEnabled = useAtomValue(reviewAgentFeatureEnabledAtom);
   const setSettingsDialogOpen = useSetAtom(settingsDialogOpenAtom);
   const sessionMetaCache = useAtomValue(sessionMetaCacheAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -460,7 +458,6 @@ export function MachineAgentSettings({
     useSetAtom(machineSettingsFilterAtom),
   ];
   const [mobileMachinePickerOpen, setMobileMachinePickerOpen] = useState(false);
-  const [mobileReviewPolicyOpen, setMobileReviewPolicyOpen] = useState(false);
   const effectiveFilter = filter;
   const [desktopExpandedMachineId, setDesktopExpandedMachineId] = useState<MachineId | null>(
     selectedMachineId
@@ -1340,19 +1337,6 @@ export function MachineAgentSettings({
                 onDeleteSetup={handleDeleteSetup}
               />
             ) : null}
-            {reviewAgentEnabled ? (
-              <MobileSettingsSection>
-                <MobileSettingsRow
-                  label={t('settings.review.title', 'Review agent')}
-                  helper={t(
-                    'settings.review.machineConfigHelper',
-                    'Choose the reviewer used by sessions on each machine.'
-                  )}
-                  onClick={() => setMobileReviewPolicyOpen(true)}
-                  trailing={<ChevronRight {...stylex.props(styles.icon16)} />}
-                />
-              </MobileSettingsSection>
-            ) : null}
           </div>
           {remoteMachinesAvailable ? (
             <Drawer open={mobileMachinePickerOpen} onOpenChange={setMobileMachinePickerOpen}>
@@ -1405,24 +1389,6 @@ export function MachineAgentSettings({
                       );
                     })}
                   </div>
-                </div>
-              </DrawerContent>
-            </Drawer>
-          ) : null}
-          {reviewAgentEnabled ? (
-            <Drawer open={mobileReviewPolicyOpen} onOpenChange={setMobileReviewPolicyOpen}>
-              <DrawerContent className="h-[88dvh]! max-h-[88dvh]!">
-                <DrawerTitle {...stylex.props(styles.sheetTitle)}>
-                  {t('settings.review.title', 'Review agent')}
-                </DrawerTitle>
-                <DrawerDescription {...stylex.props(styles.srOnly)}>
-                  {t(
-                    'settings.review.machineConfigHelper',
-                    'Choose the reviewer used by sessions on each machine.'
-                  )}
-                </DrawerDescription>
-                <div {...stylex.props(styles.sheetPolicy)}>
-                  {mobileReviewPolicyOpen ? <ReviewPolicySection /> : null}
                 </div>
               </DrawerContent>
             </Drawer>
@@ -1829,7 +1795,6 @@ export function MachineAgentSettings({
           {t('settings.agent.machineTabs.selectPromptAgent', 'Select a machine.')}
         </div>
       )}
-      <ReviewPolicySection />
       {dialog}
     </div>
   );

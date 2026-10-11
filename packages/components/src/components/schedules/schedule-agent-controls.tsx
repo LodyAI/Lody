@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { getAcpCapabilityCacheKey, normalizeLegacyScheduleAgent } from '@lody/shared';
 import type {
   AcpConfigOptionValue,
   AgentConfigMeta,
@@ -12,22 +13,6 @@ import {
   DesktopRunConfigMenu,
 } from '@/components/sessions/desktop-run-config-menu';
 import { seedScheduleAgentRunRef } from './schedule-agent-defaults';
-
-/**
- * Stored schedule option values are strings (the definition schema); the
- * composer's selectors speak `AcpConfigOptionValue`, so booleans cross back.
- */
-const toSelectorValues = (
-  values: Record<string, string> | undefined
-): Record<string, AcpConfigOptionValue> | undefined =>
-  values
-    ? Object.fromEntries(
-        Object.entries(values).map(([id, value]) => [
-          id,
-          value === 'true' ? true : value === 'false' ? false : value,
-        ])
-      )
-    : undefined;
 
 /**
  * The composer's own Agent controls — the run-config menu (Agent, model,
@@ -55,7 +40,12 @@ export function ScheduleAgentControls({
 }) {
   const { t } = useTranslation();
   const selected = agentConfigs.find((config) => config.id === value?.agentConfigId);
-  const optionValues = toSelectorValues(value?.configOptionValues);
+  const optionValues = value
+    ? normalizeLegacyScheduleAgent(
+        value,
+        machine?.acpCapabilities?.[getAcpCapabilityCacheKey(value.agentConfigId)]?.configOptions
+      ).configOptionValues
+    : undefined;
   const options = useAcpSelectorOptions(
     selected
       ? {
@@ -75,7 +65,7 @@ export function ScheduleAgentControls({
   };
   const patchOption = (configId: string, optionValue: AcpConfigOptionValue) =>
     patch({
-      configOptionValues: { ...(value?.configOptionValues ?? {}), [configId]: String(optionValue) },
+      configOptionValues: { ...(value?.configOptionValues ?? {}), [configId]: optionValue },
     });
   const editable = !disabledReason;
 

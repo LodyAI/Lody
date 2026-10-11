@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { Duration, Effect, TestClock, TestContext } from 'effect';
+import { Duration, Effect } from 'effect';
+import { TestClock } from 'effect/testing';
 import {
   createLocalReconnectLoop,
   type LocalReconnectLoop,
@@ -38,7 +39,7 @@ const withTestLoop = (
 ): Promise<void> =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const runtime = yield* Effect.runtime<never>();
+      const services = yield* Effect.context<never>();
       const calls: Array<{ force: boolean; triggerReason?: LocalReconnectTriggerReason }> = [];
       let hasProblem = false;
       let canRun = true;
@@ -53,7 +54,7 @@ const withTestLoop = (
         },
       };
       harness.loop = createLocalReconnectLoop({
-        runtime,
+        services,
         canRun: () => canRun,
         hasProblem: () => hasProblem,
         reconnect: async (context) => {
@@ -66,10 +67,39 @@ const withTestLoop = (
       });
       yield* body(harness);
       harness.loop.stop();
-    }).pipe(Effect.provide(TestContext.TestContext))
+    }).pipe(Effect.provide(TestClock.layer()))
   );
 
 describe('createLocalReconnectLoop', () => {
+  it('permanently closes, joins active reconciliation, and cannot restart', async () => {
+    const finished = Promise.withResolvers<void>();
+    const state: string[] = [];
+    const loop = createLocalReconnectLoop({
+      canRun: () => true,
+      hasProblem: () => true,
+      reconnect: async () => {
+        state.push('started');
+        await finished.promise;
+        state.push('finished');
+      },
+      onStateChange: () => {},
+    });
+    loop.trigger();
+    const closing = loop.close();
+    expect(loop.close()).toBe(closing);
+    void closing.then(() => state.push('closed'));
+    loop.trigger();
+    loop.update();
+    await Promise.resolve();
+    expect(state).toEqual(['started']);
+    finished.resolve();
+    await closing;
+    loop.trigger();
+    loop.update();
+    expect(state).toEqual(['started', 'finished', 'closed']);
+    expect(loop.isActive()).toBe(false);
+  });
+
   it('passes force: true for trigger() runs and force: false for scheduled retries', async () => {
     await withTestLoop(
       ({ loop, calls, setHasProblem }) =>

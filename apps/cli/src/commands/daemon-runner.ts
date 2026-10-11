@@ -1,5 +1,5 @@
+import { toShared } from '@/platform/process-options';
 import { Command } from 'commander';
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { version } from '@/pkg';
 import {
@@ -37,6 +37,8 @@ import { normalizeCurrentProcessResourceProfile } from '@/utils/process-resource
 import { flushTelemetry } from '@/instrument';
 import { captureSupervisorEvent } from './analytics-events';
 import { getRuntimeDiagnostics } from '@/utils/runtime-diagnostics';
+import { startProcessLegacy } from '@lody/shared/node/process';
+
 import {
   EXIT_CODE_REMOTE_RESTART,
   EXIT_CODE_REMOTE_UPGRADE,
@@ -45,6 +47,7 @@ import {
   EXIT_CODE_SUPERVISOR_CONTRACT_MISMATCH,
   LODY_DAEMON_SUPERVISED_ENV,
   runDaemonUpgradeFromIntent,
+  type DaemonUpgradeInstallation,
 } from '@/lib/machine-lifecycle';
 import {
   describeDaemonWorkerStartupFailure,
@@ -74,11 +77,21 @@ function launchLodyStart(
   delete env.LODY_ELECTRON_BOOTSTRAP;
   delete env.ELECTRON_RUN_AS_NODE;
   delete env[DAEMON_RUNNER_READY_FD_ENV];
-  const child = spawn(process.execPath, args, {
-    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    env,
-    windowsHide: true,
-  });
+  // The Worker stays in the watchdog's process group: the Supervisor owns its
+  // shutdown through `requestShutdown` and signals to the exact child.
+  const { child } = startProcessLegacy(
+    {
+      command: process.execPath,
+      args,
+      options: {
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        env,
+        windowsHide: true,
+      },
+      processGroup: false,
+    },
+    toShared()
+  );
 
   const result = new Promise<CliRunResult>((resolve, reject) => {
     let stdout = '';
@@ -263,7 +276,7 @@ export const daemonRunnerCommand = new Command('daemon-runner')
     };
 
     let terminating = false;
-    let pendingUpgradeHandoff = false;
+    let pendingUpgradeHandoff: DaemonUpgradeInstallation | null = null;
     const finish = async (code: number) => {
       if (terminating) return;
       terminating = true;
@@ -280,19 +293,23 @@ export const daemonRunnerCommand = new Command('daemon-runner')
     // detached runner from the new install. Falling back to in-place restart
     // keeps the machine online when the replacement cannot claim ownership.
     async function performUpgradeHandoff(): Promise<void> {
-      pendingUpgradeHandoff = false;
+      const installation = pendingUpgradeHandoff;
+      if (!installation) return;
+      pendingUpgradeHandoff = null;
       logger.info('Handing the daemon watchdog off to the upgraded CLI...');
       try {
-        const handoff = await spawnDaemonRunnerAndAwaitReady(passthroughArgs);
+        const handoff = await spawnDaemonRunnerAndAwaitReady(passthroughArgs, { installation });
         if (handoff.status === 'ready') {
-          logger.info(`Upgraded daemon watchdog is running (PID ${handoff.pid}).`);
+          logger.info(
+            `Upgraded daemon watchdog ${installation.version} is running (PID ${handoff.pid}, entry ${installation.bin}).`
+          );
           // The replacement overwrote the PID record; the conditional
           // removePidFile inside finish() will leave it in place.
           await finish(0);
           return;
         }
         logger.error(
-          `Watchdog handoff failed (${handoff.status}); restarting on the current version.`
+          `Watchdog handoff failed (${handoff.status}${handoff.status === 'error' ? `: ${handoff.message}` : ''}); restarting on the current version.`
         );
       } catch (error) {
         logger.error(
@@ -388,7 +405,7 @@ export const daemonRunnerCommand = new Command('daemon-runner')
             // Stop cleanly so the Host lease is released, then hand the
             // watchdog role to the freshly installed CLI in onTerminal. This
             // is what upgrades the watchdog code itself, not just the Worker.
-            pendingUpgradeHandoff = true;
+            pendingUpgradeHandoff = upgraded;
             return { action: 'stop', message: 'Remote upgrade installed; handing off watchdog' };
           }
           logger.warn('Upgrade did not complete; respawning the current version.');
@@ -435,6 +452,7 @@ export const daemonRunnerCommand = new Command('daemon-runner')
             status: 'ready',
             pid: process.pid,
             instanceId: supervisorIdentity.instanceId,
+            cliVersion: version,
           });
         }
         if (state.phase === 'fatal') {

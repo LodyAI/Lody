@@ -1,3 +1,4 @@
+import { MemoryBindingSchema, type MemoryBinding } from './memory-provider';
 import type { AgentConfigId, AgentRoleId, MachineId } from './ids';
 import { isSensitiveAcpConfigOptionId } from './session-preparation';
 
@@ -31,6 +32,7 @@ export type AgentRoleVisibility = 'private' | 'workspace';
  * module — a Role stores only the primitive shapes an option selector produces.
  */
 export type AgentRoleRunConfig = {
+  memory?: MemoryBinding;
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, string | boolean>;
@@ -201,6 +203,7 @@ export const normalizeAgentRoleRunConfig = (value: unknown): AgentRoleRunConfig 
   const modelId = typeof value.modelId === 'string' ? value.modelId.trim() : '';
   const configOptionValues = normalizeAgentRoleConfigOptionValues(value.configOptionValues);
   return {
+    ...(value.memory === undefined ? {} : { memory: MemoryBindingSchema.parse(value.memory) }),
     ...(modeId ? { modeId } : {}),
     ...(modelId ? { modelId } : {}),
     ...(configOptionValues ? { configOptionValues } : {}),
@@ -217,7 +220,12 @@ const serializeRunConfig = (value: AgentRoleRunConfig): string => {
   const options = Object.entries(normalized.configOptionValues ?? {}).sort(([left], [right]) =>
     left.localeCompare(right)
   );
-  return JSON.stringify([normalized.modeId ?? '', normalized.modelId ?? '', options]);
+  return JSON.stringify([
+    normalized.modeId ?? '',
+    normalized.modelId ?? '',
+    options,
+    normalized.memory ?? null,
+  ]);
 };
 
 const runConfigsEqual = (left: AgentRoleRunConfig, right: AgentRoleRunConfig): boolean =>
@@ -254,6 +262,12 @@ export const isAgentRole = (value: unknown): value is AgentRole => {
   if (value.description !== undefined && typeof value.description !== 'string') return false;
   if (value.promptPrefix !== undefined && typeof value.promptPrefix !== 'string') return false;
   if (value.runConfig !== undefined && !isRecord(value.runConfig)) return false;
+  if (
+    isRecord(value.runConfig) &&
+    value.runConfig.memory !== undefined &&
+    !MemoryBindingSchema.safeParse(value.runConfig.memory).success
+  )
+    return false;
   // A name that normalizes to nothing (only punctuation the token strips) has no
   // mention token, so it could never be used for what a Role is for.
   return getAgentRoleMentionSlug({ name: value.name.trim() }).length > 0;
@@ -328,6 +342,7 @@ export const listAccessibleAgentRoles = (
 // ---------------------------------------------------------------------------
 
 export type AgentRoleUnavailableReason =
+  | 'memory_unsupported'
   | 'machine_unknown'
   | 'machine_offline'
   | 'agent_config_missing'
@@ -342,6 +357,7 @@ export type AgentRoleAvailability =
 export type AgentRoleAvailabilityContext = {
   /** Machines the current user may reach at all. */
   authorizedMachineIds: ReadonlySet<MachineId>;
+  memoryProviderMachineIds?: ReadonlySet<MachineId>;
   onlineMachineIds: ReadonlySet<MachineId>;
   /** Agent config id -> the machine it belongs to. */
   agentConfigMachineIds: ReadonlyMap<AgentConfigId, MachineId>;
@@ -374,5 +390,7 @@ export const resolveAgentRoleAvailability = (
   if (!context.onlineMachineIds.has(role.machineId)) {
     return { kind: 'unavailable', reason: 'machine_offline' };
   }
+  if (role.runConfig.memory && !context.memoryProviderMachineIds?.has(role.machineId))
+    return { kind: 'unavailable', reason: 'memory_unsupported' };
   return { kind: 'available' };
 };

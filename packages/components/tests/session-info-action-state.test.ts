@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import type { SessionMeta } from '@lody/shared';
+import { getSessionGitHubState } from '../src/lib/session-github-state';
 import {
   resolveSessionInfoBarGitHubActionIds,
   shouldDisableSessionInfoBarGitHubActionForHydration,
@@ -15,6 +17,26 @@ const BASE_INPUT = {
 };
 
 describe('resolveSessionInfoBarGitHubActionIds', () => {
+  it('uses compact owner PR metadata to replace Create PR in both the conversation and child tab', () => {
+    const owner = {
+      project: { kind: 'local', localProjectId: 'local-1', githubRepoFullName: 'owner/repo' },
+      workspaceDirty: true,
+      pullRequests: [{ url: 'https://github.com/owner/repo/pull/55', status: 'open' }],
+    } as SessionMeta;
+    for (const state of [
+      getSessionGitHubState(owner),
+      getSessionGitHubState({ pullRequests: [] } as unknown as SessionMeta, owner),
+    ]) {
+      expect(state.latestPr).toEqual(owner.pullRequests?.[0]);
+      expect(
+        resolveSessionInfoBarGitHubActionIds({
+          ...BASE_INPUT,
+          ...state,
+          prStatus: state.latestPr?.status,
+        })
+      ).toEqual(['commit-and-push']);
+    }
+  });
   it('offers Create PR and Commit & Push for a dirty GitHub-capable workspace without a PR', () => {
     expect(
       resolveSessionInfoBarGitHubActionIds({
@@ -222,10 +244,23 @@ describe('shouldDisableSessionInfoBarGitHubActionForHydration', () => {
 });
 
 it('keeps local agent repair actions without offering unavailable hosted mutations', () => {
-  expect(resolveSessionInfoBarGitHubActionIds({
-    ...BASE_INPUT, canMutatePr: false, hasExistingPr: true, prStatus: 'draft', workspaceDirty: true,
-  })).toEqual(['commit-and-push']);
-  expect(resolveSessionInfoBarGitHubActionIds({
-    ...BASE_INPUT, canMutatePr: false, hasExistingPr: true, prStatus: 'open', prReadiness: 'y', prCiState: 'f',
-  })).toEqual(['fix-ci-errors']);
+  expect(
+    resolveSessionInfoBarGitHubActionIds({
+      ...BASE_INPUT,
+      canMutatePr: false,
+      hasExistingPr: true,
+      prStatus: 'draft',
+      workspaceDirty: true,
+    })
+  ).toEqual(['commit-and-push']);
+  expect(
+    resolveSessionInfoBarGitHubActionIds({
+      ...BASE_INPUT,
+      canMutatePr: false,
+      hasExistingPr: true,
+      prStatus: 'open',
+      prReadiness: 'y',
+      prCiState: 'f',
+    })
+  ).toEqual(['fix-ci-errors']);
 });

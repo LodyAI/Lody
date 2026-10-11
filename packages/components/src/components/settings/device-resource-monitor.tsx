@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -28,7 +29,6 @@ import { toast } from '@/lib/toast';
 import type { MachineMonitorViewState } from '@/hooks/use-machine-monitor';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 import { settingsSurface as surface } from './surface';
-import { settingsType as type } from './type.stylex';
 
 type SessionPresentationMeta = SessionMeta;
 
@@ -52,7 +52,7 @@ const styles = stylex.create({
     gap: space[2],
     paddingBlock: space[8],
     textAlign: 'center',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   noticeMeta: {
@@ -69,7 +69,7 @@ const styles = stylex.create({
     justifyContent: 'center',
     gap: space[2],
     paddingBlock: '40px',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   mono: { fontFamily: 'var(--font-mono, ui-monospace, monospace)' },

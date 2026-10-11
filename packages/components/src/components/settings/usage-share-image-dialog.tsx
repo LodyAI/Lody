@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
+import * as stylex from '@stylexjs/stylex';
 import { Check, Copy, Download } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
-import { cn } from '@/lib/utils';
 import { Dialog } from '@/ui/dialog';
 import { Field as UiField } from '@lody/ui/field';
 import { Button } from '@lody/ui/button';
@@ -34,6 +34,146 @@ import type {
 } from './settings-data-cache';
 
 const BACKDROPS: Exclude<UsageShareCardBackdrop, 'none'>[] = ['lody', 'aurora', 'ocean', 'sunset'];
+
+const styles = stylex.create({
+  preview: {
+    display: 'flex',
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  previewFrame: { position: 'relative' },
+  previewContent: {
+    position: 'absolute',
+    insetBlockStart: 0,
+    insetInlineStart: 0,
+    width: 'max-content',
+    transformOrigin: 'top left',
+  },
+  exportFrame: { width: 'max-content' },
+  iconSize: { width: '16px', height: '16px' },
+  body: {
+    display: 'grid',
+    minHeight: 0,
+    flex: '1 1 0%',
+    gridTemplateColumns: {
+      default: 'minmax(0, 1fr)',
+      '@media (min-width: 640px)': '280px minmax(0, 1fr)',
+    },
+  },
+  controls: {
+    minHeight: 0,
+    minWidth: 0,
+    overflowY: 'auto',
+    padding: '16px',
+    borderBottomWidth: {
+      default: '1px',
+      '@media (min-width: 640px)': '0px',
+    },
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+    paddingInline: {
+      default: null,
+      '@media (min-width: 640px)': '20px',
+    },
+    borderRightWidth: {
+      default: '0px',
+      '@media (min-width: 640px)': '1px',
+    },
+    borderRightStyle: 'solid',
+    borderRightColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+  },
+  controlGroup: { marginBlockEnd: { default: '20px', ':last-child': 0 } },
+  controlSpacing: { marginBlockEnd: { default: '8px', ':last-child': 0 } },
+  hint: { fontSize: '0.75rem', lineHeight: '1.375', color: 'hsl(var(--muted-foreground))' },
+  backdropGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '8px' },
+  backdropNone: {
+    gridColumn: '1 / -1',
+    display: 'flex',
+    height: '36px',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '6px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    fontSize: '0.875rem',
+    lineHeight: '20px',
+    fontWeight: 400,
+    transitionProperty:
+      'color, background-color, border-color, text-decoration-color, fill, stroke',
+    transitionDuration: '150ms',
+  },
+  backdropNoneSelected: {
+    borderColor: 'hsl(var(--primary))',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--primary)) 10%, transparent)',
+    color: 'hsl(var(--primary))',
+    boxShadow: '0 0 0 2px color-mix(in oklab, hsl(var(--primary)) 25%, transparent)',
+  },
+  backdropNoneIdle: {
+    borderColor: 'hsl(var(--border))',
+    backgroundColor: {
+      default: 'color-mix(in oklab, hsl(var(--muted)) 30%, transparent)',
+      ':hover': 'color-mix(in oklab, hsl(var(--muted)) 60%, transparent)',
+    },
+  },
+  backdropChoice: {
+    position: 'relative',
+    aspectRatio: '1',
+    overflow: 'hidden',
+    borderRadius: '6px',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    transitionProperty: 'box-shadow',
+    transitionDuration: '150ms',
+    boxShadow: {
+      default: null,
+      ':hover': '0 0 0 2px color-mix(in oklab, hsl(var(--primary)) 40%, transparent)',
+    },
+  },
+  backdropChoiceSelected: {
+    borderColor: 'hsl(var(--primary))',
+    boxShadow: '0 0 0 2px hsl(var(--primary))',
+  },
+  backdropChoiceIdle: { borderColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)' },
+  backdropCheck: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgb(0 0 0 / 15%)',
+    color: 'white',
+  },
+  backdropCheckGlyph: { filter: 'drop-shadow(0 1px 1px rgb(0 0 0 / 25%))' },
+  qrRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' },
+  previewPane: {
+    minHeight: 0,
+    padding: {
+      default: '16px',
+      '@media (min-width: 640px)': '24px',
+    },
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+  },
+  exportBar: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: '12px',
+    paddingBlock: '12px',
+    paddingInline: {
+      default: '16px',
+      '@media (min-width: 640px)': '20px',
+    },
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'color-mix(in oklab, hsl(var(--border)) 70%, transparent)',
+  },
+  status: { marginInlineEnd: 'auto', fontSize: '0.875rem', color: 'hsl(var(--muted-foreground))' },
+  error: { color: 'hsl(var(--destructive))' },
+});
 
 /**
  * Scales the fixed-size card down to the preview panel. The card never reflows —
@@ -68,17 +208,14 @@ function FitPreview({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div
-      ref={containerRef}
-      className="flex h-full w-full items-center justify-center overflow-hidden"
-    >
+    <div ref={containerRef} {...stylex.props(styles.preview)}>
       <div
-        className="relative"
+        {...stylex.props(styles.previewFrame)}
         style={scaledSize ? { width: scaledSize.width, height: scaledSize.height } : undefined}
       >
         <div
           ref={contentRef}
-          className="absolute left-0 top-0 w-fit origin-top-left"
+          {...stylex.props(styles.previewContent)}
           style={{ transform: `scale(${scale})` }}
         >
           {children}
@@ -214,7 +351,14 @@ export function UsageShareImageDialog({
     >
       <Dialog.Content
         width="56rem"
-        className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:p-0"
+        style={{
+          display: 'flex',
+          maxHeight: '85vh',
+          flexDirection: 'column',
+          gap: 0,
+          overflow: 'hidden',
+          padding: 0,
+        }}
       >
         <Dialog.Header className="border-b border-border/70 px-4 py-3.5 pr-12 text-left sm:px-5 sm:pr-12">
           <Dialog.Title className="text-base">
@@ -225,13 +369,13 @@ export function UsageShareImageDialog({
           </Dialog.Description>
         </Dialog.Header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 sm:grid-cols-[280px_minmax(0,1fr)]">
-          <fieldset
-            disabled={exporting}
-            className="min-h-0 min-w-0 space-y-5 overflow-y-auto border-b border-border/70 px-4 py-4 sm:border-b-0 sm:border-r sm:px-5"
-          >
-            <div className="space-y-2">
-              <UiField.Label htmlFor="usage-share-metric">
+        <div {...stylex.props(styles.body)}>
+          <fieldset disabled={exporting} {...stylex.props(styles.controls)}>
+            <div {...stylex.props(styles.controlGroup)}>
+              <UiField.Label
+                className={stylex.props(styles.controlSpacing).className}
+                htmlFor="usage-share-metric"
+              >
                 {t('workspace.usage.shareImage.metric')}
               </UiField.Label>
               <Select.Root
@@ -244,7 +388,10 @@ export function UsageShareImageDialog({
                   if (value != null) setMetric(value as UsageCalendarMetric);
                 }}
               >
-                <Select.Trigger id="usage-share-metric" className="w-full">
+                <Select.Trigger
+                  id="usage-share-metric"
+                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                >
                   <Select.Value />
                 </Select.Trigger>
                 <Select.Content>
@@ -253,14 +400,17 @@ export function UsageShareImageDialog({
                 </Select.Content>
               </Select.Root>
               {metric === 'costUSD' ? (
-                <p className="text-xs leading-snug text-muted-foreground">
+                <p {...stylex.props(styles.hint)}>
                   {t('workspace.usage.shareImage.metricCostHint')}
                 </p>
               ) : null}
             </div>
 
-            <div className="space-y-2">
-              <UiField.Label htmlFor="usage-share-aspect">
+            <div {...stylex.props(styles.controlGroup)}>
+              <UiField.Label
+                className={stylex.props(styles.controlSpacing).className}
+                htmlFor="usage-share-aspect"
+              >
                 {t('workspace.usage.shareImage.aspect')}
               </UiField.Label>
               <Select.Root
@@ -276,7 +426,10 @@ export function UsageShareImageDialog({
                   if (value != null) setAspect(value as UsageShareCardAspect);
                 }}
               >
-                <Select.Trigger id="usage-share-aspect" className="w-full">
+                <Select.Trigger
+                  id="usage-share-aspect"
+                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                >
                   <Select.Value />
                 </Select.Trigger>
                 <Select.Content>
@@ -290,8 +443,11 @@ export function UsageShareImageDialog({
               </Select.Root>
             </div>
 
-            <div className="space-y-2">
-              <UiField.Label htmlFor="usage-share-subject">
+            <div {...stylex.props(styles.controlGroup)}>
+              <UiField.Label
+                className={stylex.props(styles.controlSpacing).className}
+                htmlFor="usage-share-subject"
+              >
                 {t('workspace.usage.shareImage.subject')}
               </UiField.Label>
               <Select.Root
@@ -307,7 +463,10 @@ export function UsageShareImageDialog({
                   if (value != null) setSubject(value as UsageShareCardSubject);
                 }}
               >
-                <Select.Trigger id="usage-share-subject" className="w-full">
+                <Select.Trigger
+                  id="usage-share-subject"
+                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                >
                   <Select.Value />
                 </Select.Trigger>
                 <Select.Content>
@@ -320,14 +479,17 @@ export function UsageShareImageDialog({
                 </Select.Content>
               </Select.Root>
               {subject === 'team' ? (
-                <p className="text-xs leading-snug text-muted-foreground">
+                <p {...stylex.props(styles.hint)}>
                   {t('workspace.usage.shareImage.subjectTeamHint')}
                 </p>
               ) : null}
             </div>
 
-            <div className="space-y-2">
-              <UiField.Label htmlFor="usage-share-theme">
+            <div {...stylex.props(styles.controlGroup)}>
+              <UiField.Label
+                className={stylex.props(styles.controlSpacing).className}
+                htmlFor="usage-share-theme"
+              >
                 {t('workspace.usage.shareImage.theme')}
               </UiField.Label>
               <Select.Root
@@ -341,7 +503,10 @@ export function UsageShareImageDialog({
                   if (value != null) setTheme(value as 'app' | 'light' | 'dark');
                 }}
               >
-                <Select.Trigger id="usage-share-theme" className="w-full">
+                <Select.Trigger
+                  id="usage-share-theme"
+                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                >
                   <Select.Value />
                 </Select.Trigger>
                 <Select.Content>
@@ -356,8 +521,11 @@ export function UsageShareImageDialog({
               </Select.Root>
             </div>
 
-            <div className="space-y-2">
-              <UiField.Label htmlFor="usage-share-footer">
+            <div {...stylex.props(styles.controlGroup)}>
+              <UiField.Label
+                className={stylex.props(styles.controlSpacing).className}
+                htmlFor="usage-share-footer"
+              >
                 {t('workspace.usage.shareImage.footer')}
               </UiField.Label>
               <Select.Root
@@ -371,7 +539,10 @@ export function UsageShareImageDialog({
                 }}
                 disabled={backdrop === 'none'}
               >
-                <Select.Trigger id="usage-share-footer" className="w-full">
+                <Select.Trigger
+                  id="usage-share-footer"
+                  className={`w-full ${stylex.props(styles.controlSpacing).className}`}
+                >
                   <Select.Value />
                 </Select.Trigger>
                 <Select.Content>
@@ -385,17 +556,17 @@ export function UsageShareImageDialog({
               </Select.Root>
             </div>
 
-            <div className="space-y-2">
-              <UiField.Label>{t('workspace.usage.shareImage.backdrop')}</UiField.Label>
-              <div className="grid grid-cols-4 gap-2" role="group">
+            <div {...stylex.props(styles.controlGroup)}>
+              <UiField.Label className={stylex.props(styles.controlSpacing).className}>
+                {t('workspace.usage.shareImage.backdrop')}
+              </UiField.Label>
+              <div {...stylex.props(styles.backdropGrid)} role="group">
                 <button
                   type="button"
                   aria-pressed={backdrop === 'none'}
-                  className={cn(
-                    'col-span-full flex h-9 items-center justify-center rounded-md border text-sm font-normal transition-colors',
-                    backdrop === 'none'
-                      ? 'border-primary bg-primary/10 text-primary ring-2 ring-primary/25'
-                      : 'border-border bg-muted/30 hover:bg-muted/60'
+                  {...stylex.props(
+                    styles.backdropNone,
+                    backdrop === 'none' ? styles.backdropNoneSelected : styles.backdropNoneIdle
                   )}
                   onClick={() => setBackdrop('none')}
                 >
@@ -409,16 +580,19 @@ export function UsageShareImageDialog({
                       type="button"
                       aria-label={value}
                       aria-pressed={selected}
-                      className={cn(
-                        'relative aspect-square overflow-hidden rounded-md border transition-shadow hover:ring-2 hover:ring-primary/40',
-                        selected ? 'border-primary ring-2 ring-primary' : 'border-border/70'
+                      {...stylex.props(
+                        styles.backdropChoice,
+                        selected ? styles.backdropChoiceSelected : styles.backdropChoiceIdle,
+                        USAGE_SHARE_BACKDROP_STYLES[value]
                       )}
-                      style={USAGE_SHARE_BACKDROP_STYLES[value]}
                       onClick={() => setBackdrop(value)}
                     >
                       {selected ? (
-                        <span className="absolute inset-0 flex items-center justify-center bg-black/15 text-white">
-                          <Check className="size-4 drop-shadow" />
+                        <span {...stylex.props(styles.backdropCheck)}>
+                          <Check
+                            size={16}
+                            className={stylex.props(styles.backdropCheckGlyph).className}
+                          />
                         </span>
                       ) : null}
                     </button>
@@ -427,9 +601,11 @@ export function UsageShareImageDialog({
               </div>
             </div>
 
-            <div className="space-y-2">
-              <UiField.Label>{t('workspace.usage.shareImage.content')}</UiField.Label>
-              <div className="flex items-center justify-between gap-3">
+            <div {...stylex.props(styles.controlGroup)}>
+              <UiField.Label className={stylex.props(styles.controlSpacing).className}>
+                {t('workspace.usage.shareImage.content')}
+              </UiField.Label>
+              <div {...stylex.props(styles.qrRow)}>
                 <UiField.Label
                   htmlFor="usage-share-qr"
                   className="font-normal text-muted-foreground"
@@ -441,9 +617,9 @@ export function UsageShareImageDialog({
             </div>
           </fieldset>
 
-          <div className="min-h-0 bg-muted/40 p-4 sm:p-6">
+          <div {...stylex.props(styles.previewPane)}>
             <FitPreview>
-              <div ref={exportRef} className="w-fit">
+              <div ref={exportRef} {...stylex.props(styles.exportFrame)}>
                 <UsageShareCard
                   calendar={model}
                   stats={stats}
@@ -465,13 +641,13 @@ export function UsageShareImageDialog({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border/70 px-4 py-3 sm:px-5">
+        <div {...stylex.props(styles.exportBar)}>
           {exportError ? (
-            <p role="alert" className="mr-auto text-sm text-destructive">
+            <p role="alert" {...stylex.props(styles.status, styles.error)}>
               {t('workspace.usage.shareImage.exportFailed')}
             </p>
           ) : copied ? (
-            <p role="status" className="mr-auto text-sm text-muted-foreground">
+            <p role="status" {...stylex.props(styles.status)}>
               {t('workspace.usage.shareImage.copied')}
             </p>
           ) : null}
@@ -481,19 +657,19 @@ export function UsageShareImageDialog({
             disabled={exporting || !assetsReady}
           >
             {operation === 'copy' ? (
-              <Spinner className="size-4" />
+              <Spinner size="small" />
             ) : copied ? (
-              <Check className="size-4" />
+              <Check className={stylex.props(styles.iconSize).className} />
             ) : (
-              <Copy className="size-4" />
+              <Copy className={stylex.props(styles.iconSize).className} />
             )}
             {t('workspace.usage.shareImage.copyImage')}
           </Button>
           <Button onClick={() => void run('export')} disabled={exporting || !assetsReady}>
             {operation === 'export' ? (
-              <Spinner className="size-4" />
+              <Spinner size="small" />
             ) : (
-              <Download className="size-4" />
+              <Download className={stylex.props(styles.iconSize).className} />
             )}
             {t('workspace.usage.shareImage.exportPng')}
           </Button>

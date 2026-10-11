@@ -1,4 +1,8 @@
 import { assertProductWindowSender } from '../assert-sender'
+import { parseSessionLink, INSTALLATION_LINK_SCHEMES } from '@lody/shared/session-link'
+import { desktopInstallationProfile } from '../../platform'
+import { getDesktopCallbackProtocol } from '../../desktop-channel'
+import { isDefaultLodyProtocolClient, setDefaultLodyProtocolClient } from '../../protocol-client'
 import { parseAppIconName } from '../../services/app-icon-core'
 import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
@@ -110,6 +114,44 @@ export function installNativeThemeWatch(): void {
 
 export class AppIpc extends IpcService {
   static override readonly groupName = 'app'
+
+  @IpcMethod()
+  async getDefaultLinkHandler() {
+    assertProductWindowSender(getIpcContext().event)
+    return { isDefault: isDefaultLodyProtocolClient() }
+  }
+
+  @IpcMethod()
+  async setDefaultLinkHandler() {
+    assertProductWindowSender(getIpcContext().event)
+    const requested = setDefaultLodyProtocolClient()
+    return { requested, isDefault: isDefaultLodyProtocolClient() }
+  }
+
+  @IpcMethod()
+  async getLinkInstallations() {
+    assertProductWindowSender(getIpcContext().event)
+    return INSTALLATION_LINK_SCHEMES.flatMap((scheme) => {
+      if (scheme === getDesktopCallbackProtocol(desktopInstallationProfile)) return []
+      const name = app.getApplicationNameForProtocol(`${scheme}://session/probe`)
+      return name ? [{ scheme, name }] : []
+    })
+  }
+
+  @IpcMethod()
+  async openSessionInInstallation(raw: string, scheme: string) {
+    assertProductWindowSender(getIpcContext().event)
+    if (
+      !INSTALLATION_LINK_SCHEMES.includes(scheme) ||
+      typeof raw !== 'string' ||
+      !parseSessionLink(raw)?.workspaceId
+    ) {
+      throw new Error('Invalid installation link')
+    }
+    const target = new URL(raw)
+    target.protocol = `${scheme}:`
+    await shell.openExternal(target.href)
+  }
 
   @IpcMethod()
   async getAppIconState() {
@@ -401,6 +443,12 @@ export class AppIpc extends IpcService {
 
   @IpcMethod()
   async openExternalUrl(urlRaw: string) {
+    if (typeof urlRaw === 'string' && parseSessionLink(urlRaw)) {
+      const { event } = getIpcContext()
+      assertProductWindowSender(event)
+      event.sender.send('app.deepLink', urlRaw)
+      return { opened: true, url: urlRaw }
+    }
     const externalUrl = normalizeExternalHttpUrl(urlRaw)
     if (!externalUrl) {
       return { opened: false, error: 'invalid_url' }

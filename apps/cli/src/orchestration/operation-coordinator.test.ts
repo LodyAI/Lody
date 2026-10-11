@@ -121,6 +121,9 @@ const makeHarness = async (options?: {
   const subscribers = new Map<SessionId, Set<() => void>>();
   let historyUpdateAttempt = 0;
   let remainingProgressHistoryFailures = options?.progressHistoryFailures ?? 0;
+  const flushRepo = async () => {
+    if (options?.failProgressFlush) throw new Error('flush unavailable');
+  };
   const sessionDoc = (sessionId: SessionId) =>
     withHistoryPort({
       mirror: {
@@ -137,10 +140,18 @@ const makeHarness = async (options?: {
         history: {
           count: async () => 0,
           readAt: async () => ({ state: 'missing' as const }),
-          readTurn: async () => ({ state: 'missing' as const }),
+          readTurn: async (turnId: string) => {
+            const turn = (histories.get(sessionId) ?? []).find((entry) => entry.id === turnId);
+            return turn ? { state: 'ready' as const, turn } : { state: 'missing' as const };
+          },
           readRange: async () => [],
           readDirectory: async () => [],
-          observe: () => ({ initial: Promise.resolve([]), unsubscribe: () => {} }),
+          observe: (listener: () => void) => {
+            const set = subscribers.get(sessionId) ?? new Set();
+            set.add(listener);
+            subscribers.set(sessionId, set);
+            return { initial: Promise.resolve([]), unsubscribe: () => set.delete(listener) };
+          },
         },
         commands: {},
         durability: { waitDurable: async () => {} },
@@ -170,6 +181,9 @@ const makeHarness = async (options?: {
         }
         histories.set(sessionId, next);
       },
+      ...(targetInputDurable || options?.failProgressFlush === true
+        ? { flushLocalWrites: flushRepo }
+        : {}),
     });
   const flockRows = options?.machineAgentConfig
     ? [
@@ -203,9 +217,7 @@ const makeHarness = async (options?: {
     return meta ? { meta } : undefined;
   });
   const repo = {
-    flush: async () => {
-      if (options?.failProgressFlush) throw new Error('flush unavailable');
-    },
+    flush: flushRepo,
     watch: () => ({ unsubscribe: vi.fn() }),
     getDocMeta,
     getMeta: getRepoMeta,
@@ -1129,6 +1141,37 @@ describe('LodyOperationCoordinator', () => {
         state: 'finished',
         completion: { type: 'result', value: { items: [expected] } },
       });
+    } finally {
+      store.close();
+    }
+  });
+
+  it('saves late completion without waking a stopped tree and does not replay it on restore', async () => {
+    const harness = await makeHarness({ deadlineAt: '2026-07-19T23:59:59.000Z' });
+    const meta = harness.metas.get(harness.requesterSessionId)!;
+    meta.collaborationStopped = true;
+    // Any wake would fail the test; assertions below check the durable result too.
+    harness.continueSession.mockImplementation(async () => {
+      throw new Error('Stopped tree was awakened');
+    });
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    const history = harness.histories.get(harness.requesterSessionId)!;
+    expect(history).toHaveLength(1);
+    expect(history[0]?.items[0]).toMatchObject({
+      type: 'operation_completion',
+      continuation: { status: 'not_started', reason: { code: 'COLLABORATION_STOPPED' } },
+    });
+    meta.collaborationStopped = false;
+    await harness.coordinator.wake('restore');
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+    const store = new LodyOperationStore(harness.storePath, () => TEST_NOW_MS);
+    try {
+      expect(store.getDelivery(harness.requesterSessionId, 'review-round-1').state).toBe(
+        'consumed'
+      );
+      expect(history).toHaveLength(1);
     } finally {
       store.close();
     }

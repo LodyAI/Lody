@@ -1,8 +1,5 @@
 import type { SessionEntry, SessionFileDiff } from './session-data/domain';
 import { InferInputType, InferType, schema } from 'loro-mirror';
-// Type-only, so the cycle with `review.ts` (which needs
-// `SessionPullRequestStateMeta` for the merge gate) is erased at compile time.
-import type { SessionAutoReviewMeta } from './review';
 import {
   ACPSessionId,
   AcpConfigOptionValue,
@@ -128,11 +125,12 @@ export const parseRateLimitEntryKey = (
  */
 export type InitializingStage = 'git-clone' | 'managed-runtime' | 'acp' | 'resuming';
 export type SessionRunningActivity = 'image_generation';
+export type SessionRunningPhase = 'finalizing';
 export type PermissionRequestKind = 'permission' | 'ask_user_question';
 
 export type SessionStatus =
   | { type: 'idle' }
-  | { type: 'running'; activity?: SessionRunningActivity }
+  | { type: 'running'; activity?: SessionRunningActivity; phase?: SessionRunningPhase }
   | { type: 'requestPermission' }
   | {
       type: 'initializing';
@@ -582,10 +580,12 @@ const acpSessionConfigSchema = schema
       /** Config option values (configId → value) for setSessionConfigOption */
       configOptionValues: schema.Any({ required: false }),
       /** Workspace MCP catalog ids selected for this session (string[]). */
+      memory: schema.Any({ required: false }),
       mcpServerIds: schema.Any({ required: false }),
       /** Agent Role selected for this Turn; null is explicit None. */
       agentRoleId: agentRoleIdSchema,
       agentRoleRevision: schema.Number({ required: false }),
+      agentRoleSnapshot: schema.Any({ required: false }),
       chainDepth: schema.Number({ required: false }),
     },
     { required: false }
@@ -691,6 +691,7 @@ export const sessionHistorySchema = schema.LoroMap({
    */
   read: schema.Boolean({ required: false }),
   userId: schema.String({ required: false }),
+  author: schema.Any({ required: false }),
   modelInfo: schema.Any({ required: false }),
   // Assistant turns: tokens this turn consumed, summed from adapter usage deltas.
   // A primitive JSON value (`SessionTurnTokenUsage`), replaced whole on each write.
@@ -873,6 +874,32 @@ export type SessionExternalHistoryCursorDocState = {
   storedHistoryBaseline?: string;
 };
 
+/** Durable notification cursor for a Roost-backed session history. The cursor
+ * lives in the session control document so every renderer can observe a
+ * history commit without polling the history store. */
+export type SessionHistoryChange =
+  | { readonly kind: 'structure'; readonly from: number; readonly to: number }
+  | { readonly kind: 'changed'; readonly ids: readonly string[] };
+
+export type SessionRoostHistoryCursorDocState = {
+  cursor: string;
+  operationId?: string;
+  historyRevision?: number;
+  historyCount?: number;
+  historyChangeJson?: string;
+};
+
+const sessionRoostHistoryCursorDocSchema = schema.LoroMap(
+  {
+    cursor: schema.String(),
+    operationId: schema.String({ required: false }),
+    historyRevision: schema.Number({ required: false }),
+    historyCount: schema.Number({ required: false }),
+    historyChangeJson: schema.String({ required: false }),
+  },
+  { required: false }
+);
+
 /**
  * Legacy/fallback launch config shape. New writers must not persist this per session;
  * resolve customAcp/env from AgentConfigMeta and worktree scripts from project config.
@@ -928,6 +955,56 @@ export type PendingScheduledTask = {
   timeZone?: string;
 };
 
+export type SessionHistoryBackendKind = 'loro' | 'roost';
+
+/** Missing discriminator means a legacy session and must remain pinned to Loro. */
+export const LEGACY_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'loro';
+
+/** Explicit backend selected by the renderer when the Roost experiment is enabled. */
+export const ROOST_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind = 'roost';
+
+/**
+ * Default for creation paths without a renderer feature-gate decision.
+ * Existing sessions keep their persisted choice; only an explicit opt-in selects Roost.
+ */
+export const NEW_SESSION_HISTORY_BACKEND: SessionHistoryBackendKind =
+  LEGACY_SESSION_HISTORY_BACKEND;
+
+/**
+ * Resolve the immutable history backend choice for an opened session.
+ *
+ * Keep this policy in the shared package so the CLI and renderer cannot
+ * accidentally assign different meanings to a missing discriminator while a
+ * document is still being bootstrapped.
+ */
+export const resolveSessionHistoryBackendKind = (
+  meta?: Pick<{ historyBackend?: SessionHistoryBackendKind }, 'historyBackend'> | null
+): SessionHistoryBackendKind => meta?.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND;
+
+export type SessionQueuePromotionState =
+  | 'prepared'
+  | 'history_accepted'
+  | 'activation_published'
+  | 'queue_consumed';
+
+export type SessionQueuePromotionRecord = {
+  queueCid: string;
+  userTurnId: string;
+  state: SessionQueuePromotionState;
+  updatedAt: number;
+};
+
+export type SessionSteerOperationRecord = {
+  operationId: string;
+  userTurnId: string;
+  expectedTurnId: string;
+  cancellationPolicy: 'promote' | 'preserve';
+  phase: 'prepared' | 'submitted' | 'settled';
+  delivery: 'not_submitted' | 'applied' | 'not_applied' | 'unknown';
+  status: 'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown';
+  updatedAt: number;
+};
+
 export type SessionMeta = {
   /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
   lastModel?: { modelId?: string; name?: string } | null;
@@ -950,6 +1027,8 @@ export type SessionMeta = {
   userId: string;
   status?: SessionStatus;
   isArchived?: boolean;
+  /** User-owned tree execution barrier; inherited through containment and precise opener links. */
+  collaborationStopped?: boolean;
   /** Shared tab visibility only; closing never changes the session lifecycle. */
   isTabClosed?: boolean;
   origin?: 'lody' | 'external-acp';
@@ -957,6 +1036,8 @@ export type SessionMeta = {
   isPinned?: boolean;
   cliType: AgentConfigCliType;
   agentType: AgentType;
+  /** Backend selected when this session was created. Missing means legacy Loro. */
+  historyBackend?: SessionHistoryBackendKind;
   agentConfigId?: AgentConfigId;
   /**
    * Agent Role this session was created from, and the Role revision that was
@@ -1009,6 +1090,10 @@ export type SessionMeta = {
     string,
     'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown'
   >;
+  /** Durable provider-delivery evidence, keyed by stable steer operation id. */
+  steerOperationLedger?: Record<string, SessionSteerOperationRecord>;
+  /** Recoverable queue promotion receipts, keyed by the stable operation id. */
+  queuePromotionLedger?: Record<string, SessionQueuePromotionRecord>;
   /** Assistant turn id the client wants to stop; cancel is ignored unless it matches the machine's in-memory active turn. */
   lastCanceledTurn?: string;
   /** Latest user history entry id that the machine has fully handled. */
@@ -1055,6 +1140,8 @@ export type SessionMeta = {
   pinnedHistoryId?: string;
   /** Preview candidate summary for list/header UI; full state lives in session doc `preview`. */
   previewCandidate?: SessionPreviewCandidateMeta;
+  /** Last agent-started simulator operation (UUID only); UI discovery hint, never live state or authority. */
+  iosSimulatorPreviewRequestId?: string;
   /** Preview connection summary for list/header UI; full state lives in session doc `preview`. */
   previewConnection?: SessionPreviewConnectionMeta;
   /** External native history projection cursor for imported sessions. */
@@ -1075,14 +1162,10 @@ export type SessionMeta = {
    */
   awaitingUserSince?: number;
   /**
-   * Auto review and merge authorization plus a pointer to the run document.
-   * Presence of this field IS the checkbox being on, so unchecking removes it.
-   *
-   * Only a human may write it. The reviewer and the authoring agent both run
-   * with MCP access to this session, and an agent that could grant itself merge
-   * authority would make the whole gate decorative.
+   * Historical auto-review pointer, retained for stored metadata compatibility.
+   * The retired review automation no longer reads or acts on this field.
    */
-  autoReview?: SessionAutoReviewMeta;
+  autoReview?: { runId: string; t: number };
 };
 
 /**
@@ -1094,7 +1177,7 @@ export type SessionMeta = {
  * either fires. `lastMissingHistoryUserMsgId` is a permanent negative ack for a
  * turn whose payload never synced; `settledActivationUserMsgId` retires a turn
  * whose history entry is already terminal. Every consumer that asks "does this
- * session still owe a turn?" — dispatch, idle GC, auto review, MCP status —
+ * session still owe a turn?" — dispatch, idle GC, MCP status —
  * must go through here, or they disagree with the watcher and hang.
  */
 export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
@@ -1164,6 +1247,8 @@ export const messageQueueItemSchema = schema.LoroMap({
   project: schema.Any({ required: false }),
   userId: schema.String(),
   userTurnId: schema.String({ required: false }),
+  /** Stable queue promotion identity; legacy rows derive it from userTurnId/$cid. */
+  operationId: schema.String({ required: false }),
   timestamp: schema.String(),
   isEditing: schema.Boolean({ required: false }),
   // Calibrated server time (`getServerNow()`) when the current editor entered the row.
@@ -1263,6 +1348,7 @@ export const sessionDocSchema = schema({
   forkOperation: sessionForkOperationDocSchema,
   preview: sessionPreviewDocSchema,
   externalHistoryCursor: sessionExternalHistoryCursorDocSchema,
+  roostHistoryCursor: sessionRoostHistoryCursorDocSchema,
   acpRuntimeConfig: sessionAcpRuntimeConfigDocSchema,
 });
 

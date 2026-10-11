@@ -21,6 +21,7 @@ import {
 } from '@/components/mentions/issue-pr-hash-mention';
 import {
   SKILL_MENTION_TRIGGER,
+  SKILL_MENTION_TRIGGER_ALIAS,
   selectSkillMentionCandidates,
   type SkillMentionItem,
 } from '@/components/mentions/mention-skill-source';
@@ -380,7 +381,9 @@ export function selectMentionMenuViewForTrigger(
       rankedCandidates,
     };
   }
-  const direct = categories.find((entry) => entry.directTrigger === trigger);
+  const canonicalTrigger =
+    trigger === SKILL_MENTION_TRIGGER_ALIAS ? SKILL_MENTION_TRIGGER : trigger;
+  const direct = categories.find((entry) => entry.directTrigger === canonicalTrigger);
   if (!direct) return null;
   return {
     level: 'category',

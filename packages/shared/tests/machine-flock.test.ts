@@ -788,3 +788,33 @@ describe('machine Flock helpers', () => {
     });
   });
 });
+
+it('reads, updates and deletes validated memory association rows without mixing machine scope', async () => {
+  const { getMachineFlockMemories } = await import('../src/machine-flock');
+  const flock = new FakeMachineFlock();
+  const entry = {
+    providerId: 'nowledge-mem',
+    memoryId: 'reviewer',
+    machineId: 'a',
+    name: 'Reviewer',
+    description: 'Lessons',
+  };
+  const key = machineFlockKeys.memory(entry.providerId, entry.memoryId);
+  writeMachineFlockRowToFlock(flock, { key, value: entry });
+  flock.set(machineFlockKeys.memory('nowledge-mem', 'wrong-key'), entry);
+  flock.set(machineFlockKeys.memory('nowledge-mem', 'secret'), {
+    ...entry,
+    memoryId: 'secret',
+    token: 'not-allowed',
+  });
+  const rows = readMachineFlockRowsFromFlock(flock, { families: ['memory'] });
+  expect(getMachineFlockMemories(rows, 'a' as MachineId)).toEqual([entry]);
+  expect(getMachineFlockMemories(rows, 'b' as MachineId)).toEqual([]);
+  const updated = applyMachineFlockRowEvents(rows, [{ key, value: { ...entry, name: 'Edited' } }]);
+  expect(getMachineFlockMemories(updated, 'a' as MachineId)).toEqual([
+    { ...entry, name: 'Edited' },
+  ]);
+  expect(
+    getMachineFlockMemories(applyMachineFlockRowEvents(updated, [{ key }]), 'a' as MachineId)
+  ).toEqual([]);
+});

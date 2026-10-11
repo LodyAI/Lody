@@ -131,6 +131,7 @@ function openWindowedView(entries: SessionHistory[], id: SessionId = sessionId):
     doc.free();
   };
   const writer = session.historyWriter;
+  if (!writer) throw new Error('The Loro story requires a history writer');
   for (const entry of entries) writer.append(entry);
   return view;
 }
@@ -524,6 +525,7 @@ function NativeTextSelectionStory() {
       maxHydrated: 8,
       tailKeep: 2,
     });
+    if (!next.historyWriter) throw new Error('The Loro story requires a history writer');
     for (const entry of selectionHistory) next.historyWriter.append(entry);
     setSession(next);
     return () => {
@@ -552,8 +554,10 @@ function NativeTextSelectionStory() {
           data-finished={
             session?.history.turn(session.history.indexOf('selection-0'))?.finished ?? false
           }
-          onClick={() =>
-            session?.historyWriter.replace('selection-0', {
+          onClick={() => {
+            const writer = session?.historyWriter;
+            if (!writer) return;
+            writer.replace('selection-0', {
               ...selectionHistory[0]!,
               finished: true,
               items: [
@@ -567,8 +571,8 @@ function NativeTextSelectionStory() {
                 },
                 { type: 'text', text: 'UNSELECTED-FINAL-ANSWER' },
               ],
-            } as SessionHistory)
-          }
+            } as SessionHistory);
+          }}
         >
           Finish first turn
         </button>

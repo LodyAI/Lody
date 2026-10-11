@@ -90,9 +90,9 @@ export type PrAssociationPlan = {
 /**
  * Decide whether a discovered PR should become a canonical association: run
  * current-PR selection over associated ∪ discovered; when the winner is not
- * yet associated, it must go through the association effect BEFORE any local
- * meta write. Returns null when the winner is already associated (or nothing
- * was discovered).
+ * yet published, it is eligible for metadata publication. Hosted callers also
+ * supply confirmed webhook associations so a published PR with a failed
+ * association remains eligible for retry.
  *
  * `observations` must include EVERY observation of this round (status and
  * discovery alike): an already-associated PR needs its own branch/updatedAt
@@ -106,6 +106,8 @@ export function planAssociation(args: {
   /** Exact-branch discovery candidates — the only PRs eligible for a NEW association. */
   discovered: readonly PrObservation[];
   runtimeBranch: string | null;
+  /** Omit locally; hosted confirmation is independent of session metadata. */
+  confirmedAssociationUrls?: ReadonlySet<string>;
 }): PrAssociationPlan | null {
   const associatedUrls = new Set((args.meta?.pullRequests ?? []).map((pr) => pr.url));
   const candidates: SessionPullRequestMeta[] = (args.meta?.pullRequests ?? []).map((pr) => ({
@@ -120,11 +122,15 @@ export function planAssociation(args: {
   }
   const eligible = new Map<string, PrObservation>();
   for (const pr of args.discovered) {
-    if (associatedUrls.has(pr.url) || eligible.has(pr.url)) {
+    if (
+      (associatedUrls.has(pr.url) &&
+        (args.confirmedAssociationUrls ?? associatedUrls).has(pr.url)) ||
+      eligible.has(pr.url)
+    ) {
       continue;
     }
     eligible.set(pr.url, pr);
-    candidates.push({ url: pr.url, status: pr.status });
+    if (!associatedUrls.has(pr.url)) candidates.push({ url: pr.url, status: pr.status });
   }
   if (eligible.size === 0) {
     return null;
@@ -160,7 +166,7 @@ export function planPullRequestMetaWrite(args: {
   meta: Pick<SessionMeta, 'pullRequests' | 'pullRequestState'> | undefined;
   /** This round's observations; applied only to already-associated URLs. */
   observations: readonly PrObservation[];
-  /** Freshly (successfully) associated PRs to upsert into the array. */
+  /** Authenticated exact-branch observations eligible for publication. */
   newlyAssociated?: readonly PrObservation[];
   runtimeBranch: string | null;
   /** Epoch seconds — stamped as `t` only when a state signal actually changed. */
@@ -192,7 +198,7 @@ export function planPullRequestMetaWrite(args: {
     nextPrs.push({ url: pr.url, status });
   }
 
-  // 2. Append freshly associated PRs (association effect already succeeded).
+  // 2. Append authenticated discoveries; webhook association may still be pending.
   for (const pr of args.newlyAssociated ?? []) {
     if (seenUrls.has(pr.url)) {
       continue;

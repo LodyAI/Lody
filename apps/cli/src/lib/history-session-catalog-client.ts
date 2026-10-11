@@ -1,11 +1,11 @@
-import { type ChildProcess } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import path from 'path';
 import * as fs from 'fs/promises';
 import * as acp from '@agentclientprotocol/sdk';
 import { ndJsonStream, type Stream } from '@agentclientprotocol/sdk';
 import type { SessionInfo } from '@agentclientprotocol/sdk';
 
-import { spawnAcpProcess } from '@/agent/acp-runner';
+import { spawnAcpProcess, terminateAcpProcessTree } from '@/agent/acp-runner';
 import { withAcpSessionStartSlot } from '@/agent/acp-session-start-gate';
 import { getLoginShellEnv } from '@/agent/login-shell-env';
 import {
@@ -34,53 +34,25 @@ const ACP_OPERATION_TIMEOUT_MS = 120_000;
 const ACP_PROCESS_EXIT_TIMEOUT_MS = 3_000;
 export const MAX_LOCAL_PROJECT_HISTORY_CATALOG_SESSIONS = 100;
 
-function waitForChildProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null) {
-    return Promise.resolve(true);
-  }
-
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      child.off('exit', onExit);
-      resolve(child.exitCode !== null);
-    }, timeoutMs);
-    const onExit = () => {
-      clearTimeout(timeout);
-      resolve(true);
-    };
-    child.once('exit', onExit);
-  });
-}
-
-function signalChildProcess(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (process.platform !== 'win32' && typeof child.pid === 'number' && child.pid > 0) {
-    process.kill(-child.pid, signal);
-    return;
-  }
-  child.kill(signal);
-}
-
-async function terminateChildProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) {
-    return;
-  }
-
+async function terminateHistoryAcpProcess(
+  child: ChildProcess,
+  logger: Logger,
+  provider: HistoryProviderLaunch
+): Promise<void> {
+  const label = `${getProviderLabel(provider)}-history-sync`;
   try {
-    signalChildProcess(child, 'SIGTERM');
-  } catch {
-    return;
+    await terminateAcpProcessTree(child, {
+      logger,
+      sessionLabel: label,
+      exitTimeoutMs: ACP_PROCESS_EXIT_TIMEOUT_MS,
+    });
+  } catch (error) {
+    // The history agent is never reused; a survivor is a leak to surface, not
+    // a reason to fail the history read that already completed.
+    logger.warn(
+      `[${label}] ACP history process could not be terminated: ${formatErrorMessage(error)}`
+    );
   }
-
-  if (await waitForChildProcessExit(child, ACP_PROCESS_EXIT_TIMEOUT_MS)) {
-    return;
-  }
-
-  try {
-    signalChildProcess(child, 'SIGKILL');
-  } catch {
-    return;
-  }
-  await waitForChildProcessExit(child, ACP_PROCESS_EXIT_TIMEOUT_MS);
 }
 
 async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
@@ -216,7 +188,7 @@ async function createHistoryAcpConnection(args: {
       });
 
       if (!agentProcess.stdout || !agentProcess.stdin) {
-        await terminateChildProcess(agentProcess);
+        await terminateHistoryAcpProcess(agentProcess, args.logger, args.provider);
         throw new Error(
           `${getProviderLabel(args.provider)} ACP process did not expose stdio streams`
         );
@@ -244,7 +216,7 @@ async function createHistoryAcpConnection(args: {
         );
         return { agentProcess, connection, collector, initResponse };
       } catch (error) {
-        await terminateChildProcess(agentProcess);
+        await terminateHistoryAcpProcess(agentProcess, args.logger, args.provider);
         throw error;
       }
     }
@@ -297,8 +269,11 @@ export async function requestHistorySessionReplay(args: {
   connection: HistoryReplayConnection;
   initResponse: acp.InitializeResponse;
 }): Promise<SessionAcpRuntimeConfigPatch | undefined> {
-  if (args.provider.cliType === 'builtin' && args.provider.agentType === 'codex') {
-    const method = getLodyReadSessionHistoryMethod(args.initResponse);
+  const method = getLodyReadSessionHistoryMethod(args.initResponse);
+  if (
+    method ||
+    (args.provider.cliType === 'builtin' && ['codex', 'deepseek'].includes(args.provider.agentType))
+  ) {
     if (!method) {
       throw new Error(
         `${getProviderLabel(args.provider)} ACP agent does not advertise ` +
@@ -407,7 +382,7 @@ export async function listHistorySessionsForLocalProject(args: {
         bySessionId.set(session.sessionId, session);
       }
     } finally {
-      await terminateChildProcess(agentProcess);
+      await terminateHistoryAcpProcess(agentProcess, args.logger, args.provider);
     }
   }
 
@@ -448,7 +423,7 @@ export async function loadHistorySessionReplay(args: {
     }: ${formatErrorMessage(error)}`;
     throw new Error(message, { cause: error });
   } finally {
-    await terminateChildProcess(agentProcess);
+    await terminateHistoryAcpProcess(agentProcess, args.logger, args.provider);
   }
 }
 import type { ResolvedCodexProfile } from '@/agent/codex-profile-store';

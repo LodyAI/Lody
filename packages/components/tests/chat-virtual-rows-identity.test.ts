@@ -114,6 +114,24 @@ describe('buildChatVirtualRows per-turn row identity', () => {
     });
   });
 
+  it('updates the round boundary when a following user arrives while keeping row keys', () => {
+    const assistant = wrap(makeMessage('boundary-answer', 'assistant', [text('done')], true));
+    const before = build([assistant]);
+    const user = wrap(makeMessage('boundary-followup', 'user', [text('continue')]));
+    const after = build([assistant, user]).filter((row) => row.type === 'assistant');
+    const first = after[0]!;
+    const last = after[after.length - 1]!;
+    expect(first.isFirstRowForMessage).toBe(true);
+    expect(last.endsRound).toBe(true);
+    expect(after.slice(0, -1).every((row) => !row.endsRound)).toBe(true);
+    expect(after.map((row) => row.key)).toEqual(before.map((row) => row.key));
+    expect(areAssistantChatVirtualRowsEqual(before[before.length - 1]!, last)).toBe(false);
+    const unchanged = build([assistant, user]);
+    after.forEach((row, index) => expect(unchanged[index]).toBe(row));
+    const removed = build([assistant]);
+    expect(removed[removed.length - 1]).toMatchObject({ endsRound: false });
+  });
+
   it('a streaming delta rebuilds only the changed turn', () => {
     const { finishedTurn, items } = makeConversation();
     const first = build(items);

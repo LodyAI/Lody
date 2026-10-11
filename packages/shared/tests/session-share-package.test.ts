@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   SHARE_LIMITS,
+  assertShareAttachmentPolicy,
   SharePackageManifestSchema,
   captureShareHistory,
   encodeShareJson,
@@ -258,4 +259,36 @@ describe('static share package', () => {
       expect(() => shareManifestKey(value, 'deployment')).toThrow();
     }
   });
+});
+
+it('enforces new image limits without invalidating published packages or 32 MiB histories', () => {
+  const value = manifest();
+  value.attachments = Array.from({ length: 64 }, (_, i) => ({
+    id: `a${i}`,
+    kind: 'image',
+    fileName: 'image.png',
+    objectId: `a${i}`,
+  }));
+  value.objects = [
+    ...value.objects.filter((object) => object.mediaType === 'application/json'),
+    ...value.attachments.map((attachment, i) => ({
+      id: attachment.objectId,
+      mediaType: 'image/png',
+      sizeBytes: i === 0 ? 20_000_000 : 1,
+      sha256: digest,
+    })),
+  ];
+  value.objects[0]!.sizeBytes = 32 * 1024 ** 2;
+  const accepted = SharePackageManifestSchema.parse(value);
+  expect(() => assertShareAttachmentPolicy(accepted)).not.toThrow();
+  value.objects[3]!.sizeBytes = 20_000_001;
+  const oldLargeImage = SharePackageManifestSchema.parse(value);
+  expect(() => assertShareAttachmentPolicy(oldLargeImage)).toThrow(
+    'Share image exceeds size limit'
+  );
+  value.objects[3]!.sizeBytes = 20_000_000;
+  value.attachments.push({ id: 'a64', kind: 'image', fileName: 'image.png', objectId: 'a64' });
+  value.objects.push({ id: 'a64', mediaType: 'image/png', sizeBytes: 1, sha256: digest });
+  const oldManyImages = SharePackageManifestSchema.parse(value);
+  expect(() => assertShareAttachmentPolicy(oldManyImages)).toThrow('Too many share attachments');
 });

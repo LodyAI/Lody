@@ -21,6 +21,7 @@ import {
   type SessionTurn,
 } from '@lody/shared/session-data';
 import { cloneHistoryThroughTurn, SessionForkService } from './session-fork-service';
+import { createSessionBackend } from './session-backend';
 import type {
   SessionForkOperationCleanup,
   SessionForkOperationMarker,
@@ -502,6 +503,7 @@ describe('SessionForkService durability boundary', () => {
             sessionId: targetSessionId,
             phase: 'setup',
             logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never,
+            backend: await createSessionBackend(doc, { historyBackend: 'loro' }),
           });
           await recorder.onStart?.({
             phase: 'setup',

@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState, type ReactNode } from 'react';
 import { Check, Copy, Link2, RotateCw, X } from 'lucide-react';
 import * as stylex from '@stylexjs/stylex';
@@ -41,13 +42,13 @@ const styles = stylex.create({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   expires: {
     display: { default: 'none', [WIDE]: 'inline' },
     flexShrink: 0,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     color: colors.secondaryLabel,
   },
   controls: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[2] },
@@ -71,12 +72,17 @@ const styles = stylex.create({
     lineHeight: type.leading,
     color: colors.label,
   },
-  meta: { margin: 0, fontSize: type.caption, lineHeight: 1.375, color: colors.secondaryLabel },
+  meta: {
+    margin: 0,
+    fontSize: uiText.footnoteSize,
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
   reason: {
     margin: 0,
     marginTop: space[2],
     whiteSpace: 'pre-wrap',
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: 1.43,
     color: colors.label,
   },

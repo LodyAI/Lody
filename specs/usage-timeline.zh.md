@@ -15,6 +15,11 @@ Translation: current
 点击柱子或点仍打开对应的 UTC 日期详情。桌面和响应式移动端使用同一选定时间线
 及格式化规则。
 
+切换到小时范围（24h、7d），或从小时范围切到其他范围时，关闭已选日期详情。
+30d ↔ All 共用同一组日历格，因此保留选日。Resize 和 scroll 位置同步可以移动
+当前选日的指示箭头，但不得重新打开已关闭的详情，也不得替换另一个选日。
+切换范围后再次点击格子，应正常打开其日期详情。关闭详情不使日期缓存失效。
+
 客户端对 `day` 和 `week` 请求 `granularity: hour`，使用返回的 `startMs`、
 `endMs`、`bucketSizeMs` 及桶。本展示契约不重新定义服务端的范围选择或聚合算法。
 日粒度桶保留服务端标签。数值、总量和费用估算透传；图表对齐不能证明账单正确性。
@@ -26,5 +31,6 @@ Translation: current
 - [实际渲染回归](../packages/components/tests/usage-timeline.test.tsx)
 - [跨日和不完整桶回归](../packages/components/tests/usage-share-stats.test.ts)
 - [决策及验证边界](../.agents/notes/implemented/bug-fix/2026-10-01-usage-timeline-time-basis.zh.md)
+- [选日生命周期与回调回归](../.agents/notes/implemented/bug-fix/2026-10-02-usage-range-selection.zh.md)
 
 托管服务实现不在公共仓库内，其范围算法、聚合端点和生产返回尚未验证。

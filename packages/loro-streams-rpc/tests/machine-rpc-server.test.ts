@@ -1,3 +1,5 @@
+import { IosSimulatorRemoteResponseSchema } from '@lody/shared';
+import { createRpcSecretRecipient, getIosSimulatorViewerSecretContext } from '../src/rpc-secret';
 import { describe, expect, it, vi } from 'vitest';
 import type {
   AgentConfigId,
@@ -154,7 +156,8 @@ describe('LoroStreamsMachineRpcServer', () => {
                   type: 'machine/preview-control_response',
                   machineId,
                   success: true,
-                  runtimeNonce: scenario === 'invalid nonce' ? 'invalid' : previewProof.runtimeNonce,
+                  runtimeNonce:
+                    scenario === 'invalid nonce' ? 'invalid' : previewProof.runtimeNonce,
                 };
               },
         refreshMachineAcpCapabilities: vi.fn(),
@@ -225,7 +228,12 @@ describe('LoroStreamsMachineRpcServer', () => {
     }
   );
 
-  it.each(['session/preview-create', 'session/preview-status', 'session/preview-revoke'])(
+  it.each([
+    'session/preview-create',
+    'session/preview-status',
+    'session/preview-revoke',
+    'ios-simulator/control',
+  ])(
     'rejects missing or malformed proof without dispatching %s or logging its secret',
     async (method) => {
       const fake = createFakeStreamClient();
@@ -251,6 +259,7 @@ describe('LoroStreamsMachineRpcServer', () => {
         createSessionPreview: handler,
         getSessionPreviewStatus: handler,
         revokeSessionPreview: handler,
+        controlIosSimulator: handler,
       });
       const target = { protocol: 'http', host: '127.0.0.1', port: 5173 };
       fake.pushBatch({
@@ -268,6 +277,7 @@ describe('LoroStreamsMachineRpcServer', () => {
             sessionId: 'session-1',
             requestedByUserId: 'user-1',
             proof,
+            ...(method === 'ios-simulator/control' ? { command: { action: 'list' } } : {}),
             ...(method === 'session/preview-create'
               ? {
                   target,
@@ -2879,4 +2889,96 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     server.stop();
   });
+});
+
+it('round trips typed simulator commands and isolates unavailable and denied controls', async () => {
+  const wire: unknown[] = [];
+  const recipient = await createRpcSecretRecipient();
+  const requests = createFakeStreamClient(),
+    responses = createFakeStreamClient();
+  const forward =
+    (destination: ReturnType<typeof createFakeStreamClient>) =>
+    async (_streamId: string, value: unknown) => {
+      wire.push(value);
+      destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+      return '1';
+    };
+  const server = new LoroStreamsMachineRpcServer({
+    logger: createSilentLogger(),
+    workspaceId: 'w' as WorkspaceId,
+    machineId: 'm' as MachineId,
+    streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    controlIosSimulator: async (params) => {
+      if (params.proof.requestToken !== 'synthetic-preview-proof') throw new Error('Access denied');
+      return {
+        type: 'ios-simulator/control_response',
+        sessionId: params.sessionId,
+        success: true,
+        preview:
+          params.command.action === 'start'
+            ? {
+                operationId: 'op',
+                udid: params.command.udid,
+                phase: 'ready',
+                transport: 'remote',
+                viewerUrl: 'https://viewer.example/?token=synthetic-viewer-secret',
+              }
+            : undefined,
+      };
+    },
+  });
+  const client = new LoroStreamsMachineRpcClient({
+    workspaceId: 'w',
+    machineId: 'm',
+    streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+  });
+  await server.start();
+  try {
+    const result = await client.requestIosSimulatorControl({
+      sessionId: 's',
+      requestedByUserId: 'u',
+      command: { action: 'start', udid: '5519cb11-71c9-46d9-aeff-73c96f1104e0' },
+      proof: previewProof,
+      responseRecipient: recipient,
+    });
+    expect(result).toMatchObject({
+      success: true,
+      preview: {
+        phase: 'ready',
+        viewerUrl: 'https://viewer.example/?token=synthetic-viewer-secret',
+        udid: '5519cb11-71c9-46d9-aeff-73c96f1104e0',
+      },
+    });
+    expect(JSON.stringify(wire)).not.toContain('synthetic-viewer-secret');
+    expect(JSON.stringify(wire)).not.toContain('https://viewer.example');
+    expect(IosSimulatorRemoteResponseSchema.safeParse(result).success).toBe(false);
+    const envelopeResponse = wire.find(
+      (v): v is { result: unknown } => typeof v === 'object' && v !== null && 'result' in v
+    );
+    const envelope = IosSimulatorRemoteResponseSchema.parse(envelopeResponse?.result).preview
+      ?.viewerUrlEnvelope;
+    if (!envelope) throw Error('Missing encrypted viewer capability');
+    const context = getIosSimulatorViewerSecretContext({
+      workspaceId: 'w',
+      machineId: 'm',
+      sessionId: 's',
+      requestId: previewProof.requestId,
+    });
+    await expect((await createRpcSecretRecipient()).decrypt(envelope, context)).rejects.toThrow();
+    await expect(recipient.decrypt(envelope, context + 'other-request')).rejects.toThrow();
+
+    const denied = await client.requestIosSimulatorControl({
+      sessionId: 's',
+      requestedByUserId: 'u',
+      command: { action: 'list' },
+      proof: { ...previewProof, requestToken: 'forged' },
+      responseRecipient: recipient,
+    });
+    expect(denied).toMatchObject({ success: false, sessionId: 's', error: 'failed' });
+  } finally {
+    client.stop();
+    server.stop();
+  }
 });

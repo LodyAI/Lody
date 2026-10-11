@@ -53,6 +53,35 @@ describe('shouldWatchSession', () => {
     expect(decide({ ...baseMeta, status: SessionStatusFactory.running() })).toBe(true);
   });
 
+  it('keeps a session open while a queue promotion receipt is incomplete', () => {
+    expect(
+      decide({
+        ...baseMeta,
+        queuePromotionLedger: {
+          'queue:turn-1': {
+            queueCid: 'cid-1',
+            userTurnId: 'turn-1',
+            state: 'activation_published',
+            updatedAt: 1,
+          },
+        },
+      })
+    ).toBe(true);
+    expect(
+      decide({
+        ...baseMeta,
+        queuePromotionLedger: {
+          'queue:turn-1': {
+            queueCid: 'cid-1',
+            userTurnId: 'turn-1',
+            state: 'queue_consumed',
+            updatedAt: 1,
+          },
+        },
+      })
+    ).toBe(false);
+  });
+
   it('suppresses only the exact activation whose history payload was missing', () => {
     const missingMeta = {
       ...baseMeta,

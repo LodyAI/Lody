@@ -13,5 +13,5 @@ not change its paragraph alignment.
 
 ## Evidence
 
-- Implementation: [Markdown renderer](../packages/components/src/components/ai-gui/markdown-renderer.tsx) and [conversation Markdown styles](../packages/components/src/tailwind/index.css).
+- Implementation: [Markdown renderer](../packages/components/src/components/ai-gui/markdown-renderer.tsx).
 - Decision: [remove CJK paragraph justification](../.agents/notes/implemented/simplification/2026-09-29-remove-cjk-markdown-justification.md).

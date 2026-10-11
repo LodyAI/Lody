@@ -133,7 +133,7 @@ export class LoroConnectionRecoveryController {
   private readonly metaRoomSyncedListeners = new Set<MetaRoomSyncedListener>();
   private readonly streamsOnlineListeners = new Set<StreamsOnlineListener>();
   private readonly pendingReconnectCompletions = new Set<ReconnectCompletion>();
-  private readonly eventFiber: Fiber.RuntimeFiber<never, never>;
+  private readonly eventFiber: Fiber.Fiber<never, never>;
   private readonly repo: LoroRepo;
   private readonly workspaceId: WorkspaceId;
   private readonly logger: Logger;
@@ -462,7 +462,7 @@ export class LoroConnectionRecoveryController {
         Effect.tryPromise(() =>
           this.trackActiveOperation(() => this.handleRecoveryEvent(event))
         ).pipe(
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             Effect.sync(() => {
               this.logger.debug(
                 `[${this.workspaceId}] Loro recovery controller event failed: ${formatErrorMessage(
@@ -551,7 +551,7 @@ export class LoroConnectionRecoveryController {
     if (this.isCleanedUp) {
       return false;
     }
-    return Queue.unsafeOffer(this.recoveryEvents, event);
+    return Queue.offerUnsafe(this.recoveryEvents, event);
   }
 
   private attachMetaRoomStatusLogger(
@@ -1047,7 +1047,7 @@ export class LoroConnectionRecoveryController {
     const nowMs = Date.now();
     const elapsedMs = nowMs - this.lastMetaSyncedEmitMs;
     // A real meta-room outage rescans right away; a transport-only flap waits
-    // out the floor. Either way the emit happens — never dropped.
+    // out the floor. Result way the emit happens — never dropped.
     if (this.metaRoomDegradedSinceEmit || minIntervalMs <= 0 || elapsedMs >= minIntervalMs) {
       this.deliverMetaRoomSynced(reason, nowMs);
       return;

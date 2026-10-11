@@ -10,12 +10,36 @@ import {
   machineSupportsLocalFileResourcesProtocol,
   machineSupportsProtocolCapability,
   machineSupportsSubagentEvents,
+  machineSupportsIosSimulatorControls,
   negotiatedAcpCapabilitiesRefreshForce,
+  resolveNewSessionHistoryBackend,
 } from '../src/machine-protocol-capabilities';
 import {
   MachineAcpCapabilitiesRefreshRequestSchema,
   safeParseLocalSessionControlRequest,
 } from '../src/message-schemas';
+
+it('negotiates a new backend preference without changing explicit persisted choices', () => {
+  expect(resolveNewSessionHistoryBackend(undefined, { preferred: 'roost' })).toBe('loro');
+  expect(
+    resolveNewSessionHistoryBackend(
+      { protocolCapabilities: { sessionHistory: 1 } },
+      { preferred: 'roost' }
+    )
+  ).toBe('loro');
+  expect(
+    resolveNewSessionHistoryBackend(
+      { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES },
+      { preferred: 'roost' }
+    )
+  ).toBe('roost');
+  expect(() => resolveNewSessionHistoryBackend(undefined, { requested: 'roost' })).toThrow(
+    'Update the machine'
+  );
+  expect(
+    resolveNewSessionHistoryBackend(undefined, { requested: 'loro', preferred: 'roost' })
+  ).toBe('loro');
+});
 
 it('negotiates subagent events and Codex auth profiles independently on the same daemon', () => {
   const machine = { protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES };
@@ -145,4 +169,16 @@ describe('ACP capability refresh cache protocol capability', () => {
       )
     ).toEqual({});
   });
+});
+
+it('negotiates private simulator controls independently of preview support', () => {
+  expect(machineSupportsIosSimulatorControls(undefined)).toBe(false);
+  expect(machineSupportsIosSimulatorControls({ protocolCapabilities: { iosSimulator: 1 } })).toBe(
+    false
+  );
+  expect(
+    machineSupportsIosSimulatorControls({
+      protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+    })
+  ).toBe(true);
 });

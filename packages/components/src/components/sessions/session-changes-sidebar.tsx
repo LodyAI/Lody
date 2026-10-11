@@ -2,6 +2,8 @@ import * as AccordionPrimitive from '@radix-ui/react-accordion';
 import { ChevronRight } from 'lucide-react';
 import { useId, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import * as stylex from '@stylexjs/stylex';
+import { space } from '@lody/ui/tokens/scales.stylex';
 import type { FileTreeItem } from '@lody/shared';
 import {
   createFileIconComponent,
@@ -11,7 +13,7 @@ import {
   FileIcon,
 } from '@/components/icons/file-icons';
 import { TreeView, type TreeDataItem, type TreeRenderItemParams } from '@/components/tree-view';
-import { cn, getBasename } from '@/lib';
+import { getBasename } from '@/lib';
 import { buildFileTreeFromPaths } from '@/lib/file-tree';
 import {
   FILE_CHANGE_CATEGORY_ORDER,
@@ -30,6 +32,22 @@ type DisplayChangeEntry = SessionDiffChangeEntry & {
   statsUnavailable: boolean;
 };
 
+const accordionDown = stylex.keyframes({
+  from: { height: 0 },
+  to: {
+    height:
+      'var(--radix-accordion-content-height, var(--bits-accordion-content-height, var(--reka-accordion-content-height, var(--kb-accordion-content-height, var(--ngp-accordion-content-height, auto)))))',
+  },
+});
+const accordionUp = stylex.keyframes({
+  from: {
+    height:
+      'var(--radix-accordion-content-height, var(--bits-accordion-content-height, var(--reka-accordion-content-height, var(--kb-accordion-content-height, var(--ngp-accordion-content-height, auto)))))',
+  },
+  to: { height: 0 },
+});
+const accordionTriggerMarker = stylex.defaultMarker();
+
 export type SessionChangesSidebarProps = {
   ready: boolean;
   synced: boolean;
@@ -40,9 +58,248 @@ export type SessionChangesSidebarProps = {
   onOpenChangesDiff: (focusFilePath: string, filePaths: string[]) => void;
 };
 
-// Stat columns are fixed-width so +N / -N line up in a clean column across
-// every row, instead of jittering with content length.
-const STAT_COL_CLASS = 'inline-block min-w-[2.25rem] text-right tabular-nums';
+const styles = stylex.create({
+  scope: { display: 'flex', height: '100%', flexDirection: 'column' },
+  header: {
+    display: 'flex',
+    height: '40px',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: space[2],
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    paddingInline: space[3],
+  },
+  heading: {
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '11px',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  },
+  totals: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: space[1],
+    fontSize: '11px',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  subdued: { color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 70%, transparent)' },
+  viewSwitch: {
+    display: 'inline-flex',
+    height: '24px',
+    alignItems: 'center',
+    marginInlineStart: 'auto',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: 'color-mix(in oklab, hsl(var(--border)) 60%, transparent)',
+    borderRadius: 'var(--radius-md)',
+    backgroundColor: 'color-mix(in oklab, hsl(var(--muted)) 40%, transparent)',
+    padding: '2px',
+    fontSize: '11px',
+  },
+  scrollContent: { minHeight: 0, flex: '1 1 0%' },
+  fileTreePadding: { paddingBlock: space[1], paddingInline: space[1] },
+  categoryList: {
+    display: 'flex',
+    flexDirection: 'column',
+    paddingBlock: space[2],
+    paddingInline: space[1.5],
+  },
+  categoryHeader: { display: 'flex' },
+  categoryTrigger: {
+    display: 'flex',
+    width: '100%',
+    height: '24px',
+    alignItems: 'center',
+    gap: space[1.5],
+    borderRadius: 'var(--radius-md)',
+    paddingInline: space[1],
+    textAlign: 'left',
+    backgroundColor: {
+      default: null,
+      ':hover': 'color-mix(in oklab, hsl(var(--hover)) 60%, transparent)',
+    },
+    outline: {
+      default: null,
+      ':focus-visible': 'none',
+    },
+    boxShadow: {
+      default: null,
+      ':focus-visible': '0 0 0 1px hsl(var(--ring))',
+    },
+  },
+  categoryIcon: {
+    width: '12px',
+    height: '12px',
+    flexShrink: 0,
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 70%, transparent)',
+    transitionProperty: 'transform',
+    transitionDuration: '150ms',
+    transform: {
+      default: 'rotate(0deg)',
+      [stylex.when.ancestor('[data-state="open"]')]: 'rotate(90deg)',
+    },
+  },
+  categoryLabel: {
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '11px',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+  },
+  categoryCount: {
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 60%, transparent)',
+    fontSize: '11px',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  categoryContent: {
+    overflow: 'hidden',
+    animationName: {
+      default: 'none',
+      '[data-state="open"]': accordionDown,
+      '[data-state="closed"]': accordionUp,
+    },
+    animationDuration: {
+      default: 'var(--tw-animation-duration, var(--tw-duration, .2s))',
+      '[data-state="open"]': 'var(--tw-animation-duration, var(--tw-duration, .2s))',
+      '[data-state="closed"]': 'var(--tw-animation-duration, var(--tw-duration, .2s))',
+    },
+    animationTimingFunction: {
+      default: 'var(--tw-ease, ease-out)',
+      '[data-state="open"]': 'var(--tw-ease, ease-out)',
+      '[data-state="closed"]': 'var(--tw-ease, ease-out)',
+    },
+    animationDelay: 'var(--tw-animation-delay, 0s)',
+    animationIterationCount: 'var(--tw-animation-iteration-count, 1)',
+    animationDirection: 'var(--tw-animation-direction, normal)',
+    animationFillMode: 'var(--tw-animation-fill-mode, none)',
+  },
+  categoryRows: {
+    display: 'flex',
+    flexDirection: 'column',
+    marginTop: '2px',
+    paddingBottom: space[2],
+  },
+  fileRow: {
+    display: 'flex',
+    width: '100%',
+    minHeight: '36px',
+    alignItems: 'center',
+    gap: space[1.5],
+    borderRadius: 'var(--radius-md)',
+    paddingBlock: space[1],
+    paddingInline: space[2],
+    color: {
+      default: 'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)',
+      ':hover': 'hsl(var(--hover-foreground))',
+    },
+    textAlign: 'left',
+    backgroundColor: {
+      default: null,
+      ':hover': 'hsl(var(--hover))',
+    },
+    outline: {
+      default: null,
+      ':focus-visible': 'none',
+    },
+    boxShadow: {
+      default: null,
+      ':focus-visible': '0 0 0 1px hsl(var(--ring))',
+    },
+  },
+  fileIcon: { width: '16px', height: '16px', flexShrink: 0 },
+  fileNameStack: {
+    display: 'flex',
+    minWidth: 0,
+    flex: '1 1 0%',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    lineHeight: 1.25,
+  },
+  fileName: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '14px',
+    lineHeight: '20px',
+  },
+  parentPath: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'color-mix(in oklab, hsl(var(--muted-foreground)) 70%, transparent)',
+    fontSize: '10px',
+  },
+  treeIcon: { width: '16px', height: '16px', flexShrink: 0, marginInlineEnd: space[1.5] },
+  treeName: {
+    minWidth: 0,
+    flex: '1 1 0%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '14px',
+    lineHeight: '20px',
+  },
+  treeLeafName: { color: 'color-mix(in oklab, hsl(var(--foreground)) 90%, transparent)' },
+  treeDirectoryName: { color: 'hsl(var(--foreground))' },
+  stats: {
+    display: 'inline-block',
+    minWidth: '2.25rem',
+    textAlign: 'right',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  aggregateStats: {
+    display: 'inline-block',
+    minWidth: '4.75rem',
+    color: 'hsl(var(--muted-foreground))',
+    textAlign: 'right',
+  },
+  rowTrailing: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'baseline',
+    gap: space[1],
+    marginInlineStart: space[1],
+    fontSize: '11px',
+  },
+  added: { color: 'hsl(var(--github-addition))' },
+  deleted: { color: 'hsl(var(--github-deletion))' },
+  segmentButton: {
+    height: '20px',
+    borderRadius: 'var(--radius-sm)',
+    paddingInline: space[2],
+    fontSize: '11px',
+    fontWeight: 500,
+    transitionProperty: 'color, background-color',
+    transitionDuration: '150ms',
+  },
+  segmentActive: {
+    backgroundColor: 'hsl(var(--background))',
+    color: 'hsl(var(--foreground))',
+    boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
+  },
+  segmentInactive: {
+    color: {
+      default: 'hsl(var(--muted-foreground))',
+      ':hover': 'hsl(var(--foreground))',
+    },
+  },
+  emptyState: {
+    display: 'flex',
+    height: '100%',
+    minHeight: '120px',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBlock: space[6],
+    paddingInline: space[4],
+    color: 'hsl(var(--muted-foreground))',
+    fontSize: '14px',
+    lineHeight: '20px',
+    textAlign: 'center',
+  },
+});
 
 function getParentPath(filePath: string): string {
   const normalized = filePath.replace(/\\/g, '/');
@@ -122,11 +379,11 @@ export function SessionChangesSidebar({
 
     return (
       <>
-        <Icon className="mr-1.5 h-4 w-4 shrink-0" />
+        <Icon className={stylex.props(styles.treeIcon).className} />
         <span
-          className={cn(
-            'min-w-0 flex-1 truncate text-sm',
-            isLeaf ? 'text-foreground/90' : 'text-foreground'
+          {...stylex.props(
+            styles.treeName,
+            isLeaf ? styles.treeLeafName : styles.treeDirectoryName
           )}
         >
           {item.name}
@@ -150,23 +407,14 @@ export function SessionChangesSidebar({
         type="button"
         data-id={`change:${entry.filePath}`}
         data-scope-item="row"
-        className={cn(
-          'group flex min-h-9 w-full items-center gap-1.5 rounded-md px-2 py-1 text-left',
-          'text-foreground/90 hover:bg-hover hover:text-hover-foreground',
-          'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-        )}
+        {...stylex.props(styles.fileRow)}
         title={entry.filePath}
         onClick={() => onOpenChangesDiff(entry.filePath, changeFilePaths)}
       >
-        <FileIcon filePath={entry.filePath} className="h-4 w-4 shrink-0" />
-        <span
-          className="flex min-w-0 flex-1 flex-col justify-center leading-tight"
-          title={entry.filePath}
-        >
-          <span className="truncate text-sm">{getBasename(entry.filePath)}</span>
-          {parentPath ? (
-            <span className="truncate text-[10px] text-muted-foreground/70">{parentPath}/</span>
-          ) : null}
+        <FileIcon filePath={entry.filePath} className={stylex.props(styles.fileIcon).className} />
+        <span {...stylex.props(styles.fileNameStack)} title={entry.filePath}>
+          <span {...stylex.props(styles.fileName)}>{getBasename(entry.filePath)}</span>
+          {parentPath ? <span {...stylex.props(styles.parentPath)}>{parentPath}/</span> : null}
         </span>
         <RowTrailing
           add={entry.add}
@@ -193,7 +441,7 @@ export function SessionChangesSidebar({
     }
     if (viewMode === 'files') {
       return (
-        <div className="px-1 py-1">
+        <div {...stylex.props(styles.fileTreePadding)}>
           <TreeView
             data={fileTreeData}
             expandAll
@@ -212,24 +460,17 @@ export function SessionChangesSidebar({
         // entries stream in and new categories appear, they'll show up expanded
         // to mirror the original "always expanded" layout.
         defaultValue={[...FILE_CHANGE_CATEGORY_ORDER]}
-        className="flex flex-col px-1.5 py-2"
+        {...stylex.props(styles.categoryList)}
       >
         {groups.map((group) => (
           <AccordionPrimitive.Item key={group.category} value={group.category}>
-            <AccordionPrimitive.Header className="flex">
+            <AccordionPrimitive.Header {...stylex.props(styles.categoryHeader)}>
               <AccordionPrimitive.Trigger
-                className={cn(
-                  'group flex h-6 w-full items-center gap-1.5 rounded-md px-1 text-left',
-                  'hover:bg-hover/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-                )}
+                {...stylex.props(styles.categoryTrigger, accordionTriggerMarker)}
               >
-                <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 group-data-[state=open]:rotate-90" />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                  {categoryLabel[group.category]}
-                </span>
-                <span className="text-[11px] tabular-nums text-muted-foreground/60">
-                  {group.entries.length}
-                </span>
+                <ChevronRight {...stylex.props(styles.categoryIcon)} />
+                <span {...stylex.props(styles.categoryLabel)}>{categoryLabel[group.category]}</span>
+                <span {...stylex.props(styles.categoryCount)}>{group.entries.length}</span>
                 <AggregateStats
                   add={group.add}
                   del={group.del}
@@ -241,8 +482,8 @@ export function SessionChangesSidebar({
                 />
               </AccordionPrimitive.Trigger>
             </AccordionPrimitive.Header>
-            <AccordionPrimitive.Content className="overflow-hidden data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down">
-              <ul className="mt-0.5 flex flex-col pb-2">{group.entries.map(renderEntryRow)}</ul>
+            <AccordionPrimitive.Content {...stylex.props(styles.categoryContent)}>
+              <ul {...stylex.props(styles.categoryRows)}>{group.entries.map(renderEntryRow)}</ul>
             </AccordionPrimitive.Content>
           </AccordionPrimitive.Item>
         ))}
@@ -251,14 +492,12 @@ export function SessionChangesSidebar({
   };
 
   return (
-    <FocusScope id={scopeId} className="flex h-full flex-col">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 px-3">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {t('sessions.changes.title', 'Changes')}
-        </span>
+    <FocusScope id={scopeId} {...stylex.props(styles.scope)}>
+      <div {...stylex.props(styles.header)}>
+        <span {...stylex.props(styles.heading)}>{t('sessions.changes.title', 'Changes')}</span>
         {statusMessage === null && (
-          <span className="flex items-baseline gap-1 text-[11px] tabular-nums">
-            <span className="text-muted-foreground/70">{totals.count}</span>
+          <span {...stylex.props(styles.totals)}>
+            <span {...stylex.props(styles.subdued)}>{totals.count}</span>
             <AggregateStats
               add={totals.add}
               del={totals.del}
@@ -268,7 +507,7 @@ export function SessionChangesSidebar({
             />
           </span>
         )}
-        <div className="ml-auto inline-flex h-6 items-center rounded-md border border-border/60 bg-muted/40 p-0.5 text-[11px]">
+        <div {...stylex.props(styles.viewSwitch)}>
           <SegmentButton active={viewMode === 'types'} onClick={() => setViewMode('types')}>
             {t('sessions.changes.view.types', 'Types')}
           </SegmentButton>
@@ -277,7 +516,9 @@ export function SessionChangesSidebar({
           </SegmentButton>
         </div>
       </div>
-      <ScrollArea className="min-h-0 flex-1">{renderBody()}</ScrollArea>
+      <ScrollArea className={stylex.props(styles.scrollContent).className}>
+        {renderBody()}
+      </ScrollArea>
     </FocusScope>
   );
 }
@@ -295,11 +536,9 @@ function SegmentButton({
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        'h-5 rounded px-2 text-[11px] font-medium transition-colors',
-        active
-          ? 'bg-background text-foreground shadow-sm'
-          : 'text-muted-foreground hover:text-foreground'
+      {...stylex.props(
+        styles.segmentButton,
+        active ? styles.segmentActive : styles.segmentInactive
       )}
     >
       {children}
@@ -318,10 +557,7 @@ function AggregateStats({
 }) {
   if (statsUnavailableLabel) {
     return (
-      <span
-        className="inline-block min-w-[4.75rem] text-right text-muted-foreground"
-        title={statsUnavailableLabel}
-      >
+      <span {...stylex.props(styles.aggregateStats)} title={statsUnavailableLabel}>
         --
       </span>
     );
@@ -329,8 +565,8 @@ function AggregateStats({
 
   return (
     <>
-      <span className={cn(STAT_COL_CLASS, 'text-github-addition')}>+{add}</span>
-      <span className={cn(STAT_COL_CLASS, 'text-github-deletion')}>−{del}</span>
+      <span {...stylex.props(styles.stats, styles.added)}>+{add}</span>
+      <span {...stylex.props(styles.stats, styles.deleted)}>−{del}</span>
     </>
   );
 }
@@ -345,15 +581,15 @@ function RowTrailing({
   statsUnavailableLabel?: string;
 }) {
   return (
-    <span className="ml-1 flex shrink-0 items-baseline gap-1 text-[11px]">
+    <span {...stylex.props(styles.rowTrailing)}>
       {statsUnavailableLabel ? (
-        <span className="inline-block min-w-[4.75rem] text-right text-muted-foreground">
+        <span {...stylex.props(styles.aggregateStats)}>
           <span title={statsUnavailableLabel}>--</span>
         </span>
       ) : (
         <>
-          <span className={cn(STAT_COL_CLASS, 'text-github-addition')}>+{add}</span>
-          <span className={cn(STAT_COL_CLASS, 'text-github-deletion')}>−{del}</span>
+          <span {...stylex.props(styles.stats, styles.added)}>+{add}</span>
+          <span {...stylex.props(styles.stats, styles.deleted)}>−{del}</span>
         </>
       )}
     </span>
@@ -361,11 +597,7 @@ function RowTrailing({
 }
 
 function EmptyState({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-full min-h-[120px] items-center justify-center px-4 py-6 text-center text-sm text-muted-foreground">
-      {children}
-    </div>
-  );
+  return <div {...stylex.props(styles.emptyState)}>{children}</div>;
 }
 
 const changeFileTreeToTreeData = (

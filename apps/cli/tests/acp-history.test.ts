@@ -5,6 +5,7 @@ import { LoroRepo } from 'loro-repo';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
+  appendACPNotificationsToAssistantEntry,
   applyMessageContentsBatch,
   ensurePermissionRequestOnToolCall,
   updatePermissionOutcomeInHistory,
@@ -15,7 +16,13 @@ import {
 } from '../src/lib/acp/history-apply';
 import { SessionDocument } from '../src/lib/loro/doc';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
-import type { MessageContent, SessionHistoryInput, SessionId, ToolCallContent } from '@lody/shared';
+import type {
+  AcpSessionNotification,
+  MessageContent,
+  SessionHistoryInput,
+  SessionId,
+  ToolCallContent,
+} from '@lody/shared';
 import type { Logger } from '../src/utils/logger';
 
 const createSilentLogger = (): Logger => ({
@@ -31,6 +38,75 @@ const createSilentLogger = (): Logger => ({
 });
 
 describe('acp history batch', () => {
+  it('keeps operation IDs aligned when invalid and non-history notifications are filtered', async () => {
+    const text: AcpSessionNotification = {
+      sessionId: 'synthetic-session',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'kept' },
+      },
+    };
+    const invalid = {
+      sessionId: 'synthetic-session',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 42 },
+      },
+    } as unknown as AcpSessionNotification;
+    const nonHistory = {
+      sessionId: 'synthetic-session',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'resource', resource: { uri: 'file:///tmp/resource.txt' } },
+      },
+    } as unknown as AcpSessionNotification;
+    const applied: unknown[] = [];
+    const backend = {
+      applyAgentBatch: async (input: unknown) => {
+        applied.push(input);
+      },
+    };
+    const doc = { sessionId: 'synthetic-session' } as SessionDocument;
+
+    await appendACPNotificationsToAssistantEntry(
+      doc,
+      [invalid, nonHistory, text],
+      'assistant-entry',
+      {
+        logger: createSilentLogger(),
+        backend: backend as never,
+        operationIds: ['invalid-id', 'filtered-id', 'kept-id'],
+      }
+    );
+
+    expect(applied).toEqual([
+      expect.objectContaining({
+        notifications: [text],
+        operationIds: ['kept-id'],
+      }),
+    ]);
+  });
+
+  it('rejects an operation ID list that does not match its notification batch', async () => {
+    const backend = { applyAgentBatch: async () => undefined };
+    const doc = { sessionId: 'synthetic-session' } as SessionDocument;
+
+    await expect(
+      appendACPNotificationsToAssistantEntry(
+        doc,
+        {
+          sessionId: 'synthetic-session',
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'kept' },
+          },
+        },
+        'assistant-entry',
+        { backend: backend as never, operationIds: [] }
+      )
+    ).rejects.toThrow('ACP notification operation IDs must match the input batch length');
+  });
+
   it('merges text deltas into last assistant entry', () => {
     const history: SessionHistoryInput[] = [
       {

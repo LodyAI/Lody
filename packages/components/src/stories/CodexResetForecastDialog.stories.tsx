@@ -47,7 +47,7 @@ type Story = StoryObj<typeof meta>;
 export const ActiveForecast: Story = {
   args: {
     watch,
-    state: { status: 'ready', data: { watch, latestReset }, error: null },
+    state: { status: 'ready', data: { watch, latestReset, scheduledReset: null }, error: null },
   },
 };
 
@@ -56,7 +56,11 @@ export const WithoutProbability: Story = {
     watch: { ...watch, chancePercent: null, level: 'elevated' },
     state: {
       status: 'ready',
-      data: { watch: { ...watch, chancePercent: null, level: 'elevated' }, latestReset },
+      data: {
+        watch: { ...watch, chancePercent: null, level: 'elevated' },
+        latestReset,
+        scheduledReset: null,
+      },
       error: null,
     },
   },
@@ -64,14 +68,18 @@ export const WithoutProbability: Story = {
 
 export const NoActiveWatch: Story = {
   args: {
-    state: { status: 'ready', data: { watch: null, latestReset }, error: null },
+    state: {
+      status: 'ready',
+      data: { watch: null, latestReset, scheduledReset: null },
+      error: null,
+    },
   },
 };
 
 export const ExpiredForecast: Story = {
   args: {
     isExpired: true,
-    state: { status: 'ready', data: { watch, latestReset }, error: null },
+    state: { status: 'ready', data: { watch, latestReset, scheduledReset: null }, error: null },
   },
 };
 
@@ -90,6 +98,39 @@ export const LoadFailed: Story = {
 export const RefreshFailedWithStaleForecast: Story = {
   args: {
     watch,
-    state: { status: 'error', data: { watch, latestReset }, error: 'fetch failed' },
+    state: {
+      status: 'error',
+      data: { watch, latestReset, scheduledReset: null },
+      error: 'fetch failed',
+    },
+  },
+};
+
+const scheduledReset = {
+  ...latestReset,
+  text: 'A reset is scheduled for later today.',
+  scheduledForIso: new Date(NOW_MS + 14 * 3_600_000).toISOString(),
+  scheduledForMs: NOW_MS + 14 * 3_600_000,
+};
+
+export const ScheduledReset: Story = {
+  args: {
+    state: { status: 'ready', data: { watch: null, latestReset, scheduledReset }, error: null },
+  },
+};
+export const ScheduledAwaitingExecution: Story = {
+  args: { ...ScheduledReset.args, nowMs: scheduledReset.scheduledForMs },
+};
+export const ScheduledWithoutTime: Story = {
+  args: {
+    state: {
+      status: 'ready',
+      data: {
+        watch: null,
+        latestReset,
+        scheduledReset: { ...scheduledReset, scheduledForIso: null, scheduledForMs: null },
+      },
+      error: null,
+    },
   },
 };

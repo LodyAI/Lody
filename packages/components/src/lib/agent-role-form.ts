@@ -17,6 +17,7 @@ import {
 } from '@lody/shared';
 import {
   isConfigOptionValueValid,
+  type AcpConfigOptionSelector,
   type AcpSelectorOptions,
 } from '@/components/shared/acp-selector-options';
 
@@ -36,6 +37,7 @@ export type AgentRoleFormValue = {
   modeId: string | null;
   modelId: string | null;
   configOptionValues: Record<string, string | boolean>;
+  memory?: AgentRoleRunConfig['memory'];
   promptPrefix: string;
   /** Off by default: a new Role is private until its owner says otherwise. */
   shareWithWorkspace: boolean;
@@ -94,6 +96,7 @@ export const buildAgentRoleFormValue = (role: AgentRole): AgentRoleFormValue => 
   modeId: role.runConfig.modeId ?? null,
   modelId: role.runConfig.modelId ?? null,
   configOptionValues: { ...(role.runConfig.configOptionValues ?? {}) },
+  memory: role.runConfig.memory,
   promptPrefix: role.promptPrefix ?? '',
   shareWithWorkspace: role.visibility === 'workspace',
 });
@@ -144,6 +147,7 @@ export const validateAgentRoleForm = (
  */
 export const buildAgentRoleRunConfig = (value: AgentRoleFormValue): AgentRoleRunConfig =>
   normalizeAgentRoleRunConfig({
+    memory: value.memory,
     modeId: value.modeId ?? undefined,
     modelId: value.modelId ?? undefined,
     configOptionValues: value.configOptionValues,
@@ -236,6 +240,19 @@ export const applyAgentRoleRunConfigDefaults = (
   }
   return { ...value, modelId, modeId, configOptionValues };
 };
+
+export const carryAgentRoleOptionsToModel = (
+  values: AgentRoleFormValue['configOptionValues'],
+  outgoing: readonly AcpConfigOptionSelector[],
+  incoming: readonly AcpConfigOptionSelector[]
+): AgentRoleFormValue['configOptionValues'] =>
+  Object.fromEntries(
+    Object.entries(values).filter(([configId, value]) => {
+      if (!outgoing.some((selector) => selector.configId === configId)) return true;
+      const next = incoming.find((selector) => selector.configId === configId);
+      return next !== undefined && isConfigOptionValueValid(next, value);
+    })
+  );
 
 // ---------------------------------------------------------------------------
 // Capability compatibility

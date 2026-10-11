@@ -84,6 +84,8 @@ const SessionForkOperationMarkerSchema = z
     createdAt: z.string().min(1),
     /** Target session title, for republishing meta after a mid-commit crash. */
     title: z.string().min(1),
+    /** History backend selected by the source session, for crash-safe target repair. */
+    historyBackend: z.enum(['loro', 'roost']).optional(),
     /**
      * The worktree's real branch name, recorded by the saga once git answers.
      * Absent on markers whose saga never reached the commit block.

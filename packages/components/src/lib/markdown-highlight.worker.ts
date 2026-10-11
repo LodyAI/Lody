@@ -1,6 +1,7 @@
 import type { BundledLanguage } from 'shiki';
 import {
   createMarkdownHighlighter,
+  ensureMarkdownCodeLanguage,
   tokenizeMarkdownCode,
   type MarkdownHighlighter,
 } from './markdown-highlighter';
@@ -19,10 +20,16 @@ let highlighter: Promise<MarkdownHighlighter> | null = null;
 const post = (message: MarkdownHighlightResponse) => self.postMessage(message);
 
 self.onmessage = async (event: MessageEvent<MarkdownHighlightRequest>) => {
-  const { id, code, language } = event.data;
+  const { id, code, language, extendedLanguagesEnabled = false } = event.data;
   try {
     highlighter ??= createMarkdownHighlighter();
-    const tokens = tokenizeMarkdownCode(await highlighter, code, language as BundledLanguage);
+    const resolvedHighlighter = await highlighter;
+    await ensureMarkdownCodeLanguage(
+      resolvedHighlighter,
+      language as BundledLanguage,
+      extendedLanguagesEnabled
+    );
+    const tokens = tokenizeMarkdownCode(resolvedHighlighter, code, language as BundledLanguage);
     post({ id, tokens });
   } catch (error) {
     post({ id, error: error instanceof Error ? error.message : String(error) });

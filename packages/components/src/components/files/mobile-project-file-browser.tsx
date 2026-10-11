@@ -1,3 +1,4 @@
+import * as stylex from '@stylexjs/stylex';
 import {
   forwardRef,
   Fragment,
@@ -15,18 +16,26 @@ import { Spinner } from '@/ui/spinner';
 import type { FileTreeItem } from '@lody/shared';
 
 import { useAtomValue } from 'jotai';
-import { conversationFontSizeAtom } from '@/atoms';
+import { conversationFontSizeAtom, extendedCodeLanguagesEnabledAtom } from '@/atoms';
 import { FileIcon, FolderIcon } from '@/components/icons/file-icons';
 import { MobileEdgeBackSwipeZone } from '@/components/mobile/mobile-edge-back-swipe';
 import { SessionFileImagePreview } from '@/components/sessions/session-file-image-preview';
+import { SessionFileVideoPreview } from '@/components/sessions/session-file-video-preview';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { MarkdownFileResources } from '@/components/ai-gui/markdown-file-image';
 import { SessionMonacoTextViewer } from '@/components/sessions/session-monaco-text-viewer';
+import { SessionShikiTextViewer } from '@/components/sessions/session-shiki-text-viewer';
 import { useFileWorkspaceTree } from '@/hooks/use-code-session';
 import { isNativeAppShell } from '@/lib/native-platform';
 import type { FileWorkspaceProvider, FileWorkspaceSnapshot } from '@/lib/file-workspace-provider';
 import { getImageMimeTypeForPath, isSvgPath } from '@/lib/image-file-preview';
-import { getSessionFileMonacoLanguageId, isSessionMarkdownPath } from '@/lib/session-file-language';
+import { getVideoMimeTypeForPath } from '@/lib/video-file-preview';
+import {
+  getSessionFileLanguageId,
+  getSessionFileMonacoLanguageId,
+  isSessionFileShikiLanguage,
+  isSessionMarkdownPath,
+} from '@/lib/session-file-language';
 import { cn } from '@/lib/utils';
 import { useActiveVSCodeTheme, useResolvedTheme } from '../../theme-provider';
 
@@ -42,6 +51,7 @@ const MOBILE_TABBAR_CLEARANCE =
 const MOBILE_SAFE_AREA_CLEARANCE = 'pb-[calc(var(--k-safe-area-bottom,0px)+1rem)]';
 
 const ROOT_PATH = '';
+const videoStyles = stylex.create({ frame: { height: '100%', minHeight: 0 } });
 
 export type MobileProjectFileBrowserHandle = {
   /** Pop one level (folder listing or file preview). No-op at the root. */
@@ -678,6 +688,13 @@ function MobileFilePreview({
   // Raster/binary images (png/jpeg/gif/webp/…) arrive as raw bytes. A binary
   // snapshot without bytes is an image that was too large to transfer.
   if (snapshot.kind === 'binary') {
+    if (getVideoMimeTypeForPath(path) && snapshot.bytes !== undefined) {
+      return (
+        <div className={cn(stylex.props(videoStyles.frame).className, bottomClearanceClassName)}>
+          <SessionFileVideoPreview path={path} bytes={snapshot.bytes} />
+        </div>
+      );
+    }
     if (isImage && snapshot.bytes && snapshot.bytes.byteLength > 0) {
       return (
         <MobileImagePreview
@@ -778,6 +795,8 @@ function MobileTextPreview({
   const resolvedTheme = useResolvedTheme();
   const activeVSCodeTheme = useActiveVSCodeTheme();
   const conversationFontSize = useAtomValue(conversationFontSizeAtom);
+  const extendedCodeLanguagesEnabled = useAtomValue(extendedCodeLanguagesEnabledAtom);
+  const language = getSessionFileLanguageId(path, extendedCodeLanguagesEnabled);
 
   if (isSessionMarkdownPath(path)) {
     return (
@@ -793,6 +812,25 @@ function MobileTextPreview({
     );
   }
 
+  if (isSessionFileShikiLanguage(language)) {
+    return (
+      <div
+        className={cn(
+          'min-h-0 flex-1 overflow-hidden overscroll-contain',
+          bottomClearanceClassName
+        )}
+      >
+        <SessionShikiTextViewer
+          key={path}
+          path={path}
+          text={text}
+          language={language}
+          className="h-full min-h-0"
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn('min-h-0 flex-1 overflow-hidden overscroll-contain', bottomClearanceClassName)}
@@ -800,7 +838,7 @@ function MobileTextPreview({
       <SessionMonacoTextViewer
         key={path}
         text={text}
-        language={getSessionFileMonacoLanguageId(path)}
+        language={getSessionFileMonacoLanguageId(path, extendedCodeLanguagesEnabled)}
         resolvedTheme={resolvedTheme}
         vscodeTheme={activeVSCodeTheme ?? null}
         readOnly

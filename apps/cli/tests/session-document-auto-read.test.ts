@@ -194,6 +194,7 @@ describe('SessionDocument auto read', () => {
         task: 'stuck draft',
         project: undefined,
         userId: 'user-1',
+        userTurnId: 'turn-stuck',
         timestamp: new Date().toISOString(),
         isEditing: true,
         editingStartedAt: tenMinutesAgo,
@@ -207,6 +208,7 @@ describe('SessionDocument auto read', () => {
 
       const popped = await doc.popMessageQueue();
       expect(popped?.task).toBe('stuck draft');
+      expect(popped?.operationId).toBe('queue:turn-stuck');
       await expect(doc.getMessageQueue()).resolves.toEqual([]);
     } finally {
       await repo.destroy();

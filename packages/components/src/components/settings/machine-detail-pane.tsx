@@ -1,3 +1,4 @@
+import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAtomValue } from 'jotai';
 import * as stylex from '@stylexjs/stylex';
@@ -63,7 +64,7 @@ const MONO = 'var(--font-mono, ui-monospace, monospace)';
 const styles = stylex.create({
   quietLine: {
     margin: 0,
-    fontSize: type.caption,
+    fontSize: uiText.footnoteSize,
     lineHeight: type.leading,
     color: colors.secondaryLabel,
     textAlign: 'center',
@@ -114,7 +115,7 @@ const styles = stylex.create({
     textAlign: 'center',
   },
   emptyIcon: { width: '24px', height: '24px', color: colors.tertiaryLabel },
-  emptyCopy: { margin: 0, fontSize: type.caption, color: colors.secondaryLabel },
+  emptyCopy: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   pane: {
     display: 'flex',
     flexDirection: 'column',
@@ -175,7 +176,7 @@ const styles = stylex.create({
   titleMobile: { fontSize: '1.125em', textAlign: 'center' },
   ping: { display: 'flex', flexShrink: 0, alignItems: 'center', gap: space[1.5] },
   pushEnd: { marginInlineStart: 'auto' },
-  latency: { fontFamily: MONO, fontSize: type.caption, color: colors.secondaryLabel },
+  latency: { fontFamily: MONO, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   share: {
     display: 'flex',
     flexShrink: 0,
@@ -184,7 +185,7 @@ const styles = stylex.create({
     marginInlineStart: 'auto',
     paddingInlineStart: space[2],
   },
-  shareLabel: { whiteSpace: 'nowrap', fontSize: type.caption, color: colors.secondaryLabel },
+  shareLabel: { whiteSpace: 'nowrap', fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   /** Between the management actions and the destructive ones: one structural line. */
   groupRule: {
     flexShrink: 0,
@@ -218,8 +219,8 @@ const styles = stylex.create({
     marginTop: space[3],
   },
   updateText: { minWidth: 0 },
-  updateTitle: { fontSize: type.caption, color: colors.label },
-  updateVersion: { fontFamily: MONO, fontSize: type.caption, color: colors.secondaryLabel },
+  updateTitle: { fontSize: uiText.footnoteSize, color: colors.label },
+  updateVersion: { fontFamily: MONO, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   body: { flexGrow: 1, minHeight: 0, overflowY: 'auto' },
   bodyInAccordion: { overflowY: 'visible' },
 });
@@ -786,7 +787,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   >
                     {isMobile && manageableOwnMachine && (
                       <Menu.Item
-                        icon={<Pencil {...stylex.props(styles.iconFill)} />}
+                        icon={Pencil}
                         onClick={() => {
                           pendingRenameRef.current = true;
                           setRenaming(true);
@@ -803,7 +804,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                           void handleSharedToggle(!effectiveShared);
                         }}
                         disabled={sharing}
-                        icon={<Users {...stylex.props(styles.iconFill)} />}
+                        icon={Users}
                         endContent={
                           <Switch
                             checked={effectiveShared}
@@ -829,13 +830,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                           void handlePing();
                         }}
                         disabled={pinging}
-                        icon={
-                          pinging ? (
-                            <Spinner size="small" />
-                          ) : (
-                            <Activity {...stylex.props(styles.iconFill)} />
-                          )
-                        }
+                        icon={pinging ? <Spinner size="small" /> : Activity}
                         shortcut={
                           pingLatencyMs !== null ? (
                             <span {...stylex.props(styles.mono)}>
@@ -853,13 +848,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       <Menu.Item
                         onClick={() => void handleUpgradeDaemon()}
                         disabled={restartingDaemon || upgradingDaemon}
-                        icon={
-                          upgradingDaemon ? (
-                            <Spinner size="small" />
-                          ) : (
-                            <Download {...stylex.props(styles.iconFill)} />
-                          )
-                        }
+                        icon={upgradingDaemon ? <Spinner size="small" /> : Download}
                       >
                         {t(
                           'settings.agent.machineLifecycle.upgradeAndRestartButton',
@@ -871,13 +860,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       <Menu.Item
                         onClick={() => void handleRestartDaemon()}
                         disabled={restartingDaemon || upgradingDaemon}
-                        icon={
-                          restartingDaemon ? (
-                            <Spinner size="small" />
-                          ) : (
-                            <RotateCcw {...stylex.props(styles.iconFill)} />
-                          )
-                        }
+                        icon={restartingDaemon ? <Spinner size="small" /> : RotateCcw}
                       >
                         {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
                       </Menu.Item>
@@ -892,7 +875,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                           }}
                           disabled={!canDelete}
                           tone="destructive"
-                          icon={<LogOut {...stylex.props(styles.iconFill)} />}
+                          icon={LogOut}
                         >
                           {canDelete
                             ? t('workspace.machines.removeFromWorkspace', 'Remove from workspace')

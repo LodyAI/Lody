@@ -16,8 +16,8 @@ export function NightlyDownloadPage({ locale }: { locale: 'en' | 'zh' }) {
           <h1>{isZh ? '下载 Lody Nightly' : 'Download Lody Nightly'}</h1>
           <p className="download-subtitle">
             {isZh
-              ? '提前体验新功能。独立安装、独立更新，使用现有账号和真实云端数据。'
-              : 'Try new features early. A separate app with its own updates, using your existing account and live cloud data.'}
+              ? '提前体验新功能，使用现有账号和真实云端数据。'
+              : 'Try new features early using your existing account and live cloud data.'}
           </p>
           <SiteAnchor
             className="download-nightly__stable"

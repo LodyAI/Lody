@@ -97,6 +97,9 @@ describe('electron oauth helpers', () => {
   });
 
   it('builds the official Electron callback deep link from an authorization code', () => {
+    expect(buildElectronAuthorizationCallbackUrl('auth-code-123', 'stable')).toBe(
+      'ai.lody.stable://auth/callback#token=auth-code-123'
+    );
     expect(buildElectronAuthorizationCallbackUrl('auth-code-123')).toBe(
       'lody://auth/callback#token=auth-code-123'
     );

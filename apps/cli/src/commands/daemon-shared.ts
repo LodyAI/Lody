@@ -1,6 +1,7 @@
+import { toShared } from '@/platform/process-options';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import os from 'node:os';
@@ -14,6 +15,9 @@ import {
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { requestLocalCliHostShutdown } from '@lody/shared/node/local-cli-host-lease';
 import { calculateWorkerMaxOldSpaceMiB } from '@lody/cli-supervisor';
+import { startProcessLegacy, type ProcessHandleLegacy } from '@lody/shared/node/process';
+
+import type { NodeProcessApi } from '@lody/shared/node/process';
 export { LODY_LOG_DIR } from '@/utils/log-retention';
 
 export const DAEMON_PID_FILE = path.join(getLodyDataDir(), 'daemon.pid');
@@ -128,6 +132,7 @@ const DaemonRunnerLaunchOutcomeSchema = z.discriminatedUnion('status', [
     status: z.literal('ready'),
     pid: z.number().int().positive(),
     instanceId: z.string().min(1),
+    cliVersion: z.string().min(1).optional(),
   }),
   z.object({
     status: z.literal('occupied'),
@@ -183,10 +188,21 @@ type DaemonRunnerWaitResult = {
 /** Translate the runner report and identify outcomes whose child must be awaited. */
 export function interpretDaemonRunnerLaunchOutcome(
   outcome: DaemonRunnerLaunchOutcome,
-  runnerPid: number
+  runnerPid: number,
+  expectedVersion?: string
 ): DaemonRunnerWaitResult {
   switch (outcome.status) {
     case 'ready':
+      if (expectedVersion !== undefined && outcome.cliVersion !== expectedVersion) {
+        return {
+          outcome: {
+            status: 'error',
+            runnerPid,
+            message: `Daemon reported version ${outcome.cliVersion ?? 'unknown'}; expected ${expectedVersion}`,
+          },
+          cancelRunner: true,
+        };
+      }
       return {
         outcome: { status: 'ready', pid: runnerPid, instanceId: outcome.instanceId },
         cancelRunner: false,
@@ -220,74 +236,61 @@ function isChildProcessRunning(child: ChildProcess): boolean {
   return child.exitCode === null && child.signalCode === null;
 }
 
-async function waitForChildProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (!isChildProcessRunning(child)) return true;
-  return await new Promise<boolean>((resolve) => {
-    let settled = false;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    let onExit: () => void;
-    const finish = (exited: boolean) => {
-      if (settled) return;
-      settled = true;
-      if (timeout !== undefined) clearTimeout(timeout);
-      child.off('exit', onExit);
-      child.off('close', onExit);
-      resolve(exited);
-    };
-    onExit = () => finish(true);
-    timeout = setTimeout(() => finish(!isChildProcessRunning(child)), timeoutMs);
-    child.once('exit', onExit);
-    child.once('close', onExit);
-    if (!isChildProcessRunning(child)) finish(true);
-  });
+/** Whether the runner's root process exited within `timeoutMs`. */
+async function waitForRunnerExit(runner: ProcessHandleLegacy, timeoutMs: number): Promise<boolean> {
+  if (!isChildProcessRunning(runner.child)) return true;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      runner.exited.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(!isChildProcessRunning(runner.child)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 /**
- * A failed foreground launch must not leave its exact detached child running.
- * Ask that runner's authenticated Host endpoint to drain its Worker; the exact
- * ChildProcess handle we spawned is the fallback and force-stop authority.
+ * A failed foreground launch must not leave its exact detached runner, or the
+ * Worker in its process tree, running. Ask that runner's authenticated Host
+ * endpoint to drain its Worker; the process tree we spawned is the fallback
+ * and force-stop authority.
  */
 export async function terminateSpawnedDaemonRunner(
-  child: ChildProcess,
+  runner: ProcessHandleLegacy,
   runnerPid: number,
-  options: { shutdownGraceMs?: number; forceKillWaitMs?: number } = {}
+  options: { shutdownGraceMs?: number; forceKillWaitMs?: number; pidFilePath?: string } = {}
 ): Promise<boolean> {
-  if (!isChildProcessRunning(child)) return true;
-
-  // Prefer the runner's authenticated cross-platform shutdown channel so its
-  // Worker drains even where OS signals do not reach Node handlers (Windows).
-  const pidRecord = readPidFileRecord();
-  let gracefulShutdownRequested = false;
-  if (pidRecord?.pid === runnerPid) {
-    const requested = await requestLocalCliHostShutdown({
-      instanceId: pidRecord.instanceId,
-      token: pidRecord.controlToken,
-      expectedPid: runnerPid,
-      expectedMode: 'daemon',
-    });
-    gracefulShutdownRequested = requested.ok;
-  }
-  if (!gracefulShutdownRequested) {
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      // Exit state below remains authoritative.
+  const graceMs = options.shutdownGraceMs ?? DAEMON_RUNNER_SHUTDOWN_GRACE_MS;
+  const killWaitMs = options.forceKillWaitMs ?? DAEMON_RUNNER_FORCE_KILL_WAIT_MS;
+  let signalGraceMs = graceMs;
+  if (isChildProcessRunning(runner.child)) {
+    // Prefer the runner's authenticated cross-platform shutdown channel so its
+    // Worker drains even where OS signals do not reach Node handlers (Windows).
+    const pidRecord = readPidFileRecord(options.pidFilePath);
+    if (pidRecord?.pid === runnerPid) {
+      const requested = await requestLocalCliHostShutdown({
+        instanceId: pidRecord.instanceId,
+        token: pidRecord.controlToken,
+        expectedPid: runnerPid,
+        expectedMode: 'daemon',
+      });
+      if (requested.ok) {
+        // The drain already had its grace period; whatever outlives it is killed.
+        await waitForRunnerExit(runner, graceMs);
+        signalGraceMs = 0;
+      }
     }
   }
-  if (
-    await waitForChildProcessExit(child, options.shutdownGraceMs ?? DAEMON_RUNNER_SHUTDOWN_GRACE_MS)
-  ) {
-    return true;
-  }
   try {
-    child.kill('SIGKILL');
+    await runner.terminate({ graceMs: signalGraceMs, killWaitMs });
+    return true;
   } catch {
-    // The final wait reports whether the exact child actually exited.
+    // TerminationFailed: the tree could not be proven gone.
+    return false;
   }
-  return await waitForChildProcessExit(
-    child,
-    options.forceKillWaitMs ?? DAEMON_RUNNER_FORCE_KILL_WAIT_MS
-  );
 }
 
 /**
@@ -297,9 +300,15 @@ export async function terminateSpawnedDaemonRunner(
  */
 export async function spawnDaemonRunnerAndAwaitReady(
   passthroughArgs: string[],
-  options: { timeoutMs?: number } = {}
+  options: {
+    timeoutMs?: number;
+    installation?: { bin: string; version: string };
+    /** Test seams: the OS process table and the daemon PID record location. */
+    nodeProcess?: NodeProcessApi;
+    pidFilePath?: string;
+  } = {}
 ): Promise<SpawnDaemonRunnerResult> {
-  const bin = resolveLodyBin();
+  const bin = options.installation?.bin ?? resolveLodyBin();
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     [DAEMON_RUNNER_READY_FD_ENV]: String(DAEMON_RUNNER_READY_FD),
@@ -312,23 +321,30 @@ export async function spawnDaemonRunnerAndAwaitReady(
   delete env[LODY_SUPERVISOR_TOKEN_ENV];
   delete env[LODY_SUPERVISOR_CONTRACT_ENV];
 
-  const child = spawn(
-    process.execPath,
-    [
-      `--max-old-space-size=${DAEMON_WATCHDOG_MAX_OLD_SPACE_MB}`,
-      bin,
-      'daemon-runner',
-      ...passthroughArgs,
-    ],
+  // Detached everywhere: its own process group on POSIX, its own console on
+  // Windows, so the runner outlives the terminal that started it.
+  const runner = startProcessLegacy(
     {
-      detached: true,
-      // On Windows a detached child would otherwise get its own visible
-      // console window.
-      windowsHide: true,
-      stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
-      env,
-    }
+      command: process.execPath,
+      args: [
+        `--max-old-space-size=${DAEMON_WATCHDOG_MAX_OLD_SPACE_MB}`,
+        bin,
+        'daemon-runner',
+        ...passthroughArgs,
+      ],
+      options: {
+        // On Windows a detached child would otherwise get its own visible
+        // console window.
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'ignore', 'pipe'],
+        env,
+      },
+      processGroup: true,
+      windowsDetached: true,
+    },
+    toShared({ nodeProcess: options.nodeProcess })
   );
+  const { child } = runner;
   const runnerPid = child.pid;
   if (runnerPid === undefined) {
     child.unref();
@@ -376,7 +392,11 @@ export async function spawnDaemonRunnerAndAwaitReady(
         finish({ status: 'error', runnerPid, message: 'invalid readiness report' }, true);
         return;
       }
-      const interpreted = interpretDaemonRunnerLaunchOutcome(outcome.data, runnerPid);
+      const interpreted = interpretDaemonRunnerLaunchOutcome(
+        outcome.data,
+        runnerPid,
+        options.installation?.version
+      );
       finish(interpreted.outcome, interpreted.cancelRunner);
     });
     // EOF without a report means the runner exited before its Worker became ready.
@@ -387,7 +407,10 @@ export async function spawnDaemonRunnerAndAwaitReady(
   readyPipe?.removeAllListeners();
   readyPipe?.destroy();
   let result = waitResult.outcome;
-  if (waitResult.cancelRunner && !(await terminateSpawnedDaemonRunner(child, runnerPid))) {
+  if (
+    waitResult.cancelRunner &&
+    !(await terminateSpawnedDaemonRunner(runner, runnerPid, { pidFilePath: options.pidFilePath }))
+  ) {
     result = {
       status: 'error',
       runnerPid,

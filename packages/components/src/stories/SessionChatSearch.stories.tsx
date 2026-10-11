@@ -29,7 +29,9 @@ type Story = StoryObj<typeof meta>;
 const sessionId = 'session-search-storybook' as SessionId;
 
 const buildItems = (messages: SessionHistoryParsed[]): ChatStreamItem[] =>
-  messages.map((message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const);
+  messages.map(
+    (message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const
+  );
 
 const renderMessageRow: SessionChatStreamViewProps['renderMessageRow'] = ({
   message,
@@ -132,6 +134,7 @@ const searchMessages: SessionHistoryParsed[] = [
 ];
 
 interface SearchStoryPreviewProps {
+  messages?: SessionHistoryParsed[];
   initialQuery?: string;
   initialActiveIndex?: number;
   forceTotalCount?: number;
@@ -140,6 +143,7 @@ interface SearchStoryPreviewProps {
 }
 
 function SearchStoryPreview({
+  messages = searchMessages,
   initialQuery = 'search',
   initialActiveIndex = 1,
   forceTotalCount,
@@ -152,8 +156,8 @@ function SearchStoryPreview({
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(initialActiveIndex);
 
   const searchBlocks = useMemo<SessionSearchBlock[]>(
-    () => extractSessionSearchBlocks(searchMessages as unknown as SessionHistory[]),
-    []
+    () => extractSessionSearchBlocks(messages as unknown as SessionHistory[]),
+    [messages]
   );
   const normalizedSearchQuery = useMemo(() => normalizeSessionSearchQuery(query), [query]);
   const computedResults = useMemo<SessionSearchResult[]>(
@@ -261,7 +265,7 @@ function SearchStoryPreview({
           <div className="h-full rounded-2xl border border-border/60 bg-background pt-16 shadow-xs">
             <SessionChatStreamView
               sessionId={sessionId}
-              items={buildItems(searchMessages)}
+              items={buildItems(messages)}
               renderMessageRow={renderMessageRow}
             />
           </div>
@@ -370,3 +374,79 @@ function StateRow({ label, children }: { label: string; children: React.ReactNod
     </div>
   );
 }
+
+const literalMessages = [
+  buildMessage({
+    id: 'literal-user',
+    role: 'user',
+    items: [{ type: 'text', text: 'QA_RESUMED_OK' }],
+  }),
+  buildMessage({
+    id: 'literal-assistant',
+    finished: true,
+    items: [{ type: 'text', text: 'QA_RESUMED_OK —' }],
+  }),
+];
+
+export const LiteralUnderscores: Story = {
+  args: { sessionId, items: buildItems(literalMessages), renderMessageRow },
+  render: () => (
+    <SearchStoryPreview
+      messages={literalMessages}
+      initialQuery="QA_RESUMED_OK"
+      initialActiveIndex={0}
+    />
+  ),
+};
+
+const markdownLiteralMessages = [
+  literalMessages[0]!,
+  buildMessage({
+    id: 'markdown-literal-assistant',
+    finished: true,
+    items: [
+      {
+        type: 'text',
+        text: [
+          'QA_RESUMED_OK —',
+          '',
+          '**QA_RESUMED_OK** _QA_RESUMED_OK_ ~~QA_RESUMED_OK~~',
+          '',
+          '`QA_RESUMED_OK`',
+          '',
+          '```text',
+          'QA_RESUMED_OK',
+          '```',
+          '',
+          '~~~text',
+          'QA_RESUMED_OK',
+          '~~~',
+        ].join('\n'),
+      },
+    ],
+  }),
+];
+
+export const LiteralMarkdownCases: Story = {
+  args: { sessionId, items: buildItems(markdownLiteralMessages), renderMessageRow },
+  render: () => (
+    <SearchStoryPreview
+      messages={markdownLiteralMessages}
+      initialQuery="QA_RESUMED_OK"
+      initialActiveIndex={1}
+    />
+  ),
+};
+
+export const StreamingLiteral: Story = {
+  args: { sessionId, items: buildItems(literalMessages), renderMessageRow },
+  render: () => (
+    <SearchStoryPreview
+      messages={streamingLiteralMessages}
+      initialQuery="QA_RESUMED_OK"
+      initialActiveIndex={1}
+    />
+  ),
+};
+
+const streamingLiteralMessages = [literalMessages[0]!, { ...literalMessages[1]!, finished: false }];

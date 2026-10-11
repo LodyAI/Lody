@@ -93,7 +93,7 @@ describe('UnifiedProjectSelectorView options', () => {
     });
 
     const projectItems = Array.from(
-      document.querySelectorAll<HTMLElement>('[role="menuitem"]')
+      document.querySelectorAll<HTMLElement>('[role^="menuitem"]')
     ).filter((item) => item.textContent?.startsWith('Project '));
 
     expect(projectItems.map((item) => item.textContent)).toEqual(
@@ -113,7 +113,7 @@ describe('UnifiedProjectSelectorView options', () => {
     });
 
     const searchedProjectItems = Array.from(
-      document.querySelectorAll<HTMLElement>('[role="menuitem"]')
+      document.querySelectorAll<HTMLElement>('[role^="menuitem"]')
     ).filter((item) => item.textContent?.startsWith('Project '));
     expect(searchedProjectItems.map((item) => item.textContent)).toEqual(['Project 25']);
   });
@@ -180,7 +180,7 @@ describe('UnifiedProjectSelectorView options', () => {
     });
 
     const projectItems = Array.from(
-      document.querySelectorAll<HTMLElement>('[role="menuitem"]')
+      document.querySelectorAll<HTMLElement>('[role^="menuitem"]')
     ).filter(
       (item) =>
         item.textContent?.startsWith('Project ') || item.textContent?.includes('loro-dev/lody')
@@ -221,7 +221,7 @@ describe('UnifiedProjectSelectorView options', () => {
     });
 
     const projectItems = Array.from(
-      document.querySelectorAll<HTMLElement>('[role="menuitem"]')
+      document.querySelectorAll<HTMLElement>('[role^="menuitem"]')
     ).filter(
       (item) =>
         item.textContent?.startsWith('Project ') ||

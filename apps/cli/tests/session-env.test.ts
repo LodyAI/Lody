@@ -220,41 +220,50 @@ describe('Session buildShellEnv', () => {
     }
   });
 
-  it('awaits the login-shell PATH before spawning the ACP agent', async () => {
-    loginShellOverlay.value = { PATH: '/usr/bin' };
-    resolvedLoginShellOverlay.value = {
-      PATH: ['/opt/homebrew/bin', '/usr/bin'].join(delimiter),
-    };
+  it.each([undefined, { providerId: 'nowledge-mem', memoryId: 'reviewer' }])(
+    'awaits the shell and injects the frozen memory at ACP spawn: %j',
+    async (memory) => {
+      loginShellOverlay.value = { PATH: '/usr/bin' };
+      resolvedLoginShellOverlay.value = {
+        PATH: ['/opt/homebrew/bin', '/usr/bin'].join(delimiter),
+      };
 
-    let spawnedEnv: NodeJS.ProcessEnv | undefined;
-    const stopAfterCapture = new Error('stop after capturing ACP spawn environment');
-    const spawn: SessionSandbox['spawn'] = vi.fn(async (_command, _args, options) => {
-      spawnedEnv = options.env;
-      throw stopAfterCapture;
-    });
-    const sandbox: SessionSandbox = {
-      enabled: false,
-      description: 'test',
-      applyLimits: async () => {},
-      readResourceAccounting: async () => ({ kind: 'unavailable', reason: 'test' }),
-      spawn,
-      terminate: async () => {},
-      cleanup: async () => {},
-    };
-    const session = new Session(createConfig(), createSilentLogger(), process.cwd(), sandbox);
-    const callbacks = {
-      cliType: 'registry',
-      agentType: 'opencode',
-      command: 'opencode',
-      args: ['acp'],
-    } as CreateAgentConfig;
+      let spawnedEnv: NodeJS.ProcessEnv | undefined;
+      const stopAfterCapture = new Error('stop after capturing ACP spawn environment');
+      const spawn: SessionSandbox['spawn'] = vi.fn(async (_command, _args, options) => {
+        spawnedEnv = options.env;
+        throw stopAfterCapture;
+      });
+      const sandbox: SessionSandbox = {
+        enabled: false,
+        description: 'test',
+        applyLimits: async () => {},
+        readResourceAccounting: async () => ({ kind: 'unavailable', reason: 'test' }),
+        spawn,
+        terminate: async () => {},
+        cleanup: async () => {},
+      };
+      const session = new Session(
+        createConfig({ memory }),
+        createSilentLogger(),
+        process.cwd(),
+        sandbox
+      );
+      const callbacks = {
+        cliType: 'registry',
+        agentType: 'opencode',
+        command: 'opencode',
+        args: ['acp'],
+      } as CreateAgentConfig;
 
-    await expect(session.createAgent(callbacks)).rejects.toBe(stopAfterCapture);
-    expect((spawnedEnv?.PATH ?? '').split(delimiter)).toEqual(
-      expect.arrayContaining(['/opt/homebrew/bin', '/usr/bin'])
-    );
-    expect((spawnedEnv?.PATH ?? '').split(delimiter).indexOf('/opt/homebrew/bin')).toBeLessThan(
-      (spawnedEnv?.PATH ?? '').split(delimiter).indexOf('/usr/bin')
-    );
-  });
+      await expect(session.createAgent(callbacks)).rejects.toBe(stopAfterCapture);
+      if (memory) expect(spawnedEnv?.NMEM_AGENT_ID).toBe(memory.memoryId);
+      expect((spawnedEnv?.PATH ?? '').split(delimiter)).toEqual(
+        expect.arrayContaining(['/opt/homebrew/bin', '/usr/bin'])
+      );
+      expect((spawnedEnv?.PATH ?? '').split(delimiter).indexOf('/opt/homebrew/bin')).toBeLessThan(
+        (spawnedEnv?.PATH ?? '').split(delimiter).indexOf('/usr/bin')
+      );
+    }
+  );
 });

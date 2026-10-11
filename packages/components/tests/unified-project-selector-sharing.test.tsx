@@ -214,7 +214,7 @@ describe('UnifiedProjectSelector project sharing', () => {
   }
 
   function getProjectMenuItem(): HTMLElement {
-    const item = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
+    const item = Array.from(document.querySelectorAll<HTMLElement>('[role^="menuitem"]')).find(
       (menuItem) => menuItem.textContent?.includes('Lody')
     );
     expect(item).toBeInstanceOf(HTMLElement);

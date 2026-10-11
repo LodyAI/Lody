@@ -3,11 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
-import {
-  getServerNow,
-  type AgentConfigId,
-  type SessionContextWindowUsage,
-} from '@lody/shared';
+import { getServerNow, type AgentConfigId, type SessionContextWindowUsage } from '@lody/shared';
 import { Spinner } from '@lody/ui/spinner';
 
 import { Button } from '@lody/ui/button';
@@ -82,9 +78,12 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
   const hasRateLimit = rateLimitWindows.length > 0;
   const wallet = rateLimit?.limits.wallet ?? null;
   const hasRateLimitDetails = rateLimit !== null;
+  const triggerRateLimitWindow =
+    rateLimitWindows.find((window) => window.windowDurationSeconds === FIVE_HOUR_WINDOW_SECONDS) ??
+    rateLimitWindows[0];
   const triggerValue =
     context?.usedPercentage ??
-    (showRateLimitWithoutContext ? rateLimitWindows[0]?.usedPercent : undefined);
+    (showRateLimitWithoutContext ? triggerRateLimitWindow?.usedPercent : undefined);
   const resolvedModelLabel =
     modelLabel?.trim() ||
     rateLimit?.limits.limitName?.trim() ||
@@ -138,10 +137,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
               type="button"
               variant="ghost"
               size="small"
-              className={cn(
-                'select-none focus-visible:ring-1 focus-visible:ring-ring',
-                className
-              )}
+              className={cn('select-none focus-visible:ring-1 focus-visible:ring-ring', className)}
               aria-label={triggerLabel}
               title={triggerLabel}
             >

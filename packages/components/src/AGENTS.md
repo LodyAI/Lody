@@ -41,9 +41,9 @@ Performance comparisons must use the current full-Mirror baseline.
 
 ## Soft-keyboard viewport handling
 
-- Native non-iOS side drawers without snap points use `ui/drawer.tsx`'s live
-  viewport bottom inset when input repositioning is enabled. Never cache a
-  keyboard-shrunken drawer height or infer keyboard visibility from focus:
+- Non-iOS side drawers without snap points use `ui/drawer.tsx`'s live
+  viewport bottom inset on native shells or explicit `repositionInputs={true}`.
+  Never cache a keyboard-shrunken drawer height or infer keyboard visibility from focus:
   Android-compatible shells can resize the WebView and retain input focus on hide.
   Preserve the separate iOS native keyboard offset and bottom-sheet handling.
   `repositionInputs={false}` explicitly opts out of both Vaul repositioning and
@@ -66,7 +66,10 @@ Performance comparisons must use the current full-Mirror baseline.
   single scope switcher uses Left/Right between visible leaf scopes. A local
   control may keep a key by calling `preventDefault`; text inputs are never
   intercepted. Nested parent scopes yield to their visible child scopes, and an
-  open dialog's scopes never switch focus into the background workspace.
+  open dialog's scopes never switch focus into the background workspace. Scopes
+  handle their keys on the scope element itself: a dialog popup stops composite
+  keys (arrows, Home/End) before window listeners, so `FocusScope` moves its
+  registered list and the switcher on its own `onKeyDown`.
 
 ## Zen layout
 

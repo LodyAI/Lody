@@ -32,6 +32,7 @@ import { getRegisteredAuthClient } from './auth-client-singleton';
 import { getIpcServices } from './electron-ipc-client';
 import { isWarmWindow } from './desktop-window';
 import { PROMPT_SHORTCUT_DATA_PREFIX } from './prompt-shortcut-storage';
+import { ROOST_HISTORY_CACHE_DB } from './roost-history-cache';
 
 /**
  * Prefix for the per-workspace meta remote-cursor startup-bypass marker.
@@ -59,6 +60,7 @@ export type PendingLocalClearMode = 'cache' | 'hard';
 
 /** IndexedDB databases created with static names (not suffixed per workspace). */
 const KNOWN_INDEXEDDB_NAMES = [
+  ROOST_HISTORY_CACHE_DB,
   // Durable session-send journal of earlier builds; no longer written, but an
   // upgraded install may still hold it, and a cache clear should remove it.
   'lody-session-send-v1',

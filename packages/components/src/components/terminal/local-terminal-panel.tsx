@@ -6,7 +6,12 @@ import { useTranslation } from 'react-i18next';
 import '@xterm/xterm/css/xterm.css';
 import './terminal-scrollbars.css';
 
-import { terminalFontFamilyAtom, terminalFontSizeAtom } from '@/atoms';
+import {
+  conversationFontSizeAtom,
+  DEFAULT_CONVERSATION_FONT_SIZE,
+  terminalFontFamilyAtom,
+  terminalFontSizeAtom,
+} from '@/atoms';
 import { formatKeyBinding } from '@/lib/commands';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
@@ -88,7 +93,10 @@ export function LocalTerminalPanel({
   const pasteShortcutLabel = formatKeyBinding(pasteShortcutBinding());
   const windowsRightClick = usesWindowsCopyPasteRightClick();
   const terminalFontFamily = useAtomValue(terminalFontFamilyAtom);
-  const terminalFontSize = useAtomValue(terminalFontSizeAtom);
+  const terminalBaseFontSize = useAtomValue(terminalFontSizeAtom);
+  const interfaceFontSize = useAtomValue(conversationFontSizeAtom);
+  const terminalFontSize =
+    (terminalBaseFontSize * interfaceFontSize) / DEFAULT_CONVERSATION_FONT_SIZE;
   const terminalFontFamilyRef = useRef(terminalFontFamily);
   const terminalFontSizeRef = useRef(terminalFontSize);
   terminalFontFamilyRef.current = terminalFontFamily;
@@ -370,7 +378,7 @@ export function LocalTerminalPanel({
         if (open) setHasSelection(termRef.current?.hasSelection() ?? false);
       }}
     >
-      <ContextMenu.Trigger >{host}</ContextMenu.Trigger>
+      <ContextMenu.Trigger>{host}</ContextMenu.Trigger>
       <ContextMenu.Content className="min-w-40">
         <ContextMenu.Item
           disabled={!hasSelection}

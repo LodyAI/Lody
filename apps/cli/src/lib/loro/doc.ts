@@ -1,5 +1,6 @@
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
-import { readSessionHistory } from '@lody/shared/session-data';
+import { createSessionBackend, disposeSessionBackend } from '@/session/session-backend';
+import type { SessionBackend, SessionBackendFactory } from '@/session/session-backend';
 import { readLatestTurn } from '@lody/shared/session-data';
 import { isContainer, type LoroDoc, type LoroList, type LoroMap } from 'loro-crdt';
 import {
@@ -25,6 +26,9 @@ import {
   isCodeCollabFileIndexSignalFlockDocId,
   CODE_COLLAB_FILE_INDEX_FLOCK_TTL_MS,
   SessionMeta,
+  type SessionHistoryBackendKind,
+  type SessionQueuePromotionRecord,
+  type SessionSteerOperationRecord,
   SessionDocMeta,
   type SessionPreviewDocState,
   AgentConfigMeta,
@@ -36,6 +40,7 @@ import {
   SessionPullRequestMeta,
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
+  type SessionRoostHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
   MessageQueueItem,
   SessionTitleSource,
@@ -44,6 +49,8 @@ import {
   getServerNow,
   shouldRenewAcpCapabilityFetchTime,
   isLoroRepoDocDeleted,
+  NEW_SESSION_HISTORY_BACKEND,
+  LEGACY_SESSION_HISTORY_BACKEND,
   getMachineFlockAcpCapabilities,
   getMachineFlockProviderSetupCancellations,
   getMachineFlockProviderSetups,
@@ -331,6 +338,8 @@ export interface LoroDocumentManagerOptions {
   remoteStreamsAttached?: boolean;
   streamsTokens?: CloudStreamsTokenPort | null;
   cloudBilling?: CloudBillingPort | null;
+  /** One-shot clients route history to the owner; daemons use installed local factories. */
+  sessionHistoryFactory?: SessionBackendFactory;
 }
 
 export type LoroRepoPersistReason =
@@ -367,6 +376,7 @@ export class LoroDocumentManager {
   private remoteTransportOpQueue: Promise<unknown> = Promise.resolve();
   private readonly streamsTokens: CloudStreamsTokenPort | null;
   public readonly cloudBilling: CloudBillingPort | null;
+  private readonly sessionHistoryFactory?: SessionBackendFactory;
 
   static async create(
     workspaceId: WorkspaceId,
@@ -381,6 +391,7 @@ export class LoroDocumentManager {
       documentCursorScope?: DocumentCursorScope;
       streamsTokens?: CloudStreamsTokenPort | null;
       cloudBilling?: CloudBillingPort | null;
+      sessionHistoryFactory?: SessionBackendFactory;
     } = {}
   ): Promise<LoroDocumentManager> {
     // Configure the CLI's global HTTP dispatcher once (proxy/H2/diagnostics). This
@@ -477,6 +488,7 @@ export class LoroDocumentManager {
         remoteStreamsAttached: false,
         streamsTokens: options.streamsTokens ?? null,
         cloudBilling: options.cloudBilling ?? null,
+        sessionHistoryFactory: options.sessionHistoryFactory,
       });
     } catch (error) {
       try {
@@ -538,6 +550,7 @@ export class LoroDocumentManager {
     this.remoteStreamsAttached = options.remoteStreamsAttached ?? false;
     this.streamsTokens = options.streamsTokens ?? null;
     this.cloudBilling = options.cloudBilling ?? null;
+    this.sessionHistoryFactory = options.sessionHistoryFactory;
     this.remoteStreamsGeneration = this.remoteStreamsAttached ? 1 : 0;
     this.presenceRuntime = options.presenceRuntime ?? null;
     this.machineMonitorRuntime = options.machineMonitorRuntime ?? null;
@@ -1219,20 +1232,30 @@ export class LoroDocumentManager {
       });
   }
 
-  async getOrCreateSessionDoc(sessionId: SessionId): Promise<SessionDocument> {
+  async getOrCreateSessionDoc(
+    sessionId: SessionId,
+    options: { historyBackend?: SessionHistoryBackendKind; skipAutoRead?: boolean } = {}
+  ): Promise<SessionDocument> {
     const docId = getSessionRoomId(sessionId);
     // An activated SessionDocument owns the live cloud room from here on. Stop
     // any one-shot renderer reconciliation without unloading the shared doc.
     this.cancelLocalDocRoomBridge(docId);
     const existing = this.sessions.get(sessionId);
     if (existing) {
+      if (options.historyBackend) {
+        await createSessionBackend(existing, { historyBackend: options.historyBackend });
+      }
       return existing;
     }
 
     // Guard against concurrent init for the same session
     const pending = this.pendingSessionDocs.get(sessionId);
     if (pending) {
-      return await pending;
+      const sessionDoc = await pending;
+      if (options.historyBackend) {
+        await createSessionBackend(sessionDoc, { historyBackend: options.historyBackend });
+      }
+      return sessionDoc;
     }
 
     // Serialize activation with renderer-only release for this exact doc. If a
@@ -1244,9 +1267,22 @@ export class LoroDocumentManager {
         this.repo,
         sessionId,
         (sessionDocId) => this.unloadDocRoom(sessionDocId),
-        this.logger
+        this.logger,
+        this.sessionHistoryFactory
       );
-      await sessionDoc.init();
+      const meta = options.historyBackend ? undefined : await this.repo.getDocMeta(docId);
+      const historyBackend =
+        options.historyBackend ??
+        (!isLoroRepoDocDeleted(meta)
+          ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
+          : undefined);
+      // Observation commands own an isolated manager and must not arm execution's
+      // auto-seen/model-summary writers. This option applies to a new open only;
+      // it never changes the policies of an already-owned cached document.
+      await sessionDoc.init({
+        historyBackend,
+        skipAutoRead: options.skipAutoRead ?? Boolean(this.sessionHistoryFactory),
+      });
       // If cleanup ran while we were initializing, destroy the orphaned doc
       // instead of registering it (cleanUp/cleanSessionDoc only sees this.sessions).
       if (sessionDoc.isDestroyed) {
@@ -1267,12 +1303,12 @@ export class LoroDocumentManager {
   async getSessionHistorySnapshot(sessionId: SessionId): Promise<SessionHistoryInput[]> {
     const active = this.sessions.get(sessionId);
     if (active) {
-      return readSessionHistory(active.sessionData.history);
+      return await (await createSessionBackend(active)).readHistory();
     }
 
     const pending = this.pendingSessionDocs.get(sessionId);
     if (pending) {
-      return readSessionHistory((await pending).sessionData.history);
+      return await (await createSessionBackend(await pending)).readHistory();
     }
 
     const docId = getSessionRoomId(sessionId);
@@ -1285,11 +1321,19 @@ export class LoroDocumentManager {
         this.repo,
         sessionId,
         (snapshotDocId) => this.unloadDocRoom(snapshotDocId),
-        this.logger
+        this.logger,
+        this.sessionHistoryFactory
       );
-      await sessionDoc.init({ skipAutoRead: true });
+      const meta = await this.repo.getDocMeta(docId);
+      const historyBackend = !isLoroRepoDocDeleted(meta)
+        ? (meta?.meta as Partial<SessionMeta> | undefined)?.historyBackend
+        : undefined;
+      await sessionDoc.init({
+        skipAutoRead: true,
+        ...(historyBackend ? { historyBackend } : {}),
+      });
       try {
-        return readSessionHistory(sessionDoc.sessionData.history);
+        return await (await createSessionBackend(sessionDoc)).readHistory();
       } finally {
         await sessionDoc.destroy({ preserveStatus: true });
       }
@@ -1303,7 +1347,6 @@ export class LoroDocumentManager {
     title?: string
   ): Promise<SessionId> {
     const sessionId = uuidv4() as SessionId;
-    const sessionDoc = await this.getOrCreateSessionDoc(sessionId);
 
     const createdAt = new Date().toISOString();
     const sessionMeta: SessionMeta = {
@@ -1315,13 +1358,14 @@ export class LoroDocumentManager {
       isArchived: false,
       cliType,
       agentType,
+      historyBackend: NEW_SESSION_HISTORY_BACKEND,
     };
     const sanitizedTitle = title?.trim();
     if (sanitizedTitle) {
       sessionMeta.title = sanitizedTitle;
     }
 
-    await this.repo.upsertDocMeta(sessionDoc.roomId, sessionMeta);
+    await this.repo.upsertDocMeta(getSessionRoomId(sessionId), sessionMeta);
     return sessionId;
   }
 
@@ -1748,9 +1792,24 @@ const EDITING_LEASE_MS = 5 * 60 * 1000;
  * document that was not composed through `composeSessionData` throws.
  */
 export function subscribeSessionChanges(
-  sessionDoc: Pick<SessionDocument, 'subscribeAll'>,
-  listener: () => void
+  sessionDoc: Pick<SessionDocument, 'subscribeAll'> &
+    Partial<Pick<SessionDocument, 'subscribeControl' | 'getSessionBackend'>>,
+  listener: () => void,
+  backend?: Pick<SessionBackend, 'subscribeHistory'>
 ): () => void {
+  const backendAccessor = sessionDoc.getSessionBackend;
+  backend ??= backendAccessor?.call(sessionDoc);
+  if (!backend && typeof backendAccessor === 'function') {
+    throw new Error('Session backend is not bound for session changes');
+  }
+  if (backend && sessionDoc.subscribeControl) {
+    const unsubscribeControl = sessionDoc.subscribeControl(listener);
+    const unsubscribeHistory = backend.subscribeHistory(listener);
+    return () => {
+      unsubscribeControl();
+      unsubscribeHistory();
+    };
+  }
   return sessionDoc.subscribeAll(listener);
 }
 
@@ -1765,7 +1824,11 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   private readonly docRoomStatusListeners = new Set<(status: RepoTransportRoomStatus) => void>();
   private historyAutoReadHandle: AutoMarkLatestUserHistoryAsReadHandle | null = null;
   private modelSummary: ReturnType<typeof attachSessionModelSummary> | null = null;
+  /** Serialize async ACP runtime patches so history reads cannot race a newer patch. */
+  private acpRuntimeConfigPatchSerial: Promise<unknown> = Promise.resolve();
   private destroyed = false;
+  /** Backend bound during initialization; subscriptions must use this instance. */
+  private sessionBackendInstance: SessionBackend | null = null;
   /**
    * CRDT-neutral read/write seam over the same doc and the Mirror's one shared
    * writer. Business callers use this instead of raw history callbacks; Loro,
@@ -1788,7 +1851,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
      * `LoroDocumentManager.unloadDocRoom`.
      */
     private unloadDocRoom: (docId: string) => Promise<void>,
-    private logger: Logger = getLogger('loro')
+    private logger: Logger = getLogger('loro'),
+    readonly historyBackendFactory?: SessionBackendFactory
   ) {
     this.roomId = getSessionRoomId(this.sessionId);
   }
@@ -1799,22 +1863,22 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * that has not been composed here has no `sessionData` and no control Mirror.
    * `init()` calls it with the opened handle; tests call it with a fixture doc.
    */
-  composeSessionData(doc: LoroDoc, initialState?: SessionDocInitialState): void {
+  composeSessionData(
+    doc: LoroDoc,
+    initialState?: SessionDocInitialState,
+    options: { historyBackend?: SessionHistoryBackendKind } = {}
+  ): void {
     this.modelSummary?.dispose();
     this.modelSummary = null;
     this.historyAutoReadHandle?.dispose();
     this.historyAutoReadHandle = null;
+    this.sessionDataInstance?.dispose();
+    this.sessionDataInstance = null;
     this.mirror?.dispose();
     const initialHistory = initialState?.history ?? [];
     const mergedSession = initialState?.session
       ? { ...initialState.session, id: this.sessionId }
       : { id: this.sessionId };
-    // Seed a brand-new document's history through the shared writer. A persisted
-    // document already holds its history; the control Mirror never reads it.
-    const writer = createHistoryWriter(doc);
-    if (initialHistory.length > 0 && doc.getList('history').length === 0) {
-      writer.update(() => initialHistory);
-    }
     const controlInitialState = { ...(initialState ?? {}) } as Record<string, unknown>;
     delete controlInitialState.history;
     this.mirror = createSessionControlPlaneMirror({
@@ -1824,24 +1888,50 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
         session: mergedSession,
       } as SessionControlPlaneState,
     });
-    this.sessionDataInstance = createLoroSessionData({
-      sessionId: this.sessionId,
-      doc,
-      // One writer instance owns local history writes; the control Mirror never
-      // materializes history.
-      writer,
-      // The composed history import binds its cursor through the control plane:
-      // the adapter reads/writes the cursor in the same synchronous block as
-      // the history write, with no await gap.
-      historyImportCursor: {
-        read: () => this.mirror?.getState().externalHistoryCursor,
-        write: (cursor) => {
-          this.mirror?.setState({
-            externalHistoryCursor: cursor as SessionExternalHistoryCursorDocState,
-          });
+    try {
+      // The control plane is shared by every backend, but history storage is not.
+      // A Roost session must not construct a Loro reader/writer while opening a
+      // long conversation; the registered backend owns that history surface.
+      if ((options.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND) !== 'loro') {
+        if (initialHistory.length > 0) {
+          throw new Error(
+            `Cannot seed history through the Loro document for backend ${options.historyBackend}`
+          );
+        }
+        this.sessionDataInstance = null;
+        return;
+      }
+      // Seed a brand-new document's history through the shared writer. A persisted
+      // document already holds its history; the control Mirror never reads it.
+      const writer = createHistoryWriter(doc);
+      if (initialHistory.length > 0 && doc.getList('history').length === 0) {
+        writer.update(() => initialHistory);
+      }
+      this.sessionDataInstance = createLoroSessionData({
+        sessionId: this.sessionId,
+        doc,
+        // One writer instance owns local history writes; the control Mirror never
+        // materializes history.
+        writer,
+        // The composed history import binds its cursor through the control plane:
+        // the adapter reads/writes the cursor in the same synchronous block as
+        // the history write, with no await gap.
+        historyImportCursor: {
+          read: () => this.mirror?.getState().externalHistoryCursor,
+          write: (cursor) => {
+            this.mirror?.setState({
+              externalHistoryCursor: cursor as SessionExternalHistoryCursorDocState,
+            });
+          },
         },
-      },
-    });
+      });
+    } catch (error) {
+      this.sessionDataInstance?.dispose();
+      this.sessionDataInstance = null;
+      this.mirror?.dispose();
+      this.mirror = null;
+      throw error;
+    }
   }
 
   /**
@@ -1855,6 +1945,15 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   get agentWrites(): SessionAgentWrites {
     if (!this.sessionDataInstance) throw new Error('SessionDocument not initialized');
     return createSessionAgentWrites(this.sessionDataInstance.writer);
+  }
+
+  /**
+   * Return the backend selected when this document was opened. The binding is
+   * stable for the document lifetime, so synchronous waiters can subscribe
+   * without resolving a factory or re-reading metadata.
+   */
+  getSessionBackend(): SessionBackend | undefined {
+    return this.sessionBackendInstance ?? undefined;
   }
 
   attachAutoRead(): void {
@@ -1902,6 +2001,19 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     await this.modelSummary?.flush();
   }
 
+  /** Publish the latest assistant model for a backend-owned history store. */
+  async setLastModel(lastModel: SessionMeta['lastModel']): Promise<void> {
+    if (!this.mirror) {
+      throw new Error('SessionDocument not initialized');
+    }
+    const current = await this.repo.getDocMeta(this.roomId);
+    if (isLoroRepoDocDeleted(current)) return;
+    const meta = current?.meta as SessionMeta | undefined;
+    if (meta?.id !== undefined && meta.id !== this.sessionId) return;
+    if (JSON.stringify(meta?.lastModel) === JSON.stringify(lastModel)) return;
+    await this.repo.upsertDocMeta(this.roomId, { lastModel });
+  }
+
   /**
    * The domain seam for session history. Callers express business operations
    * (`appendTurn`, `setTurnField`, `respondPermission`, ...) and never see the
@@ -1919,11 +2031,12 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    */
   subscribeAll(listener: () => void): () => void {
     if (!this.mirror) throw new Error('SessionDocument not initialized');
+    const history = this.sessionBackendInstance?.history ?? this.sessionData.history;
     let disposed = false;
-    const unsubscribeMirror = this.mirror.subscribe(() => {
+    const unsubscribeMirror = this.subscribeControl(() => {
       if (!disposed) listener();
     });
-    const observation = this.sessionData.history.observe(() => {
+    const observation = history.observe(() => {
       if (!disposed) listener();
     });
     return () => {
@@ -1934,20 +2047,37 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     };
   }
 
-  async init(options: { skipAutoRead?: boolean } = {}) {
+  subscribeControl(listener: () => void): () => void {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    return this.mirror.subscribe(listener);
+  }
+
+  subscribeRoostHistoryCursor(listener: () => void): () => void {
+    if (!this.handle) throw new Error('SessionDocument not initialized');
+    return this.handle.doc.subscribe((batch) => {
+      if (batch.events.some((event) => String(event.path[0]) === 'roostHistoryCursor')) {
+        listener();
+      }
+    });
+  }
+
+  async init(options: { skipAutoRead?: boolean; historyBackend?: SessionHistoryBackendKind } = {}) {
     this.destroyed = false;
-    this.handle = await this.repo.openPersistedDoc(this.roomId);
-    // Create the mirror before remote sync completes so dispatch watchers can subscribe
-    // immediately; the room join continues in the background and remote changes merge later.
-    this.composeSessionData(this.handle.doc);
-    // A read-only open (`skipAutoRead`) composes storage without arming the
-    // auto-read write policy; normal init arms it and marks the initial turn.
-    if (!options.skipAutoRead) {
-      this.attachAutoRead();
-      this.attachModelSummary();
-      await this.markLatestUserHistoryAsSeenIfNeeded();
+    try {
+      this.handle = await this.repo.openPersistedDoc(this.roomId);
+      const historyBackend = await this.resolveHistoryBackend(options.historyBackend);
+      // Create the mirror before remote sync completes so dispatch watchers can subscribe
+      // immediately; the room join continues in the background and remote changes merge later.
+      this.composeSessionData(this.handle.doc, undefined, {
+        historyBackend,
+      });
+      this.sessionBackendInstance = await createSessionBackend(this, { historyBackend });
+      await this.sessionBackendInstance.initialize({ skipAutoRead: options.skipAutoRead === true });
+      this.remoteSyncReady = this.startDocRoomSync();
+    } catch (error) {
+      await this.abortInitialization();
+      throw error;
     }
-    this.remoteSyncReady = this.startDocRoomSync();
   }
 
   /**
@@ -2020,19 +2150,65 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
    * Initialize without joining any transport rooms.
    * This is intended for tests or fully-offline usage.
    */
-  async initOffline(initialState?: SessionDocInitialState) {
+  async initOffline(
+    initialState?: SessionDocInitialState,
+    options: { historyBackend?: SessionHistoryBackendKind } = {}
+  ) {
     this.destroyed = false;
-    this.handle = await this.repo.openPersistedDoc(this.roomId);
+    try {
+      this.handle = await this.repo.openPersistedDoc(this.roomId);
+      const historyBackend = await this.resolveHistoryBackend(options.historyBackend);
+      this.docSub?.unsubscribe();
+      this.docSub = null;
+      this.docBinding = null;
+      this.detachDocRoomStatusListener?.();
+      this.detachDocRoomStatusListener = null;
+      this.composeSessionData(this.handle.doc, initialState, {
+        historyBackend,
+      });
+      this.sessionBackendInstance = await createSessionBackend(this, { historyBackend });
+      await this.sessionBackendInstance.initialize({ skipAutoRead: false });
+    } catch (error) {
+      await this.abortInitialization();
+      throw error;
+    }
+  }
+
+  private async resolveHistoryBackend(
+    requested?: SessionHistoryBackendKind
+  ): Promise<SessionHistoryBackendKind> {
+    if (requested) return requested;
+    const record = await this.repo.getDocMeta(this.roomId);
+    if (isLoroRepoDocDeleted(record)) return LEGACY_SESSION_HISTORY_BACKEND;
+    return (
+      (record?.meta as Partial<SessionMeta> | undefined)?.historyBackend ??
+      LEGACY_SESSION_HISTORY_BACKEND
+    );
+  }
+
+  /** Release every partially-created resource when backend selection/open fails. */
+  private async abortInitialization(): Promise<void> {
+    this.destroyed = true;
+    await disposeSessionBackend(this).catch(() => {});
+    this.sessionBackendInstance = null;
     this.docSub?.unsubscribe();
     this.docSub = null;
     this.docBinding = null;
     this.detachDocRoomStatusListener?.();
     this.detachDocRoomStatusListener = null;
-    this.composeSessionData(this.handle.doc, initialState);
-    // Offline composition is a normal open; arm the auto-read policy that
-    // composition no longer owns.
-    this.attachAutoRead();
-    this.attachModelSummary();
+    this.docRoomStatusListeners.clear();
+    if (this.handle) {
+      await this.unloadDocRoom(this.roomId).catch(() => {});
+    }
+    this.sessionDataInstance?.dispose();
+    this.sessionDataInstance = null;
+    this.modelSummary?.dispose();
+    this.modelSummary = null;
+    this.historyAutoReadHandle?.dispose();
+    this.historyAutoReadHandle = null;
+    this.mirror?.dispose();
+    this.mirror = null;
+    this.handle = null;
   }
 
   private async startDocRoomSync(): Promise<void> {
@@ -2177,6 +2353,7 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
       forkOperation: state.forkOperation as SessionDocMeta['forkOperation'],
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
+      roostHistoryCursor: state.roostHistoryCursor as SessionDocMeta['roostHistoryCursor'],
       acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
     };
   }
@@ -2228,6 +2405,77 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     return await getAliveDocMeta<SessionMeta>(this.repo, this.roomId);
   }
 
+  async getQueuePromotionRecord(
+    operationId: string
+  ): Promise<SessionQueuePromotionRecord | undefined> {
+    return (await this.getMetaState())?.queuePromotionLedger?.[operationId];
+  }
+
+  /**
+   * Persist queue promotion progress as a bounded receipt. The history and
+   * queue live in different CRDT roots, so this receipt is the recovery point
+   * between those writes. Keeping the last 64 receipts prevents metadata from
+   * growing with the lifetime of a long-running session.
+   */
+  async setQueuePromotionRecord(
+    operationId: string,
+    record: SessionQueuePromotionRecord | undefined
+  ): Promise<void> {
+    const current = await this.getMetaState();
+    const ledger = { ...(current?.queuePromotionLedger ?? {}) };
+    if (record) ledger[operationId] = record;
+    else delete ledger[operationId];
+    const entries = Object.entries(ledger);
+    const bounded = Object.fromEntries(entries.slice(Math.max(0, entries.length - 64)));
+    await this.repo.upsertDocMeta(this.roomId, {
+      queuePromotionLedger: bounded,
+    } satisfies Partial<SessionMeta>);
+  }
+
+  async getSteerTurnStatuses(): Promise<SessionMeta['steerTurnStatuses']> {
+    return (await this.getMetaState())?.steerTurnStatuses;
+  }
+
+  async replaceSteerTurnStatuses(statuses: SessionMeta['steerTurnStatuses']): Promise<void> {
+    await this.repo.upsertDocMeta(this.roomId, {
+      steerTurnStatuses: statuses,
+    } satisfies Partial<SessionMeta>);
+  }
+
+  async getSteerOperationRecord(
+    operationId: string
+  ): Promise<SessionSteerOperationRecord | undefined> {
+    return (await this.getMetaState())?.steerOperationLedger?.[operationId];
+  }
+
+  async getSteerOperationLedger(): Promise<SessionMeta['steerOperationLedger']> {
+    return (await this.getMetaState())?.steerOperationLedger;
+  }
+
+  async setSteerOperationRecord(
+    operationId: string,
+    record: SessionSteerOperationRecord | undefined
+  ): Promise<void> {
+    if (record && record.operationId !== operationId) {
+      throw new Error(`Steer operation id does not match ledger key ${operationId}`);
+    }
+    const current = await this.getMetaState();
+    const ledger = { ...(current?.steerOperationLedger ?? {}) };
+    if (record) ledger[operationId] = record;
+    else delete ledger[operationId];
+
+    const records = Object.entries(ledger);
+    if (records.length > 128) {
+      const settled = records
+        .filter(([, entry]) => entry.phase === 'settled')
+        .sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+      for (const [id] of settled.slice(0, Math.max(0, records.length - 128))) delete ledger[id];
+    }
+    await this.repo.upsertDocMeta(this.roomId, {
+      steerOperationLedger: ledger,
+    } satisfies Partial<SessionMeta>);
+  }
+
   getForkOperation(): SessionForkOperation | undefined {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
@@ -2259,83 +2507,111 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   applyAcpRuntimeConfigPatch(
     basedOnUserTurnId: string,
     patch: SessionAcpRuntimeConfigPatch
-  ): boolean {
-    if (!this.mirror) {
-      throw new Error('SessionDocument not initialized');
-    }
+  ): Promise<boolean> {
+    const next = this.acpRuntimeConfigPatchSerial.then(async () => {
+      if (!this.mirror) {
+        throw new Error('SessionDocument not initialized');
+      }
 
-    const durablePatch: SessionAcpRuntimeConfigPatch =
-      patch.configOptionValues === undefined
-        ? patch
-        : {
-            ...patch,
-            configOptionValues: Object.fromEntries(
-              Object.entries(patch.configOptionValues).filter(
-                ([configId]) => !isSensitiveAcpConfigOptionId(configId)
-              )
-            ),
-          };
+      const durablePatch: SessionAcpRuntimeConfigPatch =
+        patch.configOptionValues === undefined
+          ? patch
+          : {
+              ...patch,
+              configOptionValues: Object.fromEntries(
+                Object.entries(patch.configOptionValues).filter(
+                  ([configId]) => !isSensitiveAcpConfigOptionId(configId)
+                )
+              ),
+            };
 
-    const state = this.mirror.getState();
-    const { indexById: userTurnIndex, latestIndex: latestUserTurnIndex } = this.shallowUserTurns();
-    const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
-    if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
-      return false;
-    }
+      const history = this.sessionBackendInstance?.history ?? this.sessionDataInstance?.history;
+      if (!history) {
+        throw new Error('Session history is not initialized');
+      }
+      const count = await history.count();
+      const rows = await history.readDirectory(0, count);
+      const userTurnIndex = new Map<string, number>();
+      let latestUserTurnIndex = -1;
+      for (const row of rows) {
+        if (row.state !== 'ready' || row.scalars?.role !== 'user' || !row.turnId) continue;
+        userTurnIndex.set(row.turnId, row.position);
+        latestUserTurnIndex = row.position;
+      }
 
-    const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
-    const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
-    if (currentTurnIndex > incomingTurnIndex) {
-      return false;
-    }
+      const state = this.mirror?.getState();
+      if (!state) throw new Error('SessionDocument not initialized');
+      const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
+      if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
+        return false;
+      }
 
-    const continuesCurrentSnapshot =
-      current?.acpSessionId === durablePatch.acpSessionId &&
-      current.basedOnUserTurnId === basedOnUserTurnId;
-    const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
-      ...(continuesCurrentSnapshot
-        ? {
-            ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
-            ...(current.modelId !== undefined ? { modelId: current.modelId } : {}),
-            ...(current.configOptionValues !== undefined
-              ? { configOptionValues: current.configOptionValues }
-              : {}),
-          }
-        : {}),
-      ...durablePatch,
-      basedOnUserTurnId,
-    };
-    if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {
-      return false;
-    }
+      const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
+      const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
+      if (currentTurnIndex > incomingTurnIndex) {
+        return false;
+      }
 
-    const next: SessionAcpRuntimeConfigSnapshot = {
-      ...nextWithoutRevision,
-      revision: (current?.revision ?? 0) + 1,
-    };
-    this.mirror.setState((prev) => {
-      prev.acpRuntimeConfig = next;
-      return prev;
+      const continuesCurrentSnapshot =
+        current?.acpSessionId === durablePatch.acpSessionId &&
+        current.basedOnUserTurnId === basedOnUserTurnId;
+      const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
+        ...(continuesCurrentSnapshot
+          ? {
+              ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
+              ...(current.modelId !== undefined ? { modelId: current.modelId } : {}),
+              ...(current.configOptionValues !== undefined
+                ? { configOptionValues: current.configOptionValues }
+                : {}),
+            }
+          : {}),
+        ...durablePatch,
+        basedOnUserTurnId,
+      };
+      if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {
+        return false;
+      }
+
+      const nextSnapshot: SessionAcpRuntimeConfigSnapshot = {
+        ...nextWithoutRevision,
+        revision: (current?.revision ?? 0) + 1,
+      };
+      this.mirror.setState((prev) => {
+        prev.acpRuntimeConfig = nextSnapshot;
+        return prev;
+      });
+      return true;
     });
-    return true;
+    this.acpRuntimeConfigPatchSerial = next.then(
+      () => undefined,
+      () => undefined
+    );
+    return next;
   }
 
   async markHistoryAsSeen(turnId: string): Promise<void> {
-    if (!this.sessionDataInstance) {
-      throw new Error('SessionDocument not initialized');
-    }
     this.logger.debug(`Marking session ${this.sessionId} history as seen`);
+    if (this.sessionBackendInstance?.kind === 'roost') {
+      await this.sessionBackendInstance.applyHistoryAction({
+        kind: 'user-status',
+        turnId,
+        status: 'seen',
+      });
+      return;
+    }
+    if (!this.sessionDataInstance) throw new Error('SessionDocument not initialized');
     this.agentWrites.markTurnSeen(turnId);
   }
 
   async markLatestUserHistoryAsSeenIfNeeded(): Promise<void> {
-    if (!this.sessionDataInstance) {
+    const history = this.sessionBackendInstance?.history ?? this.sessionDataInstance?.history;
+    if (!history) {
       throw new Error('SessionDocument not initialized');
     }
 
-    const count = await this.sessionData.history.count();
+    const count = await history.count();
     for (let position = count - 1; position >= 0; position -= 1) {
-      const read = await this.sessionData.history.readAt(position);
+      const read = await history.readAt(position);
       if (read.state !== 'ready' || read.turn.role !== 'user') continue;
       if (resolveSessionHistoryStatus(read.turn) !== 'pending') return;
       await this.markHistoryAsSeen(read.turn.id);
@@ -2656,12 +2932,25 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     }));
   }
 
+  async getRoostHistoryCursor(): Promise<SessionRoostHistoryCursorDocState | undefined> {
+    if (!this.mirror) return undefined;
+    return this.mirror.getState().roostHistoryCursor as
+      | SessionRoostHistoryCursorDocState
+      | undefined;
+  }
+
+  async setRoostHistoryCursor(cursor: SessionRoostHistoryCursorDocState): Promise<void> {
+    if (!this.mirror) throw new Error('Mirror not initialized');
+    this.mirror.setState((prev) => ({ ...prev, roostHistoryCursor: cursor }));
+  }
+
   /**
    * Get the plan from the latest assistant entry in history.
    * Plan is now stored per-turn on each history entry, not at the root level.
    */
   async getPlan(): Promise<SessionPlanEntry[]> {
-    const entry = await readLatestTurn(this.sessionData.history, 'assistant');
+    const history = this.sessionBackendInstance?.history ?? this.sessionData.history;
+    const entry = await readLatestTurn(history, 'assistant');
     if (!entry) {
       return [];
     }
@@ -2704,11 +2993,19 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
         `appendUserTurn requires a user entry, received role "${entry.role}" for ${entry.id}`
       );
     }
+    if (this.sessionBackendInstance?.kind === 'roost') {
+      await this.sessionBackendInstance.appendUserTurn(entry);
+      return;
+    }
     // Queue promotion is a dispatch producer: append through the domain command
     // (which validates before writing), then publish the activation pointer.
     await this.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
+    await this.publishUserTurnActivation(entry.id);
+  }
+
+  async publishUserTurnActivation(userTurnId: string): Promise<void> {
     await this.repo.upsertDocMeta(this.roomId, {
-      latestUserMsgId: entry.id,
+      latestUserMsgId: userTurnId,
     } satisfies Partial<SessionMeta>);
   }
 
@@ -2754,6 +3051,10 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
   async setPlan(entries: SessionPlanEntry[]) {
     if (!this.mirror) {
       throw new Error('Mirror not initialized');
+    }
+    if (this.sessionBackendInstance?.kind === 'roost') {
+      await this.sessionBackendInstance.setPlan(entries);
+      return;
     }
     const id = this.shallowLatestTurnId('assistant');
     if (!id) return;
@@ -2807,8 +3108,13 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
     this.mirror.setState((prev) => {
       const mq = (prev.mq ?? []) as MessageQueueItem[];
+      const operationId =
+        item.operationId ??
+        (typeof item.userTurnId === 'string' && item.userTurnId.trim().length > 0
+          ? `queue:${item.userTurnId.trim()}`
+          : undefined);
       // @ts-ignore - mq is read-only in type but writable at runtime
-      prev.mq = [...mq, item];
+      prev.mq = [...mq, { ...item, ...(operationId ? { operationId } : {}) }];
       return prev;
     });
   }
@@ -2886,6 +3192,8 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
 
     await this.modelSummary?.flush();
     this.destroyed = true;
+    await disposeSessionBackend(this);
+    this.sessionBackendInstance = null;
 
     this.modelSummary?.dispose();
     this.modelSummary = null;
@@ -2923,6 +3231,10 @@ export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'histo
     this.mirror?.dispose();
     this.mirror = null;
     this.handle = null;
+  }
+
+  async flushLocalWrites(): Promise<void> {
+    await this.repo.flush();
   }
 }
 

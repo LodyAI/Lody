@@ -1,3 +1,5 @@
+import { nativeSessionCredentials, type SessionCredentials } from './session-credentials';
+import { memoryEnvironment } from '@/lib/memory-providers';
 import EventEmitter from 'eventemitter3';
 import { clearGitHubTokenEnv } from '@/lib/gh-token-env';
 import { applyNonOwnerShellEnv } from '@/lib/non-owner-shell-env';
@@ -58,6 +60,15 @@ import {
   normalizeAcpSessionCapabilities,
   type AcpCapabilitiesResult,
 } from '@/agent/acp-capability-normalization';
+
+/** One run of `Session.terminate`, shared by the calls that arrive while it runs. */
+type SessionTermination = {
+  force: boolean;
+  /** Settles when a forced call joins, ending the graceful waits early. */
+  readonly escalated: Promise<void>;
+  readonly escalate: () => void;
+  done: Promise<void>;
+};
 
 type SessionEvents = {
   output: (event: SessionOutputEvent) => void;
@@ -121,7 +132,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
   private readonly startedAtMs = getServerNow();
   private activeProcess: SessionProcessHandle | null = null;
   private agentProcess: SessionProcessHandle | null = null;
+  private termination: SessionTermination | null = null;
   private readonly sandbox: SessionSandbox;
+  private personalIdentityEnabled = false;
   private gitIdentity: { id: string; name: string; email: string };
   public agentClient: AgentClient | null = null;
   public acpSessionId: ACPSessionId | null = null;
@@ -133,7 +146,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     config: SessionConfig,
     logger: Logger,
     workdir?: string,
-    sandbox: SessionSandbox = createNoopSessionSandbox()
+    sandbox: SessionSandbox = createNoopSessionSandbox(),
+    private readonly credentials: SessionCredentials = nativeSessionCredentials
   ) {
     super();
     this.config = config;
@@ -247,25 +261,76 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     return execPromise;
   }
 
-  async terminate(force: boolean = false): Promise<void> {
-    this.logger.debug(`[${this.sessionId}] Terminating session${force ? ' (force)' : ''}`);
+  /**
+   * Terminate every process this Session started and release its sandbox.
+   *
+   * Concurrent calls share one termination, so `terminated` is emitted once; a
+   * forced call during a graceful one escalates it at once. A call after a
+   * termination finished starts a new one: the Session may have started
+   * processes since, and a failed attempt deserves a retry rather than its
+   * stale rejection. Each process tree gets a bounded SIGTERM grace (none when
+   * forced) and a bounded wait after SIGKILL. A tree that survives both still
+   * ends the Session's bookkeeping, but the returned promise rejects with the
+   * `TerminationFailed`: a caller must not treat that agent as idle and reuse it.
+   */
+  terminate(force: boolean = false): Promise<void> {
+    const current = this.termination;
+    if (current) {
+      if (force && !current.force) this.escalateTermination(current);
+      return current.done;
+    }
+    let escalate = (): void => {};
+    const escalated = new Promise<void>((resolve) => {
+      escalate = resolve;
+    });
+    const termination: SessionTermination = { force, escalated, escalate, done: Promise.resolve() };
+    this.termination = termination;
+    termination.done = this.terminateOnce(termination).finally(() => {
+      if (this.termination === termination) this.termination = null;
+    });
+    return termination.done;
+  }
+
+  /** Force an in-flight graceful termination: SIGKILL everything now. */
+  private escalateTermination(termination: SessionTermination): void {
+    this.logger.debug(`[${this.sessionId}] Escalating in-flight termination to force`);
+    termination.force = true;
+    termination.escalate();
+    // The in-flight termination's own forced calls below report any survivor.
+    void Promise.allSettled([
+      this.activeProcess?.terminate(true),
+      this.agentProcess?.terminate(true),
+      this.sandbox.terminate(true),
+    ]);
+  }
+
+  private async terminateOnce(termination: SessionTermination): Promise<void> {
+    this.logger.debug(
+      `[${this.sessionId}] Terminating session${termination.force ? ' (force)' : ''}`
+    );
     this.status = 'stopping';
 
-    if (this.acpSessionId && this.terminalManager.disposeAll) {
-      try {
-        await this.terminalManager.disposeAll(this.acpSessionId);
-      } catch (error) {
-        this.logger.debug(
-          `[${
-            this.sessionId
-          }] Failed to dispose ACP terminals during terminate: ${formatErrorMessage(error)}`
-        );
-      }
+    const acpSessionId = this.acpSessionId;
+    const disposeAll = this.terminalManager.disposeAll?.bind(this.terminalManager);
+    const terminalsDisposed =
+      acpSessionId && disposeAll
+        ? disposeAll(acpSessionId).catch((error: unknown) => {
+            this.logger.debug(
+              `[${
+                this.sessionId
+              }] Failed to dispose ACP terminals during terminate: ${formatErrorMessage(error)}`
+            );
+          })
+        : Promise.resolve();
+    // A graceful stop lets terminal commands wind down before the agent. A
+    // forced one does not wait on them: the sandbox SIGKILLs them below.
+    if (!termination.force) {
+      await Promise.race([terminalsDisposed, termination.escalated]);
     }
 
-    if (!force && this.acpSessionId && this.agentClient?.isCreated()) {
+    if (!termination.force && acpSessionId && this.agentClient?.isCreated()) {
       try {
-        await this.agentClient.closeSession(this.acpSessionId);
+        await Promise.race([this.agentClient.closeSession(acpSessionId), termination.escalated]);
       } catch (error) {
         this.logger.debug(
           `[${this.sessionId}] Failed to close ACP session during terminate: ${formatErrorMessage(
@@ -279,19 +344,24 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const activeProcess = this.activeProcess;
     const agentProcess = this.agentProcess;
 
-    // Kill both processes and wait for them to actually exit before proceeding.
-    // This prevents OS-level process leaks where SIGTERM is sent but the process
-    // outlives this function (and all tracking of it).
-    await Promise.all([
-      this.killAndWait(activeProcess, force),
-      this.killAndWait(agentProcess, force),
-    ]);
-
+    // The per-process trees first, then the sandbox as a whole: the latter also
+    // reaches terminal commands and groups whose leader already exited.
+    const failures: unknown[] = [];
+    for (const outcome of await Promise.allSettled([
+      activeProcess?.terminate(termination.force),
+      agentProcess?.terminate(termination.force),
+    ])) {
+      if (outcome.status === 'rejected') failures.push(outcome.reason);
+    }
     try {
-      await this.sandbox.terminate(force);
+      await this.sandbox.terminate(termination.force);
     } catch (error) {
-      this.logger.debug(
-        `[${this.sessionId}] Failed to terminate sandbox process tree: ${formatErrorMessage(error)}`
+      failures.push(error);
+    }
+    await terminalsDisposed;
+    for (const failure of failures) {
+      this.logger.error(
+        `[${this.sessionId}] Session process termination failed: ${formatErrorMessage(failure)}`
       );
     }
 
@@ -303,75 +373,23 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       );
     }
 
+    await this.credentials.release();
     this.activeProcess = null;
     this.agentProcess = null;
     this.agentClient = null;
     this.acpSessionId = null;
     this.acpCapabilities = null;
 
-    this.status = 'terminated';
+    this.status = failures.length > 0 ? 'failed' : 'terminated';
 
     const event: SessionExitEvent = {
       sessionId: this.sessionId,
-      exitCode: activeProcess?.child.exitCode ?? 0,
+      exitCode: agentProcess?.child.exitCode ?? activeProcess?.child.exitCode ?? 0,
     };
     this.emit('terminated', event);
-  }
 
-  /**
-   * Kill a process and wait for it to actually exit.
-   *
-   * With force=false: sends SIGTERM, waits up to SIGTERM_GRACE_MS, then
-   * escalates to SIGKILL if the process hasn't exited.
-   * With force=true: sends SIGKILL directly.
-   *
-   * Always awaits the actual OS process exit before returning, so callers can
-   * be certain no orphaned processes remain.
-   */
-  private async killAndWait(proc: SessionProcessHandle | null, force: boolean): Promise<void> {
-    if (!proc?.child) return;
-
-    const child = proc.child;
-    // Already exited — nothing to do.
-    // Note: child.killed only means a signal was *sent*, not that the process
-    // exited. Only exitCode !== null proves the process has actually terminated.
-    if (child.exitCode !== null) return;
-
-    const waitForExit = (): Promise<void> =>
-      new Promise<void>((resolve) => {
-        const unsubscribe = proc.onExit(() => {
-          unsubscribe();
-          resolve();
-        });
-        // Guard: if the process exited between the check above and
-        // registering the listener, resolve immediately.
-        if (child.exitCode !== null) {
-          unsubscribe();
-          resolve();
-        }
-      });
-
-    if (force) {
-      await proc.terminate(true);
-      await waitForExit();
-      return;
-    }
-
-    // Graceful path: SIGTERM → wait → SIGKILL fallback
-    const SIGTERM_GRACE_MS = 5_000;
-    await proc.terminate(false);
-
-    const outcome = await Promise.race([
-      waitForExit().then(() => 'exited' as const),
-      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), SIGTERM_GRACE_MS)),
-    ]);
-
-    if (outcome === 'timeout' && child.exitCode === null) {
-      this.logger.debug(
-        `[${this.sessionId}] Process did not exit within ${SIGTERM_GRACE_MS}ms of SIGTERM; escalating to SIGKILL`
-      );
-      await proc.terminate(true);
-      await waitForExit();
+    if (failures.length > 0) {
+      throw failures[0];
     }
   }
 
@@ -386,11 +404,8 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     options: { preferMachineIdentity: boolean; personalIdentityEnabled?: boolean }
   ): void {
     const configEnv = this.config.env ?? {};
-    if (this.config.githubCredentialPolicy) {
-      this.config.githubCredentialPolicy.allowLocalAuth = options.preferMachineIdentity;
-      if (options.personalIdentityEnabled !== undefined) {
-        this.config.githubCredentialPolicy.personalEnabled = options.personalIdentityEnabled;
-      }
+    if (options.personalIdentityEnabled !== undefined) {
+      this.personalIdentityEnabled = options.personalIdentityEnabled;
     }
     // Set git identity using Git's recognized environment variables directly.
     // The env is per agent process, so a shared machine never mixes requesters.
@@ -398,10 +413,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       { name: userName, email: userEmail },
       {
         preferMachineIdentity: options.preferMachineIdentity,
-        personalIdentityEnabled:
-          options.personalIdentityEnabled ??
-          this.config.githubCredentialPolicy?.personalEnabled ??
-          false,
+        personalIdentityEnabled: options.personalIdentityEnabled ?? this.personalIdentityEnabled,
       }
     );
     configEnv.GIT_AUTHOR_NAME = name;
@@ -419,6 +431,14 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
 
   getGitIdentityForUser(userId: string): { id: string; name: string; email: string } | null {
     return this.gitIdentity.id === userId ? { ...this.gitIdentity } : null;
+  }
+
+  getGitHubCredentials(): SessionCredentials {
+    return this.credentials;
+  }
+
+  getMemoryBinding(): SessionConfig['memory'] {
+    return this.config.memory;
   }
 
   updateEnv(env: Record<string, string | undefined>): void {
@@ -504,9 +524,9 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
     const finalEnv = withLoopbackNoProxy(
       withDefaultAcpPathEntries(agentEnv, this.config.agentType)
     );
-    const policy = this.config.githubCredentialPolicy;
+    const policy = this.credentials.mode === 'managed' ? this.credentials.lease : undefined;
     if (policy) {
-      if (!policy.allowLocalAuth) {
+      if (!policy.active || !policy.allowLocalAuth) {
         clearGitHubTokenEnv(finalEnv);
         applyNonOwnerShellEnv(finalEnv, policy.stateFilePath);
       } else if (policy.stateFilePath) {
@@ -517,6 +537,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         if (
           key.startsWith('LODY_GIT_CRED_') ||
           key.startsWith('GIT_CONFIG_') ||
+          key === 'GIT_EXEC_PATH' ||
           key === 'LODY_GIT_LOCAL_CONFIG'
         )
           finalEnv[key] = configEnv[key];
@@ -551,7 +572,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
         return;
       }
       try {
-        await this.killAndWait(handle, true);
+        await handle.terminate(true);
       } catch (error) {
         this.logger.debug(
           `[${
@@ -595,6 +616,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           ? await codexProfileSpawnEnvironment({ profile }, env)
           : { env, close: undefined };
         closeBroker = prepared.close;
+        Object.assign(prepared.env, memoryEnvironment(this.config.memory));
         if (releaseProfile) prepared.env.LODY_CODEX_PROCESS_TOKEN = releaseProfile.token;
         const executable = resolveDeepSeekHarnessSpawn({
           command: callbacks.command,
@@ -703,6 +725,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             cliType: callbacks.cliType,
             agentType: callbacks.agentType,
           },
+          modelId: this.config.modelId,
           configOptionValues: this.config.configOptionValues,
           launcher,
           workspaceId: this.config.workspaceId,
@@ -894,7 +917,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
             cleanup();
             void processHandle
               .inspectExit(code, signal)
-              .then((violation) => {
+              .then(async (violation) => {
                 if (violation) {
                   const error = createSessionResourceLimitError(this.sessionId, violation);
                   void this.handleResourceLimitExceeded(error);
@@ -931,6 +954,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
                   }
                 }
                 if (isAI) {
+                  await this.credentials.release();
                   this.emit('exit', { sessionId: this.sessionId, exitCode });
                 }
                 // stderr is decoded but not used in return value (only logged above)

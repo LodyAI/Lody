@@ -256,26 +256,6 @@ const injectGhToken = (env, token) => {
   env[MANAGED_TOKEN_MARKER_ENV] = fingerprintToken(token);
 };
 
-// Keep authentication checks on the real executable and this invocation's env.
-// auth token checks local availability without a network request. /user then
-// distinguishes revoked credentials (401) from transient/permission errors.
-const hasUsableGhAuth = async (ghPath, env, host) => {
-  const available = await runGhCommand(ghPath, ['auth', 'token', '--hostname', host], {
-    env, stdio: ['ignore', 'ignore', 'ignore'], timeout: 5000,
-  });
-  if (available.error) throw new Error('Unable to inspect local GitHub credentials.');
-  if (available.status !== 0) return false;
-  const check = await runGhCommand(ghPath, ['api', '--hostname', host, 'user', '--silent'], {
-    env, stdio: ['ignore', 'ignore', 'pipe'], timeout: 5000,
-  });
-  if (check.status === 0) return true;
-  if (!check.error && /\\bHTTP 401\\b/i.test(check.stderr)) return false;
-  // A token may authenticate APIs that /user does not permit (e.g. installation
-  // tokens). Preserve this identity on 403, rate limits and network failures;
-  // the real command reports its own error and is never replayed.
-  return true;
-};
-
 const readGitRemoteOrigin = async () => {
   try {
     const result = await runGhCommand('git', ['remote', 'get-url', 'origin'], {
@@ -501,25 +481,6 @@ const readRepoCommandArgs = (args) => {
   return { subject, command, disableAuto, repo: issueRepo !== undefined ? issueRepo : repo };
 };
 
-// Only require a repository role when the command necessarily needs it.
-// Comments, reviews and PR creation can be allowed without push permission.
-// Token-specific scopes and branch rules remain GitHub's final decision.
-const requiredRepositoryPermission = (args) => {
-  const parsed = readRepoCommandArgs(args);
-  const command = parsed?.command;
-  // PR authors may disable auto-merge without base-repository write access.
-  if (args[0] === 'pr' && command === 'merge' && parsed.disableAuto) return false;
-  if (args[0] === 'repo' && ['archive', 'delete', 'rename'].includes(command)) return 'admin';
-  const pushCommands = {
-    pr: ['merge'],
-    release: ['create', 'delete', 'delete-asset', 'edit', 'upload'],
-    workflow: ['run', 'enable', 'disable'],
-    run: ['cancel', 'delete', 'rerun'],
-    repo: ['sync'],
-  };
-  return pushCommands[args[0]]?.includes(command) ? 'push' : false;
-};
-
 // API accepts exactly one endpoint. Values can themselves look like URLs or
 // hostname flags, so only consumed positional/hostname arguments select auth.
 const readApiArgs = (args) => {
@@ -658,182 +619,111 @@ const readCredentialFreeArgs = (args) => {
 // Child environment overrides must never select the authorization authority.
 const BROKER_STATE_PATH = '${BROKER_STATE_PATH_PLACEHOLDER}';
 const getBrokerConfig = () => {
-  try {
-    const state = JSON.parse(fs.readFileSync(BROKER_STATE_PATH, 'utf8'));
-    if (state && typeof state.url === 'string' && typeof state.token === 'string') {
-      return { url: state.url, token: state.token };
-    }
-  } catch { /* Missing or unreadable trusted state fails closed. */ }
-  return null;
+  const state = JSON.parse(fs.readFileSync(BROKER_STATE_PATH, 'utf8'));
+  if (typeof state?.url !== 'string' || typeof state?.token !== 'string') throw credentialError('broker_state_invalid');
+  return state;
 };
 
-const capturedContextToken = (() => {
-  if (process.env.LODY_GIT_CRED_CONTEXT_FILE) {
-    try { return JSON.parse(fs.readFileSync(process.env.LODY_GIT_CRED_CONTEXT_FILE, 'utf8')).contextToken || null; } catch { return null; }
-  }
-  const value = process.env.LODY_GIT_CRED_CONTEXT_TOKEN;
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-})();
-const getContextToken = () => capturedContextToken;
-
+let capturedContext;
+const getContext = () => capturedContext ??= readCredentialContext(fs, BROKER_STATE_PATH, process.env);
 const requestBroker = async (endpoint, body, timeoutMs) => {
   const config = getBrokerConfig();
-  if (!config || typeof globalThis.fetch !== 'function') return null;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(config.url + endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + config.token,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  if (!config) throw credentialError('broker_state_unavailable');
+  return await fetch(config.url + endpoint, {
+    method: 'POST', redirect: 'error',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + config.token },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs),
+  });
 };
 
-
-const rejectTokenToBroker = async (repoFullName, invalidatedToken) => {
-  // Short timeout: the gh shim awaits this before exiting, so a slow broker would stall
-  // the user. The next gh invocation will re-trigger reject if delivery here fails.
-  await requestBroker('/github-token/reject', {
-    repoFullName, contextToken: getContextToken(), invalidatedToken,
-  }, 2000);
+const isolatedGhEnv = (env, token) => {
+  const isolated = { ...env };
+  for (const key of Object.keys(isolated)) if (GITHUB_CREDENTIAL_ENV_KEYS.includes(key.toUpperCase())) delete isolated[key];
+  const directory = fs.mkdtempSync(path.join(require('os').tmpdir(), 'lody-gh-auth-'));
+  process.on('exit', () => { try { fs.rmSync(directory, { recursive: true, force: true }); } catch {} });
+  isolated.GH_CONFIG_DIR = directory;
+  isolated.XDG_DATA_HOME = directory;
+  isolated.XDG_STATE_HOME = directory;
+  isolated.XDG_CACHE_HOME = directory;
+  isolated.GH_NO_UPDATE_NOTIFIER = '1';
+  isolated.GH_NO_EXTENSION_UPDATE_NOTIFIER = '1';
+  isolated.GH_PROMPT_DISABLED = '1';
+  injectGhToken(isolated, token);
+  return isolated;
 };
 
-const GH_AUTH_FAILURE_PHRASES = [
-  'http 401',
-  '401 unauthorized',
-  'bad credentials',
-  'requires authentication',
-  'authentication failed',
-];
-
-const isGhAuthFailureOutput = (stderrText) => {
-  const value = String(stderrText || '').toLowerCase();
-  return GH_AUTH_FAILURE_PHRASES.some((phrase) => value.includes(phrase));
-};
-
-const buildGhEnv = async (ghCommand, args) => {
+async function* ghEnvironments(ghCommand, args) {
   const env = { ...process.env };
   clearManagedTokenEnv(env);
   const normalizedArgs = normalizeRepoArgs(args);
   const helpArgs = readCredentialFreeArgs(normalizedArgs);
-  // Neither a missing environment marker nor an inherited token proves ownership.
-  const policy = helpArgs ? { allowLocalAuth: false, personalEnabled: false } : await readCredentialPolicy();
-  const { allowLocalAuth } = policy;
-  if (!allowLocalAuth) {
-    for (const key of Object.keys(env)) {
-      if (GITHUB_CREDENTIAL_ENV_KEYS.includes(key.toUpperCase())) delete env[key];
-    }
-  }
-  // Help needs no authority. Canonical arguments prevent any user operation.
-  if (helpArgs) {
-    // Help must not load owner aliases/extensions or start background authentication.
-    const directory = fs.mkdtempSync(path.join(require('os').tmpdir(), 'lody-gh-help-'));
-    process.on('exit', () => { try { fs.rmSync(directory, { recursive: true, force: true }); } catch {} });
-    env.GH_CONFIG_DIR = directory;
-    env.XDG_DATA_HOME = directory;
-    env.XDG_STATE_HOME = directory;
-    env.XDG_CACHE_HOME = directory;
-    env.GH_PAGER = '';
-    env.GH_NO_UPDATE_NOTIFIER = '1';
-    env.GH_NO_EXTENSION_UPDATE_NOTIFIER = '1';
-    // The separator keeps gh's extension-help rewrite from executing a command.
-    return { env, args: helpArgs };
-  }
-  // Authentication management must reach the owner's real gh unchanged, even
-  // when no login exists yet; injecting an App token prevents gh auth login.
+  if (helpArgs) { yield { env: isolatedGhEnv(env), args: helpArgs, source: 'help' }; return; }
+  const policy = readCredentialPolicy();
   if (args[0] === 'auth') {
-    if (allowLocalAuth) return { env };
-    throw new Error('GitHub authentication management is unavailable for this session.');
+    if (!policy.allowLocalAuth) throw credentialError('machine_identity_not_allowed');
+    yield { env, source: 'local' }; return;
   }
   const target = await readGitHubTarget(normalizedArgs);
-  if (!target.host) {
-    // The owner's native gh can resolve ambiguous arguments itself. A shared
-    // session must stop rather than risk selecting another host's credentials.
-    if (allowLocalAuth && !policy.personalEnabled) return { env };
-    throw new Error('Cannot determine the GitHub target safely while personal or managed identity is required. For supported repository commands, specify -R owner/repo. Account-wide commands, extensions and unsupported flags cannot use repository-scoped credentials here; use a separately authenticated terminal. No command was executed.');
+  if (target.host !== 'github.com' || !target.repo) {
+    diagnostic('personal', 'target', credentialError('repository_required'));
+    if (policy.allowLocalAuth) { yield { env, source: 'local' }; return; }
+    throw credentialError('repository_required');
   }
-  const tokenKeys = target.host === 'github.com' || target.host.endsWith('.ghe.com')
-    ? ['GH_TOKEN', 'GITHUB_TOKEN'] : ['GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
-  if (target.host === 'github.com' && target.repo) {
-    // Only preflight is retried, never the user's command. Unknown/API operations
-    // and issue/comment/review access must not be inferred from contents push.
-    const requireWrite = requiredRepositoryPermission(normalizedArgs);
-    const selected = await selectGitHubCredential(target.repo, policy, async () => {
-      for (const key of tokenKeys) {
-        const token = env[key];
-        if (token && await checkRepositoryCredential(token, target.repo, requireWrite) === 'usable') return { token };
-        delete env[key];
-      }
-      const result = await runGhCommand(ghCommand, ['auth', 'token', '--hostname', target.host], {
-        env, stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000,
-      });
-      if (result.error) throw new Error('Unable to inspect local GitHub credentials.');
-      const token = result.status === 0 ? result.stdout.trim() : '';
-      return token && await checkRepositoryCredential(token, target.repo, requireWrite) === 'usable' ? { token } : null;
-    }, requireWrite);
-    env.GH_HOST = 'github.com';
-    injectGhToken(env, selected.token);
-    return { env, ...(selected.source !== 'local' ? { managed: { token: selected.token, repoFullName: target.repo } } : {}) };
+  const local = async () => {
+    const token = env.GH_TOKEN || env.GITHUB_TOKEN;
+    if (token) return { token };
+    const result = await runGhCommand(ghCommand, ['auth', 'token', '--hostname', target.host], {
+      env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 3000,
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw credentialError('local_auth_missing');
+    return result.stdout.trim() ? { token: result.stdout.trim() } : null;
+  };
+  for await (const candidate of githubCredentials(target.repo, policy, local)) {
+    const attemptEnv = candidate.source === 'local' ? { ...env } : isolatedGhEnv(env, candidate.token);
+    injectGhToken(attemptEnv, candidate.token);
+    attemptEnv.GH_HOST = 'github.com';
+    yield { env: attemptEnv, source: candidate.source };
   }
-  // Try explicit credentials in gh's precedence order. Only a definitive 401
-  // allows the next credential; never retry the user's actual command.
-  for (const key of tokenKeys) {
-    if (!env[key]) continue;
-    if (await hasUsableGhAuth(ghCommand, env, target.host)) return { env };
-    delete env[key];
-  }
-  if (allowLocalAuth && await hasUsableGhAuth(ghCommand, env, target.host)) return { env };
-
-  if (!allowLocalAuth) throw new Error('No managed GitHub credential is available for this session.');
-  return { env };
-};
-
+}
 const main = async () => {
   const ghCommand = resolveRealGhCommand();
-  if (!ghCommand) {
-    console.error('gh CLI not found. Please install it from https://cli.github.com/');
-    process.exit(127);
-  }
-
-  const ghEnv = await buildGhEnv(ghCommand, process.argv.slice(2));
-  const child = spawnGh(ghCommand, ghEnv.args || process.argv.slice(2), {
-    stdio: ['inherit', 'inherit', 'pipe'],
-    env: ghEnv.env,
-  });
-  let stderrText = '';
-  child.stderr.on('data', (chunk) => {
-    const text = String(chunk || '');
-    process.stderr.write(chunk);
-    if (stderrText.length < 20000) {
-      stderrText += text.slice(0, 20000 - stderrText.length);
+  if (!ghCommand) throw credentialError('gh_not_found');
+  const args = process.argv.slice(2);
+  for await (const attempt of ghEnvironments(ghCommand, args)) {
+    console.error('[Lody GitHub] ' + JSON.stringify({ source: attempt.source, stage: 'execute' }));
+    // Preserve native streaming. Once output or a possible write is observed,
+    // never replay a command (gh may issue multiple API calls internally).
+    const result = await new Promise(resolve => {
+      const child = spawnGh(ghCommand, attempt.args || args, { stdio: ['inherit', 'pipe', 'pipe'], env: attempt.env });
+      let output = false;
+      let stderr = '';
+      child.stdout.on('data', chunk => { output = true; process.stdout.write(chunk); });
+      child.stderr.on('data', chunk => { process.stderr.write(chunk); stderr += String(chunk).slice(0, Math.max(0, 20000 - stderr.length)); });
+      child.on('error', error => resolve({ error, code: 1, output, stderr }));
+      child.on('close', (code, signal) => resolve({ code, signal, output, stderr }));
+    });
+    if (result.signal) { process.kill(process.pid, result.signal); return; }
+    if (result.code === 0) return;
+    if (result.error) throw result.error;
+    // A single unpaginated REST API request with no hooks has a clear rejection
+    // boundary. Other commands may have completed an earlier write: stop.
+    const singleApi = args[0] === 'api' && !args.includes('graphql') && !args.includes('--paginate') && !args.includes('--cache');
+    const rejected = /HTTP (401|403|404)\\b/.test(result.stderr);
+    const normalized = normalizeRepoArgs(args);
+    const readCommands = { pr: ['view', 'list', 'status', 'checks', 'diff'], issue: ['view', 'list', 'status'], repo: ['view', 'list'], release: ['view', 'list'], run: ['view', 'list'], workflow: ['view', 'list'] };
+    const safeRead = (args[0] === 'api' && !args.some(arg => /^(?:-X|-f|-F|--method|--field|--raw-field|--input)/.test(arg)) && !args.includes('graphql')) || readCommands[normalized[0]]?.includes(normalized[1]);
+    if (!result.output && (safeRead || (singleApi && rejected))) {
+      diagnostic(attempt.source, 'execute', credentialError(rejected ? 'access_denied' : 'command_failed'));
+      continue;
     }
-  });
-
-  child.on('error', () => process.exit(127));
-  child.on('close', (code, signal) => {
-    void (async () => {
-      if (code && ghEnv.managed && isGhAuthFailureOutput(stderrText)) {
-        await rejectTokenToBroker(ghEnv.managed.repoFullName, ghEnv.managed.token);
-      }
-      if (signal) {
-        process.kill(process.pid, signal);
-        return;
-      }
-      process.exit(code ?? 1);
-    })();
-  });
+    console.error('[Lody GitHub] command_failed; no replay because effects may have occurred.');
+    process.exitCode = result.code ?? 1;
+    return;
+  }
 };
 
-main().catch((error) => { console.error(error.message); process.exit(1); });
+main().catch((error) => { diagnostic('gh', 'failed', error); process.exitCode = 1; });
 `;
 
 const windowsLauncherSourceTemplate = `@echo off

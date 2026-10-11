@@ -25,6 +25,44 @@ describe('GitHubTokenManager', () => {
     vi.useRealTimers();
   });
 
+  it('isolates short-lived candidates by owner and source and honors invalidation', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-03T00:00:00Z'));
+    let generation = 0;
+    actionMock.mockImplementation(async (_rpc, args) => ({
+      success: true,
+      token: `${args.requesterUserId}:${args.credentialSource}:${++generation}`,
+      tokenSource: args.credentialSource,
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    }));
+    const manager = new GitHubTokenManager({
+      serverUrl: 'http://example.test',
+      cliToken: 'cli',
+      workspaceId: 'ws',
+    });
+    const context = { requesterUserId: 'owner', machineId: 'machine' };
+    const first = await manager.getCredentialCandidate('org/repo', context, 'personal');
+    expect(await manager.getCredentialCandidate('ORG/REPO', context, 'personal')).toEqual(first);
+    expect(
+      await manager.getCredentialCandidate(
+        'org/repo',
+        { ...context, requesterUserId: 'other' },
+        'personal'
+      )
+    ).not.toEqual(first);
+    expect(await manager.getCredentialCandidate('org/repo', context, 'app')).toMatchObject({
+      tokenSource: 'app',
+    });
+    vi.advanceTimersByTime(60001);
+    const expired = await manager.getCredentialCandidate('org/repo', context, 'personal');
+    expect(expired).not.toEqual(first);
+    manager.invalidate('org/repo', { requesterUserId: 'owner' });
+    expect(await manager.getCredentialCandidate('org/repo', context, 'personal')).not.toEqual(
+      expired
+    );
+    await manager.shutdown();
+    vi.useRealTimers();
+  });
   it('returns tokens even for public repos when a token is issued', async () => {
     actionMock.mockResolvedValueOnce({
       success: true,

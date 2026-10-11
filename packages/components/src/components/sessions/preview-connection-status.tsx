@@ -8,12 +8,111 @@ import {
   TimerOff,
   TriangleAlert,
 } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { radius, space } from '@lody/ui/tokens/scales.stylex';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Popover } from '@lody/ui/popover';
 import { Spinner } from '@lody/ui/spinner';
 import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
+
+const styles = stylex.create({
+  content: { width: '100%' },
+  centeredContent: {
+    display: 'flex',
+    maxWidth: '28rem',
+    flexDirection: 'column',
+    alignItems: 'center',
+    textAlign: 'center',
+  },
+  headingRow: { display: 'flex', width: '100%', alignItems: 'flex-start', gap: '10px' },
+  centeredHeadingRow: { flexDirection: 'column', alignItems: 'center' },
+  statusMark: {
+    display: 'flex',
+    width: '24px',
+    height: '24px',
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.full,
+    backgroundColor: 'hsl(var(--muted))',
+    color: colors.secondaryLabel,
+  },
+  statusMarkDanger: {
+    backgroundColor: `color-mix(in oklab, ${colors.destructive} 10%, transparent)`,
+    color: colors.destructive,
+  },
+  statusIcon: { flexShrink: 0, width: '14px', height: '14px' },
+  statusIconFill: { width: '100%', height: '100%', flexShrink: 0 },
+  statusText: { minWidth: 0 },
+  title: {
+    margin: 0,
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    fontWeight: 500,
+    color: colors.label,
+  },
+  detail: {
+    margin: 0,
+    marginTop: '2px',
+    fontSize: '11px',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  diagnostic: {
+    width: '100%',
+    marginTop: '8px',
+    overflowWrap: 'break-word',
+    borderRadius: '6px',
+    backgroundColor: `color-mix(in oklab, ${colors.destructive} 8%, transparent)`,
+    paddingInline: '8px',
+    paddingBlock: '6px',
+    textAlign: 'left',
+    fontSize: '11px',
+    lineHeight: 1.375,
+    color: colors.destructive,
+  },
+  facts: {
+    width: '100%',
+    margin: 0,
+    marginTop: '8px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    padding: 0,
+    paddingTop: '8px',
+    listStyle: 'none',
+    textAlign: 'left',
+    fontSize: '11px',
+    lineHeight: 1.375,
+    color: colors.secondaryLabel,
+  },
+  factRow: { marginBottom: space[1] },
+  actions: {
+    display: 'flex',
+    width: '100%',
+    gap: '6px',
+    marginTop: '8px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: colors.separator,
+    paddingTop: '8px',
+  },
+  centeredActions: { justifyContent: 'center' },
+  trailingActions: { justifyContent: 'flex-end' },
+  placeholder: {
+    display: 'flex',
+    flex: '1 1 0%',
+    minHeight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+    paddingInline: '24px',
+    paddingBlock: '32px',
+  },
+});
 
 export type PreviewConnectionStatusProps = {
   local: boolean;
@@ -211,21 +310,22 @@ function usePreviewStatusPresentation({
   };
 }
 
-function StatusGlyph({ kind, className }: { kind: PreviewStatusKind; className?: string }) {
-  const glyphClassName = cn('shrink-0', className);
+function StatusGlyph({ kind, fill = false }: { kind: PreviewStatusKind; fill?: boolean }) {
+  const glyphStyle = stylex.props(fill ? styles.statusIconFill : styles.statusIcon);
+  const spinnerClassName = cn('shrink-0', fill ? 'h-full w-full' : 'h-3.5 w-3.5');
   if (kind === 'connecting') {
-    return <Spinner label={null} className={glyphClassName} />;
+    return <Spinner label={null} className={spinnerClassName} />;
   }
   if (kind === 'checking') {
-    return <RefreshCw className={glyphClassName} aria-hidden />;
+    return <RefreshCw {...glyphStyle} aria-hidden />;
   }
-  if (kind === 'local') return <Monitor className={glyphClassName} aria-hidden />;
-  if (kind === 'active') return <RadioTower className={glyphClassName} aria-hidden />;
-  if (kind === 'expired') return <TimerOff className={glyphClassName} aria-hidden />;
-  if (kind === 'closed') return <Link2Off className={glyphClassName} aria-hidden />;
+  if (kind === 'local') return <Monitor {...glyphStyle} aria-hidden />;
+  if (kind === 'active') return <RadioTower {...glyphStyle} aria-hidden />;
+  if (kind === 'expired') return <TimerOff {...glyphStyle} aria-hidden />;
+  if (kind === 'closed') return <Link2Off {...glyphStyle} aria-hidden />;
   if (kind === 'failed' || kind === 'unavailable')
-    return <TriangleAlert className={glyphClassName} aria-hidden />;
-  return <CloudOff className={glyphClassName} aria-hidden />;
+    return <TriangleAlert {...glyphStyle} aria-hidden />;
+  return <CloudOff {...glyphStyle} aria-hidden />;
 }
 
 function PreviewStatusContent({
@@ -252,41 +352,40 @@ function PreviewStatusContent({
     onStopSharing,
   } = presentation;
 
+  const contentStyle = stylex.props(styles.content, centered && styles.centeredContent);
+  const headingStyle = stylex.props(styles.headingRow, centered && styles.centeredHeadingRow);
+  const actionsStyle = stylex.props(
+    styles.actions,
+    centered ? styles.centeredActions : styles.trailingActions
+  );
   return (
-    <div className={cn('w-full', centered && 'flex max-w-md flex-col items-center text-center')}>
-      <div className={cn('flex w-full items-start gap-2.5', centered && 'flex-col items-center')}>
+    <div {...contentStyle}>
+      <div {...headingStyle}>
         <span
-          className={cn(
-            'flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground',
-            (kind === 'failed' || kind === 'unavailable') && 'bg-destructive/10 text-destructive'
+          {...stylex.props(
+            styles.statusMark,
+            (kind === 'failed' || kind === 'unavailable') && styles.statusMarkDanger
           )}
         >
-          <StatusGlyph kind={kind} className="h-3.5 w-3.5" />
+          <StatusGlyph kind={kind} />
         </span>
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-foreground">{title}</p>
-          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{detail}</p>
+        <div {...stylex.props(styles.statusText)}>
+          <p {...stylex.props(styles.title)}>{title}</p>
+          <p {...stylex.props(styles.detail)}>{detail}</p>
         </div>
       </div>
-      {diagnostic ? (
-        <p className="mt-2 w-full break-words rounded-md bg-destructive/8 px-2 py-1.5 text-left text-[11px] leading-snug text-destructive">
-          {diagnostic}
-        </p>
-      ) : null}
+      {diagnostic ? <p {...stylex.props(styles.diagnostic)}>{diagnostic}</p> : null}
       {showFacts && facts.length > 0 ? (
-        <ul className="mt-2 w-full space-y-1 border-t border-border pt-2 text-left text-[11px] leading-snug text-muted-foreground">
-          {facts.map((fact) => (
-            <li key={fact}>{fact}</li>
+        <ul {...stylex.props(styles.facts)}>
+          {facts.map((fact, index) => (
+            <li key={fact} {...stylex.props(index < facts.length - 1 && styles.factRow)}>
+              {fact}
+            </li>
           ))}
         </ul>
       ) : null}
       {showRestore || showStopSharing ? (
-        <div
-          className={cn(
-            'mt-2 flex w-full gap-1.5 border-t border-border pt-2',
-            centered ? 'justify-center' : 'justify-end'
-          )}
-        >
+        <div {...actionsStyle}>
           {showStopSharing ? (
             <Button type="button" variant="secondary" size="mini" onClick={onStopSharing}>
               {t('sessions.browser.stopSharing', 'Stop sharing')}
@@ -340,7 +439,7 @@ export function PreviewConnectionStatus(props: PreviewConnectionStatusProps) {
                     data-testid="preview-status-trigger"
                     aria-label={accessibleName}
                   >
-                    <StatusGlyph kind={presentation.kind} className="h-full w-full" />
+                    <StatusGlyph kind={presentation.kind} fill />
                   </Button>
                 }
               />
@@ -361,11 +460,7 @@ export function PreviewConnectionStatus(props: PreviewConnectionStatusProps) {
 export function PreviewConnectionPlaceholder(props: PreviewConnectionStatusProps) {
   const presentation = usePreviewStatusPresentation(props);
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="flex min-h-0 flex-1 items-center justify-center bg-background px-6 py-8"
-    >
+    <div role="status" aria-live="polite" {...stylex.props(styles.placeholder)}>
       <PreviewStatusContent presentation={presentation} centered showFacts={false} />
     </div>
   );

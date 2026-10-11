@@ -18,6 +18,13 @@ const NativeStarted = z.object({
   electron: z.string().optional(),
 });
 
+// Bundled CommonJS dependencies (cross-spawn in the process layer) require Node
+// built-ins; an ESM bundle needs a real `require` for that, as Vite provides in
+// the production build.
+const cjsRequireBanner = {
+  js: "import { createRequire as __lodyCreateRequire } from 'node:module'; const require = __lodyCreateRequire(import.meta.url);",
+};
+
 // Real process/IPC tests, no public network. POSIX shebang fixture stands in for
 // the native binary; Windows native execution belongs to platform acceptance.
 describe.skipIf(process.platform === 'win32')('cloudflared lifecycle IPC', () => {
@@ -37,6 +44,7 @@ describe.skipIf(process.platform === 'win32')('cloudflared lifecycle IPC', () =>
       platform: 'node',
       format: 'esm',
       target: 'node22',
+      banner: cjsRequireBanner,
     });
     await build({
       stdin: {
@@ -54,6 +62,7 @@ describe.skipIf(process.platform === 'win32')('cloudflared lifecycle IPC', () =>
       platform: 'node',
       format: 'esm',
       target: 'node22',
+      banner: cjsRequireBanner,
     });
     await writeFile(
       binary,

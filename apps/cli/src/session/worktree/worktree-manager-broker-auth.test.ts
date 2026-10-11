@@ -1,47 +1,84 @@
+import { Effect } from 'effect';
+import type { SessionCredentials } from '../session-credentials';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineId, RepoId, SessionId, WorkspaceId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
-import {
-  buildCredentialHelperValueForHost,
-  ensureCredentialHelperScript,
-} from '@/lib/git-credential-helper-script';
+import type { NodeProcessApi } from '@lody/shared/node/process';
+import { SessionManager } from '../session-manager';
+import type { SessionConfig } from '../types';
+import type { LoroDocumentManager } from '@/lib/loro/doc';
+import { createTestCloudPort } from '../../../tests/test-cloud-port';
 import { materializeSpeculativeWorktree } from './speculative-worktree';
 import { ensureGitHubGitTransport } from '@/lib/github-git-transport';
 import type { GitCredentialBrokerAuth } from './worktree-manager';
+import { isGitExecutableNotFoundError } from './git-process-error';
 
-const spawnMock = vi.hoisted(() => vi.fn());
-
-vi.mock('cross-spawn', () => ({ default: spawnMock }));
 vi.mock('@/utils/file-lock', () => ({
   withFileLock: async <T>(_name: string, fn: () => Promise<T>): Promise<T> => fn(),
 }));
+
+type SpawnCall = { command: string; args: readonly string[]; options: SpawnOptions };
+type SpawnImpl = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+
+/** Pids no OS hands out, so scripted children never collide with real ones. */
+const FAKE_PID_BASE = 2 ** 30;
+let nextFakePid = FAKE_PID_BASE;
+let spawnImpl: SpawnImpl;
+const spawnCalls: SpawnCall[] = [];
+
+/**
+ * The process layer's OS seam. Scripted git children have fake pids that
+ * no signal can reach; children the native fixture really spawns get real
+ * signals, so their process groups are proven gone like in production.
+ */
+const nodeProcess: NodeProcessApi = {
+  platform: process.platform,
+  spawn: (command, args, options) => {
+    spawnCalls.push({ command, args, options });
+    return spawnImpl(command, args, options);
+  },
+  spawnSync: () => {
+    throw new Error('host git never runs synchronously');
+  },
+  kill: (pid, signal) => {
+    if (Math.abs(pid) >= FAKE_PID_BASE) {
+      throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+    }
+    process.kill(pid, signal);
+  },
+};
 
 /**
  * Minimal stand-in for a git child process that exits successfully.
  * `stdout` is scripted per invocation so callers that parse output (fetchspec
  * probing, rev-parse) take their normal branches without a real repository.
  */
-function makeChild(stdout: string, stderr = '', code = 0) {
+function makeChild(stdout: string, stderr = '', code = 0): ChildProcess {
   const child = new EventEmitter() as EventEmitter & {
+    pid: number;
     stdout: Readable;
     stderr: Readable;
   };
-  child.stdout = Readable.from([stdout]);
-  child.stderr = Readable.from([stderr]);
+  child.pid = nextFakePid++;
+  child.stdout = Readable.from([Buffer.from(stdout)]);
+  child.stderr = Readable.from([Buffer.from(stderr)]);
   // Match child_process: close follows both output streams, including errors.
   let remainingStreams = 2;
   const ended = () => {
-    if (--remainingStreams === 0) child.emit('close', code);
+    if (--remainingStreams === 0) {
+      child.emit('exit', code, null);
+      child.emit('close', code, null);
+    }
   };
   child.stdout.once('end', ended);
   child.stderr.once('end', ended);
-  return child;
+  return child as unknown as ChildProcess;
 }
 
 function createLogger(): Logger {
@@ -64,15 +101,15 @@ const REPO_URL = 'https://github.com/owner/repo.git';
 
 /** Env of the git invocation whose argv contains `verb`. */
 function envOfGitCall(verb: string): NodeJS.ProcessEnv {
-  const call = spawnMock.mock.calls.find(([, args]) => (args as string[]).includes(verb));
+  const call = spawnCalls.find(({ args }) => args.includes(verb));
   if (!call) {
     throw new Error(
-      `no git invocation with "${verb}"; saw: ${spawnMock.mock.calls
-        .map(([, args]) => (args as string[]).join(' '))
+      `no git invocation with "${verb}"; saw: ${spawnCalls
+        .map(({ args }) => args.join(' '))
         .join(' | ')}`
     );
   }
-  return (call[2] as { env: NodeJS.ProcessEnv }).env;
+  return call.options.env ?? {};
 }
 
 describe('WorktreeManager host git credential broker routing', () => {
@@ -80,15 +117,15 @@ describe('WorktreeManager host git credential broker routing', () => {
   let previousDataDir: string | undefined;
 
   beforeEach(() => {
-    spawnMock.mockReset();
-    spawnMock.mockImplementation((_cmd: string, args: string[]) => {
+    spawnCalls.length = 0;
+    spawnImpl = (_cmd, args) => {
       // `remote.origin.fetch` already configured -> no `config --add` detour.
       if (args.includes('--get-all')) {
         return makeChild('+refs/heads/*:refs/remotes/origin/*\n');
       }
       if (args.includes('rev-parse')) return makeChild('deadbeef\n');
       return makeChild('');
-    });
+    };
 
     previousDataDir = process.env.LODY_DATA_DIR;
     dataDir = mkdtempSync(path.join(os.tmpdir(), 'lody-broker-auth-'));
@@ -152,6 +189,10 @@ describe('WorktreeManager host git credential broker routing', () => {
       ],
       upstream
     );
+    writeFileSync(
+      path.join(dataDir, 'empty-config'),
+      '[credential]\n\thelper = "!f() { echo username=machine; echo password=machine-owner-secret; }; f"\n'
+    );
     const head = nativeGit(['rev-parse', 'HEAD'], upstream);
     const bare = path.join(dataDir, 'repos', REPO_ID, 'bare.git');
     rmSync(bare, { recursive: true, force: true });
@@ -186,9 +227,10 @@ globalThis.fetch = async (url, init) => {
       `
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
+if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) throw new Error('host credential leaked');
 const input = fs.readFileSync(0);
 const result = spawnSync(${JSON.stringify(process.execPath)}, [${JSON.stringify(wrapper)}, 'credential', 'fill'], {
-  input: 'protocol=https\\nhost=github.com\\npath=owner/repo.git\\n\\n', encoding: 'utf8', env: process.env,
+  input: 'protocol=https\\nhost=github.com\\npath=owner/repo.git/info/lfs\\n\\n', encoding: 'utf8', env: process.env,
 });
 if (result.status !== 0 || !result.stdout.includes('password=synthetic-fixture-token')) {
   process.stderr.write(result.stderr); process.exit(1);
@@ -198,27 +240,26 @@ process.stdout.write(input);
     );
     let networkCalls = 0;
     let checkoutFailed = false;
-    spawnMock.mockImplementation(
-      (_command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }) => {
-        if (retryCheckout && !checkoutFailed && args[0] === 'worktree' && args[1] === 'add') {
-          checkoutFailed = true;
-          return makeChild('', 'fatal: missing stale worktree registration', 1);
-        }
-        const verb = args.find((arg) => arg === 'fetch' || arg === 'clone');
-        if (!verb)
-          return spawn(
-            checkoutCredentials ? process.execPath : git,
-            checkoutCredentials ? [wrapper, ...args] : args,
-            {
-              ...options,
-              env: { ...options.env, NODE_OPTIONS: `--require ${JSON.stringify(preload)}` },
-              stdio: ['ignore', 'pipe', 'pipe'],
-            }
-          );
-        networkCalls++;
-        // Ask actual Git to run the generated helper with EXACTLY the supplied
-        // auth env before serving pack data from the local fixture repository.
-        const script = `
+    spawnImpl = (_command, args, options) => {
+      if (retryCheckout && !checkoutFailed && args[0] === 'worktree' && args[1] === 'add') {
+        checkoutFailed = true;
+        return makeChild('', 'fatal: missing stale worktree registration', 1);
+      }
+      const verb = args.find((arg) => arg === 'fetch' || arg === 'clone');
+      if (!verb)
+        return spawn(
+          checkoutCredentials ? process.execPath : git,
+          checkoutCredentials ? [wrapper, ...args] : args,
+          {
+            ...options,
+            env: { ...options.env, NODE_OPTIONS: `--require ${JSON.stringify(preload)}` },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          }
+        );
+      networkCalls++;
+      // Ask actual Git to run the generated helper with EXACTLY the supplied
+      // auth env before serving pack data from the local fixture repository.
+      const script = `
 const { spawnSync } = require('node:child_process');
 const args = ${JSON.stringify(args)};
 const index = args.indexOf(${JSON.stringify(verb)});
@@ -233,37 +274,92 @@ const operation = ${JSON.stringify(verb)} === 'clone'
 const result = spawnSync(${JSON.stringify(git)}, operation, { env: process.env, stdio: 'inherit' });
 process.exit(result.status ?? 1);
 `;
-        return spawn(process.execPath, ['-e', script], {
-          ...options,
-          env: { ...options.env, NODE_OPTIONS: `--require ${JSON.stringify(preload)}` },
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
+      return spawn(process.execPath, ['-e', script], {
+        ...options,
+        env: { ...options.env, NODE_OPTIONS: `--require ${JSON.stringify(preload)}` },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    };
+    const auth = async (context: string): Promise<GitCredentialBrokerAuth> => {
+      const stateFilePath = path.join(dataDir, context + '-broker.json');
+      mkdirSync(stateFilePath + '.contexts', { recursive: true });
+      writeFileSync(
+        stateFilePath,
+        JSON.stringify({ url: `http://${context}.test`, token: context })
+      );
+      writeFileSync(
+        stateFilePath + '.contexts/' + context + '.json',
+        JSON.stringify({ version: 1, contextToken: context, allowLocalAuth: false })
+      );
+      const sessionManager = new SessionManager(
+        createLogger(),
+        'cli',
+        'machine',
+        'workspace',
+        {
+          repo: { getDocMeta: async () => ({ meta: { userId: context } }) },
+        } as unknown as LoroDocumentManager,
+        { cloudPort: createTestCloudPort() }
+      );
+      Object.assign(sessionManager, {
+        githubTokenManager: {},
+        gitCredentialBroker: {
+          ensureStarted: async () => ({ url: `http://${context}.test`, token: context, port: 0 }),
+          acquireContext: () =>
+            Effect.acquireRelease(
+              Effect.sync(() => ({
+                context: { sessionId: context, requesterUserId: context, machineId: 'machine' },
+                contextToken: context,
+                stateFilePath,
+                contextFilePath: stateFilePath + '.contexts/' + context + '.json',
+                allowLocalAuth: false,
+                active: true,
+                revoke: () => {},
+              })),
+              () => Effect.void
+            ),
+          getStateFilePath: () => stateFilePath,
+        },
+      });
+      const production = sessionManager as unknown as {
+        prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials>;
+        resolveHostGitBrokerAuth(
+          source: { kind: 'github'; repoUrl: string },
+          config: SessionConfig,
+          credentials: SessionCredentials
+        ): Promise<GitCredentialBrokerAuth>;
+      };
+      const config = {
+        sessionId: context,
+        requesterUserId: context,
+        repoId: REPO_ID,
+        githubRepo: 'owner/repo',
+        env: {},
+      } as SessionConfig;
+      const credentials = await production.prepareGitHubRepoSessionConfig(config);
+      const prepared = await production.resolveHostGitBrokerAuth(
+        { kind: 'github', repoUrl: REPO_URL },
+        config,
+        credentials
+      );
+      // Only repository filter configuration is fixture-specific. Credentials,
+      // routing and pinned authority come from the actual production preparation.
+      if (checkoutCredentials) {
+        let count = Number(prepared.transportEnv.GIT_CONFIG_COUNT);
+        for (const [key, value] of [
+          [
+            'filter.credential-fixture.smudge',
+            `${JSON.stringify(process.execPath)} ${JSON.stringify(smudge)}`,
+          ],
+          ['filter.credential-fixture.required', 'true'],
+        ]) {
+          prepared.transportEnv[`GIT_CONFIG_KEY_${count}`] = key;
+          prepared.transportEnv[`GIT_CONFIG_VALUE_${count++}`] = value;
+        }
+        prepared.transportEnv.GIT_CONFIG_COUNT = String(count);
       }
-    );
-    ensureCredentialHelperScript(REPO_ID);
-    const auth = (context: string): GitCredentialBrokerAuth => ({
-      workspaceId: context,
-      url: `http://${context}.test`,
-      token: context,
-      contextToken: context,
-      transportEnv: {
-        GIT_CONFIG_COUNT: checkoutCredentials ? '5' : '3',
-        GIT_CONFIG_KEY_0: 'credential.https://github.com.helper',
-        GIT_CONFIG_VALUE_0: '',
-        GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
-        GIT_CONFIG_VALUE_1: buildCredentialHelperValueForHost(REPO_ID),
-        GIT_CONFIG_KEY_2: 'credential.https://github.com.useHttpPath',
-        GIT_CONFIG_VALUE_2: 'true',
-        ...(checkoutCredentials
-          ? {
-              GIT_CONFIG_KEY_3: 'filter.credential-fixture.smudge',
-              GIT_CONFIG_VALUE_3: `${JSON.stringify(process.execPath)} ${JSON.stringify(smudge)}`,
-              GIT_CONFIG_KEY_4: 'filter.credential-fixture.required',
-              GIT_CONFIG_VALUE_4: 'true',
-            }
-          : {}),
-      },
-    });
+      return prepared;
+    };
     return {
       head,
       auth,
@@ -288,7 +384,7 @@ process.exit(result.status ?? 1);
       if (!needsClone) fixture.seed();
       const manager = await newManager();
       const sessionId = `startup-${mode}` as SessionId;
-      const brokerAuth = fixture.auth('requester-a');
+      const brokerAuth = await fixture.auth('requester-a');
       const info =
         mode === 'speculative'
           ? (
@@ -314,7 +410,7 @@ process.exit(result.status ?? 1);
       expect(info.headSha).toBe(fixture.head);
       expect(fixture.calls()).toBe(needsClone ? 2 : 1);
       expect(fixture.contexts()).toEqual(
-        Array.from({ length: needsClone ? 4 : 2 }, () => 'requester-a')
+        Array.from({ length: needsClone ? 2 : 1 }, () => 'requester-a')
       );
       if (mode === 'restore-cache') expect(info.branch).toBe('fixture-base');
       // Existing checkout restores offline, without authenticating or fetching.
@@ -327,6 +423,8 @@ process.exit(result.status ?? 1);
     'passes frozen credentials to checkout-time smudge filters during %s',
     async (mode) => {
       const fixture = nativeFixture(true, mode === 'retry');
+      vi.stubEnv('GH_TOKEN', 'machine-owner-env-secret');
+      vi.stubEnv('GITHUB_TOKEN', 'machine-owner-secondary-secret');
       fixture.seed();
       const manager = await newManager();
       const info = await manager.createWorktree(
@@ -334,15 +432,10 @@ process.exit(result.status ?? 1);
         undefined,
         mode === 'restore' ? 'fixture-base' : undefined,
         undefined,
-        fixture.auth('requester-a')
+        await fixture.auth('requester-a')
       );
       expect(readFileSync(path.join(info.hostPath, 'README.md'), 'utf8')).toBe('fixture content');
-      expect(fixture.contexts()).toEqual([
-        'requester-a',
-        'requester-a',
-        'requester-a',
-        'requester-a',
-      ]);
+      expect(fixture.contexts()).toEqual(['requester-a', 'requester-a']);
     }
   );
 
@@ -377,16 +470,11 @@ process.exit(result.status ?? 1);
         undefined,
         undefined,
         undefined,
-        fixture.auth(requester)
+        await fixture.auth(requester)
       );
       expect(info.headSha).toBe(fixture.head);
     }
-    expect(fixture.contexts()).toEqual([
-      'requester-a',
-      'requester-a',
-      'requester-b',
-      'requester-b',
-    ]);
+    expect(fixture.contexts()).toEqual(['requester-a', 'requester-b']);
   });
 
   it('fails a fresh worktree before materialization when the requester context is invalid', async () => {
@@ -395,8 +483,14 @@ process.exit(result.status ?? 1);
     const manager = await newManager();
     const sessionId = 'denied-startup' as SessionId;
     await expect(
-      manager.createWorktree(sessionId, undefined, undefined, undefined, fixture.auth('revoked'))
-    ).rejects.toThrow('credential context expired');
+      manager.createWorktree(
+        sessionId,
+        undefined,
+        undefined,
+        undefined,
+        await fixture.auth('revoked')
+      )
+    ).rejects.toThrow('invalid_context');
     expect(manager.hasWorktree(sessionId)).toBe(false);
     expect(fixture.contexts()).toEqual([]);
   });
@@ -407,6 +501,7 @@ process.exit(result.status ?? 1);
       repoId: REPO_ID,
       source: { kind: 'github', repoUrl: REPO_URL },
       logger: createLogger(),
+      nodeProcess,
     });
   }
 
@@ -460,12 +555,30 @@ process.exit(result.status ?? 1);
         LODY_GIT_CRED_CONTEXT_TOKEN: 'frozen-requester',
         LODY_GIT_CRED_CONTEXT_FILE: undefined,
       });
-      const args = spawnMock.mock.calls.find(([, invocationArgs]) =>
-        (invocationArgs as string[]).includes(verb)
-      )?.[1] as string[];
+      const args = spawnCalls.find((call) => call.args.includes(verb))?.args ?? [];
       expect(args.some((arg) => arg.includes('credential.https://github.com.helper'))).toBe(false);
     }
   );
+
+  it('reports a missing git executable through the process layer', async () => {
+    rmSync(path.join(dataDir, 'repos', REPO_ID, 'bare.git'), { recursive: true });
+    spawnImpl = () => {
+      // What Node does for a missing executable: no pid, then an async ENOENT.
+      const child = new EventEmitter();
+      queueMicrotask(() =>
+        child.emit('error', Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' }))
+      );
+      return child as unknown as ChildProcess;
+    };
+    const manager = await newManager();
+
+    const failure = await manager.ensureRepo().then(
+      () => undefined,
+      (error: unknown) => error
+    );
+
+    expect(isGitExecutableNotFoundError(failure)).toBe(true);
+  });
 
   it('uses native Git without installing managed credentials or borrowing an ambient broker', async () => {
     // Local platform has no token manager and therefore no broker; host git must
@@ -479,8 +592,10 @@ process.exit(result.status ?? 1);
     const env = envOfGitCall('fetch');
     expect(env.LODY_GIT_CRED_BROKER_URL).toBeUndefined();
     expect(env.LODY_GIT_CRED_BROKER_TOKEN).toBeUndefined();
-    expect(
-      spawnMock.mock.calls.find(([, args]) => (args as string[]).includes('fetch'))?.[1]
-    ).toEqual(['fetch', 'origin', '--prune']);
+    expect(spawnCalls.find(({ args }) => args.includes('fetch'))?.args).toEqual([
+      'fetch',
+      'origin',
+      '--prune',
+    ]);
   });
 });

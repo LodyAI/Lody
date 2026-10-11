@@ -9,6 +9,14 @@ Session/Task MCP tool contracts are owned by
 directory. Cross-entry model validation, Session provenance, and feedback privacy
 remain in the CLI parent rules.
 
+MCP Session creation reuses CLI dispatch validation for explicit ACP modes and
+config options alongside semantic controls. `acp-run-config.ts` supplies shared
+discovery metadata; `commands/session.ts` resolves and validates the effective
+config before acceptance. Operation storage freezes that config for recovery.
+The [creation contract](../../specs/session-orchestration.md#session-creation-configuration)
+owns precedence and authorization; [the decision note](../notes/implemented/feature/2026-10-02-mcp-create-run-config.md)
+records the necessary conflict handling and deletion experiments.
+
 ## Development build
 
 `pnpm dev` bundles with esbuild (`scripts/dev-build.mjs`, ~3s) into `dist-dev/`, then runs
@@ -44,7 +52,9 @@ composition.
 
 `src/lib/pr-poller/` reconciles PR discovery/association, lifecycle, CI rollup, and merge/conflict
 state for this machine's sessions. It is the compensation path for a broken hosted GitHub webhook
-→ Streams fan-out, and its normative spec is `specs/pr-status-reconciler.md`.
+→ Streams fan-out. [PR observation](../../specs/local-github-pr-observation.md) defines
+summary publication independently of hosted webhook linkage: failed linkage remains
+retryable without hiding an authenticated exact-branch observation from the UI.
 
 `PrStatusPoller` is constructed in `LodyFleet.start()`; per-workspace handles
 (`pr-poller-workspace.ts`) are fact sources and write-back destinations only. All policy lives in

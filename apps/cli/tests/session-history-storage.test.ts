@@ -1,3 +1,4 @@
+import { buildAgentMessageAuthor } from '@lody/shared';
 import { createSessionAgentWrites } from '../src/lib/loro/session-agent-writes';
 import { describe, expect, it, vi } from 'vitest';
 import { Loro, isContainer, LoroList, LoroMap } from 'loro-crdt';
@@ -312,12 +313,26 @@ describe('stored history operations', () => {
     const harness = makeHarness();
     const { data } = harness;
 
+    const author = buildAgentMessageAuthor({
+      sessionId: 'source',
+      turnId: 'user-new',
+      name: 'Original Agent',
+    });
     const created = await data.commands.openAssistantTurn({
       turnId: 'assistant-new',
+      author,
       userTurnId: 'user-1',
       timestamp: '2026-01-01T00:00:02.000Z',
     });
     expect(created).toBeUndefined();
+    await data.commands.openAssistantTurn({
+      turnId: 'assistant-new',
+      timestamp: '2026-01-01T00:00:03.000Z',
+      author: { ...author, name: 'Changed Agent' },
+    });
+    expect(harness.readStored().find((turn) => turn.id === 'assistant-new')?.author).toEqual(
+      author
+    );
     expect(harness.readStored().filter((turn) => turn.id === 'assistant-new')).toHaveLength(1);
 
     await data.commands.appendTurn(assistantTurn('assistant-1'));

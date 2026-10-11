@@ -23,11 +23,13 @@ import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   SESSION_DOC_PREFIX,
   getMachineRoomId,
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   getSessionRoomId,
   isLoroRepoDocDeleted,
   machineFlockKeys,
   type LocalProjectId,
   readSessionOperationTargets,
+  isSessionCollaborationStopped,
   type MachineId,
   type SessionHistory,
   type SessionId,
@@ -105,7 +107,17 @@ vi.mock('../src/hooks/use-authenticated-convex', () => ({
 
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { docMetaCacheReadyAtom, sessionMetaCacheAtom } from '../src/atoms/doc-meta';
+import {
+  editSessionRunConfigDraftAtom,
+  registerSessionRunConfigDraftLeaseAtom,
+  sessionRunConfigDraftsAtom,
+  setSessionRunConfigDraftAccountAtom,
+} from '../src/atoms/session-run-config-drafts';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
+import {
+  experimentalFeaturesEnabledAtom,
+  roostHistoryExperimentEnabledAtom,
+} from '../src/atoms/settings';
 import {
   countSessionMentions,
   SessionCreateBillingError,
@@ -130,6 +142,26 @@ function createDeferred(): { promise: Promise<void>; resolve: () => void; reject
     throw new Error('Failed to create deferred');
   }
   return { promise, resolve, reject };
+}
+
+function editRunConfigDraft(
+  store: ReturnType<typeof createStore>,
+  sessionId: string,
+  workspaceId = 'workspace-1',
+  accountId = 'user-1'
+) {
+  store.set(setSessionRunConfigDraftAccountAtom, accountId);
+  const lease = store.set(registerSessionRunConfigDraftLeaseAtom, {
+    accountId,
+    workspaceId,
+    sessionId,
+    targetKey: 'codex',
+  });
+  store.set(editSessionRunConfigDraftAtom, {
+    lease,
+    edit: { type: 'config', configId: 'fast', value: false },
+  });
+  return lease;
 }
 
 function ActionsProbe({ onReady }: { onReady: (actions: SessionActions) => void }) {
@@ -267,7 +299,11 @@ const createRuntime = (
     ({
       upsertDocMeta: vi.fn(async () => undefined),
       getDocMeta: vi.fn(async (roomId: string) => ({
-        meta: { id: roomId.slice(SESSION_DOC_PREFIX.length), machineId: 'machine-1' },
+        meta: {
+          id: roomId.slice(SESSION_DOC_PREFIX.length),
+          machineId: 'machine-1',
+          protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        },
       })),
     } as unknown as WorkspaceRuntime['repo']);
 
@@ -524,6 +560,49 @@ describe('useSessionActions', () => {
     }
     return actions;
   };
+
+  it('stops and restores the whole authoritative tree from a leaf, including hidden descendants', async () => {
+    const tree = createContainmentSessions('collaboration', false);
+    const unrelated = { ...tree.rootSession, id: 'unrelated' as SessionId };
+    const metaRepo = createSessionMetaRepo([...tree.sessions, unrelated]);
+    for (const session of [...tree.sessions, unrelated]) {
+      metaRepo.setMeta(getMachineRoomId(session.machineId), {
+        id: session.machineId,
+        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      });
+    }
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+      sessionMetaCache: {},
+    });
+    await actions.setTreeCollaborationStopped(tree.openedFromTabSession.id, true);
+    for (const session of tree.sessions) {
+      expect(metaRepo.getSession(session.id)?.collaborationStopped).toBe(true);
+    }
+    expect(metaRepo.getSession(unrelated.id)?.collaborationStopped).toBeUndefined();
+    const lateChild = 'late-child' as SessionId;
+    metaRepo.setMeta(getSessionRoomId(lateChild), {
+      ...tree.openedSession,
+      id: lateChild,
+      openedBySessionId: tree.rootSession.id,
+    });
+    expect(await isSessionCollaborationStopped(metaRepo.repo, lateChild)).toBe(true);
+    await actions.setTreeCollaborationStopped(tree.rootSession.id, false);
+    for (const id of [...tree.sessions.map((session) => session.id), lateChild]) {
+      expect(await isSessionCollaborationStopped(metaRepo.repo, id)).toBe(false);
+    }
+  });
+
+  it('rejects collaboration control before writes when a target daemon lacks support', async () => {
+    const tree = createContainmentSessions('unsupported-collaboration', false);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
+    await expect(actions.setTreeCollaborationStopped(tree.rootSession.id, true)).rejects.toThrow(
+      'Update every machine'
+    );
+    expect(
+      tree.sessions.map((session) => metaRepo.getSession(session.id)?.collaborationStopped)
+    ).toEqual([undefined, undefined, undefined, undefined]);
+  });
 
   it('does not block session creation on remote stream pre-creation', async () => {
     const sessionId = 'session-create-stream-pending' as SessionId;
@@ -1002,9 +1081,78 @@ describe('useSessionActions', () => {
     expect(result.sessionMeta).toMatchObject({
       id: sessionId,
       machineId: 'machine-1',
+      historyBackend: 'loro',
       lastMessageAt: expect.any(Number),
     });
     expect(result.historyEntry.inputConfig?.inputBlocks).toEqual([{ type: 'text', text: 'hi' }]);
+  });
+
+  it('selects Roost for new sessions only when both experimental gates are enabled', async () => {
+    const store = createStore();
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(roostHistoryExperimentEnabledAtom, true);
+    const runtime = createRuntime({});
+    const actions = await renderActions(runtime, { store });
+
+    const result = await actions.createSession(
+      createSessionPayload('session-roost-gated' as SessionId)
+    );
+
+    expect(result.sessionMeta.historyBackend).toBe('roost');
+  });
+
+  it('keeps the legacy backend when the experimental master switch is off', async () => {
+    const store = createStore();
+    store.set(experimentalFeaturesEnabledAtom, false);
+    store.set(roostHistoryExperimentEnabledAtom, true);
+    const runtime = createRuntime({});
+    const actions = await renderActions(runtime, { store });
+
+    const result = await actions.createSession(
+      createSessionPayload('session-roost-master-off' as SessionId)
+    );
+
+    expect(result.sessionMeta.historyBackend).toBe('loro');
+  });
+
+  it('keeps creating ordinary Loro sessions on targets without Roost capability', async () => {
+    const store = createStore();
+    store.set(experimentalFeaturesEnabledAtom, true);
+    store.set(roostHistoryExperimentEnabledAtom, true);
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime, { store });
+    const result = await actions.createSession(
+      createSessionPayload('old-machine-session' as SessionId)
+    );
+    expect(result.sessionMeta.historyBackend).toBe('loro');
+    expect(metaRepo.repo.upsertDocMeta).toHaveBeenCalledWith(
+      getSessionRoomId(result.sessionId),
+      expect.objectContaining({ historyBackend: 'loro' })
+    );
+  });
+
+  it('rejects explicit Roost creation before metadata, history or warm-up on unsupported targets', async () => {
+    const metaRepo = createSessionMetaRepo([]);
+    const runtime = createRuntime({ repo: metaRepo.repo });
+    const actions = await renderActions(runtime);
+    const payload = {
+      ...createSessionPayload('unsupported-roost-session' as SessionId),
+      historyBackend: 'roost' as const,
+    };
+    await expect(actions.createSession(payload)).rejects.toThrow('Update the machine');
+    await expect(
+      actions.startSession(payload, {
+        role: 'user',
+        userId: 'user-1',
+        timestamp: '2026-10-09T00:00:00.000Z',
+        items: [{ type: 'text', text: 'hello' }],
+        fileDiff: [],
+        inputConfig: { inputBlocks: [{ type: 'text', text: 'hello' }] },
+      } as never)
+    ).rejects.toThrow('Update the machine');
+    expect(metaRepo.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(runtime.ensureDocStream).not.toHaveBeenCalled();
   });
 
   it('keeps a local branch selector out of baseBranch until the target machine resolves it', async () => {
@@ -1936,12 +2084,35 @@ describe('useSessionActions', () => {
         throw new Error('Session metadata is still loading');
       },
     });
-    const actions = await renderActions(runtime, { sessionMetaCache, docMetaCacheReady: false });
+    const store = createStore();
+    const targetLease = editRunConfigDraft(store, tabSession.id);
+    editRunConfigDraft(store, rootSession.id);
+    editRunConfigDraft(store, tabSession.id, 'other-workspace');
+    const actions = await renderActions(runtime, {
+      store,
+      sessionMetaCache,
+      docMetaCacheReady: false,
+    });
 
     await actions.deleteSessions([tabSession.id]);
 
     expect(metaRepo.getSession(rootSession.id)).toMatchObject({ isArchived: false });
     expect(metaRepo.getSession(tabSession.id)).toBeUndefined();
+    expect(
+      [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => [
+        scope.workspaceId,
+        scope.sessionId,
+      ])
+    ).toEqual([
+      ['workspace-1', rootSession.id],
+      ['other-workspace', tabSession.id],
+    ]);
+    expect(targetLease.active).toBe(false);
+    store.set(editSessionRunConfigDraftAtom, {
+      lease: targetLease,
+      edit: { type: 'config', configId: 'fast', value: true },
+    });
+    expect(store.get(sessionRunConfigDraftsAtom).size).toBe(2);
     expect(metaRepo.getSession(openedSession.id)).toMatchObject({
       isArchived: false,
       openedBySessionId: rootSession.id,
@@ -2002,12 +2173,19 @@ describe('useSessionActions', () => {
       },
     });
     const runtime = createRuntime({ repo: metaRepo.repo });
+    const store = createStore();
+    editRunConfigDraft(store, rootSession.id);
+    editRunConfigDraft(store, tabSession.id);
+    editRunConfigDraft(store, openedSession.id);
+    const drafts = store.get(sessionRunConfigDraftsAtom);
     const actions = await renderActions(runtime, {
+      store,
       docMetaCacheReady: true,
       sessionMetaCache,
     });
 
     await actions.archiveSession(rootSession.id);
+    expect(store.get(sessionRunConfigDraftsAtom)).toBe(drafts);
     for (const session of [openedSession, openedFromTabSession]) {
       expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: true });
     }
@@ -2016,6 +2194,9 @@ describe('useSessionActions', () => {
     vi.mocked(runtime.writer.deleteDoc).mockClear();
 
     await actions.deleteArchivedSession(rootSession.id);
+    expect(
+      [...store.get(sessionRunConfigDraftsAtom).values()].map(({ scope }) => scope.sessionId)
+    ).toEqual([openedSession.id]);
 
     expect(metaRepo.getSession(rootSession.id)).toBeUndefined();
     expect(metaRepo.getSession(tabSession.id)).toBeUndefined();

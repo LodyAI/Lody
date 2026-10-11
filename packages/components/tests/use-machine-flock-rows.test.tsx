@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   getMachineRoomId,
+  getBuiltinRuntimeOverrideSourceVersionSuffix,
+  type AcpCapabilityCacheEntry,
   machineFlockKeys,
   serializeMachineFlockKey,
   type AgentConfigId,
@@ -31,6 +33,7 @@ import {
   useMachineFlockRows,
   useMachineFlockRowsByMachineIdsState,
 } from '../src/hooks/use-machine-flock-rows';
+import { useSessionAcpSelectorContext } from '../src/hooks/use-session-acp-selector-context';
 import { useResolvedMachineMeta } from '../src/hooks/use-resolved-machine-meta';
 
 const postHogEvents = vi.hoisted(() => [] as { name: string; properties: unknown }[]);
@@ -1995,5 +1998,132 @@ describe('useMachineFlockRows', () => {
     await flushMicrotasks();
 
     expect(scan).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('session ACP catalogs from Machine Flock', () => {
+  it('tracks the exact Provider extension selection for models and commands', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const store = createStore();
+    const workspaceId = 'workspace-pi-selectors' as WorkspaceId;
+    const machineId = 'machine-pi-selectors' as MachineId;
+    const configId = 'pi-selectors' as AgentConfigId;
+    let config: AgentConfigMeta = {
+      id: configId,
+      machineId,
+      name: 'Pi',
+      cliType: 'builtin',
+      agentType: 'pi',
+      env: {},
+      runtimeOverrides: { piExtensions: ['/fixture/plugin.ts'] },
+    };
+    let capability: AcpCapabilityCacheEntry = {
+      cliType: 'builtin',
+      agentType: 'pi',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      modes: [],
+      models: [{ modelId: 'fixture/model', name: 'Fixture' }],
+      sourceVersion: `builtin-pi:test${getBuiltinRuntimeOverrideSourceVersionSuffix(config.runtimeOverrides)}`,
+      availableCommands: [{ name: 'fixture', description: 'Fixture command' }],
+      fetchedAt: 1,
+    };
+    const rows = (): MachineFlockRowMap =>
+      Object.fromEntries(
+        [
+          { key: machineFlockKeys.agentConfig(configId), value: config },
+          { key: machineFlockKeys.acpCapability(configId), value: capability },
+        ].map((row) => [serializeMachineFlockKey(row.key), row])
+      );
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug: workspaceId,
+      repo: {
+        openFlockDoc: async () => ({
+          flock: {
+            scan: ({ prefix }: { prefix?: readonly unknown[] } = {}) =>
+              Object.values(rows()).filter(
+                (row) => !prefix || prefix.every((part, i) => row.key[i] === part)
+              ),
+            subscribe: () => () => {},
+          },
+          joinRoom: liveRoom().joinRoom,
+        }),
+      },
+    } as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceId);
+    store.set(machineMetaCacheAtom, {
+      [getMachineRoomId(machineId)]: {
+        id: machineId,
+        name: 'Pi machine',
+        cliVersion: '',
+        os: '',
+        sessions: [],
+      },
+    } as unknown as Record<string, MachineMeta>);
+    function Composer() {
+      const { modelOptions, availableCommands } = useSessionAcpSelectorContext({
+        machineId,
+        configId,
+        cliType: 'builtin',
+        agentType: 'pi',
+      });
+      return createElement(
+        'output',
+        null,
+        JSON.stringify({
+          models: modelOptions.map((option) => option.value),
+          commands: availableCommands.map((command) => command.name),
+        })
+      );
+    }
+    render(createElement(Provider, { store }, createElement(Composer)));
+    await flushMicrotasks();
+    const expectCatalog = (visible: boolean) =>
+      expect(JSON.parse(container?.textContent ?? '{}')).toEqual({
+        models: visible ? ['fixture/model'] : [],
+        commands: visible ? ['fixture'] : [],
+      });
+    const publish = async () => {
+      await act(async () => {
+        store.set(setMachineFlockRowsForMachineAtom, { workspaceId, machineId, rows: rows() });
+      });
+    };
+    expectCatalog(true);
+    // Provider changes reach the mounted composer before a replacement probe.
+    config = { ...config, runtimeOverrides: { piExtensions: ['/fixture/other.ts'] } };
+    await publish();
+    expectCatalog(false);
+    capability = {
+      ...capability,
+      sourceVersion: `builtin-pi:test${getBuiltinRuntimeOverrideSourceVersionSuffix(config.runtimeOverrides)}`,
+    };
+    await publish();
+    expectCatalog(true);
+    config = { ...config, runtimeOverrides: undefined };
+    await publish();
+    expectCatalog(false);
+    capability = { ...capability, sourceVersion: 'builtin-pi:test' };
+    await publish();
+    expectCatalog(true);
+    for (const mismatch of [
+      { machineId: 'another-machine' as MachineId },
+      { agentType: 'codex' },
+      { cliType: 'registry' as const },
+    ]) {
+      const matching = config;
+      config = { ...matching, ...mismatch };
+      await publish();
+      expectCatalog(false);
+      config = matching;
+    }
+    // A missing bound Provider cannot borrow another Pi Provider's catalog.
+    await act(async () => {
+      const remaining = rows();
+      delete remaining[serializeMachineFlockKey(machineFlockKeys.agentConfig(configId))];
+      store.set(setMachineFlockRowsForMachineAtom, { workspaceId, machineId, rows: remaining });
+    });
+    expectCatalog(false);
   });
 });

@@ -1,6 +1,5 @@
-import { readSessionHistory } from '@lody/shared/session-data';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { toShared } from '@/platform/process-options';
+import { resolveSessionConversationConfig } from '@lody/shared';
 import {
   getServerNow,
   resolveSessionAcpTargetId,
@@ -8,6 +7,7 @@ import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
   SessionId,
+  LEGACY_SESSION_HISTORY_BACKEND,
   sessionForkFailure,
   SessionStatusFactory,
   type AgentConfigId,
@@ -23,9 +23,10 @@ import {
   type ProjectRef,
   resolveSessionMcpSelection,
 } from '@lody/shared';
-import type { SessionSnapshot, SessionTurn } from '@lody/shared/session-data';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { SessionManager } from './session-manager';
@@ -36,9 +37,9 @@ import {
   type SessionForkOperationMarker,
   type SessionForkOperationStore,
 } from './session-fork-operation-store';
+import { createSessionBackend, type SessionBackendForkSnapshot } from './session-backend';
 
 type ForkWarning = SessionForkResponse['warnings'][number];
-const execFileAsync = promisify(execFile);
 
 /** Recovery opens only store-listed docs; keep even that small fan-out bounded. */
 const FORK_RECOVERY_CONCURRENCY = 4;
@@ -53,7 +54,7 @@ type WorktreeForkPreparedInput = {
   targetMeta: SessionMeta;
   marker: SessionForkOperationMarker;
   historyResult: NonNullable<ReturnType<typeof cloneHistoryThroughTurn>>;
-  sourceSnapshot: SessionSnapshot;
+  sourceSnapshot: SessionBackendForkSnapshot;
   sourceRuntimeConfig?: ForkRuntimeConfig;
   agentConfig: NonNullable<Awaited<ReturnType<LoroDocumentManager['getAgentConfigById']>>>;
   user: { name: string; email: string };
@@ -312,7 +313,9 @@ export class SessionForkService {
     }
 
     const targetDoc = await this.deps.workspaceDocument
-      .getOrCreateSessionDoc(targetSessionId)
+      .getOrCreateSessionDoc(targetSessionId, {
+        historyBackend: marker.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND,
+      })
       .catch(() => null);
     if (!targetDoc) {
       // Transient open failure — keep the marker for the next startup.
@@ -334,7 +337,12 @@ export class SessionForkService {
       return;
     }
 
-    const history = readSessionHistory(targetDoc.sessionData.history);
+    const targetMeta = await targetDoc.getMetaState();
+    const targetBackend = await createSessionBackend(targetDoc, {
+      historyBackend:
+        targetMeta?.historyBackend ?? marker.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND,
+    });
+    const history = await targetBackend.readHistory();
     const hasOriginNotice = history.some((entry) =>
       (entry.items ?? []).some(
         (item) => item.type === 'system_notice' && item.name === 'session_fork_origin'
@@ -359,6 +367,7 @@ export class SessionForkService {
           agentConfigId: marker.cleanup.agentConfigId as never,
           agentCliType: marker.cleanup.cliType,
           agentType: marker.cleanup.agentType as never,
+          memory: resolveSessionConversationConfig(history).memory,
           mcpServerIds: resolveSessionMcpSelection(history),
           project: marker.cleanup.project as ProjectRef,
           sessionId: targetSessionId,
@@ -421,6 +430,7 @@ export class SessionForkService {
         isArchived: false,
         cliType: marker.cleanup.cliType,
         agentType: marker.cleanup.agentType,
+        historyBackend: marker.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND,
         agentConfigId: marker.cleanup.agentConfigId as AgentConfigId,
         project: marker.cleanup.project as ProjectRef,
         repoFullName: marker.cleanup.repoFullName,
@@ -479,17 +489,19 @@ export class SessionForkService {
     // path; the rejection order below is unchanged.
     // This detached capture belongs to the fork operation, which may outlive
     // the cached source document while git creates the new worktree.
-    const sourceSnapshots = sourceDoc.sessionData.snapshots;
+    const sourceBackend = await createSessionBackend(sourceDoc, source);
     const [targetExisting, sourceSnapshot, agentConfig, user, sourceControlState] =
       await Promise.all([
         this.deps.workspaceDocument.repo.getDocMeta(targetRoomId),
-        sourceSnapshots.capture(),
+        sourceBackend.captureForkSnapshot(),
         this.deps.workspaceDocument.getAgentConfigById(source.agentConfigId, source.machineId),
         reusedUser ?? this.deps.userResolver.resolve(spec.requestedByUserId),
         sourceDoc.getDocState(),
       ]);
     if (worktreeFork) {
-      const targetDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId);
+      const targetDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId, {
+        historyBackend: source.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND,
+      });
       const existingOperation = targetDoc.getForkOperation();
       if (existingOperation) {
         if (
@@ -560,7 +572,7 @@ export class SessionForkService {
     // repaired session can never drift from a normally-forked one's title.
     const forkTitle = `(fork) ${sourceTitle}`;
     const historyResult = cloneHistoryThroughTurn(
-      sourceSnapshot.history as SessionHistoryInput[],
+      [...sourceSnapshot.history],
       spec.sourceTurnId,
       sourceSessionId,
       sourceTitle,
@@ -714,6 +726,10 @@ export class SessionForkService {
         isArchived: false,
         cliType: source.cliType,
         agentType: source.agentType,
+        // A fork copies the source backend's opaque snapshot. Pin the target
+        // to that backend so Loro snapshots never cross into Roost (or vice
+        // versa) without an explicit migration operation.
+        historyBackend: source.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND,
         agentConfigId: source.agentConfigId,
         project: targetProject,
         repoFullName: targetRepoFullName,
@@ -729,6 +745,7 @@ export class SessionForkService {
         operationId: operation.id,
         createdAt: operation.createdAt,
         title: forkTitle,
+        historyBackend: targetMeta.historyBackend,
         cleanup: {
           project: targetProject,
           ...(targetRepoFullName ? { repoFullName: targetRepoFullName } : {}),
@@ -757,7 +774,9 @@ export class SessionForkService {
         this.activeOperations.add(operation.id);
         let doc: WorktreeForkPreparedInput['targetDoc'] | undefined;
         try {
-          doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId);
+          doc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId, {
+            historyBackend: targetMeta.historyBackend,
+          });
           doc.setForkOperation(operation);
           await this.deps.workspaceDocument.persistPendingChanges('session-fork-prepare');
         } catch (error) {
@@ -775,7 +794,9 @@ export class SessionForkService {
       if (acceptFailure) {
         return acceptFailure;
       }
-      const targetDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId);
+      const targetDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId, {
+        historyBackend: targetMeta.historyBackend,
+      });
 
       const preparedInput: WorktreeForkPreparedInput = {
         spec,
@@ -821,6 +842,8 @@ export class SessionForkService {
       isArchived: false,
       cliType: source.cliType,
       agentType: source.agentType,
+      // Fork snapshots are backend-specific; preserve the source choice.
+      historyBackend: source.historyBackend ?? LEGACY_SESSION_HISTORY_BACKEND,
       agentConfigId: source.agentConfigId,
       project: source.project,
       repoFullName: source.repoFullName,
@@ -834,7 +857,9 @@ export class SessionForkService {
     let targetPrepared = false;
     try {
       await this.deps.workspaceDocument.repo.upsertDocMeta(targetRoomId, targetMeta);
-      const targetDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId);
+      const targetDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(targetSessionId, {
+        historyBackend: targetMeta.historyBackend,
+      });
       await this.deps.workspaceDocument.persistPendingChanges('session-fork-prepare');
       targetPrepared = true;
 
@@ -847,6 +872,7 @@ export class SessionForkService {
             agentConfigId: source.agentConfigId,
             agentCliType: source.cliType,
             agentType: source.agentType,
+            memory: resolveSessionConversationConfig(historyResult.history).memory,
             mcpServerIds: resolveSessionMcpSelection(historyResult.history),
             customAcp: agentConfig.customAcp,
             runtimeOverrides: agentConfig.runtimeOverrides,
@@ -887,12 +913,10 @@ export class SessionForkService {
           acpSessionId: targetSession.acpSessionId,
           status: SessionStatusFactory.idle(),
         });
-        await targetDoc.sessionData.snapshots.copyFrom(
-          sourceSnapshot,
-          historyResult.history as unknown as readonly SessionTurn[]
-        );
+        const targetBackend = await createSessionBackend(targetDoc, targetMeta);
+        await targetBackend.importForkHistory(sourceSnapshot, historyResult.history);
         if (sourceRuntimeConfig) {
-          targetDoc.applyAcpRuntimeConfigPatch(sourceRuntimeConfig.basedOnUserTurnId, {
+          await targetBackend.applyAcpRuntimeConfigPatch(sourceRuntimeConfig.basedOnUserTurnId, {
             ...sourceRuntimeConfig,
             acpSessionId: targetSession.acpSessionId,
           });
@@ -940,16 +964,26 @@ export class SessionForkService {
   }
 
   private async inspectGitWorkdir(workdir: string): Promise<{ dirty: boolean; headSha: string }> {
-    const status = await execFileAsync('git', ['status', '--porcelain'], {
-      cwd: workdir,
-      windowsHide: true,
-      timeout: 10_000,
-    });
-    const head = await execFileAsync('git', ['rev-parse', '--verify', 'HEAD^{commit}'], {
-      cwd: workdir,
-      windowsHide: true,
-      timeout: 10_000,
-    });
+    const status = await runCommandTextLegacy(
+      {
+        command: 'git',
+        args: ['status', '--porcelain'],
+        cwd: workdir,
+        timeout: 10_000,
+        check: 'exit-0',
+      },
+      toShared()
+    );
+    const head = await runCommandTextLegacy(
+      {
+        command: 'git',
+        args: ['rev-parse', '--verify', 'HEAD^{commit}'],
+        cwd: workdir,
+        timeout: 10_000,
+        check: 'exit-0',
+      },
+      toShared()
+    );
     return { dirty: status.stdout.trim().length > 0, headSha: head.stdout.trim() };
   }
 
@@ -979,6 +1013,7 @@ export class SessionForkService {
       agentConfigId: source.agentConfigId,
       agentCliType: source.cliType,
       agentType: source.agentType,
+      memory: resolveSessionConversationConfig(historyResult.history).memory,
       mcpServerIds: resolveSessionMcpSelection(historyResult.history),
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
@@ -1013,11 +1048,16 @@ export class SessionForkService {
       const resolvedBranch = this.deps.resolveGitBranch
         ? await this.deps.resolveGitBranch(sessionWorkdir)
         : (
-            await execFileAsync('git', ['branch', '--show-current'], {
-              cwd: sessionWorkdir,
-              windowsHide: true,
-              timeout: 10_000,
-            })
+            await runCommandTextLegacy(
+              {
+                command: 'git',
+                args: ['branch', '--show-current'],
+                cwd: sessionWorkdir,
+                timeout: 10_000,
+                check: 'exit-0',
+              },
+              toShared()
+            )
           ).stdout.trim() || undefined;
       const targetAcpSessionId = targetSession.acpSessionId;
       const branchName = resolvedBranch ?? targetMeta.baseBranch;
@@ -1037,12 +1077,10 @@ export class SessionForkService {
         // no-operation branch relies on flag-clear being flush-atomic with a
         // landed history), meta record LAST (repo flushes are whole-repo, so a
         // durable acpSessionId then implies the doc writes are durable too).
-        await targetDoc.sessionData.snapshots.copyFrom(
-          sourceSnapshot,
-          historyResult.history as unknown as readonly SessionTurn[]
-        );
+        const targetBackend = await createSessionBackend(targetDoc, targetMeta);
+        await targetBackend.importForkHistory(sourceSnapshot, historyResult.history);
         if (sourceRuntimeConfig) {
-          targetDoc.applyAcpRuntimeConfigPatch(sourceRuntimeConfig.basedOnUserTurnId, {
+          await targetBackend.applyAcpRuntimeConfigPatch(sourceRuntimeConfig.basedOnUserTurnId, {
             ...sourceRuntimeConfig,
             acpSessionId: targetAcpSessionId,
           });

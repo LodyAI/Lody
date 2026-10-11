@@ -176,3 +176,17 @@ export const encryptRpcSecret = async (
     ciphertext: bytesToBase64Url(new Uint8Array(ciphertext)),
   });
 };
+
+export const getIosSimulatorViewerSecretContext = (options: {
+  workspaceId: string;
+  machineId: string;
+  sessionId: string;
+  requestId: string;
+}): string =>
+  JSON.stringify([
+    'ios-simulator/control',
+    options.workspaceId,
+    options.machineId,
+    options.sessionId,
+    options.requestId,
+  ]);

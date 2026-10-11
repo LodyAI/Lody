@@ -15,7 +15,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Builtin Grok must default `clientCapabilities.terminal` to false.
 - ACP file reads map native `ENOENT` to `RequestError.resourceNotFound`; preserve
   other failures and session validation rather than returning empty content.
-- Send the driving turn's config on every session establishment as `_meta.lody.sessionConfig`;
+- Send the driving turn's model/config on session establishment as `_meta.lody.sessionConfig`;
   provider-specific startup translation belongs in the ACP adapter. `session/set_config_option`
   stays the live-session switch, and a successful selection becomes a later replacement's
   startup state.
@@ -73,6 +73,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   to the shared abort signal; ZIP cancellation destroys the yauzl endpoint, awaits the
   relay/output pipeline, and fences cleanup on the reader's real close/error event — never await
   the yauzl endpoint, whose `destroy()` does not settle.
+- Builtin Dimcode is user-installed.
 - `npx-cache.ts`: ACP `npx` spawns force `npm_config_cache`/`NPM_CONFIG_CACHE` to the active
   profile's `npm-cache`. Automatic `_npx`/`_cacache` cleanup is allowed ONLY for that Lody-owned
   cache.
@@ -105,10 +106,10 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   the cache, and requests/responses carry that id to keep configs of one provider isolated.
   `ManagedRuntimeUpdateCoordinator` never hot-swaps a running ACP process, and Machine Flock
   writes ignore `fetchedAt` when comparing entries.
-- Core `sessionTitle` v1 transfers title generation to the live ACP process after
-  initialization; tagged `generated`/`explicit` updates qualify, never `fallback`/`unset`.
-  Legacy managed Claude/Codex/Grok retain ownership without runtime overrides;
-  only Claude/Grok trust untagged titles. Sanitize internal instructions and preserve
-  user-set titles. Contract: [session titles](../../../../specs/acp-session-titles.md).
+- Core `sessionTitle` v1 transfers titles to ACP after initialization, except builtin Codex.
+  Codex uses Lody title settings; its adapter never generates titles.
+  Accept tagged `generated`/`explicit`, never `fallback`/`unset`. Legacy managed
+  Claude/Grok retain ownership without overrides and alone allow untagged titles.
+  Strip internal instructions; preserve user titles. [Contract](../../../../specs/acp-session-titles.md).
 - NEVER derive a git ref from prompt text: refs reach the remote and no filter proves a
-  prompt secret-free. Worktree sessions keep `session/<id>` unless the agent renames it.
+  prompt secret-free. Worktree sessions keep their allocated ref unless the agent renames it.

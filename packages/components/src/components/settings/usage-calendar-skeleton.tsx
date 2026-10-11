@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { cn } from '@/lib/utils';
+import * as stylex from '@stylexjs/stylex';
 import { Skeleton } from '@lody/ui/skeleton';
 import type { SettingsUsageRange } from './settings-data-cache';
 import {
@@ -10,6 +10,221 @@ import {
   USAGE_CALENDAR_COLUMNS,
   USAGE_CALENDAR_ROWS,
 } from './usage-calendar-geometry';
+
+const COLOR_MIX = '@supports (color: color-mix(in lab, red, red))';
+
+const styles = stylex.create({
+  screenReaderOnly: {
+    position: 'absolute',
+    width: '1px',
+    height: '1px',
+    padding: 0,
+    margin: '-1px',
+    overflow: 'hidden',
+    clip: 'rect(0, 0, 0, 0)',
+    whiteSpace: 'nowrap',
+    borderWidth: 0,
+  },
+  card: {
+    overflow: 'hidden',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: {
+      default: 'hsl(var(--border) / 1)',
+      [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--border) / 1) 60%, transparent)',
+    },
+    borderRadius: 'var(--radius-lg)',
+    backgroundColor: {
+      default: 'hsl(var(--card) / 1)',
+      [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--card) / 1) 40%, transparent)',
+    },
+  },
+  header: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px',
+    paddingInline: '16px',
+    paddingTop: '16px',
+  },
+  headerText: { minWidth: 0 },
+  cardTitle: {
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+    fontWeight: 400,
+    color: 'hsl(var(--foreground))',
+  },
+  subtitle: {
+    marginTop: '2px',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  body: { padding: '16px' },
+  metricsBand: {
+    backgroundColor: {
+      default: 'hsl(var(--muted) / 1)',
+      [COLOR_MIX]: 'color-mix(in oklab, hsl(var(--muted) / 1) 25%, transparent)',
+    },
+    padding: '16px',
+    '@media (min-width: 640px)': { paddingInline: '20px' },
+  },
+  compositionSpace: { marginBottom: '24px' },
+  line: { lineHeight: 1.45 },
+  lineTiny: { fontSize: '10px' },
+  lineCaption: { fontSize: '11px' },
+  lineFootnote: { fontSize: '0.875rem' },
+  heatLegend: {
+    display: 'flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: '8px',
+    fontSize: '11px',
+    color: 'hsl(var(--muted-foreground))',
+  },
+  composition: {
+    display: 'grid',
+    columnGap: '24px',
+    rowGap: '12px',
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: 'hsl(var(--border) / 0.5)',
+    paddingTop: '12px',
+    '@media (min-width: 640px)': { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' },
+  },
+  compositionColumn: { minWidth: 0 },
+  compositionTitle: {
+    fontSize: '10px',
+    fontWeight: 400,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: 'hsl(var(--muted-foreground) / 0.8)',
+  },
+  compositionLegend: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: '4px',
+    marginTop: '6px',
+    fontSize: '10px',
+  },
+  legendRow: { display: 'flex', height: '1.45em', alignItems: 'center', gap: '10px' },
+  legendItem: { display: 'flex', alignItems: 'center', gap: '4px' },
+  summary: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    columnGap: '16px',
+    rowGap: '12px',
+    '@media (min-width: 640px)': { gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' },
+    '@media (min-width: 1024px)': { gridTemplateColumns: 'repeat(5, minmax(0, 1fr))' },
+  },
+  summaryCell: { minWidth: 0 },
+  lineValue: { marginTop: '2px' },
+  lineRing: { width: '100%', marginTop: '12px' },
+  hourlyGrid: {
+    display: 'grid',
+    alignItems: 'center',
+    columnGap: '24px',
+    rowGap: '20px',
+    '@media (min-width: 640px)': { gridTemplateColumns: 'minmax(0, 10.5rem) minmax(0, 1fr)' },
+  },
+  hourlyPanel: { minWidth: 0 },
+  hourlyHeading: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    columnGap: '16px',
+    rowGap: '4px',
+  },
+  headingActions: { display: 'flex', alignItems: 'center', gap: '12px' },
+  chartSpacing: { marginTop: '12px' },
+  chartTrack: { minHeight: '10.5rem', minWidth: 0 },
+  axisFooter: { display: 'flex', height: '20px', alignItems: 'center', marginTop: '12px' },
+  ringColumn: { display: 'flex', minWidth: 0, flexDirection: 'column', alignItems: 'center' },
+  ringBox: {
+    position: 'relative',
+    width: '9.5rem',
+    maxWidth: '100%',
+    '@media (min-width: 640px)': { width: '10.5rem' },
+  },
+  ringOverlay: {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+  },
+  ringCaption: { width: '100%', marginTop: '12px' },
+  ringLegend: {
+    display: 'grid',
+    width: '100%',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    columnGap: '12px',
+    rowGap: '4px',
+    marginTop: '6px',
+    fontSize: '10px',
+  },
+  ringLegendItem: { display: 'flex', height: '1.45em', alignItems: 'center', gap: '4px' },
+  hourColumns: { display: 'grid', gridTemplateColumns: 'repeat(24, minmax(0, 1fr))', gap: '3px' },
+  hourAxisSpacing: { marginTop: '6px' },
+  hourAxisCell: { display: 'flex', justifyContent: 'center' },
+  dayTrack: (height: number) => ({
+    display: 'flex',
+    width: '100%',
+    height,
+    alignItems: 'flex-end',
+  }),
+  axisRule: { width: '100%', height: '1px', backgroundColor: 'hsl(var(--border) / 0.7)' },
+  weekDots: { display: 'flex', gap: '8px' },
+  dayLabels: { display: 'flex', flexShrink: 0, flexDirection: 'column', gap: '3px' },
+  weekLabelRow: { display: 'flex', height: '18px', alignItems: 'center' },
+  centeredRow: { display: 'flex', alignItems: 'center' },
+  weekGrid: { minWidth: 0, flex: 1 },
+  weekRows: { display: 'flex', flexDirection: 'column', gap: '3px' },
+  weekHourGrid: { display: 'grid', gridTemplateColumns: 'repeat(24, minmax(0, 1fr))', gap: '3px' },
+  weekDotRow: (height: number) => ({
+    display: 'flex',
+    height,
+    alignItems: 'center',
+    justifyContent: 'center',
+  }),
+  year: { display: 'flex', flexDirection: 'column', gap: '12px' },
+  yearHeatmap: { display: 'flex', gap: '6px', containerType: 'inline-size' },
+  weekdayGutter: {
+    display: 'grid',
+    width: '28px',
+    flexShrink: 0,
+    gridTemplateRows: 'repeat(7, minmax(0, 1fr))',
+    gap: '4px',
+    marginTop: '16px',
+  },
+  calendarScroll: { minWidth: 0, flex: 1, overflowX: 'auto', paddingBottom: '4px' },
+  calendarTrack: {
+    minWidth: 'var(--usage-heatmap-min-track-width)',
+    paddingInline: '2px',
+    '@container (min-width: 672px)': { minWidth: 0 },
+  },
+  monthLabels: { display: 'grid', gap: '4px', marginBottom: '6px' },
+  monthCell: { display: 'flex' },
+  yearCells: {
+    display: 'grid',
+    gridTemplateRows: 'repeat(7, minmax(0, 1fr))',
+    gridAutoFlow: 'column',
+  },
+  yearFooter: {
+    display: 'flex',
+    height: '20px',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '16px',
+  },
+  dynamicColumns: (value: string) => ({ gridTemplateColumns: value }),
+  dynamicGap: (value: number) => ({ gap: `${value}px` }),
+  dynamicMinWidth: (value: number) => ({ minWidth: value }),
+});
 
 /**
  * Presentational placeholder for UsageCalendarVisualization. Rendered while the
@@ -30,18 +245,14 @@ export function UsageCalendarSkeleton({ range }: { range: SettingsUsageRange }) 
   const shape = range === 'day' ? 'day' : range === 'week' ? 'week' : 'year';
 
   return (
-    <section
-      className="overflow-hidden rounded-lg border border-border/60 bg-card/40"
-      role="status"
-      aria-busy="true"
-    >
-      <span className="sr-only">{t('workspace.usage.loading', 'Loading usage data...')}</span>
-      <header className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4">
-        <div className="min-w-0">
-          <h3 className="text-sm font-normal text-foreground">
-            {t('workspace.usage.skyline.title')}
-          </h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+    <section {...stylex.props(styles.card)} role="status" aria-busy="true">
+      <span {...stylex.props(styles.screenReaderOnly)}>
+        {t('workspace.usage.loading', 'Loading usage data...')}
+      </span>
+      <header {...stylex.props(styles.header)}>
+        <div {...stylex.props(styles.headerText)}>
+          <h3 {...stylex.props(styles.cardTitle)}>{t('workspace.usage.skyline.title')}</h3>
+          <p {...stylex.props(styles.subtitle)}>
             {shape === 'year'
               ? range === 'month'
                 ? t('workspace.usage.skyline.windowSubtitle')
@@ -53,14 +264,14 @@ export function UsageCalendarSkeleton({ range }: { range: SettingsUsageRange }) 
         <Skeleton shape="block" width={224} height={32} />
       </header>
 
-      <div className="p-4">
+      <div {...stylex.props(styles.body)}>
         {shape === 'year' ? <YearSkeleton /> : <HourlySkeleton shape={shape} />}
       </div>
 
       {/* Metrics band: composition rules above the range stats, same as the
          real card's `bg-muted/25` footer. */}
-      <div className="bg-muted/25 px-4 py-4 sm:px-5">
-        <CompositionSkeleton className="mb-6" />
+      <div {...stylex.props(styles.metricsBand)}>
+        <CompositionSkeleton />
         <SummarySkeleton />
       </div>
     </section>
@@ -76,17 +287,23 @@ export function UsageCalendarSkeleton({ range }: { range: SettingsUsageRange }) 
 function LinePill({
   size,
   width,
-  className,
+  variant,
 }: {
-  /** Font-size class of the real line, e.g. `text-[11px]` — sets the row height. */
-  size: string;
+  /** Font size of the real line; it sets the row height. */
+  size: 'tiny' | 'caption' | 'footnote';
   width: number;
-  className?: string;
+  variant?: 'value' | 'ring';
 }) {
+  const lineStyle =
+    size === 'tiny'
+      ? styles.lineTiny
+      : size === 'caption'
+        ? styles.lineCaption
+        : styles.lineFootnote;
+  const variantStyle =
+    variant === 'value' ? styles.lineValue : variant === 'ring' ? styles.lineRing : null;
   return (
-    // `normal` line-height lands near 1.45 for the UI font — the real rows
-    // measure that, so the pills stand on the same metric rather than 1.5.
-    <div aria-hidden="true" className={cn(size, 'leading-[1.45]', className)}>
+    <div aria-hidden="true" {...stylex.props(styles.line, lineStyle, variantStyle)}>
       <Skeleton height="0.75em" width={width} className="inline-block align-middle" />
     </div>
   );
@@ -95,7 +312,7 @@ function LinePill({
 function HeatLegendSkeleton() {
   const { t } = useTranslation();
   return (
-    <div className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+    <div {...stylex.props(styles.heatLegend)}>
       <span>{t('workspace.usage.skyline.less')}</span>
       <Skeleton shape="circle" width={80} height={8} />
       <span>{t('workspace.usage.skyline.more')}</span>
@@ -104,31 +321,24 @@ function HeatLegendSkeleton() {
 }
 
 /** One composition rule + its legend (UsageCompositionBar), times two. */
-function CompositionSkeleton({ className }: { className?: string }) {
+function CompositionSkeleton() {
   const { t } = useTranslation();
   const columns = [t('workspace.usage.byModel'), t('workspace.usage.byUser')];
   return (
-    <div
-      className={cn(
-        'grid gap-x-6 gap-y-3 border-t border-border/50 pt-3 sm:grid-cols-2',
-        className
-      )}
-    >
+    <div {...stylex.props(styles.composition, styles.compositionSpace)}>
       {columns.map((label) => (
-        <div key={label} className="min-w-0">
-          <p className="text-[10px] font-normal uppercase tracking-[0.08em] text-muted-foreground/80">
-            {label}
-          </p>
+        <div key={label} {...stylex.props(styles.compositionColumn)}>
+          <p {...stylex.props(styles.compositionTitle)}>{label}</p>
           <Skeleton shape="circle" height={6} width="100%" className="mt-1.5" />
           {/* The real legend wraps to two `text-[10px]` rows at this width. */}
-          <div className="mt-1.5 flex flex-col gap-y-1 text-[10px]">
+          <div {...stylex.props(styles.compositionLegend)}>
             {[
               [88, 72, 96],
               [76, 60],
             ].map((widths, row) => (
-              <div key={row} className="flex h-[1.45em] items-center gap-2.5">
+              <div key={row} {...stylex.props(styles.legendRow)}>
                 {widths.map((width) => (
-                  <span key={width} className="flex items-center gap-1">
+                  <span key={width} {...stylex.props(styles.legendItem)}>
                     <Skeleton shape="circle" width={6} height={6} />
                     <Skeleton height="0.75em" width={width} />
                   </span>
@@ -145,12 +355,12 @@ function CompositionSkeleton({ className }: { className?: string }) {
 /** The five-stat dl both UsageSummary and UsageTimelineSummary render. */
 function SummarySkeleton() {
   return (
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+    <dl {...stylex.props(styles.summary)}>
       {[64, 88, 72, 80, 68].map((width, index) => (
-        <div key={index} className="min-w-0">
-          <LinePill size="text-[11px]" width={width} />
-          <LinePill size="text-sm" width={48} className="mt-0.5" />
-          {index === 2 || index === 3 ? <LinePill size="text-[11px]" width={96} /> : null}
+        <div key={index} {...stylex.props(styles.summaryCell)}>
+          <LinePill size="caption" width={width} />
+          <LinePill size="footnote" width={48} variant="value" />
+          {index === 2 || index === 3 ? <LinePill size="caption" width={96} /> : null}
         </div>
       ))}
     </dl>
@@ -160,7 +370,6 @@ function SummarySkeleton() {
 /* --------------------------- hourly (24h / 7d) ------------------------------ */
 
 /** 24 hour tracks, shared by the bars, the dot rows, and the hour axis. */
-const HOUR_COLUMNS_CLASS = 'grid grid-cols-[repeat(24,minmax(0,1fr))] gap-[3px]';
 /** UsageDayMatrix track height. */
 const DAY_BAR_TRACK_PX = 148;
 /** UsageWeekMatrix row pitch. */
@@ -174,22 +383,22 @@ const DAY_BAR_HEIGHTS = [
 function HourlySkeleton({ shape }: { shape: 'day' | 'week' }) {
   return (
     // Ring column + panel, same grid as the real hourly layout.
-    <div className="grid items-center gap-x-6 gap-y-5 sm:grid-cols-[minmax(0,10.5rem)_minmax(0,1fr)]">
+    <div {...stylex.props(styles.hourlyGrid)}>
       <RingSkeleton />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <LinePill size="text-[11px]" width={192} />
-          <div className="flex items-center gap-3">
-            <LinePill size="text-[11px]" width={128} />
+      <div {...stylex.props(styles.hourlyPanel)}>
+        <div {...stylex.props(styles.hourlyHeading)}>
+          <LinePill size="caption" width={192} />
+          <div {...stylex.props(styles.headingActions)}>
+            <LinePill size="caption" width={128} />
             <HeatLegendSkeleton />
           </div>
         </div>
-        <div className="mt-3">
-          <div className="min-h-[10.5rem] min-w-0">
+        <div {...stylex.props(styles.chartSpacing)}>
+          <div {...stylex.props(styles.chartTrack)}>
             {shape === 'day' ? <DayBarsSkeleton /> : <WeekDotsSkeleton />}
           </div>
         </div>
-        <div className="mt-3 flex h-5 items-center">
+        <div {...stylex.props(styles.axisFooter)}>
           <Skeleton width={208} height={12} />
         </div>
       </div>
@@ -200,21 +409,28 @@ function HourlySkeleton({ shape }: { shape: 'day' | 'week' }) {
 /** UsageTokenRings: donut + caption + two-column segment legend. */
 function RingSkeleton() {
   return (
-    <div className="flex min-w-0 flex-col items-center">
-      <div className="relative w-[9.5rem] max-w-full sm:w-[10.5rem]">
+    <div {...stylex.props(styles.ringColumn)}>
+      <div {...stylex.props(styles.ringBox)}>
         {/* Ring, not a filled disc: border carries the pulse so the centre stays
            open like the real donut (RING_VIEWBOX 168 / RING_STROKE 26). */}
-        <Skeleton shape="circle" width="100%" className="aspect-square border-[26px] border-primary/10 bg-transparent" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+        {/* The primitive has no prop for this pre-existing ring appearance.
+            Keep the original override as a documented holdout until its API can
+            represent the same border and transparent fill. */}
+        <Skeleton
+          shape="circle"
+          width="100%"
+          className="aspect-square border-[26px] border-primary/10 bg-transparent"
+        />
+        <div {...stylex.props(styles.ringOverlay)}>
           <Skeleton width={48} height={16} />
           <Skeleton width={36} height={8} />
         </div>
       </div>
-      <LinePill size="text-[10px]" width={96} className="mt-3 w-full" />
+      <LinePill size="tiny" width={96} variant="ring" />
       {/* Segment rows stand on real text-[10px] lines, like the ring legend. */}
-      <div className="mt-1.5 grid w-full grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+      <div {...stylex.props(styles.ringLegend)}>
         {[0, 1, 2, 3].map((index) => (
-          <div key={index} className="flex h-[1.45em] items-center gap-1">
+          <div key={index} {...stylex.props(styles.ringLegendItem)}>
             <Skeleton shape="circle" width={6} height={6} />
             <Skeleton height="0.75em" width={48} />
             <Skeleton className="ml-auto" height="0.75em" width={20} />
@@ -227,9 +443,9 @@ function RingSkeleton() {
 
 function HourAxisSkeleton() {
   return (
-    <div aria-hidden="true" className={cn(HOUR_COLUMNS_CLASS, 'mt-1.5')}>
+    <div aria-hidden="true" {...stylex.props(styles.hourColumns, styles.hourAxisSpacing)}>
       {Array.from({ length: 24 }, (_, hour) => (
-        <div key={hour} className="flex justify-center">
+        <div key={hour} {...stylex.props(styles.hourAxisCell)}>
           {hour % 3 === 0 ? <Skeleton width={16} height={8} /> : null}
         </div>
       ))}
@@ -240,14 +456,14 @@ function HourAxisSkeleton() {
 function DayBarsSkeleton() {
   return (
     <div>
-      <div className={HOUR_COLUMNS_CLASS}>
+      <div {...stylex.props(styles.hourColumns)}>
         {DAY_BAR_HEIGHTS.map((height, hour) => (
-          <div key={hour} className="flex w-full items-end" style={{ height: DAY_BAR_TRACK_PX }}>
+          <div key={hour} {...stylex.props(styles.dayTrack(DAY_BAR_TRACK_PX))}>
             <Skeleton width="100%" height={`${height}%`} className="rounded-t-[3px]" />
           </div>
         ))}
       </div>
-      <div aria-hidden="true" className="h-px w-full bg-border/70" />
+      <div aria-hidden="true" {...stylex.props(styles.axisRule)} />
       <HourAxisSkeleton />
     </div>
   );
@@ -261,26 +477,22 @@ function weekDotSize(dayIndex: number, hour: number): number {
 
 function WeekDotsSkeleton() {
   return (
-    <div className="flex gap-2">
-      <div aria-hidden="true" className="flex shrink-0 flex-col gap-[3px]">
+    <div {...stylex.props(styles.weekDots)}>
+      <div aria-hidden="true" {...stylex.props(styles.dayLabels)}>
         {Array.from({ length: 7 }, (_, dayIndex) => (
-          <div key={dayIndex} className="flex items-center" style={{ height: WEEK_ROW_PX }}>
+          <div key={dayIndex} {...stylex.props(styles.weekLabelRow)}>
             <Skeleton width={64} height={10} />
           </div>
         ))}
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-col gap-[3px]">
+      <div {...stylex.props(styles.weekGrid)}>
+        <div {...stylex.props(styles.weekRows)}>
           {Array.from({ length: 7 }, (_, dayIndex) => (
-            <div key={dayIndex} className={HOUR_COLUMNS_CLASS}>
+            <div key={dayIndex} {...stylex.props(styles.weekHourGrid)}>
               {Array.from({ length: 24 }, (_cell, hour) => {
                 const size = weekDotSize(dayIndex, hour);
                 return (
-                  <div
-                    key={hour}
-                    className="flex items-center justify-center"
-                    style={{ height: WEEK_ROW_PX }}
-                  >
+                  <div key={hour} {...stylex.props(styles.weekDotRow(WEEK_ROW_PX))}>
                     <Skeleton shape="circle" width={size} height={size} />
                   </div>
                 );
@@ -298,42 +510,37 @@ function WeekDotsSkeleton() {
 
 function YearSkeleton() {
   return (
-    <div className="space-y-3">
-      <div className="@container flex gap-1.5">
+    <div {...stylex.props(styles.year)}>
+      <div {...stylex.props(styles.yearHeatmap)}>
         {/* Weekday gutter: labels only on rows 1/3/5, like the real heatmap. */}
-        <div
-          aria-hidden="true"
-          className="mt-[calc(0.625rem+0.375rem)] grid w-7 shrink-0 grid-rows-7 gap-[4px]"
-        >
+        <div aria-hidden="true" {...stylex.props(styles.weekdayGutter)}>
           {Array.from({ length: USAGE_CALENDAR_ROWS }, (_, row) => (
-            <div key={row} className="flex items-center">
+            <div key={row} {...stylex.props(styles.centeredRow)}>
               {row % 2 === 1 ? <Skeleton width={24} height={10} /> : null}
             </div>
           ))}
         </div>
 
-        <div className="min-w-0 flex-1 overflow-x-auto pb-1">
-          <div className="min-w-[var(--usage-heatmap-min-track-width)] px-0.5 @[672px]:min-w-0">
+        <div {...stylex.props(styles.calendarScroll)}>
+          <div {...stylex.props(styles.calendarTrack)}>
             {/* Month labels row. */}
             <div
-              className="mb-1.5 grid gap-[4px]"
-              style={{ gridTemplateColumns: HEATMAP_COLUMN_TEMPLATE }}
+              {...stylex.props(styles.monthLabels, styles.dynamicColumns(HEATMAP_COLUMN_TEMPLATE))}
             >
               {Array.from({ length: USAGE_CALENDAR_COLUMNS }, (_, column) => (
-                <div key={column} className="flex">
+                <div key={column} {...stylex.props(styles.monthCell)}>
                   {column % 4 === 1 ? <Skeleton width={24} height={10} /> : null}
                 </div>
               ))}
             </div>
 
             <div
-              className="grid grid-rows-7"
-              style={{
-                gridTemplateColumns: HEATMAP_COLUMN_TEMPLATE,
-                gridAutoFlow: 'column',
-                gap: `${CELL_GAP_PX}px`,
-                minWidth: HEATMAP_MIN_TRACK_WIDTH,
-              }}
+              {...stylex.props(
+                styles.yearCells,
+                styles.dynamicColumns(HEATMAP_COLUMN_TEMPLATE),
+                styles.dynamicGap(CELL_GAP_PX),
+                styles.dynamicMinWidth(HEATMAP_MIN_TRACK_WIDTH)
+              )}
             >
               {Array.from({ length: USAGE_CALENDAR_CELLS }, (_, index) => (
                 <Skeleton
@@ -348,7 +555,7 @@ function YearSkeleton() {
         </div>
       </div>
 
-      <div className="flex h-5 items-center justify-between gap-4">
+      <div {...stylex.props(styles.yearFooter)}>
         <Skeleton width={192} height={12} />
         <HeatLegendSkeleton />
       </div>

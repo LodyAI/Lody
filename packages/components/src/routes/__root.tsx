@@ -28,12 +28,23 @@ import { persistAuthToken, signOutWithoutRedirect } from '../lib/auth';
 import { setLoginHintCookie } from '../lib/login-hint-cookie';
 import i18next from 'i18next';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
-import { onIpcEvent } from '@/lib/electron-ipc-client';
+import { buildSessionLink, parseSessionLink, type SessionLink } from '@lody/shared/session-link';
+import {
+  SESSION_DEEP_LINK_EVENT,
+  pendingSessionLinkAtom,
+  resolveSessionLinkWorkspace,
+  watchSessionLinkRequest,
+  isSessionLinkDestination,
+} from '@/lib/session-deep-link';
+import { formatExplicitSessionTabSearch } from '@/lib/session-tab-url';
+import { usePlatformWorkspaces } from '@lody/platform/react';
+import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
+import { onIpcEvent, getIpcServices } from '@/lib/electron-ipc-client';
 import { useStableSession } from '@/hooks/useStableSession';
 import { normalizeCurrentUserFromSessionUser } from '@/lib/current-user';
 import { writeAuthBootstrapSnapshot } from '@/lib/auth-bootstrap';
 import { toast } from '@/lib/toast';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import {
   authTokenAtom,
   electronDeepLinkSignInInProgressAtom,
@@ -208,6 +219,7 @@ function RootApp() {
     <LodyPostHogProvider>
       {telemetryEnabled && <AppLaunchAnalyticsTracker isElectron={isElectron} />}
       {telemetryEnabled && <ShortcutAnalyticsTracker />}
+      <SessionDeepLinkRouter />
       {isElectron && <DesktopDeepLinkRouter />}
       <ThemeProvider>
         <InterfaceFontController enabled={isElectron} />
@@ -215,14 +227,17 @@ function RootApp() {
           <AppInitializer>
             <LanguageProvider>
               <>
-                <Toast.Provider manager={toastManager} closeLabel={i18next.t('common.close', 'Close')} />
-                <RuntimeProvider>
-                  {/* Location-driven effects and the Outlet boundary subscribe to
-                      router state in these two small components, so a navigation
-                      no longer re-renders the whole provider stack above. */}
-                  <RootLocationEffects />
-                  <RootOutletBoundary />
-                </RuntimeProvider>
+                <Toast.Provider
+                  manager={toastManager}
+                  closeLabel={i18next.t('common.close', 'Close')}
+                />
+                {/* Auth invalidation must remain mounted even if the runtime fails. */}
+                <RootLocationEffects />
+                <ErrorBoundary name="RootRuntime" variant="page" propagateAuthErrors={false}>
+                  <RuntimeProvider>
+                    <RootOutletBoundary />
+                  </RuntimeProvider>
+                </ErrorBoundary>
                 {/* <TanStackRouterDevtools /> */}
               </>
             </LanguageProvider>
@@ -399,6 +414,123 @@ function navigateToResolvedPath(navigate: ReturnType<typeof useNavigate>, path: 
   void navigate({ to, search, replace: true });
 }
 
+function SessionDeepLinkRouter() {
+  const store = useStore();
+  const navigationTarget = useAtomValue(pendingSessionLinkAtom);
+  const location = useLocation();
+  const [settledNavigation, setSettledNavigation] = useState<{
+    target: SessionLink;
+    slug: string;
+  } | null>(null);
+  const setNavigationTarget = useSetAtom(pendingSessionLinkAtom);
+  const workspaces = usePlatformWorkspaces();
+  const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const navigate = useNavigate();
+  const [pending, setPending] = useState<SessionLink | null>(null);
+  useEffect(() => {
+    if (!navigationTarget) return undefined;
+    return watchSessionLinkRequest(store, navigationTarget, () => {
+      toast.error(i18next.t('deepLink.openFailed', 'Unable to open this conversation.'));
+    });
+  }, [navigationTarget, store]);
+  useEffect(() => {
+    if (!settledNavigation || settledNavigation.target !== navigationTarget) return;
+    if (
+      !isSessionLinkDestination(
+        navigationTarget,
+        settledNavigation.slug,
+        location.pathname,
+        location.search.tab
+      )
+    ) {
+      setNavigationTarget(null);
+    }
+  }, [
+    navigationTarget,
+    settledNavigation,
+    location.pathname,
+    location.search,
+    setNavigationTarget,
+  ]);
+  useEffect(() => {
+    const receive = (raw: unknown) => {
+      if (typeof raw !== 'string') return;
+      const link = parseSessionLink(raw);
+      if (link) {
+        setNavigationTarget(null);
+        setPending(link);
+      }
+    };
+    const onOpen = (event: Event) => receive((event as CustomEvent<unknown>).detail);
+    window.addEventListener(SESSION_DEEP_LINK_EVENT, onOpen);
+    return () => {
+      window.removeEventListener(SESSION_DEEP_LINK_EVENT, onOpen);
+    };
+  }, [setNavigationTarget]);
+  useEffect(() => {
+    // Let auth/provisioning and the default landing settle before applying the explicit target.
+    if (!pending) return;
+    const resolution = resolveSessionLinkWorkspace(pending, workspaces, currentWorkspaceId);
+    if (resolution.kind === 'wait') return;
+    const { workspaceId } = resolution;
+    setPending(null);
+    if (resolution.kind === 'unavailable') {
+      toast.error(
+        i18next.t(
+          'deepLink.workspaceUnavailable',
+          'This workspace is unavailable in this version of Lody. Open the link in the installation that owns it.'
+        )
+      );
+      const app = getIpcServices()?.app;
+      if (app)
+        void app
+          .getLinkInstallations()
+          .then((installations) => {
+            for (const installation of installations) {
+              toast.info(installation.name, {
+                duration: 0,
+                action: {
+                  label: i18next.t('deepLink.openHere', 'Open with this app'),
+                  onClick: () => {
+                    void app
+                      .openSessionInInstallation(
+                        buildSessionLink({ ...pending, workspaceId }),
+                        installation.scheme
+                      )
+                      .catch(() =>
+                        toast.error(
+                          i18next.t('deepLink.openFailed', 'Unable to open this conversation.')
+                        )
+                      );
+                  },
+                },
+              });
+            }
+          })
+          .catch(() => {});
+      return;
+    }
+    const target = { ...pending, workspaceId };
+    setNavigationTarget(target);
+    void navigate({
+      to: '/$workspaceName/sessions/$sessionId',
+      params: { workspaceName: resolution.slug, sessionId: pending.sessionId },
+      search: { tab: formatExplicitSessionTabSearch(pending.tabSessionId ?? pending.sessionId) },
+    })
+      .then(() => {
+        if (store.get(pendingSessionLinkAtom) === target)
+          setSettledNavigation({ target, slug: resolution.slug });
+      })
+      .catch(() => {
+        if (store.get(pendingSessionLinkAtom) === target) {
+          setNavigationTarget(null);
+          toast.error(i18next.t('deepLink.openFailed', 'Unable to open this conversation.'));
+        }
+      });
+  }, [pending, workspaces, currentWorkspaceId, navigate, setNavigationTarget, store]);
+  return null;
+}
+
 function DesktopDeepLinkRouter() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -470,6 +602,10 @@ function DesktopDeepLinkRouter() {
       return undefined;
     }
     return onIpcEvent('app.deepLink', (url) => {
+      if (parseSessionLink(url)) {
+        window.dispatchEvent(new CustomEvent(SESSION_DEEP_LINK_EVENT, { detail: url }));
+        return;
+      }
       const invitePath = resolveDesktopInviteDeepLinkPath(url);
       const machinePairingRequestId = readDesktopMachinePairingRequestId(url);
       const openLocalProjectPath = resolveDesktopOpenLocalProjectDeepLinkPath(

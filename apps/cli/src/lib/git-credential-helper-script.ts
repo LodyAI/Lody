@@ -10,24 +10,13 @@ const helperSource = String.raw`#!/usr/bin/env node
 'use strict';
 const fs = require('fs');
 const { spawnSync } = require('child_process');
-const capturedContextToken = (() => {
-  if (process.env.LODY_GIT_CRED_CONTEXT_FILE) {
-    try { return JSON.parse(fs.readFileSync(process.env.LODY_GIT_CRED_CONTEXT_FILE, 'utf8')).contextToken || null; } catch { return null; }
-  }
-  return process.env.LODY_GIT_CRED_CONTEXT_TOKEN || null;
-})();
-const getContextToken = () => capturedContextToken;
-const readState = () => {
-  const file = process.env.LODY_GIT_CRED_BROKER_STATE_FILE;
-  if (!file) return null;
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
-};
+let context;
+const getContext = () => context ??= readCredentialContext(fs, process.env.LODY_GIT_CRED_BROKER_STATE_FILE, process.env);
 const requestBroker = async (endpoint, body, timeoutMs) => {
-  const state = readState();
-  const config = state || {
-    url: process.env.LODY_GIT_CRED_BROKER_URL, token: process.env.LODY_GIT_CRED_BROKER_TOKEN,
-  };
-  if (!config.url || !config.token) return null;
+  const file = process.env.LODY_GIT_CRED_BROKER_STATE_FILE;
+  if (!file) throw credentialError('broker_state_missing');
+  const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (!config.url || !config.token) throw credentialError('broker_state_invalid');
   return fetch(config.url + endpoint, {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + config.token, 'Content-Type': 'application/json' },
@@ -49,14 +38,13 @@ const localCredential = async (request, repo) => {
     input, env, encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024,
     stdio: ['pipe', 'pipe', 'ignore'],
   });
-  if (result.error) throw new Error('Unable to inspect local Git credentials.');
+  if (result.error) throw result.error;
   if (result.status !== 0) return null;
   const fields = Object.fromEntries(result.stdout.trim().split('\n').map(line => {
     const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)];
   }));
   if (!fields.username || !fields.password) return null;
-  const status = await checkRepositoryCredential(fields.password, repo, process.env.LODY_GIT_OPERATION === 'write');
-  return status === 'usable' ? { token: fields.password, username: fields.username } : null;
+  return { token: fields.password, username: fields.username };
 };
 
 const main = async () => {
@@ -72,11 +60,11 @@ const main = async () => {
     if (index > 0) request[line.slice(0, index)] = line.slice(index + 1);
   }
   if (request.protocol !== 'https' || !['github.com', 'github.com:443', 'www.github.com'].includes(request.host)) return;
-  const repo = String(request.path || '').replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '');
+  const repo = String(request.path || '').replace(/^\/+|\/+$/g, '').split('/').slice(0, 2).join('/').replace(/\.git$/i, '');
   if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) return;
   if (action !== 'get') {
     await requestBroker('/git-credential/reject', {
-      repoFullName: repo, contextToken: getContextToken(), invalidatedToken: request.password,
+      repoFullName: repo, contextToken: getContext().contextToken, invalidatedToken: request.password,
     }, 2000);
     return;
   }
@@ -86,7 +74,7 @@ const main = async () => {
   process.stdout.write('username=' + (credential.username || 'x-access-token') + '\npassword=' + credential.token + '\n\n');
 };
 main().catch(error => {
-  console.error('[Lody] ' + error.message);
+  diagnostic('git-helper', 'failed', error);
   process.stdout.write('quit=true\n\n');
   process.exitCode = 1;
 });
@@ -101,7 +89,10 @@ export const getCredentialHelperContainerPath = (repoId: RepoId): string =>
 const normalizeNewlines = (value: string): string => value.replace(/\r\n/g, '\n');
 
 export const ensureCredentialHelperScript = (repoId: RepoId): void => {
-  const filePath = getCredentialHelperHostPath(repoId);
+  ensureCredentialHelperAtPath(getCredentialHelperHostPath(repoId));
+};
+
+export const ensureCredentialHelperAtPath = (filePath: string): void => {
   const dir = path.dirname(filePath);
   mkdirSync(dir, { recursive: true });
 
@@ -130,3 +121,6 @@ export const buildCredentialHelperValueForContainer = (repoId: RepoId): string =
   const helperPath = escapeForGitHelper(getCredentialHelperContainerPath(repoId));
   return `!node "${helperPath}"`;
 };
+
+export const buildCredentialHelperValueForPath = (filePath: string): string =>
+  `!node "${escapeForGitHelper(filePath)}"`;

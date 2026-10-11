@@ -9,9 +9,24 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   `(sessions)/` and `(agents-and-cli)/`. Keep both locale trees and every folder's
   `meta.json` in sync. Parenthesized group names are intentional: they provide
   physical/sidebar hierarchy without changing established docs URLs.
+- `content/docs/{en,zh}/compare/` is crawler-only SEO: real `/docs/compare/…`
+  URLs, omitted from the root and Features `meta.json` `pages` arrays so the
+  folder does not appear in the docs sidebar. Do not add `compare` to those
+  arrays.
 - Reference public document images as URLs, `<img src="/_docs-assets/name.png" />`.
   Do not use Markdown image syntax here; Vite will treat it as a JS import from
   `public/`.
+- Prefer the registered rich MDX components over long unbroken prose: `Callout`
+  (`info`/`warn`/`error`/`success`/`idea`), `Cards`/`Card`, `Accordions`/`Accordion`,
+  `Steps`/`Step`, `Files`/`Folder`/`File`, `Tabs`/`Tab`, and `InlineToc`. They are
+  wired in `components/mdx.tsx`; content needs no import for them.
+- When a surface has a registered docs preview in `components/docs-replica/`,
+  render that component instead of a screenshot so old UI cannot ship and the
+  preview follows the reader's light/dark theme. The Feature List / reference
+  previews (`SessionListPreview`, `DiffViewerPreview`, `MentionPreview`,
+  `NotificationPreview`, and the other exports wired in `components/mdx.tsx`)
+  are the current examples; pass the page `locale` and keep their mock data
+  synthetic. Surfaces without a preview keep the `<img>` rule above.
 - MDX links are resolved by the site's client router, so a link to a path this
   site does not own renders the 404 page. Web-app paths such as `/login` work only
   because `components/site-root-provider.tsx` lists them in `APP_OWNED_PATHS`; add

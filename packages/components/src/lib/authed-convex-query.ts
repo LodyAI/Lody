@@ -5,6 +5,10 @@ export type AuthenticatedConvexState = {
 
 export const CONVEX_AUTH_RECOVERY_DELAYS_MS = [250, 500, 1_000, 2_000, 4_000, 8_000] as const;
 
+export const CONVEX_AUTH_RECOVERY_MAX_ATTEMPTS = CONVEX_AUTH_RECOVERY_DELAYS_MS.length;
+export const CONVEX_AUTH_RECOVERY_TIMEOUT_MS = 15_000;
+export const CONVEX_AUTH_HEALTHY_RESET_MS = 30_000;
+
 export function getConvexAuthRecoveryDelayMs(attempt: number): number {
   return CONVEX_AUTH_RECOVERY_DELAYS_MS[
     Math.min(Math.max(0, attempt), CONVEX_AUTH_RECOVERY_DELAYS_MS.length - 1)

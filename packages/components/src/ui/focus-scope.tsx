@@ -11,6 +11,16 @@ import { isImeComposingNativeKeyboardEvent } from '@/lib/ime';
 const activeFocusScopeAtom = atom<string | null>(null);
 const lastFocusedItemByScope = new Map<string, { element: HTMLElement; id: string | null }>();
 
+/**
+ * A scope's registered list navigation, keyed by scope id. `FocusScope` reads it
+ * to move within the scope on its own React `onKeyDown`: a dialog popup stops
+ * composite keys (arrows, Home, End) at the portal edge, so a window listener
+ * never sees them inside one — the scope element's synthetic handler still does.
+ */
+const listNavByScope = new Map<string, { current: ListNavigationOptions }>();
+/** How many mounted `useFocusScopeSwitcher` calls — the switcher runs wherever a scope sees Left/Right. */
+let scopeSwitcherSubscriptions = 0;
+
 const DEFAULT_ITEM_SELECTOR = '[data-scope-item]';
 const OPEN_LAYER_SELECTOR =
   '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]';
@@ -102,6 +112,154 @@ function scopeLayer(root: HTMLElement): HTMLElement | null {
   return root.closest<HTMLElement>(OPEN_LAYER_SELECTOR);
 }
 
+interface ListNavigationOptions {
+  enabled?: boolean;
+  itemSelector?: string;
+  loop?: boolean;
+  onItemFocus?: (item: HTMLElement) => void;
+}
+
+/**
+ * Moves through a scope's items on one list-navigation key. Shared by the
+ * window listener (events whose target sits outside every scope) and the scope
+ * element's own key handler (which a dialog's composite-key stop cannot reach).
+ */
+function moveWithinScope(
+  scopeId: string,
+  root: HTMLElement,
+  key: string,
+  options: ListNavigationOptions
+): boolean {
+  const itemSelector = options.itemSelector ?? DEFAULT_ITEM_SELECTOR;
+  const items = getScopeItems(root, itemSelector);
+  if (items.length === 0) return false;
+
+  const active = document.activeElement;
+  const current = active instanceof HTMLElement ? active.closest<HTMLElement>(itemSelector) : null;
+  const currentIndex = current ? items.indexOf(current) : -1;
+  let nextIndex: number;
+
+  switch (key) {
+    case 'ArrowDown':
+    case 'j':
+      nextIndex = currentIndex < 0 ? 0 : currentIndex + 1;
+      break;
+    case 'ArrowUp':
+    case 'k':
+      nextIndex = currentIndex < 0 ? items.length - 1 : currentIndex - 1;
+      break;
+    case 'Home':
+      nextIndex = 0;
+      break;
+    case 'End':
+      nextIndex = items.length - 1;
+      break;
+    default:
+      return false;
+  }
+
+  if (options.loop !== false) {
+    nextIndex = (nextIndex + items.length) % items.length;
+  } else {
+    nextIndex = Math.max(0, Math.min(items.length - 1, nextIndex));
+  }
+
+  const next = items[nextIndex];
+  if (!next) return false;
+  focusScopeItem(scopeId, next);
+  options.onItemFocus?.(next);
+  return true;
+}
+
+/**
+ * The scope switch itself, shared between the window listener and the scope
+ * element that saw Left/Right inside a dialog. `sourceRoot` is the scope the
+ * event belongs to — the element handler, or the active scope at window level.
+ */
+function switchFocusScope(
+  sourceRoot: HTMLElement,
+  key: 'ArrowLeft' | 'ArrowRight',
+  setActiveScopeId: (id: string | null) => void
+): boolean {
+  const sourceLayer = scopeLayer(sourceRoot);
+  const visible = getScopeRoots().filter((scope) => scopeLayer(scope) === sourceLayer);
+  const scopes = visible.filter(
+    (scope) => !visible.some((candidate) => candidate !== scope && scope.contains(candidate))
+  );
+  const currentIndex = scopes.indexOf(sourceRoot);
+  if (currentIndex < 0) return false;
+  const nextScope = scopes[currentIndex + (key === 'ArrowRight' ? 1 : -1)];
+  if (!nextScope) return false;
+  const nextScopeId = nextScope.dataset.focusScope;
+  if (!nextScopeId) return false;
+  setActiveScopeId(nextScopeId);
+
+  const items = getScopeItems(nextScope, DEFAULT_ITEM_SELECTOR);
+  const remembered = lastFocusedItemByScope.get(nextScopeId);
+  if (
+    remembered &&
+    (items.includes(remembered.element) || isUsableFocusTarget(nextScope, remembered.element))
+  ) {
+    focusScopeItem(nextScopeId, remembered.element);
+    return true;
+  }
+
+  const restored = remembered?.id
+    ? items.find((item) => item.getAttribute('data-id') === remembered.id)
+    : null;
+  const current = items.find((item) => {
+    const value = item.getAttribute('aria-current');
+    return (
+      (value !== null && value !== 'false') ||
+      item.getAttribute('aria-selected') === 'true' ||
+      item.getAttribute('aria-pressed') === 'true'
+    );
+  });
+  if (restored ?? current ?? items[0]) {
+    focusScopeItem(nextScopeId, restored ?? current ?? items[0]!);
+  } else {
+    nextScope.focus({ preventScroll: true });
+    nextScope.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  return true;
+}
+
+/**
+ * A scope element's own key handling. It runs as a React handler on the scope
+ * root — after controls inside it, so their first refusal is kept — and before
+ * an enclosing dialog popup's composite-key `stopPropagation`, which is why it
+ * sees arrow keys the window listeners never will.
+ */
+function handleScopeKeyNavigation(
+  event: ReactKeyboardEvent<HTMLElement>,
+  scopeId: string,
+  root: HTMLElement,
+  setActiveScopeId: (id: string | null) => void
+): void {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if (isImeComposingNativeKeyboardEvent(event.nativeEvent) || isTextInput(event.target)) return;
+  // The event may belong to a nested scope, whose own handler already ran.
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || target.closest('[data-focus-scope]') !== root) return;
+
+  const nav = listNavByScope.get(scopeId);
+  if (
+    nav &&
+    nav.current.enabled !== false &&
+    moveWithinScope(scopeId, root, event.key, nav.current)
+  ) {
+    event.preventDefault();
+    return;
+  }
+  if (
+    (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+    scopeSwitcherSubscriptions > 0 &&
+    switchFocusScope(root, event.key, setActiveScopeId)
+  ) {
+    event.preventDefault();
+  }
+}
+
 export interface FocusScopeProps extends HTMLAttributes<HTMLDivElement> {
   id: string;
 }
@@ -163,6 +321,9 @@ export const FocusScope = forwardRef<HTMLDivElement, FocusScopeProps>(function F
       }}
       onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {
         onKeyDown?.(event);
+        if (!event.defaultPrevented && localRef.current) {
+          handleScopeKeyNavigation(event, id, localRef.current, setActiveScopeId);
+        }
         if (
           !event.defaultPrevented &&
           event.key === 'Escape' &&
@@ -194,6 +355,18 @@ export function useListKeyboardNavigation(options: {
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
+  // The scope element handles keys that belong to it; this registration is what
+  // it looks up. The window listener below stays for the rest (a press landing
+  // on the document body while a scope is active).
+  useEffect(() => {
+    listNavByScope.set(options.scopeId, optionsRef);
+    return () => {
+      if (listNavByScope.get(options.scopeId) === optionsRef) {
+        listNavByScope.delete(options.scopeId);
+      }
+    };
+  }, [options.scopeId]);
+
   useEffect(() => {
     if (options.enabled === false || typeof window === 'undefined') return undefined;
 
@@ -206,46 +379,9 @@ export function useListKeyboardNavigation(options: {
       const root = getScopeRoot(options.scopeId);
       if (!root || !eventBelongsToScope(event, root)) return;
       if (!activeScopeId && !root.contains(document.activeElement)) return;
-      const itemSelector = optionsRef.current.itemSelector ?? DEFAULT_ITEM_SELECTOR;
-      const items = getScopeItems(root, itemSelector);
-      if (items.length === 0) return;
-
-      const active = document.activeElement;
-      const current =
-        active instanceof HTMLElement ? active.closest<HTMLElement>(itemSelector) : null;
-      const currentIndex = current ? items.indexOf(current) : -1;
-      let nextIndex: number;
-
-      switch (event.key) {
-        case 'ArrowDown':
-        case 'j':
-          nextIndex = currentIndex < 0 ? 0 : currentIndex + 1;
-          break;
-        case 'ArrowUp':
-        case 'k':
-          nextIndex = currentIndex < 0 ? items.length - 1 : currentIndex - 1;
-          break;
-        case 'Home':
-          nextIndex = 0;
-          break;
-        case 'End':
-          nextIndex = items.length - 1;
-          break;
-        default:
-          return;
+      if (moveWithinScope(options.scopeId, root, event.key, optionsRef.current)) {
+        event.preventDefault();
       }
-
-      if (optionsRef.current.loop !== false) {
-        nextIndex = (nextIndex + items.length) % items.length;
-      } else {
-        nextIndex = Math.max(0, Math.min(items.length - 1, nextIndex));
-      }
-
-      event.preventDefault();
-      const next = items[nextIndex];
-      if (!next) return;
-      focusScopeItem(options.scopeId, next);
-      optionsRef.current.onItemFocus?.(next);
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -258,6 +394,16 @@ export function useFocusScopeSwitcher(options: { enabled?: boolean } = {}): void
   const activeScopeId = useAtomValue(activeFocusScopeAtom);
   const setActiveScopeId = useSetAtom(activeFocusScopeAtom);
 
+  // While a switcher is mounted, scope elements run it on their own Left/Right;
+  // a dialog popup would otherwise stop those keys before this listener.
+  useEffect(() => {
+    if (options.enabled === false) return undefined;
+    scopeSwitcherSubscriptions += 1;
+    return () => {
+      scopeSwitcherSubscriptions -= 1;
+    };
+  }, [options.enabled]);
+
   useEffect(() => {
     if (options.enabled === false || typeof window === 'undefined') return undefined;
 
@@ -269,49 +415,8 @@ export function useFocusScopeSwitcher(options: { enabled?: boolean } = {}): void
 
       const activeRoot = getScopeRoot(activeScopeId);
       if (!activeRoot || !eventBelongsToScope(event, activeRoot)) return;
-
-      const activeLayer = scopeLayer(activeRoot);
-      const visible = getScopeRoots().filter((scope) => scopeLayer(scope) === activeLayer);
-      const scopes = visible.filter(
-        (scope) => !visible.some((candidate) => candidate !== scope && scope.contains(candidate))
-      );
-      const currentIndex = scopes.indexOf(activeRoot);
-      if (currentIndex < 0) return;
-      const nextIndex = currentIndex + (event.key === 'ArrowRight' ? 1 : -1);
-      const nextScope = scopes[nextIndex];
-      if (!nextScope) return;
-
-      event.preventDefault();
-      const nextScopeId = nextScope.dataset.focusScope;
-      if (!nextScopeId) return;
-      setActiveScopeId(nextScopeId);
-
-      const items = getScopeItems(nextScope, DEFAULT_ITEM_SELECTOR);
-      const remembered = lastFocusedItemByScope.get(nextScopeId);
-      if (
-        remembered &&
-        (items.includes(remembered.element) || isUsableFocusTarget(nextScope, remembered.element))
-      ) {
-        focusScopeItem(nextScopeId, remembered.element);
-        return;
-      }
-
-      const restored = remembered?.id
-        ? items.find((item) => item.getAttribute('data-id') === remembered.id)
-        : null;
-      const current = items.find((item) => {
-        const value = item.getAttribute('aria-current');
-        return (
-          (value !== null && value !== 'false') ||
-          item.getAttribute('aria-selected') === 'true' ||
-          item.getAttribute('aria-pressed') === 'true'
-        );
-      });
-      if (restored ?? current ?? items[0]) {
-        focusScopeItem(nextScopeId, restored ?? current ?? items[0]!);
-      } else {
-        nextScope.focus({ preventScroll: true });
-        nextScope.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      if (switchFocusScope(activeRoot, event.key, setActiveScopeId)) {
+        event.preventDefault();
       }
     };
 

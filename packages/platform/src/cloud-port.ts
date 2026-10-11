@@ -235,6 +235,11 @@ export interface CloudAttachmentUploadPort {
 }
 
 export interface CloudRemotePreviewPort {
+  /** Short-lived ICE credentials; null/absent providers never trigger cloud I/O. */
+  simulatorIceServers?(input: MachineAccessRequest): Promise<{
+    iceServers: Array<{ urls: string[]; username?: string; credential?: string }>;
+    expiresAt: number;
+  }>;
   verifyControl(
     input: import('@lody/shared').VerifyPreviewControlInput
   ): Promise<{ requesterUserId: string; expiresAt: number }>;

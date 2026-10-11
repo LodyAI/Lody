@@ -927,7 +927,13 @@ export function useGitHubPrDetails({
   const postComment = useCallback(
     async (body: string) => {
       const trimmed = body.trim();
-      if (!trimmed || !workspaceId || !normalizedRepoFullName || !prNumber || !cacheKey) return;
+      if (!trimmed) return;
+      // A typed comment is user input: silently resolving here would let the
+      // composer clear it as if it were posted. Reject so the caller can keep
+      // the draft and report the failure.
+      if (!workspaceId || !normalizedRepoFullName || !prNumber || !cacheKey) {
+        throw new Error('The pull request is not ready yet; the comment was not posted.');
+      }
       const targetCacheKey = cacheKey;
       setIsPostingComment(true);
       try {
@@ -1245,6 +1251,7 @@ export function useGitHubPrDetails({
     state: identity.error ? 'error' : effectiveState,
     data: enabledWithInputs ? data : null,
     error: identity.error ?? error,
+
     checksPermissionError,
     isRevalidating,
     refresh,

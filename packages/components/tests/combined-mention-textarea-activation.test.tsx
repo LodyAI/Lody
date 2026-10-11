@@ -10,6 +10,10 @@ import type {
   FileSearchResponse,
 } from '../src/components/mentions/file-search/client';
 
+import type { SkillMentionItem } from '../src/components/mentions/mention-skill-source';
+
+const skillItems: SkillMentionItem[] = [];
+
 let fileEntry: { paths: string[]; fetchedAt: number; truncated: boolean } | null = null;
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,7 +43,7 @@ vi.mock('../src/components/mentions/mention-skill-source', async (importOriginal
     skillScanEnabled.push(enabled);
     return {
       skillState: { status: enabled ? ('ready' as const) : ('idle' as const) },
-      skillItems: [],
+      skillItems,
       knownSkillTokens: new Set<string>(),
     };
   },
@@ -76,6 +80,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
     fileEntry = null;
     skillScanEnabled.length = 0;
+    skillItems.length = 0;
     sessionItems.length = 0;
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -84,6 +89,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount());
+    vi.useRealTimers();
     container.remove();
     if (originalScrollIntoView) {
       HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
@@ -297,6 +303,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
   });
 
   it('wraps ArrowUp from the first @ result and continues in reverse order', async () => {
+    vi.useFakeTimers();
     sessionItems.push(
       {
         sessionId: 's1',
@@ -322,6 +329,7 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     );
     await render({ value: '' });
     await typeInto('@session:');
+    await act(async () => vi.advanceTimersToNextFrame());
 
     const input = textarea();
     if (!input) throw new Error('composer textarea missing');
@@ -546,13 +554,53 @@ describe('CombinedMentionTextarea mention enablement and activation', () => {
     expect(skillScanEnabled).toContain(true);
   });
 
-  it('retains $ as a direct skill-menu trigger', async () => {
+  it.each(['$', '￥'])('opens skills from %s and commits the dollar form', async (trigger) => {
+    for (const token of ['review', 'research']) {
+      skillItems.push({
+        token,
+        dir: '.agents/skills',
+        scope: 'project',
+        skill: {
+          id: token,
+          name: token,
+          relativePath: `.agents/skills/${token}/SKILL.md`,
+          isSymlink: false,
+        },
+      });
+    }
     await render({ value: '', skillAgent: { machineId: 'machine-1' } });
     expect(skillScanEnabled).not.toContain(true);
+    await typeInto(`Use ${trigger}`);
+    expect(document.body.textContent).toContain('review');
+    expect(document.body.textContent).toContain('research');
+    await typeInto(`Use ${trigger}rev`);
+    expect(document.body.textContent).toContain('review');
+    expect(document.body.textContent).not.toContain('research');
+    await act(async () => {
+      textarea()!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      );
+    });
+    expect(textarea()!.value.trimEnd()).toBe('Use $review');
+  });
 
-    await typeInto('$');
+  it.each(['$', '￥'])('keeps %s plain when skills are unavailable', async (trigger) => {
+    await render({ value: '', availableCommands: [{ name: 'review', description: 'Review' }] });
+    await typeInto(`${trigger}review`);
+    expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
+    expect(textarea()!.value).toBe(`${trigger}review`);
+  });
 
-    expect(skillScanEnabled).toContain(true);
+  it('preserves an unselected yuan query on dismissal', async () => {
+    await render({ value: '', skillAgent: { machineId: 'machine-1' } });
+    await typeInto('￥unknown');
+    await act(async () => {
+      textarea()!.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+      );
+    });
+    expect(textarea()!.value).toBe('￥unknown');
+    expect(document.querySelector('[data-slot="mention-item"]')).toBeNull();
   });
 
   it('still scans skills for a draft that already carries a $ token', async () => {

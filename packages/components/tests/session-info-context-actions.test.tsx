@@ -147,9 +147,7 @@ describe('ContextChip actions', () => {
     // Light theme uses a soft hairline border + faint fill; dark keeps muted fill only.
     expect(createPrButton?.parentElement?.className).toContain('border-foreground/[0.08]');
     expect(createPrButton?.parentElement?.className).toContain('bg-foreground/[0.03]');
-    expect(createPrButton?.parentElement?.className).toContain(
-      'dark:bg-muted-foreground/[0.08]'
-    );
+    expect(createPrButton?.parentElement?.className).toContain('dark:bg-muted-foreground/[0.08]');
 
     await act(async () => createPrButton?.click());
 
@@ -321,9 +319,9 @@ describe('ContextChip actions', () => {
       );
       await new Promise((resolve) => setTimeout(resolve, 40));
     });
-    const squashItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-      (item) => item.textContent?.includes('Squash and merge')
-    );
+    const squashItem = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')
+    ).find((item) => item.textContent?.includes('Squash and merge'));
     expect(squashItem).toBeInstanceOf(HTMLElement);
     await act(async () => squashItem?.click());
     expect(onSelectMethod).toHaveBeenCalledWith('squash');

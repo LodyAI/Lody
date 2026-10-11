@@ -33,18 +33,18 @@ export const control = stylex.defineVars({
 });
 
 export const text = stylex.defineVars({
-  captionSize: '11px',
-  captionLeading: '16px',
-  footnoteSize: '12px',
-  footnoteLeading: '16px',
-  subheadlineSize: '13px',
-  subheadlineLeading: '18px',
-  bodySize: '14px',
-  bodyLeading: '20px',
-  headlineSize: '16px',
-  headlineLeading: '24px',
-  titleSize: '18px',
-  titleLeading: '24px',
+  captionSize: 'calc(var(--ui-font-size, 14px) * 11 / 14)',
+  captionLeading: 'calc(var(--ui-font-size, 14px) * 16 / 14)',
+  footnoteSize: 'calc(var(--ui-font-size, 14px) * 12 / 14)',
+  footnoteLeading: 'calc(var(--ui-font-size, 14px) * 16 / 14)',
+  subheadlineSize: 'calc(var(--ui-font-size, 14px) * 13 / 14)',
+  subheadlineLeading: 'calc(var(--ui-font-size, 14px) * 18 / 14)',
+  bodySize: 'var(--ui-font-size, 14px)',
+  bodyLeading: 'calc(var(--ui-font-size, 14px) * 20 / 14)',
+  headlineSize: 'calc(var(--ui-font-size, 14px) * 16 / 14)',
+  headlineLeading: 'calc(var(--ui-font-size, 14px) * 24 / 14)',
+  titleSize: 'calc(var(--ui-font-size, 14px) * 18 / 14)',
+  titleLeading: 'calc(var(--ui-font-size, 14px) * 24 / 14)',
   controlTracking: '-0.01em',
 });
 

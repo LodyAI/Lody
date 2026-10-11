@@ -166,7 +166,7 @@ export async function applyAcpSessionRunConfig(args: {
       confirmedLegacyModelId = config.modelId;
     } catch (error) {
       assertNotAborted();
-      recordRejection(`model=${JSON.stringify(config.modelId)}`, suppressKnownRunConfigWarnings);
+      recordRejection(`model=${JSON.stringify(config.modelId)}`, false);
       logger.debug(
         `[${sessionId}] Failed to set ACP model ${JSON.stringify(config.modelId)}: ${String(error)}`
       );
@@ -201,6 +201,7 @@ export async function applyAcpSessionRunConfig(args: {
           confirmedLegacyModelId = value;
         } catch (error) {
           assertNotAborted();
+          recordRejection(`model=${formatAcpConfigValueForLog(configId, value)}`, false);
           logger.debug(
             `[${sessionId}] Failed to set ACP model option ${configId}=${formatAcpConfigValueForLog(
               configId,

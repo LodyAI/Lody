@@ -122,6 +122,14 @@ export function shouldWatchSession(snapshot: SessionWatchSnapshot): boolean {
   }
   if (Object.keys(meta.steerTurnStatuses ?? {}).length > 0) return true;
 
+  if (
+    Object.values(meta.queuePromotionLedger ?? {}).some(
+      (record) => record.state !== 'queue_consumed'
+    )
+  ) {
+    return true;
+  }
+
   if ((meta.messageQueueUpdatedAt ?? 0) > (meta.messageQueueCheckedAt ?? 0)) {
     return true;
   }

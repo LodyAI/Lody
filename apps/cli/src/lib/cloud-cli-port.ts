@@ -1,3 +1,7 @@
+import { SessionAttachmentTransfer } from './session-attachment-transfer';
+import { getCliPlatformKind } from './cli-platform';
+import { LODY_SERVER_URL } from '@/utils/const';
+import { SimulatorIceServersSchema } from '@/ios-simulator/webrtc-protocol';
 import { ConvexClient, ConvexHttpClient } from 'convex/browser';
 import { z } from 'zod';
 import { api } from '@lody/cloud-api';
@@ -15,7 +19,6 @@ import {
   type CloudBillingPort,
   type CloudPort,
   type CloudSessionSharingPort,
-  type CloudPrAssociationInput,
   type CloudStreamsTokenPort,
   type CloudUsageUpdateInput,
   type WorkspaceSummary,
@@ -32,6 +35,7 @@ import { NotificationService } from './notifications';
 import { UsageTrackingService, type RecordSessionUsageInput } from './usage/usage-tracking-service';
 import { GitHubTokenManager } from './github-token-manager';
 import { submitBugReportFromMachine } from './bug-report';
+import { createCloudPrAssociationPort } from './cloud-pr-association';
 
 type WorkspaceListResult =
   | { valid: false; userId: null; workspaces: WorkspaceSummary[] }
@@ -247,26 +251,32 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
             }),
         }),
     },
-    prAssociation: {
-      associatePullRequest: async (input: CloudPrAssociationInput) => {
-        const { ownerSessionId, ...association } = input;
-        const response = await fetch(new URL('/api/action', authSiteUrl), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            path: 'github:associatePullRequestForCli',
-            args: {
-              ...association,
-              sessionId: ownerSessionId,
-              cliToken: options.token,
-            },
-          }),
-        });
-        return response.ok;
-      },
-    },
+    prAssociation: createCloudPrAssociationPort({
+      token: options.token,
+      authSiteUrl,
+      logger: options.logger,
+    }),
     attachmentUpload: { serverBaseUrl },
     remotePreview: {
+      simulatorIceServers: async (input) => {
+        const response = await getCliHttpFetch({ logger: options.logger })(
+          new URL('/api/ios-simulator/ice-servers', authSiteUrl),
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${options.token}`,
+            },
+            body: JSON.stringify(input),
+            signal: AbortSignal.timeout(10_000),
+            redirect: 'error',
+          }
+        );
+        if (!response.ok) throw new Error('Simulator relay configuration is unavailable.');
+        return z
+          .object({ iceServers: SimulatorIceServersSchema, expiresAt: z.number().finite() })
+          .parse(await response.json());
+      },
       verifyControl: async (input) => {
         const response = await getCliHttpFetch({ logger: options.logger })(
           new URL('/api/session-preview/verify', authSiteUrl),
@@ -293,4 +303,14 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
       await subscriptionClient.close();
     },
   };
+}
+
+/** One-shot command composition; local builds never construct a cloud transfer. */
+export function createCommandAttachmentTransfer(
+  token: string,
+  localWorkspace = false
+): SessionAttachmentTransfer | undefined {
+  if (localWorkspace || getCliPlatformKind() === 'local') return undefined;
+  if (!LODY_SERVER_URL?.trim()) throw new Error('cloud_attachment_upload_unavailable');
+  return new SessionAttachmentTransfer(token, LODY_SERVER_URL);
 }

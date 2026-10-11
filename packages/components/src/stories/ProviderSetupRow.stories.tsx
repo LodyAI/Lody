@@ -113,3 +113,14 @@ export const BubNotInstalled: Story = {
     },
   },
 };
+
+export const DimcodeNotInstalled: Story = {
+  args: {
+    setup: {
+      ...baseSetup,
+      config: { ...baseSetup.config, agentType: 'dimcode', name: 'Dimcode' },
+      status: 'failed',
+      failureCode: 'runtime-unavailable',
+    },
+  },
+};

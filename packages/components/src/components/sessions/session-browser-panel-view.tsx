@@ -1,14 +1,77 @@
 import type { ComponentProps, ReactNode } from 'react';
 import { Globe2, ShieldAlert } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
-import { cn } from '@/lib/utils';
 import { SessionBrowserToolbar } from './session-browser-toolbar';
 import {
   PreviewConnectionPlaceholder,
   type PreviewConnectionStatusProps,
 } from './preview-connection-status';
+
+const styles = stylex.create({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: 0,
+    backgroundColor: colors.background,
+  },
+  error: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: `color-mix(in oklab, ${colors.destructive} 30%, transparent)`,
+    backgroundColor: `color-mix(in oklab, ${colors.destructive} 8%, transparent)`,
+    paddingInline: '12px',
+    paddingBlock: '8px',
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    color: colors.destructive,
+  },
+  errorIcon: { flexShrink: 0, width: '14px', height: '14px', marginTop: '2px' },
+  errorText: { minWidth: 0, overflowWrap: 'break-word' },
+  progress: {
+    display: 'flex',
+    flex: '1 1 0%',
+    minHeight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    backgroundColor: colors.background,
+    fontSize: '0.875rem',
+    lineHeight: '1.25rem',
+    color: colors.secondaryLabel,
+  },
+  empty: {
+    display: 'flex',
+    flex: '1 1 0%',
+    minHeight: 0,
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    backgroundColor: colors.background,
+    paddingInline: '24px',
+    textAlign: 'center',
+  },
+  emptyIcon: {
+    width: '28px',
+    height: '28px',
+    color: `color-mix(in oklab, ${colors.secondaryLabel} 60%, transparent)`,
+  },
+  emptyText: {
+    maxWidth: '20rem',
+    margin: 0,
+    fontSize: '0.75rem',
+    lineHeight: '1rem',
+    color: colors.secondaryLabel,
+  },
+});
 
 export type ManagedNavigationPhase = 'resolving-machine' | 'opening-local' | 'creating-tunnel';
 
@@ -50,16 +113,14 @@ export function SessionBrowserPanelView({
     null;
   const showErrorBanner =
     Boolean(error) && !(previewStatus && !hasContent && previewDiagnostic === error);
+  const rootStyle = stylex.props(styles.root);
   return (
-    <div className={cn('flex h-full min-h-0 flex-col bg-background', className)}>
+    <div {...rootStyle} className={[rootStyle.className, className].filter(Boolean).join(' ')}>
       <SessionBrowserToolbar {...toolbar} previewStatus={toolbarPreviewStatus} />
       {showErrorBanner ? (
-        <div
-          role="alert"
-          className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive"
-        >
-          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 break-words">{error}</span>
+        <div role="alert" {...stylex.props(styles.error)}>
+          <ShieldAlert {...stylex.props(styles.errorIcon)} />
+          <span {...stylex.props(styles.errorText)}>{error}</span>
           <Button
             type="button"
             variant="ghost"
@@ -72,12 +133,8 @@ export function SessionBrowserPanelView({
         </div>
       ) : null}
       {navigationPhase && !hasContent ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex min-h-0 flex-1 items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
-        >
-          <Spinner label={null} className="h-4 w-4" />
+        <div role="status" aria-live="polite" {...stylex.props(styles.progress)}>
+          <Spinner label={null} size="small" />
           <span>
             {navigationPhase === 'resolving-machine'
               ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')
@@ -91,9 +148,9 @@ export function SessionBrowserPanelView({
         (previewStatus ? (
           <PreviewConnectionPlaceholder {...previewStatus} />
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-background px-6 text-center">
-            <Globe2 className="h-7 w-7 text-muted-foreground/60" aria-hidden />
-            <p className="max-w-xs text-xs text-muted-foreground">
+          <div {...stylex.props(styles.empty)}>
+            <Globe2 {...stylex.props(styles.emptyIcon)} aria-hidden />
+            <p {...stylex.props(styles.emptyText)}>
               {suggestedAddress
                 ? t('sessions.browser.emptyWithCandidate', 'Press Enter to open {{url}}', {
                     url: suggestedAddress,

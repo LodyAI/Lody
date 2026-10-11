@@ -14,6 +14,7 @@ import {
 import type { ReplaceEditableTailInput } from '@lody/shared/session-data';
 import { SessionEditAndResendService } from './session-edit-and-resend-service';
 import { SessionExecutionService } from './session-execution-service';
+import { createSessionBackend } from './session-backend';
 
 const sessionId = 'session-1' as SessionId;
 const machineId = 'machine-1' as MachineId;
@@ -90,6 +91,14 @@ function createHarness(
 ) {
   const events: string[] = [];
   let history = options.history ?? historyFixture();
+  let storedMeta: SessionMeta | undefined;
+  const repo = {
+    getDocMeta: vi.fn(async () => (storedMeta ? { meta: storedMeta } : undefined)),
+    upsertDocMeta: vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
+      events.push('meta');
+      storedMeta = { ...storedMeta, ...patch } as SessionMeta;
+    }),
+  };
   const loro = new LoroDoc();
   for (const entry of history) {
     const map = loro
@@ -98,7 +107,7 @@ function createHarness(
     for (const [key, value] of Object.entries(entry)) if (value !== undefined) map.set(key, value);
   }
   loro.commit();
-  const realDoc = new SessionDocument({} as never, sessionId, async () => {}, {
+  const realDoc = new SessionDocument(repo as never, sessionId, async () => {}, {
     debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
@@ -120,6 +129,7 @@ function createHarness(
     agentConfigId: 'agent-config-1' as AgentConfigId,
     acpSessionId: 'acp-old',
   } as SessionMeta;
+  storedMeta = meta;
   const sessionDoc = withHistoryPort({
     getMetaState: vi.fn(async () => meta),
     getHistory: vi.fn(realDoc.sessionData.history.readAll.bind(realDoc.sessionData.history)),
@@ -144,14 +154,6 @@ function createHarness(
       },
     },
   });
-  let storedMeta = meta;
-  const repo = {
-    getDocMeta: vi.fn(async () => ({ meta: storedMeta })),
-    upsertDocMeta: vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
-      events.push('meta');
-      storedMeta = { ...storedMeta, ...patch };
-    }),
-  };
   const agentClient = {
     prepareReplacementSession: vi.fn(async () => {
       events.push('prepare');
@@ -224,6 +226,8 @@ function createHarness(
     getHistory: () => loro.getList('history').toJSON() as SessionHistoryInput[],
     logger,
     realDoc,
+    meta,
+    readStoredMeta: () => storedMeta,
     repo,
     service,
   });
@@ -278,7 +282,8 @@ describe('SessionEditAndResendService', () => {
       });
     });
     expect(harness.sessionData.history.readAll().at(-1)).toMatchObject({
-      userId: 'original-author',
+      userId: spec.requestedByUserId,
+      author: { v: 1, kind: 'human', userId: spec.requestedByUserId },
       status: 'seen',
       read: true,
       inputConfig: {
@@ -297,6 +302,25 @@ describe('SessionEditAndResendService', () => {
         lastHandledUserMsgId: 'user-1',
       })
     );
+  });
+
+  it('edits and resends while retaining an inert legacy auto-review pointer', async () => {
+    const harness = createHarness();
+    harness.meta.autoReview = { runId: 'retired-review', t: 1 };
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result).toMatchObject({ success: true });
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-3',
+    ]);
+    expect(harness.readStoredMeta()).toMatchObject({
+      autoReview: { runId: 'retired-review', t: 1 },
+      acpSessionId: 'acp-new',
+      latestUserMsgId: 'user-3',
+    });
   });
 
   it('refuses the commit when the editable tail moved after the eligibility check', async () => {
@@ -455,13 +479,14 @@ describe('SessionEditAndResendService', () => {
         getSession: vi.fn(() => undefined),
       },
     } as never);
+    const backend = await createSessionBackend(harness.realDoc, { historyBackend: 'loro' });
     await execution['transitionDispatchOwnership']({
       sessionId,
       sessionDoc: harness.realDoc,
       nextUserTurnId: 'user-2',
     });
     // Once settled, pending_apply no longer protects the steer from editing.
-    await execution['setUserTurnStatus'](harness.realDoc, 'user-2', 'handled');
+    await execution['setUserTurnStatus'](backend, 'user-2', 'handled');
     const stored = harness.realDoc.sessionData.writer.read('user-2');
     expect(stored?.inputConfig?._lodyDeliveryKind).toBe('steer');
     const read = await harness.realDoc.sessionData.history.readAll();

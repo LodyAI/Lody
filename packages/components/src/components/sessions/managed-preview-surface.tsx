@@ -8,6 +8,8 @@ import {
   useState,
 } from 'react';
 import { Send, X } from 'lucide-react';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
 import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
@@ -62,11 +64,59 @@ import {
   getManagedPageKey,
   toManagedLogicalUrl,
 } from '@/lib/session-browser-url';
-import { cn } from '@/lib/utils';
 import {
   acquireManagedPreviewFrame,
   releaseManagedPreviewFrame,
 } from './managed-preview-frame-cache';
+
+const styles = stylex.create({
+  root: {
+    position: 'relative',
+    minHeight: 0,
+    flex: '1 1 0%',
+    overflow: 'hidden',
+    // The managed preview surface has always been a white viewport, including in dark theme.
+    backgroundColor: '#fff',
+  },
+  iframeHost: { width: '100%', height: '100%' },
+  loadingIndicator: {
+    position: 'absolute',
+    top: '12px',
+    right: '12px',
+    zIndex: 10,
+    pointerEvents: 'none',
+    color: colors.secondaryLabel,
+  },
+  annotationDraft: {
+    position: 'absolute',
+    zIndex: 30,
+    width: '280px',
+    maxWidth: 'calc(100% - 24px)',
+    pointerEvents: 'auto',
+    borderWidth: '1px',
+    borderStyle: 'solid',
+    borderColor: colors.separator,
+    borderRadius: '6px',
+    backgroundColor: 'hsl(var(--popover))',
+    padding: '12px',
+    color: 'hsl(var(--popover-foreground))',
+    boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+  },
+  draftHeader: { display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' },
+  draftHeading: { minWidth: 0, flex: '1 1 0%' },
+  draftTitle: { fontSize: '0.75rem', lineHeight: '1rem', fontWeight: 600 },
+  draftTarget: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontFamily: 'monospace',
+    fontSize: '10px',
+    color: colors.secondaryLabel,
+  },
+  draftCancelIcon: { width: '14px', height: '14px' },
+  draftSubmitRow: { display: 'flex', justifyContent: 'flex-end', marginTop: '8px' },
+  draftSubmitIcon: { width: '14px', height: '14px' },
+});
 
 type ManagedPreviewSurfaceProps = {
   session: SessionMeta;
@@ -672,17 +722,19 @@ export function ManagedPreviewSurface({
     [onToggleVisualAnnotationInChat]
   );
 
+  const rootStyle = stylex.props(styles.root);
   return (
     <div
       ref={surfaceRef}
-      className={cn('relative min-h-0 flex-1 overflow-hidden bg-white', className)}
+      {...rootStyle}
+      className={[rootStyle.className, className].filter(Boolean).join(' ')}
     >
       {!iframeLoaded ? (
-        <div className="pointer-events-none absolute right-3 top-3 z-10">
-          <Spinner className="h-5 w-5 text-muted-foreground" />
+        <div {...stylex.props(styles.loadingIndicator)}>
+          <Spinner size="medium" />
         </div>
       ) : null}
-      <div ref={iframeHostRef} className="h-full w-full" />
+      <div ref={iframeHostRef} {...stylex.props(styles.iframeHost)} />
       <VisualAnnotationCommentsOverlay
         comments={comments}
         viewport={viewport}
@@ -706,21 +758,19 @@ export function ManagedPreviewSurface({
       isResolvedAnchorVisible(resolvedAnchors[DRAFT_VISUAL_ANNOTATION_ANCHOR_ID], viewport) ? (
         <div
           data-lody-visual-comment-draft="true"
-          className="pointer-events-auto absolute z-30 w-[280px] max-w-[calc(100%-24px)] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-xl"
+          {...stylex.props(styles.annotationDraft)}
           style={getDraftPosition(
             selectedTarget,
             viewport,
             resolvedAnchors[DRAFT_VISUAL_ANNOTATION_ANCHOR_ID]
           )}
         >
-          <div className="mb-2 flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-semibold">
+          <div {...stylex.props(styles.draftHeader)}>
+            <div {...stylex.props(styles.draftHeading)}>
+              <div {...stylex.props(styles.draftTitle)}>
                 {t('sessions.preview.annotation.addComment', 'Add comment')}
               </div>
-              <div className="truncate font-mono text-[10px] text-muted-foreground">
-                {getTargetLabel(selectedTarget)}
-              </div>
+              <div {...stylex.props(styles.draftTarget)}>{getTargetLabel(selectedTarget)}</div>
             </div>
             <Button
               type="button"
@@ -734,7 +784,7 @@ export function ManagedPreviewSurface({
                 setDraftBody('');
               }}
             >
-              <X className="h-3.5 w-3.5" />
+              <X {...stylex.props(styles.draftCancelIcon)} />
             </Button>
           </div>
           <Textarea
@@ -744,14 +794,18 @@ export function ManagedPreviewSurface({
             className="min-h-20 resize-none bg-background text-xs"
             autoFocus
           />
-          <div className="mt-2 flex justify-end">
+          <div {...stylex.props(styles.draftSubmitRow)}>
             <Button
               type="button"
               size="small"
               disabled={!draftBody.trim() || submitting}
               onClick={() => void submitDraft()}
             >
-              {submitting ? <Spinner className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
+              {submitting ? (
+                <Spinner className="h-3.5 w-3.5" />
+              ) : (
+                <Send {...stylex.props(styles.draftSubmitIcon)} />
+              )}
               {t('sessions.preview.annotation.send', 'Send')}
             </Button>
           </div>

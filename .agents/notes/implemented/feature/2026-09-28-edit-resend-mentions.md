@@ -70,3 +70,20 @@ cycles, viewport resize, CSS zoom, `@`-in-mention, readOnly) surfaced and fixed
 the modified-Enter swallow described above; the rest matched composer
 semantics. Not yet validated end-to-end in the Electron app against a live
 session.
+
+## Edit availability correction (2026-10-06)
+
+The mention-expansion wrapper accidentally supplied a callable `onEdit` to the
+last user row even when the session owner omitted `onEditLastUser`. Unsupported
+providers and other ineligible sessions therefore displayed an editor whose save
+returned `false`. The stream now supplies the wrapper only when the owner supplies
+the action, preserving the existing eligibility checks and mention expansion.
+The first user message remains a deliberate exception to fork requirements: its
+replacement uses `session/new`; later messages require an authoritative
+`sessionFork` capability and a completed preceding assistant turn with an ACP ID.
+This corrects callback propagation without changing edit-and-resend intent.
+
+Correction validation: `git diff --check` passes. Typecheck, lint, and formatting
+could not run because this worktree has no installed dependencies (`tsgo`,
+`oxlint`, and `oxfmt` are unavailable). `pnpm run docs check` reports broken
+links into absent ACP submodule files, outside this change. No runtime test was run.

@@ -1,16 +1,16 @@
-import { execFile } from 'child_process';
+import { toShared } from '@/platform/process-options';
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
 
 import type { RepoId, SessionId, SessionMeta } from '@lody/shared';
+
+import { runCommandTextLegacy } from '@lody/shared/node/process';
 
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
 import { getWorktreeManager } from './worktree-manager';
 
-const execFileAsync = promisify(execFile);
 const GIT_PROBE_TIMEOUT_MS = 30_000;
 
 /**
@@ -248,11 +248,16 @@ export class WorktreeGarbageCollector {
   private async isInsideGitWorkTree(dir: string): Promise<boolean> {
     if (!fs.existsSync(dir)) return false;
     try {
-      const { stdout } = await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
-        cwd: dir,
-        timeout: GIT_PROBE_TIMEOUT_MS,
-        encoding: 'utf8',
-      });
+      const { stdout } = await runCommandTextLegacy(
+        {
+          command: 'git',
+          args: ['rev-parse', '--is-inside-work-tree'],
+          cwd: dir,
+          timeout: GIT_PROBE_TIMEOUT_MS,
+          check: 'exit-0',
+        },
+        toShared()
+      );
       return stdout.trim() === 'true';
     } catch {
       return false;

@@ -528,6 +528,52 @@ describe('LocalPreviewProxyManager', () => {
     await expect(fetch(endpoint.viewerUrl)).rejects.toThrow();
   });
 
+  it('keeps module requests authenticated for two loopback previews sharing a cookie jar', async () => {
+    const { server, target } = await listenHtmlServer();
+    servers.push(server);
+    const upstreamCookies: Array<string | undefined> = [];
+    server.prependListener('request', (request) => upstreamCookies.push(request.headers.cookie));
+    const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+    managers.push(manager);
+    const endpoints = [];
+    const cookies = new Map<string, string>();
+    for (const sessionId of ['first-preview', 'second-preview']) {
+      const endpoint = await manager.acquire({ sessionId: sessionId as SessionId, target });
+      endpoints.push(endpoint);
+      const page = await fetch(endpoint.viewerUrl);
+      expect(page.status).toBe(200);
+      await page.text();
+      const setCookie = page.headers.get('set-cookie') ?? '';
+      // These attributes allow Chromium to retain credentials in a cross-site
+      // iframe, including when ordinary third-party cookies are blocked.
+      expect(setCookie).toContain('; Path=/; HttpOnly; Secure; SameSite=None; Partitioned');
+      const pair = setCookie.split(';')[0] ?? '';
+      const separator = pair.indexOf('=');
+      cookies.set(pair.slice(0, separator), pair.slice(separator + 1));
+    }
+    const cookie = [...cookies].map(([name, value]) => `${name}=${value}`).join('; ');
+    for (const endpoint of endpoints) {
+      const resource = new URL('/@react-refresh', endpoint.viewerUrl);
+      const referer = new URL('/src/nested-module.js', endpoint.viewerUrl).href;
+      const response = await fetch(resource, { headers: { cookie, referer } });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain('RefreshRuntime');
+      const denied = await fetch(resource, { headers: { referer } });
+      expect(denied.status).toBe(403);
+      await denied.text();
+      // Another endpoint's cookie cannot authenticate this listener.
+      const ownToken = new URL(endpoint.viewerUrl).searchParams.get('__lody_preview_token');
+      const foreignCookies = [...cookies]
+        .filter(([, value]) => value !== ownToken)
+        .map(([name, value]) => `${name}=${value}`)
+        .join('; ');
+      const crossed = await fetch(resource, { headers: { cookie: foreignCookies, referer } });
+      expect(crossed.status).toBe(403);
+      await crossed.text();
+    }
+    expect(upstreamCookies).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
   it('keeps one session-owned proxy endpoint until it is explicitly released', async () => {
     const { server, target } = await listenHtmlServer();
     servers.push(server);
@@ -769,6 +815,21 @@ describe('LocalPreviewProxyManager WebSocket close forwarding', () => {
     sockets.push(denied);
     const error = await new Promise<Error>((resolve) => denied.once('error', resolve));
     expect(error.message).toContain('403');
+    const authorized = new WebSocket(address, {
+      headers: { cookie: page.headers.get('set-cookie')?.split(';')[0] ?? '' },
+    });
+    sockets.push(authorized);
+    await new Promise<void>((resolve, reject) => {
+      authorized.once('open', resolve);
+      authorized.once('error', reject);
+    });
+    const local = await upstream.nextUpstreamSocket();
+    sockets.push(local);
+    const received = new Promise<string>((resolve) =>
+      local.once('message', (bytes) => resolve(bytes.toString()))
+    );
+    authorized.send('cookie-authenticated hot reload');
+    expect(await received).toBe('cookie-authenticated hot reload');
   });
 
   it('mirrors an abnormal upstream close to the browser instead of throwing', async () => {
