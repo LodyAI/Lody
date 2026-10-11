@@ -1,0 +1,11 @@
+/* Monaco 0.55 renders Find action labels as string hovers with an inline
+ * `white-space: pre-wrap`. In narrow editors that can wrap a tooltip back over
+ * its originating button, making Monaco repeatedly dismiss and recreate it.
+ * Keep only Find-widget hovers in the session editor on one line; ordinary
+ * editor content hovers retain Monaco's wrapping behavior. */
+.lody-session-monaco:has(.find-widget.visible)
+  .workbench-hover-container
+  .monaco-hover
+  .hover-contents {
+  white-space: nowrap !important;
+}
