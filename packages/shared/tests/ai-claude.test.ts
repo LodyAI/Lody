@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { getStaticBuiltinAcpCapabilities } from '../src/ai';
 
 describe('builtin Claude shared contract', () => {
-  it('matches the modes and models exposed by Claude Code 2.1.258', () => {
+  it('exposes version-agnostic Claude models for first render', () => {
     const capabilities = getStaticBuiltinAcpCapabilities('builtin', 'claude');
 
     expect(capabilities?.modes.map(({ id, name }) => ({ id, name }))).toEqual([
@@ -23,24 +23,36 @@ describe('builtin Claude shared contract', () => {
       {
         modelId: 'opus[1m]',
         name: 'Opus (1M context)',
-        description: 'Opus 5 with 1M context · Best for everyday, complex tasks',
+        description: 'Opus with 1M context · Best for everyday, complex tasks',
       },
       {
         modelId: 'claude-fable-5-1[1m]',
         name: 'Fable',
-        description: 'Fable 5.1 · Most capable for your hardest and longest-running tasks',
+        description: 'Fable · Most capable for your hardest and longest-running tasks',
       },
       {
         modelId: 'sonnet',
         name: 'Sonnet',
-        description: 'Sonnet 5 · Efficient for routine tasks',
+        description: 'Sonnet · Efficient for routine tasks',
       },
       {
         modelId: 'haiku',
         name: 'Haiku',
-        description: 'Haiku 4.5 · Fastest for quick answers',
+        description: 'Haiku · Fastest for quick answers',
       },
     ]);
+  });
+
+  it('keeps static Claude model labels free of hardcoded versions', () => {
+    // Static labels are provisional first-render copy; exact versions arrive
+    // from the runtime probe. A hardcoded version here goes stale on every
+    // runtime bump that skips the static sync.
+    const capabilities = getStaticBuiltinAcpCapabilities('builtin', 'claude');
+    const texts = (capabilities?.models ?? []).flatMap((model) => [
+      model.name ?? '',
+      model.description ?? '',
+    ]);
+    expect(texts.filter((text) => /\d+\.\d+/.test(text))).toEqual([]);
   });
 
   it('matches the default model config options exposed to boolean-capable clients', () => {

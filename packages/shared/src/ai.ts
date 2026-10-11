@@ -937,22 +937,22 @@ const CLAUDE_STATIC_MODELS: StaticBuiltinAcpCapabilities['models'] = [
   {
     modelId: 'opus[1m]',
     name: 'Opus (1M context)',
-    description: 'Opus 5 with 1M context · Best for everyday, complex tasks',
+    description: 'Opus with 1M context · Best for everyday, complex tasks',
   },
   {
     modelId: 'claude-fable-5-1[1m]',
     name: 'Fable',
-    description: 'Fable 5.1 · Most capable for your hardest and longest-running tasks',
+    description: 'Fable · Most capable for your hardest and longest-running tasks',
   },
   {
     modelId: 'sonnet',
     name: 'Sonnet',
-    description: 'Sonnet 5 · Efficient for routine tasks',
+    description: 'Sonnet · Efficient for routine tasks',
   },
   {
     modelId: 'haiku',
     name: 'Haiku',
-    description: 'Haiku 4.5 · Fastest for quick answers',
+    description: 'Haiku · Fastest for quick answers',
   },
 ];
 
