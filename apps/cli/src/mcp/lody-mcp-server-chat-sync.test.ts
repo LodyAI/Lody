@@ -130,14 +130,12 @@ describe('session chat prevalidation sync failures', () => {
       inputConfig: {},
     });
     mocks.findMatchingRetry.mockReturnValue(undefined);
-    // Collaboration ancestry checks may reread the requester before target validation.
-    const sessions = new Map(
-      [requesterSession, targetSession].map((session) => [
-        getSessionRoomId(session.id as SessionId),
-        { meta: session },
-      ])
-    );
-    mocks.getDocMeta.mockImplementation(async (roomId: string) => sessions.get(roomId));
+    mocks.getDocMeta.mockImplementation(async (roomId: string) => {
+      const session = [requesterSession, targetSession].find(
+        (candidate) => getSessionRoomId(candidate.id as SessionId) === roomId
+      );
+      return session ? { meta: session } : undefined;
+    });
     mocks.validateSessionChatTarget.mockRejectedValue(
       new WorkspaceSyncUnavailableError({
         message: 'prewrite sync failed',

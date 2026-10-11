@@ -12,8 +12,15 @@ import { SessionRelationCard } from '../src/components/shared/session-relation-c
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import { CurrentSessionRelationsChip } from '../src/components/sessions/session-relations-chip';
 
-// This suite exercises relation navigation; collaboration mutations have their own coverage.
-vi.mock('../src/hooks/use-session-actions', () => ({ useSessionActions: () => ({}) }));
+// This suite exercises relation rendering and navigation; collaboration controls
+// and their workspace-backed actions have their own behavioral suites.
+vi.mock('../src/hooks/use-session-actions', () => ({
+  useSessionActions: () => ({
+    setTreeCollaborationStopped: async () => {
+      throw new Error('Collaboration actions are outside this navigation fixture');
+    },
+  }),
+}));
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
