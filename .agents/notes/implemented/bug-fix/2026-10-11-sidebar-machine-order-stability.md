@@ -34,6 +34,45 @@ for that identity change remains unverified. A `reconnecting` phase alone is
 insufficient: snapshots that still contain the same machine identity do not reorder
 this section.
 
+Static analysis traced identity loss upstream without changing runtime code.
+The [CLI reporter](../../../../apps/cli/src/lib/cli-runtime-state.ts) receives its
+machine id once in the startup command, before the local probe server starts;
+connectivity changes do not clear it. Electron instead observes availability:
+the [supervisor](../../../../packages/cli-supervisor/src/supervisor.ts) defaults to
+a 1,000 ms poll interval, an 800 ms request timeout and three consecutive failures
+before discarding the snapshot. An owned child can remain alive throughout this
+transition and recover with the same id. PID mismatches, ownership loss and process
+lifecycle transitions are separate paths that can also remove the snapshot.
+The [main-process adapter](../../../../apps/electron/src/main/services/cli-service.ts)
+folds every probe error, including connection, timeout and protocol errors, into
+`null`. It already retains `cachedMachineId` for `getLocalMachineId`, but
+`buildCliState` forwards only the supervisor's live snapshot. Consequently, the
+renderer can observe `A → null → A` without the CLI changing its machine id.
+
+Session navigation only changes the route; it does not restart the CLI or remount
+the app-level probe effect. Opening an uncached session can join a document room.
+The probe handler and local data-plane engine run in the same CLI process; the
+[engine](../../../../packages/shared/src/local-loro-data-plane-server.ts) exports
+Loro deltas and encodes payloads synchronously. Its shared scheduler yields between
+tasks and frames but cannot preempt a single export. Event-loop contention is
+therefore a candidate for probe timeouts, not a measured cause of the recording.
+In dual mode, identity loss also changes the workspace target router's local/cloud
+selection and invokes `refreshTransportRoutes`; recovery invokes it again. This
+can add synchronization work, but a feedback loop has not been demonstrated.
+Ordinary backend reconnection alone does not explain identity loss.
+
+There is also an initialization-only race: `localProbeEffectAtom` accepts the
+initial `getState` result and pushed states without a revision check, and an initial
+read rejection clears the live identity even after a valid push. This cannot
+explain repeated session-click fluctuations without an additional remount or reload.
+Current probe errors lose their classification at the main-process adapter, while
+CLI timer-lag warnings and stall profiling default to 5,000 ms and 4,000 ms
+thresholds respectively; absence of those logs cannot exclude shorter delays that
+exceed the 800 ms probe timeout. Establishing the original trigger requires
+correlated probe error, duration, PID and lifecycle evidence from the recording
+device. The implemented change stabilizes presentation; it does not repair or
+identify an upstream probe outage.
+
 `lastKnownLocalMachineIdAtom` retains a confirmed identity in renderer memory.
 `compareSidebarMachineOrder` applies it before ownership, name and id ordering.
 It affects only section placement: import/removal actions, current-machine labels,

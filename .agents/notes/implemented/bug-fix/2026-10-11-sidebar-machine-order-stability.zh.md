@@ -27,6 +27,33 @@ Electron 的 `buildCliState` 随后发布不含 `runtime` 的状态。
 而非已读状态或选中会话的排序。录制设备没有可关联的 CLI 日志，因此身份变化的上游原因
 尚未核实。仅有 `reconnecting` 阶段不够：快照仍带有相同本机身份时，这个分组不会因此换位。
 
+静态分析继续追踪了身份缺失的上游路径，未修改运行时代码。
+[CLI reporter](../../../../apps/cli/src/lib/cli-runtime-state.ts) 在启动命令中接收一次设备 id，
+此时本地探测服务尚未启动；连接状态变化不会清空它。Electron 观测的是可用性：
+[supervisor](../../../../packages/cli-supervisor/src/supervisor.ts) 默认每 1,000 ms 探测一次，
+请求超时为 800 ms，连续三次失败后丢弃快照。受管子进程可以在此期间始终存活，
+恢复后仍返回同一个 id。PID 不匹配、所有权丢失和进程生命周期变化是其他清空快照的路径。
+[主进程适配器](../../../../apps/electron/src/main/services/cli-service.ts) 将连接、超时、协议
+等所有探测错误统一转成 `null`。它已经为 `getLocalMachineId` 保留 `cachedMachineId`，
+但 `buildCliState` 只转发 supervisor 的实时快照。因此 CLI 无须改变设备 id，
+渲染器就可能看到 `A → null → A`。
+
+会话导航只改变路由，不重启 CLI，也不重新挂载应用级探测 effect。打开尚未缓存的会话
+可能加入文档 room。探测 handler 与本地数据通道引擎运行在同一个 CLI 进程中；
+[引擎](../../../../packages/shared/src/local-loro-data-plane-server.ts) 同步导出 Loro 增量
+并编码数据。共享 scheduler 会在任务和帧之间让出事件循环，但无法抢占一次导出。
+因此事件循环争用是探测超时的候选原因，并非原视频中已经测得的原因。
+在双通道模式下，身份缺失还会改变 workspace target router 的本地/云端选择并调用
+`refreshTransportRoutes`，身份恢复时再次调用。这可能增加同步工作，但尚未证明形成反馈循环。
+普通后端重连本身不能解释身份缺失。
+
+初始化阶段还有一处竞态：`localProbeEffectAtom` 接收首次 `getState` 结果与推送状态时
+没有检查版本，首次读取拒绝也会在已有有效推送后清空实时身份。没有额外的重挂载或重新加载，
+它无法解释反复点击会话时的波动。当前探测错误在主进程适配器中丢失分类；CLI 定时器延迟
+警告和阻塞采样默认阈值分别为 5,000 ms 和 4,000 ms，所以没有这些日志也不能排除超过
+800 ms 探测超时的较短延迟。确认原始触发原因需要录制设备上可关联的探测错误、耗时、PID
+与生命周期证据。已经实现的改动稳定展示顺序，并未修复或确认上游探测失效。
+
 `lastKnownLocalMachineIdAtom` 在渲染器内存中保留已确认的身份。
 `compareSidebarMachineOrder` 先按该身份排序，再按所属用户、名称和 id 排序。
 它只影响分组位置：导入和删除操作、本机标签、本地请求路由及启动门控仍使用实时输入。
