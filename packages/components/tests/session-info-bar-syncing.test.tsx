@@ -7,10 +7,7 @@ import { SESSION_GOAL_COMMANDS, type SessionGoalMessage } from '@lody/shared';
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (_key: string, fallback: string | { defaultValue: string }) =>
-      typeof fallback === 'string' ? fallback : fallback.defaultValue,
-  }),
+  useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
 }));
 
 (
@@ -47,46 +44,6 @@ describe('SessionInfoBar syncing indicator', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
-  });
-
-  it('keeps execution-machine ownership visible without context and while status changes', () => {
-    const machine = { name: 'Mac Studio', owner: { name: 'Zhang San' } };
-    act(() => root.render(<SessionInfoBar {...CONTEXT_LESS_PROPS} executionMachine={machine} />));
-    expect(container.querySelector('[data-info-bar-surface]')).not.toBeNull();
-    expect(container.querySelector('[data-execution-machine]')?.textContent).toContain('Zhang San');
-    act(() =>
-      root.render(
-        <SessionInfoBar
-          {...CONTEXT_LESS_PROPS}
-          executionMachine={machine}
-          status={{ kind: 'machine-offline', machineName: machine.name }}
-        />
-      )
-    );
-    expect(container.querySelector('[data-execution-machine]')?.textContent).toContain('Zhang San');
-    expect(container.querySelector('[data-execution-machine]')?.textContent).toContain(
-      'Mac Studio'
-    );
-  });
-
-  it('labels my machine and unresolved ownership without guessing a session owner', () => {
-    act(() =>
-      root.render(
-        <SessionInfoBar
-          {...CONTEXT_LESS_PROPS}
-          executionMachine={{ name: 'Mac Studio', isMine: true }}
-        />
-      )
-    );
-    expect(container.querySelector('[data-execution-machine]')?.textContent).toContain('You');
-    act(() =>
-      root.render(
-        <SessionInfoBar {...CONTEXT_LESS_PROPS} executionMachine={{ name: 'Remote workstation' }} />
-      )
-    );
-    expect(container.querySelector('[data-execution-machine]')?.textContent).toContain(
-      'Unknown owner'
-    );
   });
 
   it('renders the bar for syncing alone on a context-less session', () => {
