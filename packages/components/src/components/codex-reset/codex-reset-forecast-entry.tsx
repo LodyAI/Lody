@@ -80,7 +80,7 @@ const styles = stylex.create({
  * this component may fetch anything at all.
  *
  * NOTHING here loads on mount. The forecast is fetched from the interaction
- * that reveals it — opening the dialog from provider quota details, or opening the
+ * that reveals it — opening the dialog directly from a provider row, or opening the
  * usage popover in the composer — so a workspace nobody asks never requests it.
  */
 

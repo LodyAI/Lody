@@ -11,8 +11,8 @@ import {
   type MachineViewMeta,
 } from '@lody/shared';
 
-// Settings exposes forecasts through quota details; render the real provider row
-// to exercise its eligibility and the popover-to-dialog handoff.
+// Render the real provider row to exercise its direct forecast action,
+// eligibility, and placement beside read-only remaining quota.
 import { ProviderRow } from '@/components/settings/provider-row';
 import { SessionUsagePopover } from '@/components/sessions/session-usage-popover';
 import type { CodexResetStatus, CodexResetWatch } from '@/lib/codex-reset-forecast';
@@ -201,7 +201,7 @@ export const WithoutProbability: Story = {
 
 /**
  * No forecast in force: the popover row disappears entirely, while the provider
- * row keeps a quota-details entry that leads to the forecast dialog.
+ * row keeps its direct entry into the forecast dialog.
  */
 export const NoActiveWatch: Story = {
   args: { state: readyState({ watch: null, scheduledReset: null, latestReset: null }) },

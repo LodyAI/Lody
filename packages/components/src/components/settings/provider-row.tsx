@@ -26,7 +26,7 @@ import { AgentIcon } from '@/components/icons/agent-icon';
 import { useAcpSelectorOptions } from '@/hooks/use-acp-selector-options';
 import { formatLocalizedRelativeTime } from '@/lib/format-relative-time';
 import { Menu } from '@lody/ui/menu';
-import { ProviderUsageDetails } from './provider-usage-details';
+import { ProviderUsageSummary } from './provider-usage-summary';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import {
   canShowSubscriptionRateLimits,
@@ -223,7 +223,7 @@ export function ProviderRow({
   };
 
   const compact = variant === 'card';
-  const hasUsageDetails = rateLimitWindows.length > 0 || showResetForecast;
+  const hasUsageSummary = rateLimitWindows.length > 0 || showResetForecast;
   const facts = compact
     ? [
         kind,
@@ -270,9 +270,9 @@ export function ProviderRow({
             ) : null}
           </div>
         </button>
-        {hasUsageDetails ? (
+        {hasUsageSummary ? (
           <div {...stylex.props(styles.usage, !compact && styles.usageList)}>
-            <ProviderUsageDetails
+            <ProviderUsageSummary
               name={config.name}
               windows={rateLimitWindows}
               showResetForecast={showResetForecast}

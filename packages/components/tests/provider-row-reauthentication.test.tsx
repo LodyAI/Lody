@@ -100,7 +100,7 @@ describe('ProviderRow reauthentication', () => {
     expect(container.textContent).toContain('Opened detail for claude');
   });
 
-  it('loads the forecast only after opening it from quota details', async () => {
+  it('loads the forecast only after its direct action is selected', async () => {
     const store = createCodexResetForecastStore({
       fetchStatus: async () => ({
         status: { watch: null, scheduledReset: null, latestReset: null },
@@ -111,14 +111,9 @@ describe('ProviderRow reauthentication', () => {
     setCodexResetForecastStoreForTests(store);
     await renderConfig(makeConfig({ cliType: 'builtin', agentType: 'codex' }));
     expect(store.getState().status).toBe('idle');
-    expect(container.textContent).not.toContain('Reset forecast');
-    const quota = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="codex quota details"]'
-    );
-    expect(quota).not.toBeNull();
-    await act(async () => quota?.click());
-    expect(store.getState().status).toBe('idle');
-    const forecast = Array.from(document.querySelectorAll('button')).find(
+    expect(container.textContent).toContain('Reset forecast');
+    expect(container.textContent).not.toContain('Quota details');
+    const forecast = Array.from(container.querySelectorAll('button')).find(
       (button) => button.textContent === 'Reset forecast'
     );
     expect(forecast).toBeDefined();

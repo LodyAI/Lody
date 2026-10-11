@@ -209,61 +209,56 @@ for (const locale of ['en', 'zh_CN']) {
     'active-forecast-narrow-with-actions',
     'no-active-watch-with-actions',
   ]) {
-    test(`separates Provider quota, forecast and management: ${story}, ${locale}`, async ({
+    test(`opens the Provider forecast directly and keeps quota separate: ${story}, ${locale}`, async ({
       page,
     }) => {
       await page.goto(
         `/iframe.html?id=codexreset-codexresetforecastentry--${story}&viewMode=story&globals=locale:${locale};theme:dark`
       );
-      const quota = page.getByRole('button', { name: /Codex (quota details|额度详情)/ });
+      const entry = page.getByRole('button', { name: /^(Reset forecast|重置预测)$/ });
       const manage = page.getByRole('button', { name: /Manage Codex|管理 Codex/ });
-      const row = quota.locator('xpath=../../..');
-      await expectInside(quota, row);
-      await expect(quota).toHaveText(/^(Quota details|额度详情)$/);
+      const row = entry.locator('xpath=../../..');
+      await expectInside(entry, row);
       await expectInside(manage, row);
-      await expect(row.getByText(/Reset forecast|重置预测/)).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /quota details|额度详情/ })).toHaveCount(0);
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      const quota = row.getByRole('group', { name: /Codex (remaining quota|剩余额度)/ });
       if (story !== 'no-active-watch-with-actions') {
-        await expect(row).toContainText(/Remaining|剩余/);
-        await expect(row).toContainText('5h');
-        await expect(row).toContainText('59%');
-        await expect(row).toContainText('7d');
-        await expect(row).toContainText('71%');
-        await expect(row).not.toContainText('65%');
-      }
-      await page.evaluate(() => document.fonts.ready);
-      const idleQuota = await quota.boundingBox();
-      const idleManage = await manage.boundingBox();
-      await row.hover();
-      expect(await quota.boundingBox()).toEqual(idleQuota);
-      expect(await manage.boundingBox()).toEqual(idleManage);
-      await quota.focus();
-      await page.keyboard.press('Enter');
-      const details = page.getByRole('dialog', { name: /Codex (quota details|额度详情)/ });
-      await expect(details).toBeVisible();
-      if (story !== 'no-active-watch-with-actions') {
-        await expect(details.getByRole('progressbar', { name: /5h.*59%/ })).toHaveAttribute(
+        await expect(quota).toContainText(/Remaining|剩余/);
+        await expect(quota.getByRole('meter', { name: /5h.*59%/ })).toHaveAttribute(
           'aria-valuenow',
           '59'
         );
-        await expect(details.getByRole('progressbar', { name: /7d.*71%/ })).toHaveAttribute(
+        await expect(quota.getByRole('meter', { name: /7d.*71%/ })).toHaveAttribute(
           'aria-valuenow',
           '71'
         );
       } else {
-        await expect(details.getByText(/did not report usage|未提供此套餐/)).toBeVisible();
+        await expect(quota).toHaveCount(0);
       }
-      await expect(details.getByText(/Third-party reset forecast|第三方重置预测/)).toBeVisible();
-      await details.getByRole('button', { name: /^(Reset forecast|重置预测)$/ }).click();
+      await expect(row).not.toContainText('65%');
+      await page.evaluate(() => document.fonts.ready);
+      const idleEntry = await entry.boundingBox();
+      const idleManage = await manage.boundingBox();
+      await row.hover();
+      expect(await entry.boundingBox()).toEqual(idleEntry);
+      expect(await manage.boundingBox()).toEqual(idleManage);
+      await entry.focus();
+      await page.keyboard.press('Enter');
       const forecast = page.getByRole('dialog', { name: /Codex reset forecast|Codex 重置预测/ });
       await expect(forecast).toBeVisible();
+      await expect(page.getByRole('dialog')).toHaveCount(1);
       await expect
         .poll(() => forecast.evaluate((el) => el.contains(document.activeElement)))
         .toBe(true);
-      await expect(details).toBeHidden();
       if (story !== 'no-active-watch-with-actions') await expect(forecast).toContainText('65%');
       await page.keyboard.press('Escape');
       await expect(forecast).toBeHidden();
-      await expect(quota).toBeFocused();
+      await expect(entry).toBeFocused();
+      await entry.click();
+      await expect(forecast).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(forecast).toBeHidden();
       await manage.click();
       const menu = page.getByRole('menu');
       await expect(menu.getByText('Codex', { exact: true })).toBeVisible();
@@ -280,25 +275,21 @@ for (const locale of ['en', 'zh_CN']) {
 }
 
 for (const locale of ['en', 'zh_CN']) {
-  test(`keeps additional Provider quota windows in details at narrow widths: ${locale}`, async ({
-    page,
-  }) => {
+  test(`shows every Provider quota window at narrow widths: ${locale}`, async ({ page }) => {
     await page.goto(
       `/iframe.html?id=settings-providerrow--claude-with-rate-limit-narrow&viewMode=story&globals=locale:${locale};theme:dark`
     );
-    const quota = page.getByRole('button', { name: /Claude Code (quota details|额度详情)/ });
-    const row = quota.locator('xpath=../../..');
+    const manage = page.getByRole('button', { name: /Manage Claude Code|管理 Claude Code/ });
+    await expect(manage).toBeVisible();
+    const row = manage.locator('xpath=../..');
+    const quota = row.getByRole('group', { name: /Claude Code (remaining quota|剩余额度)/ });
     await expectInside(quota, row);
-    await expectInside(
-      page.getByRole('button', { name: /Manage Claude Code|管理 Claude Code/ }),
-      row
-    );
-    await expect(row).toContainText('+1');
-    await expect(quota).toHaveAccessibleDescription(/5h.*45%.*7d.*68%.*Fable.*33%/);
-    await quota.click();
-    const details = page.getByRole('dialog', { name: /Claude Code (quota details|额度详情)/ });
-    await expect(details.getByRole('progressbar')).toHaveCount(3);
-    await expect(details.getByRole('progressbar', { name: /Fable.*33%/ })).toBeVisible();
-    await expect(details.getByText(/Reset forecast|重置预测/)).toHaveCount(0);
+    await expectInside(manage, row);
+    await expect(quota.getByRole('meter')).toHaveCount(3);
+    for (const meter of await quota.getByRole('meter').all()) await expectInside(meter, row);
+    await expect(quota.getByRole('meter', { name: /Fable.*33%/ })).toBeVisible();
+    await expect(
+      row.getByRole('button', { name: /quota details|额度详情|Reset forecast|重置预测/ })
+    ).toHaveCount(0);
   });
 }
