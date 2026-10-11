@@ -14,6 +14,8 @@ name ordering and moved again when the snapshot recovered. A separate presentati
 identity now retains the last confirmed machine for ordering while local actions
 continue to use live runtime state. Disabling the local agent clears the preference;
 a newly reported machine identity replaces it.
+Probe traces now distinguish request failures and recovery; the original outage
+trigger remains unverified.
 
 ## Decision and evidence
 
@@ -54,8 +56,14 @@ the app-level probe effect. Opening an uncached session can join a document room
 The probe handler and local data-plane engine run in the same CLI process; the
 [engine](../../../../packages/shared/src/local-loro-data-plane-server.ts) exports
 Loro deltas and encodes payloads synchronously. Its shared scheduler yields between
-tasks and frames but cannot preempt a single export. Event-loop contention is
-therefore a candidate for probe timeouts, not a measured cause of the recording.
+tasks and frames but cannot preempt a single export. Inbound updates run through a
+Promise chain outside this scheduler and synchronously import the reassembled
+document delta. The frame limit is 32 MiB; chunking limits individual wire frames,
+not the complete import or its CPU duration. Event-loop contention is therefore
+a candidate for probe timeouts, not a measured cause of the recording. Local room
+cloud hydration is bounded to four tasks and does not activate SessionDocument
+wrappers. In dual mode, known-remote session rooms mount only the cloud transport,
+so clicking any session cannot be assumed to cause a local CLI document import.
 In dual mode, identity loss also changes the workspace target router's local/cloud
 selection and invokes `refreshTransportRoutes`; recovery invokes it again. This
 can add synchronization work, but a feedback loop has not been demonstrated.
@@ -65,13 +73,34 @@ There is also an initialization-only race: `localProbeEffectAtom` accepts the
 initial `getState` result and pushed states without a revision check, and an initial
 read rejection clears the live identity even after a valid push. This cannot
 explain repeated session-click fluctuations without an additional remount or reload.
-Current probe errors lose their classification at the main-process adapter, while
-CLI timer-lag warnings and stall profiling default to 5,000 ms and 4,000 ms
+Before this investigation, probe errors lost their classification at the
+main-process adapter. CLI timer-lag warnings and stall profiling default to
+5,000 ms and 4,000 ms
 thresholds respectively; absence of those logs cannot exclude shorter delays that
 exceed the 800 ms probe timeout. Establishing the original trigger requires
 correlated probe error, duration, PID and lifecycle evidence from the recording
 device. The implemented change stabilizes presentation; it does not repair or
 identify an upstream probe outage.
+
+Inspection of available local logs found backend reconnect transitions that
+retained runtime snapshots, and a startup gap before the probe server listened.
+It did not establish repeated snapshot loss on the recording device. Installed
+desktop renderer bundles use the same snapshot-based identity derivation, but
+the installed files do not establish the version loaded by a running process or
+the version used in the recording.
+
+`CliService` now observes typed probe errors before returning `null`.
+`createCliProbeTrace` writes error type, request duration and timeout, child PID,
+HTTP status when applicable, and consecutive request failures. It logs the first
+and third failure, changes in error type, and continuing failures every 30 seconds;
+recovery records the observed PID and whether a nonblank machine id is present.
+The count includes startup/reconcile requests and is not the supervisor's poll
+counter. Healthy polling stays silent. Payloads, causes, error messages and actual
+machine ids are excluded; tracing failures cannot alter the probe result.
+Supervisor transition logs also include identity presence. This corrects the
+overbroad reconnecting/stall inference in the earlier
+[daily-log tracing note](../feature/2026-09-25-daily-log-crash-and-stall-tracing.md).
+No timeout, routing or process-lifecycle behavior changed.
 
 `lastKnownLocalMachineIdAtom` retains a confirmed identity in renderer memory.
 `compareSidebarMachineOrder` applies it before ownership, name and id ordering.
@@ -115,3 +144,10 @@ and selected-session read updates were fixture inputs. This browser renderer
 acceptance does not exercise a live Electron process or establish which CLI states
 occurred in the user's original recording.
 The recording and its fixture remain in ignored local artifacts.
+The existing desktop-log suite also verifies persisted probe classifications,
+failure milestones, the 30-second summary boundary, recovery/reset, exclusion of
+private payload fields and survival of a failing diagnostic sink using an injected
+clock. All nine tests passed.
+The Electron suite passed all 214 tests outside the sandbox after its loopback
+lease tests initially failed with `listen EPERM`. The desktop-log suite also
+passed with a negative-offset timezone; log-file lookup uses the local-date helper.
