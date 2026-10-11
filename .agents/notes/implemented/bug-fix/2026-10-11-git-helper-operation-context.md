@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1476](https://github.com/LodyAI/Lody/pull/1476)
 
 [中文](2026-10-11-git-helper-operation-context.zh.md)
 
