@@ -3698,6 +3698,13 @@ export const __lodyMcpServerInternals = {
   readMcpSessionStatusTargets,
 };
 
+const SESSION_COLLABORATION_GUIDANCE = [
+  'Send inter-session messages only when they advance the user task with actionable work, a necessary question, or material new information.',
+  'Do not send acknowledgment-only, thank-you, goodbye, redundant status, or repeated completion messages; do not ask another agent to acknowledge receipt.',
+  'Delegated work returns its result automatically. Finish with your result in your own conversation instead of sending the same result back through a session tool. On receiving a completion, follow up only if substantive work remains; otherwise report to the user and stop.',
+  `The causal delegation chain is limited to ${LODY_MAX_CHAIN_DEPTH} hops. If CHAIN_DEPTH_EXCEEDED is returned, stop delegating and report the remaining work to the user; do not retry or create another session to evade the limit.`,
+].join(' ');
+
 export function buildLodyMcpServer(): McpServer {
   return buildSessionToolServer();
 }
@@ -3717,6 +3724,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
         'Session mentions use [@Title](lody://session/<sessionId>?workspace=<workspaceId>); old transcripts may use session://<sessionId>.',
         'To read that conversation, pass the full URI as sessionId to lody_session_history. The workspace must match this tool context. Bare session IDs are also accepted; use the exact child session ID to read a child conversation.',
         'Paginate with nextCursor when you need older turns.',
+        SESSION_COLLABORATION_GUIDANCE,
       ].join(' '),
     }
   );
@@ -4085,7 +4093,8 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Create a Lody session',
       description:
-        'Start durable asynchronous work that creates a Lody session. Supply operationId; the result arrives automatically as a continuation, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only.',
+        'Start durable asynchronous work that creates a Lody session. Supply operationId; the result arrives automatically as a continuation, so do not poll operation_get. To use an Agent Role, pass agentRoleId; the current workspace catalog row supplies the exact Machine, Agent config, model, reasoning, and permission mode. If manual machine or run-config fields are also present, the Role takes precedence and those fields are ignored. A Role may run on any Machine the owner of this Machine can use; to work in a project there, pass workContext for a local project on that Machine (find it with lody_session_create_options machineId + localProjectQuery). Without workContext a Role on another Machine starts as a plain chat there. To recover an already accepted create without resending its prompt, send only operationId with resume=true. useCurrentSessionAsParent=true and workContext are mutually exclusive schema branches. Machine/config ids and runConfig values for non-Role creates come from lody_session_create_options. The wait field is temporary legacy compatibility only. ' +
+        SESSION_COLLABORATION_GUIDANCE,
       inputSchema: SessionCreateToolInputSchema,
     },
     async (input) => {
@@ -4180,7 +4189,8 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Send a prompt to a Lody session',
       description:
-        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and completion arrives automatically as a continuation, so do not poll operation_get in a loop. The wait field is temporary legacy compatibility only.',
+        'Start durable asynchronous work by appending a prompt to another authorized online Lody session. Supply operationId; the tool returns immediately and completion arrives automatically as a continuation, so do not poll operation_get in a loop. The wait field is temporary legacy compatibility only. ' +
+        SESSION_COLLABORATION_GUIDANCE,
       inputSchema: SessionChatToolInputSchema,
     },
     async (args: SessionChatToolInput) => {
@@ -4246,7 +4256,8 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Create multiple Lody sessions',
       description:
-        'Start one durable batch Operation for 1-20 Session creates. defaults and items shallow-merge; nested objects replace wholesale. Each item may use an agentRoleId from the workspace catalog. When a Role item also includes manual machine, agent config, or run-config fields, the Role takes precedence and those fields are ignored. Non-Role items accept modeId, configOptionValues, modelId, reasoningEffort, fastMode, and planMode using target advertised capabilities from lody_session_create_options. Explicit permissions may be broader than the parent; choose only within the user authorization granted to the caller. Ordered item failures are isolated. Completion arrives automatically as one continuation, so do not poll operation_get in a loop.',
+        'Start one durable batch Operation for 1-20 Session creates. defaults and items shallow-merge; nested objects replace wholesale. Each item may use an agentRoleId from the workspace catalog. When a Role item also includes manual machine, agent config, or run-config fields, the Role takes precedence and those fields are ignored. Non-Role items accept modeId, configOptionValues, modelId, reasoningEffort, fastMode, and planMode using target advertised capabilities from lody_session_create_options. Explicit permissions may be broader than the parent; choose only within the user authorization granted to the caller. Ordered item failures are isolated. Completion arrives automatically as one continuation, so do not poll operation_get in a loop. ' +
+        SESSION_COLLABORATION_GUIDANCE,
       inputSchema: SessionCreateManyToolInputSchema,
     },
     async (input) => {
@@ -4264,7 +4275,8 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Chat multiple Lody sessions',
       description:
-        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. Completion arrives automatically as one continuation, so do not poll operation_get in a loop.',
+        'Start one durable batch Operation for 1-20 Session chats. defaults and items shallow-merge; nested objects replace wholesale. Ordered item failures are isolated. Completion arrives automatically as one continuation, so do not poll operation_get in a loop. ' +
+        SESSION_COLLABORATION_GUIDANCE,
       inputSchema: SessionChatManyToolInputSchema,
     },
     async (args: SessionChatManyToolInput) => {

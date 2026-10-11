@@ -6,7 +6,7 @@ Translation: current
 [English](session-orchestration.md)
 
 Agent 通过 Lody 委派异步工作时，每个委派目标都会从发起它的人类 Turn
-继续同一条因果链。Lody 最多接受 32 次这样的跳转。已经处于深度 32 的
+继续同一条因果链。Lody 最多接受 16 次这样的跳转。已经处于深度 16 的
 Turn 再发起命令时，会在创建 Operation 或目标 Session 之前被拒绝，并返回
 不可重试的 `CHAIN_DEPTH_EXCEEDED` 错误。
 
@@ -86,5 +86,5 @@ Cloud 确认远端文档追平；OSS 确认权威 daemon repo，并在已有创�
 `packages/shared/src/session-orchestration.ts`，可执行 Operation 模型位于
 `apps/cli/src/orchestration/operation-model.ts`。
 
-本草稿记录将上限改为 32 的请求。依赖安装后仍需补充运行时和已发布客户端
+本草稿记录将上限改为 16 的请求。依赖安装后仍需补充运行时和已发布客户端
 验收。

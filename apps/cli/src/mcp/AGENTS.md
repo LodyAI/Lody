@@ -48,6 +48,9 @@ Parent instructions apply. Background: [README.md](README.md).
 
 ## Session tool contracts
 
+- Keep the shared causal chain cap and MCP guidance aligned: create/chat tools forbid
+  courtesy-only messages, duplicate result callbacks, and evading the depth limit.
+
 - `lody_ios_simulator_preview` is the native-app tool; web previews remain
   `lody_report_preview_candidate`. Bind local agent-control RPC to MCP session context;
   the daemon resolves the active user. Return operation handles, never viewer URLs or

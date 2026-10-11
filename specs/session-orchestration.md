@@ -6,8 +6,8 @@ Translation: current
 [中文](session-orchestration.zh.md)
 
 When an Agent delegates asynchronous work through Lody, each delegated target
-continues the causal chain from the driving human turn. Lody accepts at most 32
-such hops. A command issued by a turn already at depth 32 is rejected before an
+continues the causal chain from the driving human turn. Lody accepts at most 16
+such hops. A command issued by a turn already at depth 16 is rejected before an
 Operation or target Session is created, with the non-retryable
 `CHAIN_DEPTH_EXCEEDED` error.
 
@@ -103,5 +103,5 @@ The implementation guard is `apps/cli/src/mcp/lody-mcp-server.ts`, the shared
 limit is `packages/shared/src/session-orchestration.ts`, and the executable
 Operation model is `apps/cli/src/orchestration/operation-model.ts`.
 
-This draft records the requested limit of 32. Runtime and deployed-client
+This draft records the requested limit of 16. Runtime and deployed-client
 acceptance remain to be verified after dependencies are installed.
