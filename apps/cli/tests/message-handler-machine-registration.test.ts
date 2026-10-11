@@ -207,6 +207,7 @@ describe('MessageHandler machine registration', () => {
       schedules: 2,
       preparedSessionInput: 1,
       sessionInputAttachments: 1,
+      sessionCollaborationControl: 1,
     });
 
     await handler.cleanup();

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getSessionRoomId, type SessionId } from '@lody/shared';
 
 const mocks = vi.hoisted(() => ({
   accept: vi.fn(),
@@ -129,9 +130,14 @@ describe('session chat prevalidation sync failures', () => {
       inputConfig: {},
     });
     mocks.findMatchingRetry.mockReturnValue(undefined);
-    mocks.getDocMeta
-      .mockResolvedValueOnce({ meta: requesterSession })
-      .mockResolvedValueOnce({ meta: targetSession });
+    // Collaboration ancestry checks may reread the requester before target validation.
+    const sessions = new Map(
+      [requesterSession, targetSession].map((session) => [
+        getSessionRoomId(session.id as SessionId),
+        { meta: session },
+      ])
+    );
+    mocks.getDocMeta.mockImplementation(async (roomId: string) => sessions.get(roomId));
     mocks.validateSessionChatTarget.mockRejectedValue(
       new WorkspaceSyncUnavailableError({
         message: 'prewrite sync failed',

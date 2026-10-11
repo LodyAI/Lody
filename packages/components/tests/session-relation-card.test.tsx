@@ -12,6 +12,9 @@ import { SessionRelationCard } from '../src/components/shared/session-relation-c
 import { SessionInfoBar } from '../src/components/sessions/session-info-bar';
 import { CurrentSessionRelationsChip } from '../src/components/sessions/session-relations-chip';
 
+// This suite exercises relation navigation; collaboration mutations have their own coverage.
+vi.mock('../src/hooks/use-session-actions', () => ({ useSessionActions: () => ({}) }));
+
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
