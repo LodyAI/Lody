@@ -131,6 +131,7 @@ function createAuthError(): Error {
 
 function createPrDetailsResult(pr: GitHubPullRequestDetails = pullRequest) {
   return {
+    canWrite: true,
     state: 'ready' as const,
     data: {
       pullRequest: pr,
@@ -241,6 +242,24 @@ describe('PrTabContainer ready-for-review auth recovery', () => {
     }
     return button;
   }
+
+  it('shows public PR details without mutation controls or a comment composer', async () => {
+    mocks.useGitHubPrDetails.mockReturnValue({
+      ...createPrDetailsResult(mergeablePullRequest),
+      canWrite: false,
+    });
+    await renderContainer();
+    expect(container?.textContent).toContain(mergeablePullRequest.title);
+    expect(
+      Array.from(container?.querySelectorAll('button') ?? []).some(
+        (button) =>
+          /Merge|Close pull request|Ready for review|Delete branch/.test(
+            button.textContent ?? ''
+          ) && !button.disabled
+      )
+    ).toBe(false);
+    expect(container?.querySelector('textarea')).toBeNull();
+  });
 
   it('refreshes once and retries without showing a toast on the first auth failure', async () => {
     mocks.markReadyForReview

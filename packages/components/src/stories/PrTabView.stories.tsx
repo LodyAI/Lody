@@ -541,6 +541,16 @@ export const LongBody: Story = {
   },
 };
 
+export const PublicReadOnly: Story = {
+  args: {
+    repoFullName: 'owner/public-repo',
+    prNumber: 42,
+    state: 'ready',
+    data: baseData,
+    onRefresh: async () => {},
+  },
+};
+
 export const Loading: Story = {
   args: {
     repoFullName: 'loro-dev/lody',

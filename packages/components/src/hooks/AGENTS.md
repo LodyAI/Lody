@@ -12,6 +12,11 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 - A cached session renders in the frame after its click: no promise tick,
   effect-only state or deferred setState before its first cycle.
 
+## GitHub PR access
+
+- Public PR reads grant no hosted write access and never reuse authenticated
+  caches. Known repository IDs must match.
+
 ## Sharing errors
 
 - Keep error operation context independent of React progress state (which resets in
