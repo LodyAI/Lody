@@ -33,6 +33,11 @@ Worker initialization failures close the failed client before releasing its leas
 Retire subprocess binary and client-path discovery. Historical owner architecture
 is described by the [transition proposal](2026-09-30-roost-transition-delivery-lifecycle.md).
 
+The later [writer identity change](2026-10-11-roost-writer-identity.md) removes the
+credential-store prerequisite through application-managed persistence, implemented
+separately from this native runtime integration. Independent-replica enrollment and
+synchronization remain proposed; previous Nightly keyrings are not migrated.
+
 Externalize the native npm package intact so its client, Worker, and binding
 keep their relative paths. Electron stages it in `resources/cli/node_modules`
 and copies it into `app.asar.unpacked` before signing. Select exactly one of the
@@ -189,10 +194,10 @@ warm OS page cache, Apple M4 / macOS arm64 / Node 24.14.0, 4 KiB bodies, one war
 and five measured samples. Medians in milliseconds:
 
 | History rows | Roost latest 40 | Loro latest 40 | Roost older 40 | Roost final-user edit | Roost complete directory |
-| --- | --- | --- | --- | --- | --- |
-| 1,000 | 63.0 | 88.1 | 36.2 | 39.8 | 910.2 |
-| 6,000 | 68.9 | 550.3 | 44.7 | 60.8 | 5,721.3 |
-| 10,000 | 58.4 | 820.3 | 42.3 | 56.5 | 9,374.9 |
+| ------------ | --------------- | -------------- | -------------- | --------------------- | ------------------------ |
+| 1,000        | 63.0            | 88.1           | 36.2           | 39.8                  | 910.2                    |
+| 6,000        | 68.9            | 550.3          | 44.7           | 60.8                  | 5,721.3                  |
+| 10,000       | 58.4            | 820.3          | 42.3           | 56.5                  | 9,374.9                  |
 
 At 6,000 rows (about 3,000 rounds), latest-window P95 is 74.2 ms and edit P95
 61.4 ms; at 10,000 rows they are 60.7 ms and 58.7 ms. All 15 measured Roost edits

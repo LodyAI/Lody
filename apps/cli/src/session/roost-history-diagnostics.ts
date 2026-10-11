@@ -3,6 +3,7 @@ import { RoostHostError } from '@loro-dev/roost-node';
 import { version } from '@/pkg';
 import { getDesktopBuildDescription } from '@/utils/desktop-build';
 import { getLogger, type Logger } from '@/utils/logger';
+import { RoostIdentityError } from './roost-writer-identity';
 
 type FailureContext = {
   readonly stage: 'initialize' | 'worker' | 'read' | 'write' | 'close';
@@ -32,6 +33,10 @@ const codes = new Set([
   'messageLimit',
   'queueLimit',
   'cancelledBeforeDispatch',
+  'identityMissing',
+  'identityInvalid',
+  'identityConflict',
+  'identityStorage',
 ]);
 
 export class RoostHistoryFailure extends Error {
@@ -72,7 +77,7 @@ export function reportRoostHistoryFailure(
   }
   const code =
     chain
-      .filter((entry) => entry instanceof RoostHostError)
+      .filter((entry) => entry instanceof RoostHostError || entry instanceof RoostIdentityError)
       .map((entry) => entry.code)
       .find((value) => codes.has(value)) ?? 'historyFailure';
   const failure =
@@ -95,7 +100,7 @@ export function reportRoostHistoryFailure(
       platform: process.platform,
       arch: process.arch,
       // Explicit Error fields only: no history/request payloads, options,
-      // credential-store seed, or arbitrary properties on a thrown object.
+      // signing seed, or arbitrary properties on a thrown object.
       errors: chain.map((entry) => ({
         name: entry.name,
         message: entry.message,
@@ -116,6 +121,7 @@ export function describeRoostHistoryFailure(
   if (
     !(error instanceof Error) ||
     (!(error instanceof RoostHostError) &&
+      !(error instanceof RoostIdentityError) &&
       !(error instanceof RoostHistoryFailure) &&
       !diagnosticIds.has(error))
   )

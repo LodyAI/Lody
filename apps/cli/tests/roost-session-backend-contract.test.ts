@@ -35,6 +35,7 @@ import { describeRoostHistoryFailure } from '../src/session/roost-history-diagno
 import { RoostHistoryGeneration } from '../src/session/roost-history-generation';
 import { encodeRoostContent } from '../src/session/roost-history-port';
 import { readGoalProjection } from '../src/session/roost-goal-projection';
+import { loadRoostOwnerSeedLegacy } from '../src/session/roost-writer-identity';
 import type { SessionBackendContractFixtureFactory } from './session-backend-contract';
 import { defineSessionBackendContract } from './session-backend-contract';
 let nativeDirectory: string;
@@ -45,7 +46,6 @@ beforeAll(async () => {
   nativeDirectory = await mkdtemp(join(tmpdir(), 'lody-production-roost-'));
   installRoostNodeSessionBackend({
     dbPath: join(nativeDirectory, 'history.db'),
-    seed: new Uint8Array(32).fill(39),
   });
 });
 afterAll(async () => {
@@ -289,75 +289,97 @@ describe('Production Roost history semantics', () => {
     expect(fixture.doc.handle?.doc.getList('history').length).toBe(0);
   });
 
-  it('uses the target owner RPC factory instead of the installed native factory and propagates owner failures', async () => {
+  it('serves different members and devices through owner RPC and preserves access failures', async () => {
     const owner = await nativeFixture();
     await owner.backend.appendHistoryTurn(nativeUser('remote-u'));
     await owner.repo.upsertDocMeta(getMachineRoomId('test-machine'), {
       id: 'test-machine',
       protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
     });
-    const auth = {
-      token: 'synthetic-cli-token',
-      machineId: 'source-machine',
-      userId: 'test-user',
-    } as AuthContext;
     let denied = false;
-    const factory = createCommandSessionHistoryFactory(
-      () => ({ repo: owner.repo, waitUntilMetaSynced: async () => true }) as LoroDocumentManager,
-      auth,
-      'test-workspace',
-      async (target, run) => {
-        expect(target.machineId).toBe('test-machine');
-        expect(target.auth).toBe(auth);
-        return run({
-          requestSessionHistoryRead: async (request: {
-            sessionId: string;
-            ownerSessionId: string;
-          }) => {
-            expect(request.sessionId).toBe(owner.doc.sessionId);
-            expect(request.ownerSessionId).toBe(owner.doc.sessionId);
-            return {
-              type: 'session/history-read_response',
-              sessionId: owner.doc.sessionId,
-              success: !denied,
-              ...(denied
-                ? { error: 'Owner access refused' }
-                : { result: await owner.backend.readHistory() }),
-            };
-          },
-          requestSessionHistoryWrite: async (request: {
-            sessionId: string;
-            ownerSessionId: string;
-            operation: string;
-            payload: { entry: SessionHistoryInput };
-          }) => {
-            expect(request.ownerSessionId).toBe(owner.doc.sessionId);
-            if (request.operation !== 'append') throw new Error('Unsupported test operation');
-            await owner.backend.appendHistoryTurn(request.payload.entry);
-            return {
-              type: 'session/history-write_response',
-              sessionId: owner.doc.sessionId,
-              operation: request.operation,
-              success: true,
-              historyCount: await owner.backend.history.count(),
-            };
-          },
-        } as never);
-      }
+    const remoteClient = async (auth: AuthContext) => {
+      const factory = createCommandSessionHistoryFactory(
+        () => ({ repo: owner.repo, waitUntilMetaSynced: async () => true }) as LoroDocumentManager,
+        auth,
+        'test-workspace',
+        async (target, run) => {
+          expect(target.machineId).toBe('test-machine');
+          expect(target.auth).toBe(auth);
+          if (denied) throw new Error('Owner access refused');
+          return run({
+            requestSessionHistoryRead: async (request: {
+              sessionId: string;
+              ownerSessionId: string;
+            }) => {
+              expect(request.sessionId).toBe(owner.doc.sessionId);
+              expect(request.ownerSessionId).toBe(owner.doc.sessionId);
+              return {
+                type: 'session/history-read_response',
+                sessionId: owner.doc.sessionId,
+                success: true,
+                result: await owner.backend.readHistory(),
+              };
+            },
+            requestSessionHistoryWrite: async (request: {
+              sessionId: string;
+              ownerSessionId: string;
+              operation: string;
+              payload: { entry: SessionHistoryInput };
+            }) => {
+              expect(request.ownerSessionId).toBe(owner.doc.sessionId);
+              if (request.operation !== 'append') throw new Error('Unsupported test operation');
+              await owner.backend.appendHistoryTurn(request.payload.entry);
+              return {
+                type: 'session/history-write_response',
+                sessionId: owner.doc.sessionId,
+                operation: request.operation,
+                success: true,
+                historyCount: await owner.backend.history.count(),
+              };
+            },
+          } as never);
+        }
+      );
+      return nativeFixture(owner.doc.sessionId, false, factory);
+    };
+    const devices = [
+      { userId: 'member-a', machineId: 'device-a1', token: 'synthetic-a1' },
+      { userId: 'member-b', machineId: 'device-b1', token: 'synthetic-b1' },
+      { userId: 'member-a', machineId: 'device-a2', token: 'synthetic-a2' },
+    ] as AuthContext[];
+    const clients = await Promise.all(devices.map(remoteClient));
+    for (const client of clients)
+      expect(await client.backend.readHistory()).toMatchObject([{ id: 'remote-u' }]);
+    await Promise.all(
+      clients.map((client, index) => {
+        const device = devices[index];
+        if (!device) throw new Error('Synthetic client has no device context');
+        const userId = device.userId;
+        return client.backend.appendHistoryTurn({
+          ...nativeUser(`remote-added-${index}`),
+          userId,
+          author: { v: 1, kind: 'human', userId },
+        });
+      })
     );
-    const client = await nativeFixture(owner.doc.sessionId, false, factory);
-    expect(await client.backend.readHistory()).toMatchObject([{ id: 'remote-u' }]);
-    await client.backend.appendHistoryTurn(nativeUser('remote-added'));
-    expect((await owner.backend.readHistory()).map((entry) => entry.id)).toEqual([
-      'remote-u',
-      'remote-added',
+    const before = await owner.backend.readHistory();
+    expect(before.map(({ id, userId, author }) => ({ id, userId, author }))).toEqual([
+      { id: 'remote-u', userId: 'test-user', author: undefined },
+      ...devices.map(({ userId }, index) => ({
+        id: `remote-added-${index}`,
+        userId,
+        author: { v: 1, kind: 'human', userId },
+      })),
     ]);
+    for (const client of clients) expect(await client.backend.readHistory()).toEqual(before);
     denied = true;
-    await expect(client.backend.readHistory()).rejects.toThrow('Owner access refused');
-    expect((await owner.backend.readHistory()).map((entry) => entry.id)).toEqual([
-      'remote-u',
-      'remote-added',
-    ]);
+    for (const client of clients) {
+      await expect(client.backend.readHistory()).rejects.toThrow('Owner access refused');
+      await expect(client.backend.appendHistoryTurn(nativeUser('refused-input'))).rejects.toThrow(
+        'Owner access refused'
+      );
+    }
+    expect(await owner.backend.readHistory()).toEqual(before);
   });
 
   it('publishes logical corrections to observers and keeps streaming reads bounded', async () => {
@@ -465,7 +487,7 @@ describe('Production Roost history semantics', () => {
 
   it('copies opaque stored values into an empty target without validating them as newly authored items', async () => {
     const id = `opaque-${ordinal++}` as SessionId;
-    const seed = new Uint8Array(32).fill(39);
+    const seed = await loadRoostOwnerSeedLegacy(join(nativeDirectory, 'history.db'));
     const owner = Identity.fromSeed(seed).owner();
     const client = new RoostNativeClient({
       dbPath: join(nativeDirectory, 'history.db'),
@@ -604,7 +626,7 @@ describe('Production Roost history semantics', () => {
         ...nativeAssistant(`tail-a-${index}`),
         finished: true,
       });
-    const seed = new Uint8Array(32).fill(39);
+    const seed = await loadRoostOwnerSeedLegacy(join(nativeDirectory, 'history.db'));
     const owner = Identity.fromSeed(seed).owner();
     const client = new RoostNativeClient({
       dbPath: join(nativeDirectory, 'history.db'),
@@ -722,7 +744,7 @@ describe('Production Roost history semantics', () => {
     } finally {
       full.mockRestore();
     }
-    const seed = new Uint8Array(32).fill(39);
+    const seed = await loadRoostOwnerSeedLegacy(join(nativeDirectory, 'history.db'));
     const client = new RoostNativeClient({
       dbPath: join(nativeDirectory, 'history.db'),
       seed,

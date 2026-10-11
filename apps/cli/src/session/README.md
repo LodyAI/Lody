@@ -27,6 +27,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
 - `session-dispatch-logic.ts` — pure decision functions for the watcher (testable).
 - `roost-node-session.ts` — owns Roost history reads/writes and its bounded active-branch
   page cache; `roost-session-backend.ts` joins it to the existing Loro control plane.
+- `roost-writer-identity.ts` — persists the replica's signing identity in private
+  application data, independent of login credentials and the system credential store.
 - `roost-history-generation.ts` — stages structural replacements privately and
   atomically activates them, fencing writes through superseded handles.
 - `roost-history-diagnostics.ts` — correlates local Worker causes and runtime details
@@ -334,6 +336,40 @@ Web/iOS clients need no Node addon. The owning machine must be available for RPC
 reads; browser-local IndexedDB replicas and offline sync are separate work.
 Runtime packaging and verification: [native runtime note](../../../../.agents/notes/proposed/architecture/2026-10-09-roost-native-runtime.md).
 
+### Roost writer identity
+
+Each Node history database has a separate host-private identity database at
+`<history path>.identity.sqlite3`. Its versioned seed/public-key pair is created once
+inside an immediate SQLite transaction, committed with `synchronous=FULL`, and read
+back before the history Worker starts. Independent processes reuse the winning
+identity. On POSIX the identity file is private (`0600`); Windows relies on the
+application data directory's account ACL. Neither seed nor identity metadata enters
+history streams, exports, RPC or diagnostics. Back up the history database and its
+identity database together, using a consistent SQLite backup while writers are stopped.
+
+The execution replica signs physical Turns, while each input retains the actual
+human `userId` and `author`. Multiple users and devices access a shared execution
+machine through the existing authorized history RPC; clients do not copy its seed.
+An independently writable local machine gets its own identity. This change does
+not compose cloud history replicas or enable offline input submission.
+
+Roost never opens the system keyring or reads `LODY_ROOST_SEED_HEX`. Login credentials
+keep their existing protection. Normal logout and renderer cache clearing do not
+delete the Node writer identity. Missing, invalid or conflicting identity data
+rejects initialization without replacing the key, changing backend or replaying work.
+
+Nightly keyring migration is deliberately unsupported. An existing history database
+without the paired identity database is refused before the history Worker starts;
+its bytes and keychain entries remain untouched. To test the new format, stop the
+daemon and select a new, unused `LODY_ROOST_DB_PATH` on the execution machine. Do not
+expect old keyring-backed conversations to become available in the fresh database.
+Failures carry `identityMissing`, `identityInvalid`, `identityConflict` or
+`identityStorage` and the existing diagnostic reference. The native identity service
+owns a short-lived SQLite handle; its deprecated `loadRoostOwnerSeedLegacy` facade
+remains until the Promise owner pool receives the service from the daemon runtime.
+
+### Paging and observations
+
 Initialization, Worker exit and failed writes retain their original error and outcome
 classification. The owner's local log records causes, exit status and runtime/build
 details under a diagnostic ID. For these failures, history RPC returns only the ID,
@@ -411,6 +447,7 @@ WorktreeGit and Clock under the caller's existing repo lease. `runWorktreeLegacy
 executes this and observation programs through the same FileLocks runtime; a failed
 metadata scratch release retains its path and bounded retry capability. Bare
 clone/fetch, full mutations and long-lived GC still require their own native owners.
+
 ## Conversation-tree stop
 
 The related-conversations action persists `collaborationStopped` on the creation tree.
