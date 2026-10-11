@@ -3,6 +3,7 @@
 Status: proposed
 Type: architecture
 Translation: current
+PR: [#1477](https://github.com/LodyAI/Lody/pull/1477)
 
 [English](2026-10-11-roost-writer-identity.md)
 
