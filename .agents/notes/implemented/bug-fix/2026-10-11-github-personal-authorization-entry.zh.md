@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1444](https://github.com/LodyAI/Lody/pull/1444)
 
 [English](2026-10-11-github-personal-authorization-entry.md)
 
