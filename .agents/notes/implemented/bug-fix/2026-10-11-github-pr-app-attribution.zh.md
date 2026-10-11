@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1475
 
 [English](2026-10-11-github-pr-app-attribution.md)
 
