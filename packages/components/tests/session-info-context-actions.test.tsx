@@ -327,4 +327,55 @@ describe('ContextChip actions', () => {
     expect(onSelectMethod).toHaveBeenCalledWith('squash');
     expect(onMerge).toHaveBeenCalledTimes(1);
   });
+
+  it('renders prominent status-tinted PR badge on stage and colored icon in cluster mode', async () => {
+    const onOpenPr = vi.fn();
+    const onPromote = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    // Stage mode with merged PR
+    await act(async () => {
+      root?.render(
+        createElement(ContextChip, {
+          mode: 'stage',
+          projectName: 'loro-dev/lody',
+          branch: 'feat/new-console',
+          pr: {
+            url: 'https://github.com/loro-dev/lody/pull/30',
+            status: 'merged',
+          } as SessionPullRequestMeta,
+          onOpenPr,
+        })
+      );
+    });
+
+    const prButton = container.querySelector<HTMLButtonElement>('button[title*="Merged"]');
+    expect(prButton).not.toBeNull();
+    expect(prButton?.className).toContain('text-pr-merged');
+    expect(prButton?.textContent).toContain('#30');
+    expect(prButton?.textContent).toContain('Merged');
+
+    // Cluster mode with merged PR
+    await act(async () => {
+      root?.render(
+        createElement(ContextChip, {
+          mode: 'cluster',
+          projectName: 'loro-dev/lody',
+          branch: 'feat/new-console',
+          pr: {
+            url: 'https://github.com/loro-dev/lody/pull/30',
+            status: 'merged',
+          } as SessionPullRequestMeta,
+          onPromote,
+        })
+      );
+    });
+
+    const clusterButton = container.querySelector<HTMLButtonElement>('button');
+    expect(clusterButton).not.toBeNull();
+    expect(clusterButton?.className).toContain('text-pr-merged');
+    expect(clusterButton?.querySelector('.lucide-git-merge')).not.toBeNull();
+  });
 });
