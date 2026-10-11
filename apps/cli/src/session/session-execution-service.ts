@@ -4107,7 +4107,12 @@ export class SessionExecutionService {
           onUnhandledError: effectiveErrorContext.onUnhandledError,
         });
         outcome = 'unhandled-error-recorded';
-        settlement = 'handled';
+        settlement =
+          options.dispatchSource === 'delivery' &&
+          runtime.promptStarted &&
+          isAgentDisconnectedError(error)
+            ? 'uncertain'
+            : 'handled';
       }
     } finally {
       if (!runtime.promptStarted) {
@@ -5050,12 +5055,20 @@ export class SessionExecutionService {
         let turnStartWorkingTreeDiff: GitWorkingTreeDiffBaseline | null = null;
 
         // A requester switch re-derives commit identity for this turn only;
-        // the policy lookup never blocks the turn (falls back to owner rules).
-        const gitIdentityOptions = yield* self.tryPromise(async () => {
+        // the bounded policy lookup falls back to owner rules on failure.
+        const gitIdentityOptions = yield* self.tryPromise(async (signal) => {
           try {
-            return await self.deps.sessionManager.resolveGitIdentityOptions(message.userId);
+            return await self.deps.sessionManager.resolveGitIdentityOptions(
+              message.userId,
+              signal,
+              sessionId
+            );
           } catch {
-            return { preferMachineIdentity: message.userId === self.deps.userId };
+            signal.throwIfAborted();
+            return {
+              preferMachineIdentity: message.userId === self.deps.userId,
+              personalIdentityEnabled: false,
+            };
           }
         });
         const bindReadySession = (nextSession: ISession): void => {
@@ -5204,9 +5217,9 @@ export class SessionExecutionService {
             return undefined;
           });
 
-        // A disposed ACP JSON-RPC connection means the adapter rejected the prompt before it
-        // could own the turn. Retry only once, and only while MessageHandler reports no ACP
-        // output for this assistant entry, so we never replay a prompt that may have acted.
+        // Delivery has already crossed its durable start fence before prompt submission.
+        // A disconnected transport with no observed output cannot prove non-consumption.
+        // Ordinary turns retain their existing bounded stale-connection recovery.
         const promptWithStaleACPRecovery = (
           promptBlocks: ContentBlock[]
         ): Effect.Effect<void, unknown, Scope.Scope> =>
@@ -5216,6 +5229,7 @@ export class SessionExecutionService {
                 const hasPromptOutput =
                   self.deps.hasPromptOutputForTurn?.(sessionId, runtime.turnId) ?? false;
                 if (
+                  dispatchOptions?.dispatchSource === 'delivery' ||
                   runtime.turnId !== turnId ||
                   !shouldRecoverStaleACPConnectionPrompt({
                     error,

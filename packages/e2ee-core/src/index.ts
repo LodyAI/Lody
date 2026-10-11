@@ -18,3 +18,10 @@ export {
   type ContentMetadata,
 } from './content-format';
 export { verifySignature, verifyContentSignature } from './signature';
+export {
+  deriveContentKey,
+  sealContentAead,
+  openContentAead,
+  type ContentKey,
+  type SealedContentAead,
+} from './crypto/content';

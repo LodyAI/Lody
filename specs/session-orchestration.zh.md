@@ -80,11 +80,42 @@ Cloud 确认远端文档追平；OSS 确认权威 daemon repo，并在已有创�
 检查固定 Turn。Cloud workspace 不能把云端断连当成本地权威。完成回传继续
 使用已有的单一所有者 Delivery 协议，不需要持久化 schema 或托管 API 变更。
 
+## 幂等消息消费
+
+A 给 B 发送任务、B 完成后，重复通知、重试和 Worker 替换不得使 A 再次消费同一条
+完成消息。身份是机器本地的 `(requesterSessionId, operationId)`，对应固定的目标输入、
+Delivery 和完成 Turn。重试保留这组 ID 以及原始来源 Turn、请求人和命令。新的 Operation
+id 表示新任务，即使文本完全相同；不能按内容相等去重。
+
+接受任务和完成任务使用 SQLite 事务。Host-lease Worker 在请求方 Session 的互斥锁下
+认领 Delivery，写入固定完成 Turn，再记录 `prepared`；提交给 ACP 之前先持久化
+`started`。确认发生在 provider 提交之前的中断可以释放准备状态并有限恢复。提交之后，
+Delivery prompt 绝不自动再次提交。连接断开时，即使尚未观察到输出，也不能证明没有被
+消费；保留完成消息和输出，并显示 `DELIVERY_EXECUTION_UNCERTAIN`。启动恢复遵守相同
+规则。成功或取消的结算消费 claim；结算写入失败只重试结算，不重新执行 provider。
+
+持久化去重和消费确认属于消息编排存储，不属于模型 provider 协议。所有运行时使用
+相同行为，不修改 ACP client、adapter 或协商能力。重复通知只协调同一条持久化 Delivery；
+成功结算持久化消费状态，结算写入失败后只继续结算同一 claim。这保证每条完成消息
+至多提交一次，不保证在持久化启动检查与提交之间崩溃时模型仍能成功执行。
+普通用户 Turn 的旧连接恢复保留原有行为。
+
+已消费结果七天后可以过期，但清理必须原子地保留不含 prompt 或输出的精简 retired-id
+记录。同一存储内不能再次接受该 ID，数据库触发器也阻止旧版写入方重新插入。
+新版调用方收到不可重试的 `OPERATION_ID_REUSED`；过期结果的查询仍返回不存在。
+记录随已完成 Operation 数量增长。删除存储会重置此保证；迁移之前已经删除的 ID 无法
+重建。降级运行的 Worker 仍保留其旧版 ACP 重试行为。
+
 ## 实现证据
 
 实现检查位于 `apps/cli/src/mcp/lody-mcp-server.ts`，共享上限位于
 `packages/shared/src/session-orchestration.ts`，可执行 Operation 模型位于
 `apps/cli/src/orchestration/operation-model.ts`。
+
+消费和保留策略位于 `apps/cli/src/orchestration/operation-store.ts`，续接提交位于
+`apps/cli/src/session/session-execution-service.ts`，协调恢复位于
+`apps/cli/src/orchestration/operation-coordinator.ts`。对应测试覆盖连接失败、claim 和结算
+竞争、重启以及结果过期。
 
 本草稿记录将上限改为 16 的请求。依赖安装后仍需补充运行时和已发布客户端
 验收。

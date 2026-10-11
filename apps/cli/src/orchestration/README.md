@@ -21,6 +21,27 @@ current history so a preflight snapshot cannot overwrite an intervening update.
 The real-Mirror regression is in
 [operation-progress-feedback.test.ts](../../tests/operation-progress-feedback.test.ts).
 
+## Completion consumption
+
+SQLite claims fence the fixed completion Turn and the provider submission. A
+Delivery connection failure after submission settles as uncertain and does not
+enter ordinary user-turn stale-ACP recovery. An absence of received output is
+insufficient evidence of non-consumption. Settlement retries and Worker recovery
+use the existing claim protocol; see the
+[consumption contract](../../../../specs/session-orchestration.md#idempotent-message-consumption).
+
+Consumed Operation payloads expire after seven days. `operation_retired_ids`
+retains only their Session/Operation keys for the life of the local store.
+The retirement trigger runs in the same cleanup transaction, before cascaded
+Delivery deletion; the insertion trigger also fences older writers. No columns
+are added to the strict legacy Operation or Delivery rows. Modern acceptance and
+retry lookup return non-retryable `OPERATION_ID_REUSED` for retired keys.
+
+Persistence and acknowledgement stay in this store: repeated notifications
+resolve the same Delivery, and successful settlement atomically records consumed
+state for its claim. No ACP client or provider-specific protocol is required.
+See the [scope correction](../../../../.agents/notes/rejected/architecture/2026-10-10-provider-prompt-receipts.md).
+
 ## Message-author snapshots
 
 `operation_authors` stores source identity and per-target Role display snapshots in

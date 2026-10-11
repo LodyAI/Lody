@@ -1,9 +1,12 @@
 # 输入框上方的执行机器归属
 
-Status: draft
+Status: outdated
 Translation: current
 
 [English](composer-machine-owner.md)
+
+此提案的实现已于 2026-10-11 按用户要求撤回。以下保留原提案意图，
+不代表当前行为；info bar 不再常驻显示机器名称与主人。
 
 ## 场景与意图
 

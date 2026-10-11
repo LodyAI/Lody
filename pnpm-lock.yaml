@@ -1544,6 +1544,9 @@ importers:
       '@ipld/dag-cbor':
         specifier: 10.0.2
         version: 10.0.2
+      '@noble/ciphers':
+        specifier: 2.1.1
+        version: 2.1.1
       '@noble/ed25519':
         specifier: 3.2.0
         version: 3.2.0

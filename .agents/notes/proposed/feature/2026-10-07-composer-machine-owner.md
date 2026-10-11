@@ -31,3 +31,10 @@ fixtures rendered visible owner and machine-name labels in Chromium. No
 screenshots were captured. These checks establish component rendering with
 fixture data, not live workspace-member resolution or visual approval.
 Live team-session verification remains pending.
+
+## Withdrawal
+
+The user requested reverting this feature on 2026-10-11. Its implementation,
+identity-specific stories, tests and translations have been removed; the original
+info-bar layout is restored. This proposal is no longer active. See the
+[revert decision](../../implemented/simplification/2026-10-11-revert-composer-machine-owner.md).

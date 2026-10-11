@@ -112,11 +112,53 @@ Every target machine must advertise the control capability before the UI writes
 metadata. Offline machines enforce the barrier after receiving it; the UI must
 not promise simultaneous cancellation or rollback of already performed work.
 
+## Idempotent message consumption
+
+When A sends work to B and B finishes, repeated notifications, retries and Worker
+replacement must not make A consume the same completion again. Identity is the
+machine-local pair `(requesterSessionId, operationId)`, with a fixed target input,
+Delivery and completion Turn. Retries retain that pair and the original source
+Turn, requester and command. A different Operation id denotes new work, even if
+its text is identical; content equality is not a deduplication key.
+
+Acceptance and completion use SQLite transactions. The Host-lease Worker claims
+Delivery under the requester Session mutex, writes the fixed completion Turn,
+then records `prepared`. Its `started` fence commits before submitting to ACP.
+Confirmed pre-provider interruption may release preparation for bounded recovery.
+Once submitted, a Delivery prompt is never automatically submitted again. A
+disconnected transport, even without observed output, is uncertain consumption;
+retain the completion/output and surface `DELIVERY_EXECUTION_UNCERTAIN`. Startup
+recovery applies the same rule. Successful/cancelled settlement consumes the
+claim; a failed settlement write retries settlement rather than provider execution.
+
+Persistence and consumption acknowledgement belong to the message orchestration
+store, not a model-provider protocol. This behavior applies to every runtime
+without changing ACP clients, adapters or negotiated capabilities. Duplicate
+notifications only reconcile the same durable Delivery. Successful settlement
+records its consumption; retries after a failed write settle the same claim.
+This guarantees at most one submission for a completion, not guaranteed successful
+model execution under a crash between the durable start fence and submission.
+Ordinary user-turn stale-connection recovery retains its existing behavior.
+
+Consumed results may expire after seven days, but cleanup atomically retains a
+small retired-id record without prompts or outputs. That id can never be accepted
+again in the same store, including by older writers using the database triggers.
+Modern callers receive non-retryable `OPERATION_ID_REUSED`; lookup of the expired
+result still reports absence. Records grow with completed Operations. Deleting
+the store resets this guarantee; ids already removed before this migration
+cannot be reconstructed. Downgraded Workers retain their old ACP retry behavior.
+
 ## Implementation evidence
 
 The implementation guard is `apps/cli/src/mcp/lody-mcp-server.ts`, the shared
 limit is `packages/shared/src/session-orchestration.ts`, and the executable
 Operation model is `apps/cli/src/orchestration/operation-model.ts`.
+
+Consumption and retention are implemented in
+`apps/cli/src/orchestration/operation-store.ts`, continuation submission in
+`apps/cli/src/session/session-execution-service.ts`, and reconciliation in
+`apps/cli/src/orchestration/operation-coordinator.ts`. Their owning suites cover
+transport failure, claim/settlement races, restart and result expiry.
 
 This draft records the requested limit of 16. Runtime and deployed-client
 acceptance remain to be verified after dependencies are installed.

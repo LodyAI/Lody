@@ -1,3 +1,4 @@
+import { resolveGitIdentityPolicyLegacy } from './git-identity-policy';
 import {
   acquireSessionCredentialsLegacy,
   nativeSessionCredentials,
@@ -484,6 +485,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   /** Per-instance listener teardown for `detachSession`; see `registerSessionEvents`. */
   private readonly sessionEventDetachers = new WeakMap<ISession, () => void>();
   private readonly pendingSessionCreates = new Map<SessionId, Promise<ISession>>();
+  private readonly pendingCreateControllers = new Map<SessionId, AbortController>();
   private readonly pendingTerminationPromises = new Map<SessionId, Promise<void>>();
   private readonly preparationSessions = new Map<SessionId, Session>();
   private readonly sessionSandboxFactory: SessionSandboxFactory;
@@ -566,8 +568,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
    * stall. Callers that have given up (the initialization stall watchdog) must
    * detach it here instead.
    *
-   * The underlying work cannot be cancelled — there is no abort signal through
-   * `createSessionFromPreparationOrCold` — so it is reaped instead: if the
+   * Git identity preflight is cancelled immediately. Other dependencies may
+   * still finish after cancellation, so they are reaped instead: if the
    * abandoned create ever produces a Session, that Session is terminated rather
    * than left as an orphan process. Returns whether an entry was detached.
    */
@@ -576,6 +578,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     if (!pending) {
       return false;
     }
+    this.pendingCreateControllers.get(sessionId)?.abort(new Error(reason));
+    this.pendingCreateControllers.delete(sessionId);
     this.pendingSessionCreates.delete(sessionId);
     this.logger.warn(
       `[${sessionId}] Abandoning in-flight session create (${reason}); a retry will start a new one`
@@ -722,11 +726,19 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     // Register durable ownership before claim/cold-start work begins. Besides
     // deduplicating concurrent creates, this prevents an abandoned preparation
     // from deleting a default workdir that the authoritative create is taking over.
+    const controller = new AbortController();
+    this.pendingCreateControllers.set(sessionId, controller);
     const promise = Promise.resolve()
-      .then(async () => await this.createSessionFromPreparationOrCold(config, agentStart))
+      .then(
+        async () =>
+          await this.createSessionFromPreparationOrCold(config, agentStart, controller.signal)
+      )
       .finally(() => {
         if (this.pendingSessionCreates.get(sessionId) === promise) {
           this.pendingSessionCreates.delete(sessionId);
+        }
+        if (this.pendingCreateControllers.get(sessionId) === controller) {
+          this.pendingCreateControllers.delete(sessionId);
         }
       });
     this.pendingSessionCreates.set(sessionId, promise);
@@ -735,9 +747,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   private async createSessionFromPreparationOrCold(
     config: SessionConfig,
-    agentStart?: AgentStartConfig
+    agentStart?: AgentStartConfig,
+    signal?: AbortSignal
   ): Promise<ISession> {
+    signal?.throwIfAborted();
     await this.freezeCodexProfile(config);
+    signal?.throwIfAborted();
     const sessionId = config.sessionId!;
     const preparationIdentity = config.agentConfigId
       ? {
@@ -750,7 +765,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       : null;
     if (!preparationIdentity || agentStart?.resumeSessionId || agentStart?.forkSessionId) {
       await this.preparationService.discard(sessionId);
-      return await this.createSessionInnerWithAgent(config, agentStart);
+      return await this.createSessionInnerWithAgent(config, agentStart, signal);
     }
 
     const compatibility = buildSessionPreparationCompatibility(
@@ -795,9 +810,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     });
     if (claim.status === 'miss') {
       await claim.cleanup;
-      return await this.createSessionInnerWithAgent(config, agentStart);
+      return await this.createSessionInnerWithAgent(config, agentStart, signal);
     }
-    return await this.finishPreparedSession(config, claim.resource, agentStart);
+    return await this.finishPreparedSession(config, claim.resource, agentStart, signal);
   }
 
   /**
@@ -808,6 +823,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     sessionId: SessionId,
     force: boolean = true
   ): Promise<'terminated' | 'not-found'> {
+    this.pendingCreateControllers
+      .get(sessionId)
+      ?.abort(new Error('Session initialization cancelled'));
     const existingTermination = this.pendingTerminationPromises.get(sessionId);
     if (existingTermination) {
       await existingTermination;
@@ -1261,7 +1279,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private async finishPreparedSession(
     incomingConfig: SessionConfig,
     prepared: PreparedSessionRuntime,
-    agentStart?: AgentStartConfig
+    agentStart?: AgentStartConfig,
+    signal?: AbortSignal
   ): Promise<ISession> {
     const sessionId = incomingConfig.sessionId!;
     if (
@@ -1270,7 +1289,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         prepared.session.getGitHubCredentials().mode !== 'native')
     ) {
       await prepared.dispose();
-      return this.createSessionInnerWithAgent(incomingConfig, agentStart);
+      return this.createSessionInnerWithAgent(incomingConfig, agentStart, signal);
     }
     await prepared.adopt();
     const preparedWorktree = await prepared.workspaceReady;
@@ -1309,7 +1328,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           `[${sessionId}] Discarding prepared session: prepared worktree is unusable for the durable target (claim=${claimOutcome ?? 'no-worktree-target'} path=${preparedWorktree.info.hostPath})`
         );
         await prepared.dispose();
-        return await this.createSessionInnerWithAgent(incomingConfig, agentStart);
+        return await this.createSessionInnerWithAgent(incomingConfig, agentStart, signal);
       }
     }
 
@@ -1325,17 +1344,29 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         'session.createSessionInner.prepared',
         sessionId
       );
+      signal?.throwIfAborted();
+      config.onPresencePhase?.('initializing', 'Resolving Git identity');
+      const gitIdentityOptions = await this.resolveGitIdentityOptions(
+        config.requesterUserId,
+        signal,
+        sessionId
+      );
+      signal?.throwIfAborted();
       session.updateGitIdentity(
         config.userName,
         config.userEmail,
         config.requesterUserId,
-        await this.resolveGitIdentityOptions(config.requesterUserId)
+        gitIdentityOptions
       );
+      config.onPresencePhase?.('acp', 'Waiting for prepared agent');
       const acpSessionId = await prepared.agentResult;
+      signal?.throwIfAborted();
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+      signal?.throwIfAborted();
       await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
       return session;
     } catch (error) {
+      this.detachSession(prepared.session);
       await prepared.dispose();
       throw error;
     }
@@ -1463,9 +1494,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
 
   private async createSessionInnerWithAgent(
     config: SessionConfig,
-    agentStart?: AgentStartConfig
+    agentStart?: AgentStartConfig,
+    signal?: AbortSignal
   ): Promise<ISession> {
+    signal?.throwIfAborted();
     await this.freezeCodexProfile(config);
+    signal?.throwIfAborted();
     const credentials = await this.prepareGitHubRepoSessionConfig(config);
     let session: Session | undefined;
     try {
@@ -1494,11 +1528,23 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       );
       const sessionId = config.sessionId!;
       this.logger.debug(`[${sessionId}] Session workdir resolved: ${session.getWorkdir()}`);
+      signal?.throwIfAborted();
+      config.onPresencePhase?.('initializing', 'Resolving Git identity');
+      const gitIdentityOptions = await this.resolveGitIdentityOptions(
+        config.requesterUserId,
+        signal,
+        sessionId
+      );
+      signal?.throwIfAborted();
       session.updateGitIdentity(
         config.userName,
         config.userEmail,
         config.requesterUserId,
-        await this.resolveGitIdentityOptions(config.requesterUserId)
+        gitIdentityOptions
+      );
+      config.onPresencePhase?.(
+        requestedResumeSessionId ? 'resuming' : 'acp',
+        'Resolving agent runtime'
       );
       let acpSessionId: string | undefined;
 
@@ -1563,6 +1609,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         config.onPresencePhase?.('acp', detail);
       };
 
+      signal?.throwIfAborted();
       publishAcpStep('spawn');
       this.logger.debug(`[${sessionId}] About to call session.createAgent`);
       try {
@@ -1615,6 +1662,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         throw error;
       }
 
+      signal?.throwIfAborted();
       if (requestedResumeSessionId) {
         if (acpSessionId === requestedResumeSessionId) {
           this.logger.debug(`[${sessionId}] ACP resume confirmed (acpSessionId=${acpSessionId})`);
@@ -1702,23 +1750,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
    * failures degrade to "not enabled" rather than blocking the turn.
    */
   async resolveGitIdentityOptions(
-    requesterUserId: string
+    requesterUserId: string,
+    signal?: AbortSignal,
+    sessionId?: SessionId
   ): Promise<{ preferMachineIdentity: boolean; personalIdentityEnabled: boolean }> {
+    signal?.throwIfAborted();
     const preferMachineIdentity = requesterUserId === this.cloudPort.identity.userId;
     const tokenManager = this.getGitHubTokenManager();
     if (!tokenManager) return { preferMachineIdentity, personalIdentityEnabled: false };
-    try {
-      const policy = await tokenManager.getCredentialPolicy({
-        requesterUserId,
-        machineId: this.machineId,
-      });
-      return { preferMachineIdentity, personalIdentityEnabled: policy.personalEnabled };
-    } catch (error) {
-      this.logger.warn(
-        `Could not read the GitHub identity preference for ${requesterUserId}; committing without personal identity: ${formatErrorMessage(error)}`
-      );
-      return { preferMachineIdentity, personalIdentityEnabled: false };
-    }
+    const policy = await resolveGitIdentityPolicyLegacy(
+      () => tokenManager.getCredentialPolicy({ requesterUserId, machineId: this.machineId }),
+      this.logger,
+      sessionId ?? 'git-identity',
+      signal
+    );
+    return { preferMachineIdentity, personalIdentityEnabled: policy.personalEnabled };
   }
 
   private async prepareGitHubRepoSessionConfig(config: SessionConfig): Promise<SessionCredentials> {

@@ -1,9 +1,13 @@
 # Composer execution-machine identity
 
-Status: draft
+Status: outdated
 Translation: current
 
 [中文](composer-machine-owner.zh.md)
+
+The implementation of this proposal was reverted at the user’s request on
+2026-10-11. The intent below is retained for history, rather than current behavior;
+the info bar no longer persistently displays the machine name and owner.
 
 ## Scenario and intent
 

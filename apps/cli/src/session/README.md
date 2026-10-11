@@ -283,6 +283,12 @@ same-session replacement rather than pretending resources were released. See [th
 
 ### Commit identity
 
+`git-identity-policy.ts` bounds the complete policy lookup to 3 seconds per attempt,
+retries once, and returns personal identity disabled after two failures. Startup publishes
+`Resolving Git identity`; cancellation interrupts the waiter and fences identity updates
+and agent launch. Late policy results have no side effects. This deadline also covers
+per-turn identity refresh; it is separate from network credential fallback.
+
 The effective identity becomes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` in the session env (`session.ts`
 `updateGitIdentity`, re-applied per turn via the execution service's `bindReadySession`). When
 the turn requester is the machine owner, the repository/machine Git identity is used without a cloud profile lookup; missing local

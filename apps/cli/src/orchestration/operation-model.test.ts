@@ -34,6 +34,35 @@ describe('Operation delivery executable model', () => {
     expect(stepOrchestrationModel(started, 'complete_turn').delivery).toBe('consumed');
   });
 
+  it('submits one completion across duplicate starts, interruption and Worker recovery', () => {
+    const state = trace(
+      'accept',
+      'materialize_success',
+      'finish',
+      'schedule',
+      'prepare_turn',
+      'start_turn',
+      'start_turn',
+      'interrupt_turn',
+      'restart',
+      'recover_orphans',
+      'schedule',
+      'complete_finalization',
+      'flush_progress',
+      'expire_result',
+      'accept',
+      'schedule',
+      'start_turn'
+    );
+    expect(state).toMatchObject({
+      operation: 'retired',
+      providerSubmissions: 1,
+      completionTurnWrites: 1,
+      delivery: 'consumed',
+      activeTurn: 'none',
+    });
+  });
+
   it('keeps archived delivery pending until restore', () => {
     const archived = trace('accept', 'materialize_success', 'archive', 'finish', 'schedule');
     expect(archived).toMatchObject({ delivery: 'pending', completionTurnWrites: 0 });
@@ -281,6 +310,12 @@ describe('Operation delivery executable model', () => {
         chainDepth: LODY_MAX_CHAIN_DEPTH + 1,
       })
     ).toThrow(/exceeded the fixed depth cap/);
+    expect(() =>
+      assertOrchestrationModelSafety({
+        ...initialOrchestrationModelState(),
+        providerSubmissions: 2,
+      })
+    ).toThrow(/provider more than once/);
     expect(() =>
       assertOrchestrationModelSafety({
         ...initialOrchestrationModelState(),

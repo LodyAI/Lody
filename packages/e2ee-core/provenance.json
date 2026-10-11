@@ -59,6 +59,22 @@
     "No signing, private-key export, ledger, Lab, Node host, transport or storage entrypoints.",
     "Bound encoding traversal and copies by expanded canonical wire size before serialization; preserve valid shared values and reject cycles. No wire or algorithm change."
   ],
-  "migratedScopeSha256": "8c3e3a9e1ba0cc449d2a12b057f2272d4148e5f554d19b4cdb54fc6aa048ad14",
-  "scopeHashEncoding": "UTF-8, destination paths sorted ascending, one line: <destinationSha256>  <destination>\\n"
+  "migratedScopeSha256": "c3c7f53f3716d6f96f94f50e8ee710853b1d3bd5a400464c6d56f0b65d536d77",
+  "scopeHashEncoding": "UTF-8, destination paths sorted ascending, one line: <destinationSha256>  <destination>\\n",
+  "cryptoExtraction": {
+    "destination": "src/crypto/content.ts",
+    "destinationSha256": "25fc404916ac933c1b35aa076028deac80717d83c9203ccd2898cb9b9cac4340",
+    "sources": {
+      "pure/content-frame.ts": "022ef814d7d82f684d6ce39ae78561c9f3e240033b2faff29c0854f808d4b65f",
+      "platform/content.ts": "0afee368139aa8217a2ebb5ee8803608c86da5d89a38bd518c4cc33f73f9720b"
+    },
+    "scope": "Content v0 HKDF-SHA-256 and XChaCha20-Poly1305 only; no signer, authority, frame workflow, ledger, host, storage or HPKE",
+    "adaptations": [
+      "Synchronous HKDF extract/expand using already pinned @noble/hashes 2.2.0, preserving candidate WebCrypto HKDF-SHA-256 bytes.",
+      "Opaque context-bound derived ContentKey; leaf import/export remains outside this slice.",
+      "Bound and classify AEAD inputs before copying; use host secure randomness only with a typed unavailable result.",
+      "Wipe temporary epoch/key/PRK/plaintext copies; no signing private key or runtime service.",
+      "Run ordinary try/finally cleanup before yielding Results: Effect 4.0.2 Result.gen does not close its iterator on typed failure."
+    ]
+  }
 }

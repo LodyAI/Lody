@@ -1413,7 +1413,7 @@ describe('SessionManager preparation compatibility', () => {
       coldSession
     );
     expect(prepared.dispose).toHaveBeenCalledTimes(1);
-    expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined);
+    expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined, undefined);
   });
 
   it('waits for a published preparation to release its worktree when durable launch config is absent', async () => {
@@ -1464,7 +1464,7 @@ describe('SessionManager preparation compatibility', () => {
 
     cleanup.resolve(undefined);
     await expect(result).resolves.toBe(coldSession);
-    expect(coldCreate).toHaveBeenCalledWith(config, undefined);
+    expect(coldCreate).toHaveBeenCalledWith(config, undefined, undefined);
   });
 
   it.each(['project', 'model'] as const)(
@@ -1539,7 +1539,7 @@ describe('SessionManager preparation compatibility', () => {
 
       cleanup.resolve(undefined);
       await expect(result).resolves.toBe(coldSession);
-      expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined);
+      expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined, undefined);
     }
   );
 
@@ -1600,7 +1600,12 @@ describe('SessionManager preparation compatibility', () => {
     await expect(internals.createSessionFromPreparationOrCold(durableConfig)).resolves.toBe(
       adoptedSession
     );
-    expect(finishPreparedSession).toHaveBeenCalledWith(durableConfig, prepared, undefined);
+    expect(finishPreparedSession).toHaveBeenCalledWith(
+      durableConfig,
+      prepared,
+      undefined,
+      undefined
+    );
     expect(coldCreate).not.toHaveBeenCalled();
   });
 

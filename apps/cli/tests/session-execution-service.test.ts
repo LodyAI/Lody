@@ -2501,7 +2501,7 @@ describe('SessionExecutionService', () => {
       'Teammate',
       'teammate@example.com',
       'user-2',
-      { preferMachineIdentity: false }
+      { preferMachineIdentity: false, personalIdentityEnabled: false }
     );
   });
 
@@ -3365,7 +3365,7 @@ describe('SessionExecutionService', () => {
   });
 
   it.each([undefined, 'delivery'] as const)(
-    'restores a stale ACP session without repeating the start fence for %s dispatch',
+    'preserves the completion submission policy after a transport failure for %s dispatch',
     async (dispatchSource) => {
       const sessionId = 'session-stale-acp' as SessionId;
       const acpSessionId = 'acp-stale' as ACPSessionId;
@@ -3378,10 +3378,14 @@ describe('SessionExecutionService', () => {
           read: false,
         },
       ];
+      const submittedSessions: string[] = [];
+      let settledOutcome: string | undefined;
       const agentClient = {
         isCreated: vi.fn(() => true),
         cancel: vi.fn(async () => {}),
         prompt: vi.fn(async () => {
+          // Submission can succeed before the transport reports failure.
+          submittedSessions.push(acpSessionId);
           throw new Error('ACP connection closed');
         }),
         currentModel: undefined,
@@ -3389,7 +3393,10 @@ describe('SessionExecutionService', () => {
       const restoredAgentClient = {
         isCreated: vi.fn(() => true),
         cancel: vi.fn(async () => {}),
-        prompt: vi.fn(async () => ({})),
+        prompt: vi.fn(async () => {
+          submittedSessions.push(restoredAcpSessionId);
+          return {};
+        }),
         currentModel: undefined,
       };
       const exec = vi.fn(async (command: string, args: string[]) => {
@@ -3445,7 +3452,9 @@ describe('SessionExecutionService', () => {
           throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
         })
         .mockResolvedValueOnce(true);
-      const onTurnSettled = vi.fn(async () => {});
+      const onTurnSettled = async (outcome: string) => {
+        settledOutcome = outcome;
+      };
       const service = new SessionExecutionService(deps);
       await service.continueSession(
         {
@@ -3463,27 +3472,14 @@ describe('SessionExecutionService', () => {
         dispatchSource ? { dispatchSource, onTurnStarted, onTurnSettled } : undefined
       );
 
-      expect(agentClient.prompt).toHaveBeenCalledWith(
-        'acp-stale',
-        [{ type: 'text', text: 'hello' }],
-        {
-          signal: expect.any(AbortSignal),
-        }
-      );
-      expect(sessionManager.terminateSession).toHaveBeenCalledWith(sessionId, true);
-      expect(sessionManager.createSession).toHaveBeenCalled();
-      expect(restoredAgentClient.prompt).toHaveBeenCalledWith(
-        'acp-restored',
-        [{ type: 'text', text: 'hello' }],
-        {
-          signal: expect.any(AbortSignal),
-        }
-      );
-      expect(deps.recordChatFailure).not.toHaveBeenCalled();
-      expect(history[0]?.status).toBe(dispatchSource === 'delivery' ? 'pending' : 'handled');
+      expect(service.getExecutionSnapshot(sessionId).hasActiveTurn).toBe(false);
       if (dispatchSource === 'delivery') {
-        expect(onTurnSettled).toHaveBeenCalledWith('handled');
-        expect(onTurnStarted).toHaveBeenCalledOnce();
+        expect(submittedSessions).toEqual([acpSessionId]);
+        expect(settledOutcome).toBe('uncertain');
+        expect(history[0]?.status).toBe('pending');
+      } else {
+        expect(submittedSessions).toEqual([acpSessionId, restoredAcpSessionId]);
+        expect(history[0]?.status).toBe('handled');
       }
     }
   );

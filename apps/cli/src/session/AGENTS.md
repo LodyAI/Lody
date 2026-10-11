@@ -63,8 +63,8 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
   `agent_disconnected`, Harness compression mismatch is `acp_session_storage_incompatible`.
-- Continue-session recovery may restore the ACP session and retry the same prompt once, only
-  while that turn has no ACP output.
+- User turns may restore stale ACP and retry once before output. Delivery never retries after
+  provider submission.
 - A turn with no ACP updates takes `recordSilentTurnFailure`, not `setDispatchHandled`.
   Read `turnProducedVisibleOutput` before `finalizeTurn` clears it; still finalize, advance
   the pointer, and fail open.
