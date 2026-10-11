@@ -173,6 +173,12 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
             if (!inputElement) return;
 
             const selectionStart = inputElement.selectionStart ?? 0;
+            const selectionEnd = inputElement.selectionEnd ?? selectionStart;
+            // WebKit can temporarily reset the caret on focus. Finish that
+            // focus/update cycle before starting an asynchronous preparation,
+            // otherwise the transient empty query cancels the selected item.
+            inputElement.focus();
+            inputElement.setSelectionRange(selectionStart, selectionEnd);
             const lastTriggerIndex = inputElement.value.lastIndexOf(
               context.trigger,
               selectionStart
@@ -181,8 +187,6 @@ const MentionItem = React.forwardRef<ItemElement, MentionItemProps>(
             if (lastTriggerIndex !== -1) {
               void context.onMentionAdd(value, lastTriggerIndex);
             }
-
-            inputElement.focus();
           })}
           onPointerDown={composeEventHandlers(
             itemProps.onPointerDown,

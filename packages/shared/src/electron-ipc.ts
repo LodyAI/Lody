@@ -427,6 +427,7 @@ export type ElectronLoginState = {
     | 'browser_open_failed'
     | 'authorization_expired'
     | 'exchange_failed'
+    | 'exchange_certificate_failed'
     | 'exchange_rejected'
     | 'exchange_timeout'
     | 'secure_storage_unavailable'

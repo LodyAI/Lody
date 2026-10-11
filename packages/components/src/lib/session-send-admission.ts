@@ -19,7 +19,8 @@ export async function acceptSessionUserTurn(
   delivery: SessionSendDelivery,
   creation?: SessionMeta,
   queue?: Record<string, unknown>,
-  attachments?: SessionAttachmentDraft[]
+  attachments?: SessionAttachmentDraft[],
+  onAccepted?: () => void
 ): Promise<'written' | 'pending'> {
   const pending = runtime.pendingSends;
   const unprepared = attachments?.some((attachment) => !attachment.ready) ?? false;
@@ -41,6 +42,7 @@ export async function acceptSessionUserTurn(
       attachments: attachments ?? [],
       targetMachineId: targetMachineId as MachineId | undefined,
     });
+    onAccepted?.();
     return 'pending';
   }
   if (unprepared) throw new Error('Attachments cannot be sent in this workspace');
@@ -60,5 +62,6 @@ export async function acceptSessionUserTurn(
     creation,
     queue: prepared.queue,
   });
+  onAccepted?.();
   return 'written';
 }

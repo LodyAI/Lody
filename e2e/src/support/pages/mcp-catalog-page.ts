@@ -135,8 +135,8 @@ export class McpCatalogPage {
 
   async deleteSyntheticServer(): Promise<void> {
     const settings = await this.openMcpSettings();
-    const main = settings.getByRole('main');
-    await main.getByRole('button', { name: /^(Remove|移除)$/u }).click();
+    const surface = settings.locator('[data-settings-surface]');
+    await surface.getByRole('button', { name: /^(Remove|移除)$/u }).click();
     const confirmation = this.page.getByRole('alertdialog');
     await expect(confirmation.getByText(this.fixture.serverName)).toBeVisible();
     await confirmation.getByRole('button', { name: /^(Remove|移除)$/u }).click();

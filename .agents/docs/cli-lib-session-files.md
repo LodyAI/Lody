@@ -56,3 +56,16 @@ Agent-to-human ACP `image`, `resource` and `resource_link` output is materialize
 injected image/file capability, then append `image_group` / `file` history blocks. A
 `resource_link file://...` is accepted only when it is contained in the session
 workspace.
+
+
+## CLI and MCP input
+
+[CLI input attachments](../../specs/cli-session-attachments.md) adds a preparation
+boundary before user history is authored. `session-input-attachments.ts` resolves
+caller paths and snapshots all sources before any transfer. The shared
+`session-attachment-transfer.ts` performs uploads for both this preparation and
+MessageHandler's assistant output/backfill. Transport never appends history.
+
+Create and chat write the same complete input blocks to user content and frozen
+execution input. MCP acceptance persists references in `operation_inputs` with
+fixed Session/Turn IDs; daemon recovery consumes these instead of source paths.

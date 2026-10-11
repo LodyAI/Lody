@@ -44,8 +44,9 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 
 ## Coding rules
 
-- Prefer Effect TS idioms for new/refactored CLI code — services via `Context.Tag` + `Layer`,
-  typed errors, structured concurrency, `Schedule` retries: context/cli-effect-ts.md.
+- Prefer Effect v4 for new/refactored CLI code; follow the [Effect guide](../../.agents/docs/cli-effect-ts.md).
+- Processes use `@lody/shared/node/process` (CLI wiring: `src/platform/process-options`);
+  [rules](../../packages/shared/src/node/AGENTS.md), enforced by `check:cli-process-boundary`.
 - Keep the strict tsconfig, no `any` or non-null assertions, and Zod at every foreign boundary:
   context/cli-type-safety.md.
 - After a remote prompt arrives, only correctness-critical setup may block before ACP
@@ -77,8 +78,8 @@ execution/consent rules. These rules also bind CLI callers outside that director
   `getModelEffortChoices` (the stored per-model declaration first, then
   `modelReasoningEfforts`) and skip the resulting `validatedConfigIds` in
   `validateTurnConfigOptionValues`; dispatch what cannot be checked offline as requested. Keep
-  runtime rejections in debug diagnostics: Codex/Claude mismatches for model, effort, Fast, or Plan
-  never become visible `agent_warning` notices, while other rejections still do. Claude Fable
+  runtime rejections in debug diagnostics. Codex/Claude effort, Fast and Plan rejections stay hidden;
+  model rejections always emit `agent_warning` in the GUI. Claude Fable
   models omit Fast, so `fast=false` is skipped as a no-op while `fast=true` is dispatched.
 - INVARIANT: `SessionManager` publishes `exit`/`terminated` only for `Session` instances a caller
   received. `MessageHandler` treats them as "the live turn's agent died" and finalizes the turn, so
@@ -109,8 +110,5 @@ execution/consent rules. These rules also bind CLI callers outside that director
 - Pi extension scanning runs only the pinned runtime's read-only listing entry under a frozen
   default or saved-profile environment — never caller-supplied launch fields. Selections
   require the pinned extension-aware runtime (`piExtensionsProtocolVersion`), not a fallback.
-- `src/lib/pr-poller/` compensates for a broken hosted GitHub webhook → Streams fan-out. Keep
-  policy in its pure modules with a thin scheduler, keep priority driven by presence and
-  `lastMessageAt` rather than a turn-end hook, and keep only scheduling state (never PR status) in
-  `~/.lody/pr-poller-state.json`. Spec: `specs/pr-status-reconciler.md`; invariants:
-  `src/lib/pr-poller/AGENTS.md`.
+- `src/lib/pr-poller/` compensates for the hosted GitHub webhook fan-out. Spec:
+  `specs/pr-status-reconciler.md`; invariants: [pr-poller](src/lib/pr-poller/AGENTS.md).

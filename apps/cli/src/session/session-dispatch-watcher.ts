@@ -1,9 +1,11 @@
+import { MemoryBindingSchema } from '@lody/shared';
 import type { RepoTransportRoomStatus, RepoWatchHandle } from 'loro-repo';
 import { Effect, Fiber } from 'effect';
 import {
   buildMissingEmail,
   buildPendingUserHistoryEntry,
   buildSessionTurnInputConfig,
+  normalizeSessionTurnInputConfig,
   getSessionRoomId,
   type ChatFailedReason,
   isLoroRepoDocDeleted,
@@ -122,7 +124,7 @@ type SessionDispatchWatcherDeps = {
 /** A running verify-with-retry fiber for a transient access failure on `turnId`. */
 type AccessRetryHandle = {
   turnId: string;
-  fiber: Fiber.RuntimeFiber<void, never>;
+  fiber: Fiber.Fiber<void, never>;
 };
 
 type WatchedSession = {
@@ -2003,9 +2005,11 @@ export class SessionDispatchWatcher {
         modeId: entry.inputConfig?.modeId,
         modelId: entry.inputConfig?.modelId,
         configOptionValues: entry.inputConfig?.configOptionValues,
+        memory: entry.inputConfig?.memory,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
+        agentRoleSnapshot: entry.inputConfig?.agentRoleSnapshot,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
         resume: entry.inputConfig?.resume ?? resolveDispatchAcpSessionId(meta),
       },
@@ -2046,9 +2050,11 @@ export class SessionDispatchWatcher {
         modeId: entry.inputConfig?.modeId,
         modelId: entry.inputConfig?.modelId,
         configOptionValues: entry.inputConfig?.configOptionValues,
+        memory: entry.inputConfig?.memory,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
+        agentRoleSnapshot: entry.inputConfig?.agentRoleSnapshot,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
         resume: entry.inputConfig?.resume,
       },
@@ -2105,9 +2111,15 @@ export class SessionDispatchWatcher {
       configOptionValues: isConfigOptionValueRecord(queuedItem.acpSessionConfig?.configOptionValues)
         ? queuedItem.acpSessionConfig.configOptionValues
         : undefined,
+      memory:
+        queuedItem.acpSessionConfig?.memory === undefined
+          ? undefined
+          : MemoryBindingSchema.parse(queuedItem.acpSessionConfig.memory),
       mcpServerIds: normalizeMcpServerIdSelection(queuedItem.acpSessionConfig?.mcpServerIds) ?? [],
       agentRoleId: queuedItem.acpSessionConfig?.agentRoleId,
       agentRoleRevision: queuedItem.acpSessionConfig?.agentRoleRevision,
+      agentRoleSnapshot: normalizeSessionTurnInputConfig(queuedItem.acpSessionConfig)
+        ?.agentRoleSnapshot,
       issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,
       resume: resolveResumableAcpSessionId(meta),
     });

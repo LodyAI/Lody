@@ -265,46 +265,15 @@ describe('MessageHandler title generation', () => {
     expect(sessionDoc.setTitle).not.toHaveBeenCalled();
   });
 
-  it('applies Kimi titleGeneration overrides when no titleConfig is passed', async () => {
-    const titleGeneration = {
-      configOptionValues: { model: 'kimi-k2-turbo', reasoning_effort: 'low' },
-    };
-    const { handler, workspaceDocument } = await createHandler(undefined, undefined, undefined, {
-      agentConfigId: 'agent-config-1',
-      agentConfigMeta: { titleGeneration },
-    });
-
-    const titleHost = handler as unknown as {
-      maybeGenerateAndStoreSessionTitle: (
-        sessionId: SessionId,
-        cliType: string,
-        agentType: string,
-        taskPrompt: string
-      ) => Promise<void>;
-    };
-    await titleHost.maybeGenerateAndStoreSessionTitle(
-      's-6' as SessionId,
-      'builtin',
-      'kimi',
-      'Do something cool'
-    );
-
-    expect(workspaceDocument.getAgentConfigById).toHaveBeenCalledWith('agent-config-1');
-    expect(mockedGenerateTitleIsolated).toHaveBeenCalledTimes(1);
-    expect(mockedGenerateTitleIsolated).toHaveBeenCalledWith(
-      expect.objectContaining({ titleConfig: titleGeneration })
-    );
-  });
-
-  // Claude asks the Agent SDK, Codex generates on an ephemeral thread and Grok's
-  // runtime pushes one per session; either way the isolated generator would only
-  // duplicate that work, and must not read the agent config to do it.
-  it.each(['claude', 'codex', 'grok'])(
-    'skips isolated generation for builtin %s',
+  it.each(['kimi', 'codex'])(
+    'applies %s titleGeneration overrides when no titleConfig is passed',
     async (agentType) => {
+      const titleGeneration = {
+        configOptionValues: { model: 'kimi-k2-turbo', reasoning_effort: 'low' },
+      };
       const { handler, workspaceDocument } = await createHandler(undefined, undefined, undefined, {
         agentConfigId: 'agent-config-1',
-        agentConfigMeta: { titleGeneration: { configOptionValues: { model: 'stale-model' } } },
+        agentConfigMeta: { titleGeneration },
       });
 
       const titleHost = handler as unknown as {
@@ -316,16 +285,47 @@ describe('MessageHandler title generation', () => {
         ) => Promise<void>;
       };
       await titleHost.maybeGenerateAndStoreSessionTitle(
-        's-acp-owned' as SessionId,
+        's-6' as SessionId,
         'builtin',
         agentType,
         'Do something cool'
       );
 
-      expect(mockedGenerateTitleIsolated).not.toHaveBeenCalled();
-      expect(workspaceDocument.getAgentConfigById).not.toHaveBeenCalled();
+      expect(workspaceDocument.getAgentConfigById).toHaveBeenCalledWith('agent-config-1');
+      expect(mockedGenerateTitleIsolated).toHaveBeenCalledTimes(1);
+      expect(mockedGenerateTitleIsolated).toHaveBeenCalledWith(
+        expect.objectContaining({ titleConfig: titleGeneration })
+      );
     }
   );
+
+  // Claude asks the Agent SDK and Grok's
+  // runtime pushes one per session; either way the isolated generator would only
+  // duplicate that work, and must not read the agent config to do it.
+  it.each(['claude', 'grok'])('skips isolated generation for builtin %s', async (agentType) => {
+    const { handler, workspaceDocument } = await createHandler(undefined, undefined, undefined, {
+      agentConfigId: 'agent-config-1',
+      agentConfigMeta: { titleGeneration: { configOptionValues: { model: 'stale-model' } } },
+    });
+
+    const titleHost = handler as unknown as {
+      maybeGenerateAndStoreSessionTitle: (
+        sessionId: SessionId,
+        cliType: string,
+        agentType: string,
+        taskPrompt: string
+      ) => Promise<void>;
+    };
+    await titleHost.maybeGenerateAndStoreSessionTitle(
+      's-acp-owned' as SessionId,
+      'builtin',
+      agentType,
+      'Do something cool'
+    );
+
+    expect(mockedGenerateTitleIsolated).not.toHaveBeenCalled();
+    expect(workspaceDocument.getAgentConfigById).not.toHaveBeenCalled();
+  });
 
   it('filters Lody internal prompt instructions before storing an ACP title', async () => {
     const { handler, sessionDoc } = await createHandler(undefined);

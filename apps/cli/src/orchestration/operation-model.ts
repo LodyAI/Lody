@@ -6,7 +6,7 @@ import { LODY_MAX_CHAIN_DEPTH } from '@lody/shared';
  * safety or liveness decision. Tests exhaustively explore bounded traces.
  */
 export type OrchestrationModelState = {
-  operation: 'absent' | 'active' | 'finished';
+  operation: 'absent' | 'active' | 'finished' | 'retired';
   targetInput: 'absent' | 'missing' | 'retry_scheduled' | 'durable';
   delivery:
     | 'absent'
@@ -27,11 +27,13 @@ export type OrchestrationModelState = {
   archived: boolean;
   configurationAvailable: boolean;
   completionTurnWrites: number;
+  providerSubmissions: number;
   chainDepth: number;
 };
 
 export type OrchestrationModelAction =
   | 'accept'
+  | 'expire_result'
   | 'materialize_fail'
   | 'materialization_retry'
   | 'materialize_success'
@@ -68,6 +70,7 @@ export const initialOrchestrationModelState = (): OrchestrationModelState => ({
   archived: false,
   configurationAvailable: true,
   completionTurnWrites: 0,
+  providerSubmissions: 0,
   chainDepth: 0,
 });
 
@@ -82,6 +85,15 @@ export const stepOrchestrationModel = (
         next.operation = 'active';
         next.targetInput = 'missing';
         next.progress = 'pending';
+      }
+      break;
+    case 'expire_result':
+      if (
+        next.operation === 'finished' &&
+        next.delivery === 'consumed' &&
+        next.progress === 'settled'
+      ) {
+        next.operation = 'retired';
       }
       break;
     case 'materialize_fail':
@@ -167,6 +179,7 @@ export const stepOrchestrationModel = (
         next.deliveryClaimOwner === 'current'
       ) {
         next.delivery = 'started';
+        next.providerSubmissions += 1;
       }
       break;
     case 'history_write_fail':
@@ -277,6 +290,9 @@ export const assertOrchestrationModelSafety = (state: OrchestrationModelState): 
   if (state.progress === 'settled' && state.targetInput === 'durable' && !state.targetTerminal) {
     throw new Error('progress ownership ended before the published target was terminal');
   }
+  if (state.providerSubmissions > 1) {
+    throw new Error('one Delivery submitted its completion to the provider more than once');
+  }
   if (state.completionTurnWrites > 1) {
     throw new Error('one Delivery created more than one visible completion Turn');
   }
@@ -321,6 +337,7 @@ export const assertOrchestrationModelSafety = (state: OrchestrationModelState): 
 export const enumerateOrchestrationModel = (maxDepth: number): OrchestrationModelState[] => {
   const actions: OrchestrationModelAction[] = [
     'accept',
+    'expire_result',
     'materialize_fail',
     'materialization_retry',
     'materialize_success',

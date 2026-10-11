@@ -1723,10 +1723,12 @@ describe('SessionDispatchWatcher', () => {
       { timeout: 3_000 }
     );
     expect(h.startSession).not.toHaveBeenCalled();
-    expect(recordChatFailure).toHaveBeenCalledWith(
-      expect.anything(),
-      'machine_access_denied',
-      expect.any(String)
+    await vi.waitFor(() =>
+      expect(recordChatFailure).toHaveBeenCalledWith(
+        expect.anything(),
+        'machine_access_denied',
+        expect.any(String)
+      )
     );
 
     h.watcher.stop();
@@ -1754,6 +1756,12 @@ describe('SessionDispatchWatcher', () => {
           agentType: 'codex',
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
         },
       },
     ];
@@ -1846,6 +1854,12 @@ describe('SessionDispatchWatcher', () => {
         inputConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
         }),
       })
     );
@@ -1859,6 +1873,12 @@ describe('SessionDispatchWatcher', () => {
         acpSessionConfig: expect.objectContaining({
           agentRoleId: 'role-reviewer',
           agentRoleRevision: 7,
+          agentRoleSnapshot: {
+            id: 'role-reviewer',
+            revision: 7,
+            name: 'Frozen reviewer',
+            emoji: '🔎',
+          },
         }),
       }),
       { dispatchSource: 'queue' }

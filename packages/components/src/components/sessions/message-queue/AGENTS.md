@@ -22,6 +22,10 @@ It renders through the bar's `queue` slot as an inset sheet (composer fill, roun
 top, square bottom) sitting directly on the bar, or on the composer when the bar
 has nothing to show; never with a gap, and never inside the input area.
 
+Coarse-pointer and narrow-screen actions use real, non-overlapping 44 px boxes
+on a separate row; fine-pointer desktop actions stay compact. Intent:
+[queue touch actions](../../../../../../specs/message-queue-touch-actions.md).
+
 Queue-bound sends held in memory (`runtime.pendingSends`) while attachments
 prepare render here as local rows (`pending-queue-row.tsx`) after the real items,
 never in `mq` and never in the conversation stream. They are display-only (retry
@@ -29,3 +33,8 @@ and cancel only; no drag, edit or steer) and are hidden by `userTurnId` once the
 real item exists. Upload progress is subscribed only inside the sheet; the page
 reads `useHasPendingQueueRecords`. Decisions: [local queue rows](../../../../../../.agents/notes/implemented/feature/2026-09-28-local-queue-pending-rows.md),
 [in-memory held sends](../../../../../../.agents/notes/implemented/simplification/2026-09-29-remove-session-send-journal.md).
+
+The queue disclosure is local display state, initially expanded. Keep its editing
+rows mounted while folded; focusing the disclosure must not commit or discard a
+row draft. Folded summaries retain pending/failed-send awareness. Intent:
+[queue presentation](../../../../../../specs/message-queue.md).

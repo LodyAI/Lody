@@ -1,11 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import * as os from 'os';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { CliType } from '../ai';
+import { CommandFailed, runCommandTextLegacy } from './process';
 
-const execFileAsync = promisify(execFile);
 const CLI_VERSION_COMMAND_TIMEOUT_MS = 5_000;
 
 function uniqNonEmpty(values: Array<string | undefined | null>): string[] {
@@ -72,23 +70,26 @@ async function runCommand(
   env: NodeJS.ProcessEnv
 ): Promise<CliCommandResult> {
   try {
-    const result = await execFileAsync(command, args, {
+    const result = await runCommandTextLegacy({
+      command,
+      args,
       env,
-      encoding: 'utf-8',
       timeout: CLI_VERSION_COMMAND_TIMEOUT_MS,
-      windowsHide: true,
+      check: 'exit-0',
     });
     return {
-      stdout: String(result.stdout ?? ''),
+      stdout: result.stdout,
       status: 0,
     };
   } catch (error) {
-    const withOutput = error as
-      | (Error & { code?: number | string; stdout?: string; stderr?: string })
-      | undefined;
+    // A non-zero exit keeps its status and stdout; a spawn failure (ENOENT),
+    // a timeout or an output overflow has no exit status.
+    if (error instanceof CommandFailed) {
+      return { stdout: error.stdout, status: error.code, error };
+    }
     return {
-      stdout: String(withOutput?.stdout ?? ''),
-      status: typeof withOutput?.code === 'number' ? withOutput.code : null,
+      stdout: '',
+      status: null,
       ...(error instanceof Error ? { error } : {}),
     };
   }

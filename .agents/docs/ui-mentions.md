@@ -29,15 +29,23 @@ lives in its `README.md`.
 
 ## Menu placement
 
-The main desktop chat composer anchors its menu to the whole composer frame
-and pins it above that frame. The popup stays within the frame's width and
-caps its height to the available room above; the list scrolls when needed.
-The dialog composer and inline editor instead use a virtual anchor measured
-from the textarea's laid-out caret. Soft wraps, internal scrolling, and scaled
-editor containers move those popups with the insertion point. The virtual
-element retains the textarea as its observation target so layout shifts also
-update the menu. Those floating menus flip at the viewport edge and scroll
-within visible room when neither side fits.
+The main desktop chat composer follows the textarea's laid-out caret and
+prefers the space above it. Its height is capped to that upper space while a
+heading and option fit; otherwise it may open below. The dialog composer and
+inline editor follow the caret but prefer below and flip at viewport edges.
+Soft wraps, internal scrolling, and scaled editor containers move these
+popups with the insertion point. The virtual element retains the textarea as
+its observation target so layout shifts also update the menu. All stay within
+the input's usable width and scroll when their contents exceed visible room.
+An explicit `positionAnchor="composer"` caller instead anchors to the whole
+frame and locks its side for the lifetime of the open menu.
+
+Desktop content changes also request positioning in a layout effect. Entering
+`@role:` or filtering rows can change the popup height before resize observation
+arrives; updating with the content commit keeps an upward menu's bottom edge
+at its anchor. Resize observation still handles later layout changes. The
+[position synchronization decision](../notes/implemented/bug-fix/2026-10-08-mention-layout-position-sync.md)
+records the frame-level evidence.
 
 The mobile composer uses a separate docked strip. Its boundary is the whole
 `data-mention-frame` (input, controls, and attachments), so the strip cannot
@@ -46,6 +54,19 @@ above that frame, including the top inset. Inline edit-and-resend opts out of
 the dock and keeps the floating caret menu. The
 [placement Spec](../../specs/composer-mention-menu-placement.md) owns these
 visible guarantees.
+
+Hovering a candidate may show or hide a desktop detail pane. The menu keeps
+the candidate list mounted across that change so its scroll position and
+registered rows survive; only the pane and layout styles change. The
+[scroll continuity decision](../notes/implemented/bug-fix/2026-10-08-mention-detail-scroll-continuity.md)
+records the reproduction and verification.
+
+Row selection saves the textarea selection, restores focus and that selection,
+then starts insertion/preparation. WebKit touch taps can blur the textarea and
+expose a temporary zero caret during refocus; starting an asynchronous Shortcut
+before that focus cycle lets the empty-query handler cancel it. Preparation keeps
+the menu open for loading and retry feedback. See the
+[touch focus note](../notes/implemented/bug-fix/2026-10-07-shortcut-touch-focus.md).
 
 ## Ranking
 

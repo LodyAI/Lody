@@ -26,3 +26,13 @@ telemetry, or managed-runtime downloads, as routed by the root instructions.
 - Managed runtime downloads default to the public R2-backed channel owned by
   `packages/platform/src/runtime-artifacts.ts`; local and cloud assembly must use that
   same constant. `LODY_RUNTIME_BASE_URL` is only an explicit mirror override.
+
+## Host identity keys
+
+- `./host-keys` is host-only and remains unconnected until the crypto and host
+  adapters are reviewed. CLI assembly receives machine identity only; never grant
+  it personal management operations. No generic private export or arbitrary signing.
+- Failure, scope close, logout and ordinary cache cleanup must not delete identity
+  keys. Preserve uncertain failure reasons and writes; no plaintext-file fallback.
+- Native fixtures use random UUIDs and isolated test keychains only. Verify exact
+  cleanup; never change user keychains or global settings. See [validation](README.md).

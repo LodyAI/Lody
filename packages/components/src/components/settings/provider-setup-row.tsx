@@ -1,7 +1,7 @@
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import {
   machineSupportsProviderSetupProtocol,
@@ -9,7 +9,7 @@ import {
   type MachineViewMeta,
   type ProviderSetupTask,
 } from '@lody/shared';
-import { RotateCcw, Trash2 } from 'lucide-react';
+import { Check, Copy, RotateCcw, Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 
 import { AgentReadinessMark, type AgentReadiness } from '@/components/shared/agent-readiness-mark';
@@ -18,6 +18,7 @@ import { colors } from '@lody/ui/tokens/colors.stylex';
 import { space } from '@lody/ui/tokens/scales.stylex';
 import { withClassName } from '@/lib/stylex';
 import { openExternalUrl } from '@/lib/native-browser';
+import { writeTextToClipboard } from '@/lib/clipboard';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
@@ -29,6 +30,7 @@ import { settingsCatalog as catalog } from './surface';
 
 /** Where the agent's text column starts: the mark, its gap, and the row's inset. */
 const TEXT_INSET = '52px';
+const DIMCODE_INSTALL_COMMAND = 'npm install -g dimcode';
 
 const styles = stylex.create({
   root: { minWidth: 0 },
@@ -83,6 +85,19 @@ const styles = stylex.create({
     paddingInlineEnd: space[3],
     paddingBottom: space[3],
   },
+  installCommand: {
+    margin: 0,
+    fontSize: uiText.footnoteSize,
+    lineHeight: uiText.footnoteLeading,
+    color: colors.secondaryLabel,
+  },
+  command: {
+    whiteSpace: 'nowrap',
+    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+    fontSize: uiText.footnoteSize,
+    color: colors.label,
+    userSelect: 'all',
+  },
   status: { margin: 0, fontSize: uiText.footnoteSize, color: colors.secondaryLabel },
   /** A failure says so in its sentence; the row takes no border for it. */
   statusFailed: { color: colors.destructive },
@@ -107,9 +122,13 @@ export function ProviderSetupRow({
 }: ProviderSetupRowProps) {
   const { t } = useTranslation();
   const [actionPending, setActionPending] = useState<'retry' | 'delete' | null>(null);
+  const [commandCopied, setCommandCopied] = useState(false);
   const config = setup.config;
   const isBubSetup = config.cliType === 'builtin' && config.agentType === 'bub';
+  const isDimcodeSetup = config.cliType === 'builtin' && config.agentType === 'dimcode';
   const installDocsUrl = isBubSetup ? BUB_ACP_INSTALL_DOCS_URL : undefined;
+  const showDimcodeInstallCommand =
+    isDimcodeSetup && setup.status === 'failed' && setup.failureCode === 'runtime-unavailable';
   const showBubInstallCommand =
     isBubSetup && setup.status === 'failed' && setup.failureCode === 'runtime-unavailable';
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -284,9 +303,43 @@ export function ProviderSetupRow({
       {/* Aligned to the name above it, not to the edge: the sentence is about
           this agent, so it starts where the agent's text column starts. */}
       <div {...stylex.props(styles.detail)}>
-        <p {...stylex.props(styles.status, setup.status === 'failed' && styles.statusFailed)}>
-          {statusText}
-        </p>
+        {showDimcodeInstallCommand ? (
+          <p {...stylex.props(styles.installCommand)}>
+            <Trans
+              t={t}
+              i18nKey="settings.agent.setup.dimcodeInstallHint"
+              defaults="dimcode not detected. Install it with <command>{{command}}</command><copy/>."
+              values={{ command: DIMCODE_INSTALL_COMMAND }}
+              components={{
+                command: <code {...stylex.props(styles.command)} />,
+                copy: (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="mini"
+                    icon
+                    aria-label={
+                      commandCopied ? t('common.copied', 'Copied') : t('common.copy', 'Copy')
+                    }
+                    onClick={() => {
+                      void writeTextToClipboard(DIMCODE_INSTALL_COMMAND).then(setCommandCopied);
+                    }}
+                  >
+                    {commandCopied ? (
+                      <Check {...stylex.props(catalog.icon)} />
+                    ) : (
+                      <Copy {...stylex.props(catalog.icon)} />
+                    )}
+                  </Button>
+                ),
+              }}
+            />
+          </p>
+        ) : (
+          <p {...stylex.props(styles.status, setup.status === 'failed' && styles.statusFailed)}>
+            {statusText}
+          </p>
+        )}
         {showBubInstallCommand ? (
           <BubInstallGuide />
         ) : setup.status === 'failed' && installDocsUrl ? (

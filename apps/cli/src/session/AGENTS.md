@@ -2,9 +2,8 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Rules only; rationale: [README.md](README.md). Worktrees and git
-credentials: [worktree/AGENTS.md](worktree/AGENTS.md). Architecture: context/message-flow.md.
-Contract: specs/session-orchestration.md.
+Module map and contracts: [README.md](README.md).
+Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Authorization and identity
 
@@ -64,8 +63,8 @@ Contract: specs/session-orchestration.md.
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
   `agent_disconnected`, Harness compression mismatch is `acp_session_storage_incompatible`.
-- Continue-session recovery may restore the ACP session and retry the same prompt once, only
-  while that turn has no ACP output.
+- User turns may restore stale ACP and retry once before output. Delivery never retries after
+  provider submission.
 - A turn with no ACP updates takes `recordSilentTurnFailure`, not `setDispatchHandled`.
   Read `turnProducedVisibleOutput` before `finalizeTurn` clears it; still finalize, advance
   the pointer, and fail open.
@@ -73,6 +72,8 @@ Contract: specs/session-orchestration.md.
   semantics, and `session-diff-stats-target.ts` skips rather than overwrites a good total.
 
 ## Lifecycle
+
+- For Roost reads and writes, follow [paging rules](README.md#roost-history-paging).
 
 - `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
   protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup
@@ -86,11 +87,11 @@ Contract: specs/session-orchestration.md.
 
 ## Sagas
 
-- Preparation peek/claim never delay cold fallback; peek never transfers ownership. Publish the
-  resource BEFORE `start()`. It may create the marked final worktree and complete `newSession`, but cannot
-  create a session doc, run setup, append history, or publish events before adoption.
-- Dispatch and claim rescan the current row and reject changed compatibility under canonical
-  `buildSessionLaunchConfig` semantics; a published incompatible resource cleans up first.
+- Peek/claim are synchronous; publish before `start()`. Peek never transfers ownership.
+  Cold/replacement starts await same-session cleanup; failures block, including late creation.
+  Before adoption: marked worktree and `newSession` only; no doc, setup, history or events.
+- Credentials are runtime leases: adopt retains, dispose releases that generation; local has none.
+- Dispatch/claim rescan `buildSessionLaunchConfig`; await incompatible cleanup.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
 - Fork and continuation share `resolveSessionAcpTargetId`; source runtime config copies only at its matching user-turn fence.
 - Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder

@@ -13,7 +13,7 @@ That tolerance must not authorize creating new malformed items locally.
 
 ## Contract
 
-- Renderer and CLI share one HistoryWriter for local history changes. A reader
+- Renderer and CLI share one HistoryWriter for local Loro history changes. A reader
   feature flag may replace the view, not the write contract.
 - New turns use explicit message types and runtime input parsing. Legacy typed
   callback callers use the same writer through the session facade.
@@ -37,9 +37,9 @@ That tolerance must not authorize creating new malformed items locally.
   and opaque items. Explicit changes and new fork notices still require parsing.
   Prepend copied rows and reject id collisions; retain target containers.
   Caller-created JSON cannot claim this provenance. Copying does not modify the source.
-  A fork's detached capture belongs to the fork operation and survives source-cache
-  eviction until explicitly released. Ordinary store-scoped captures become invalid
-  on teardown; release remains safe after teardown.
+  A detached capture held by a fork survives source-cache eviction and source
+  teardown. Its writer provenance remains authoritative across backend instances;
+  copying never depends on the source store remaining open.
 - Failed edit-and-resend can restore captured old history without reparsing it as
   new input. A one-use local rollback receipt restores only the changed range, preserving
   current content of untouched rows and subsequent appends. It captures only the affected
@@ -47,7 +47,7 @@ That tolerance must not authorize creating new malformed items locally.
   and edits inside that range, except a newly inserted pending user row becoming seen/read
   with every other field unchanged. It is not crash recovery or a distributed transaction.
   External provider imports remain new inputs, not privileged stored-history copies.
-- Acceptance here means a local CRDT write. Existing repo persistence and transport
+- Acceptance in the Loro writer means a local CRDT write. Existing repo persistence and transport
   still own durability, permissions, and remote synchronization.
 - Tool fields other than type/toolCallId
   parse only changed fields without reparsing untouched tool payloads; outcome-only
@@ -170,6 +170,70 @@ on projected history. This is not arbitrary downgrade safety.
 
 ## Limits and review questions
 
+### Backend selection and display reads
+
+New sessions use Loro by default. With both experimental switches enabled, the
+renderer prefers Roost only when the target advertises the required history
+protocol. Missing or older capabilities retain Loro before any session write.
+An explicit Roost request to an unsupported target fails before metadata, history
+or warm-up is created. Legacy sessions and non-renderer creation paths without an
+explicit choice retain Loro.
+Existing sessions keep their persisted backend when the switch changes. Commands
+use the session's selected backend, with one writer for its storage. Loro-specific
+container rules above apply to that backend; Roost preserves immutable sealed
+segments and projects state corrections and independent permission outcomes into
+the same logical turn. Structural replacement prepares a coherent branch and
+atomically activates it; a failed preparation never empties the visible branch.
+Cloud command clients read and write through the session's owning machine rather
+than selecting a database on the calling machine. Control metadata and
+delivery state remain in Loro. Local history acceptance does not establish remote
+Roost synchronization.
+
+Desktop sidebar session hover cards display the session's persisted history
+backend as Roost or Loro in Workspace, Updated and Pinned lists. Missing backend
+metadata on a legacy session resolves to Loro; the current experimental preference
+does not determine this label. Showing the label does not read the history body.
+
+Performance work must preserve the existing Lody conversation identity and its
+owner workflow. Edit & Resend may reuse an immutable prefix through the storage
+SDK's internal branch operations; it must not create or navigate to another Lody
+conversation. Old writers must remain fenced, lost acknowledgments must refresh
+the committed branch, and rollback must preserve later appends or refuse a
+conflicting edit. A cached goal guard is valid only for its exact history version;
+missing, invalid or concurrently changed cache evidence requires an authoritative
+check. Cache absence never establishes that no active goal exists.
+
+Opening a Roost conversation reads the latest active-branch window. Scrolling
+up loads older logical turns through a reverse cursor. Whole-history search,
+outline navigation, counts and facts must cover earlier pages without requiring
+manual scrolling. These consumers load directory pages in the background and
+keep body hydration bounded by their leases; opening does not await a full-history
+read. Restoring a reading position loads its logical turn before declaring the
+initial window ready. New messages retain the loaded prefix
+and its cursor. A branch rewrite invalidates incompatible pages and refreshes the
+loaded window without displaying the superseded suffix. Unloaded rows contribute
+neither fabricated messages nor complete-history facts. Explicit export/snapshot
+operations retain an authoritative full-read capability.
+
+Text deltas update visible content and outline summaries without repeatedly
+rebuilding unchanged whole-history business facts. Goal, permission, scheduling,
+diff and status changes still invalidate their consumers. Reverse page loading
+preserves retained row/body identities when their positions and content remain
+unchanged. Optimization must not delay control updates or claim complete facts
+for an unread prefix.
+
+Previously synchronized history remains readable when its owner is unavailable,
+including reopening the conversation, searching and navigating older cached turns.
+The renderer persists a read-only projection scoped by account, workspace, machine
+and session. Owner read responses bind page content, count and a durable revision
+to the same observation. Consecutive changes update the affected cached rows
+atomically; a missed revision stages a replacement through bounded pages while
+retaining the previous coherent snapshot. Reconnection refreshes through the
+existing owner transport. The cache never accepts or replays user commands, and
+cannot supply history this device has never synchronized.
+
+### Verification limits
+
 This is not a proof of arbitrary cross-version application compatibility or reader
 safety. TypeScript cannot enforce untrusted inputs, semantic string constraints,
 or prevent deliberate casts/raw access. A command changing an already damaged item
@@ -177,8 +241,8 @@ may need to repair that item; it cannot rely on tolerance reserved for untouched
 history. The initial callback adapter supports order-preserving history edits, not
 arbitrary reordering of existing turns in a plain LoroList.
 
-The current full-Mirror read path still materializes history; this change is not
-the 3000-round performance acceptance or the windowed ConversationView rollout.
+The Roost reader now uses active-branch pages; the legacy Loro reader still loads
+its directory. This does not establish 3000-round performance acceptance.
 Non-history control-field validation remains outside this HistoryWriter contract.
 The v2 canonical form is defined for the shapes this repository writes. The full
 sealed-skeleton feature (a reader-side `ref` payload fetch, payload hooks, and the
@@ -190,6 +254,8 @@ sealed turn from looking like a hash conflict once such skeletons exist.
 - `packages/shared/src/{history-writer,history-write-schema,history-materializer,session-mirror,schema}.ts`
 - `packages/shared/src/session-data/{history-import,loro}.ts`
 - `apps/cli/src/lib/local-project-history-sync-service.ts`
+- `apps/cli/src/session/{roost-node-session,roost-history-generation,roost-rpc-session}.ts`
+- `apps/cli/tests/roost-session-backend-contract.test.ts`
 - `packages/shared/tests/history-writer.test.ts`, `history-writer.contract.ts`,
   `history-storage-policy.test.ts` and `session-history-import-port.test.ts`
 - `apps/cli/tests/local-project-history-sync-service.test.ts` and `local-project-history-sync-writer.test.ts`

@@ -44,7 +44,9 @@ export type UseCodeCollabSaveTextResult = {
   readonly status: SessionFileSaveStatus;
   readonly liveStatus: SessionFileLiveSyncStatus;
   readonly onContentChange: (text: string) => void;
-  readonly onExternalTextApplied: () => void;
+  // Seed from an accepted open/refresh or saved external snapshot. Conflict
+  // markers are drafts and must go through onContentChange instead.
+  readonly onExternalTextApplied: (text: string) => void;
   readonly markConflictPending: (message?: string) => void;
   readonly flush: () => Promise<void>;
   readonly resolveConflict: (
@@ -78,6 +80,11 @@ export function useCodeCollabSaveText(
   const liveStatusRef = useRef<SessionFileLiveSyncStatus>(liveStatus);
 
   const pendingTextRef = useRef<string | null>(null);
+  const savedTextRef = useRef<string | undefined>(undefined);
+  const latestTextRef = useRef<string | undefined>(undefined);
+  const savingTextRef = useRef<string | null>(null);
+  const conflictTextRef = useRef<string | undefined>(undefined);
+  const saveGenerationRef = useRef(0);
   const pendingLiveTextRef = useRef<string | null>(null);
   // Tracks the fileId associated with the pending text so a save that
   // started before a file switch doesn't write the old file's bytes
@@ -130,6 +137,16 @@ export function useCodeCollabSaveText(
     setLiveStatus(next);
   }, []);
 
+  const clearUnchangedPending = useCallback((): boolean => {
+    if (savedTextRef.current === undefined || latestTextRef.current !== savedTextRef.current) {
+      return false;
+    }
+    pendingTextRef.current = null;
+    pendingFileIdRef.current = null;
+    firstPendingSaveAtRef.current = null;
+    return true;
+  }, []);
+
   const performSave = useCallback(async (): Promise<SaveAttemptResult> => {
     const text = pendingTextRef.current;
     const targetFileId = pendingFileIdRef.current;
@@ -148,12 +165,14 @@ export function useCodeCollabSaveText(
       firstPendingSaveAtRef.current = null;
       return 'idle';
     }
+    const generation = saveGenerationRef.current;
     const isCurrentTarget = (): boolean =>
-      targetFileId === fileIdRef.current && currentProvider === providerRef.current;
+      generation === saveGenerationRef.current && targetFileId === fileIdRef.current;
     const pendingWindowStartedAt = firstPendingSaveAtRef.current;
     pendingTextRef.current = null;
     pendingFileIdRef.current = null;
     firstPendingSaveAtRef.current = null;
+    savingTextRef.current = text;
     commitStatus({ kind: 'saving' });
     // Restore the failed (text, fileId) into the pending refs so a
     // follow-up keystroke or `flush()` retries instead of silently
@@ -194,6 +213,8 @@ export function useCodeCollabSaveText(
         });
         return 'blocked';
       }
+      savedTextRef.current = result.snapshot.kind === 'text' ? result.snapshot.text : text;
+      clearUnchangedPending();
       if (liveStatusRef.current.kind !== 'idle') {
         commitLiveStatus({ kind: 'synced', at: Date.now() });
       }
@@ -205,6 +226,10 @@ export function useCodeCollabSaveText(
       if (!isCurrentTarget()) return 'idle';
       if (error instanceof SaveTextConflictError) {
         retryableSaveFailureCountRef.current = 0;
+        // Disk no longer matches our baseline; equality with the old open text
+        // cannot dismiss this conflict or release the leave guard.
+        savedTextRef.current = undefined;
+        conflictTextRef.current = text;
         // Conflicts are not retryable from the pending buffer — the
         // user has to pick a resolution; leave pending cleared so
         // a stray keystroke doesn't beat the resolution RPC.
@@ -234,12 +259,14 @@ export function useCodeCollabSaveText(
       retryableSaveFailureCountRef.current = 0;
       commitStatus({ kind: 'error', message, at: Date.now() });
       return 'blocked';
+    } finally {
+      if (isCurrentTarget()) savingTextRef.current = null;
     }
     // `providerRef` / `fileIdRef` are stable `useLatestRef`
     // MutableRefObjects — listing them is a no-op at runtime but
     // satisfies the exhaustive-deps lint rule, which can't detect
     // ref stability through a custom hook return value.
-  }, [commitLiveStatus, commitStatus, providerRef, fileIdRef]);
+  }, [clearUnchangedPending, commitLiveStatus, commitStatus, providerRef, fileIdRef]);
 
   const drainSaves = useCallback(async (): Promise<void> => {
     while (pendingTextRef.current !== null) {
@@ -355,13 +382,23 @@ export function useCodeCollabSaveText(
       if (!enabled) return;
       const currentFileId = fileIdRef.current;
       if (!currentFileId) return;
+      latestTextRef.current = text;
       retryableSaveFailureCountRef.current = 0;
+      if (
+        savingTextRef.current === null &&
+        statusRef.current.kind !== 'conflict_pending' &&
+        statusRef.current.kind !== 'conflict' &&
+        clearUnchangedPending()
+      ) {
+        commitStatus({ kind: 'idle' });
+        return;
+      }
       if (pendingTextRef.current === null) {
         firstPendingSaveAtRef.current = Date.now();
       }
       pendingTextRef.current = text;
       pendingFileIdRef.current = currentFileId;
-      if (statusRef.current.kind !== 'conflict_pending') {
+      if (statusRef.current.kind !== 'conflict_pending' && statusRef.current.kind !== 'conflict') {
         commitStatus({ kind: 'pending' });
       }
     },
@@ -369,7 +406,7 @@ export function useCodeCollabSaveText(
     // it is a no-op at runtime but satisfies the exhaustive-deps lint
     // rule, which can't detect ref stability through a custom hook
     // return value.
-    [commitStatus, enabled, fileIdRef]
+    [clearUnchangedPending, commitStatus, enabled, fileIdRef]
   );
 
   const markConflictPending = useCallback(
@@ -383,6 +420,7 @@ export function useCodeCollabSaveText(
         ...(message === undefined ? {} : { message }),
         at: Date.now(),
       });
+      savedTextRef.current = undefined;
     },
     [commitStatus, enabled, fileIdRef]
   );
@@ -415,29 +453,35 @@ export function useCodeCollabSaveText(
     }
   }, [startDrain, startLiveSync]);
 
-  const onExternalTextApplied = useCallback(() => {
-    pendingTextRef.current = null;
-    pendingFileIdRef.current = null;
-    firstPendingSaveAtRef.current = null;
-    pendingLiveTextRef.current = null;
-    pendingLiveFileIdRef.current = null;
-    liveSyncGenerationRef.current += 1;
-    retryableSaveFailureCountRef.current = 0;
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    if (liveSyncTimerRef.current !== null) {
-      clearTimeout(liveSyncTimerRef.current);
-      liveSyncTimerRef.current = null;
-    }
-    if (statusRef.current.kind === 'pending' || statusRef.current.kind === 'conflict_pending') {
+  const onExternalTextApplied = useCallback(
+    (text: string) => {
+      savedTextRef.current = text;
+      latestTextRef.current = text;
+      savingTextRef.current = null;
+      conflictTextRef.current = undefined;
+      saveGenerationRef.current += 1;
+      pendingTextRef.current = null;
+      pendingFileIdRef.current = null;
+      firstPendingSaveAtRef.current = null;
+      pendingLiveTextRef.current = null;
+      pendingLiveFileIdRef.current = null;
+      liveSyncGenerationRef.current += 1;
+      retryableSaveFailureCountRef.current = 0;
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      if (liveSyncTimerRef.current !== null) {
+        clearTimeout(liveSyncTimerRef.current);
+        liveSyncTimerRef.current = null;
+      }
       commitStatus({ kind: 'idle' });
-    }
-    if (liveStatusRef.current.kind === 'pending' || liveStatusRef.current.kind === 'syncing') {
-      commitLiveStatus({ kind: 'idle' });
-    }
-  }, [commitLiveStatus, commitStatus]);
+      if (liveStatusRef.current.kind === 'pending' || liveStatusRef.current.kind === 'syncing') {
+        commitLiveStatus({ kind: 'idle' });
+      }
+    },
+    [commitLiveStatus, commitStatus]
+  );
 
   useEffect(() => {
     const isDirty = () =>
@@ -464,6 +508,9 @@ export function useCodeCollabSaveText(
       const currentProvider = providerRef.current;
       const currentFileId = fileIdRef.current;
       if (!currentProvider || !currentFileId) return;
+      const generation = saveGenerationRef.current;
+      const isCurrentTarget = () =>
+        generation === saveGenerationRef.current && currentFileId === fileIdRef.current;
       const reconciler = currentProvider.resolveSaveConflict;
       if (!reconciler) {
         commitStatus({
@@ -489,18 +536,25 @@ export function useCodeCollabSaveText(
         return;
       }
       commitStatus({ kind: 'saving' });
+      savingTextRef.current = conflictTextRef.current ?? latestTextRef.current ?? null;
       try {
         retryableSaveFailureCountRef.current = 0;
         await reconciler.call(currentProvider, currentFileId, {
           conflictId,
           resolution,
         });
+        if (!isCurrentTarget()) return;
+        if (resolution === 'override') {
+          savedTextRef.current = conflictTextRef.current;
+          clearUnchangedPending();
+        }
         commitStatus(
-          resolution === 'load_with_conflicts'
+          resolution === 'load_with_conflicts' || pendingTextRef.current !== null
             ? { kind: 'pending' }
             : { kind: 'saved', at: Date.now() }
         );
       } catch (error) {
+        if (!isCurrentTarget()) return;
         if (error instanceof SaveTextConflictError) {
           commitStatus({
             kind: 'conflict',
@@ -512,13 +566,15 @@ export function useCodeCollabSaveText(
         }
         const message = error instanceof Error ? error.message : String(error);
         commitStatus({ kind: 'error', message, at: Date.now() });
+      } finally {
+        if (isCurrentTarget()) savingTextRef.current = null;
       }
     },
     // `providerRef` / `fileIdRef` are stable `useLatestRef`
     // MutableRefObjects — listing them is a no-op at runtime but
     // satisfies the exhaustive-deps lint rule, which can't detect
     // ref stability through a custom hook return value.
-    [commitStatus, providerRef, fileIdRef]
+    [clearUnchangedPending, commitStatus, providerRef, fileIdRef]
   );
 
   useEffect(() => {
@@ -544,6 +600,11 @@ export function useCodeCollabSaveText(
   // can briefly flicker during provider rebuilds, so it is deliberately not a
   // reset trigger.
   useEffect(() => {
+    savedTextRef.current = undefined;
+    latestTextRef.current = undefined;
+    savingTextRef.current = null;
+    conflictTextRef.current = undefined;
+    saveGenerationRef.current += 1;
     pendingTextRef.current = null;
     pendingFileIdRef.current = null;
     firstPendingSaveAtRef.current = null;

@@ -1,6 +1,6 @@
 # components/ai-gui
 
-Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md).
+Ownership: [README.md](README.md).
 
 ## Stream And Search
 
@@ -50,7 +50,7 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   body type, a hover-only trailing chevron, no fill. Only builtin DeepSeek Harness retains thought rows in expandable
   activity groups; pure thoughts default open unless explicitly collapsed. Other providers
   keep thoughts hidden.
-  Turns are avatar-free and full-width; run config lives in the footer.
+  Assistant footers show config, not author identity.
 - An expanded tool step is ONE `ToolDetailSheet` (`tool-call-detail.tsx`): composer
   fill + card shadow, no header restating the row, sections in content order. Only
   the command is highlighted, via the Shiki worker; output stays ANSI text. Drop
@@ -86,11 +86,11 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   and `support.cancel`. Dialogs share turn renderers/grouping and one scroller:
   [task rows and dialog](README.md#subagent-tasks).
 
-- Text roles use `@lody/ui`; reading prose uses `conversation.readingLeading`.
-  Compact prose/code use subheadline, never nested `em`. Message sizes use
-  `conversation-font-size-classes.ts`; hosts require CSS typed division. Only live
-  turns load the stream engine. Remounted live rows show existing text immediately;
-  only additions animate.
+- Text roles: `@lody/ui`; prose: `conversation.readingLeading`; compact prose/code:
+  subheadline, no nested `em`. Message sizes: `conversation-font-size-classes.ts`;
+  hosts require CSS typed division. Stream engine: live turns only;
+  remounts show existing text immediately and animate only additions.
+- Rendering and search share CJK emphasis rules.
 - A Mermaid diagram in a message is a still preview until a pointer click
   activates it, and an unmodified wheel is NEVER taken — activated or not.
   Deactivation preserves pan/zoom and activation adds no outline; see the
@@ -115,8 +115,8 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   dialog resends the same content as a new ordinary message, then marks the old
   entry `canceled` while retaining the marker as a tombstone. Never automatically
   dispatch or revive the old turn.
-- User rows show names right of time; desktop avatars open accessible name/email
-  cards, mobile avatars do not.
+- Frozen Agent/Role names/icons never use human profiles or live catalogs. Human names
+  sit right of time; only desktop avatars open accessible name/email cards.
 - Attachment layout, preview continuity, and mobile previews follow
   [session-files-rendering.md](session-files-rendering.md).
 - Markdown images remember each source's natural size or failure for the page's

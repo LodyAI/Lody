@@ -8,6 +8,8 @@ import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { ensureShareThemeScopes } from '@/components/share-theme-scope';
 import { ModelBrandIcon } from '@/components/icons/model-brand-icon';
 import { Avatar } from '@lody/ui/avatar';
+import { avatarPaletteTheme } from '@lody/ui/avatar/avatar.tokens.stylex';
+import { productDarkPalette, productLightPalette } from '@/lib/vscode-theme/lody-ui-palette.stylex';
 import lodyLogo from '@/assets/lody-icon.png';
 import { createUsageHeatScale, type UsageCalendarModel } from './usage-calendar-model';
 import type { UsageShareGraphic, UsageShareSlice, UsageShareStats } from './usage-share-stats';
@@ -1033,6 +1035,8 @@ export function UsageShareCard({
   );
 
   const rootStyles = stylex.props(
+    theme === 'light' ? productLightPalette : theme === 'dark' ? productDarkPalette : undefined,
+    theme !== undefined && avatarPaletteTheme,
     styles.root,
     !framed && styles.rootNoFrame,
     onCanvas && styles.rootOnCanvas,

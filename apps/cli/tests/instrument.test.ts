@@ -6,7 +6,11 @@ const posthogInstance = vi.hoisted(() => ({
   flush: vi.fn(async () => {}),
 }));
 
-const PostHogCtor = vi.hoisted(() => vi.fn(() => posthogInstance));
+const PostHogCtor = vi.hoisted(() =>
+  vi.fn(function () {
+    return posthogInstance;
+  })
+);
 
 vi.mock('posthog-node', () => ({ PostHog: PostHogCtor }));
 

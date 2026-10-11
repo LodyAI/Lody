@@ -12,7 +12,7 @@ Translation: current
 
 ## 契约
 
-- 前端与 CLI 共用一个 HistoryWriter 进行本地历史修改。读取功能开关可切换视图，不能切换写入契约。
+- 前端与 CLI 共用一个 HistoryWriter 进行本地 Loro 历史修改。读取功能开关可切换视图，不能切换写入契约。
 - 新轮次使用明确消息类型和运行时输入解析。原有带类型的 callback 调用通过会话适配层进入同一 writer。
 - 一条命令修改历史前，先校验新增轮次和变化的已知字段/item。非法命令报告路径和错误码，
   保留旧值；另一条合法命令仍可执行。不重新校验无关旧 item。
@@ -29,12 +29,14 @@ Translation: current
   保留未改动的未知字段和不透明 item；显式修改及新增 fork notice 仍需解析。
   复制轮次插在目标已有轮次之前，拒绝 id 冲突，保留目标容器。
   调用者构造的 JSON 不能冒充这种来源。复制不修改源文档。
+  Fork 持有的独立捕获在源会话缓存回收及关闭后仍有效；不同 backend 实例继续依赖
+  writer 的既有来源校验，复制不要求源存储保持打开。
 - 编辑后重发失败时，可恢复捕获的旧历史，不将其当新输入重验。一次性的本地回滚凭据
   只恢复本次变化的区间，保留未涉及轮次的当前内容及随后追加的轮次。期间若轮次身份/顺序变化，或区间内
   内容变化，则拒绝覆盖；区间内唯一例外是本次新插入的 pending 用户轮次
   变成 seen/read，且其他字段完全不变；它不是崩溃恢复或分布式事务。
   外部 provider 导入仍是新输入，不能借用已存历史复制权限。
-- 这里的接受表示本地 CRDT 写入。持久化、权限和远端同步仍由原有 repo 和传输层负责。
+- Loro writer 的接受表示本地 CRDT 写入。持久化、权限和远端同步仍由原有 repo 和传输层负责。
 - 除 type/toolCallId 外，工具字段只解析本次变化的值，不重验未修改的工具内容；
   只修改 outcome 时保留已有请求信息。修改工具身份需完整 item 解析；变化的 content block
   单独解析。新增字段非法时，整条命令在写入前拒绝。
@@ -128,12 +130,58 @@ Translation: current
 
 ## 边界与待审事项
 
+### Backend 选择与显示读取
+
+新会话默认使用 Loro。两个实验开关打开时，renderer 仅在目标机器声明支持所需
+历史协议时优先选择 Roost；能力缺失或较旧时，在任何会话写入前保留 Loro。
+明确要求 Roost 而目标不支持时，在 metadata、历史或 warm-up 创建前报错。
+没有显式选择的旧会话和非 renderer 创建路径仍使用 Loro。开关变化不会改变已有会话保存的
+backend。命令通过会话选定的 backend，使用该存储唯一的 writer。上文 Loro 容器规则
+只适用于 Loro backend；Roost 保持 sealed segment 不可变，将状态修正和独立权限
+结果投影为同一逻辑 turn。结构替换先准备一致的分支，再原子激活；准备失败
+不能清空可见历史。Cloud 命令通过会话所属机器读写，不选择调用者本机数据库。
+control metadata 与投递状态仍由 Loro 保存。本地历史接受不表示 Roost
+远端已同步。
+
+桌面侧栏的工作区、按更新时间排列和置顶列表中，会话 hover 卡片显示该会话保存的历史
+backend，标为 Roost 或 Loro。旧会话没有 backend 字段时按 Loro 显示；当前实验开关偏好
+不决定这个标签。显示标签不读取历史正文。
+
+性能优化必须保留原有 Lody 对话身份及 owner 流程。Edit & Resend 可以通过存储 SDK
+内部的分支操作复用不可变前缀，但不能创建或跳转到另一条 Lody 对话。旧 writer 必须
+继续被阻止写入；确认丢失后须刷新到已提交分支；回滚须保留后续追加，或拒绝覆盖
+冲突编辑。目标校验缓存只在精确匹配历史版本时有效；缓存证据缺失、损坏或受并发
+写入影响时，必须执行权威校验。缓存不存在不能证明没有 active goal。
+
+打开 Roost 会话只读取 active branch 的最新窗口；向上滚动通过反向 cursor 加载旧
+逻辑 turn。全历史搜索、大纲导航、计数和事实必须覆盖更早的页，不要求用户手动
+翻页。这些消费方在后台读取 directory page，正文 hydration 仍受各自 lease 约束；
+打开会话不等待完整历史读取。恢复阅读位置时，先加载对应逻辑 turn，再声明首个
+窗口就绪。新消息保留已加载前缀及
+其 cursor；branch rewrite 使不兼容的页失效，只刷新已加载窗口，不能显示被替换的
+suffix。未加载行不能生成假消息，也不能被视为完整历史事实。显式 export/snapshot
+操作继续使用权威的完整读取能力。
+
+文字增量更新可见正文和大纲摘要，不反复重建未变化的全历史业务事实。目标、权限、
+调度、diff 和状态变更仍须使对应消费方失效。反向分页在已有行的位置和内容不变时，
+保留其行及正文身份。优化不能延迟控制更新，也不能把未读前缀声明为完整事实。
+
+owner 不可用时，之前同步的历史仍可读取，包括重新打开会话、搜索和浏览已缓存的
+旧 turn。renderer 按账号、工作区、机器和会话隔离持久化只读 projection。
+owner 读取响应把页内容、count 与持久 revision 绑定在同一次 observation。
+连续变更原子更新受影响的缓存行；revision 有缺口时通过有界分页暂存替换快照，
+同时保留之前一致的可读快照。重连通过现有 owner transport 刷新。缓存不能接受
+或重放用户命令，也不能提供本设备从未同步过的历史。
+
+### 验证限制
+
 这不是任意跨版本兼容或 reader 安全的证明。TypeScript 无法保证不可信输入、字符串语义约束，
 也不能阻止刻意的类型断言/底层访问。修改已损坏 item 的命令可能需要修复该 item，
 不能借用针对“未修改历史”的兼容处理。初版 callback 适配支持保持既有轮次顺序的修改，
 不支持任意重排普通 LoroList 中的已有轮次。
 
-目前完整 Mirror 读取仍会物化历史，本次不是 3000 轮性能验收或窗口化 ConversationView 上线。
+Roost reader 已采用 active-branch page，旧 Loro reader 仍加载其 directory；这不构成
+3000 轮性能验收。
 非历史控制字段的校验不属于这个 HistoryWriter 契约。v2 规范形式只针对本仓库当前写入的
 形状定义。完整的封存骨架特性（读取侧的 `ref` payload 拉取、payload hook 以及消费它们的
 UI）不在本次实现；本次只是保证将来出现这类骨架轮次时不会被误判为 hash 冲突。
@@ -143,6 +191,8 @@ UI）不在本次实现；本次只是保证将来出现这类骨架轮次时不
 - `packages/shared/src/{history-writer,history-write-schema,history-materializer,session-mirror,schema}.ts`
 - `packages/shared/src/session-data/{history-import,loro}.ts`
 - `apps/cli/src/lib/local-project-history-sync-service.ts`
+- `apps/cli/src/session/{roost-node-session,roost-history-generation,roost-rpc-session}.ts`
+- `apps/cli/tests/roost-session-backend-contract.test.ts`
 - `packages/shared/tests/history-writer.test.ts`、`history-writer.contract.ts`、
   `history-storage-policy.test.ts` 与 `session-history-import-port.test.ts`
 - `apps/cli/tests/local-project-history-sync-service.test.ts` 与 `local-project-history-sync-writer.test.ts`

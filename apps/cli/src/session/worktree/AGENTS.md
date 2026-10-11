@@ -40,11 +40,17 @@ and file responsibilities: [../README.md](../README.md).
 
 ## Worktrees, branches, and setup
 
+- First-task branch naming is agent guidance for ordinary new independent GitHub/local
+  worktree Sessions, including prepared-worktree adoption. The daemon verifies the actual branch
+  after setup against this Session's allocation (numeric collisions included); unknown or
+  descriptive refs receive no rename instruction. Exclude direct folders, child Tabs,
+  prior/resumed ACP Sessions, later turns, and Fork; never restore a host prompt-to-ref
+  generator. Contract: [workspace branches](../../../../../specs/workspace-branch-state.md).
 - Turn finalization NEVER commits or pushes on the session's behalf, in any project shape.
   A PR-linked session that ends with unpublished work is reported through
   `SessionMeta.workspaceDirty` AND `workspaceUnpushed`, which raise the Info Bar's
   `Commit & Push` action; the agent is asked to keep the branch current by the Create PR
-  prompt (`packages/shared/src/review-prompts.ts`), which the user can override in
+  prompt (`packages/shared/src/pr-prompts.ts`), which the user can override in
   conversation. Do not re-add an automatic post-turn commit/push.
 - Publish BOTH flags or the signal has a hole: `git status` goes clean the moment the agent
   commits, so a commit whose push failed reads as "all clear" and the Info Bar offers Merge

@@ -1,4 +1,7 @@
 import { useCallback, useRef } from 'react';
+import { useAtomValue } from 'jotai';
+import { currentWorkspaceIdAtom } from '@/atoms';
+import { readPastedSessionLink } from '@/lib/session-deep-link';
 import type { ClipboardEvent, KeyboardEvent, ReactNode, Ref } from 'react';
 import { usePostHog } from '@posthog/react';
 import type { Mention as MentionRange } from '@/ui/mention/index';
@@ -265,11 +268,14 @@ export function ChatLandingView({
     },
     [mentionActionsRef]
   );
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const handlePromptPasteWithSessionUrl = useCallback(
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
       const text = event.clipboardData.getData('text/plain');
       // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
-      const sessionUrl = text ? parseAppSessionUrl(text) : null;
+      const sessionUrl = text
+        ? (readPastedSessionLink(text, workspaceId) ?? parseAppSessionUrl(text))
+        : null;
       if (sessionUrl) {
         if (isPlainLinkPasteShortcut(event)) {
           capturePostHogEvent(postHog, 'mention/session_link_pasted', {
@@ -297,7 +303,7 @@ export function ChatLandingView({
       }
       onPromptPaste?.(event);
     },
-    [mentionActionsRef, onPromptPaste, postHog]
+    [mentionActionsRef, onPromptPaste, postHog, workspaceId]
   );
 
   const {

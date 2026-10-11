@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock the underlying probe so we can drive its timing deterministically. The
 // opt-out test never reaches it (shouldSkip short-circuits), so the default
 // vi.fn() is harmless there.
-vi.mock('shell-env', () => ({ shellEnv: vi.fn() }));
+vi.mock('@lody/shared/node/login-shell-env', () => ({ probeLoginShellEnv: vi.fn() }));
 
-import { shellEnv } from 'shell-env';
+import { probeLoginShellEnv } from '@lody/shared/node/login-shell-env';
 
 import {
   getCachedLoginShellEnvSync,
@@ -33,7 +33,7 @@ describe('login-shell-env slow-probe recovery', () => {
   beforeEach(() => {
     delete process.env.LODY_DISABLE_SHELL_ENV;
     resetLoginShellEnvCache();
-    vi.mocked(shellEnv).mockReset();
+    vi.mocked(probeLoginShellEnv).mockReset();
   });
 
   afterEach(() => {
@@ -43,9 +43,9 @@ describe('login-shell-env slow-probe recovery', () => {
 
   it('serves the real env to later awaiters once a slow probe lands after the timeout', async () => {
     vi.useFakeTimers();
-    let resolveProbe!: (env: NodeJS.ProcessEnv) => void;
-    vi.mocked(shellEnv).mockReturnValue(
-      new Promise<NodeJS.ProcessEnv>((resolve) => {
+    let resolveProbe!: (env: NodeJS.ProcessEnv | null) => void;
+    vi.mocked(probeLoginShellEnv).mockReturnValue(
+      new Promise<NodeJS.ProcessEnv | null>((resolve) => {
         resolveProbe = resolve;
       })
     );

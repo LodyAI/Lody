@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import {
+  getStaticBuiltinAcpCapabilities,
   ACP_CAPABILITY_CACHE_VERSION,
   PROVIDER_SETUP_PROTOCOL_VERSION,
   getAcpCapabilityCacheKey,
@@ -217,7 +218,8 @@ describe('AgentConfigDialog', () => {
       success: true,
     }),
     onManagedRuntimeSelected?: ComponentProps<typeof AgentConfigDialog>['onManagedRuntimeSelected'],
-    onScanPiExtensions?: ComponentProps<typeof AgentConfigDialog>['onScanPiExtensions']
+    onScanPiExtensions?: ComponentProps<typeof AgentConfigDialog>['onScanPiExtensions'],
+    onOpenChange = vi.fn()
   ) => {
     await act(async () => {
       root?.render(
@@ -225,7 +227,7 @@ describe('AgentConfigDialog', () => {
           <Tooltip.Provider>
             <AgentConfigDialog
               open
-              onOpenChange={vi.fn()}
+              onOpenChange={onOpenChange}
               mode={mode}
               machine={machine}
               onSubmit={onSubmit}
@@ -413,6 +415,136 @@ describe('AgentConfigDialog', () => {
       getPrimaryAction('Save').click();
     });
     expect(saved.at(-1)?.runtimeOverrides).toBeUndefined();
+  });
+
+  it('verifies edited Pi selections before closing, rejects stale results, and retries failures', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const closed: boolean[] = [];
+    const probes: { paths: string[]; finish: (success: boolean) => void }[] = [];
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'pi-edit' as AgentConfigId,
+          machineId,
+          name: 'Pi',
+          cliType: 'builtin',
+          agentType: 'pi',
+          runtimeOverrides: { piExtensions: ['/fixture/plugin.ts'] },
+        },
+      },
+      createMachine('Pi machine', {
+        piExtensions: 1,
+        providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION,
+      }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      }),
+      undefined,
+      (args) =>
+        new Promise((resolve) => {
+          probes.push({
+            paths: saved.at(-1)?.runtimeOverrides?.piExtensions ?? [],
+            finish: (success) =>
+              resolve({
+                type: 'machine/acp-capabilities-refresh_response',
+                machineId: args.machineId,
+                configId: args.configId,
+                cliType: 'builtin',
+                agentType: 'pi',
+                success,
+                ...(success ? {} : { error: 'Synthetic extension failure' }),
+              }),
+          });
+        }),
+      undefined,
+      undefined,
+      (open) => closed.push(open)
+    );
+    const toggle = () =>
+      (
+        document.querySelector(
+          '[aria-label="Pi extensions"] [role="checkbox"]'
+        ) as HTMLButtonElement
+      ).click();
+    // Removing the last extension still needs a new plain catalog.
+    await act(async () => {
+      toggle();
+    });
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(probes.map((probe) => probe.paths)).toEqual([[]]);
+    expect(saved.at(-1)?.backgroundSetup).toBeUndefined();
+    expect(closed).toEqual([]);
+    // Add a different extension before the old probe answers.
+    await act(async () => {
+      setNativeInputValue(
+        document.querySelector('input[aria-label="Extension path"]')!,
+        '/fixture/other.ts'
+      );
+    });
+    await act(async () => {
+      Array.from(document.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Add path')!
+        .click();
+    });
+    await act(async () => {
+      probes[0]!.finish(true);
+    });
+    expect(closed).toEqual([]);
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(probes.at(-1)?.paths).toEqual(['/fixture/other.ts']);
+    await act(async () => {
+      probes.at(-1)!.finish(false);
+    });
+    expect(document.body.textContent).toContain('Synthetic extension failure');
+    expect(closed).toEqual([]);
+    expect(getPrimaryAction('Save').disabled).toBe(false);
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    await act(async () => {
+      probes.at(-1)!.finish(true);
+    });
+    expect(saved.at(-1)?.runtimeOverrides).toEqual({ piExtensions: ['/fixture/other.ts'] });
+    expect(closed).toEqual([false]);
+  });
+
+  it('saves an unchanged Pi extension selection without starting a probe', async () => {
+    const saved: AgentConfigSubmitPayload[] = [];
+    const closed: boolean[] = [];
+    await renderDialog(
+      {
+        kind: 'edit',
+        config: {
+          id: 'pi-unchanged' as AgentConfigId,
+          machineId,
+          name: 'Pi',
+          cliType: 'builtin',
+          agentType: 'pi',
+          runtimeOverrides: { piExtensions: ['/fixture/plugin.ts'] },
+        },
+      },
+      createMachine('Pi machine', { piExtensions: 1 }),
+      vi.fn(async (payload: AgentConfigSubmitPayload) => {
+        saved.push(payload);
+      }),
+      undefined,
+      () => {
+        throw new Error('An unchanged selection must not be probed');
+      },
+      undefined,
+      undefined,
+      (open) => closed.push(open)
+    );
+    await act(async () => {
+      getPrimaryAction('Save').click();
+    });
+    expect(saved.at(-1)?.runtimeOverrides).toEqual({ piExtensions: ['/fixture/plugin.ts'] });
+    expect(closed).toEqual([false]);
   });
 
   it('creates a Pi provider with selected extensions through the live-probe path', async () => {
@@ -728,9 +860,7 @@ describe('AgentConfigDialog', () => {
       );
       expect(document.body.textContent).toContain('Open install guide');
     } else {
-      expect(document.body.textContent).toContain(
-        'This runtime is not available on the target machine.'
-      );
+      expect(document.body.textContent).toContain('npm install -g dimcode');
       expect(document.body.textContent).not.toContain('Open install guide');
     }
     await act(async () => {
@@ -964,7 +1094,7 @@ describe('AgentConfigDialog', () => {
           agentType: 'deepseek',
           env: {
             DEEPSEEK_API_KEY: 'sk-deepseek-test',
-            DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+            DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
           },
         })
       );
@@ -1045,13 +1175,36 @@ describe('AgentConfigDialog', () => {
       label: 'a /v1 trailing slash',
       env: { DEEPSEEK_API_KEY: 'sk-old', DEEPSEEK_BASE_URL: 'https://api.deepseek.com/v1/' },
     },
-  ])('opens the official DeepSeek tab when editing a config with $label', async ({ env }) => {
-    await renderDeepSeekEdit(env);
+    {
+      label: 'a Messages root',
+      env: { DEEPSEEK_API_KEY: 'sk-old', DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic' },
+    },
+    {
+      label: 'a versioned Messages root',
+      env: {
+        DEEPSEEK_API_KEY: 'sk-old',
+        DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic/v1/',
+      },
+    },
+  ])('opens and saves the official DeepSeek endpoint with $label', async ({ env }) => {
+    const onSubmit = vi.fn(async (_payload: AgentConfigSubmitPayload) => {});
+    await renderDeepSeekEdit(env, onSubmit);
 
     expect(getTabByName('DeepSeek official').getAttribute('aria-selected')).toBe('true');
     expect(getVisibleDeepSeekEndpointInput()).toBeNull();
     expect(document.body.querySelector<HTMLInputElement>('#deepseek-api-key')?.value).toBe(
       'sk-old'
+    );
+    await act(async () => {
+      getPrimaryAction('Save').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: {
+          DEEPSEEK_API_KEY: 'sk-old',
+          DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
+        },
+      })
     );
   });
 
@@ -1108,7 +1261,7 @@ describe('AgentConfigDialog', () => {
       expect.objectContaining({
         env: {
           DEEPSEEK_API_KEY: 'sk-updated',
-          DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+          DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
         },
       })
     );
@@ -1151,7 +1304,7 @@ describe('AgentConfigDialog', () => {
         env: {
           EXTRA_FLAG: '1',
           DEEPSEEK_API_KEY: 'sk-deepseek-test',
-          DEEPSEEK_BASE_URL: 'https://api.deepseek.com',
+          DEEPSEEK_BASE_URL: 'https://api.deepseek.com/anthropic',
         },
       })
     );
@@ -1556,9 +1709,9 @@ describe('AgentConfigDialog', () => {
     expect(findSignInAgainButton()).toBeUndefined();
   });
 
-  // Claude, Codex and Grok generate their own title over ACP, so the setting is
+  // Claude and Grok generate their own title over ACP, so the setting is
   // obsolete for them. Kimi keeps it (covered by the normalization test below).
-  it.each(['claude', 'codex', 'grok'])(
+  it.each(['claude', 'grok'])(
     'hides the title generation section for builtin %s',
     async (agentType) => {
       await renderDialog(
@@ -1567,6 +1720,46 @@ describe('AgentConfigDialog', () => {
       );
 
       expect(document.body.textContent).not.toContain('Title generation');
+    }
+  );
+
+  it.each([undefined, { model: 'gpt-5.6-sol', reasoning_effort: 'high', mode: 'read-only' }])(
+    'shows and saves Codex title configuration even with an old ownership cache: %j',
+    async (configured) => {
+      const config = createBuiltinConfig({
+        agentType: 'codex',
+        titleGeneration: configured ? { configOptionValues: configured } : undefined,
+      });
+      const machine = createMachine('Workstation');
+      machine.acpCapabilities = {
+        [getAcpCapabilityCacheKey(config.id)]: {
+          ...createTitleConfigMachine().acpCapabilities![getAcpCapabilityCacheKey(kimiConfigId)]!,
+          agentType: 'codex',
+          sessionTitle: true,
+          ...getStaticBuiltinAcpCapabilities('builtin', 'codex'),
+        },
+      };
+      const onSubmit = vi.fn(async () => {});
+      await renderDialog({ kind: 'edit', config }, machine, onSubmit);
+      expect(document.body.textContent).toContain('Title generation');
+      await act(async () => {
+        Array.from(document.body.querySelectorAll('button'))
+          .find((button) => button.textContent?.trim() === 'Save')!
+          .click();
+      });
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          titleGeneration: {
+            configOptionValues: expect.objectContaining(
+              configured ?? {
+                model: 'gpt-5.6-luna',
+                reasoning_effort: 'low',
+                mode: 'agent-full-access',
+              }
+            ),
+          },
+        })
+      );
     }
   );
 

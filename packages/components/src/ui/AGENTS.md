@@ -6,7 +6,7 @@ feature directory.
 
 ## Drawer popups
 
-- `DrawerContent` provides an internal boxless no-drag popup host via state.
+- `DrawerContent` provides a state-backed no-drag host for popups and modals.
   Keep portals inside that modal and outside scrolling children: body portals
   inherit Vaul's pointer lock and clicks pass through to the underlying content.
 

@@ -29,3 +29,18 @@ ping/pong，再发送触摸；递归 Git 测试清除外部 Git/SSH 环境变量
 两个定向套件共 22 个测试通过。验证覆盖本地 WebSocket 和原生 Git，不代表生产 GitHub
 或真实模拟器验证。相关决策：[GitHub 回退](../architecture/2026-10-03-github-identity-fallback.zh.md)
 与[模拟器手势](../feature/2026-10-03-ios-simulator-two-finger.zh.md)。
+
+## Workspace Git 测试环境补充修正
+
+WorkspaceGitService 测试同样继承了 Agent 宿主的 `GIT_CONFIG_COUNT` URL 重写：
+配置的 `git@github.com:owner/repo.git` 被解析成 `lody-github::owner/repo.git`，
+导致原生 GitHub 身份断言失败。该套件及共享 local-project helper 套件现在均清理继承的
+Git/SSH/LODY_GIT 环境变量，
+禁用测试的系统/全局配置，并在每项测试后恢复环境。隔离同时覆盖环境准备和服务子进程，
+不修改生产 Git 配置。原有真实仓库测试继续验证分支切换、本地项目身份和 remote 发现，
+并补齐测试遗漏的 `ProjectRef` 类型导入。
+
+原先失败的环境下，六项 WorkspaceGitService 测试全部通过。根类型检查命令为
+`pnpm typecheck`，没有 `checktype` 脚本。
+
+最终验证：两组受影响 Git 套件共 43 项测试通过，完整 `pnpm test`、`pnpm typecheck`、`pnpm check`、格式化及文档校验均通过。

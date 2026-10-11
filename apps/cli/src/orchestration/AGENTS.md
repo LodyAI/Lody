@@ -5,7 +5,8 @@ Root and `apps/cli/AGENTS.md` apply; `specs/session-orchestration.md` owns behav
 - `operation-store.ts` is the shared machine-local WAL SQLite source of truth.
   The key is `(requesterSessionId, operationId)`; foreign Session lookup must be
   indistinguishable from absence. Operation finalization and Delivery insertion
-  are one transaction. Delivery/system-Turn ids include both key parts; never
+  are one transaction. Cleanup retains retired ids; accepting them again is forbidden.
+  Delivery/system-Turn ids include both key parts; never
   derive a globally unique id from the Session-scoped `operationId` alone.
 - Target input creation is fenced by the SQLite item-materialization claim.
   Acceptance owns new claims; the lease Worker only adopts absent/expired
@@ -28,6 +29,8 @@ Root and `apps/cli/AGENTS.md` apply; `specs/session-orchestration.md` owns behav
   the source Session. Recovery uses that user for attribution/authorization and the current owner
   Machine credential to execute. Completion preserves userId. Matching includes both ids, kind,
   and fingerprint; reuse from another Turn is `OPERATION_ID_REUSED`, not a retry.
+  Presentation and attachment snapshots live in `operation_authors` / `operation_inputs`,
+  atomically with acceptance. Keep strict legacy rows/configs unchanged; recovery uses snapshots.
 - `operation-coordinator.ts` is owned only by the local Host-lease Worker. MCP
   subprocesses may accept Operations but never schedule completion Turns.
 - Reconciliation is level-checked. Loro subscriptions and SQLite directory
@@ -40,8 +43,7 @@ Root and `apps/cli/AGENTS.md` apply; `specs/session-orchestration.md` owns behav
   The daemon owns open-time repair/cleanup. Never reopen per call.
   See [connection and notification rationale](README.md).
 - WAL allows one writer machine-wide. Every writing store transaction runs
-  `BEGIN IMMEDIATE` (deferred read→write upgrades fail with
-  `SQLITE_BUSY_SNAPSHOT`, which `busy_timeout` cannot wait out). Subprocess
+  `BEGIN IMMEDIATE`. Subprocess
   boundaries wrap store calls in `runWithOperationStoreBusyRetry` (bounded
   async backoff; exhausted retries surface as retryable `STORE_BUSY`). Daemon
   paths must not add blocking waits on top of the driver's `busy_timeout`.
@@ -56,7 +58,7 @@ Root and `apps/cli/AGENTS.md` apply; `specs/session-orchestration.md` owns behav
   contention has no history/ACP effects, and release/consume match both ids. Terminal/no-execution
   paths claim, write history before consume, retain failed finalization for settlement-only retry,
   recheck after awaits, and never rewrite durable history. `claimed` becomes `prepared` after history
-  and spends one attempt; `started` precedes the provider, while stale-ACP recovery skips that fence.
+  and spends one attempt; `started` precedes the provider; Delivery prompts never retry after submission.
   Failed start fencing finalizes the Assistant, restores idle under Session ownership, and settles
   `not_started`; only confirmed pre-provider interruption releases prepared work. Cancellation or
   accepted steer consumes. Missing post-start settlement becomes `uncertain`, never replays, emits

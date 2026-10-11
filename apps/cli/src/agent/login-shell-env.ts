@@ -1,7 +1,13 @@
-import { shellEnv } from 'shell-env';
+import { probeLoginShellEnv } from '@lody/shared/node/login-shell-env';
 
-// Match the Electron probe's budget (cli-service.ts SHELL_ENV_TIMEOUT_MS).
-const SHELL_ENV_TIMEOUT_MS = 3000;
+import { toShared } from '@/platform/process-options';
+
+/**
+ * How long an ACP spawn waits for the probe before going ahead without it. The
+ * probe itself keeps its own bound (shared with the desktop) and ends the
+ * shell's whole process tree when it runs out, so a hung rc file leaks nothing.
+ */
+const SHELL_ENV_WAIT_MS = 3000;
 
 /**
  * Resolving the login-shell env spawns the user's shell with `-ilc` so it sources
@@ -12,13 +18,12 @@ let cachedShellEnvPromise: Promise<NodeJS.ProcessEnv> | null = null;
 /** Last successfully resolved env, exposed to synchronous callers. */
 let resolvedShellEnv: NodeJS.ProcessEnv = {};
 
-const shouldSkip = (): boolean =>
-  // shell-env just returns process.env on win32, so skip the subprocess there.
-  process.platform === 'win32' || process.env.LODY_DISABLE_SHELL_ENV === '1';
+const shouldSkip = (): boolean => process.env.LODY_DISABLE_SHELL_ENV === '1';
 
 const resolveOnce = (): Promise<NodeJS.ProcessEnv> => {
-  const probe = shellEnv()
-    .then((env) => {
+  const probe = probeLoginShellEnv({ processOptions: toShared() })
+    .then((probed) => {
+      const env = probed ?? {};
       resolvedShellEnv = env;
       // The race below may have already resolved the memoized promise to {} via
       // the timeout. Replace it so *later* awaiters (acp-runner aux sessions,
@@ -31,14 +36,12 @@ const resolveOnce = (): Promise<NodeJS.ProcessEnv> => {
     })
     .catch((): NodeJS.ProcessEnv => ({}));
 
-  // shell-env has no built-in timeout; a hanging dotfile would otherwise block
-  // every awaiting ACP spawn forever. Fail open to the empty overlay so the
-  // withDefaultAcpPathEntries fallback still applies. We cannot reap the spawned
-  // login shell here (shell-env exposes no child handle), but execa's default
-  // cleanup kills it on process exit, so at worst a hung dotfile leaks one idle
-  // shell for the daemon's lifetime — not per spawn.
+  // A slow rc file must not hold every awaiting ACP spawn for the probe's
+  // whole bound. Fail open to the empty overlay so the
+  // withDefaultAcpPathEntries fallback still applies; the probe keeps running
+  // and replaces the cached value when it finishes.
   const timeout = new Promise<NodeJS.ProcessEnv>((resolve) => {
-    const timer = setTimeout(() => resolve({}), SHELL_ENV_TIMEOUT_MS);
+    const timer = setTimeout(() => resolve({}), SHELL_ENV_WAIT_MS);
     timer.unref();
   });
 
@@ -47,22 +50,21 @@ const resolveOnce = (): Promise<NodeJS.ProcessEnv> => {
 
 /**
  * Read the environment (most importantly `PATH`) from the user's login shell
- * profile via the `shell-env` library.
+ * profile.
  *
  * GUI/daemon launches (Electron Dock, systemd, npx, IDE terminals) inherit a
  * minimal PATH that omits the dirs users actually install tools into
  * (`~/.local/bin`, homebrew, cargo, volta, asdf, ...). Spawning an agent binary
- * such as `opencode acp` then fails with `spawn opencode ENOENT`. `shell-env`
- * sources the login shell, so we pick up tools wherever they live instead of
- * guessing a fixed set of directories.
+ * such as `opencode acp` then fails with `spawn opencode ENOENT`. The shared
+ * probe (`@lody/shared/node/login-shell-env`, also used by the desktop) runs the
+ * login shell, so we pick up tools wherever they live instead of guessing a
+ * fixed set of directories.
  *
- * Never throws: on a clean failure the `.catch` yields `{}` (an empty overlay).
- * Note `shell-env` itself, when every candidate shell fails, falls back to
- * returning the inherited `process.env` rather than throwing — so the overlay may
- * be the full process env, not `{}`. That stays safe because `mergeLoginShellEnv`
- * is base-wins for non-PATH vars (a no-op for vars the base already has) and the
- * caller scrubs inherited auth/routing vars *after* overlaying (see session.ts).
- * Disable entirely via `LODY_DISABLE_SHELL_ENV=1`.
+ * Never throws: when no shell yields an environment the overlay is `{}`. The
+ * overlay is the login shell's whole environment, which stays safe because
+ * `mergeLoginShellEnv` is base-wins for non-PATH vars (a no-op for vars the
+ * base already has) and the caller scrubs inherited auth/routing vars *after*
+ * overlaying (see session.ts). Disable entirely via `LODY_DISABLE_SHELL_ENV=1`.
  */
 export const getLoginShellEnv = async (): Promise<NodeJS.ProcessEnv> => {
   if (shouldSkip()) {

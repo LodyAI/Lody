@@ -75,3 +75,17 @@ and lifecycle decisions behind them; it does not introduce additional requiremen
   exact workspace/machine scope; never open a second local writer replica.
   Cloud keeps its authenticated command runtime and remote recovery confirmation.
 
+
+## Bounded collaboration
+
+The shared causal chain limit is 16 hops, including delegated target turns and
+completion continuations. A turn at the cap cannot start another Operation;
+the existing guard returns non-retryable `CHAIN_DEPTH_EXCEEDED` before acceptance.
+This is a depth limit, not a shared total-message or fan-out budget.
+
+MCP initialization instructions and all four create/chat tool descriptions tell
+agents to send only task-advancing messages, omit acknowledgments and courtesy
+replies, and use automatic completion delivery instead of manually sending the
+same result back. At the cap, report remaining work to the user without retrying
+or creating another session to evade the limit. These prompts guide behavior;
+the runtime guard enforces the depth bound.

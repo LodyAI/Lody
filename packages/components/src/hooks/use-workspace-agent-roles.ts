@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import {
   listAccessibleAgentRoles,
+  machineSupportsMemoryProviders,
   resolveAgentRoleAvailability,
   type AgentConfigId,
   type AgentRole,
@@ -104,6 +105,11 @@ export function useAgentRoleAvailability(
       if (config.machineId) agentConfigMachineIds.set(config.id, config.machineId);
     }
     return {
+      memoryProviderMachineIds: new Set(
+        Array.from(machines)
+          .filter(([, machine]) => machineSupportsMemoryProviders(machine))
+          .map(([id]) => id)
+      ),
       authorizedMachineIds: new Set(machines.keys()),
       onlineMachineIds,
       agentConfigMachineIds,

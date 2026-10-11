@@ -1,4 +1,10 @@
 import { inspect } from 'node:util';
+let formatLoroSyncError: (error: unknown) => string | undefined = () => undefined;
+
+/** The Streams composition binds its typed formatter; standalone workers stay lightweight. */
+export const registerLoroSyncErrorFormatter = (formatter: typeof formatLoroSyncError): void => {
+  formatLoroSyncError = formatter;
+};
 
 type FormatErrorOptions = {
   includeStack?: boolean;
@@ -21,6 +27,8 @@ const readStructuredErrorDetail = (error: Error): string | undefined => {
 };
 
 export const formatErrorMessage = (error: unknown, options: FormatErrorOptions = {}): string => {
+  const syncError = formatLoroSyncError(error);
+  if (syncError) return syncError;
   if (error instanceof Error) {
     const base = options.includeStack ? (error.stack ?? error.message) : error.message;
     const detail = readStructuredErrorDetail(error);
@@ -42,6 +50,8 @@ export const formatErrorMessage = (error: unknown, options: FormatErrorOptions =
 };
 
 const formatErrorWithCausesInternal = (error: unknown, seen: ReadonlySet<unknown>): string => {
+  const syncError = formatLoroSyncError(error);
+  if (syncError) return syncError;
   if (seen.has(error)) {
     return '[circular cause]';
   }

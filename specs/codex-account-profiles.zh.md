@@ -40,8 +40,10 @@ Lody 保留共享凭据，结束失败的原生进程，短暂等待，重新核
 刷新串行。重新认证不得替换已有 ChatGPT 身份；需要重新登录时添加新提供商。
 
 API 密钥轮换先暂存新代次，以不执行工具的合成 Responses 请求验证成功，再原子切换
-生效代次。提交前失败或取消保留旧密钥；运行中进程保持原代次。宿主就绪先于目录发布，
-发布失败可重试。删除记录本地移除状态，禁止新启动，并持续协调凭据清理；不删历史、
+生效代次。提交前失败或取消保留旧密钥；即使清理也失败，仍传回原始认证错误。
+未激活代次的记录须保留，供后续清理重试；清理不得激活失败的候选密钥。
+运行中进程保持原代次。宿主就绪先于目录发布，发布失败可重试。
+删除记录本地移除状态，禁止新启动，并持续协调凭据清理；不删历史、
 不终止正在运行的会话。
 
 守护进程声明 `codexAuthProfiles` v1。持久化托管配置带有无效可执行路径保护标记，支持
@@ -52,5 +54,6 @@ API 密钥轮换先暂存新代次，以不执行工具的合成 Responses 请�
 实现归属：[账户存储](../apps/cli/src/agent/codex-profile-store.ts)、
 [凭据转发](../apps/cli/src/agent/codex-credential-broker.ts)、
 [决策及验证限制](../.agents/notes/proposed/architecture/2026-09-26-codex-account-profiles.zh.md)、
-[限额隔离](../.agents/notes/implemented/bug-fix/2026-09-30-provider-rate-limit-isolation.zh.md)。
+[限额隔离](../.agents/notes/implemented/bug-fix/2026-09-30-provider-rate-limit-isolation.zh.md)、
+[凭据失败恢复与消融](../.agents/notes/implemented/bug-fix/2026-10-07-codex-credential-failure-recovery.zh.md)。
 草案不表示全部生命周期或平台验收已经完成。

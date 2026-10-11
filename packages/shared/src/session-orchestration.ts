@@ -1,3 +1,4 @@
+import type { AgentMessageAuthor } from './message-author';
 import { z } from 'zod';
 
 import type { MachineId, SessionId, WorkspaceId } from './ids';
@@ -10,7 +11,7 @@ export const LODY_OPERATION_MIN_DEADLINE_SECONDS = 60;
 export const LODY_OPERATION_MAX_DEADLINE_SECONDS = 604_800;
 export const LODY_OPERATION_COMMAND_MAX_BYTES = 256 * 1024;
 export const LODY_OPERATION_COMPLETION_MAX_BYTES = 64 * 1024;
-export const LODY_MAX_CHAIN_DEPTH = 32;
+export const LODY_MAX_CHAIN_DEPTH = 16;
 
 export const LodyOperationIdSchema = z
   .string()
@@ -227,6 +228,14 @@ export type FrozenOperationContinuationConfig = {
 };
 
 export type StoredLodyOperation = {
+  /** Frozen attachment references, stored atomically in the input side table. */
+  targetInputAttachments?: Array<
+    Array<Extract<import('./ai').SessionInputBlock, { type: 'image' | 'file' }>>
+  >;
+
+  /** Immutable source presentation; stored separately for old reader compatibility. */
+  author?: AgentMessageAuthor;
+  targetRoleSnapshots?: Array<import('./message-author').AgentRoleSnapshot | null>;
   workspaceId: WorkspaceId;
   ownerMachineId: MachineId;
   requesterSessionId: SessionId;
@@ -274,6 +283,7 @@ export type OperationCompletionContent = {
     status: 'not_started' | 'uncertain';
     reason: {
       code:
+        | 'COLLABORATION_STOPPED'
         | 'CONFIGURATION_UNAVAILABLE'
         | 'DELIVERY_ATTEMPTS_EXHAUSTED'
         | 'DELIVERY_EXECUTION_UNCERTAIN';

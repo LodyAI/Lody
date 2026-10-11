@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   LocalMachineRpcResponseSchema,
+  LocalMachineRpcRequestSchema,
   safeParseLocalMachineRpcRequest,
 } from '../src/local-machine-rpc';
 
@@ -289,4 +290,24 @@ describe('local Machine RPC', () => {
       }).success
     ).toBe(false);
   });
+});
+
+it('accepts typed memory operations and rejects caller-provided commands', () => {
+  const request = {
+    machineId: 'machine',
+    workspaceId: 'workspace',
+    method: 'machine/memory',
+    params: {
+      action: 'create',
+      providerId: 'nowledge-mem',
+      input: { id: 'reviewer', name: 'Reviewer' },
+    },
+  };
+  expect(LocalMachineRpcRequestSchema.safeParse(request).success).toBe(true);
+  expect(
+    LocalMachineRpcRequestSchema.safeParse({
+      ...request,
+      params: { ...request.params, command: 'other' },
+    }).success
+  ).toBe(false);
 });

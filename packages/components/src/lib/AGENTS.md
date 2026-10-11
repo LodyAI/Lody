@@ -76,9 +76,9 @@ Background: [components](../../../../.agents/docs/components-package.md),
 - Preview and More-menu shell actions share `useSessionFileActions`. Only Electron
   on the session's own machine may invoke them; explicit local absolute artifact
   paths stay absolute, and remote paths never launch on the viewer's machine.
-- Native file sharing uses complete authorized preview bytes, never a remote host
-  path. Keep the existing transfer limits; stage each export in an isolated cache
-  file and clean up after cancellation, failure, or handoff.
+- Native file/PNG sharing uses complete authorized bytes, never host paths. Preserve
+  transfer limits; stage isolated cache files and clean up after handoff, failure, or
+  cancellation. Report cancellation separately; retain the preview and selection.
 
 ## File identity, caching, and errors
 

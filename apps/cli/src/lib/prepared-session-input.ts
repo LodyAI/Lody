@@ -1,3 +1,4 @@
+import { normalizeSessionTurnInputConfig } from '@lody/shared';
 import { isDeepStrictEqual } from 'node:util';
 import {
   getSessionRoomId,
@@ -93,10 +94,13 @@ export async function materializePreparedSessionInput(
     if (prior) {
       if (
         prior.role !== entry.role ||
-        !isDeepStrictEqual(prior.items, entry.items) ||
         !isDeepStrictEqual(
-          JSON.parse(JSON.stringify(prior.inputConfig ?? {})),
-          JSON.parse(JSON.stringify(entry.inputConfig ?? {}))
+          JSON.parse(JSON.stringify(prior.items)),
+          JSON.parse(JSON.stringify(entry.items))
+        ) ||
+        !isDeepStrictEqual(
+          JSON.parse(JSON.stringify(normalizeSessionTurnInputConfig(prior.inputConfig) ?? {})),
+          JSON.parse(JSON.stringify(normalizeSessionTurnInputConfig(entry.inputConfig) ?? {}))
         )
       )
         throw new Error('Prepared Session Turn identity conflict');

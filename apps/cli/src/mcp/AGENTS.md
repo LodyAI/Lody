@@ -39,7 +39,7 @@ Parent instructions apply. Background: [README.md](README.md).
 - Derive orchestration identity only from the active execution runtime's dispatch payload;
   reject absent runtime/userId, never infer from daemon credential, Session owner or history.
   Freeze `requesterUserId` and `sourceTurnId` at Operation acceptance; requester Session id
-  already identifies the Session, so add no duplicate actor tag. Recovery uses the Operation
+  already identifies the Session. Author snapshots are presentation only. Recovery uses the Operation
   owner Machine and current authorization, not a frozen daemon account.
 - Direct Role creation stays on the ordinary `lody_session_create` and
   `lody_session_create_many` tools. When `agentRoleId` is present, tolerate manual Machine, Agent,
@@ -47,6 +47,9 @@ Parent instructions apply. Background: [README.md](README.md).
   and those fields must not influence validation, canonical identity, recovery, or dispatch.
 
 ## Session tool contracts
+
+- Keep the shared causal chain cap and MCP guidance aligned: create/chat tools forbid
+  courtesy-only messages, duplicate result callbacks, and evading the depth limit.
 
 - `lody_ios_simulator_preview` is the native-app tool; web previews remain
   `lody_report_preview_candidate`. Bind local agent-control RPC to MCP session context;
@@ -90,6 +93,15 @@ Parent instructions apply. Background: [README.md](README.md).
   `limit` counts displayable turns, the cursor is the raw position from the previous page, and
   hidden/empty rows never shift it. A page reports `hasMore` from the underlying raw rows, so a
   scan budget never claims the history ended. Session mentions expand to
-  `[@Title](session://<sessionId>)`; resolve them with this tool, accepting a bare id or a
-  `session://` URI.
-  ([note](../../../../.agents/notes/implemented/feature/2026-09-18-session-mention-uri-and-paste.md))
+  `[@Title](lody://session/<id>?workspace=<id>)`; accept bare ids and legacy
+  `session://` URIs too. Explicit workspace must match the tool context.
+  ([contract](../../../../specs/deep-links.md))
+
+- Single create/chat attachments require durable Operations and the calling daemon's
+  `sessionInputAttachments` capability. Resolve paths inside the calling Session's
+  authoritative workspace, never the daemon cwd or target workspace. Freeze references
+  before acceptance; retries use stored references. Legacy wait and batch schemas reject
+  attachment arguments. See [input Spec](../../../../specs/cli-session-attachments.md).
+
+- The user-owned inherited `collaborationStopped` barrier rejects delegation. Agents and
+  completion callbacks must never clear it; execution also fences setup and prompt dispatch.

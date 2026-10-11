@@ -1,3 +1,4 @@
+import { MessageAuthorIdentity } from './message-author-identity';
 import * as stylex from '@stylexjs/stylex';
 import { space, text as textScale } from '@lody/ui/tokens/scales.stylex';
 import { writeTextToClipboard } from '@/lib/clipboard';
@@ -180,6 +181,7 @@ import { SubagentTaskPanel, collectSubagentTasks, type SubagentTask } from './su
 import { SubagentRunMessageList } from './subagent-run-history';
 import { styles as subagentHistoryStyles } from './subagent-run-history.stylex';
 import { SessionReadonlyContext } from './session-readonly-context';
+import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
 import { UserMessageEditor } from './user-message-editor';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import type { SkillMentionAgent } from '@/components/mentions/mention-skill-source';
@@ -303,6 +305,12 @@ import {
 } from '@/lib/session-chat-search';
 
 const EMPTY_GALLERY_ENTRIES: readonly SessionImageGalleryEntry[] = [];
+
+function useSessionCopyWorkspaceId(): string | undefined {
+  const readonlyPresentation = useContext(SessionReadonlyContext);
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  return readonlyPresentation ? undefined : (workspaceId ?? undefined);
+}
 
 // ── Expand/collapse state cache ──────────────────────────────────────────────
 // Survives virtual-scroll unmount/remount so expand/collapse state is not lost
@@ -1582,6 +1590,24 @@ const INITIAL_SCROLLER_STATE: ConversationScrollerState = {
   isSticky: true,
 };
 
+const scrollToLatestStyles = stylex.create({
+  icon: { width: space[4], height: space[4] },
+  workingSpinner: {
+    display: {
+      default: 'inline-flex',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):hover')]: 'none',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):focus-visible')]: 'none',
+    },
+  },
+  workingArrow: {
+    display: {
+      default: 'none',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):hover')]: 'block',
+      [stylex.when.ancestor(':where([data-scroll-to-latest]):focus-visible')]: 'block',
+    },
+  },
+});
+
 /**
  * The conversation: a virtualized list of keyed rows, rendered and scrolled by
  * the conversation scroll engine (`lib/conversation-scroll`,
@@ -2498,15 +2524,31 @@ export const SessionChatStreamView = forwardRef<
                     variant="secondary"
                     icon
                     data-scroll-to-latest=""
-                    className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
+                    className={cn(
+                      stylex.props(stylex.defaultMarker()).className,
+                      'pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none'
+                    )}
                     onClick={scrollToBottom}
                     aria-label={t('sessions.scrollToLatest')}
                   >
                     {agentActivityLabel && agentActivityShimmer ? (
-                      <Spinner className="h-4 w-4" aria-hidden="true" />
-                    ) : (
-                      <ArrowDown className="h-4 w-4" aria-hidden="true" />
-                    )}
+                      <Spinner
+                        {...stylex.props(
+                          scrollToLatestStyles.icon,
+                          scrollToLatestStyles.workingSpinner
+                        )}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                    <ArrowDown
+                      {...stylex.props(
+                        scrollToLatestStyles.icon,
+                        !!agentActivityLabel &&
+                          agentActivityShimmer &&
+                          scrollToLatestStyles.workingArrow
+                      )}
+                      aria-hidden="true"
+                    />
                   </Button>
                 </ConversationColumn>
               </div>
@@ -3660,6 +3702,7 @@ const UserMessageRowView = ({
 }) => {
   const { t } = useTranslation();
   const { copyContext } = useContext(SessionChatActionContext);
+  const copyWorkspaceId = useSessionCopyWorkspaceId();
   const isMobile = useIsMobile();
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
@@ -3706,13 +3749,13 @@ const UserMessageRowView = ({
     if (!hasTextContent) return;
 
     // The chip form, not the rewritten instruction the agent received.
-    const textContent = getCopyTextFromMessageItems(message.items);
+    const textContent = getCopyTextFromMessageItems(message.items, copyWorkspaceId);
     const ok = await writeTextToClipboard(textContent);
     if (!ok) return;
 
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [hasTextContent, message.items]);
+  }, [hasTextContent, message.items, copyWorkspaceId]);
 
   const handlePin = useCallback(() => {
     if (!pinCtx) return;
@@ -3766,7 +3809,15 @@ const UserMessageRowView = ({
       {...stylex.props(conversationSurface.userRow, isMobile && conversationSurface.mobileUserRow)}
     >
       <div {...stylex.props(conversationSurface.author)}>
-        <UserMessageAuthorAvatar user={user} isMobile={isMobile} showProfile={showSenderIdentity} />
+        {message.author?.kind === 'agent' ? (
+          <MessageAuthorIdentity author={message.author} />
+        ) : (
+          <UserMessageAuthorAvatar
+            user={user}
+            isMobile={isMobile}
+            showProfile={showSenderIdentity}
+          />
+        )}
       </div>
       <div
         {...withClassName(
@@ -3778,7 +3829,11 @@ const UserMessageRowView = ({
         )}
       >
         <div {...stylex.props(conversationSurface.metadata)} data-testid="user-message-metadata">
-          {showSenderIdentity && user?.name ? (
+          {message.author?.kind === 'agent' ? (
+            <span title={message.author.role?.name ?? message.author.name}>
+              {message.author.role?.name ?? message.author.name}
+            </span>
+          ) : showSenderIdentity && user?.name ? (
             <span className="max-w-40 truncate font-medium" title={user.name}>
               {user.name}
             </span>
@@ -5019,6 +5074,7 @@ export const AssistantTurnFooter = ({
     return getVisibleAssistantTextContent(contentItems, message.finished === true);
   }, [message.finished, message.items]);
   const hasCopyableText = textContent.trim().length > 0;
+  const copyWorkspaceId = useSessionCopyWorkspaceId();
   const fileDiffs = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;
   const durationUnitLabels = getDurationUnitLabels(t);
   const durationMs = resolveSessionHistoryDurationMs(message);
@@ -5054,11 +5110,13 @@ export const AssistantTurnFooter = ({
 
   const handleCopy = useCallback(async () => {
     if (!hasCopyableText) return;
-    const ok = await writeTextToClipboard(textContent);
+    const ok = await writeTextToClipboard(
+      normalizeSessionLinksForExport(textContent, copyWorkspaceId)
+    );
     if (!ok) return;
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [hasCopyableText, textContent]);
+  }, [hasCopyableText, textContent, copyWorkspaceId]);
 
   return (
     <div className="flex flex-col gap-1">
@@ -5090,7 +5148,8 @@ export const AssistantTurnFooter = ({
               'flex flex-wrap items-center justify-start text-muted-foreground'
             ),
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
-            !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
+            !isMobile &&
+              'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
             !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100'
           )}
           data-assistant-turn-actions
@@ -5204,7 +5263,7 @@ export const AssistantTurnFooter = ({
           {showFinishedMetadata && !isMobile && showDuration && durationLabel ? (
             <>
               {completionTimestampLabel ? <span aria-hidden="true">·</span> : null}
-              <span className="font-mono tabular-nums">{durationLabel}</span>
+              <span className="tabular-nums">{durationLabel}</span>
             </>
           ) : null}
         </div>
@@ -7017,6 +7076,7 @@ const PlanPanel = ({
   isStreaming?: boolean;
 }) => {
   const plan = { markdown, status: isStreaming ? ('delta' as const) : ('completed' as const) };
+  const copyWorkspaceId = useSessionCopyWorkspaceId();
   const handleAgentFileLinkClick = useCallback(
     (href: string) => {
       onFilePathClick?.(href);
@@ -7025,11 +7085,13 @@ const PlanPanel = ({
   );
   const [didCopy, setDidCopy] = useState(false);
   const handleCopy = useCallback(async () => {
-    const ok = await writeTextToClipboard(plan.markdown);
+    const ok = await writeTextToClipboard(
+      normalizeSessionLinksForExport(plan.markdown, copyWorkspaceId)
+    );
     if (!ok) return;
     setDidCopy(true);
     window.setTimeout(() => setDidCopy(false), 1200);
-  }, [plan.markdown]);
+  }, [plan.markdown, copyWorkspaceId]);
 
   /* A plan is long by nature and it now sits near the TOP of its turn, above the
      work it produced — unclamped it would push everything that happened after it

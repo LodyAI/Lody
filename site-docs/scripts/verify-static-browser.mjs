@@ -11,7 +11,7 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const output = path.join(packageRoot, 'out/client');
 const artifactDir = path.join(packageRoot, 'out/static-verification');
 const phase = process.env.STATIC_TEST_PHASE ?? 'all';
-assert.ok(['all', 'scan', 'faults', 'navigation', 'anchors', 'agent-pages'].includes(phase));
+assert.ok(['all', 'scan', 'faults', 'navigation', 'anchors'].includes(phase));
 const host = createStaticHost({ root: output, port: 0 });
 const server = await host.listen();
 const origin = `http://127.0.0.1:${server.address().port}`;
@@ -71,6 +71,11 @@ function snapshot(page) {
     alternates: [...document.querySelectorAll('link[hreflang]')].map((el) => el.href),
     lang: document.documentElement.lang,
     headings: [...document.querySelectorAll('h1')].map((el) => el.textContent.trim()),
+    missingFragmentTargets: [...document.querySelectorAll('a[href^="#"]')]
+      .map((el) => el.getAttribute('href'))
+      .filter(
+        (href) => href.length > 1 && !document.getElementById(decodeURIComponent(href.slice(1)))
+      ),
     paragraphs: [...document.querySelectorAll('main p, #nd-page p')]
       .map((el) => el.textContent.trim())
       .filter(Boolean),
@@ -145,6 +150,10 @@ async function scan() {
             }
             assert.equal(data.lang, urlPath.startsWith('/zh') ? 'zh-CN' : 'en');
             assert.ok(data.headings.length > 0);
+            if (/^\/(zh\/)?docs(\/|$)/u.test(urlPath)) {
+              assert.equal(data.headings.length, 1);
+              assert.deepEqual(data.missingFragmentTargets, [], 'Docs anchors must resolve');
+            }
             assert.ok(await page.locator('h1').first().isVisible());
             assert.ok(data.text.length > 80);
             if (/^\/(zh\/)?docs(\/|$)/u.test(urlPath) || /^\/(zh\/)?blog\//u.test(urlPath)) {
@@ -484,6 +493,26 @@ async function anchors() {
     for (const js of [false, true]) {
       const context = await newContext({ mobile, js });
       try {
+        for (const [urlPath, id] of [
+          ['/docs/quickstart/', 'quick-start'],
+          ['/zh/docs/quickstart/', '快速开始'],
+        ]) {
+          await run(
+            `docs title anchor ${urlPath} ${mobile ? 'mobile' : 'desktop'} ${js ? 'hydrated' : 'no-js'}`,
+            async () => {
+              const page = await context.newPage();
+              await page.goto(`${origin}${urlPath}#${encodeURIComponent(id)}`);
+              if (js) await settled(page);
+              assert.equal(await page.locator('h1').count(), 1);
+              assert.equal(await page.locator('h1').getAttribute('id'), id);
+              await anchorPosition(page, id);
+              await page.reload();
+              if (js) await settled(page);
+              await anchorPosition(page, id);
+              await page.close();
+            }
+          );
+        }
         for (const [source, label, destination, id] of [
           ['/docs/', 'Daemon Mode', '/docs/cli', 'daemon-mode'],
           ['/zh/docs/local-project/', 'CLI 命令', '/zh/docs/cli', 'project-命令'],
@@ -583,95 +612,12 @@ async function anchors() {
   }
 }
 
-async function agentPages() {
-  for (const mobile of [false, true]) {
-    for (const js of [false, true]) {
-      const context = await newContext({ mobile, js });
-      try {
-        await run(
-          `coding agent pages ${mobile ? 'mobile' : 'desktop'} ${js ? 'hydrated' : 'no-js'}`,
-          async () => {
-            const page = await context.newPage();
-            const errors = [];
-            page.on('pageerror', (error) => errors.push(error.message));
-            for (const [slug, heading] of [
-              ['coding-agent-gui', 'One GUI for Your Coding Agents'],
-              ['coding-agent-remote-control', 'Remote Control for Your Coding Agents'],
-            ]) {
-              await page.goto(`${origin}/${slug}/`);
-              if (js) await settled(page);
-              assert.equal(await page.locator('h1').count(), 1);
-              assert.equal(
-                (await page.locator('h1').textContent()).replace(/\s+/gu, ' ').trim(),
-                heading
-              );
-              assert.equal((await snapshot(page)).canonical, `https://lody.ai/${slug}/`);
-              assert.equal(await page.locator('.agent-page__agent').count(), 6);
-              assert.equal(await page.locator('link[hreflang]').count(), 0);
-              assert.ok(
-                await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
-              );
-              assert.ok(
-                await page
-                  .locator('main img')
-                  .evaluateAll((images) =>
-                    images.every((image) => image.complete && image.naturalWidth > 0)
-                  )
-              );
-              const faq = page.locator('.agent-page__faq details').first();
-              await faq.locator('summary').click();
-              assert.ok(await faq.evaluate((element) => element.open));
-              await faq.locator('summary').click();
-              assert.equal(await faq.evaluate((element) => element.open), false);
-              if (js) {
-                const previous = await page.locator('html').getAttribute('class');
-                await page.getByRole('button', { name: 'Toggle color theme' }).click();
-                await page.waitForFunction(
-                  (value) => document.documentElement.className !== value,
-                  previous
-                );
-              }
-              await page.screenshot({
-                path: path.join(
-                  artifactDir,
-                  `${slug}-${mobile ? 'mobile' : 'desktop'}-${js ? 'js' : 'no-js'}.png`
-                ),
-                fullPage: true,
-              });
-            }
-            await clickTo(
-              page,
-              page
-                .getByRole('navigation', { name: 'Coding agent guides' })
-                .getByRole('link', { name: 'Agent GUI', exact: true }),
-              '/coding-agent-gui'
-            );
-            await page.goBack();
-            await page.waitForURL(`${origin}/coding-agent-remote-control/`);
-            await page.goForward();
-            await page.waitForURL(`${origin}/coding-agent-gui/`);
-            await clickTo(
-              page,
-              page.getByRole('link', { name: 'Follow the quick start', exact: true }).first(),
-              '/docs/quickstart'
-            );
-            assert.deepEqual(errors, []);
-          }
-        );
-      } finally {
-        await context.close();
-      }
-    }
-  }
-}
-
 try {
   await mkdir(artifactDir, { recursive: true });
   if (phase === 'all' || phase === 'scan') await scan();
   if (phase === 'all' || phase === 'faults') await faults();
   if (phase === 'all' || phase === 'navigation') await navigation();
   if (phase === 'all' || phase === 'anchors') await anchors();
-  if (phase === 'all' || phase === 'agent-pages') await agentPages();
 } finally {
   await writeFile(
     path.join(artifactDir, `${phase}.json`),

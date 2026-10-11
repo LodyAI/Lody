@@ -668,6 +668,9 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
       if (!isNavigating && selectedItem?.onMentionPrepare) {
         if (disabled || readonly) return;
         const ticket = preparation.begin();
+        // Refocusing a touch-blurred input may have closed the query briefly.
+        // Keep the selected row's loading/error state visible while preparing.
+        setOpen(true);
         void selectedItem
           .onMentionPrepare({
             signal: ticket.signal,

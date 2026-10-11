@@ -71,7 +71,8 @@ const typography = stylex.create({
   block: {
     '--markdown-code-block-bg': {
       default: conversation.codeFill,
-      ':is(.dark *)': conversation.codeDarkFill,
+      ':where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *))':
+        conversation.codeDarkFill,
     },
     '--markdown-code-block-border': conversation.codeBorder,
     '--markdown-code-block-foreground': conversation.codeText,

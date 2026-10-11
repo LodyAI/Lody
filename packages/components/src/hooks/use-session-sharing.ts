@@ -73,7 +73,9 @@ export function useSessionSharing(options: UseSessionSharingOptions = {}) {
     shouldShowSessionSharing({
       workspaceId,
       activeWorkspaceId: activeOrganization?.id ?? null,
-      memberCount: activeOrganization?.members.length ?? null,
+      memberCount: Array.isArray(activeOrganization?.members)
+        ? activeOrganization.members.length
+        : null,
     });
 
   const resolve = useCallback(

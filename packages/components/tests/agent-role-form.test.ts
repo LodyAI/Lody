@@ -11,6 +11,7 @@ import {
 import type { AcpSelectorOptions } from '../src/components/shared/acp-selector-options';
 import {
   applyAgentRoleRunConfigDefaults,
+  carryAgentRoleOptionsToModel,
   buildAgentRoleFormValue,
   buildAgentRoleRunConfigSummary,
   buildAgentRoleFromForm,
@@ -415,6 +416,30 @@ describe('run config defaults', () => {
       })
     );
     expect(seeded.configOptionValues).toEqual({});
+  });
+});
+
+describe('run config model switch', () => {
+  it('keeps the values the new model still accepts and drops the rest', () => {
+    const effort = (values: string[]) => ({
+      type: 'select' as const,
+      configId: 'effort',
+      label: 'Effort',
+      currentValue: values[0],
+      options: values.map((value) => ({ value, label: value })),
+    });
+    const fast = { type: 'boolean' as const, configId: 'fast', label: 'Fast', options: [] };
+    const outgoing = [effort(['high', 'xhigh']), fast];
+    const incoming = [effort(['high'])];
+    const values = { effort: 'high', permission_mode: 'acceptEdits', fast: true };
+
+    expect(carryAgentRoleOptionsToModel(values, outgoing, incoming)).toEqual({
+      effort: 'high',
+      permission_mode: 'acceptEdits',
+    });
+    expect(
+      carryAgentRoleOptionsToModel({ ...values, effort: 'xhigh' }, outgoing, incoming)
+    ).not.toHaveProperty('effort');
   });
 });
 

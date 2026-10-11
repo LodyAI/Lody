@@ -1,6 +1,7 @@
 import http from 'http';
+import { Data, Effect } from 'effect';
 import { randomBytes } from 'crypto';
-import { existsSync, mkdirSync, writeFileSync, unlinkSync, renameSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import path from 'path';
 import { Logger, getLogger } from '@/utils/logger';
 import { GitHubTokenFetchError } from '@/lib/github-token-manager';
@@ -39,6 +40,23 @@ export type GitCredentialBrokerSessionContext = {
   requesterUserId: string;
   machineId: string;
 };
+
+/** A capability owned by one runtime, never looked up by logical Session ID. */
+export interface GitCredentialLease {
+  readonly context: Readonly<GitCredentialBrokerSessionContext>;
+  readonly contextToken: string;
+  readonly contextFilePath: string | undefined;
+  readonly stateFilePath: string | undefined;
+  readonly allowLocalAuth: boolean;
+  readonly active: boolean;
+  /** Immediate revocation on ownership changes; ordinary cleanup is scope-owned. */
+  revoke(): void;
+}
+
+export class GitCredentialContextError extends Data.TaggedError('GitCredentialContextError')<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
 
 export type GitCredentialBrokerEnv = {
   /** URL for same-host access (127.0.0.1) */
@@ -328,7 +346,6 @@ export class GitCredentialBroker {
   private readonly workspaceId: string | undefined;
   private readonly ownerUserId: string | undefined;
   private readonly contexts = new Map<string, GitCredentialBrokerSessionContext>();
-  private readonly sessionContextTokens = new Map<string, string>();
   private server: http.Server | null = null;
   private env: GitCredentialBrokerEnv | null = null;
 
@@ -347,11 +364,6 @@ export class GitCredentialBroker {
   /** Path this broker publishes its state to, for callers pointing a session at it. */
   getStateFilePath(): string | undefined {
     return this.workspaceId ? getBrokerStateFilePathForWorkspace(this.workspaceId) : undefined;
-  }
-
-  getSessionContextFilePath(sessionId: string): string | undefined {
-    const state = this.getStateFilePath();
-    return state ? `${state}.sessions/${encodeURIComponent(sessionId)}.json` : undefined;
   }
 
   getPinnedContextFilePath(contextToken: string): string | undefined {
@@ -415,59 +427,50 @@ export class GitCredentialBroker {
     return this.env;
   }
 
-  hasSessionContext(sessionId: string): boolean {
-    return this.sessionContextTokens.has(sessionId);
-  }
-
-  getSessionOwner(sessionId: string): string | undefined {
-    const token = this.sessionContextTokens.get(sessionId);
-    return token ? this.contexts.get(token)?.requesterUserId : undefined;
-  }
-
-  /** Rotate only sessions that opted into managed credentials during preparation. */
-  refreshSessionContext(context: GitCredentialBrokerSessionContext): string | undefined {
-    if (!this.sessionContextTokens.has(context.sessionId)) return undefined;
-    return this.activateSessionContext(context);
-  }
-
-  activateSessionContext(context: GitCredentialBrokerSessionContext): string {
-    const existingToken = this.sessionContextTokens.get(context.sessionId);
-    if (existingToken) {
-      const existing = this.contexts.get(existingToken);
-      if (
-        existing &&
-        existing.requesterUserId === context.requesterUserId &&
-        existing.machineId === context.machineId
-      ) {
-        return existingToken;
-      }
-      // A different requester is taking over this session. Drop the old token
-      // so stale subprocesses still holding it via env get invalid_context (403)
-      // instead of silently resolving to the new requester's identity.
-      this.contexts.delete(existingToken);
-      const previousFile = this.getPinnedContextFilePath(existingToken);
-      if (previousFile) removeFileIfExists(previousFile);
-    }
-
-    const contextToken = randomBytes(32).toString('hex');
-    this.sessionContextTokens.set(context.sessionId, contextToken);
-    this.contexts.set(contextToken, context);
-    const snapshot = JSON.stringify({
-      version: 1,
-      contextToken,
-      allowLocalAuth: context.requesterUserId === this.ownerUserId,
-    });
-    for (const file of [
-      this.getPinnedContextFilePath(contextToken),
-      this.getSessionContextFilePath(context.sessionId),
-    ]) {
-      if (!file) continue;
-      mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-      const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
-      writeFileSync(temporary, snapshot, { mode: 0o600 });
-      renameSync(temporary, file);
-    }
-    return contextToken;
+  /** Each acquisition is a distinct generation, even for the same Session/owner. */
+  acquireContext(context: GitCredentialBrokerSessionContext) {
+    return Effect.acquireRelease(
+      Effect.try({
+        try: (): GitCredentialLease => {
+          const snapshot = Object.freeze({ ...context });
+          const contextToken = randomBytes(32).toString('hex');
+          const file = this.getPinnedContextFilePath(contextToken);
+          const allowLocalAuth = snapshot.requesterUserId === this.ownerUserId;
+          if (file) {
+            mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+            // Unique filename: publish completely before giving any caller the lease.
+            try {
+              writeFileSync(file, JSON.stringify({ version: 1, contextToken, allowLocalAuth }), {
+                mode: 0o600,
+                flag: 'wx',
+              });
+            } catch (error) {
+              removeFileIfExists(file);
+              throw error;
+            }
+          }
+          this.contexts.set(contextToken, snapshot);
+          const contexts = this.contexts;
+          return {
+            context: snapshot,
+            contextToken,
+            contextFilePath: file,
+            stateFilePath: this.getStateFilePath(),
+            allowLocalAuth,
+            get active() {
+              return contexts.get(contextToken) === snapshot;
+            },
+            revoke() {
+              contexts.delete(contextToken);
+              if (file) removeFileIfExists(file);
+            },
+          };
+        },
+        catch: (cause) =>
+          new GitCredentialContextError({ message: 'github_context_acquisition_failed', cause }),
+      }),
+      (lease) => Effect.sync(() => lease.revoke())
+    );
   }
 
   /**
@@ -523,11 +526,6 @@ export class GitCredentialBroker {
       if (file) removeFileIfExists(file);
     }
     this.contexts.clear();
-    for (const sessionId of this.sessionContextTokens.keys()) {
-      const file = this.getSessionContextFilePath(sessionId);
-      if (file) removeFileIfExists(file);
-    }
-    this.sessionContextTokens.clear();
 
     if (!this.server) {
       return;

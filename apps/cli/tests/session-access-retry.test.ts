@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Cause, Duration, Effect, Exit, Fiber, Option, TestClock, TestContext } from 'effect';
+import { Cause, Duration, Effect, Exit, Fiber, Option } from 'effect';
+import { TestClock } from 'effect/testing';
 import {
   AccessDenied,
   MachineAccessVerificationError,
@@ -21,14 +22,14 @@ const indeterminate = (cause: 'network' | 'auth'): MachineAccessVerification => 
 // Runs `program` under a virtual clock, advancing time and returning the final Exit.
 const runWithClock = <A, E>(
   program: Effect.Effect<A, E>,
-  drive: (fiber: Fiber.RuntimeFiber<A, E>) => Effect.Effect<unknown>
+  drive: (fiber: Fiber.Fiber<A, E>) => Effect.Effect<unknown>
 ): Promise<Exit.Exit<A, E>> =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const fiber = yield* Effect.fork(program);
+      const fiber = yield* Effect.forkChild(program);
       yield* drive(fiber);
       return yield* Fiber.await(fiber);
-    }).pipe(Effect.provide(TestContext.TestContext))
+    }).pipe(Effect.provide(TestClock.layer()))
   );
 
 describe('verifyMachineAccessWithRetry', () => {
@@ -80,7 +81,7 @@ describe('verifyMachineAccessWithRetry', () => {
     // A definitive deny must propagate (so the caller can fail the turn) — the
     // `whileInput` predicate stops the schedule on a non-indeterminate error.
     expect(Exit.isFailure(exit)).toBe(true);
-    const error = Exit.isFailure(exit) ? Option.getOrNull(Cause.failureOption(exit.cause)) : null;
+    const error = Exit.isFailure(exit) ? Option.getOrNull(Cause.findErrorOption(exit.cause)) : null;
     expect(error).toBeInstanceOf(AccessDenied);
     expect((error as AccessDenied | null)?.reason).toBe('not_visible');
     expect(verify).toHaveBeenCalledTimes(2);
@@ -108,7 +109,7 @@ describe('verifyMachineAccessWithRetry', () => {
 
     expect(onAuthEscalation).toHaveBeenCalledTimes(1);
     expect(verify.mock.calls.length).toBeGreaterThanOrEqual(3);
-    expect(Exit.isInterrupted(exit)).toBe(true);
+    expect(Exit.hasInterrupts(exit)).toBe(true);
   });
 
   it('treats a hung verify call as transient and retries after the timeout', async () => {
@@ -174,7 +175,7 @@ describe('verifyMachineAccessWithRetry', () => {
         })
     );
 
-    expect(Exit.isInterrupted(exit)).toBe(true);
+    expect(Exit.hasInterrupts(exit)).toBe(true);
     expect(onAuthEscalation).not.toHaveBeenCalled();
   });
 });

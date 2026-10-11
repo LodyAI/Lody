@@ -4,8 +4,7 @@ import { radius, space, text } from '@lody/ui/tokens/scales.stylex';
 
 const readingLeading = `calc(${text.bodyLeading} * 1.2)`;
 
-/** Conversation anatomy; hosts can override this group with createTheme. */
-export const conversation = stylex.defineVars({
+const conversationDefaults = {
   reading: 'hsl(var(--reading-foreground, var(--foreground)))',
   readingLeading,
   strong: 'hsl(var(--foreground-strong, var(--foreground)))',
@@ -31,4 +30,10 @@ export const conversation = stylex.defineVars({
   codeBorder: 'hsl(var(--code-border))',
   codeText: 'hsl(var(--code-foreground))',
   codeMeta: 'hsl(var(--code-foreground) / 0.55)',
-});
+};
+
+/** Conversation anatomy; hosts can override this group with createTheme. */
+export const conversation = stylex.defineVars(conversationDefaults);
+
+/** Re-evaluate CSS aliases where a host pins its own palette instead of inheriting root colours. */
+export const scopedConversationTheme = stylex.createTheme(conversation, conversationDefaults);

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { startProcessLegacy } from '@lody/shared/node/process';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import type { SimulatorHostControl } from './host-controls';
@@ -18,9 +18,11 @@ export async function startBaguetteProcess(
   const env: NodeJS.ProcessEnv = {};
   for (const key of ['HOME', 'PATH', 'TMPDIR', 'DEVELOPER_DIR', 'ELECTRON_RUN_AS_NODE'])
     if (process.env[key]) env[key] = process.env[key];
-  const worker = spawn(process.execPath, [workerPath, binary], {
-    env,
-    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  const { child: worker } = startProcessLegacy({
+    command: process.execPath,
+    args: [workerPath, binary],
+    processGroup: false,
+    options: { env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] },
   });
   const stop = () => {
     if (worker.connected) worker.disconnect();

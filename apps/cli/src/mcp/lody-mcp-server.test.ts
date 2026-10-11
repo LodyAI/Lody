@@ -185,6 +185,7 @@ describe('Lody MCP tool catalog', () => {
       ])
     );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
+    expect(names).not.toContain('lody_review_submit');
   });
 
   it('always advertises only the bounded Schedule family', async () => {

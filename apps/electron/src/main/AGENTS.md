@@ -3,7 +3,17 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 Parent [module rules](../AGENTS.md) apply.
 
+Main authentication uses `auth-fetch.ts` with Electron Chromium networking after
+app readiness. Preserve Better Auth cookie hooks and cancellation; never bypass
+certificate verification. Behavior: [login Spec](../../../../specs/desktop-browser-login.md).
+
 ## Diagnostics
+
+Resource links use `lody://` in every channel; startup never replaces an existing
+default handler. Packaged Windows fills an absent handler on first launch. Forward
+legacy cloud routes only to Stable's private alias, never through the common scheme;
+OSS must not exchange cloud credentials. Callback schemes stay channel-specific. Validate session resources before
+product-window dispatch, preserving the explicit workspace. See [deep links](../../../../specs/deep-links.md).
 
 Main-process `console` output, lifecycle, and embedded-CLI supervision reach the
 CLI daily log through `desktop-log.ts`; write synchronously, never persist

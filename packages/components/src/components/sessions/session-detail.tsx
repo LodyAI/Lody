@@ -1,4 +1,5 @@
 import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
+import { pendingSessionLinkAtom } from '@/lib/session-deep-link';
 import { windowPreparationAtom } from '@/lib/window-preparation';
 import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
@@ -177,7 +178,7 @@ import {
   MobileProjectFileBrowser,
   type MobileProjectFileBrowserHandle,
 } from '@/components/files/mobile-project-file-browser';
-import { getAppShareUrl } from '@/lib/app-location';
+import { buildSessionLink } from '@lody/shared/session-link';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
 import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
@@ -1112,6 +1113,8 @@ const SessionDetail = ({
   const atomWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const workspaceSlug = routeTargetWorkspaceSlug ?? atomWorkspaceSlug;
   const currentWorkspaceId = useAtomValue(currentWorkspaceIdAtom) as WorkspaceId | null;
+  const pendingSessionLink = useAtomValue(pendingSessionLinkAtom);
+  const clearPendingSessionLink = useSetAtom(pendingSessionLinkAtom);
   const isLeftSidebarHidden = !useAtomValue(navigationSidebarVisibleAtom);
   const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
@@ -2064,12 +2067,21 @@ const SessionDetail = ({
   // A draft choice in an archived workspace is replaced the same way.
   useEffect(() => {
     if (!docMetaCacheReady) return;
+    if (pendingTabRestoreNavigation?.tabSessionId === requestedTabSessionId) return;
+    if (
+      pendingSessionLink?.workspaceId === currentWorkspaceId &&
+      (pendingSessionLink.tabSessionId ?? pendingSessionLink.sessionId) === requestedTabSessionId
+    )
+      return;
     if (!isArchivedDraftChoice && !closedConversationIds.has(requestedTabSessionId)) return;
     if (router.state.location.search.tab !== urlTab) return;
     navigateToSessionTab(activeTabSessionId);
   }, [
     docMetaCacheReady,
     isArchivedDraftChoice,
+    pendingSessionLink,
+    pendingTabRestoreNavigation,
+    currentWorkspaceId,
     closedConversationIds,
     requestedTabSessionId,
     activeTabSessionId,
@@ -3005,7 +3017,10 @@ const SessionDetail = ({
   const handleCopyUrl = useCallback(
     async (successMessage?: string, failureMessage?: string) => {
       try {
-        await navigator.clipboard.writeText(getAppShareUrl());
+        if (!currentWorkspaceId || !activeSessionTabId) throw new Error('Session is not ready');
+        await navigator.clipboard.writeText(
+          buildSessionLink({ sessionId: activeSessionTabId, workspaceId: currentWorkspaceId })
+        );
         captureSessionDetailEvent('session/share_link_copied');
         toast.success(successMessage ?? t('sessions.urlCopied', 'Session URL copied to clipboard'));
       } catch {
@@ -3013,7 +3028,7 @@ const SessionDetail = ({
         toast.error(failureMessage ?? t('sessions.copyFailed', 'Unable to copy'));
       }
     },
-    [captureSessionDetailEvent, t]
+    [captureSessionDetailEvent, t, currentWorkspaceId, activeSessionTabId]
   );
 
   const handleRequestShareSession = useCallback(
@@ -3180,13 +3195,9 @@ const SessionDetail = ({
     }
     const activeChatRef = chatRefsMap.current.get(activeTabSessionId);
     if (activeChatRef && 'openSearch' in activeChatRef) {
-      captureSessionDetailEvent('session/search_open_requested', {
-        tab_session_id: activeTabSessionId,
-        source: 'session_detail_menu',
-      });
       activeChatRef.openSearch();
     }
-  }, [activeDraftTab, activeTabSessionId, captureSessionDetailEvent]);
+  }, [activeDraftTab, activeTabSessionId]);
 
   // Single fork entry point for every launcher: the header/footer action forks
   // into a top tab, the side-panel launcher forks into a right-hand panel.
@@ -4127,6 +4138,58 @@ const SessionDetail = ({
       workspaceSlug,
     ]
   );
+
+  useEffect(() => {
+    if (
+      !pendingSessionLink ||
+      !docMetaCacheReady ||
+      pendingSessionLink.workspaceId !== currentWorkspaceId
+    )
+      return;
+    // A direct child URL first resolves its parent; let that existing redirect finish.
+    if (!activeSession || activeSession.parentSessionId) return;
+    const exactId = pendingSessionLink.tabSessionId ?? pendingSessionLink.sessionId;
+    const sideTarget = sideSessions.find((item) => item.id === exactId);
+    const isRootTarget = pendingSessionLink.sessionId === sessionId;
+    const isChildTarget =
+      !pendingSessionLink.tabSessionId &&
+      (allOrderedSessionTabIdSet.has(pendingSessionLink.sessionId) || sideTarget !== undefined);
+    if (!isRootTarget && !isChildTarget) return;
+    if (sideTarget) {
+      clearPendingSessionLink(null);
+      selectSidePanelTab(getSideSessionPanelTabId(sideTarget.id));
+      revealRightSidebar();
+      return;
+    }
+    const archivedTarget = closedConversations.find((item) => item.id === exactId);
+    if (archivedTarget && isArchivedOutsideWorkspace(archivedTarget, isWorkspaceArchived)) {
+      clearPendingSessionLink(null);
+      toast.error(t('deepLink.archived', 'Restore this archived conversation before opening it.'));
+      return;
+    }
+    if (!allOrderedSessionTabIdSet.has(exactId) && exactId !== sessionId) {
+      // A ready catalog is a snapshot, not proof that this child has synced yet.
+      // Keep waiting; the root request owner reports and clears a bounded timeout.
+      return;
+    }
+    clearPendingSessionLink(null);
+    handleNavigateSession({ sessionId, tabSessionId: exactId as SessionId });
+  }, [
+    pendingSessionLink,
+    docMetaCacheReady,
+    currentWorkspaceId,
+    activeSession,
+    sessionId,
+    allOrderedSessionTabIdSet,
+    clearPendingSessionLink,
+    handleNavigateSession,
+    sideSessions,
+    selectSidePanelTab,
+    revealRightSidebar,
+    closedConversations,
+    isWorkspaceArchived,
+    t,
+  ]);
 
   // When a viewer tab is selected, activate the viewer surface for the current session.
   const handleViewerTabSelect = useCallback(

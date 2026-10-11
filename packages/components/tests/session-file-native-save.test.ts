@@ -1,5 +1,8 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import { runTouchImagePreviewAction } from '../src/lib/image-preview-export';
 import { shareFileBytesNatively } from '../src/lib/session-file-native-save';
+
+vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: () => true }));
 
 vi.mock('../src/lib/session-file-upload', () => ({
   buildSessionFileDownloadUrl: () => {
@@ -56,7 +59,9 @@ it.each([0, 7, 3 * 1024 * 1024 + 5])(
   'shares all %i bytes with a safe extension and cleans up',
   async (size) => {
     const bytes = Uint8Array.from({ length: size }, (_, i) => i % 256);
-    await shareFileBytesNatively('../package.deb', bytes);
+    await expect(shareFileBytesNatively('../package.deb', bytes)).resolves.toEqual({
+      shared: true,
+    });
     // Compare every byte without generic deep equality enumerating millions of keys.
     expect(state.received[0].bytes.equals(Buffer.from(bytes))).toBe(true);
     expect(state.received[0].name.split('/')).toHaveLength(3);
@@ -75,11 +80,16 @@ it('isolates concurrent exports of the same filename', async () => {
   expect(state.files.size).toBe(0);
 });
 
-it('treats cancellation as dismissal and cleans up', async () => {
-  state.failure = 'Share canceled';
-  await expect(shareFileBytesNatively('package.deb', Uint8Array.of(1))).resolves.toBeUndefined();
-  expect(state.files.size).toBe(0);
-});
+it.each(['Share canceled', 'Share cancelled', 'User cancelled sharing'])(
+  'treats %s as dismissal and cleans up',
+  async (message) => {
+    state.failure = message;
+    await expect(shareFileBytesNatively('package.deb', Uint8Array.of(1))).resolves.toEqual({
+      shared: false,
+    });
+    expect(state.files.size).toBe(0);
+  }
+);
 
 it.each(['write', 'share'])('cleans up and reports a %s failure', async (step) => {
   state.failWrite = step === 'write';
@@ -88,3 +98,21 @@ it.each(['write', 'share'])('cleans up and reports a %s failure', async (step) =
   expect(state.files.size).toBe(0);
   expect(state.received).toEqual([]);
 });
+
+it.each(['save', 'share'] as const)(
+  'image %s hands off original bytes, never claims an album save',
+  async (action) => {
+    const image = new File([Uint8Array.of(255, 216, 255, 1)], 'photo.jpeg', { type: 'image/jpeg' });
+    expect(await runTouchImagePreviewAction(action, 'blob:photo', image)).toEqual({
+      kind: 'shared',
+    });
+    expect(state.received[0].name).toMatch(/photo\.jpeg$/);
+    expect([...state.received[0].bytes]).toEqual([255, 216, 255, 1]);
+    expect(state.files.size).toBe(0);
+    state.failure = 'Share canceled';
+    expect(await runTouchImagePreviewAction(action, 'blob:photo', image)).toEqual({
+      kind: 'dismissed',
+    });
+    expect(state.files.size).toBe(0);
+  }
+);

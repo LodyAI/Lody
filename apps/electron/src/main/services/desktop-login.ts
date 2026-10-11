@@ -34,6 +34,27 @@ function readErrorCode(error: unknown, depth = 0): string | null {
   return readString(record.code) ?? readErrorCode(record.cause, depth + 1)
 }
 
+const NODE_CERTIFICATE_ERRORS = new Set([
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'CERT_HAS_EXPIRED',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'ERR_TLS_CERT_ALTNAME_INVALID'
+])
+
+function readCertificateError(error: unknown, depth = 0): string | null {
+  if (typeof error !== 'object' || error === null || depth > 3) return null
+  const record = error as { code?: unknown; message?: unknown; cause?: unknown }
+  const code = readString(record.code)
+  if (code && (NODE_CERTIFICATE_ERRORS.has(code) || /^ERR_CERT_[A-Z_]+$/.test(code))) {
+    return code
+  }
+  // Chromium net.fetch rejects with an Error whose message contains net::ERR_*.
+  const chromiumCode = readString(record.message)?.match(/\bnet::(ERR_CERT_[A-Z_]+)\b/)?.[1]
+  return chromiumCode ?? readCertificateError(record.cause, depth + 1)
+}
+
 // Summarizes an exchange/browser failure for the user and diagnostics: HTTP
 // status and Better Auth error code for server rejections, error name/message/
 // system code for local failures. Request bodies and headers are never read.
@@ -66,7 +87,11 @@ export function describeDesktopLoginFailure(
     }
   } else {
     const name = readString(record.name) ?? 'Error'
-    const systemCode = readErrorCode(error)
+    const certificateCode = readCertificateError(error)
+    const systemCode = certificateCode ?? readErrorCode(error)
+    if (fallback === 'exchange_failed' && certificateCode) {
+      code = 'exchange_certificate_failed'
+    }
     detail = [`${name}: ${readString(record.message) ?? 'unknown error'}`, systemCode]
       .filter(Boolean)
       .join(' ')
@@ -160,7 +185,7 @@ export class DesktopLogin {
     try {
       await this.dependencies.openBrowser({
         client_id: 'electron',
-        ...(this.dependencies.channel === 'nightly' ? { desktop_channel: 'nightly' } : {}),
+        desktop_channel: this.dependencies.channel ?? 'stable',
         state: attempt.state,
         code_challenge: createHash('sha256').update(attempt.verifier).digest('base64url'),
         code_challenge_method: 'S256'

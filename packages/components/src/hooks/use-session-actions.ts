@@ -28,12 +28,16 @@ import {
   SessionStatusFactory,
   getLocalProjectHistoryProviderKey,
   getServerNow,
+  LEGACY_SESSION_HISTORY_BACKEND,
+  ROOST_SESSION_HISTORY_BACKEND,
   evaluateSessionCreateQuota,
   formatSessionQuotaRejection,
   isConvexUnauthenticatedError,
   isLoroRepoDocDeleted,
   readMachineFlockRowsFromFlock,
   sanitizeMessageTextSpans,
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -41,6 +45,10 @@ import { usePostHog } from '@posthog/react';
 // module-runner interop used by site-docs SSR (UNEXPECTED named-export error).
 import debug from 'debug';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import {
+  clearSessionRunConfigDraftsAtom,
+  sessionRunConfigDraftAccountAtom,
+} from '@/atoms/session-run-config-drafts';
 import {
   setDocMetaByRoomIdAtom,
   sessionMetaCacheAtom,
@@ -54,6 +62,7 @@ import {
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { sendIpc } from '@/lib/electron-ipc-client';
 import { useAuthenticatedConvex } from './use-authenticated-convex';
+import { roostHistoryFeatureEnabledAtom } from '@/atoms/settings';
 import {
   createSessionSubmission,
   type CreateSessionResult,
@@ -219,6 +228,7 @@ export type SessionActions = {
       dispatch?: boolean;
       guideExpectedTurnId?: string;
       attachments?: SessionAttachmentDraft[];
+      onAccepted?: () => void;
     }
   ) => Promise<SessionHistory>;
   requestSessionDispatch: (
@@ -254,6 +264,7 @@ export type SessionActions = {
   /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
   archiveSession: (sessionId: SessionId) => Promise<void>;
+  setTreeCollaborationStopped: (sessionId: SessionId, stopped: boolean) => Promise<void>;
   setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
@@ -346,6 +357,7 @@ export async function touchSessionActivityMeta(
 
 export function useSessionActions(): SessionActions {
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const roostHistoryEnabled = useAtomValue(roostHistoryFeatureEnabledAtom);
   const setDocMetaByRoomId = useSetAtom(setDocMetaByRoomIdAtom);
   const store = useStore();
   // Convex dedupes identical subscriptions client-side, so this shares the
@@ -409,6 +421,9 @@ export function useSessionActions(): SessionActions {
     () =>
       createSessionSubmission({
         runtime,
+        defaultHistoryBackend: roostHistoryEnabled
+          ? ROOST_SESSION_HISTORY_BACKEND
+          : LEGACY_SESSION_HISTORY_BACKEND,
         assertSessionCreateAllowed,
         recordWorkspaceActivity,
         publishSessionMeta: setDocMetaByRoomId,
@@ -435,6 +450,7 @@ export function useSessionActions(): SessionActions {
       }),
     [
       runtime,
+      roostHistoryEnabled,
       assertSessionCreateAllowed,
       recordWorkspaceActivity,
       setDocMetaByRoomId,
@@ -690,6 +706,7 @@ export function useSessionActions(): SessionActions {
         throw new Error('Runtime not ready');
       }
 
+      const draftOwner = store.get(sessionRunConfigDraftAccountAtom);
       const sessionRoomId = getSessionRoomId(sessionId);
       const sessionMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
         | SessionMeta
@@ -707,10 +724,18 @@ export function useSessionActions(): SessionActions {
       // Held sends never write after this: cancellation joins any in-flight write.
       await runtime.pendingSends?.cancelSessions([sessionId]);
       await runtime.writer.deleteDoc(sessionRoomId);
+      if (runtime.accountId) {
+        store.set(clearSessionRunConfigDraftsAtom, {
+          accountId: runtime.accountId,
+          lifetime: draftOwner.lifetime,
+          workspaceId: runtime.workspaceId,
+          sessionIds: [sessionId],
+        });
+      }
       await runtime.repo.flush();
       await runtime.releaseSessionStore(sessionId);
     },
-    [invalidateExternalHistoryCatalog, runtime]
+    [invalidateExternalHistoryCatalog, runtime, store]
   );
 
   const deleteSessions = useCallback(
@@ -721,6 +746,36 @@ export function useSessionActions(): SessionActions {
       await Promise.all(sessionIds.map((id) => deleteSessionDocuments(id)));
     },
     [runtime, deleteSessionDocuments]
+  );
+
+  const setTreeCollaborationStopped = useCallback(
+    async (sessionId: SessionId, stopped: boolean) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const targets = await runtime.readSessionOperationTargets(sessionId, 'collaboration');
+      for (const machineId of new Set(targets.map((target) => target.machineId))) {
+        const machine = await runtime.repo.getDocMeta(getMachineRoomId(machineId));
+        if (
+          !machineSupportsProtocolCapability(
+            machine?.meta,
+            MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl
+          )
+        )
+          throw new Error(
+            'Update every machine in this conversation tree before controlling collaboration'
+          );
+      }
+      if (store.get(activeWorkspaceRuntimeAtom) !== runtime) {
+        throw new Error('Workspace changed before controlling collaboration');
+      }
+      // Stop the root first, so late descendants inherit its barrier. Restore it last.
+      for (const target of stopped ? targets : [...targets].reverse()) {
+        await runtime.writer.upsertDocMeta(getSessionRoomId(target.id), {
+          collaborationStopped: stopped,
+        } as Partial<SessionMeta>);
+      }
+      if (stopped) await runtime.pendingSends?.cancelSessions(targets.map((target) => target.id));
+    },
+    [runtime, store]
   );
 
   const archiveSession = useCallback(
@@ -870,6 +925,7 @@ export function useSessionActions(): SessionActions {
     markSessionUnread,
     deleteSessions,
     archiveSession,
+    setTreeCollaborationStopped,
     restoreSession,
     deleteArchivedSession,
     setSessionPinned,

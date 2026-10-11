@@ -6,10 +6,7 @@ import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId, SessionMeta } from '@lody/shared';
 
-import {
-  experimentalFeaturesEnabledAtom,
-  reviewAgentExperimentEnabledAtom,
-} from '../src/atoms/settings';
+import { experimentalFeaturesEnabledAtom } from '../src/atoms/settings';
 import { SessionHeaderMenu } from '../src/components/sessions/session-chat-interface';
 import { Tooltip } from '@lody/ui/tooltip';
 
@@ -48,6 +45,7 @@ describe('SessionHeaderMenu', () => {
   let container: HTMLDivElement | undefined;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     Object.defineProperty(globalThis, 'PointerEvent', {
       configurable: true,
       value: TestPointerEvent,
@@ -61,6 +59,7 @@ describe('SessionHeaderMenu', () => {
     if (root) {
       await act(async () => root?.unmount());
     }
+    vi.useRealTimers();
     document.body.innerHTML = '';
     root = undefined;
     container = undefined;
@@ -79,7 +78,7 @@ describe('SessionHeaderMenu', () => {
           pointerType: 'mouse',
         })
       );
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      await vi.advanceTimersByTimeAsync(40);
     });
   }
 
@@ -198,41 +197,31 @@ describe('SessionHeaderMenu', () => {
     expect(onOpenSession).not.toHaveBeenCalled();
   });
 
-  it('keeps the reviewer setup dialog mounted after the actions menu closes', async () => {
+  it('omits retired review actions even with the old opt-in and session pointer', async () => {
     const store = createStore();
     store.set(experimentalFeaturesEnabledAtom, true);
-    store.set(reviewAgentExperimentEnabledAtom, true);
-    const onOpenReviewSettings = vi.fn();
-
-    await act(async () => {
-      root?.render(
-        <Provider store={store}>
-          <SessionHeaderMenu
-            session={session}
-            machineName="Review machine"
-            onCopyUrl={vi.fn()}
-            onOpenReviewSettings={onOpenReviewSettings}
-            t={translate}
-          />
-        </Provider>
-      );
-    });
-    await openMenu();
-
-    const reviewItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-      (item) => item.textContent?.includes('Review this branch')
-    );
-    expect(reviewItem).toBeDefined();
-    await act(async () => reviewItem?.click());
-
-    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-    expect(dialog?.textContent).toContain('Configure a review agent');
-
-    const openSettings = Array.from(
-      dialog?.querySelectorAll<HTMLButtonElement>('button') ?? []
-    ).find((button) => button.textContent?.includes('Open review settings'));
-    await act(async () => openSettings?.click());
-    expect(onOpenReviewSettings).toHaveBeenCalledTimes(1);
+    localStorage.setItem('lody-review-agent-enabled', 'true');
+    try {
+      await act(async () => {
+        root?.render(
+          <Provider store={store}>
+            <SessionHeaderMenu
+              session={{ ...session, autoReview: { runId: 'retired-review', t: 1 } }}
+              onCopyUrl={() => {}}
+              t={translate}
+            />
+          </Provider>
+        );
+      });
+      await openMenu();
+      expect(document.querySelector('[role="menu"]')).not.toBeNull();
+      expect(document.body.textContent).toContain('Copy');
+      expect(document.body.textContent).not.toContain('Review this branch');
+      expect(document.body.textContent).not.toContain('Auto review and merge');
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+    } finally {
+      localStorage.removeItem('lody-review-agent-enabled');
+    }
   });
 
   it('omits the Session group heading and keeps Team as a normal-weight row', async () => {

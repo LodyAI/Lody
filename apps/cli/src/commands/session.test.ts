@@ -1,3 +1,8 @@
+import { LoroDoc } from 'loro-crdt';
+import { createHistoryWriter } from '@lody/shared';
+import { createLoroSessionData } from '@lody/shared/session-data';
+import { appendUserPromptHistory } from './session';
+import { prepareSessionInput } from './session';
 import path from 'node:path';
 import os from 'node:os';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -1642,6 +1647,47 @@ describe('session command helpers', () => {
     }
   });
 
+  it('resolves a local project from the replica when Flock freshness sync fails', async () => {
+    const syncFlockDocOrThrow = vi.fn(async () => {
+      throw new Error('Streams sync failed: network_error');
+    });
+    const manager = {
+      syncFlockDocOrThrow,
+      repo: {
+        getDocMeta: vi.fn(async () => ({
+          meta: {
+            localProjects: {
+              'local-project-1': {
+                id: 'local-project-1',
+                name: 'lody',
+                rootPath: '/workspace/lody',
+                createdAtMs: 1,
+              },
+            },
+          },
+        })),
+        openFlockDoc: vi.fn(async () => ({
+          flock: {
+            scan: () => [],
+          },
+        })),
+      },
+    } as unknown as Parameters<typeof resolveLocalProjectRefOrThrow>[0];
+
+    await expect(
+      resolveLocalProjectRefOrThrow(
+        manager,
+        'workspace-1' as WorkspaceId,
+        'machine-id' as MachineId,
+        'lody'
+      )
+    ).resolves.toEqual({
+      kind: 'local',
+      localProjectId: 'local-project-1',
+    });
+    expect(syncFlockDocOrThrow).toHaveBeenCalled();
+  });
+
   it('does not synthesize a branch for non-git local projects', async () => {
     const rootPath = mkdtempSync(path.join(os.tmpdir(), 'lody-session-non-git-'));
     try {
@@ -2154,5 +2200,149 @@ describe('delegated machine access', () => {
       allowed: false,
       reason: 'not_visible',
     });
+  });
+});
+
+describe('prepared command attachment inputs', () => {
+  const auth = {
+    machineId: 'machine-1' as MachineId,
+    userId: 'user-1',
+    token: '',
+    userName: 'User',
+    userEmail: 'user@example.test',
+    machineName: 'Local',
+  };
+  const workspace = { id: 'workspace-1', name: 'Workspace', slug: 'workspace', role: 'owner' };
+  const ownerTarget = {
+    targetMachine: { id: auth.machineId, ownerUserId: auth.userId } as MachineMeta,
+    agentConfig: {
+      id: 'agent-1',
+      machineId: auth.machineId,
+      cliType: 'registry',
+      agentType: 'fixture',
+      prompt: 'System instructions',
+    } as AgentConfigMeta,
+  };
+  const file = {
+    type: 'file' as const,
+    fileId: 'file-1',
+    fileName: 'data.csv',
+    mimeType: 'text/csv',
+    sizeBytes: 3,
+    sha256: 'a'.repeat(64),
+    textPreview: true,
+    transport: 'r2' as const,
+    uploadedAt: 1,
+  };
+  const options = {
+    workspaceMetaPrewriteSatisfied: true,
+    bypassSessionQuota: true,
+    historyBackend: 'loro' as const,
+  };
+
+  it('keeps raw input in history and preserves attachments beside composed execution text', async () => {
+    // Preparation must not write metadata/history or start execution.
+    const manager = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('Unexpected side effect during preparation');
+        },
+      }
+    );
+    const prepared = await prepareSessionInput(
+      auth,
+      workspace,
+      manager as never,
+      'Analyze',
+      {
+        ...options,
+        inputAttachments: [file],
+      },
+      { inheritSessionDefaults: false },
+      ownerTarget
+    );
+    expect(prepared.userTurn.items).toEqual([{ type: 'text', text: 'Analyze' }, file]);
+    expect(prepared.userTurn.inputConfig?.prompt).toBe('System instructions\n\nAnalyze');
+    expect(prepared.userTurn.inputConfig?.inputBlocks).toEqual([
+      { type: 'text', text: 'Analyze' },
+      file,
+    ]);
+    expect(prepared.userTurn.status).toBe('prepared');
+    expect(prepared.meta.latestUserMsgId).toBeUndefined();
+  });
+
+  it('appends attachment-only continuations once and rejects a changed attachment on retry', async () => {
+    const doc = new LoroDoc();
+    const sessionId = 'session-attachments' as SessionId;
+    const data = createLoroSessionData({ doc, sessionId });
+    const writer = createHistoryWriter(doc);
+    const sessionDoc = {
+      sessionId,
+      sessionData: data,
+      getMetaState: async () => ({ historyBackend: 'loro' }),
+      appendUserTurn: async (entry: SessionHistoryInput) => {
+        writer.append(entry as never);
+      },
+    };
+    const args = {
+      sessionDoc: sessionDoc as never,
+      prompt: '',
+      inputBlocks: [file],
+      userId: 'user-1',
+      preallocatedId: 'fixed-turn',
+      inputConfig: {
+        prompt: '',
+        inputBlocks: [file],
+        cliType: 'registry' as const,
+        agentType: 'fixture',
+      },
+    };
+    const first = await appendUserPromptHistory(args);
+    expect(await appendUserPromptHistory(args)).toMatchObject({ id: first.id });
+    expect(writer.readStored()).toHaveLength(1);
+    expect(writer.readStored()[0]?.items).toEqual([file]);
+    await expect(
+      appendUserPromptHistory({ ...args, inputBlocks: [{ ...file, fileId: 'other-file' }] })
+    ).rejects.toThrow('already used');
+    expect(writer.readStored()).toHaveLength(1);
+  });
+
+  it('prepares an attachment-only first turn and rejects an empty message before publication', async () => {
+    const manager = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('Unexpected side effect during preparation');
+        },
+      }
+    );
+    const prepared = await prepareSessionInput(
+      auth,
+      workspace,
+      manager as never,
+      '',
+      {
+        ...options,
+        inputAttachments: [file],
+      },
+      { inheritSessionDefaults: false },
+      ownerTarget
+    );
+    expect(prepared.userTurn.items).toEqual([file]);
+    await expect(
+      prepareSessionInput(
+        auth,
+        workspace,
+        manager as never,
+        '',
+        {
+          ...options,
+          inputAttachments: [],
+        },
+        { inheritSessionDefaults: false },
+        ownerTarget
+      )
+    ).rejects.toThrow('text');
   });
 });

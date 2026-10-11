@@ -41,14 +41,18 @@ vi.mock('@lody/shared', async (importOriginal) => {
   };
 });
 
-vi.mock('loro-repo', () => ({
-  LoroRepo: {
-    create: mocks.repoCreate,
-  },
-  RepoDocHandle: class RepoDocHandle {},
-  RepoWatchHandle: class RepoWatchHandle {},
-  TransportSubscription: class TransportSubscription {},
-}));
+vi.mock('loro-repo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('loro-repo')>();
+  return {
+    ...actual,
+    LoroRepo: {
+      create: mocks.repoCreate,
+    },
+    RepoDocHandle: class RepoDocHandle {},
+    RepoWatchHandle: class RepoWatchHandle {},
+    TransportSubscription: class TransportSubscription {},
+  };
+});
 
 vi.mock('loro-repo/transport/streams', () => {
   class MockStreamsTransportAdapter {
@@ -880,6 +884,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       resolveInitialSync = resolve;
     });
     const detachInitialSyncListener = manager.onMetaRoomSynced(resolveInitialSync);
+    await vi.advanceTimersByTimeAsync(1);
     await expect(initialSyncObserved).resolves.toBe('meta-room-joined');
     detachInitialSyncListener();
     waitUntilSynced.mockClear();
@@ -898,7 +903,7 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
       listener(metaStatus);
     }
 
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.waitFor(() => expect(syncedListener).toHaveBeenCalledWith('meta-room-joined'));
     await expect(syncedListenerCalled).resolves.toBe('meta-room-joined');
 
     expect(repoReconnect).toHaveBeenCalledTimes(1);

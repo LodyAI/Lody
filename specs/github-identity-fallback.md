@@ -19,8 +19,9 @@ The host reads the conversation owner from trusted session metadata; before a
 new session is published its creator is its owner. Participant changes do not
 change network identity. The host atomically writes a workspace-local context
 with an opaque context token and machine-eligibility boolean. Helpers capture it
-once. When a refresh observes an owner change, update shell eligibility with the
-context, terminate the old ACP/terminal runtime and report `github_owner_changed`.
+once. Before a prompt or steer is submitted, validate the current runtime's context
+and owner. An owner change revokes its context and machine eligibility, terminates
+the old ACP/terminal runtime and reports `github_owner_changed`.
 Existing child environments cannot be scrubbed in place. The interrupted operation
 is not replayed; a subsequent turn creates a fresh runtime for the new owner.
 Host worktree operations carry an immutable context snapshot through
@@ -30,6 +31,22 @@ non-owner checkout processes cannot inherit machine GitHub token env or shell
 startup files. Missing/malformed snapshots are setup errors, not
 permission to borrow machine credentials. This is process credential isolation,
 not an OS sandbox against processes sharing the same user account.
+
+## Runtime ownership
+
+A logical Session may have successive speculative and live runtime instances.
+Each managed instance owns a distinct credential lease and pinned context file,
+including when Session ID and owner are unchanged. Successful adoption retains
+that lease; cancelled preparation, failed startup and runtime termination release
+only the exact acquired generation. An old release must never revoke a replacement.
+Local runtimes have no managed lease and never infer authentication from a broker's
+historical Session registration. Missing or released managed authority is an error,
+not permission to fall back to machine credentials.
+
+Preparation control (expiry/cancellation) ends on claim; adopted runtime resources
+continue until the runtime ends. Same-session replacement waits for successful
+retirement, including late resource creation. Failed cleanup remains observable
+and blocks replacement; a timeout or interrupted waiter does not prove release.
 
 ## Providers and availability
 

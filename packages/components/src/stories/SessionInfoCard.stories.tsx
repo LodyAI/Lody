@@ -36,6 +36,9 @@ const meta = {
   title: 'Sessions/SessionInfoCard',
   component: SessionInfoCard,
   parameters: { layout: 'centered' },
+  argTypes: {
+    historyBackend: { control: 'select', options: ['loro', 'roost'] },
+  },
   args: {
     title: 'Fix data persistence race',
     latestMessageAt: hoursAgo(2),
@@ -63,6 +66,14 @@ const githubArgs = {
 
 export const GithubOpenWithCiPassing: Story = {
   args: { ...githubArgs, prCiRuns: ciPassing },
+};
+
+export const RoostHistory: Story = {
+  args: { ...githubArgs, historyBackend: 'roost' },
+};
+
+export const LoroHistory: Story = {
+  args: { ...githubArgs, historyBackend: 'loro' },
 };
 
 export const GithubOpenWithCiRollup: Story = {
@@ -192,6 +203,7 @@ export const LongBranchName: Story = {
  * it stays open (hoverable), and the branch is copyable / the PR is clickable.
  */
 export const HoverInteraction: Story = {
+  args: { historyBackend: 'roost' },
   render: (args) => (
     <div className="w-64 rounded-lg border border-border p-2">
       <SessionInfoHoverCard {...args} {...githubArgs} prCiRuns={ciPassing} standalone={false}>

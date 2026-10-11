@@ -36,6 +36,7 @@ export function applyOpenAssistantTurn(draft: Draft, input: OpenAssistantTurnInp
   applyResumeAssistant(draft);
   if (draft.userTurnId === undefined && input.userTurnId !== undefined)
     draft.userTurnId = input.userTurnId;
+  if (draft.author === undefined && input.author !== undefined) draft.author = input.author;
   if (input.modelInfo !== undefined) draft.modelInfo = input.modelInfo;
 }
 
@@ -44,6 +45,7 @@ export function createAssistantTurn(input: OpenAssistantTurnInput): Draft {
   return {
     id: input.turnId,
     role: 'assistant',
+    ...(input.author !== undefined ? { author: input.author } : {}),
     timestamp: input.timestamp,
     ...(input.userTurnId !== undefined ? { userTurnId: input.userTurnId } : {}),
     ...(input.modelInfo !== undefined ? { modelInfo: input.modelInfo } : {}),

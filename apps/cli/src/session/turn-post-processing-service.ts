@@ -265,7 +265,7 @@ export class TurnPostProcessingService {
         workspaceId: this.deps.workspaceId,
       });
       if (!associated) {
-        this.deps.logger.debug(`[${sessionId}] PR association backend call was rejected`);
+        this.deps.logger.trace(`[${sessionId}] PR association backend call was rejected or paused`);
         return detected;
       }
       this.deps.logger.debug(`[${sessionId}] Associated PR #${detected.prNumber} with session`);

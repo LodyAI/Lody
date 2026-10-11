@@ -29,6 +29,7 @@ import { createSessionBackend } from '@/session/session-backend';
 import { streamsRoomBinding } from '../loro/streams-room-binding';
 import {
   buildScheduleRunTarget,
+  resolveScheduleAgentRunConfig,
   buildScheduleSessionCreateOptions,
   destinationSessionProblem,
   scheduleDestinationSessionId,
@@ -150,8 +151,13 @@ export async function createScheduleWorkspace(args: {
     },
     prepare: async (run) => {
       const { prepareSessionInput, resolveTurnDispatchConfig } = await import('@/commands/session');
-      const agent = run.definition.agent;
       const target = await resolveTarget(run);
+      const agent = await resolveScheduleAgentRunConfig(
+        manager,
+        workspaceId,
+        auth.machineId,
+        run.definition.agent
+      );
       const prepared = await prepareSessionInput(
         auth,
         workspace,

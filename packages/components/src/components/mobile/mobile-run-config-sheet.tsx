@@ -620,7 +620,7 @@ function MobileRunConfigSheetRows({
         return (
           <RunConfigRow key={selector.configId} label={selector.label}>
             <MobileInlinePicker<string>
-              id={`run-config-${selector.configId}`}
+              id={`run-config-option:${selector.configId}`}
               value={selectedValue}
               onChange={(nextValue) =>
                 onConfigOptionChange?.(selector.configId, nextValue as AcpConfigOptionValue)

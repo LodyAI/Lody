@@ -84,7 +84,7 @@ export function makeSessionAccessPolicy(
         // that still fails (e.g. EACCES on ~/.lody) must not strand the turn in
         // a dispatch check that errors forever: degrade to the remote
         // three-state verification, which is the no-catalog behavior anyway.
-        Effect.catchAll(() => Effect.succeed<SessionAccessPolicyDecision>({ outcome: 'remote' }))
+        Effect.catch(() => Effect.succeed<SessionAccessPolicyDecision>({ outcome: 'remote' }))
       ),
   };
 }

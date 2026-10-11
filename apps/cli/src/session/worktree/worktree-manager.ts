@@ -1,7 +1,7 @@
+import { toShared } from '@/platform/process-options';
 import { GITHUB_CREDENTIAL_ENV_KEYS } from '@/lib/gh-token-env';
 import { RepoId, SessionId } from '@lody/shared';
 import { resolveLocalProjectBranchAtRootPath } from '@lody/shared/node/local-project';
-import spawn from 'cross-spawn';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from '@/utils/logger';
@@ -9,9 +9,16 @@ import { withFileLock } from '@/utils/file-lock';
 import { redactUrlAuth } from '@/utils/github';
 import { getCredentialHelperHostPath } from '@/lib/git-credential-helper-script';
 import { formatErrorMessage } from '@/utils/format-error';
+import { runCommandTextLegacy } from '@lody/shared/node/process';
+
+import { CommandTimedOut } from '@lody/shared/node/process';
+import type { NodeProcessApi } from '@lody/shared/node/process';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { mapGitSpawnError } from './git-process-error';
-import { resolveAvailableBranchName } from './branch-name-allocation';
+import {
+  getAllocatedSessionBranchName,
+  resolveAvailableBranchName,
+} from './branch-name-allocation';
 
 const SAFE_SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const LODY_LOCAL_BRANCH_PREFIX = 'lody/';
@@ -87,6 +94,8 @@ export interface WorktreeManagerConfig {
   source?: WorktreeManagerSource;
   repoUrl?: string;
   logger: Logger;
+  /** OS process seam of the process layer; tests substitute a fake. */
+  nodeProcess?: NodeProcessApi;
 }
 
 type RepoFetchMode = 'skip' | 'best-effort' | 'required';
@@ -159,6 +168,10 @@ const DEFAULT_ARCHIVE_BACKUP_AUTHOR_EMAIL = 'archive@lody.ai';
 // staleness window (30 min) so a stalled git process releases the repo lock
 // by failing instead of looking like a live holder.
 const GIT_OPERATION_TIMEOUT_MS = 10 * 60 * 1000;
+// Git output used to be collected without a ceiling. `status --porcelain` or
+// `for-each-ref` in a large repository can exceed the process layer's 1 MiB
+// default, so git keeps a ceiling that only a runaway command reaches.
+const GIT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 /**
  * Per-repo file lock for git operations (cross-process safe)
@@ -284,6 +297,7 @@ export class WorktreeManager {
   private source: WorktreeManagerSource;
   private repoUrl?: string;
   private readonly logger: Logger;
+  private readonly nodeProcess?: NodeProcessApi;
 
   /** Base directory on host: <active installation data root>/repos */
   private readonly baseDir: string;
@@ -301,6 +315,7 @@ export class WorktreeManager {
     this.source = config.source ?? { kind: 'github', repoUrl: config.repoUrl };
     this.repoUrl = this.source.kind === 'github' ? this.source.repoUrl : undefined;
     this.logger = config.logger;
+    this.nodeProcess = config.nodeProcess;
 
     this.baseDir = path.join(getLodyDataDir(), 'repos');
     this.repoDir = path.join(this.baseDir, this.repoId);
@@ -334,72 +349,44 @@ export class WorktreeManager {
     }
   }
 
-  private runGit(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
+  private async runGit(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
     const mergedEnv: NodeJS.ProcessEnv = {
       ...process.env,
       ...env,
       GIT_TERMINAL_PROMPT: '0',
     };
     this.logger.debug(`[${this.repoId}] Running git ${args.join(' ')}`);
-    return new Promise<string>((resolve, reject) => {
-      let child: ReturnType<typeof spawn>;
-      try {
-        child = spawn('git', args, {
-          cwd,
-          env: mergedEnv,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-      } catch (error) {
-        reject(mapGitSpawnError(error, cwd));
-        return;
-      }
-
-      let stdout = '';
-      let stderr = '';
-      let timedOut = false;
-
+    let result: { code: number | null; stdout: string; stderr: string };
+    try {
       // Git has no deadline of its own for stalled network operations; without this a
       // hung fetch/clone would pin the per-repo worktree lock until the file-lock
-      // staleness window frees it.
-      const timeoutTimer = setTimeout(() => {
-        timedOut = true;
-        child.kill('SIGKILL');
-      }, GIT_OPERATION_TIMEOUT_MS);
-      timeoutTimer.unref();
-
-      // Use setEncoding to handle UTF-8 multibyte boundaries correctly
-      // (e.g., non-ASCII branch names, file paths, user.name)
-      child.stdout?.setEncoding('utf8');
-      child.stderr?.setEncoding('utf8');
-
-      child.stdout?.on('data', (chunk: string) => {
-        stdout += chunk;
-      });
-
-      child.stderr?.on('data', (chunk: string) => {
-        stderr += chunk;
-      });
-
-      child.on('error', (error) => {
-        clearTimeout(timeoutTimer);
-        reject(mapGitSpawnError(error, cwd));
-      });
-
-      child.on('close', (code) => {
-        clearTimeout(timeoutTimer);
-        if (timedOut) {
-          reject(new Error(`git ${args.join(' ')} timed out after ${GIT_OPERATION_TIMEOUT_MS}ms`));
-          return;
-        }
-        if (code !== 0) {
-          const details = (stderr || stdout || '').trim();
-          reject(new Error(details ? details : `git exited with code ${code}`));
-          return;
-        }
-        resolve(stdout.trim());
-      });
-    });
+      // staleness window frees it. The timeout ends git's whole process tree
+      // (remote helpers, credential helpers), not just git itself.
+      result = await runCommandTextLegacy(
+        {
+          command: 'git',
+          args,
+          cwd,
+          env: mergedEnv,
+          timeout: GIT_OPERATION_TIMEOUT_MS,
+          maxOutputBytes: GIT_MAX_OUTPUT_BYTES,
+          check: 'none',
+        },
+        toShared({ nodeProcess: this.nodeProcess })
+      );
+    } catch (error) {
+      if (error instanceof CommandTimedOut) {
+        throw new Error(`git ${args.join(' ')} timed out after ${GIT_OPERATION_TIMEOUT_MS}ms`, {
+          cause: error,
+        });
+      }
+      throw mapGitSpawnError(error, cwd);
+    }
+    if (result.code !== 0) {
+      const details = (result.stderr || result.stdout || '').trim();
+      throw new Error(details ? details : `git exited with code ${result.code}`);
+    }
+    return result.stdout.trim();
   }
 
   private isLocalSharedSource(): boolean {
@@ -612,39 +599,19 @@ export class WorktreeManager {
     env: NodeJS.ProcessEnv;
   }): Promise<{ exitCode: number | null; returnedCredentials: boolean; stderrNonEmpty: boolean }> {
     const input = `protocol=https\nhost=${options.host}\npath=/${options.repoFullName}.git\n\n`;
-    return await new Promise((resolve, reject) => {
-      const child = spawn('node', [options.helperPath, 'get'], {
+    const { code, stdout, stderr } = await runCommandTextLegacy(
+      {
+        command: 'node',
+        args: [options.helperPath, 'get'],
         env: options.env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      // Use setEncoding to handle UTF-8 multibyte boundaries correctly
-      child.stdout?.setEncoding('utf8');
-      child.stderr?.setEncoding('utf8');
-
-      child.stdout?.on('data', (chunk: string) => {
-        stdout += chunk;
-      });
-      child.stderr?.on('data', (chunk: string) => {
-        stderr += chunk;
-      });
-
-      child.on('error', (error) => reject(error));
-      child.on('close', (code) => {
-        const returnedCredentials =
-          stdout.includes('username=') && stdout.includes('\npassword=') && stdout.includes('\n\n');
-        resolve({ exitCode: code, returnedCredentials, stderrNonEmpty: stderr.trim().length > 0 });
-      });
-
-      if (child.stdin) {
-        child.stdin.write(input);
-        child.stdin.end();
-      }
-    });
+        input,
+        check: 'none',
+      },
+      toShared({ nodeProcess: this.nodeProcess })
+    );
+    const returnedCredentials =
+      stdout.includes('username=') && stdout.includes('\npassword=') && stdout.includes('\n\n');
+    return { exitCode: code, returnedCredentials, stderrNonEmpty: stderr.trim().length > 0 };
   }
 
   /**
@@ -1112,14 +1079,7 @@ export class WorktreeManager {
   }
 
   private getDefaultSessionBranchName(sessionId: SessionId): string {
-    if (this.isLocalSharedSource()) {
-      const shortId = sessionId
-        .slice(0, 12)
-        .replace(/[^A-Za-z0-9_-]/g, '')
-        .slice(0, 12);
-      return `${LODY_LOCAL_BRANCH_PREFIX}${shortId || sessionId.slice(0, 8)}`;
-    }
-    return `session/${sessionId.slice(0, 8)}`;
+    return getAllocatedSessionBranchName(sessionId, this.isLocalSharedSource());
   }
 
   private isLodyManagedLocalBranch(branchName: string): boolean {

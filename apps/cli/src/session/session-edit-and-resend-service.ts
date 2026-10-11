@@ -1,3 +1,4 @@
+import { resolveSessionConversationConfig, type MemoryBinding } from '@lody/shared';
 import {
   buildPendingUserHistoryEntry,
   getServerNow,
@@ -129,7 +130,7 @@ export class SessionEditAndResendService {
 
     const legacyMeta = meta as SessionMeta & SessionLegacyMetaFields;
     const latestGoal = resolveLatestSessionGoalFromHistory(history) ?? legacyMeta.latestGoal;
-    if (meta.autoReview || isSessionGoalActive(latestGoal)) {
+    if (isSessionGoalActive(latestGoal)) {
       return sessionEditAndResendFailure(
         spec,
         'ACTIVE_AUTOMATION',
@@ -158,7 +159,8 @@ export class SessionEditAndResendService {
       runtime = await this.getOrRestoreRuntime(
         meta,
         spec.requestedByUserId,
-        resolveSessionMcpSelection(history)
+        resolveSessionMcpSelection(history),
+        resolveSessionConversationConfig(history).memory
       );
       const agentClient = runtime.agentClient;
       oldAcpSessionId = runtime.acpSessionId;
@@ -222,7 +224,7 @@ export class SessionEditAndResendService {
         const freshGoal =
           resolveLatestSessionGoalFromHistory(freshHistory) ?? freshLegacyMeta.latestGoal;
         const freshExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
-        if (freshMeta.autoReview || isSessionGoalActive(freshGoal)) {
+        if (isSessionGoalActive(freshGoal)) {
           await this.closePrepared(runtime, preparedSessionId);
           preparedSessionId = null;
           return sessionEditAndResendFailure(
@@ -287,15 +289,6 @@ export class SessionEditAndResendService {
             'The session changed before the replacement could be committed.'
           );
         }
-        if (preCommitMeta.autoReview) {
-          await this.closePrepared(runtime, preparedSessionId);
-          preparedSessionId = null;
-          return sessionEditAndResendFailure(
-            spec,
-            'ACTIVE_AUTOMATION',
-            'Session automation started before the replacement could be committed.'
-          );
-        }
         commitMeta = preCommitMeta;
 
         const inputConfig = this.buildReplacementInputConfig(
@@ -309,7 +302,7 @@ export class SessionEditAndResendService {
           inputConfig.prompt ?? ''
         );
         const pending = buildPendingUserHistoryEntry({
-          userId: commitEditable.turn.userId ?? spec.requestedByUserId,
+          userId: spec.requestedByUserId,
           inputBlocks,
           timestamp: spec.timestamp,
           inputConfig,
@@ -474,7 +467,8 @@ export class SessionEditAndResendService {
   private async getOrRestoreRuntime(
     meta: SessionMeta,
     requestedByUserId: string,
-    mcpServerIds: McpServerId[]
+    mcpServerIds: McpServerId[],
+    memory?: MemoryBinding
   ): Promise<ISession> {
     const existing = this.deps.sessionManager.getSession(meta.id);
     if (existing) return existing;
@@ -496,6 +490,7 @@ export class SessionEditAndResendService {
         agentConfigId: meta.agentConfigId,
         agentCliType: meta.cliType,
         agentType: meta.agentType,
+        memory,
         mcpServerIds,
         customAcp: agentConfig.customAcp,
         runtimeOverrides: agentConfig.runtimeOverrides,

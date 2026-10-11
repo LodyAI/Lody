@@ -12,9 +12,32 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 - A cached session renders in the frame after its click: no promise tick,
   effect-only state or deferred setState before its first cycle.
 
+## Sharing errors
+
+- Keep error operation context independent of React progress state (which resets in
+  `finally`). `lib/session-share-errors.ts` maps only known codes to localized advice;
+  never display raw errors or claim a lost mutation response proves failure.
+
 ## Session, auth, and app shell
 
+- Authenticated cloud queries share one subscription/retry budget per client,
+  session and arguments. Retry only opaque server failures; return loading instead
+  of stale access rows, then throw on exhaustion. Keep auth recovery separate and
+  crash-screen recovery user initiated. [Implementation](README.md#cloud-query-recovery).
+
+- Cloud auth recovery has a per-session attempt budget and per-attempt deadline.
+  Loading/visibility transitions must not reset it; exhausted recovery requires
+  explicit retry or sign-in. Preserve mounted routes and local data.
+  [Contract](../../../../specs/auth-recovery.md).
+
+- Session ACP catalogs use the bound Provider's runtime overrides.
+
 - History uses SessionData commands.
+- Existing-session run-config drafts store only edited fields, scoped to account,
+  workspace and session. Only successful local admission retires captured field
+  generations; remote Turns never consume them. Never retain history IDs or empty
+  visited-session entries. Deletion/account teardown invalidates edit callbacks;
+  navigation preserves intent. [Contract](../../../../specs/session-run-config-drafts.md).
 - Held-send config is a session/runtime-scoped input to selection, never a stored
   resolved selection. Keep its logical Turn fence across history/queue handoff;
   next-draft edits win and attachment progress does not rebuild the catalog.

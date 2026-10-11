@@ -20,7 +20,7 @@ import { Check, ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
 import { toast } from '@/lib/toast';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
-import { developerModeEnabledAtom, reviewAgentFeatureEnabledAtom } from '@/atoms/settings';
+import { developerModeEnabledAtom } from '@/atoms/settings';
 import { settingsDialogOpenAtom } from '@/atoms/settings';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
@@ -84,7 +84,6 @@ import {
   MachineConnectedResources,
   type MachineConnectedProject,
 } from './my-machine-connected-resources';
-import { ReviewPolicySection } from './review-policy-setting';
 import {
   AgentConfigDialog,
   type AgentConfigDialogMode,
@@ -188,7 +187,6 @@ const styles = stylex.create({
     paddingTop: space[2],
     paddingBottom: SHEET_BOTTOM,
   },
-  sheetPolicy: { flexGrow: 1, minHeight: 0, overflowY: 'auto', paddingBottom: SHEET_BOTTOM },
   /** A row of the machine picker: the whole line is the choice. */
   pickerRow: {
     boxSizing: 'border-box',
@@ -416,7 +414,6 @@ export function MachineAgentSettings({
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const authToken = useAtomValue(authTokenAtom);
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
-  const reviewAgentEnabled = useAtomValue(reviewAgentFeatureEnabledAtom);
   const setSettingsDialogOpen = useSetAtom(settingsDialogOpenAtom);
   const sessionMetaCache = useAtomValue(sessionMetaCacheAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -461,7 +458,6 @@ export function MachineAgentSettings({
     useSetAtom(machineSettingsFilterAtom),
   ];
   const [mobileMachinePickerOpen, setMobileMachinePickerOpen] = useState(false);
-  const [mobileReviewPolicyOpen, setMobileReviewPolicyOpen] = useState(false);
   const effectiveFilter = filter;
   const [desktopExpandedMachineId, setDesktopExpandedMachineId] = useState<MachineId | null>(
     selectedMachineId
@@ -1341,19 +1337,6 @@ export function MachineAgentSettings({
                 onDeleteSetup={handleDeleteSetup}
               />
             ) : null}
-            {reviewAgentEnabled ? (
-              <MobileSettingsSection>
-                <MobileSettingsRow
-                  label={t('settings.review.title', 'Review agent')}
-                  helper={t(
-                    'settings.review.machineConfigHelper',
-                    'Choose the reviewer used by sessions on each machine.'
-                  )}
-                  onClick={() => setMobileReviewPolicyOpen(true)}
-                  trailing={<ChevronRight {...stylex.props(styles.icon16)} />}
-                />
-              </MobileSettingsSection>
-            ) : null}
           </div>
           {remoteMachinesAvailable ? (
             <Drawer open={mobileMachinePickerOpen} onOpenChange={setMobileMachinePickerOpen}>
@@ -1406,24 +1389,6 @@ export function MachineAgentSettings({
                       );
                     })}
                   </div>
-                </div>
-              </DrawerContent>
-            </Drawer>
-          ) : null}
-          {reviewAgentEnabled ? (
-            <Drawer open={mobileReviewPolicyOpen} onOpenChange={setMobileReviewPolicyOpen}>
-              <DrawerContent className="h-[88dvh]! max-h-[88dvh]!">
-                <DrawerTitle {...stylex.props(styles.sheetTitle)}>
-                  {t('settings.review.title', 'Review agent')}
-                </DrawerTitle>
-                <DrawerDescription {...stylex.props(styles.srOnly)}>
-                  {t(
-                    'settings.review.machineConfigHelper',
-                    'Choose the reviewer used by sessions on each machine.'
-                  )}
-                </DrawerDescription>
-                <div {...stylex.props(styles.sheetPolicy)}>
-                  {mobileReviewPolicyOpen ? <ReviewPolicySection /> : null}
                 </div>
               </DrawerContent>
             </Drawer>
@@ -1830,7 +1795,6 @@ export function MachineAgentSettings({
           {t('settings.agent.machineTabs.selectPromptAgent', 'Select a machine.')}
         </div>
       )}
-      <ReviewPolicySection />
       {dialog}
     </div>
   );

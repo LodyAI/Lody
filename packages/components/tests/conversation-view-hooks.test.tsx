@@ -4,12 +4,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
-import {
-  createHistoryWriter,
-  resolveSessionConversationConfig,
-} from '@lody/shared';
+import { createHistoryWriter, resolveSessionConversationConfig } from '@lody/shared';
 import {
   useConversationVersion,
+  useConversationIndexRows,
   useConversationTail,
   useTurnRange,
 } from '../src/hooks/use-conversation-view';
@@ -20,7 +18,7 @@ import {
   collectConversationConfigSources,
   type ConversationView,
 } from '../src/lib/conversation-view';
-import type { SessionSearchBlock } from '../src/lib/session-chat-search';
+import { buildSessionSearchResults, type SessionSearchBlock } from '../src/lib/session-chat-search';
 import {
   buildFixtureHistory,
   buildSessionDoc,
@@ -69,6 +67,73 @@ const flush = async () => {
 };
 
 describe('conversation view React readers', () => {
+  it('updates streamed text and summaries without rebuilding unchanged business facts or losing the draft', async () => {
+    const { doc, view } = await openView(2);
+    let facts!: ReturnType<typeof useSessionTurnFacts>;
+    let businessRows!: ReturnType<typeof useConversationIndexRows>;
+    let summaryRows!: ReturnType<typeof useConversationIndexRows>;
+    function Probe() {
+      facts = useSessionTurnFacts(view);
+      businessRows = useConversationIndexRows(view, { includeSummary: false });
+      summaryRows = useConversationIndexRows(view);
+      const tail = useConversationTail(view);
+      const first = tail.turns.at(-1)?.items[0];
+      return (
+        <>
+          <input defaultValue="kept draft" />
+          <output>{first?.type === 'text' ? first.text : ''}</output>
+          <span>{facts.ordered.at(-1)?.goal?.status}</span>
+        </>
+      );
+    }
+    await act(async () => root.render(<Probe />));
+    await flush();
+    const beforeFacts = facts.ordered;
+    const beforeRows = businessRows;
+    const beforeSummary = summaryRows;
+    const input = container.querySelector('input')!;
+    input.focus();
+    input.setSelectionRange(2, 4);
+    const writer = createHistoryWriter(doc);
+    await act(async () => {
+      writer.updateEntry('a-1', (entry) => {
+        entry.items = [
+          { type: 'text', text: 'Streaming text is visible' },
+          ...entry.items.slice(1),
+        ];
+        return entry;
+      });
+      doc.commit();
+      await flushReaderChanges();
+    });
+    await flush();
+    expect(container.querySelector('output')?.textContent).toBe('Streaming text is visible');
+    expect(facts.ordered).toBe(beforeFacts);
+    expect(businessRows).toBe(beforeRows);
+    expect(summaryRows).not.toBe(beforeSummary);
+    expect(summaryRows.at(-1)?.summary?.headText).toContain('Streaming text is visible');
+    expect(container.querySelector('input')).toBe(input);
+    expect(document.activeElement).toBe(input);
+    expect([input.value, input.selectionStart, input.selectionEnd]).toEqual(['kept draft', 2, 4]);
+    await act(async () => {
+      writer.updateEntry('a-1', (entry) => {
+        entry.items.push({
+          type: 'goal',
+          threadId: 'stream-goal',
+          objective: 'Finish safely',
+          status: 'active',
+        });
+        return entry;
+      });
+      doc.commit();
+      await flushReaderChanges();
+    });
+    await flush();
+    expect(container.querySelector('span')?.textContent).toBe('active');
+    expect(facts.ordered).not.toBe(beforeFacts);
+    expect(facts.ordered.at(-1)?.goal?.threadId).toBe('stream-goal');
+  });
+
   it('keeps render membership stable while background facts hydrate and evict older turns', async () => {
     const { view } = await openView(150, 80);
     let stream!: ReturnType<typeof useConversationStreamItems>;
@@ -360,6 +425,38 @@ describe('conversation view React readers', () => {
     expect(
       Array.from({ length: view.turnCount }, (_, i) => view.isHydrated(i)).filter(Boolean).length
     ).toBeLessThanOrEqual(4);
+  });
+
+  it('refreshes literal search text on streamed turn replacements and keeps settled blocks', async () => {
+    const { doc, view } = await openView(1);
+    let blocks: SessionSearchBlock[] = [];
+    function Probe({ open = true }: { open?: boolean }) {
+      blocks = useIncrementalSearchBlocks(view, open);
+      return null;
+    }
+    await act(async () => root.render(<Probe />));
+    const userBlock = blocks.find((block) => block.messageId === 'u-0');
+    const writer = createHistoryWriter(doc);
+    for (const source of ['QA_RESUMED', 'QA_RESUMED_OK —', '**QA_RESUMED_OK** —']) {
+      await act(async () => {
+        writer.updateEntry('a-0', (entry) => {
+          entry.items = [{ type: 'text', text: source }];
+          return entry;
+        });
+        doc.commit();
+        await flushReaderChanges();
+      });
+      await flush();
+      expect(blocks.find((block) => block.messageId === 'u-0')).toBe(userBlock);
+      expect(buildSessionSearchResults(blocks, 'QA_RESUMED_OK')).toHaveLength(
+        source === 'QA_RESUMED' ? 0 : 1
+      );
+      expect(buildSessionSearchResults(blocks, 'QARESUMEDOK')).toEqual([]);
+    }
+    await act(async () => root.render(<Probe open={false} />));
+    expect(blocks).toEqual([]);
+    await act(async () => root.render(<Probe />));
+    expect(buildSessionSearchResults(blocks, 'QA_RESUMED_OK')).toHaveLength(1);
   });
 
   it('refreshes cached search positions after insertion and deletion', async () => {

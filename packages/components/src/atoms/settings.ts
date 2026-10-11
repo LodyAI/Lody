@@ -294,7 +294,7 @@ export const semanticShortcutsFeatureEnabledAtom = atom(
 
 /** localStorage keys for the experimental features gate. */
 export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'lody-experimental-features-enabled';
-export const REVIEW_AGENT_EXPERIMENT_STORAGE_KEY = 'lody-review-agent-enabled';
+export const ROOST_HISTORY_EXPERIMENT_STORAGE_KEY = 'lody-roost-history-enabled';
 
 /**
  * Master switch for user-facing experimental features.
@@ -311,23 +311,15 @@ export const experimentalFeaturesEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true }
 );
 
-/** Opt-in for the review agent, listed once experimental features are on. */
-export const reviewAgentExperimentEnabledAtom = atomWithStorage<boolean>(
-  REVIEW_AGENT_EXPERIMENT_STORAGE_KEY,
+/** Opt-in for Roost-backed history on newly created sessions. */
+export const roostHistoryExperimentEnabledAtom = atomWithStorage<boolean>(
+  ROOST_HISTORY_EXPERIMENT_STORAGE_KEY,
   false,
   undefined,
   { getOnInit: true }
 );
 
-/**
- * The single gate every review-agent surface reads.
- *
- * Note what this gate does NOT control: a run already authorized on a session
- * keeps going, because the authorization is durable session state that the
- * machine acts on, and this switch is per-device UI visibility. Turning the
- * experiment off hides the controls; it does not silently abandon a branch the
- * user was told would be merged.
- */
-export const reviewAgentFeatureEnabledAtom = atom(
-  (get) => get(experimentalFeaturesEnabledAtom) && get(reviewAgentExperimentEnabledAtom)
+/** The single gate for selecting Roost when a new session is accepted. */
+export const roostHistoryFeatureEnabledAtom = atom(
+  (get) => get(experimentalFeaturesEnabledAtom) && get(roostHistoryExperimentEnabledAtom)
 );

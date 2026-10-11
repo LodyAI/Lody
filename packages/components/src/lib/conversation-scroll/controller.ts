@@ -36,6 +36,8 @@ const REARM_DISTANCE_PX = 4;
 const MAX_GESTURE_BOTTOMS = 32;
 /** How long a send (or a smooth jump) takes to glide to its target. */
 const GLIDE_MS = 360;
+/** Keep the previous message's tail visible above a newly sent message. */
+const SENT_CONTEXT_PX = 100;
 /** Differences below this are sub-pixel rounding, not movement. */
 const EPSILON_PX = 1;
 
@@ -438,14 +440,19 @@ export class ScrollController {
     this.pointerHeld = held;
   }
 
-  setTouchActive(active: boolean): void {
+  /** A tap, pinch or cancelled touch has no conversation momentum. */
+  setTouchActive(active: boolean, continuesAfterRelease = true): void {
     this.touchActive = active;
-    if (!active) this.momentum = true;
+    this.momentum = !active && continuesAfterRelease;
+    if (active || !continuesAfterRelease) {
+      this.gesture = null;
+      this.compensationPendingCheck = false;
+      this.momentumStats = { compensations: 0, interruptions: 0 };
+    }
   }
 
   /** The native `scrollend` event. */
   onScrollEnd(): void {
-    this.rearmAtGestureBottom();
     if (this.compensationPendingCheck && !this.scrolledSinceCompensation) {
       this.momentumStats.interruptions += 1;
     }
@@ -455,6 +462,7 @@ export class ScrollController {
     this.momentum = false;
     this.compensationPendingCheck = false;
     this.momentumStats = { compensations: 0, interruptions: 0 };
+    this.rearmAtGestureBottom();
   }
 
   // ---- Commands -----------------------------------------------------------
@@ -483,7 +491,7 @@ export class ScrollController {
     this.run('jump', true);
   }
 
-  /** Hold a just-sent row at the top with room reserved for the reply. */
+  /** Hold a just-sent row below the previous message's tail, with reply room. */
   anchorToRow(index: number): void {
     if (this.disposed) return;
     const row = this.rows[index];
@@ -496,7 +504,11 @@ export class ScrollController {
       return;
     }
     this.refreshViewport(false);
-    this.startGlide(row.key, this.contentTop, settle);
+    this.startGlide(
+      row.key,
+      this.contentTop + this.geometry.offset(index) - this.sentScrollTop(index),
+      settle
+    );
   }
 
   /** The sent row moved or vanished. Rows are keyed, so only a vanished row matters. */
@@ -654,7 +666,10 @@ export class ScrollController {
 
     if (this.intent.kind === 'sent') {
       const index = this.geometry.indexOfKey(this.intent.rowKey);
-      const usable = this.viewportHeight - this.contentTop - this.paddingBottom;
+      const destination = index < 0 ? 0 : this.sentScrollTop(index);
+      const screenY =
+        index < 0 ? this.contentTop : this.contentTop + this.geometry.offset(index) - destination;
+      const usable = this.viewportHeight - screenY - this.paddingBottom;
       if (index < 0) {
         this.cancelGlide();
         this.setIntent({ kind: 'follow' });
@@ -662,7 +677,6 @@ export class ScrollController {
         this.cancelGlide();
         this.setIntent({ kind: 'follow' });
       } else {
-        const destination = this.geometry.offset(index);
         const needed = destination + this.viewportHeight - this.paddingBottom - bottomLimit;
         if (needed <= 0) {
           this.cancelGlide();
@@ -881,6 +895,10 @@ export class ScrollController {
     );
   }
 
+  private sentScrollTop(index: number): number {
+    return Math.max(0, this.geometry.offset(index) - SENT_CONTEXT_PX);
+  }
+
   /** The scroll position the current intent (or glide frame) resolves to. */
   private targetScrollTop(): number {
     const max = this.maxScrollTop();
@@ -902,8 +920,7 @@ export class ScrollController {
       case 'sent': {
         const index = this.geometry.indexOfKey(this.intent.rowKey);
         if (index < 0) return max;
-        // The sent row rests where the first row rests: at the content top.
-        return clamp(this.geometry.offset(index));
+        return clamp(this.sentScrollTop(index));
       }
       case 'read': {
         const resolved = resolveAnchor(this.rows, this.intent.anchor, this.geometry);
@@ -998,7 +1015,10 @@ export class ScrollController {
     ) {
       return 'clamp';
     }
-    if (this.pointerHeld || this.touchActive) return 'reader';
+    // A fast touch scroll can deliver its first offset after the finger lifts.
+    // It is still the reader's movement, including when a resize samples it
+    // before its scroll event. Correcting it back to follow would fight the fling.
+    if (this.pointerHeld || this.touchActive || this.momentum) return 'reader';
     return 'unknown';
   }
 
@@ -1009,8 +1029,7 @@ export class ScrollController {
   ): void {
     if (movement === 'none' || movement === 'own-write') return;
     const last = this.lastObserved;
-    // Scrollbar drags, selection auto-scroll and touch pans hold a pointer;
-    // upward movement without one is a clamp or a size correction.
+    // Reader evidence includes a held pointer and post-touch momentum.
     if (
       movement === 'reader' &&
       last &&
@@ -1115,6 +1134,9 @@ export class ScrollController {
 
   private setIntent(intent: Intent): void {
     this.intent = intent;
+    // Explicit navigation or reaching the bottom supersedes the old fling.
+    // This also bounds input evidence on hosts without `scrollend` support.
+    if (intent.kind !== 'read') this.momentum = false;
     const sticky = intent.kind !== 'read';
     if (sticky !== this.sticky) {
       this.sticky = sticky;

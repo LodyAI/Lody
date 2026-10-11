@@ -4,8 +4,13 @@ import { act, createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider as JotaiProvider } from 'jotai';
-import type { SessionHistoryParsed, SessionId } from '@lody/shared';
+import { getAgentRoleEmoji } from '@lody/shared';
+import type { SessionHistory, SessionHistoryParsed, SessionId } from '@lody/shared';
 
+import { buildChatStreamItems } from '../src/components/ai-gui/build-chat-stream-items';
+import { createConversationViewFromHistory } from '../src/lib/conversation-view';
+import { MessageAuthorIdentity } from '../src/components/ai-gui/message-author-identity';
+import { OpenAIIcon } from '../src/components/icons/openai-icon';
 import { MessageRowView } from '../src/components/ai-gui/view';
 import { ForceDesktopLayoutProvider } from '../src/hooks/use-mobile';
 import { initI18n } from '../src/i18n';
@@ -87,6 +92,105 @@ describe('user message sender identity', () => {
 
     expect(document.body.textContent).toContain('Maya Chen');
     expect(document.body.textContent).toContain('maya.chen@example.com');
+  });
+
+  it('shows a Role author in a solo workspace without the human profile and exposes source model details', async () => {
+    const author = {
+      v: 1 as const,
+      kind: 'agent' as const,
+      sessionId: 'source-session',
+      turnId: 'source-turn',
+      name: 'Agent A',
+      role: { id: 'reviewer', revision: 1, name: 'Reviewer', emoji: '🔎' },
+      model: { id: 'model-a', source: 'runtime' as const },
+    };
+    const history = [
+      { ...message, author, inputConfig: { modelId: 'model-b' } },
+    ] as unknown as SessionHistory[];
+    const projected = buildChatStreamItems(
+      createConversationViewFromHistory({
+        sessionId,
+        getHistory: () => history,
+        subscribe: () => () => {},
+      }),
+      sessionId
+    ).items[0];
+    if (projected?.type !== 'message') throw new Error('Expected hydrated message');
+    await act(async () =>
+      root?.render(
+        createElement(
+          JotaiProvider,
+          null,
+          createElement(
+            ForceDesktopLayoutProvider,
+            null,
+            createElement(MessageRowView, {
+              message: projected.message,
+              sessionId,
+              user,
+              showSenderIdentity: false,
+            })
+          )
+        )
+      )
+    );
+    expect(
+      container?.querySelector('[data-testid="user-message-metadata"]')?.textContent
+    ).toContain('Reviewer');
+    expect(container?.textContent).toContain('🔎');
+    expect(container?.querySelector('button[aria-label="View profile for Maya Chen"]')).toBeNull();
+    const trigger = container?.querySelector('button[aria-label="View sender: Reviewer"]');
+    expect(trigger).toBeTruthy();
+    await click(trigger!);
+    expect(document.body.textContent).toContain('Model: model-a');
+    expect(document.body.textContent).not.toContain('maya.chen@example.com');
+    expect(document.body.textContent).not.toContain('Model: model-b');
+  });
+
+  it('uses the Role catalog emoji whenever a Role exists and provider logo only without a Role', async () => {
+    const author = {
+      v: 1 as const,
+      kind: 'agent' as const,
+      sessionId: 'source',
+      turnId: 'turn',
+      name: 'Codex',
+      cliType: 'builtin' as const,
+      agentType: 'codex',
+      role: { id: 'reviewer', revision: 1, name: 'reviewer', emoji: '' },
+    };
+    await act(async () =>
+      root?.render(
+        createElement(
+          'div',
+          null,
+          createElement(MessageAuthorIdentity, {
+            author: { ...author, role: undefined },
+          }),
+          createElement('div', { 'data-testid': 'expected-provider' }, createElement(OpenAIIcon))
+        )
+      )
+    );
+    const trigger = container!.querySelector('button[aria-label="View sender: Codex"]')!;
+    expect(trigger.getAttribute('aria-label')).toBe('View sender: Codex');
+    expect(trigger.textContent).not.toContain('🤖');
+    expect(trigger.querySelector('svg')?.innerHTML).toBe(
+      container!.querySelector('[data-testid="expected-provider"] svg')?.innerHTML
+    );
+    await act(async () => root?.render(createElement(MessageAuthorIdentity, { author })));
+    expect(container!.textContent).toContain(getAgentRoleEmoji({}));
+    expect(container!.querySelector('button')?.getAttribute('aria-label')).toBe(
+      'View sender: reviewer'
+    );
+    expect(container!.querySelector('svg')).toBeNull();
+    await act(async () =>
+      root?.render(
+        createElement(MessageAuthorIdentity, {
+          author: { ...author, role: { ...author.role, emoji: '🔎' } },
+        })
+      )
+    );
+    expect(container!.textContent).toContain('🔎');
+    expect(container!.querySelector('svg')).toBeNull();
   });
 
   it('keeps sender identity hidden when the workspace has one member', async () => {

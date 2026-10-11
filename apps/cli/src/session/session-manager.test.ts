@@ -1,3 +1,6 @@
+import { acquireSessionCredentialsLegacy } from './session-credentials';
+import { GitCredentialBroker } from '../lib/git-credential-broker';
+import type { CloudGithubTokenManager } from '@lody/platform';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -154,10 +157,12 @@ const createSessionConfig = (
 const createPreparedTestCompatibility = (
   launchSource: Partial<SessionLaunchConfig>,
   mcpServerIds: SessionConfig['mcpServerIds'] = [],
-  configOptionValues?: SessionConfig['configOptionValues']
+  configOptionValues?: SessionConfig['configOptionValues'],
+  modelId?: SessionConfig['modelId']
 ) => ({
   launch: buildSessionLaunchConfig(launchSource),
   runConfig: normalizeSessionPreparationRunConfigForDedup({
+    modelId,
     mcpServerIds,
     configOptionValues,
   }),
@@ -1216,6 +1221,24 @@ describe('SessionManager durable create ownership', () => {
     expect(managerTerminated).toEqual([]);
   });
 
+  it('does not forward an old runtime exit as the replacement runtime death', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'runtime-generation-events' as SessionId;
+    const config = createSessionConfig({ sessionId });
+    const exits: string[] = [];
+    manager.on('exit', () => exits.push('exit'));
+    manager.on('terminated', () => exits.push('terminated'));
+    const previous = (await createSessionInner(manager, config)) as Session;
+    const replacement = await createSessionInner(manager, config);
+    previous.emit('exit', { sessionId, exitCode: 0 });
+    await previous.terminate(true);
+    expect(manager.getSession(sessionId)).toBe(replacement);
+    expect(exits).toEqual([]);
+    await replacement.terminate(true);
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(exits).toEqual(['terminated']);
+  });
+
   it('reports no entry to abandon when the create already settled', async () => {
     const manager = buildOwnershipManager();
     const sessionId = 'settled-create-session' as SessionId;
@@ -1269,7 +1292,20 @@ describe('SessionManager preparation compatibility', () => {
     );
     const sessionId = 'stale-prepared-git-identity' as SessionId;
     const config = createSessionConfig({ sessionId });
-    const preparedSession = new Session(config, logger, process.cwd(), createNoopSessionSandbox());
+    const credentials = acquireSessionCredentialsLegacy(
+      new GitCredentialBroker({
+        tokenManager: {} as CloudGithubTokenManager,
+        logger,
+      }),
+      { sessionId, requesterUserId: 'user-1', machineId: 'machine-1' }
+    );
+    const preparedSession = new Session(
+      config,
+      logger,
+      process.cwd(),
+      createNoopSessionSandbox(),
+      credentials
+    );
     const updateIdentity = vi.spyOn(preparedSession, 'updateGitIdentity');
     const dispose = vi.fn(async () => await preparedSession.terminate(true));
     const prepared = {
@@ -1310,6 +1346,10 @@ describe('SessionManager preparation compatibility', () => {
       config.requesterUserId,
       { preferMachineIdentity: true, personalIdentityEnabled: false }
     );
+    expect(preparedSession.getGitHubCredentials()).toBe(credentials);
+    expect(credentials.mode === 'managed' && credentials.lease.active).toBe(true);
+    await preparedSession.terminate(true);
+    expect(credentials.mode === 'managed' && credentials.lease.active).toBe(false);
   });
 
   it('rejects a prepared session with different initial config option values', async () => {
@@ -1373,7 +1413,7 @@ describe('SessionManager preparation compatibility', () => {
       coldSession
     );
     expect(prepared.dispose).toHaveBeenCalledTimes(1);
-    expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined);
+    expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined, undefined);
   });
 
   it('waits for a published preparation to release its worktree when durable launch config is absent', async () => {
@@ -1424,80 +1464,84 @@ describe('SessionManager preparation compatibility', () => {
 
     cleanup.resolve(undefined);
     await expect(result).resolves.toBe(coldSession);
-    expect(coldCreate).toHaveBeenCalledWith(config, undefined);
+    expect(coldCreate).toHaveBeenCalledWith(config, undefined, undefined);
   });
 
-  it('waits for an incompatible published preparation to release its worktree before cold start', async () => {
-    const manager = new SessionManager(
-      createLogger(),
-      'token',
-      'machine-1' as MachineId,
-      'workspace-1' as WorkspaceId,
-      createWorkspaceDocument(new Map()),
-      {
-        sessionSandboxFactory: async () => createNoopSessionSandbox(),
-        cloudPort: createTestCloudPort(),
-      }
-    );
-    const sessionId = 'changed-project-cold-fallback' as SessionId;
-    const agentConfigId = 'agent-1' as AgentConfigId;
-    const cleanup = deferred<void>();
-    const prepared = {
-      config: { mcpServerIds: [] },
-      compatibility: createPreparedTestCompatibility({}),
-      initialized: Promise.resolve(),
-      sessionReady: Promise.resolve(),
-      dispose: vi.fn(async () => await cleanup.promise),
-    } satisfies PreparedTestResource;
-    const preparedIdentity = {
-      requestedByUserId: 'user-1',
-      agentConfigId,
-      cliType: 'builtin' as const,
-      agentType: 'codex',
-      project: {
-        kind: 'github' as const,
-        repoFullName: 'loro-dev/old-project',
-        branch: 'main',
-      },
-    };
-    const internals = manager as unknown as {
-      preparationService: SessionPreparationService<PreparedTestResource>;
-      createSessionFromPreparationOrCold(config: SessionConfig): Promise<ISession>;
-      createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
-    };
-    internals.preparationService.start({
-      preparationId: 'prepare-old-project',
-      sessionId,
-      requesterUserId: 'user-1',
-      requestKey: buildSessionPreparationRequestKey(preparedIdentity),
-      claimKey: buildSessionPreparationClaimKey(preparedIdentity),
-      create: async () => prepared,
-    });
-    await vi.waitFor(() =>
-      expect(internals.preparationService.getState(sessionId)).toBe('session-ready')
-    );
-    const coldSession = { sessionId } as ISession;
-    const coldCreate = vi
-      .spyOn(internals, 'createSessionInnerWithAgent')
-      .mockResolvedValue(coldSession);
-    const durableConfig = createSessionConfig({
-      sessionId,
-      agentConfigId,
-      project: {
-        kind: 'github',
-        repoFullName: 'loro-dev/new-project',
-        branch: 'main',
-      },
-    });
+  it.each(['project', 'model'] as const)(
+    'releases a preparation with a changed %s before cold start',
+    async (changed) => {
+      const manager = new SessionManager(
+        createLogger(),
+        'token',
+        'machine-1' as MachineId,
+        'workspace-1' as WorkspaceId,
+        createWorkspaceDocument(new Map()),
+        {
+          sessionSandboxFactory: async () => createNoopSessionSandbox(),
+          cloudPort: createTestCloudPort(),
+        }
+      );
+      const sessionId = 'changed-project-cold-fallback' as SessionId;
+      const agentConfigId = 'agent-1' as AgentConfigId;
+      const cleanup = deferred<void>();
+      const prepared = {
+        config: { mcpServerIds: [], modelId: 'original-model' },
+        compatibility: createPreparedTestCompatibility({}, [], undefined, 'original-model'),
+        initialized: Promise.resolve(),
+        sessionReady: Promise.resolve(),
+        dispose: vi.fn(async () => await cleanup.promise),
+      } satisfies PreparedTestResource;
+      const preparedIdentity = {
+        requestedByUserId: 'user-1',
+        agentConfigId,
+        cliType: 'builtin' as const,
+        agentType: 'codex',
+        project: {
+          kind: 'github' as const,
+          repoFullName: 'loro-dev/old-project',
+          branch: 'main',
+        },
+      };
+      const internals = manager as unknown as {
+        preparationService: SessionPreparationService<PreparedTestResource>;
+        createSessionFromPreparationOrCold(config: SessionConfig): Promise<ISession>;
+        createSessionInnerWithAgent(config: SessionConfig): Promise<ISession>;
+      };
+      internals.preparationService.start({
+        preparationId: 'prepare-old-project',
+        sessionId,
+        requesterUserId: 'user-1',
+        requestKey: buildSessionPreparationRequestKey(preparedIdentity),
+        claimKey: buildSessionPreparationClaimKey(preparedIdentity),
+        create: async () => prepared,
+      });
+      await vi.waitFor(() =>
+        expect(internals.preparationService.getState(sessionId)).toBe('session-ready')
+      );
+      const coldSession = { sessionId } as ISession;
+      const coldCreate = vi
+        .spyOn(internals, 'createSessionInnerWithAgent')
+        .mockResolvedValue(coldSession);
+      const durableConfig = createSessionConfig({
+        sessionId,
+        agentConfigId,
+        modelId: changed === 'model' ? 'selected-model' : 'original-model',
+        project: {
+          kind: 'github',
+          repoFullName: changed === 'project' ? 'loro-dev/new-project' : 'loro-dev/old-project',
+          branch: 'main',
+        },
+      });
 
-    const result = internals.createSessionFromPreparationOrCold(durableConfig);
-    await vi.waitFor(() => expect(prepared.dispose).toHaveBeenCalledTimes(1));
-    expect(coldCreate).not.toHaveBeenCalled();
+      const result = internals.createSessionFromPreparationOrCold(durableConfig);
+      await vi.waitFor(() => expect(prepared.dispose).toHaveBeenCalledTimes(1));
+      expect(coldCreate).not.toHaveBeenCalled();
 
-    cleanup.resolve(undefined);
-    await expect(result).resolves.toBe(coldSession);
-    expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined);
-  });
+      cleanup.resolve(undefined);
+      await expect(result).resolves.toBe(coldSession);
+      expect(coldCreate).toHaveBeenCalledWith(durableConfig, undefined, undefined);
+    }
+  );
 
   it('claims a preparation when empty launch settings are omitted by durable dispatch', async () => {
     const manager = new SessionManager(
@@ -1556,7 +1600,12 @@ describe('SessionManager preparation compatibility', () => {
     await expect(internals.createSessionFromPreparationOrCold(durableConfig)).resolves.toBe(
       adoptedSession
     );
-    expect(finishPreparedSession).toHaveBeenCalledWith(durableConfig, prepared, undefined);
+    expect(finishPreparedSession).toHaveBeenCalledWith(
+      durableConfig,
+      prepared,
+      undefined,
+      undefined
+    );
     expect(coldCreate).not.toHaveBeenCalled();
   });
 
@@ -1725,6 +1774,15 @@ describe('SessionManager failed agent creation', () => {
     expect(manager.getSession(sessionId)).toBe(replacement);
     expect(terminated).not.toHaveBeenCalled();
 
+    await manager.retireSessionForReconfiguration(replacement);
+    expect(manager.getSession(sessionId)).toBeNull();
+    expect(terminated).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    createAgent.mockResolvedValueOnce('acp-memory');
+    const memory = { providerId: 'nowledge-mem', memoryId: 'reviewer' };
+    const reconfigured = await manager.createSession({ ...config, memory });
+    expect(reconfigured.getMemoryBinding?.()).toEqual(memory);
+    expect(manager.getSession(sessionId)).toBe(reconfigured);
     await manager.terminateSession(sessionId, true);
     expect(terminated).toHaveBeenCalledTimes(1);
     expect(terminated).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));

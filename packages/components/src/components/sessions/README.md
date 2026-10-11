@@ -4,6 +4,9 @@ What each file in this directory is responsible for. Binding rules live in
 [AGENTS.md](AGENTS.md); the long-form explanations it links to live under
 [`.agents/docs/`](../../../../../.agents/docs/) with the `sessions-` prefix.
 
+Session control event meanings and retired request events are described in the
+[auth/session analytics draft](../../../../../specs/auth-session-analytics.md).
+
 ## Page shell and tabs
 
 `ask-user-question-card.tsx` owns interactive and read-only question presentation,
@@ -62,7 +65,6 @@ describes the shared parsing and persistence boundary.
 | `pr-tab-container.tsx`, `pr-tab-view.tsx`                                     | PR side-panel tab                                                |
 | `create-pr-prompt.ts`, `session-pr-prompts.ts`, `session-pr-agent-action.ts`  | Agent prompts behind Create PR / Fix CI / Resolve Conflicts      |
 | `diff-pr-analytics.ts`                                                        | Analytics for diff and PR surfaces                               |
-| `auto-review-menu-item.tsx`, `auto-review-info.tsx`, `auto-review-status.tsx` | Auto review checkbox, setup explanation, and run banner          |
 | `use-capacity-auto-retry.ts`                                                  | Capacity-error retry behaviour                                   |
 
 ## File, diff, and browser surfaces
@@ -97,14 +99,14 @@ describes the shared parsing and persistence boundary.
 - [Run config and Agent Roles](../../../../../.agents/docs/sessions-run-config.md)
 - [Live status and dispatch](../../../../../.agents/docs/sessions-live-status.md)
 - [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)
-- [Auto review and status slot](../../../../../.agents/docs/sessions-auto-review.md)
+- [Session status slot](../../../../../.agents/docs/sessions-auto-review.md)
 - [File surfaces](../../../../../.agents/docs/sessions-file-surfaces.md)
 - [Render-cost invariants](../../../../../.agents/docs/sessions-render-cost.md)
 - [Stories and Storybook fidelity](../../../../../.agents/docs/sessions-stories.md)
 
 ## Binary previews
 
-`session-file-binary-preview.tsx` renders supported images, PDFs, DOCX, XLSX, and
+`session-file-binary-preview.tsx` renders supported images, videos, PDFs, DOCX, XLSX, and
 PPTX, and otherwise shows a binary notice. The [PDF viewer](session-file-pdf-preview.tsx) reads local
 resources in 64 KiB byte ranges, keeps page canvases within an 8-megapixel budget,
 and provides page and thumbnail navigation, rotation, fit and percentage zoom,
@@ -122,3 +124,8 @@ with a reason-specific next step. See the
 
 Binary previews share `SessionFileNoticeCard` with unavailable-file states, including
 the same card spacing, full-width actions and Copy file path callback.
+
+The [video viewer](session-file-video-preview.tsx) uses native controls for
+browser-decodable WebM, MP4/M4V, MOV, and OGV. It consumes authorized bytes or
+resource URLs, releases the player when inactive, and preserves file actions on
+failure. The mobile project browser uses the same player.

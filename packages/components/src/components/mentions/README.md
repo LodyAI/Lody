@@ -24,7 +24,8 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
   `category_enter` is reported from the resolved view, not a row callback: a
   navigation item never fires `onMentionSelect`, and the keyboard route counts.
 - `file-at-mention.tsx` and `mention-project-file-source.ts` load file paths and
-  provide draft hydration. [`file-search/`](file-search/README.md) owns the
+  provide draft hydration. GitHub discovery uses the shared cache and request-level
+  failure observer; see [fetch contract](../../../../../specs/mention-file-fetch.md). [`file-search/`](file-search/README.md) owns the
   cancellable Worker, React lifecycle, and bounded path ranking.
 - `mention-session-source.ts` owns session slugs, candidates, the slug → id cache,
   hydration, the drop-time insertion, and the before-send expansion. Transfer

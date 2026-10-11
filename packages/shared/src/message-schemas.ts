@@ -1,3 +1,5 @@
+import { MemoryBindingSchema } from './memory-provider';
+import { AgentRoleSnapshotSchema } from './message-author';
 import { z } from 'zod';
 import { SubagentTaskPayloadSchema } from './acp/claude-subagent-task';
 import {
@@ -87,6 +89,7 @@ export const BuiltinRuntimeOverridesSchema = z
     kimiPath: z.string().optional(),
     grokPath: z.string().optional(),
     devinPath: z.string().optional(),
+    piPath: z.string().optional(),
     piExtensions: z
       .array(z.string().trim().min(1).max(PI_EXTENSION_PATH_MAX_LENGTH))
       .max(PI_EXTENSIONS_MAX_SELECTIONS)
@@ -94,7 +97,7 @@ export const BuiltinRuntimeOverridesSchema = z
   })
   .strict();
 
-const AcpConfigOptionValueSchema = z.union([z.string(), z.boolean()]);
+export const AcpConfigOptionValueSchema = z.union([z.string(), z.boolean()]);
 const AcpConfigOptionValuesSchema = z
   .record(z.string(), AcpConfigOptionValueSchema)
   .transform((values) =>
@@ -379,9 +382,11 @@ export const ACPTurnConfigSchema = z
     modeId: z.string().optional(),
     modelId: z.string().optional(),
     configOptionValues: AcpConfigOptionValuesSchema.optional(),
+    memory: MemoryBindingSchema.optional(),
     mcpServerIds: z.array(z.string()).optional(),
     agentRoleId: z.string().trim().min(1).nullable().optional(),
     agentRoleRevision: z.number().int().nonnegative().optional(),
+    agentRoleSnapshot: AgentRoleSnapshotSchema.optional(),
     issuePRMentions: z.array(IssuePRMentionSchema).optional(),
     resume: ACPSessionIdSchema.optional(),
     chainDepth: z.number().int().nonnegative().optional(),
@@ -475,6 +480,7 @@ export const normalizeSessionTurnInputConfig = (
     normalized.configOptionValues = configOptionValues;
   }
 
+  if (record.memory !== undefined) normalized.memory = MemoryBindingSchema.parse(record.memory);
   const mcpServerIds = normalizeMcpServerIdSelection(record.mcpServerIds);
   if (mcpServerIds) {
     normalized.mcpServerIds = mcpServerIds;
@@ -495,6 +501,15 @@ export const normalizeSessionTurnInputConfig = (
   );
   if (agentRoleRevision !== undefined) {
     normalized.agentRoleRevision = agentRoleRevision;
+  }
+
+  const roleSnapshot = maybeParseField(AgentRoleSnapshotSchema, record.agentRoleSnapshot);
+  if (
+    roleSnapshot &&
+    roleSnapshot.id === normalized.agentRoleId &&
+    roleSnapshot.revision === normalized.agentRoleRevision
+  ) {
+    normalized.agentRoleSnapshot = roleSnapshot;
   }
 
   const issuePRMentions = maybeParseField(z.array(IssuePRMentionSchema), record.issuePRMentions);
@@ -931,6 +946,7 @@ export const SessionPreparationRunConfigSchema = z
         Object.entries(values).filter(([configId]) => !isSensitiveAcpConfigOptionId(configId))
       )
     ).optional(),
+    memory: MemoryBindingSchema.optional(),
     mcpServerIds: z
       .array(z.string())
       .transform((ids) => normalizeMcpServerIdSelection(ids) ?? [])
@@ -2021,6 +2037,184 @@ export const SessionPreviewEndpointReleaseResponseSchema = z
   })
   .strict();
 
+export const SESSION_HISTORY_READ_MAX_RANGE = 500;
+export const SESSION_HISTORY_READ_MAX_PAGE = 500;
+
+export const SessionHistoryReadQuerySchema = z
+  .discriminatedUnion('kind', [
+    z.object({ kind: z.literal('count') }).strict(),
+    z.object({ kind: z.literal('readAt'), position: z.number().int().nonnegative() }).strict(),
+    z.object({ kind: z.literal('readTurn'), turnId: z.string().trim().min(1) }).strict(),
+    z
+      .object({
+        kind: z.literal('readRange'),
+        from: z.number().int().nonnegative(),
+        to: z.number().int().nonnegative(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('readDirectory'),
+        from: z.number().int().nonnegative(),
+        to: z.number().int().nonnegative(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('readLatestPage'),
+        limit: z.number().int().positive().max(SESSION_HISTORY_READ_MAX_PAGE),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('readOlderPage'),
+        cursor: z.string().min(1),
+        limit: z.number().int().positive().max(SESSION_HISTORY_READ_MAX_PAGE),
+      })
+      .strict(),
+    z.object({ kind: z.literal('readAll') }).strict(),
+    z.object({ kind: z.literal('readTurnOutput'), userTurnId: z.string().trim().min(1) }).strict(),
+  ])
+  .superRefine((value, ctx) => {
+    if (value.kind !== 'readRange' && value.kind !== 'readDirectory') return;
+    if (value.to < value.from) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['to'],
+        message: 'History read range end must not precede its start',
+      });
+    } else if (value.to - value.from > SESSION_HISTORY_READ_MAX_RANGE) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['to'],
+        message: `History read range cannot exceed ${SESSION_HISTORY_READ_MAX_RANGE} rows`,
+      });
+    }
+  });
+
+export const SessionHistoryReadRequestSchema = z
+  .object({
+    type: z.literal('session/history-read'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    query: SessionHistoryReadQuerySchema,
+  })
+  .strict();
+
+/**
+ * History changes name logical identities or structural positions. Read replies
+ * bind the requested result and bounded page bodies to one durable revision;
+ * the renderer validates logical turn fields while retaining future fields.
+ */
+export const SessionHistoryChangeSchema = z
+  .discriminatedUnion('kind', [
+    z
+      .object({
+        kind: z.literal('structure'),
+        from: z.number().int().nonnegative(),
+        to: z.number().int().nonnegative(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal('changed'),
+        ids: z.array(z.string().trim().min(1)),
+      })
+      .strict(),
+  ])
+  .superRefine((value, ctx) => {
+    if (value.kind === 'structure' && value.to < value.from) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['to'],
+        message: 'Structure range end must not precede its start',
+      });
+    }
+  });
+
+export const SessionHistoryReadResponseSchema = z
+  .object({
+    type: z.literal('session/history-read_response'),
+    sessionId: SessionIdSchema,
+    success: z.boolean(),
+    result: z.unknown().optional(),
+    historyRevision: z.number().int().nonnegative().optional(),
+    historyCount: z.number().int().nonnegative().optional(),
+    historyChange: SessionHistoryChangeSchema.nullable().optional(),
+    pageTurns: z.array(z.unknown()).optional(),
+    error: z.string().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.success && !Object.hasOwn(value, 'result')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['result'],
+        message: 'Successful history read must include a result',
+      });
+    }
+    if (
+      value.success &&
+      (value.historyRevision === undefined || value.historyCount === undefined)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['historyRevision'],
+        message: 'Successful history read must identify its durable revision and count',
+      });
+    }
+  });
+
+export const SessionHistoryWriteOperationSchema = z.enum([
+  'append',
+  'replace',
+  'respond_permission',
+  'apply_action',
+  'replace_editable_tail',
+  'apply_import',
+  'copy_history',
+]);
+
+export const SessionHistoryWriteRequestSchema = z
+  .object({
+    type: z.literal('session/history-write'),
+    machineId: MachineIdSchema,
+    workspaceId: WorkspaceIdSchema,
+    sessionId: SessionIdSchema,
+    operation: SessionHistoryWriteOperationSchema,
+    payload: z.unknown(),
+  })
+  .strict();
+
+export const SessionHistoryWriteResponseSchema = z
+  .object({
+    type: z.literal('session/history-write_response'),
+    sessionId: SessionIdSchema,
+    operation: SessionHistoryWriteOperationSchema,
+    success: z.boolean(),
+    result: z.unknown().optional(),
+    historyRevision: z.number().int().nonnegative().optional(),
+    historyCount: z.number().int().nonnegative().optional(),
+    historyChange: z.union([SessionHistoryChangeSchema, z.null()]).optional(),
+    error: z.string().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      value.success &&
+      (value.historyRevision === undefined ||
+        value.historyCount === undefined ||
+        value.historyChange === undefined)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['historyRevision'],
+        message: 'Successful session history writes must include a change receipt',
+      });
+    }
+  });
+
 export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   SessionCreateRequestSchema,
   SessionChatRequestSchema,
@@ -2038,6 +2232,8 @@ export const LocalSessionControlRequestSchema = z.discriminatedUnion('type', [
   SessionImageUploadRequestSchema,
   SessionFileUploadRequestSchema,
   SessionFileSendLocalRequestSchema,
+  SessionHistoryReadRequestSchema,
+  SessionHistoryWriteRequestSchema,
   PreviewCandidateReportRequestSchema,
   SessionPreviewCreateRequestSchema,
   SessionPreviewRevokeRequestSchema,
@@ -2066,6 +2262,8 @@ export const LocalSessionControlResponseSchema = z.discriminatedUnion('type', [
   SessionImageUploadResponseSchema,
   SessionFileUploadResponseSchema,
   SessionFileSendLocalResponseSchema,
+  SessionHistoryReadResponseSchema,
+  SessionHistoryWriteResponseSchema,
   PreviewCandidateReportResponseSchema,
   SessionPreviewCreateResponseSchema,
   SessionPreviewRevokeResponseSchema,
@@ -3394,6 +3592,7 @@ export const NonSystemNoticeMessageContentSchema = z.discriminatedUnion('type', 
               'CONFIGURATION_UNAVAILABLE',
               'DELIVERY_ATTEMPTS_EXHAUSTED',
               'DELIVERY_EXECUTION_UNCERTAIN',
+              'COLLABORATION_STOPPED',
             ]),
             message: z.string(),
           })

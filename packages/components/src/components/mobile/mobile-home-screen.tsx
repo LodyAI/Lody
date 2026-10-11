@@ -34,6 +34,8 @@ import {
   X,
 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import * as stylex from '@stylexjs/stylex';
+import { control, corner, radius } from '@lody/ui/tokens/scales.stylex';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { MdChat, MdComputer, MdFolderCopy } from 'react-icons/md';
 import { FaGithub } from 'react-icons/fa';
@@ -311,6 +313,8 @@ export type MobileHomeScreenLabels = {
   addGitHubRepositoryHint?: string;
   chatTab?: string;
   schedulesTab?: string;
+  /** aria-label for the header plus button on the Schedules tab. */
+  newSchedule?: string;
   settingsTab?: string;
   /** aria-label for the archive-toggle chip in the header. Toggles the
      Chat tab between active and archived conversations. */
@@ -508,14 +512,36 @@ export type MobileHomeScreenProps = {
   onShowArchivedToggle?: () => void;
 };
 
-/* Home header workspace chip — shared `WorkspaceAvatar` so logo /
-   first-letter fallback match the switcher sheet and desktop sidebar. */
+const workspaceAvatarStyles = stylex.create({
+  crop: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: control.large,
+    height: control.large,
+    borderRadius: radius.full,
+    cornerShape: corner.round,
+    overflow: 'hidden',
+  },
+  content: {
+    display: 'flex',
+    // Fill the 36px header control with the primitive's 32px large tile.
+    transform: 'scale(1.125)',
+  },
+});
+
+/* The header owns its circular crop; shared workspace tiles keep their shape. */
 function HomeWorkspaceAvatar({ workspace }: { workspace: MobileHomeWorkspace }) {
-  /* One rung: `@lody/ui`'s ladder has nothing between 32 and 64, and the
-     28-vs-36 split this used to carry was a size that had drifted rather than
-     two decisions about how big a workspace tile is. */
   return (
-    <WorkspaceAvatar workspace={{ name: workspace.name, logo: workspace.avatarUrl }} size="large" />
+    <span {...stylex.props(workspaceAvatarStyles.crop)}>
+      <span {...stylex.props(workspaceAvatarStyles.content)}>
+        <WorkspaceAvatar
+          workspace={{ name: workspace.name, logo: workspace.avatarUrl }}
+          size="large"
+        />
+      </span>
+    </span>
   );
 }
 
@@ -1051,6 +1077,7 @@ function defaultSearchPlaceholder(
 ): string {
   if (tab === 'inbox') return '搜索';
   if (tab === 'chat') return '搜索对话';
+  if (tab === 'schedules') return '搜索定时任务';
   if (sub === 'github') return '搜索仓库';
   return '搜索项目';
 }
@@ -1306,6 +1333,7 @@ export function MobileHomeScreen({
      thing in both ("react" could match a project name AND a chat
      title). Persisting keeps the filter useful. */
   const [searchQuery, setSearchQuery] = useState('');
+  const createScheduleRef = useRef<(() => void) | null>(null);
   // Controls the add-project action sheet launched from the Projects header.
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [privateHelpOpen, setPrivateHelpOpen] = useState(false);
@@ -1394,14 +1422,11 @@ export function MobileHomeScreen({
     connectionUiState === 'offline';
   /* Keep search mounted for the exit transition; opacity/transform are
      driven by `searchOpaque`. Pill only mounts once `statusRevealed`. */
-  const [searchOpaque, setSearchOpaque] = useState(() => !scheduleTabActive && !wantStatusSlot);
-  const [statusRevealed, setStatusRevealed] = useState(() => scheduleTabActive || wantStatusSlot);
+  const [searchOpaque, setSearchOpaque] = useState(() => !wantStatusSlot);
+  const [statusRevealed, setStatusRevealed] = useState(() => wantStatusSlot);
   useEffect(() => {
     let reveal: number | undefined;
-    if (scheduleTabActive) {
-      setSearchOpaque(false);
-      setStatusRevealed(true);
-    } else if (wantStatusSlot) {
+    if (wantStatusSlot) {
       /* Exit search first; reveal pill only after the fade finishes so
          the two never share the chrome band. */
       setSearchOpaque(false);
@@ -1419,7 +1444,7 @@ export function MobileHomeScreen({
     return () => {
       if (reveal !== undefined) window.clearTimeout(reveal);
     };
-  }, [scheduleTabActive, wantStatusSlot]);
+  }, [wantStatusSlot]);
 
   /* Tab swipe was removed — conflicted with the row-level
      left-swipe-to-reveal-actions gesture on conversation rows. The
@@ -1484,21 +1509,19 @@ export function MobileHomeScreen({
                    Duration matches HEADER_SEARCH_EXIT_MS (tailwind
                    duration-150 ≈ 150ms; keep the timeout in sync). */
                 'transition-[opacity,transform] duration-150 ease-out',
-                searchOpaque && !scheduleTabActive
+                searchOpaque
                   ? 'opacity-100 translate-y-0'
                   : 'pointer-events-none translate-y-1.5 opacity-0'
               )}
-              aria-hidden={!searchOpaque || scheduleTabActive}
+              aria-hidden={!searchOpaque}
             >
-              {!scheduleTabActive ? (
-                <HeaderSearchInput
-                  value={searchQuery}
-                  onChange={setSearchQuery}
-                  placeholder={searchPlaceholder}
-                  ariaLabel={searchAriaLabel}
-                  clearAriaLabel={clearSearchAriaLabel}
-                />
-              ) : null}
+              <HeaderSearchInput
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder={searchPlaceholder}
+                ariaLabel={searchAriaLabel}
+                clearAriaLabel={clearSearchAriaLabel}
+              />
             </div>
 
             {/* Trailing header actions — same canvas liquid-glass discs as
@@ -1518,6 +1541,15 @@ export function MobileHomeScreen({
                 <GlassIconButton
                   label={labels.addProjectMenu ?? '添加项目'}
                   onClick={() => setAddMenuOpen(true)}
+                >
+                  <Plus className="h-5 w-5 text-current" aria-hidden="true" strokeWidth={1.75} />
+                </GlassIconButton>
+              ) : null}
+
+              {selectedTab === 'schedules' ? (
+                <GlassIconButton
+                  label={labels.newSchedule ?? '新建定时任务'}
+                  onClick={() => createScheduleRef.current?.()}
                 >
                   <Plus className="h-5 w-5 text-current" aria-hidden="true" strokeWidth={1.75} />
                 </GlassIconButton>
@@ -1694,11 +1726,16 @@ export function MobileHomeScreen({
             </div>
           </div>
 
-          {/* Schedules tab fills the content region under the home header,
-             dock still visible. The home search row stays hidden. */}
+          {/* Schedules tab keeps the home header and the bottom dock.
+             Its own title/search row stays hidden so this search field
+             is the one that filters the list. */}
           {scheduleTabActive ? (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <SchedulesWorkspace />
+              <SchedulesWorkspace
+                hideHeader
+                query={searchQuery}
+                createScheduleRef={createScheduleRef}
+              />
             </div>
           ) : null}
         </div>

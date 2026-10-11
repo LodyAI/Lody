@@ -7,11 +7,14 @@ Translation: current
 
 ## Behavior
 
-Users can configure settings-aware Harness plugins in `settings.yaml` under
-`DSH_HOME`, defaulting to `~/.dsh`. Lody's built-in DeepSeek ACP composition must
-mount the upstream file settings provider and preserve the user's document.
-Absent settings retain composition defaults. Malformed documents fail startup with
-an error; the host must not silently overwrite or discard them.
+Users configure model routes in `settings.yaml` under `DSH_HOME`, defaulting to
+`~/.dsh`. The Harness 0.2 ACP profile reads legacy `llm-deepseek` and `llm-pi-ai`
+sections into the corresponding native provider Config schemas and retains
+`agent-presets.default` plus user preset identities under `.agent-presets`.
+The profile must not invoke upstream's automatic settings migration: renaming the
+shared document and importing it into a generated profile would lose durable
+configuration across profile upgrades. Absent settings retain defaults; malformed
+documents reject ACP initialization without changing the source file.
 
 An unavailable `agent-presets.default` must not strand a session when the standard
 preset is usable. At ACP session creation, preserve a usable default, including
@@ -24,13 +27,21 @@ Agent; do not choose an arbitrary composition or change permission settings.
 
 The upstream plugin owns configuration schemas and override semantics. In
 particular, `llm-deepseek.models` replaces the local catalog array in full.
-Settings updates are observed by the provider, but ACP catalogs remain scoped
+Settings are read at startup and ACP catalogs remain scoped
 to a connection: users refresh capabilities and open a new connection to obtain
 updated choices. This does not promise live selector updates in existing sessions.
 
 An explicit `DEEPSEEK_BASE_URL` retains endpoint-driven model discovery. Local
 catalog additions are not merged into the endpoint's `/models` response by this
-change. Credentials remain host environment inputs, and generated compositions
+change. For the official API, new host configurations use
+`https://api.deepseek.com/anthropic`. Existing official root and `/v1` URLs must
+continue working without manual reconfiguration: the generated profile resolves
+known official aliases to the Messages root before provider construction while
+preserving settings-over-environment precedence and leaving stored configuration
+untouched. Official model discovery uses `https://api.deepseek.com/models`, and
+both old and new official URLs retain official pricing. Custom URLs are preserved;
+this compatibility does not convert a Chat-only gateway to Messages.
+Credentials remain host environment inputs, and generated compositions
 must not embed them. No product UI or telemetry service is introduced.
 
 ## Evidence

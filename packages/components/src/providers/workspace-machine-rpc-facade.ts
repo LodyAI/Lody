@@ -1,3 +1,9 @@
+import {
+  MemoryProviderResponseSchema,
+  machineSupportsMemoryProviders,
+  type MemoryProviderRequest,
+  type MemoryProviderResponse,
+} from '@lody/shared';
 import { createRpcSecretRecipient } from '@lody/loro-streams-rpc';
 import type { PreviewControlOperation } from '@lody/shared';
 import { mintPreviewControlProof } from '@/lib/preview-control-api';
@@ -22,6 +28,7 @@ import {
   IosSimulatorResponseSchema,
   type IosSimulatorCommand,
   type IosSimulatorResponse,
+  machineSupportsSessionHistoryProtocol,
   type MachineProtocolCapabilities,
   type AgentConfigId,
   type CodeCollabV2Error,
@@ -78,6 +85,10 @@ import {
   type SessionEditAndResendResponse,
   type SessionEditAndResendSpec,
   type SessionTurnInputConfig,
+  type SessionHistoryReadResponse,
+  type SessionHistoryReadQuery,
+  type SessionHistoryWriteOperation,
+  type SessionHistoryWriteResponse,
   type WorkspaceId,
   sessionForkFailure,
   sessionEditAndResendFailure,
@@ -198,6 +209,62 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     options?.ownerSessionId === undefined
       ? {}
       : { ownerSessionId: options.ownerSessionId.toString() };
+
+  const requireSessionHistoryCapability = async (machineId: MachineId): Promise<void> => {
+    if (
+      !machineSupportsSessionHistoryProtocol({
+        protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId),
+      })
+    ) {
+      throw new Error('This machine does not support Roost session history. Update the machine.');
+    }
+  };
+
+  const requestSessionHistoryRead = async (
+    machineId: MachineId,
+    sessionId: SessionId,
+    query: SessionHistoryReadQuery,
+    options?: { timeoutMs?: number }
+  ): Promise<SessionHistoryReadResponse> => {
+    await requireSessionHistoryCapability(machineId);
+    const plane = await resolveMachineTargetPlane(machineId);
+    if (plane === 'local') {
+      throw new Error('Local Roost history must use the local session control bridge.');
+    }
+    const response = await (
+      await getMachineRpcClient(machineId)
+    ).requestSessionHistoryRead({
+      sessionId,
+      query,
+      timeoutMs: options?.timeoutMs ?? 30_000,
+    });
+    if (!response) throw new Error('Roost session history read request timed out.');
+    return response;
+  };
+
+  const requestSessionHistoryWrite = async (
+    machineId: MachineId,
+    args: {
+      sessionId: SessionId;
+      operation: SessionHistoryWriteOperation;
+      payload: Record<string, unknown>;
+    },
+    options?: { timeoutMs?: number }
+  ): Promise<SessionHistoryWriteResponse> => {
+    await requireSessionHistoryCapability(machineId);
+    const plane = await resolveMachineTargetPlane(machineId);
+    if (plane === 'local') {
+      throw new Error('Local Roost history must use the local session control bridge.');
+    }
+    const response = await (
+      await getMachineRpcClient(machineId)
+    ).requestSessionHistoryWrite({
+      ...args,
+      timeoutMs: options?.timeoutMs ?? 30_000,
+    });
+    if (!response) throw new Error('Roost session history write request timed out.');
+    return response;
+  };
 
   /**
    * File Preview v3. Its own transport wrapper (rather than `requestCodeCollab`)
@@ -1350,6 +1417,48 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const requestMemoryProvider = async (
+    machineId: MachineId,
+    params: MemoryProviderRequest
+  ): Promise<MemoryProviderResponse> => {
+    const fail = (error: string): MemoryProviderResponse => ({
+      type: 'machine/memory',
+      status: 'error',
+      memories: [],
+      error,
+    });
+    try {
+      await targetRouter.resolvePlaneForMachine(machineId, {
+        timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
+      });
+      const capabilities = await deps.getMachineProtocolCapabilities(machineId);
+      if (!machineSupportsMemoryProviders({ protocolCapabilities: capabilities ?? undefined }))
+        return fail('Update this machine to use memory providers.');
+      const plane = targetRouter.getPlaneForMachine(machineId);
+      if (plane === null) return fail('Machine RPC routing is not available.');
+      if (plane === 'local') {
+        const sender = getLocalMachineRpcSender();
+        if (!sender) return fail('Local Machine RPC is not available.');
+        const response = await sender({
+          machineId,
+          workspaceId,
+          method: 'machine/memory',
+          params,
+          timeoutMs: 60_000,
+        });
+        return response.ok
+          ? MemoryProviderResponseSchema.parse(response.result)
+          : fail(response.error);
+      }
+      return (
+        (await (await getMachineRpcClient(machineId)).requestMemoryProvider(params)) ??
+        fail('Memory request timed out.')
+      );
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const requestMachinePiExtensions = async (
     machineId: MachineId,
     options?: { configId?: AgentConfigId }
@@ -1452,6 +1561,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionDispatchTurn,
     requestSessionPrepare,
     requestSessionPrepareCancel,
+    requestSessionHistoryRead,
+    requestSessionHistoryWrite,
     requestFilePreview,
     requestLocalCodeCollabFileIndex,
     requestCodeCollabOpenText,
@@ -1473,6 +1584,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestMemoryProvider,
     requestMachinePiExtensions,
   };
 }

@@ -30,6 +30,10 @@ Design, invariants I1–I8 and the coverage lemma:
   A host that keeps a stream mounted off screen must pass it.
 - Reading anchors are separate from React row keys: resolve through `anchor.ts`
   rules, never by list index.
+- Upward conversation touch input releases follow before the first scroll event;
+  post-touch momentum is reader input too. Taps, pinches, horizontal gestures,
+  cancelled touches and nested scrolling must not arm conversation momentum.
+  Explicit follow navigation supersedes old momentum even without `scrollend`.
 - `keyed-layout/` came from Lody's removed Virtua fork with its tests; engine
   extensions are marked `Engine:`. It is engine-owned: keep its MIT `LICENSE`.
 - Change the transaction logic only with a model test in

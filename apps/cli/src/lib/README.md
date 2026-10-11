@@ -31,7 +31,7 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   WS control-plane listener, and serializes remote bridge attach/detach/revoke through
   `runBridgeTransition`.
 - `machine-lifecycle.ts` — remote lifecycle verification and upgrade intents; runs the
-  fixed npm install through `cross-spawn` so Windows `npm.cmd` shims use the command
+  fixed npm install through the shared process layer’s `startProcessLegacy` so Windows `npm.cmd` shims use the command
   interpreter. It resolves the installed package through that npm's global root
   and verifies its entry/version. `../commands/daemon-runner.ts` owns restart and
   handoff to that explicit entry, including matching-version readiness.
@@ -39,6 +39,8 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   endpoint-derived adapters, and their lifecycle. `start.ts` validates
   identity/deployment configuration once and injects the resulting `CloudPort` through
   Fleet → Lody → MachineRuntime → MessageHandler/Loro/session services.
+- `cloud-pr-association.ts` — hosted PR association HTTP requests and shared failure
+  cooldowns; independent of GitHub observation and publication.
 - `local-loro-data-plane-server.ts` — Electron renderer ↔ CLI local Loro data plane
   (protocol v7). Design:
   [`.agents/docs/cli-lib-local-loro-data-plane.md`](../../../../.agents/docs/cli-lib-local-loro-data-plane.md).
@@ -82,9 +84,12 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   assistant models through shallow scalar/count reads of already-open documents.
   It compares current catalog metadata on each reconciliation so stale overwrites
   are repaired on the next history change or flush.
+  `streams-transport.ts` connects safe failure diagnostics to the existing logger;
+  it registers the typed error formatter without adding Repo/WASM imports to the
+  generic error utility used by standalone workers.
+  The [shared helper](../../../../packages/shared/src/loro-sync-errors/README.md)
+  owns the same safe projection used by renderer error details.
 - `pr-poller/` — PR discovery, lifecycle, CI rollup, and merge-state reconciliation
   ([AGENTS.md](pr-poller/AGENTS.md)).
-- `review-automation/` — "Auto review and merge"
-  ([AGENTS.md](review-automation/AGENTS.md)).
 - `analytics/`, `git/`, `notifications/`, `session-export/`, `usage/` — supporting
   services.

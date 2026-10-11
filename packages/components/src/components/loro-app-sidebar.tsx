@@ -1,4 +1,5 @@
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { buildSessionLink } from '@lody/shared/session-link';
 import { jsonValueEqual } from '@/lib/json-value-equal';
 import { usePostHog } from '@posthog/react';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -28,6 +29,7 @@ import {
   findFreshSessionPresenceState,
   machineSupportsLocalProjectRemovalProtocol,
   resolveProjectGitHubRepo,
+  resolveSessionHistoryBackendKind,
   type LocalProjectId,
   type LocalProjectMeta,
   type LocalProjectWorktreeCleanupPreflightResult,
@@ -960,6 +962,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           repoFullName={prRepoFullName}
           folderName={projectName}
           machineName={machineName}
+          historyBackend={resolveSessionHistoryBackendKind(session)}
           branchName={session.branchName}
           prStatus={showPr ? prStatus : undefined}
           prCiState={prInfo.ciState}
@@ -1914,25 +1917,13 @@ export function LoroAppSidebar({
 
   const copySessionUrl = useCallback(
     async (sessionId: string, successMessage: string) => {
-      if (!workspaceSlug) return;
+      if (!workspaceId) return;
       if (typeof window === 'undefined') return;
-      const path = `/${workspaceSlug}/sessions/${sessionId}`;
-      // Construct an absolute web URL even on Electron (where window.location.origin
-      // is a `file://` URL). Falling back to the configured site origin keeps the
-      // copied link openable on any device the user pastes it into.
-      const electronOrigin = isElectronRenderer()
-        ? import.meta.env.VITE_SITE_URL?.trim() || ''
-        : '';
-      const origin =
-        electronOrigin ||
-        (window.location.protocol === 'file:'
-          ? import.meta.env.VITE_SITE_URL?.trim() || ''
-          : window.location.origin);
-      const url = origin ? `${origin}${path}` : path;
+      const url = buildSessionLink({ sessionId, workspaceId });
       await navigator.clipboard.writeText(url);
       toast.success(successMessage);
     },
-    [workspaceSlug]
+    [workspaceId]
   );
 
   const [pendingSessionShare, setPendingSessionShare] = useState<PendingSessionShare | null>(null);
@@ -2573,6 +2564,7 @@ export function LoroAppSidebar({
         sectionLabel: chatsLabel,
         subtitle: null,
         machineName: task.machineName ?? null,
+        historyBackend: task.historyBackend,
         latestMessageAt: task.latestMessageAt,
         isPinned: task.isPinned,
         isWorking: task.isWorking,
@@ -2599,6 +2591,7 @@ export function LoroAppSidebar({
         repoFullName: repoName || null,
         branchName: task.branchName,
         machineName: task.machineName ?? null,
+        historyBackend: task.historyBackend,
         latestMessageAt: task.latestMessageAt,
         isPinned: task.isPinned,
         isWorking: task.isWorking,
@@ -2647,6 +2640,7 @@ export function LoroAppSidebar({
             subtitle: project.name,
             repoFullName: resolveProjectGitHubRepo(session.project) ?? null,
             machineName: section.machineDisplayName,
+            historyBackend: resolveSessionHistoryBackendKind(session),
             owner: resolveSessionAuthor(session),
             latestMessageAt: activity.latestMessageAt,
             isPinned: Boolean(session.isPinned),

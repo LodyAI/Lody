@@ -1,3 +1,4 @@
+import type { MemoryProviderRequest, MemoryProviderResponse } from '@lody/shared';
 import {
   IosSimulatorRemoteResponseSchema,
   type RpcSecretPublicKey,
@@ -49,6 +50,10 @@ import type {
   SessionPrepareResponse,
   SessionTerminateResponse,
   SessionDispatchTurnResponse,
+  SessionHistoryReadResponse,
+  SessionHistoryReadQuery,
+  SessionHistoryWriteOperation,
+  SessionHistoryWriteResponse,
   SessionEditAndResendResponse,
   SessionEditAndResendSpec,
   SessionForkResponse,
@@ -91,6 +96,8 @@ import {
   LORO_STREAMS_RPC_ERROR_CODES,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
+  SessionHistoryReadRpcPayloadSchema,
+  SessionHistoryWriteRpcPayloadSchema,
   type LocalProjectGitStateRpcResponse,
   type LoroSessionLiveStatusRpcResponse,
   LoroStreamsRpcRequestSchema,
@@ -358,6 +365,7 @@ type RpcServerDeps = {
     agentType: string;
     onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
   }) => Promise<MachineAcpBinaryInstallResponse>;
+  memoryProvider?: (request: MemoryProviderRequest) => Promise<MemoryProviderResponse>;
   listMachinePiExtensions?: (args: {
     configId?: AgentConfigId;
   }) => Promise<MachinePiExtensionsResponse>;
@@ -410,6 +418,17 @@ type RpcServerDeps = {
   cancelSessionPreparation?: (
     args: SessionPreparationCancelSpec
   ) => Promise<SessionPrepareCancelResponse>;
+  /** Encrypted Roost-backed logical history access for remote renderers. */
+  readSessionHistory?: (args: {
+    sessionId: SessionId;
+    query: SessionHistoryReadQuery;
+  }) => Promise<SessionHistoryReadResponse>;
+  writeSessionHistory?: (args: {
+    sessionId: SessionId;
+    operation: SessionHistoryWriteOperation;
+    payload: Record<string, unknown>;
+  }) => Promise<SessionHistoryWriteResponse>;
+  resolveSessionHistoryOwnerSessionId?: (sessionId: SessionId) => Promise<SessionId>;
   openCodeCollabText?: (args: CodeCollabV2OpenTextRequest) => Promise<CodeCollabV2OpenTextOk>;
   resolveCodeCollabOwnerSessionId?: (sessionId: SessionId) => Promise<SessionId>;
   /** File Preview v3 — a plain read; must not activate Code Collab. */
@@ -1082,6 +1101,18 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'machine/memory': {
+          const response = this.deps.memoryProvider
+            ? await this.deps.memoryProvider(request.params)
+            : {
+                type: 'machine/memory' as const,
+                status: 'error' as const,
+                memories: [],
+                error: 'Memory providers are unavailable',
+              };
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'machine/pi-extensions': {
           if (!this.deps.listMachinePiExtensions) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -1290,6 +1321,61 @@ export class LoroStreamsMachineRpcServer {
           }
           const response = await this.deps.cancelSessionPreparation(request.params);
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
+        case 'session/history-read': {
+          const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
+          codeCollabOwnerSessionId = decoded.ownerSessionId;
+          const params = SessionHistoryReadRpcPayloadSchema.parse(decoded.payload);
+          await this.verifySessionHistoryOwnerSession(decoded.ownerSessionId, params.sessionId);
+          if (!this.deps.readSessionHistory) {
+            await this.appendErrorResponse(
+              request.replyTo,
+              request.id,
+              request.method,
+              {
+                code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+                message: 'Session history is not available on this machine.',
+              },
+              { codeCollabOwnerSessionId }
+            );
+            return;
+          }
+          const response = await this.deps.readSessionHistory({
+            sessionId: params.sessionId as SessionId,
+            query: params.query,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+            codeCollabOwnerSessionId,
+          });
+          return;
+        }
+        case 'session/history-write': {
+          const decoded = await this.decryptCodeCollabV2RequestParams(request.params);
+          codeCollabOwnerSessionId = decoded.ownerSessionId;
+          const params = SessionHistoryWriteRpcPayloadSchema.parse(decoded.payload);
+          await this.verifySessionHistoryOwnerSession(decoded.ownerSessionId, params.sessionId);
+          if (!this.deps.writeSessionHistory) {
+            await this.appendErrorResponse(
+              request.replyTo,
+              request.id,
+              request.method,
+              {
+                code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+                message: 'Session history is not available on this machine.',
+              },
+              { codeCollabOwnerSessionId }
+            );
+            return;
+          }
+          const response = await this.deps.writeSessionHistory({
+            sessionId: params.sessionId as SessionId,
+            operation: params.operation,
+            payload: params.payload,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response, {
+            codeCollabOwnerSessionId,
+          });
           return;
         }
         case 'code-collab/open-text': {
@@ -1700,6 +1786,19 @@ export class LoroStreamsMachineRpcServer {
     }
   }
 
+  private async verifySessionHistoryOwnerSession(
+    envelopeOwnerSessionId: string,
+    businessSessionId: string
+  ): Promise<void> {
+    const resolveOwnerSessionId = this.deps.resolveSessionHistoryOwnerSessionId;
+    const expectedOwnerSessionId = resolveOwnerSessionId
+      ? await resolveOwnerSessionId(businessSessionId as SessionId)
+      : businessSessionId;
+    if (expectedOwnerSessionId !== envelopeOwnerSessionId) {
+      throw new Error('Session history RPC owner session mismatch.');
+    }
+  }
+
   private async appendResultResponse(
     replyTo: string,
     requestId: string,
@@ -1717,6 +1816,7 @@ export class LoroStreamsMachineRpcServer {
       | MachineAcpBinaryInstallResponse
       | MachineAcpBinaryProgressMessage
       | MachineBugReportResponse
+      | MemoryProviderResponse
       | MachinePiExtensionsResponse
       | SessionCancelResponse
       | LoroSessionLiveStatusRpcResponse
@@ -1728,6 +1828,8 @@ export class LoroStreamsMachineRpcServer {
       | SessionDispatchTurnResponse
       | SessionPrepareResponse
       | SessionPrepareCancelResponse
+      | SessionHistoryReadResponse
+      | SessionHistoryWriteResponse
       | CodeCollabV2Error
       | CodeCollabV2OpenTextOk
       | CodeCollabV2RefreshTextResponse

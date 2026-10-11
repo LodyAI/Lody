@@ -1,5 +1,5 @@
+import { toShared } from '@/platform/process-options';
 import { createHash, randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
 import {
   chmod,
   lstat,
@@ -55,6 +55,9 @@ import {
 } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
 import { getLogger } from '@/utils/logger';
+import { runCommandOk } from '@lody/shared/node/process';
+import { makeProcessRunnerLegacy, runCommandTextLegacy } from '@lody/shared/node/process';
+
 import { mapWithConcurrency } from '@/lib/bounded-concurrency';
 import { CodeCollabFileIndexChangedPublishError } from './code-collab-flock-publish';
 import type { CodeCollabV2DiffStore } from './code-collab-v2-diff-store';
@@ -76,7 +79,6 @@ import type {
   WorkspaceWatchSubscription,
 } from './workspace-watch-coordinator';
 
-const execFileAsync = promisify(execFile);
 // gzip/gunzip on libuv's threadpool instead of the sync variants: a large file's
 // (de)compression must not block the single Node event loop, which would stall every
 // other concurrent Machine RPC handler (open-file/refresh/diff) and the request loop.
@@ -2984,14 +2986,22 @@ async function runGit(
   args: readonly string[]
 ): Promise<{ ok: true; stdout: string } | { ok: false }> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, ...args], {
-      maxBuffer: 64 * 1024 * 1024,
-    });
+    const { stdout } = await runCommandTextLegacy(
+      {
+        command: 'git',
+        args: ['-C', cwd, ...args],
+        maxOutputBytes: 64 * 1024 * 1024,
+        check: 'exit-0',
+      },
+      toShared()
+    );
     return { ok: true, stdout };
   } catch {
     return { ok: false };
   }
 }
+
+const runPlatformCommand = makeProcessRunnerLegacy(toShared({}));
 
 async function runGitBuffer(
   cwd: string,
@@ -2999,10 +3009,9 @@ async function runGitBuffer(
   maxBuffer: number
 ): Promise<{ ok: true; stdout: Buffer } | { ok: false }> {
   try {
-    const { stdout } = (await execFileAsync('git', ['-C', cwd, ...args], {
-      encoding: 'buffer',
-      maxBuffer,
-    })) as { stdout: Buffer };
+    const { stdout } = await runPlatformCommand(
+      runCommandOk({ command: 'git', args: ['-C', cwd, ...args], maxOutputBytes: maxBuffer })
+    );
     return { ok: true, stdout };
   } catch {
     return { ok: false };

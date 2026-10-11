@@ -4,6 +4,11 @@ Scope: `packages/components`. The binding rules live in
 [that package's AGENTS.md](../../packages/components/AGENTS.md) and its child scopes;
 this page keeps the reasoning that would otherwise crowd them out.
 
+Workspace durable synchronization is composed by `providers/workspace-streams-transport.ts`.
+Its [content boundary](../../specs/workspace-streams-content.md) keeps ordinary SDK bytes
+and persistence intact while exposing protection and snapshot handling to future callers.
+The protected seam is not a product E2EE entry point or a persisted-mode resolver.
+
 ## Crash surfaces
 
 Recovery and diagnostic contracts, including callers outside `lib/`, are owned by
@@ -13,9 +18,12 @@ A crash the user cannot read or copy is a crash we never hear about, which is wh
 `ErrorBoundary` fallback shows the real error text and offers a one-click copy of the
 full report on every build rather than only in development.
 
-Automatic recovery is deliberately bounded. A crash screen that reloads or resets by
-itself can loop forever on a deterministic error, so `resetKeys` recovery stops after
-`MAX_AUTOMATIC_RESETS` for a repeating error and hands control back to the user.
+Crash screens wait for explicit user recovery; `resetKeys` cannot clear an error.
+Authenticated cloud queries retry opaque server failures before reaching a boundary,
+with a shared, finite budget. Pending retries return loading rather than stale access
+rows. Structured application failures and exhausted retries still throw; the runtime
+provider has its own page boundary because it sits above the Outlet boundary. See the
+[query adapter](../../packages/components/src/hooks/README.md#cloud-query-recovery).
 
 Both cache-recovery levels defer their asynchronous deletes to the next boot because
 `deleteDatabase()` blocks while the runtime still holds a connection; synchronous

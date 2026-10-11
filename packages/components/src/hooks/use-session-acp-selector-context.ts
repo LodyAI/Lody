@@ -1,4 +1,7 @@
 import { useMemo } from 'react';
+import { useAtomValue } from 'jotai';
+import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
+import { useMachineFlockAgentConfigsForMachineIds } from '@/hooks/use-machine-flock-agent-configs';
 import type { AgentConfigCliType, AgentConfigId, MachineId } from '@lody/shared';
 import type { AcpConfigOptionValue } from '@/components/shared/acp-selector-options';
 
@@ -26,16 +29,27 @@ export function useSessionAcpSelectorContext({
   configOptionValues,
 }: UseSessionAcpSelectorContextArgs) {
   const { machine: sessionMachine, machineFlockRows } = useResolvedMachineMeta(machineId);
+  useMachineFlockAgentConfigsForMachineIds([machineId]);
+  const config = useAtomValue(getAgentMetaByIdAtomFamily(configId ?? undefined));
+  const matchesProvider =
+    config?.machineId === machineId &&
+    config?.cliType === cliType &&
+    config?.agentType === agentType;
+  const runtimeOverrides = matchesProvider ? config?.runtimeOverrides : undefined;
   const acpTarget = useMemo(
-    () => ({
-      configId,
-      cliType,
-      agentType,
-      selectedModeId,
-      selectedModelId,
-      configOptionValues,
-      machine: sessionMachine,
-    }),
+    () =>
+      configId && !matchesProvider
+        ? undefined
+        : {
+            configId,
+            cliType,
+            agentType,
+            selectedModeId,
+            selectedModelId,
+            configOptionValues,
+            runtimeOverrides,
+            machine: sessionMachine,
+          },
     [
       agentType,
       cliType,
@@ -44,6 +58,8 @@ export function useSessionAcpSelectorContext({
       selectedModeId,
       selectedModelId,
       sessionMachine,
+      matchesProvider,
+      runtimeOverrides,
     ]
   );
   const selectorOptions = useAcpSelectorOptions(acpTarget);

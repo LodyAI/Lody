@@ -140,4 +140,43 @@ describe('worktree setup runner', () => {
     expect(outputs).toHaveLength(0);
     expect(ends).toHaveLength(0);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'ends every process a failed script started, not just its shell',
+    async () => {
+      const workdir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-worktree-setup-'));
+      tempDirs.push(workdir);
+      const pidFile = path.join(workdir, 'background.pid');
+
+      // The first step leaves a background job in the shell's process group;
+      // the second fails, which must take that job down with the shell.
+      const failure = await runWorktreeSetup({
+        config: {
+          scripts: { bash: `sleep 600 &\necho $! > ${JSON.stringify(pidFile)}\nfalse` },
+        },
+        sessionId: 'session-1' as SessionId,
+        workspaceId: 'workspace-1' as WorkspaceId,
+        workdir,
+        branch: 'feature/worktree-setup-failure',
+        logger: testLogger,
+      }).then(
+        () => undefined,
+        (error: unknown) => error
+      );
+
+      expect(failure).toBeInstanceOf(Error);
+      const backgroundPid = Number((await fs.readFile(pidFile, 'utf8')).trim());
+      expect(backgroundPid).toBeGreaterThan(0);
+      expect(isAlive(backgroundPid)).toBe(false);
+    }
+  );
 });
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}

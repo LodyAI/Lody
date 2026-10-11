@@ -3,6 +3,7 @@ import {
   getAppShareOrigin,
   getAppShareUrl,
 } from '@/lib/app-location';
+import { parseSessionTabSearch } from './session-tab-url';
 
 /**
  * Session page path: `/{workspaceSlug}/sessions/{sessionId}` plus optional
@@ -14,6 +15,7 @@ export type ParsedAppSessionUrl = {
   /** Absolute URL the user pasted, normalized without a trailing slash on the path. */
   url: string;
   workspaceSlug: string;
+  /** Conversation selected by a session tab, or the path ID when no session tab is selected. */
   sessionId: string;
 };
 
@@ -106,10 +108,12 @@ export function parseAppSessionUrl(
   if (!match) return null;
 
   const workspaceSlug = match[1] ?? '';
-  const sessionId = match[2] ?? '';
-  if (!workspaceSlug || !sessionId) return null;
+  const routeSessionId = match[2] ?? '';
+  if (!workspaceSlug || !routeSessionId) return null;
 
-  const path = `/${workspaceSlug}/sessions/${sessionId}`;
+  const tab = parseSessionTabSearch(parsed.searchParams.get('tab') ?? undefined);
+  const sessionId = tab.kind === 'session' ? tab.sessionId : routeSessionId;
+  const path = `/${workspaceSlug}/sessions/${routeSessionId}`;
   const url = `${parsed.origin}${path}${parsed.search}${parsed.hash}`;
   return { url, workspaceSlug, sessionId };
 }

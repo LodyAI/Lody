@@ -639,3 +639,99 @@ describe('local MCP discovery routing', () => {
     }
   );
 });
+
+describe('memory provider routing', () => {
+  const request = { action: 'list', providerId: 'nowledge-mem' } as const;
+  const inventory = {
+    type: 'machine/memory',
+    status: 'ready',
+    memories: [{ id: 'reviewer', name: 'Reviewer' }],
+  } as const;
+  it.each(['local', 'cloud'] as const)(
+    'returns identities from the selected %s machine',
+    async (plane) => {
+      const machineId = plane === 'local' ? localMachineId : remoteMachineId;
+      vi.stubGlobal('window', {
+        __LODY_ELECTRON__: true,
+        ipc: {
+          invoke: async (
+            _channel: string,
+            envelope: { machineId: MachineId; method: string; params: unknown }
+          ) => {
+            if (plane !== 'local') throw new Error('Unexpected local RPC');
+            expect(envelope).toMatchObject({
+              machineId,
+              method: 'machine/memory',
+              params: request,
+            });
+            return { ok: true, result: inventory };
+          },
+        },
+      });
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        targetRouter: {
+          getPlaneForMachine: () => plane,
+          resolvePlaneForMachine: async () => plane,
+        },
+        getMachineRpcClient: async (target) => {
+          if (plane !== 'cloud') throw new Error('Unexpected remote RPC');
+          expect(target).toBe(remoteMachineId);
+          return {
+            requestMemoryProvider: async (params: unknown) => {
+              expect(params).toEqual(request);
+              return inventory;
+            },
+          } as never;
+        },
+      });
+      await expect(facade.requestMemoryProvider(machineId, request)).resolves.toEqual(inventory);
+    }
+  );
+  it.each([undefined, { memoryProviders: 0 }, { memoryProviders: 0.5 }])(
+    'rejects unsupported capabilities %j before routing a command',
+    async (protocolCapabilities) => {
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId,
+        getMachineProtocolCapabilities: async () => protocolCapabilities,
+        targetRouter: {
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
+        },
+        getMachineRpcClient: async () => {
+          throw new Error('Unexpected RPC');
+        },
+      });
+      await expect(facade.requestMemoryProvider(remoteMachineId, request)).resolves.toMatchObject({
+        status: 'error',
+        error: 'Update this machine to use memory providers.',
+        memories: [],
+      });
+    }
+  );
+  it('returns local failure without falling back to a remote machine', async () => {
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async () => ({ ok: false, error: 'local service unavailable' }),
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected remote RPC');
+      },
+    });
+    await expect(facade.requestMemoryProvider(localMachineId, request)).resolves.toMatchObject({
+      status: 'error',
+      error: 'local service unavailable',
+      memories: [],
+    });
+  });
+});

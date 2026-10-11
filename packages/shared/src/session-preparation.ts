@@ -1,3 +1,4 @@
+import type { MemoryBinding } from './memory-provider';
 import type { AcpConfigOptionValue, AgentConfigCliType } from './ai';
 import type { McpServerId } from './ids';
 import { normalizeProjectRefForDedup } from './project';
@@ -10,6 +11,7 @@ export type SessionPreparationRunConfig = {
   modeId?: string;
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
+  memory?: MemoryBinding;
   mcpServerIds?: McpServerId[];
 };
 
@@ -43,6 +45,7 @@ export function buildSessionPreparationRunConfig(input: {
   modeId?: string | null;
   modelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
+  memory?: MemoryBinding;
   mcpServerIds?: readonly McpServerId[] | null;
 }): SessionPreparationRunConfig | undefined {
   const modeId = trimOptionalId(input.modeId);
@@ -60,10 +63,11 @@ export function buildSessionPreparationRunConfig(input: {
       : undefined;
   const mcpServerIds = input.mcpServerIds ? [...input.mcpServerIds] : undefined;
 
-  if (!modeId && !modelId && !nonEmptyConfigOptionValues && !mcpServerIds) {
+  if (!modeId && !modelId && !nonEmptyConfigOptionValues && !mcpServerIds && !input.memory) {
     return undefined;
   }
   return {
+    ...(input.memory ? { memory: input.memory } : {}),
     ...(modeId ? { modeId } : {}),
     ...(modelId ? { modelId } : {}),
     ...(nonEmptyConfigOptionValues ? { configOptionValues: nonEmptyConfigOptionValues } : {}),
@@ -83,6 +87,7 @@ export function normalizeSessionPreparationRunConfigForDedup(
           left.localeCompare(right)
         )
       : null,
+    ...(config.memory ? [[config.memory.providerId, config.memory.memoryId]] : []),
     ...(config.mcpServerIds === undefined
       ? []
       : [normalizeMcpServerIdsForDedup(config.mcpServerIds)]),

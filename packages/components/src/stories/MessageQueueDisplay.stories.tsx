@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { userEvent, within } from 'storybook/test';
 import { Provider, createStore } from 'jotai';
 import type { MessageQueueItem, SessionHistory, SessionId, WorkspaceId } from '@lody/shared';
 import { runtimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
@@ -260,5 +261,14 @@ export const InactiveSession: Story = {
     ...commonArgs,
     items: makeItems(3),
     showSteerAction: false,
+  },
+};
+
+/** The real disclosure keeps both recovery state and the total count visible. */
+export const CollapsedWithUploads: Story = {
+  ...LocalUploadRows,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: /Up next/ }));
   },
 };

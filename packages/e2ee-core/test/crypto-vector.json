@@ -1,0 +1,62 @@
+{
+  "source": "Python stdlib HMAC-SHA256 RFC5869 extract/one-block expand; PyNaCl 1.6.2 libsodium XChaCha20-Poly1305; independently encoded v0 context/header/AAD",
+  "nonce": "222222222222222222222222222222222222222222222222",
+  "cases": [
+    {
+      "purpose": "doc-update",
+      "binding": "",
+      "key": "ae28e34da70206addbbc84bd5381e85dfa3728c35ff5c84f1f65b8fe0ef4c4d1",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a474ef45fb20451032fbd6e19aa44575306"
+    },
+    {
+      "purpose": "doc-update",
+      "binding": "abcd",
+      "key": "ae28e34da70206addbbc84bd5381e85dfa3728c35ff5c84f1f65b8fe0ef4c4d1",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a47c9effb598186925a1d3f3f4d333c81bf"
+    },
+    {
+      "purpose": "doc-snapshot",
+      "binding": "",
+      "key": "ae28e34da70206addbbc84bd5381e85dfa3728c35ff5c84f1f65b8fe0ef4c4d1",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a4772e9fd757e22d7cebe46acc39d12a801"
+    },
+    {
+      "purpose": "doc-snapshot",
+      "binding": "abcd",
+      "key": "ae28e34da70206addbbc84bd5381e85dfa3728c35ff5c84f1f65b8fe0ef4c4d1",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "3168d65b4ce77c62660367ca7addb3e2bd678a475b095515d681e05135756d8ea9554f6c"
+    },
+    {
+      "purpose": "blob",
+      "binding": "",
+      "key": "d0750ade0eca74cde15b7426c529007ef7d37a74c28ecc2be92239f96b71d656",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "c0477915aafda82510ac66315af1494277df1ef2d0350649563e309e32a3ded5f6288d37"
+    },
+    {
+      "purpose": "blob",
+      "binding": "abcd",
+      "key": "d0750ade0eca74cde15b7426c529007ef7d37a74c28ecc2be92239f96b71d656",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "c0477915aafda82510ac66315af1494277df1ef27efc4eccc4ed05d0557ccd291fffbe55"
+    },
+    {
+      "purpose": "presence",
+      "binding": "",
+      "key": "26f968935edfe74ce96849d48361dde4bf66320a68fc4f818ee63e3480f1933e",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "8b5fd6c2c3af173e27431deb74c916666dffd47e9865d275404d90d3f92f36af329b6207"
+    },
+    {
+      "purpose": "presence",
+      "binding": "abcd",
+      "key": "26f968935edfe74ce96849d48361dde4bf66320a68fc4f818ee63e3480f1933e",
+      "plaintext": "73796e74686574696320636f6e74656e74207630",
+      "ciphertext": "8b5fd6c2c3af173e27431deb74c916666dffd47e88b0db0b9dc12a056998f406ad6d6592"
+    }
+  ]
+}

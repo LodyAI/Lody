@@ -200,7 +200,7 @@ describe('session export formatters', () => {
           endedAt: null,
           modelInfo: undefined,
           items: [
-            { type: 'text', text: 'Implemented the command.' },
+            { type: 'text', text: 'Implemented the command. See [Old](session://child).' },
             { type: 'thought', text: 'Need to keep this independent.' },
             {
               type: 'image',
@@ -228,6 +228,8 @@ describe('session export formatters', () => {
     });
 
     expect(markdown).toContain('# Exporter');
+    expect(markdown).toContain('[Open in Lody](lody://session/session-1?workspace=workspace-1)');
+    expect(markdown).toContain('[Old](lody://session/child?workspace=workspace-1)');
     expect(markdown).toContain('#### Thought');
     expect(markdown).toContain('Need to keep this independent.');
     expect(markdown).toContain('![diagram.png](artifacts/attachments/files/img-1.png)');
