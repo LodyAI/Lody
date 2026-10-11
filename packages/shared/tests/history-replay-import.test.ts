@@ -16,6 +16,55 @@ const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 const claudeProvider = { cliType: 'builtin', agentType: 'claude' } as const;
 
 describe('buildHistoryReplayImport', () => {
+  it('drops tool images from imported history without dropping tool state or text', () => {
+    const result = buildHistoryReplayImport(
+      [
+        makeNotification({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'Inspect the page' },
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'screenshot',
+          title: 'Screenshot',
+          kind: 'other',
+          status: 'completed',
+          content: [
+            {
+              type: 'content',
+              content: { type: 'image', mimeType: 'image/png', data: 'DROP_IMPORT_IMAGE' },
+            },
+            {
+              type: 'content',
+              content: {
+                type: 'resource',
+                resource: {
+                  uri: 'synthetic://image',
+                  mimeType: 'image/png',
+                  blob: 'DROP_IMPORT_BLOB',
+                },
+              },
+            },
+            { type: 'content', content: { type: 'text', text: 'Page inspected' } },
+          ],
+        }),
+      ],
+      { provider: codexProvider, acpSessionId: 'codex-session-1', mode: 'imported_snapshot' }
+    );
+    expect(result.droppedNotifications).toBe(0);
+    expect(result.history).toHaveLength(2);
+    expect(contentsOf(result.history[1]!)).toMatchObject([
+      {
+        type: 'tool_call',
+        toolCallId: 'screenshot',
+        title: 'Screenshot',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: 'Page inspected' } }],
+      },
+    ]);
+    expect(JSON.stringify(result.history)).not.toContain('DROP_IMPORT');
+  });
+
   it('projects Codex user chunks into a single resumable user history entry', () => {
     const result = buildHistoryReplayImport(
       [

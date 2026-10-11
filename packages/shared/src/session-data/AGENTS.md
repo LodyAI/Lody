@@ -55,6 +55,9 @@
   turn identity, plan, tools, or accounting. Ignore unregistered/terminal output,
   reject lineage cycles, and retain incomplete observation across snapshots. Declare
   nested transcript streaming fields in `schema.ts`; legacy rows stay unchanged.
+- New root and normalized child tool content drops ACP images and image blob
+  resources through `acp/tool-call-history.ts`; replay imports use the same rule.
+  Keep attachment references, tool state, non-image content and sparse-list semantics.
 
 - Submissions append on the live doc as local commits; transports upload only
   local events. Never author on a fork and import the export: it misses upload,

@@ -156,7 +156,10 @@ does not finish its children. Preserve each provider's existing prompt-completio
 contract; this proposal does not create a background scheduler.
 
 Persist received task state and content through the existing SessionMirror /
-HistoryWriter owner. Model them as per-run transcripts within the owning Lody
+HistoryWriter owner. As in root tool history, discard ACP image blocks and embedded
+image blob resources from child tool content; retain non-image content and tool
+state. This storage projection does not change the provider's execution output or
+ordinary conversation image attachments. Model per-run transcripts within the owning Lody
 session; native grandchildren can nest there without creating extra Lody child
 Sessions or changing their one-level creation rule. Store the transcript in an
 optional `subagent_task.run` containing the root `sessionId`, snapshot, latest

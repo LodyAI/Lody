@@ -16,6 +16,7 @@ import {
   deriveLocationsFromRawInput,
   deriveLocationsFromToolCallContent,
   stripToolCallContentForHistory,
+  stripToolCallImagesForHistory,
 } from './tool-call-history';
 import {
   parseLodyTaskMeta,
@@ -1574,8 +1575,8 @@ class NotificationOnHistoryApplier {
         );
         const previous = run.items[index];
         const tool = previous?.type === 'tool_call' ? previous : undefined;
-        // Keep child tool payloads intact. The parent's compact terminal projection
-        // intentionally discards diffs and read results, unsuitable for the detail view.
+        // Keep child diffs and read results for the detail view, but discard tool
+        // images just as the parent history does.
         const content: Extract<SubagentRunItem, { type: 'tool_call' }> = {
           ...tool,
           ...(identity.nativeTurnId !== undefined ? { nativeTurnId: identity.nativeTurnId } : {}),
@@ -1585,7 +1586,8 @@ class NotificationOnHistoryApplier {
           status: update.status ?? tool?.status ?? 'pending',
           title: update.title ?? tool?.title,
           kind: update.kind ?? tool?.kind,
-          content: update.content ?? tool?.content,
+          content:
+            update.content != null ? stripToolCallImagesForHistory(update.content) : tool?.content,
           locations: update.locations ?? tool?.locations,
           rawInput: asRecordOrUndefined(update.rawInput) ?? tool?.rawInput,
           rawOutput: asRecordOrUndefined(update.rawOutput) ?? tool?.rawOutput,

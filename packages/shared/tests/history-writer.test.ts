@@ -26,6 +26,185 @@ const open = (doc: Loro) =>
   createSessionMirror({ doc, initialState: { session: { id }, history: [] } });
 
 describe('single history writer', () => {
+  it.each(['other', 'execute', 'search', 'fetch', undefined] as const)(
+    'drops tool images for kind %s before persistence and fork copying',
+    (kind) => {
+      const doc = new Loro();
+      const writer = open(doc).historyWriter;
+      const attachment = {
+        type: 'image_group' as const,
+        images: [{ imageId: 'r2-image', mimeType: 'image/png' as const, sizeBytes: 1 }],
+      };
+      writer.append({ ...entry('first'), role: 'assistant', items: [attachment] });
+      const images = [
+        { type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'DROP_IMAGE' } },
+        {
+          type: 'content',
+          content: {
+            type: 'resource',
+            resource: { uri: 'synthetic://image', mimeType: ' Image/SVG+XML ', blob: 'DROP_BLOB' },
+          },
+        },
+        {
+          type: 'content',
+          content: {
+            type: 'resource',
+            resource: { uri: 'data:image/png;base64,DROP_URI', blob: 'DROP_URI' },
+          },
+        },
+      ];
+      const retained = [
+        { type: 'content', content: { type: 'text', text: 'Tool result' } },
+        { type: 'content', content: { type: 'audio', mimeType: 'audio/wav', data: 'AUDIO' } },
+        {
+          type: 'content',
+          content: {
+            type: 'resource',
+            resource: { uri: 'synthetic://pdf', mimeType: 'application/pdf', blob: 'PDF' },
+          },
+        },
+        {
+          type: 'content',
+          content: {
+            type: 'resource',
+            resource: { uri: 'synthetic://text', text: 'Resource text' },
+          },
+        },
+        {
+          type: 'content',
+          content: {
+            type: 'resource_link',
+            uri: 'synthetic://image-reference',
+            name: 'Image link',
+          },
+        },
+      ];
+      const emit = (update: Record<string, unknown>) =>
+        writer.updateEntry(
+          'first',
+          (turn) =>
+            applyNotificationOnHistory(
+              [turn],
+              [parseSessionNotification({ sessionId: 'root', update })],
+              undefined,
+              { targetAssistantEntryId: 'first' }
+            )[0]!
+        );
+      emit({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tool',
+        title: 'Screenshot tool',
+        kind,
+        status: 'in_progress',
+        content: [images[0], retained[0], ...images.slice(1), ...retained.slice(1)],
+      });
+      emit({ sessionUpdate: 'tool_call_update', toolCallId: 'tool', status: 'completed' });
+      const stored = writer.read('first')!;
+      expect(stored.items).toMatchObject([
+        attachment,
+        {
+          type: 'tool_call',
+          toolCallId: 'tool',
+          title: 'Screenshot tool',
+          status: 'completed',
+          content: retained,
+        },
+      ]);
+      expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_');
+      const fork = open(new Loro()).historyWriter;
+      const snapshot = writer.capture();
+      fork.copyFrom(snapshot, snapshot.history);
+      expect(fork.read('first')).toEqual(stored);
+
+      // An image-only replacement still clears earlier tool output.
+      emit({ sessionUpdate: 'tool_call_update', toolCallId: 'tool', content: images });
+      const replaced = writer.read('first')!;
+      expect(replaced.items[0]).toMatchObject(attachment);
+      expect(replaced.items[1]).toMatchObject({ toolCallId: 'tool', status: 'completed' });
+      const tool = replaced.items[1] as Extract<MessageContent, { type: 'tool_call' }>;
+      expect(tool.content ?? []).toEqual([]);
+    }
+  );
+
+  it('drops child tool images while retaining read results, diffs and sparse updates', () => {
+    const doc = new Loro();
+    const writer = open(doc).historyWriter;
+    writer.append({ ...entry('first'), role: 'assistant', items: [] });
+    const emit = (payload: Record<string, unknown>) =>
+      writer.updateEntry(
+        'first',
+        (turn) =>
+          applyNotificationOnHistory(
+            [turn],
+            [
+              parseSessionNotification({
+                sessionId: 'root',
+                update: {
+                  sessionUpdate: 'subagent_event',
+                  event: { version: 1, sessionId: 'root', runId: 'run', ...payload },
+                },
+              }),
+            ],
+            undefined,
+            { targetAssistantEntryId: 'first' }
+          )[0]!
+      );
+    emit({
+      type: 'snapshot',
+      snapshot: {
+        state: 'running',
+        support: { stream: ['tool'], progress: false, cancel: false, outputRead: 'none' },
+      },
+    });
+    const retained = [
+      { type: 'content', content: { type: 'text', text: 'Read result' } },
+      { type: 'diff', path: 'synthetic.txt', oldText: 'before', newText: 'after' },
+    ];
+    const images = [
+      { type: 'content', content: { type: 'image', mimeType: 'image/png', data: 'DROP_CHILD' } },
+      {
+        type: 'content',
+        content: {
+          type: 'resource',
+          resource: { uri: 'synthetic://image', mimeType: 'image/png', blob: 'DROP_CHILD_BLOB' },
+        },
+      },
+    ];
+    emit({
+      type: 'output',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'child-tool',
+        title: 'Child read',
+        kind: 'read',
+        content: [...retained, ...images],
+      },
+    });
+    emit({
+      type: 'output',
+      update: { sessionUpdate: 'tool_call_update', toolCallId: 'child-tool', status: 'completed' },
+    });
+    const task = writer.read('first')!.items[0] as Extract<
+      MessageContent,
+      { type: 'subagent_task' }
+    >;
+    expect(task.run?.items).toMatchObject([
+      { toolCallId: 'child-tool', kind: 'read', status: 'completed', content: retained },
+    ]);
+    expect(JSON.stringify(doc.toJSON())).not.toContain('DROP_CHILD');
+    emit({
+      type: 'output',
+      update: { sessionUpdate: 'tool_call_update', toolCallId: 'child-tool', content: images },
+    });
+    const replaced = writer.read('first')!.items[0] as Extract<
+      MessageContent,
+      { type: 'subagent_task' }
+    >;
+    expect(replaced.run?.items).toMatchObject([
+      { toolCallId: 'child-tool', status: 'completed', content: [] },
+    ]);
+  });
+
   it('freezes the same default emoji displayed by the Role catalog', () => {
     const role = snapshotAgentRole({ id: 'reviewer' as never, revision: 1, name: 'Reviewer' });
     const author = buildAgentMessageAuthor({

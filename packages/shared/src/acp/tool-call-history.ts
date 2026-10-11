@@ -72,6 +72,22 @@ export const deriveLocationsFromRawInput = (rawInput: unknown): ToolCallLocation
   return Array.from(unique).map((path) => ({ path }));
 };
 
+/** Tool images are execution output, not durable conversation attachments. */
+export const stripToolCallImagesForHistory = (content: ToolCallContent): ToolCallContent =>
+  content.filter((block) => {
+    if (block.type !== 'content') return true;
+    if (block.content.type === 'image') return false;
+    if (block.content.type !== 'resource') return true;
+    const resource = block.content.resource;
+    if (!('blob' in resource)) return true;
+    return !(
+      (typeof resource.mimeType === 'string' &&
+        resource.mimeType.trim().toLowerCase().startsWith('image/')) ||
+      (typeof resource.uri === 'string' &&
+        resource.uri.trim().toLowerCase().startsWith('data:image/'))
+    );
+  });
+
 /**
  * Removes large data payloads from tool call blocks before persisting to session history.
  *
@@ -93,6 +109,5 @@ export const stripToolCallContentForHistory = (
     // Some agents also emit a human-readable success `content` block; keep history lean by dropping it.
     return content.filter((block) => block.type !== 'diff' && block.type !== 'content');
   }
-  return content;
+  return stripToolCallImagesForHistory(content);
 };
-
