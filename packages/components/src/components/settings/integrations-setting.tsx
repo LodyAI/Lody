@@ -17,6 +17,7 @@ import { MobileIntegrationsSettings } from '@/components/mobile/mobile-integrati
 import { GitHubSettingsView } from './github-settings-view';
 import { isElectronRenderer } from '@/lib/electron';
 import { openExternalUrl } from '@/lib/native-browser';
+import { getPersonalGitHubAuthorizationUrl } from '@/components/settings/github-personal-authorization';
 import { useAuthClient } from '../../providers/convex-provider';
 import { canRunAuthedWorkspaceQuery } from '@/lib/authed-convex-query';
 import { invalidateGitHubTokensForWorkspace } from '@/lib/github-token';
@@ -241,7 +242,8 @@ function CloudIntegrationsSettings() {
   const workspaceAuthReady = authedWorkspaceId !== null;
   const workspaceAuthPending =
     Boolean(currentWorkspaceId) && (isConvexAuthLoading || !isConvexAuthenticated);
-  const canAuthorizePersonalGitHub = !isElectronRenderer() && !isNativeAppShell();
+  const authorizeInBrowser = isElectronRenderer() || isNativeAppShell();
+  const canAuthorizePersonalGitHub = !authorizeInBrowser || Boolean(currentWorkspaceSlug);
 
   const personalOperationSettings = useCloudQuery(
     cloudOperations.github.getPersonalOperationSettings,
@@ -469,6 +471,18 @@ function CloudIntegrationsSettings() {
 
     setAuthorizingPersonalGitHub(true);
     try {
+      if (authorizeInBrowser) {
+        const opened = await openExternalUrl(
+          getPersonalGitHubAuthorizationUrl(currentWorkspaceSlug!)
+        );
+        if (!opened) {
+          throw new Error(
+            t('settings.integrations.github.personalIdentityAuthFailed', 'Authorization failed')
+          );
+        }
+        setAuthorizingPersonalGitHub(false);
+        return;
+      }
       if (typeof authClient.linkSocial === 'function') {
         await authClient.linkSocial({ provider: 'github', callbackURL });
       } else {
@@ -482,7 +496,14 @@ function CloudIntegrationsSettings() {
       toast.error(message);
       setAuthorizingPersonalGitHub(false);
     }
-  }, [authClient, authedWorkspaceId, canAuthorizePersonalGitHub, t]);
+  }, [
+    authClient,
+    authedWorkspaceId,
+    authorizeInBrowser,
+    canAuthorizePersonalGitHub,
+    currentWorkspaceSlug,
+    t,
+  ]);
 
   if (isMobile) return <MobileIntegrationsSettings />;
 

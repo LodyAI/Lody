@@ -72,6 +72,11 @@ and [display preference](../../../../.agents/notes/implemented/feature/2026-09-2
   keeps an accessible name and a hover tooltip. The page and its editors stay
   mounted through resizing; header actions wrap within the pane. [Decision and
   verification](../../../../.agents/notes/implemented/bug-fix/2026-10-01-narrow-settings-panel.md).
+- GitHub personal identity authorization stays available in cloud-capable native
+  clients: Authorize opens the current workspace's `/settings/github` on
+  `VITE_SITE_URL` (default `https://lody.ai`) in the external browser. Complete
+  account linking there with the same Lody account; the client's reactive settings
+  query reflects completion. Browser settings keep their existing OAuth flow.
 - Browser desktop sign-in handoff: `login-page.tsx` under `?client_id=electron`,
   the page the desktop app opens in the system browser. A desktop sign-out leaves
   this browser signed in as the previous account, so the page names that account
