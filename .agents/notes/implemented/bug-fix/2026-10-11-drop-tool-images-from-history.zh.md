@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [LodyAI/Lody#1456](https://github.com/LodyAI/Lody/pull/1456)
 
 [English](2026-10-11-drop-tool-images-from-history.md)
 
