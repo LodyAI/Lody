@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1515](https://github.com/LodyAI/Lody/pull/1515)
 
 [English](2026-10-12-background-bash-command.md)
 
