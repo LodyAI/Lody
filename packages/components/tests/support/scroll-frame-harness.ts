@@ -17,8 +17,9 @@ import { vi } from 'vitest';
  *   size it last delivered for that target (the first observation always
  *   delivers).
  *
- * Sizes come from the caller: `sizeOf(element)` returns the element's height,
- * or `undefined` for elements whose size never matters. `rectOf(element)`
+ * Sizes come from the caller: `sizeOf(element)` returns the element's layout
+ * height for `offsetHeight` and ResizeObserver, or `undefined` for elements
+ * whose size never matters. `rectOf(element)`
  * optionally returns an element's top and height in viewport coordinates, for
  * code that reads `getBoundingClientRect`.
  */
@@ -85,6 +86,16 @@ export function createFrameHarness({
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
 
   const originalRect = Element.prototype.getBoundingClientRect;
+  const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    'offsetHeight'
+  );
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get() {
+      return sizeOf(this) ?? originalOffsetHeight?.get?.call(this) ?? 0;
+    },
+  });
   if (rectOf) {
     Element.prototype.getBoundingClientRect = function (this: Element) {
       const rect = rectOf(this, Math.min(top, maxTop()));
@@ -181,6 +192,11 @@ export function createFrameHarness({
     },
     restore() {
       Element.prototype.getBoundingClientRect = originalRect;
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight);
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).offsetHeight;
+      }
       vi.unstubAllGlobals();
     },
   };

@@ -83,6 +83,7 @@ function mount(
     strict = false,
     suppress,
     hidden,
+    scaledRects = false,
     feedback = false,
     tickOnScroll = false,
   }: {
@@ -90,6 +91,8 @@ function mount(
     suppress?: { current: boolean };
     /** The tab is inactive: `display: none`, so every offset and size reads 0. */
     hidden?: { current: boolean };
+    /** A transformed ancestor scales visual rects while layout sizes stay in CSS pixels. */
+    scaledRects?: boolean;
     /** A view whose state flips whenever it is told the offset is 0. */
     feedback?: boolean;
     /** A view that setStates on every onScroll, like the top-fade flag. */
@@ -126,7 +129,7 @@ function mount(
         )
           return { top: -scrollTop, height: px(el.style.height) };
         if (el.hasAttribute('data-virtual-index'))
-          return { top: px(el.style.top) - scrollTop, height: ROW };
+          return { top: px(el.style.top) - scrollTop, height: scaledRects ? ROW / 4 : ROW };
         return undefined;
       },
     });
@@ -247,6 +250,25 @@ it('opens at the real bottom and never hides the viewport', async () => {
     expect(mountedKeys(ctx)).toEqual(
       expect.arrayContaining(keysOnScreen(keys, ctx.harness.scrollTop))
     );
+  } finally {
+    unmount(ctx);
+  }
+});
+
+it('measures conversation rows in layout pixels under a scaled ancestor', async () => {
+  const keys = rowKeys(40);
+  const ctx = mount('engine-scaled-ancestor' as SessionId, keys, undefined, {
+    scaledRects: true,
+  });
+  // Keep ResizeObserver from correcting an incorrect first measurement. The
+  // initial row layout must already be in the same CSS-pixel space as the
+  // engine's virtual positions.
+  ctx.harness.hold(() => true);
+  try {
+    await ctx.settle();
+    const container = ctx.viewport().firstElementChild as HTMLElement;
+    expect(Number.parseFloat(container.style.height)).toBe(keys.length * ROW);
+    expect(ctx.harness.scrollTop).toBe(keys.length * ROW - VIEWPORT);
   } finally {
     unmount(ctx);
   }
