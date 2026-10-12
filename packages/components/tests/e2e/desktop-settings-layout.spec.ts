@@ -1,6 +1,16 @@
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+
+// Headless Chromium hides native scrollbars by default, masking Windows gutters.
+test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
 const rolesStory = '/iframe.html?id=settings-desktopsettingsmodal--agent-roles-tab&viewMode=story';
+
+async function openRolesStory(page: Page, globals = 'locale:en;theme:light') {
+  await page.goto(`${rolesStory}&globals=${globals}`);
+  await expect(page.getByRole('dialog', { name: /^(Agent Roles|Agent 角色)$/ })).toBeVisible({
+    timeout: 20_000,
+  });
+}
 
 async function expectInside(element: Locator, container: Locator) {
   await expect(element).toBeVisible();
@@ -19,7 +29,7 @@ for (const width of [400, 500, 707, 900, 1180]) {
     page,
   }) => {
     await page.setViewportSize({ width, height: 800 });
-    await page.goto(rolesStory);
+    await openRolesStory(page);
     const settings = page.getByRole('dialog', { name: 'Agent Roles', exact: true });
     const add = settings.getByRole('button', { name: 'Add role', exact: true });
     await expectInside(add, settings);
@@ -40,7 +50,7 @@ test('offers every existing navigation entry and keeps the editor draft across r
   page,
 }) => {
   await page.setViewportSize({ width: 1180, height: 800 });
-  await page.goto(rolesStory);
+  await openRolesStory(page);
   const settings = page.getByRole('dialog', { name: 'Agent Roles', exact: true });
   const navigation = page.getByRole('navigation', { name: 'Settings' });
   await expect(navigation).toBeVisible();
@@ -52,7 +62,7 @@ test('offers every existing navigation entry and keeps the editor draft across r
   const railBox = await navigation.boundingBox();
   expect(railBox).not.toBeNull();
   expect(railBox!.width).toBeLessThanOrEqual(60);
-  const viewport = page.locator('[data-settings-nav-viewport]');
+  const viewport = navigation.locator('[data-radix-scroll-area-viewport]');
   const roles = navigation.locator('button[data-settings-tab-id="agent-roles"]');
   await expectInside(roles, viewport);
   const about = navigation.locator('button[data-settings-tab-id="about"]');
@@ -81,9 +91,9 @@ test('scrolls overflow categories on the rail without changing the page and supp
 }) => {
   // A short window overflows the icon rail; the rail scrolls vertically.
   await page.setViewportSize({ width: 500, height: 360 });
-  await page.goto(rolesStory);
+  await openRolesStory(page);
   const navigation = page.getByRole('navigation', { name: 'Settings' });
-  const viewport = page.locator('[data-settings-nav-viewport]');
+  const viewport = navigation.locator('[data-radix-scroll-area-viewport]');
   const roles = navigation.locator('button[data-settings-tab-id="agent-roles"]');
   await expectInside(roles, viewport);
   const canScroll = await viewport.evaluate((el) => el.scrollHeight > el.clientHeight);
@@ -98,9 +108,9 @@ test('scrolls overflow categories on the rail without changing the page and supp
   await expect(page.getByRole('dialog', { name: 'Agent Roles', exact: true })).toBeVisible();
   await roles.click();
   await page.keyboard.press('ArrowDown');
-  const mcp = navigation.locator('button[data-settings-tab-id="mcp"]');
-  await expect(mcp).toBeFocused();
-  await expect(mcp).toHaveAttribute('aria-current', 'page');
+  const memory = navigation.locator('button[data-settings-tab-id="memory"]');
+  await expect(memory).toBeFocused();
+  await expect(memory).toHaveAttribute('aria-current', 'page');
   await page.keyboard.press('ArrowUp');
   await expect(roles).toBeFocused();
   await expect(roles).toHaveAttribute('aria-current', 'page');
@@ -113,19 +123,111 @@ test('scrolls overflow categories on the rail without changing the page and supp
   await expect(page.getByRole('dialog', { name: 'About', exact: true })).toBeVisible();
 });
 
+for (const [locale, theme, forcedColors] of [
+  ['en', 'light', 'none'],
+  ['zh_CN', 'dark', 'none'],
+  ['en', 'light', 'active'],
+  ['en', 'dark', 'active'],
+] as const) {
+  test(`keeps overflowing navigation aligned and scrollable with the mouse: ${locale}, ${theme}, forced colors ${forcedColors}`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ forcedColors, colorScheme: theme });
+    for (const width of [500, 1180]) {
+      await page.setViewportSize({ width, height: 360 });
+      await openRolesStory(page, `locale:${locale};theme:${theme}`);
+      const settings = page.getByRole('dialog', { name: /^(Agent Roles|Agent 角色)$/ });
+      const navigation = page.getByRole('navigation', { name: /^(Settings|设置)$/ });
+      const viewport = navigation.locator('[data-radix-scroll-area-viewport]');
+      const roles = navigation.locator('button[data-settings-tab-id="agent-roles"]');
+      const track = navigation.locator('[data-orientation="vertical"]');
+      const thumb = track.locator(':scope > div');
+      await expect(roles).toHaveAttribute('aria-current', 'page');
+      await expect(track).toBeVisible();
+      await expect(thumb).toBeVisible();
+      async function expectThumbContrast() {
+        const colors = await navigation.evaluate((nav) => ({
+          text: getComputedStyle(nav).color,
+          background: getComputedStyle(nav).backgroundColor,
+        }));
+        expect(colors.text).not.toBe(colors.background);
+        await expect(thumb).toHaveCSS('outline-color', colors.text);
+        await expect(thumb).toHaveCSS('outline-style', 'solid');
+        await expect(thumb).toHaveCSS('outline-width', '1px');
+      }
+      if (forcedColors === 'active') {
+        await expectThumbContrast();
+      }
+      await expect
+        .poll(() => viewport.evaluate((el) => el.scrollHeight > el.clientHeight))
+        .toBe(true);
+      const geometry = await navigation.evaluate((nav) => {
+        const rail = nav.getBoundingClientRect();
+        const view = nav.querySelector('[data-radix-scroll-area-viewport]')!;
+        const buttons = Array.from(nav.querySelectorAll('button[data-settings-tab-id]'));
+        return {
+          width: rail.width,
+          viewportWidth: view.clientWidth,
+          scrollWidth: view.scrollWidth,
+          centerOffset: Math.max(
+            ...buttons
+              .flatMap((button) => [button, button.querySelector('svg')!])
+              .map((el) => {
+                const box = el.getBoundingClientRect();
+                return Math.abs(box.x + box.width / 2 - (rail.x + rail.width / 2));
+              })
+          ),
+        };
+      });
+      expect(geometry.viewportWidth).toBeCloseTo(geometry.width, 0);
+      expect(geometry.scrollWidth).toBe(geometry.viewportWidth);
+      if (width === 500) {
+        expect(geometry.width).toBe(48);
+        expect(geometry.centerOffset).toBeLessThan(1);
+      }
+      const outerScroll = await page.evaluate(() => [window.scrollX, window.scrollY]);
+      const panelBox = await settings.boundingBox();
+      await viewport.hover();
+      await page.mouse.wheel(0, -10000);
+      await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBe(0);
+      await page.mouse.wheel(0, 80);
+      await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+      await expect(roles).toHaveAttribute('aria-current', 'page');
+      expect(await page.evaluate(() => [window.scrollX, window.scrollY])).toEqual(outerScroll);
+
+      const beforeDrag = await viewport.evaluate((el) => el.scrollTop);
+      const thumbBox = await thumb.boundingBox();
+      const trackBox = await track.boundingBox();
+      expect(thumbBox).not.toBeNull();
+      expect(trackBox).not.toBeNull();
+      await page.mouse.move(thumbBox!.x + thumbBox!.width / 2, thumbBox!.y + thumbBox!.height / 2);
+      if (forcedColors === 'active') await expectThumbContrast();
+      await page.mouse.down();
+      await page.mouse.move(thumbBox!.x + thumbBox!.width / 2, trackBox!.y + 1, { steps: 5 });
+      if (forcedColors === 'active') await expectThumbContrast();
+      await page.mouse.up();
+      await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBeLessThan(beforeDrag);
+      await expect(roles).toHaveAttribute('aria-current', 'page');
+      await expect(settings).toBeVisible();
+      expect(await page.evaluate(() => [window.scrollX, window.scrollY])).toEqual(outerScroll);
+      expect(await settings.boundingBox()).toEqual(panelBox);
+    }
+  });
+}
+
 test('moves through sidebar categories with arrow keys inside the dialog', async ({ page }) => {
   await page.setViewportSize({ width: 1180, height: 800 });
-  await page.goto(rolesStory);
+  await openRolesStory(page);
   const navigation = page.getByRole('navigation', { name: 'Settings' });
   const roles = navigation.locator('button[data-settings-tab-id="agent-roles"]');
   await roles.click();
   // A dialog popup stops composite keys at the portal edge; the scope element
   // still has to move the selection on them.
   await page.keyboard.press('ArrowDown');
-  const mcp = navigation.locator('button[data-settings-tab-id="mcp"]');
-  await expect(mcp).toBeFocused();
-  await expect(mcp).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByRole('dialog', { name: 'MCP', exact: true })).toBeVisible();
+  const memory = navigation.locator('button[data-settings-tab-id="memory"]');
+  await expect(memory).toBeFocused();
+  await expect(memory).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('dialog', { name: 'Memory', exact: true })).toBeVisible();
   await page.keyboard.press('ArrowUp');
   await expect(roles).toBeFocused();
   await expect(roles).toHaveAttribute('aria-current', 'page');
@@ -139,9 +241,9 @@ test('keeps the selected category visible in a single column in a short window',
   page,
 }) => {
   await page.setViewportSize({ width: 707, height: 394 });
-  await page.goto(rolesStory);
+  await openRolesStory(page);
   const navigation = page.getByRole('navigation', { name: 'Settings' });
-  const viewport = page.locator('[data-settings-nav-viewport]');
+  const viewport = navigation.locator('[data-radix-scroll-area-viewport]');
   const settings = page.getByRole('dialog', { name: 'Agent Roles', exact: true });
   await expectInside(navigation.locator('button[data-settings-tab-id="agent-roles"]'), viewport);
   const categoryRows = await navigation
@@ -158,7 +260,7 @@ test('keeps nested Role editor focus contained and short-height scrolling above 
   page,
 }) => {
   await page.setViewportSize({ width: 707, height: 394 });
-  await page.goto(rolesStory);
+  await openRolesStory(page);
   const settings = page.getByRole('dialog', { name: 'Agent Roles', exact: true });
   const edit = settings.getByRole('button', { name: 'Edit', exact: true });
   await edit.click();
@@ -186,6 +288,8 @@ test('keeps nested Role editor focus contained and short-height scrolling above 
     el.scrollTop = el.scrollHeight;
   });
   await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await expectInside(editor.getByRole('status').last(), editor);
+  await editor.getByRole('tab', { name: 'Team', exact: true }).click();
   await expectInside(editor.getByRole('switch', { name: 'Share with workspace' }), editor);
   await expectInside(cancel, editor);
   await expectInside(save, editor);
@@ -197,7 +301,7 @@ test('keeps nested Role editor focus contained and short-height scrolling above 
 
 test('fits translated header actions in a narrow dark settings panel', async ({ page }) => {
   await page.setViewportSize({ width: 500, height: 800 });
-  await page.goto(`${rolesStory}&globals=locale:zh_CN;theme:dark`);
+  await openRolesStory(page, 'locale:zh_CN;theme:dark');
   const settings = page.getByRole('dialog', { name: 'Agent 角色', exact: true });
   await expectInside(settings.getByRole('button', { name: '添加角色', exact: true }), settings);
   await expectInside(settings.getByRole('button', { name: '关闭', exact: true }), settings);
