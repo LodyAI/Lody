@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#1520](https://github.com/LodyAI/Lody/pull/1520)
 
 [中文](2026-10-12-streams-diagnostic-log-scope.zh.md)
 
