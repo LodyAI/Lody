@@ -27,7 +27,7 @@ Renderer-only waiting cannot survive closed windows. `status: idle` is not compl
 
 Metadata writes are recoverable, not a transaction across disconnected replicas. The group barrier covers known synchronized targets; unknown offline input and descendants created after commitment are outside atomic membership guarantees. Each owner rechecks late work before its archived write and lets late activation drain. Losing a renderer during attachment preparation leaves known blockers unresolved; cancel the request rather than infer completion. Blocked queue rows remain pending until completed or explicitly removed. Prepared-send writers reject new input once the archive fence is published. Local-project removal keeps its separate immediate behavior; worktree retention/cleanup policy is unchanged.
 
-The existing relations and worktree lifecycle Specs remain draft and describe the new admission boundary. No new Spec or PR was created.
+The existing relations and worktree lifecycle Specs remain draft and describe the new admission boundary. No new Spec was created. Implementation PR: [LodyAI/Lody#1522](https://github.com/LodyAI/Lody/pull/1522).
 
 ## Validation
 
