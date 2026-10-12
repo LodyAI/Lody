@@ -316,6 +316,9 @@ importers:
       '@loro-dev/roost':
         specifier: 0.1.2
         version: 0.1.2
+      '@loro-dev/streams-client':
+        specifier: 'catalog:'
+        version: 0.9.0
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.16.2(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.16.3)

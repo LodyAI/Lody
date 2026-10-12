@@ -123,3 +123,16 @@ opt in to secret output, or migrate to `envKeys`. The output is a presentation
 contract, not a full configuration backup; runtime/auth/custom-launch fields are
 not exported. No masked placeholder is stored or returned as an environment value.
 Assignment errors report entry/line numbers without echoing their contents.
+
+## Importing OSS records into cloud
+
+In the cloud CLI, run `lody migrate --from-oss`, select an existing workspace, and
+confirm the source/target summary. Close the OSS app and CLI first. For scripts,
+use `lody migrate --from-oss --workspace <id> --yes`; `--source <directory>` selects
+a custom OSS data root. No workspace is created automatically.
+
+This imports full Loro history and referenced local file attachments, keeps existing
+cloud conversations/settings, and disables execution of imported sessions/schedules.
+Roost and unsupported formats fail before record uploads. Source data is retained;
+rerunning resumes the frozen snapshot. It does not copy code directories or native
+agent credentials. See [migration and recovery](src/lib/oss-migration/README.md).
