@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/1500
 
 [中文](2026-10-12-chat-failure-detail-duplication.zh.md)
 
