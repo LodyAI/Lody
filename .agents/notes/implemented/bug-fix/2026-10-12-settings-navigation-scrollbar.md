@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#1499](https://github.com/LodyAI/Lody/pull/1499)
+
 [中文](2026-10-12-settings-navigation-scrollbar.zh.md)
 
 ## Abstract
