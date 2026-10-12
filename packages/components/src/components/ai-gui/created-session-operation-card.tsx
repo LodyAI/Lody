@@ -1,8 +1,12 @@
 import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
-import { CheckCircle2, Circle, CircleX, LoaderCircle } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Ban, Check, CircleDashed, X } from 'lucide-react';
+import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
+import * as stylex from '@stylexjs/stylex';
+import { colors } from '@lody/ui/tokens/colors.stylex';
+import { styles as taskStyles } from './subagent-task-panel.stylex';
 import { useTranslation } from 'react-i18next';
 import {
   getSessionRoomId,
@@ -12,9 +16,7 @@ import {
 } from '@lody/shared';
 
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
-import { SessionRelationCard } from '@/components/shared/session-relation-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
-import { cn } from '@/lib/utils';
 
 type CreatedSessionStatus = OperationProgressStatus;
 
@@ -39,7 +41,29 @@ export function useOperationTargetTitle(sessionId: SessionId, fallbackTitle?: st
   return liveTitle || fallbackTitle?.trim() || t('sessions.untitled', 'Untitled session');
 }
 
-/** The status belongs to the creating Operation's target Turn, not later Session activity. */
+const styles = stylex.create({
+  root: { display: 'grid', minWidth: 0 },
+  title: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.label,
+    textAlign: 'start',
+    fontWeight: 400,
+  },
+  status: { fontWeight: 400 },
+  detail: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colors.tertiaryLabel,
+  },
+});
+
+/** A compact task-style row; status stays bound to the creating Operation's Turn. */
 export function CreatedSessionOperationCard({
   sessionId,
   fallbackTitle,
@@ -55,45 +79,61 @@ export function CreatedSessionOperationCard({
 }) {
   const { t } = useTranslation();
   const title = useOperationTargetTitle(sessionId, fallbackTitle);
-  const StatusIcon =
-    status === 'running'
-      ? LoaderCircle
-      : status === 'succeeded'
-        ? CheckCircle2
-        : status === 'failed'
-          ? CircleX
-          : Circle;
-
+  const Glyph =
+    status === 'succeeded'
+      ? Check
+      : status === 'failed'
+        ? X
+        : status === 'cancelled'
+          ? Ban
+          : CircleDashed;
   return (
-    <SessionRelationCard
-      relation="opened"
-      label={t('sessions.openedBy.createdSession', 'Session created')}
-      sessionTitle={title}
-      detail={detail}
-      actionLabel={t('sessions.openedBy.viewSession', 'View session')}
-      onAction={onNavigateSession ? () => onNavigateSession({ sessionId }) : undefined}
-      status={
-        <span
-          role="status"
-          data-session-creation-status={status}
-          className={cn(
-            'inline-flex shrink-0 items-center gap-1 text-xs',
-            status === 'failed'
-              ? 'text-destructive'
-              : status === 'succeeded'
-                ? 'text-emerald-600 dark:text-emerald-400'
-                : 'text-muted-foreground'
-          )}
-        >
-          <Spinner
-            icon={StatusIcon}
-            spinning={status === 'running'}
-            className="h-3 w-3 motion-reduce:animate-none"
+    <div data-session-relation-card="opened" {...stylex.props(styles.root)}>
+      <Button
+        variant="ghost"
+        size="small"
+        disabled={!onNavigateSession}
+        title={title}
+        aria-label={`${t('sessions.openedBy.viewSession', 'View session')}: ${title}`}
+        onClick={onNavigateSession ? () => onNavigateSession({ sessionId }) : undefined}
+      >
+        <span {...stylex.props(taskStyles.line)}>
+          <span
             aria-hidden="true"
-          />
-          {t(statusLabels[status])}
+            {...stylex.props(
+              taskStyles.mark,
+              status === 'succeeded'
+                ? taskStyles.markDone
+                : status === 'failed'
+                  ? taskStyles.markFailed
+                  : taskStyles.markPending
+            )}
+          >
+            {status === 'running' ? (
+              <Spinner size="small" label={null} />
+            ) : (
+              <Glyph {...stylex.props(taskStyles.glyph)} />
+            )}
+          </span>
+          <span {...stylex.props(styles.title)}>{title}</span>
+          {detail ? (
+            <span title={detail} {...stylex.props(styles.detail)}>
+              · {detail}
+            </span>
+          ) : null}
+          <span
+            role="status"
+            data-session-creation-status={status}
+            {...stylex.props(
+              taskStyles.meta,
+              styles.status,
+              status === 'failed' && taskStyles.danger
+            )}
+          >
+            {t(statusLabels[status])}
+          </span>
         </span>
-      }
-    />
+      </Button>
+    </div>
   );
 }

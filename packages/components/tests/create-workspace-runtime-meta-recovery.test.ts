@@ -374,12 +374,14 @@ vi.mock('@lody/shared', async (importOriginal) => {
     buildLoroStreamsTokenEndpoint: vi.fn(
       () => 'https://tokens.example.test/api/loro-streams/token'
     ),
-    createLoroStreamsTokenProvider: vi.fn((options) => {
-      if (mocks.realTokenProvider) return actual.createLoroStreamsTokenProvider(options);
+    createLoroStreamsTokenProviderLegacy: vi.fn((options) => {
+      if (mocks.realTokenProvider) return actual.createLoroStreamsTokenProviderLegacy(options);
       const providerId = ++mocks.providerIdentity.providers;
       return {
         getToken: mocks.tokenReady,
         invalidate: mocks.tokenProviderInvalidate,
+        close: async () => {},
+        retryCleanup: async () => {},
         getGatewayBaseUrl: vi.fn(() => actual.DEFAULT_LORO_STREAMS_BASE_URL),
         getShardHostSuffix: vi.fn(() => undefined),
         createAuthCallback: vi.fn(() => {
@@ -402,7 +404,9 @@ import { META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX } from '../src/lib/clear-l
 
 describe('createWorkspaceRuntime meta recovery lifecycle', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({
+      toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+    });
     mocks.repoOverride = null;
     mocks.realTokenProvider = false;
     mocks.tokenReady.mockReset().mockResolvedValue('streams-token');

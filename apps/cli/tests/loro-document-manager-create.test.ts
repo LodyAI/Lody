@@ -11,6 +11,68 @@ import type { WorkspaceId } from '@lody/shared';
 import { InMemoryRemoteCursorStore } from '@loro-dev/streams-crdt';
 import { RepoSyncError, RepoTransportError, type RepoSyncReport } from 'loro-repo';
 
+import { Effect, Layer } from 'effect';
+import {
+  makeLoroStreamsTokenProvider,
+  makeLoroStreamsTokenWebPorts,
+  LoroStreamsTokenPorts,
+  type LodyPresenceInstanceId,
+} from '@lody/shared';
+import { makeApplicationRuntime } from '@lody/shared/node/application-runtime';
+import {
+  PresenceHost,
+  PresenceTransport,
+  WorkspacePresenceOwnersLive,
+} from '../src/lib/loro/workspace-presence';
+import {
+  bindWorkspacePresenceApplicationLegacy,
+  recoverCliPresenceApplicationShutdown,
+  WorkspacePresenceLegacyFailure,
+  createCliPresenceRuntimeLegacy,
+} from '../src/lib/loro/presence-legacy';
+const testPresenceLayer = WorkspacePresenceOwnersLive.pipe(
+  Layer.provide(
+    Layer.merge(
+      Layer.succeed(PresenceHost, {
+        instanceId: () => 'synthetic-document-manager' as LodyPresenceInstanceId,
+        serverOffsetMs: () => 0,
+        report: () => {},
+      }),
+      Layer.succeed(PresenceTransport, {
+        isReleaseFailure: () => false,
+        create: () =>
+          Effect.succeed({
+            stats: {
+              status: 'joined',
+              pendingLocalCount: 0,
+              physicalEntries: 0,
+              queuedBytes: 0,
+              releasePending: 0,
+            },
+            join: ({ onStatusChange }) =>
+              Effect.sync(() => {
+                onStatusChange('joined');
+                return { syncBarrier: () => Effect.void };
+              }),
+            close: Effect.void,
+            rejoin: Effect.void,
+            retryRelease: Effect.void,
+          }),
+      })
+    )
+  )
+);
+let presenceApplication: ReturnType<typeof makeApplicationRuntime>;
+beforeEach(() => {
+  const app = makeApplicationRuntime(testPresenceLayer, {
+    recover: recoverCliPresenceApplicationShutdown,
+    project: (cause) => new WorkspacePresenceLegacyFailure(cause),
+  });
+  presenceApplication = app;
+  bindWorkspacePresenceApplicationLegacy(app);
+});
+afterEach(() => presenceApplication.closeLegacy());
+
 import type { Logger } from '../src/utils/logger';
 
 const mocks = vi.hoisted(() => ({
@@ -27,20 +89,6 @@ const mocks = vi.hoisted(() => ({
   installCliHttpGlobalDispatcher: vi.fn(),
   streamsGatewayBaseUrl: 'https://streams.example.test',
 }));
-
-vi.mock('@lody/shared', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@lody/shared')>();
-  return {
-    ...actual,
-    createLoroStreamsTokenProvider: vi.fn(() => ({
-      getToken: mocks.streamsGetToken,
-      getGatewayBaseUrl: () => mocks.streamsGatewayBaseUrl,
-      getShardHostSuffix: () => undefined,
-      invalidate: () => {},
-      createAuthCallback: () => async () => 'streams-jwt',
-    })),
-  };
-});
 
 vi.mock('loro-repo', async (importOriginal) => {
   const actual = await importOriginal<typeof import('loro-repo')>();
@@ -109,11 +157,33 @@ import { LoroDocumentManager } from '../src/lib/loro/doc';
 import { createCliSqliteRepoStore } from '../src/lib/loro/sqlite-repo-store';
 
 const testStreamsTokens = {
-  createTokenProvider: () => ({
+  createTokenProvider: () =>
+    makeLoroStreamsTokenProvider({
+      endpoint: 'https://synthetic.invalid/token',
+      workspaceId: 'workspace-test',
+    }).pipe(
+      Effect.provideService(
+        LoroStreamsTokenPorts,
+        makeLoroStreamsTokenWebPorts({
+          credential: Effect.succeed('synthetic-credential'),
+          fetchImpl: async () =>
+            new Response(
+              JSON.stringify({
+                token: await mocks.streamsGetToken(),
+                expiresIn: 900,
+                gatewayBaseUrl: mocks.streamsGatewayBaseUrl,
+              })
+            ),
+        })
+      )
+    ),
+  createTokenProviderLegacy: () => ({
     getToken: mocks.streamsGetToken,
     getGatewayBaseUrl: () => mocks.streamsGatewayBaseUrl,
     getShardHostSuffix: () => undefined,
     invalidate: () => {},
+    close: async () => {},
+    retryCleanup: async () => {},
     createAuthCallback: () => async () => 'streams-jwt',
   }),
 };
@@ -517,7 +587,9 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     // resetBackoff:false) instead of early-returning, so a doc/flock room stuck
     // in 'error' behind a healthy transport+meta is rejoined without a daemon
     // restart. See connection-recovery.ts sweepRooms + connection-recovery.test.ts.
-    vi.useFakeTimers();
+    vi.useFakeTimers({
+      toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+    });
     process.env.LODY_LORO_AUTO_RECONNECT_INTERVAL_MS = '10';
     const joinMetaRoom = vi.fn(async () => createMetaSubscription());
     const repoReconnect = vi.fn(async () => {});
@@ -842,6 +914,9 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     const manager = new LoroDocumentManager({
       repo,
       workspaceId: 'workspace-flock-replaced' as WorkspaceId,
+      presenceRuntime: await createCliPresenceRuntimeLegacy(
+        'workspace-flock-replaced' as WorkspaceId
+      ),
       userId: 'user-1',
       metaSub: null,
       logger: createSilentLogger(),
@@ -1050,7 +1125,9 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
   });
 
   it('reconnects and notifies listeners after meta room disconnects', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({
+      toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+    });
     process.env.LODY_LORO_AUTO_RECONNECT_DELAY_MS = '1';
     process.env.LODY_LORO_AUTO_RECONNECT_INTERVAL_MS = '0';
 
@@ -1148,7 +1225,9 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
   });
 
   it('backs off automatic reconnects while the meta room remains disconnected', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({
+      toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+    });
     process.env.LODY_LORO_AUTO_RECONNECT_DELAY_MS = '100';
     process.env.LODY_LORO_AUTO_RECONNECT_MAX_DELAY_MS = '1000';
     process.env.LODY_LORO_AUTO_RECONNECT_INTERVAL_MS = '0';

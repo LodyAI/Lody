@@ -73,8 +73,8 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Lifecycle
 
-- Roost: [contract](README.md#roost-history-paging): app keys, no keyring/silent rotation.
-  Keep outcomes; causes local, RPC stage/code/ID.
+- Roost: [contract](README.md#roost-history-paging). Await owner/backend meta;
+  no keyring/rotation/fallback/replay. Causes local, RPC stage/code/ID.
 
 - `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
   protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup

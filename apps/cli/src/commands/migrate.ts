@@ -10,7 +10,9 @@ import {
   acquireLocalCliHostLease,
   getLocalCliHostEndpoint,
 } from '@lody/shared/node/local-cli-host-lease';
-import type { WorkspaceId } from '@lody/shared';
+import { createLoroStreamsTokenProviderLegacy, type WorkspaceId } from '@lody/shared';
+import type { LoroStreamsTokenProvider, LoroStreamsTokenProviderLegacy } from '@lody/platform';
+import type { Scope } from 'effect';
 import { getCliPlatformKind } from '@/lib/cli-platform';
 import { AuthClient, performLogin } from '@/lib/auth';
 import {
@@ -60,6 +62,24 @@ export async function withMigrationLock<T>(
     signals.off('SIGINT', interrupt);
     signals.off('SIGTERM', interrupt);
   }
+}
+
+// The command owns the native provider Scope. Only the existing shared Legacy
+// facade bridges its Effects to the third-party Streams SDK's Promise callbacks.
+export function withMigrationTokens<A, E, R>(
+  provider: Effect.Effect<LoroStreamsTokenProvider, never, Scope.Scope>,
+  use: (tokens: LoroStreamsTokenProviderLegacy) => Effect.Effect<A, E, R>
+) {
+  return Effect.gen(function* () {
+    const native = yield* provider;
+    const tokens = yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        createLoroStreamsTokenProviderLegacy({ provider: native, executor: Effect })
+      ),
+      (legacy) => migrationStep(() => legacy.close()).pipe(Effect.orDie)
+    );
+    return yield* use(tokens);
+  }).pipe(Effect.scoped);
 }
 
 export const migrateCommand = new Command('migrate')
@@ -200,20 +220,22 @@ export const migrateCommand = new Command('migrate')
           workspaceId: workspace.id,
           machineId: auth.machineId,
         });
-        const program = Effect.acquireRelease(
-          migrationStep(() => openMigrationTarget(tokenProvider, workspace.id as WorkspaceId)),
-          (target) => migrationStep(() => target.close()).pipe(Effect.orDie)
-        ).pipe(
-          Effect.flatMap((target) =>
-            migrateSnapshot(manifest, journal, directory).pipe(
-              Effect.provideService(MigrationRuntime, {
-                target,
-                transfer: new SessionAttachmentTransfer(auth.token, serverBaseUrl),
-                progress: console.log,
-              })
-            )
-          ),
-          Effect.scoped
+        const program = withMigrationTokens(tokenProvider, (tokens) =>
+          Effect.acquireRelease(
+            migrationStep(() => openMigrationTarget(tokens, workspace.id as WorkspaceId)),
+            (target) => migrationStep(() => target.close()).pipe(Effect.orDie)
+          ).pipe(
+            Effect.flatMap((target) =>
+              migrateSnapshot(manifest, journal, directory).pipe(
+                Effect.provideService(MigrationRuntime, {
+                  target,
+                  transfer: new SessionAttachmentTransfer(auth.token, serverBaseUrl),
+                  progress: console.log,
+                })
+              )
+            ),
+            Effect.scoped
+          )
         );
         const exit = await Effect.runPromiseExit(program, { signal });
         if (Exit.isFailure(exit)) throw Cause.squash(exit.cause);

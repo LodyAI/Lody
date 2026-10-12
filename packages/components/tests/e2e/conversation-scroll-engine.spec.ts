@@ -316,3 +316,54 @@ test('outline jumps land their round at the top, far and near, while rows hydrat
     expect(landed.distance!, `round ${round}`).toBeLessThanOrEqual(1);
   }
 });
+
+for (const width of [375, 1280]) {
+  test(`created sessions retain their turn range and scroll in both states at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 850 });
+    await page.goto(
+      '/iframe.html?id=sessions-sessionrelationcard--many-created-sessions&viewMode=story'
+    );
+    const panel = page.locator('[data-created-session-list]');
+    const region = panel.getByRole('region');
+    const toggle = panel.locator('button[aria-expanded]');
+    await expect(page.locator('[data-visible-turn-range]')).toHaveAttribute(
+      'data-visible-turn-range',
+      '0:22'
+    );
+    await expect(panel.locator('[data-session-relation-card="opened"]')).toHaveCount(22);
+    const collapsedHeight = await region.evaluate((element) => element.clientHeight);
+    expect(
+      await region.evaluate(
+        (element) =>
+          [...element.children].filter(
+            (child) =>
+              child.getBoundingClientRect().bottom <= element.getBoundingClientRect().bottom + 1
+          ).length
+      )
+    ).toBe(5);
+    for (const expanded of [false, true]) {
+      if (expanded) await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', String(expanded));
+      expect(await region.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+        true
+      );
+      await region.hover();
+      await page.mouse.wheel(0, 400);
+      await expect.poll(() => region.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      await region.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+    }
+    expect(await region.evaluate((element) => element.clientHeight)).toBeGreaterThan(
+      collapsedHeight
+    );
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(await region.evaluate((element) => element.clientHeight)).toBe(collapsedHeight);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(
+      false
+    );
+  });
+}

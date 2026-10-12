@@ -266,7 +266,7 @@ export async function withMachineRpcClient<T>(
     authBaseUrl: LODY_AUTH_URL,
     authSiteUrl: LODY_AUTH_SITE_URL,
     logger,
-  }).createTokenProvider({ workspaceId: args.workspaceId });
+  }).createTokenProviderLegacy({ workspaceId: args.workspaceId });
   const baseUrl = await prepareCliStreamsGatewayBaseUrl(streamsTokenProvider);
   const configuredTimeout = Number.parseInt(process.env.LODY_LORO_RPC_CONNECT_TIMEOUT_MS ?? '', 10);
   const streamClient = createLoroStreamsJsonStreamClient({

@@ -46,10 +46,41 @@ checkout, pin it to the target release tag/commit, and verify signatures against
 the actual dependency. Revisit a subtree if repeated work needs upstream tests or
 an installation-free reference and has an owner for version synchronization.
 
+## Later guidance revision
+
+The [charter revision](../../proposed/architecture/2026-09-27-effect-lifecycle-migration-roadmap.md#migration-guidance-and-progress)
+adapts the general effect-ts entry into a contract-first Lody lifecycle workflow,
+replacing conflicting upstream installation steps while retaining provenance and
+MIT licensing. The explicitly scoped v3-to-v4 skill and version-matched reference
+policy remain unchanged. Responsibility splitting is optional for large mixed
+modules; ordinary small migrations do not need a prescribed file layout.
+
+The follow-up in [#1452](https://github.com/LodyAI/Lody/pull/1452) selects the task
+mode before migration planning and reads the resolved release guide fully once
+per version in the current context. The owning guide defines five applicable
+behavior questions; the charter separates delivery state from verification and
+records synthetic guidance-evaluation cases. This avoids repeating a full migration
+workflow during review/debug while retaining lifecycle acceptance for implementation.
+
+Factual correction: v4.0.2 `src/internal/effect.ts` implements `runPromise` rejection
+through `causeSquash`, so a single typed failure is already the original error,
+not a `FiberFailure` wrapper. `runPromiseExit` remains useful for inspecting the
+complete Cause before a domain-specific projection; plain squash can lose combined
+failures and recovery ownership. `Stream.runCollect`/`runDrain` return Effects and
+are composition operators, not runtime execution entries.
+
 ## Verification limits
 
 This change affects instructions and skills only; dependencies and runtime code
 are unchanged. Tarball inspection verifies reference availability, not Lody
-shutdown/cancellation/synchronization behavior or agent effectiveness. No behavioral
-suite was run for this documentation-only change. Document checks and installation
-verification are reported separately from runtime acceptance.
+shutdown/cancellation/synchronization behavior or agent effectiveness. No Lody behavioral
+suite was run for this documentation-only change. Five temporary deterministic
+probes against the exact 4.0.2 npm reference passed on Node 22.22.0: single-failure
+projection, lazy Promise retry, late mutation after an abort-ignoring Promise's
+wait is interrupted, cooperative abort, and ManagedRuntime sharing/release order.
+They use explicit signals rather than sleeps and establish upstream semantics only,
+not integration behavior in this dependency-free worktree. The probes were rerun
+for the #1452 follow-up; the skill metadata validator also passed. Synthetic prompt
+cases have expected outcomes but have not been independently evaluated.
+Document checks and installation verification are reported separately from runtime
+acceptance.

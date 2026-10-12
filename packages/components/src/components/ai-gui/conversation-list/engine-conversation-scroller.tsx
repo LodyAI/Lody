@@ -182,8 +182,11 @@ export function EngineConversationScroller({
         const element = viewport();
         return element ? parseFloat(getComputedStyle(element).paddingBottom) || 0 : 0;
       },
-      measure: (keys) =>
-        keys.map((key) => rowElements.current.get(key)?.getBoundingClientRect().height),
+      // The scroll engine stores layout-space CSS pixels. A conversation can
+      // live under a transformed camera (the onboarding still does this), and
+      // getBoundingClientRect() reports the visually scaled height there. Use
+      // the untransformed border-box height so later rows keep their real gaps.
+      measure: (keys) => keys.map((key) => rowElements.current.get(key)?.offsetHeight),
       setExtent: (px) => {
         if (containerRef.current) containerRef.current.style.height = `${Math.max(0, px)}px`;
       },
@@ -350,8 +353,7 @@ export function EngineConversationScroller({
         const key = keyOfElement.current.get(entry.target);
         if (!key) continue;
         const height =
-          entry.borderBoxSize?.[0]?.blockSize ??
-          (entry.target as HTMLElement).getBoundingClientRect().height;
+          entry.borderBoxSize?.[0]?.blockSize ?? (entry.target as HTMLElement).offsetHeight;
         resized.push({ key, height });
       }
       if (resized.length) controller.onRowsResized(resized);

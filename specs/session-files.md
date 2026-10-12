@@ -12,7 +12,7 @@ Translation: current
 - **A message whose attachments are still preparing is held in memory only.** Nothing reaches the synchronized document until every attachment is ready. A failure keeps the whole message for retry or cancellation. Sends to the same conversation keep their order; different conversations progress independently.
 - **Losing a held message on page exit is accepted.** Closing, crashing, reloading or disposing the workspace runtime during an upload loses that message. The only protection is a leave confirmation: `beforeunload` in the page, and one native Stay/Leave confirmation in Electron for close, reload and quit.
 - **Archive, delete, logout, cache clearing and workspace switching never wait for sends.** Archive and delete cancel the held sends of their targets. The other actions are not gated.
-- **This PR owns the draft lifecycle only.** It reuses existing upload, local handoff, fallback and backfill semantics. Original-path references and permanent zero upload belong to a [separate follow-up](local-attachment-references.md). A paste over 500 KiB becomes a non-editable `text/plain` attachment named `pasted-text.txt`. This Spec is draft; packaged-device acceptance is outstanding.
+- **This PR owns the draft lifecycle only.** It reuses existing upload, local handoff, fallback and backfill semantics. Original-path references and permanent zero upload belong to a [separate follow-up](local-attachment-references.md). A paste at or above 50,000 characters becomes a non-editable `text/plain` attachment named `pasted-text.txt`. This Spec is draft; packaged-device acceptance is outstanding.
 
 ## 1. Scenario and scope
 
@@ -72,7 +72,7 @@ Pick/drop/paste only checks type, count, empty files, and existing size limits, 
 
 Users may remove attachments or replace draft sources before Send. Invalid attachments must not remain as silently omitted inputs. Revoke unused object URLs on removal/replacement while preserving data owned by another draft or held send. Navigating away from a conversation or landing and returning preserves attachments, text, references, and ordering within the same scope; restoring names without usable File/Blob data is insufficient.
 
-Changing target/configuration updates the draft and necessary validation without triggering upload. Removing all attachments before Send creates no transfer. Pasted text that fits the 500 KiB UTF-8 ceiling keeps the existing inline or folded behavior; text above that ceiling becomes the ordinary non-editable `pasted-text.txt` file draft. No new text-file editor or image-editing UI is added.
+Changing target/configuration updates the draft and necessary validation without triggering upload. Removing all attachments before Send creates no transfer. Pasted text below 50,000 characters after line-ending normalization and trimming keeps the existing inline or folded behavior; text at or above that threshold becomes the ordinary non-editable `pasted-text.txt` file draft. No new text-file editor or image-editing UI is added.
 
 ### 4.2 Reuse existing transfer after Send
 

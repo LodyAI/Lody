@@ -1,3 +1,4 @@
+import { bindTestPresenceApplication } from './presence-application-fixture';
 import { resolveSessionMessageAuthor } from '../src/session/message-author';
 import fs from 'node:fs/promises';
 import http from 'node:http';
@@ -58,7 +59,10 @@ describe('local platform zero-cloud integration', () => {
   let cloudConnectionAttempts: number;
   let originalEnv: NodeJS.ProcessEnv;
 
+  let presenceApplication: ReturnType<typeof bindTestPresenceApplication>;
+
   beforeEach(async () => {
+    presenceApplication = bindTestPresenceApplication(createSilentLogger());
     originalEnv = { ...process.env };
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-zero-cloud-'));
     cloudConnectionAttempts = 0;
@@ -86,6 +90,7 @@ describe('local platform zero-cloud integration', () => {
   });
 
   afterEach(async () => {
+    await presenceApplication.closeLegacy();
     process.env = originalEnv;
     await new Promise<void>((resolve, reject) => {
       trapServer.close((error) => (error ? reject(error) : resolve()));

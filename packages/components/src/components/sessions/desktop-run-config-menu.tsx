@@ -90,7 +90,8 @@ const styles = stylex.create({
   agentValue: { maxWidth: '9rem' },
   machineName: { maxWidth: '8rem' },
   roleName: { maxWidth: '11rem' },
-  agentName: { maxWidth: '9rem' },
+  /** The agent keeps its (capped) width: the model is what gives way first. */
+  agentName: { flexShrink: 0, maxWidth: '9rem' },
   modelList: {
     display: 'flex',
     flexDirection: 'column',
@@ -105,8 +106,12 @@ const styles = stylex.create({
     paddingInline: 0,
     justifyContent: 'center',
   },
-  /** The model keeps its tail when it truncates: `provider/model` loses the prefix. */
-  modelName: { maxWidth: '10rem', direction: 'rtl' },
+  /**
+   * The model shows in full while the face has room, and only truncates once
+   * the slot runs out. It keeps its tail when it does: `provider/model` loses
+   * the prefix.
+   */
+  modelName: { direction: 'rtl' },
   /** The "create a Role" mark at the end of the empty Role row. */
   createMark: {
     display: 'flex',

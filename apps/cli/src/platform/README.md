@@ -6,7 +6,8 @@ CLI-specific Effect platform pieces. The process layer they build on is
 
 | File                          | Responsibility                                                                                                                                                                                              |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `logger.ts`                   | Routes `Effect.log*` into the daemon's Lody logger; a facade's `logPrefix` adds the `[owner]` label.                                                                                                        |
+| `logger.ts`                   | Routes `Effect.log*`, allowlisted annotations and Cause categories into the existing daemon logger; trace follows its opt-in sink policy and `logPrefix` adds the owner label.                                                                                                        |
+| `presence.ts` | Supplies presence host capabilities and the published native SDK transport, projecting safe stage diagnostics into the existing logger. |
 | `process-options.ts`           | Composes the official process service, injected OS boundary and CLI logger; performs no process execution or Promise conversion. |
 | `sandbox/types.ts`            | `ProcessContainer` contract, resource types, termination policies.                                                                                                                                          |
 | `sandbox/noop-container.ts`   | Container without limits; tracks groups until they are empty, including after the leader exits.                                                                                                             |

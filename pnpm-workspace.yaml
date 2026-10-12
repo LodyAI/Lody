@@ -29,7 +29,7 @@ catalog:
   '@loro-dev/loro-cli': 0.6.0
   '@loro-dev/sqlite-riverrun': 0.2.0
   '@loro-dev/streams-client': 0.9.0
-  '@loro-dev/streams-crdt': 0.16.2
+  '@loro-dev/streams-crdt': 0.17.0
   '@tanstack/react-router': ^1.127.9
   '@tanstack/react-router-devtools': ^1.127.9
   '@tanstack/router-plugin': ^1.127.9
@@ -154,8 +154,9 @@ minimumReleaseAgeExclude:
   # Explicit Loro fix for concurrent-import replay stalls, reviewed in this change.
   - loro-crdt@1.16.3
   # Safe error provenance and context, reviewed with loro-repo#144.
-  - '@loro-dev/streams-crdt@0.16.2'
-  - '@loro-dev/streams-client@0.9.0'
+  # Native ephemeral lifecycle and shutdown regression reviewed with loro-streams#410.
+  - '@loro-dev/streams-crdt@0.16.2 || 0.17.0'
+  - '@loro-dev/streams-client@0.9.0 || 0.10.0'
   # Reviewed host AAD helper and safe protection reasons (loro-dev/loro-repo#146).
   - loro-repo@0.22.0
   # Adds the `remend` option the streaming Markdown renderer passes (lobehub/streamdown#5).

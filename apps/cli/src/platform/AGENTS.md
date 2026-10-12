@@ -30,3 +30,7 @@ CLI-specific Effect platform pieces over the shared process layer. File map:
   or successfully read empty membership proves the cgroup gone.
 - Legacy noop sandbox generations may be replaced only after their tracked trees
   are proven gone, including when their acquisition Scope already closed.
+
+- Effect log annotations use `logger.ts`'s explicit numeric/enum allowlist. Never
+  serialize arbitrary annotations, message objects or Cause contents to the file
+  sink. Trace passes through to the existing sink's opt-in level policy.

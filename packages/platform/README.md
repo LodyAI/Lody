@@ -24,6 +24,16 @@ envelope opening, scoped handle invalidation, lock-screen cancellation, and reco
 remain dependent on the reviewed crypto contracts and later host adapters. Key
 storage must live independently of ordinary caches and logout cleanup.
 
+## Streams token port
+
+`CloudStreamsTokenPort.createTokenProvider` creates the native shared token
+provider under its caller's Scope. Official cloud composition supplies credentials
+and HTTP; the local port has no such capability. Dispose native providers before
+cloud-port disposal. Renderer/durable Promise callers still use the explicit
+`createTokenProviderLegacy` and `LoroStreamsTokenProviderLegacy` compatibility
+boundary. [Token ownership](../shared/src/loro-streams-token/README.md) explains
+shared leases, failure retention and the remaining consumers.
+
 ## Validation
 
 ```sh

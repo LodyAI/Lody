@@ -11,14 +11,19 @@ import {
   LoginShellCacheLive,
   LoginShellCacheReporter,
   loginShellEnvLayer,
-  recoverLoginShellCacheShutdown,
 } from '@lody/shared/node/login-shell-env';
-import { squashProcessFailure } from '@lody/shared/node/process';
 import {
   bindLoginShellCacheLegacy,
   closeLoginShellApplicationLegacy,
 } from './agent/login-shell-env';
 import { toShared } from './platform/process-options';
+import { presencePlatformLayer } from './platform/presence';
+import { WorkspacePresenceOwnersLive } from './lib/loro/workspace-presence';
+import {
+  bindWorkspacePresenceApplicationLegacy,
+  recoverCliPresenceApplicationShutdown,
+  WorkspacePresenceLegacyFailure,
+} from './lib/loro/presence-legacy';
 import { version } from '@/pkg';
 import { startCommand } from './commands/start';
 
@@ -73,12 +78,18 @@ const shellCache = LoginShellCacheLive.pipe(
     )
   )
 );
-bindLoginShellCacheLegacy(
-  makeApplicationRuntime(shellCache, {
-    recover: recoverLoginShellCacheShutdown,
-    project: squashProcessFailure,
-  })
+const application = makeApplicationRuntime(
+  Layer.merge(
+    shellCache,
+    WorkspacePresenceOwnersLive.pipe(Layer.provide(presencePlatformLayer(cliLogger)))
+  ),
+  {
+    recover: recoverCliPresenceApplicationShutdown,
+    project: (cause) => new WorkspacePresenceLegacyFailure(cause),
+  }
 );
+bindLoginShellCacheLegacy(application);
+bindWorkspacePresenceApplicationLegacy(application);
 
 const program = new Command();
 

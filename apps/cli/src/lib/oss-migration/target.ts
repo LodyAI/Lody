@@ -16,7 +16,7 @@ import {
   type MachineId,
   type WorkspaceId,
 } from '@lody/shared';
-import type { LoroStreamsTokenProvider } from '@lody/platform';
+import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import { prepareCliStreamsGatewayBaseUrl } from '../loro/streams-access';
 import {
   assertOwnedDocument,
@@ -90,7 +90,7 @@ export type MigrationTarget = {
 
 /** Reads use isolated replicas. All shared-index writes use server-enforced CAS. */
 export async function openMigrationTarget(
-  provider: LoroStreamsTokenProvider,
+  provider: LoroStreamsTokenProviderLegacy,
   workspaceId: WorkspaceId
 ): Promise<MigrationTarget> {
   const baseUrl = await prepareCliStreamsGatewayBaseUrl(provider);

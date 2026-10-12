@@ -1,4 +1,10 @@
 import { fileLocksLegacy } from '@/utils/file-lock';
+import { Effect } from 'effect';
+import { awaitSessionHistoryOwner } from '@/session/session-history-owner';
+import {
+  getSessionHistoryRpcRejection,
+  putSessionHistoryRpcRejection,
+} from '@/session/session-history-rpc-rejections';
 import {
   SessionAttachmentTransfer,
   type UploadableImageFile,
@@ -195,7 +201,7 @@ import type {
   CloudNotificationsPort,
   CloudPort,
   CloudUsagePort,
-  LoroStreamsTokenProvider,
+  LoroStreamsTokenProviderLegacy,
 } from '@lody/platform';
 import { Logger } from '@/utils/logger';
 import { ProviderSetupManager } from './provider-setup-manager';
@@ -686,6 +692,7 @@ export class MessageHandler {
   private readonly machineLifecycleCapability: MachineLifecycleCapability;
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
   private readonly store = new SessionTransientStore();
+  private readonly historyOwnerAbort = new AbortController();
   private sessionActivePresence!: SessionActivePresenceController;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
   // Note: titleGenerationInFlight, archiveInFlight are self-cleaning
@@ -765,7 +772,7 @@ export class MessageHandler {
   private localProjectControlService: LocalProjectControlService;
   private localWorkspaceCatalog: LocalWorkspaceCatalogService;
   private machineRpcServer: LoroStreamsMachineRpcServer | null = null;
-  private machineRpcTokenProvider: LoroStreamsTokenProvider | null = null;
+  private machineRpcTokenProvider: LoroStreamsTokenProviderLegacy | null = null;
   private machineRpcGatewayBaseUrl: string | null = null;
   private machineRpcServerStartPromise: Promise<void> | null = null;
   private machineRpcServerRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3085,7 +3092,7 @@ export class MessageHandler {
       this.logger.debug(
         `[rpc-server:${this.machineId}] using Loro Streams RPC connect timeout ${rpcConnectTimeoutMs}ms`
       );
-      const streamsTokenProvider = streamsTokens.createTokenProvider({
+      const streamsTokenProvider = streamsTokens.createTokenProviderLegacy({
         workspaceId: this.workspaceId,
       });
       this.machineRpcTokenProvider = streamsTokenProvider;
@@ -3107,6 +3114,25 @@ export class MessageHandler {
         rpcVersion: LORO_STREAMS_RPC_VERSION,
         retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
         now: getServerNow,
+        historyRequestRejections: {
+          get: (request) =>
+            Effect.runPromise(
+              getSessionHistoryRpcRejection(
+                path.join(getLodyDataDir(), 'session-history-rpc-rejections.sqlite3'),
+                request,
+                getServerNow()
+              )
+            ),
+          put: (request, rejection) =>
+            Effect.runPromise(
+              putSessionHistoryRpcRejection(
+                path.join(getLodyDataDir(), 'session-history-rpc-rejections.sqlite3'),
+                request,
+                rejection,
+                getServerNow()
+              )
+            ),
+        },
         getMachineStatus: async () =>
           await this.executionService.getMachineStatus({
             type: 'machine/status',
@@ -6808,17 +6834,16 @@ export class MessageHandler {
   }
 
   private readonly resolveSessionHistoryOwnerSessionId = async (
-    sessionId: SessionId
+    sessionId: SessionId,
+    options?: { signal?: AbortSignal }
   ): Promise<SessionId> => {
-    const metaRecord = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
-    if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) {
-      throw new Error(`Session ${sessionId} is not available on this machine.`);
-    }
-    const meta = metaRecord.meta as SessionMeta;
-    if (meta.machineId !== this.machineId) {
-      throw new Error(`Session ${sessionId} is owned by another machine.`);
-    }
-    return sessionId;
+    const signal = options?.signal
+      ? AbortSignal.any([options.signal, this.historyOwnerAbort.signal])
+      : this.historyOwnerAbort.signal;
+    return await Effect.runPromise(
+      awaitSessionHistoryOwner(this.workspaceDocument.repo, sessionId, this.machineId, this.logger),
+      { signal }
+    );
   };
 
   private async readSessionHistoryForRpc(
@@ -9728,6 +9753,7 @@ export class MessageHandler {
    * Flush pending ACP updates and tear down session resources.
    */
   async cleanup(): Promise<void> {
+    this.historyOwnerAbort.abort();
     await this.iosSimulatorService.closeAll();
     this.logger.debug('Cleaning up message handler resources');
     this.cleanedUp = true;

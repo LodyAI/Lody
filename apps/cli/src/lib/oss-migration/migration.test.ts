@@ -16,7 +16,7 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import type { LoroStreamsTokenProvider } from '@lody/platform';
+import type { LoroStreamsTokenProviderLegacy } from '@lody/platform';
 import {
   manifestSchema,
   hashBytes,
@@ -223,7 +223,9 @@ const provider = {
   getShardHostSuffix: () => undefined,
   invalidate: () => {},
   createAuthCallback: () => async () => 'synthetic',
-} as unknown as LoroStreamsTokenProvider;
+  close: async () => {},
+  retryCleanup: async () => {},
+} satisfies LoroStreamsTokenProviderLegacy;
 const run = (
   manifest: Manifest,
   journal: Journal,

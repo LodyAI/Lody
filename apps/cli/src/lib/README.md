@@ -64,7 +64,10 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
 - `cloud-cli-port.ts` — the sole official-build composition root for cloud clients,
   endpoint-derived adapters, and their lifecycle. `start.ts` validates
   identity/deployment configuration once and injects the resulting `CloudPort` through
-  Fleet → Lody → MachineRuntime → MessageHandler/Loro/session services.
+  Fleet → Lody → MachineRuntime → MessageHandler/Loro/session services. Its native
+  Streams token factory requires the caller's Scope; it retains Legacy token
+  providers until cloud disposal and reports failed cleanup. Existing durable and
+  Machine RPC consumers keep the visible Legacy token port until their owners migrate.
 - `cloud-pr-association.ts` — hosted PR association HTTP requests and shared failure
   cooldowns; independent of GitHub observation and publication.
 - `local-loro-data-plane-server.ts` — Electron renderer ↔ CLI local Loro data plane
@@ -111,6 +114,12 @@ provides LocalProjects. See the [decision](../../../../.agents/notes/implemented
   ([AGENTS.md](code-collab/AGENTS.md)).
 - `file-preview/` — the `file/preview` (File Preview v3) read path
   ([AGENTS.md](file-preview/AGENTS.md)).
+- `loro/workspace-presence.ts` — native workspace/remote-generation owner;
+  `presence-replica.ts` keeps synchronous origin-partitioned CRDT state and
+  `presence-legacy.ts` is its application-runtime execution door. Product doc/bridge
+  consumers borrow the CLI application registry and one native
+  token provider; the platform adapter uses streams-crdt 0.17.0. See the
+  [owning scope](../../../../.agents/notes/implemented/architecture/2026-10-12-effect-workspace-presence.md).
 - `loro/` — Loro repo/runtime layer, presence, machine flock rooms, and connection
   recovery ([AGENTS.md](loro/AGENTS.md)). `session-model-summary.ts` projects actual
   assistant models through shallow scalar/count reads of already-open documents.

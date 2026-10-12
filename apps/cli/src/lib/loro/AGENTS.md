@@ -69,27 +69,29 @@ selector values to collaborators.
 
 ## Presence is ephemeral and partitioned by origin
 
-Read [the presence rules](../../../../../.agents/docs/cli-lib-loro-presence.md) before
-publishing presence or changing `presence.ts`/`session-active-presence.ts`: the origin
-partition and the two stores, the single-owner rule for session active presence, and
-turn-finalization side effects. Intent and the reader contract:
-`specs/loro-ephemeral-presence-channel.md`.
+Read [presence contracts](../../../../../.agents/docs/cli-lib-loro-presence.md) before changes:
+origin stores and session ownership. Intent: `specs/loro-ephemeral-presence-channel.md`.
 
-A workspace has ONE serial presence queue and the machine heartbeat shares it. Trigger
-a presence write ONLY from a timer, a lifecycle transition, or a user navigation,
-NEVER from a stream/progress/chunk callback however small one payload is, and bound
-every field in `packages/shared/src/presence.ts`. A burst can delay the heartbeat past its 90s freshness window despite a joined room. The `(phase, detail)` dedupe is NOT a rate
-limit: a detail that changes per emit (percentage, counter, label) defeats it.
+The workspace's ONE serial queue carries machine heartbeats. Publish only from a
+timer, lifecycle transition or navigation; never stream/progress/chunk callbacks.
+Bound every field in shared presence schemas. Same-key coalescing does not bound
+distinct keys or in-flight writes; `(phase, detail)` dedupe is not a rate limit.
+Safe fields only; barriers are not exact heartbeat/peer receipts. Joined/close
+does not prove fresh delivery/POST cleanup. Never write periodic doc-meta lastSeen or
+lastRunningSeen; write meta timestamps only at status transitions. MachineMeta.lastSeen
+is retired even at registration. Online checks use presence; null from
+getOnlineMachineIds means unknown, never offline.
 
-INVARIANT: `initializing` is bounded per stage from the last phase/detail change; on
-expiry the heartbeat stops and `notifyInitializationStalled` fails the turn. Spec:
+`initializing` has a deadline per stage from the last phase/detail change. Expiry
+stops heartbeat and notifyInitializationStalled fails the turn:
 `specs/session-initialization-deadline.md`.
 
-Never reintroduce periodic doc-meta writes (`lastSeen`/`lastRunningSeen`) — they stall
-Loro flush; meta timestamps are written only at status transitions. Durable
-`MachineMeta.lastSeen` is retired (not written even at registration); machine online
-checks read presence only, and `getOnlineMachineIds()` returning null means the
-presence room is not joined — status unknown, not offline.
+`workspace-presence.ts` owns Scopes; `presence-replica.ts` is synchronous.
+Only presence-legacy executes in the app runtime. No kernel Promise/timers,
+extra runtime or POST/SSE queue. Failed release retains work/Cause/owner
+and fences replacement; close joins completion. Revoke preserves local
+production. CLI owns registry/token Scopes; durable/presence share one provider.
+`platform/presence.ts` consumes the published SDK native entry.
 
 ## Device resources use `machine-monitor.ts`
 

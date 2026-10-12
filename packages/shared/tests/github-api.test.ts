@@ -22,6 +22,18 @@ describe('GitHub PR live reads', () => {
     vi.unstubAllGlobals();
   });
 
+  it('reads public PR comments without an Authorization header', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, options: RequestInit) => {
+        if (new Headers(options.headers).has('authorization'))
+          return new Response(null, { status: 401 });
+        return new Response(JSON.stringify([]));
+      })
+    );
+    await expect(githubFetchPRIssueComments('', 'owner/public', 42)).resolves.toEqual([]);
+  });
+
   it('forwards reload mode to every request in a manual refresh', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       const url = String(input);
@@ -321,6 +333,25 @@ describe('githubFetchFileAtCommit', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
+
+  it.each([false, true])(
+    'reads public file content anonymously (raw fallback: %s)',
+    async (fallback) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, options: RequestInit) => {
+          if (new Headers(options.headers).has('authorization'))
+            return new Response(null, { status: 401 });
+          if (fallback && String(url).startsWith('https://api.github.com/'))
+            return new Response('too large', { status: 403 });
+          return new Response('public file content');
+        })
+      );
+      await expect(
+        githubFetchFileAtCommit('', 'owner/public', 'file.txt', 'commit-sha')
+      ).resolves.toBe('public file content');
+    }
+  );
 
   it('rejects API file bodies larger than the byte cap', async () => {
     vi.stubGlobal(

@@ -30,6 +30,9 @@ const createTestCloudPort = (
       createTokenProvider: () => {
         throw new Error('not used by this Fleet unit test');
       },
+      createTokenProviderLegacy: () => {
+        throw new Error('not used by this Fleet unit test');
+      },
     },
   };
 };

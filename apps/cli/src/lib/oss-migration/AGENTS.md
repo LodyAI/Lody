@@ -24,3 +24,7 @@
 - Wire process SIGINT/SIGTERM into the lock and Effect cancellation signal.
   Propagate interruption into network signals, bound waits, and await cancellation
   cleanup. Only short local checkpoints may defer interruption; never mask uploads.
+
+- The command owns the native token provider Scope. Borrow the shared Legacy facade
+  only for the Streams SDK Promise callbacks; close target connections before the
+  facade and provider Scope. Never pass native Effect callbacks directly to the SDK.

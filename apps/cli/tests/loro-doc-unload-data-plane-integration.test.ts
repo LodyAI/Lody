@@ -1,3 +1,4 @@
+import { bindTestPresenceApplication } from './presence-application-fixture';
 import { updateTestHistory } from './history-port-fixture';
 /**
  * End-to-end coverage of the CLI seam that pairs a repo doc eviction with the
@@ -251,7 +252,10 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
   let tempDir: string;
   let originalEnv: NodeJS.ProcessEnv;
 
+  let presenceApplication: ReturnType<typeof bindTestPresenceApplication>;
+
   beforeEach(async () => {
+    presenceApplication = bindTestPresenceApplication(createSilentLogger());
     originalEnv = { ...process.env };
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'lody-doc-unload-dp-'));
     process.env.LODY_PLATFORM = 'local';
@@ -259,6 +263,7 @@ describe('session GC unloads the repo doc and invalidates its local data-plane r
   });
 
   afterEach(async () => {
+    await presenceApplication.closeLegacy();
     process.env = originalEnv;
     await fs.rm(tempDir, { recursive: true, force: true });
   });

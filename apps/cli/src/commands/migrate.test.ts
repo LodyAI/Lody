@@ -10,10 +10,11 @@ vi.mock('@/lib/auth', () => ({
     throw new Error('Login must not be reached');
   },
 }));
-import { migrateCommand, withMigrationLock } from './migrate';
+import { migrateCommand, withMigrationLock, withMigrationTokens } from './migrate';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { Effect } from 'effect';
+import { Effect, Exit } from 'effect';
+import type { LoroStreamsTokenProvider } from '@lody/platform';
 import { migrationStep } from '@/lib/oss-migration/engine';
 const previous = process.env.LODY_PLATFORM;
 afterEach(() => {
@@ -94,3 +95,49 @@ it.each(['SIGINT', 'SIGTERM'] as const)(
     expect(events.at(-1)).toBe('lock-reacquired');
   }
 );
+
+it.each([false, true])('owns native token cleanup after migration failure=%s', async (fail) => {
+  const events: string[] = [];
+  const provider: LoroStreamsTokenProvider = {
+    getToken: () =>
+      Effect.sync(() => {
+        events.push('get-token');
+        return 'synthetic';
+      }),
+    createAuthCallback: () => () => Effect.succeed('synthetic-auth'),
+    getGatewayBaseUrl: () => 'https://streams.test.invalid',
+    getShardHostSuffix: () => undefined,
+    invalidate: () => Effect.void,
+    health: Effect.die('Health is not read by migration'),
+    close: Effect.sync(() => {
+      events.push('token-closed');
+    }),
+    retryCleanup: Effect.void,
+  };
+  const owned = Effect.acquireRelease(Effect.succeed(provider), () =>
+    Effect.sync(() => {
+      events.push('scope-closed');
+    })
+  );
+  const exit = await Effect.runPromiseExit(
+    withMigrationTokens(owned, (tokens) =>
+      Effect.acquireRelease(Effect.void, () =>
+        Effect.sync(() => {
+          events.push('target-closed');
+        })
+      ).pipe(
+        Effect.flatMap(() =>
+          migrationStep(async () => {
+            expect(await tokens.getToken()).toBe('synthetic');
+            expect(await tokens.createAuthCallback()({ reason: 'initial' })).toBe('synthetic-auth');
+            expect(tokens.getGatewayBaseUrl()).toBe('https://streams.test.invalid');
+            if (fail) throw new Error('Synthetic migration failure');
+          })
+        ),
+        Effect.scoped
+      )
+    )
+  );
+  expect(Exit.isFailure(exit)).toBe(fail);
+  expect(events).toEqual(['get-token', 'target-closed', 'token-closed', 'scope-closed']);
+});

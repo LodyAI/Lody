@@ -89,10 +89,16 @@ append responses, partial publication followed by edits/deletion, historical-onl
 fork attachment freezing/resolution, in-place attachment replacement, process signals, cancellation into a real transfer fetch, and a
 virtual-clock timeout. Usage: [migration README](../../../../apps/cli/src/lib/oss-migration/README.md).
 
-The 27 focused migration tests pass. The full CLI suite passes 4064 tests (four skipped) when the session-injected
+The 29 focused migration tests pass. The full CLI suite passes 4064 tests (four skipped) when the session-injected
 `GIT_EXEC_PATH` is removed from the test environment; that injection caused the
 previous unrelated `context_unreadable` fixture failure. The cloud bundle exceeded the mandated 2 GB heap at chunk
 rendering, reproduced with the unchanged baseline entry. Documentation checks have
 six existing missing Kimi/Pi submodule links. These are not evidence of hosted E2E.
 
 The requested independent review closed the five findings after repeated adversarial probes. Additional probes covered merged commits, repeated replacements, forks/multiple branches, corrupt historical bytes (zero uploads), and real OS SIGINT/SIGTERM cleanup while holding the migration lock. No remaining reproducible P0/P1/P2 was reported in the supported full-Loro scope.
+
+The command acquires the native Streams token provider within its Effect Scope and
+borrows the existing shared Legacy facade at the SDK boundary (no additional runtime
+or cache). Success and failure both close target connections before the facade and
+provider Scope. Validate against the PR merged with current main: an older standalone
+branch can typecheck while the merged native token API does not.

@@ -75,7 +75,7 @@ from "we could not check".
 
 Channel constants, payload schemas and the freshness predicate are in
 `packages/shared/src/presence.ts`. The workspace transport, its two stores and the machine
-heartbeat timer are in `apps/cli/src/lib/loro/presence.ts`; session active presence has a single
+heartbeat timer are in `apps/cli/src/lib/loro/workspace-presence.ts`; session active presence has a single
 owner in `apps/cli/src/lib/loro/session-active-presence.ts`. Reader-side interpretation is in
 `packages/components/src/atoms/presence.ts` and, for the CLI, in
 `apps/cli/src/commands/machine.ts`, whose `onlineStatus` carries the three states through

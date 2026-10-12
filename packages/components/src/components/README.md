@@ -15,6 +15,11 @@ Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own th
 
 ## Sidebar and session rows
 
+Machine-section ordering uses [`sidebar-machine-order.ts`](sidebar-machine-order.ts)
+and the presentation identity in [`local-probe.ts`](../atoms/local-probe.ts).
+CLI outages preserve the known desktop machine's position; local actions still
+use the live identity. See the [ordering Spec](../../../../specs/sidebar-project-ordering.md).
+
 The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`, and
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.

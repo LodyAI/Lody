@@ -100,7 +100,7 @@ import {
   type SessionChatInputAreaProps,
 } from '../src/components/sessions/session-chat-input-area';
 import { initI18n } from '../src/i18n';
-import { MAX_PASTED_TEXT_BYTE_SIZE } from '../src/lib/pasted-text-draft';
+import { PASTED_TEXT_FILE_MIN_CHAR_COUNT } from '../src/lib/pasted-text-draft';
 import { toast } from '@/lib/toast';
 
 (
@@ -921,8 +921,8 @@ describe('SessionChatInputArea submission feedback', () => {
       errorToast.mockRestore();
     });
 
-    it('turns a paste past the byte ceiling into a text attachment', async () => {
-      const pastedText = 'a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE + 1);
+    it.each(['a', '日'])('turns 50,000 %s characters into a text attachment', async (character) => {
+      const pastedText = character.repeat(50_000);
       const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
       const textarea = await renderComposer({
         onSendMessage: async (...args) => {
@@ -956,7 +956,7 @@ describe('SessionChatInputArea submission feedback', () => {
     });
 
     it('merges the generated file with real clipboard files', async () => {
-      const pastedText = 'a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE + 1);
+      const pastedText = 'a'.repeat(PASTED_TEXT_FILE_MIN_CHAR_COUNT + 1);
       const submissions: Parameters<SessionChatInputAreaProps['onSendMessage']>[] = [];
       const textarea = await renderComposer({
         onSendMessage: async (...args) => {
@@ -981,9 +981,9 @@ describe('SessionChatInputArea submission feedback', () => {
       expect(errorToast).not.toHaveBeenCalled();
     });
 
-    it('still collapses a paste that sits at the ceiling', async () => {
+    it('still collapses a paste below 50,000 characters', async () => {
       const textarea = await renderComposer({ onSendMessage: async () => true });
-      const event = createPasteEvent('a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE));
+      const event = createPasteEvent('a'.repeat(49_999));
 
       await act(async () => {
         textarea.dispatchEvent(event);
