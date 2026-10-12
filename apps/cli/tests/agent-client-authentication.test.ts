@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ACPSessionId, AcpSessionNotification, SessionId } from '@lody/shared';
+import {
+  SESSION_MCP_APP_MAX_RESPONSE_BYTES,
+  type ACPSessionId,
+  type AcpSessionNotification,
+  type SessionId,
+} from '@lody/shared';
 import type { AuthMethod, InitializeResponse, NewSessionResponse } from '@agentclientprotocol/sdk';
 
 const connectionMocks = vi.hoisted(() => ({
@@ -220,6 +225,7 @@ describe('AgentClient Kimi authentication and resume', () => {
             lody: {
               elicitation: { version: 1, answerNotes: true },
               subagentEvents: { version: 1 },
+              mcpApps: { version: 1 },
             },
           },
         }),
@@ -281,5 +287,128 @@ describe('AgentClient Kimi authentication and resume', () => {
       modelId: 'grok-code-fast-1',
       name: 'Grok Code Fast 1',
     });
+  });
+});
+
+describe('AgentClient MCP App bridge', () => {
+  const target = { sessionId: 'lody-session', toolCallId: 'call-1', userId: 'user-1' } as const;
+  const agentRequests: Array<{ method: string; params: unknown }> = [];
+
+  const startClient = async (agentLody: Record<string, unknown>, reply: () => unknown) => {
+    vi.clearAllMocks();
+    agentRequests.length = 0;
+    connectionMocks.abort = new AbortController();
+    connectionMocks.initialize.mockResolvedValue({
+      ...initializeResponse(),
+      agentCapabilities: { _meta: { lody: agentLody } },
+    });
+    connectionMocks.newSession.mockResolvedValue({ sessionId: 'acp-session' });
+    connectionMocks.request.mockImplementation(async (method: string, params: unknown) => {
+      agentRequests.push({ method, params });
+      return reply();
+    });
+    const client = createClient('codex');
+    await client.startSession({} as never, '/tmp');
+    return client;
+  };
+  const failure = (code: string) => ({
+    type: 'session/mcp-app_response',
+    sessionId: 'lody-session',
+    toolCallId: 'call-1',
+    ok: false,
+    code,
+    error: expect.any(String),
+  });
+
+  it('reports an agent without the mcpApps capability as unavailable', async () => {
+    const client = await startClient({}, () => ({}));
+
+    await expect(client.requestMcpApp({ op: 'load', ...target })).resolves.toEqual(
+      failure('MCP_APP_UNAVAILABLE')
+    );
+    expect(agentRequests).toEqual([]);
+  });
+
+  it('forwards each op to the agent session and returns the validated result', async () => {
+    const loaded = {
+      app: { version: 1, server: 'apps', tool: 'graph', resourceUri: 'ui://apps/graph' },
+      toolInput: { query: 'x' },
+      toolResult: { content: [{ type: 'text', text: 'done' }] },
+    };
+    const client = await startClient({ mcpApps: { version: 1 } }, () => loaded);
+
+    await expect(client.requestMcpApp({ op: 'load', ...target })).resolves.toEqual({
+      type: 'session/mcp-app_response',
+      sessionId: 'lody-session',
+      toolCallId: 'call-1',
+      ok: true,
+      result: loaded,
+    });
+    await client.requestMcpApp({ op: 'resource_read', ...target, uri: 'ui://apps/graph' });
+    await client.requestMcpApp({
+      op: 'tool_call',
+      ...target,
+      name: 'expand',
+      arguments: { id: 7 },
+    });
+
+    // The agent only ever sees its own session id, never the Lody user or session.
+    expect(agentRequests).toEqual([
+      { method: '_lody/mcp_apps/load', params: { sessionId: 'acp-session', toolCallId: 'call-1' } },
+      {
+        method: '_lody/mcp_apps/resource/read',
+        params: { sessionId: 'acp-session', toolCallId: 'call-1', uri: 'ui://apps/graph' },
+      },
+      {
+        method: '_lody/mcp_apps/tool/call',
+        params: {
+          sessionId: 'acp-session',
+          toolCallId: 'call-1',
+          name: 'expand',
+          arguments: { id: 7 },
+        },
+      },
+    ]);
+  });
+
+  it('serves an app document as large as a real MCP App once JSON-escaped', async () => {
+    // Same raw size as a real app's single-file HTML; quotes and newlines grow it when escaped.
+    const chunk = 'a="b";\n';
+    const html = chunk.repeat(Math.ceil(7_091_831 / chunk.length));
+    const contents = [
+      { uri: 'ui://apps/graph', mimeType: 'text/html;profile=mcp-app', text: html },
+    ];
+    const client = await startClient({ mcpApps: { version: 1 } }, () => ({ contents }));
+
+    const response = await client.requestMcpApp({
+      op: 'resource_read',
+      ...target,
+      uri: 'ui://apps/graph',
+    });
+
+    expect(Buffer.byteLength(JSON.stringify(contents))).toBeGreaterThan(8 * 1024 * 1024);
+    expect(response).toMatchObject({ ok: true, result: { contents } });
+  });
+
+  it.each([
+    [
+      'an agent error',
+      () => {
+        throw new Error('Tool is not visible to apps');
+      },
+      'MCP_APP_AGENT_ERROR',
+    ],
+    ['a malformed agent result', () => ({ content: 'not-a-list' }), 'MCP_APP_AGENT_ERROR'],
+    [
+      'an oversized agent result',
+      () => ({ content: [{ type: 'text', text: 'x'.repeat(SESSION_MCP_APP_MAX_RESPONSE_BYTES) }] }),
+      'MCP_APP_RESPONSE_TOO_LARGE',
+    ],
+  ])('turns %s into a typed failure', async (_label, reply, code) => {
+    const client = await startClient({ mcpApps: { version: 1 } }, reply);
+
+    await expect(
+      client.requestMcpApp({ op: 'tool_call', ...target, name: 'expand' })
+    ).resolves.toEqual(failure(code));
   });
 });

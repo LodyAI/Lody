@@ -206,6 +206,7 @@
   "devDependencies": {
     "@lody/configs": "workspace:*",
     "@lody/e2ee-core": "workspace:*",
+    "@modelcontextprotocol/ext-apps": "2.0.0",
     "@playwright/test": "^1.58.2",
     "@radix-ui/react-avatar": "^1.1.10",
     "@storybook/react": "^10.6.0",

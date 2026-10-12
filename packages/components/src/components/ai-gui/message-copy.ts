@@ -6,6 +6,7 @@ import {
   type MessageTextSpanKind,
 } from '@lody/shared';
 import { normalizeSessionLinksForExport } from '@lody/shared/session-link-export';
+import { getRenderableMcpApp } from './mcp-app/mcp-app-host';
 
 export const USER_TEXT_RENDER_LINE_LIMIT = 10;
 export const USER_TEXT_RENDER_CHAR_LIMIT = 900;
@@ -34,7 +35,8 @@ const isNeverCollapsedAssistantItem = (content: MessageContent | undefined): boo
   // answer the same way an attachment does. Left out, a turn that ends in one
   // reports no visible answer and folds its own reply into "Worked for …".
   content?.type === 'system_notice' ||
-  (content?.type === 'tool_call' && content.kind === 'switch_mode');
+  (content?.type === 'tool_call' &&
+    (content.kind === 'switch_mode' || getRenderableMcpApp(content) !== null));
 
 /**
  * The answer is the final contiguous run of text before the never-collapsed
