@@ -2180,7 +2180,7 @@ const SessionDetail = ({
     requestSessionDispatch,
     touchSessionActivity,
     updateSessionTitle,
-    archiveSession,
+    requestArchiveSession: archiveSession,
     setSessionTabClosed,
     restoreSession,
     deleteSessions,
@@ -2911,8 +2911,11 @@ const SessionDetail = ({
   // Archive the parent session from the header menu (desktop)
   const handleArchiveCurrentSession = useCallback(async () => {
     if (!activeSession) return;
-    await archiveSession(activeSession.id);
-    handleBackToList();
+    try {
+      if ((await archiveSession(activeSession.id)) === 'archived') handleBackToList();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
   }, [activeSession, archiveSession, handleBackToList]);
 
   // Archive the active tab (mobile more menu) — archives child if child is active, parent otherwise
@@ -2923,11 +2926,16 @@ const SessionDetail = ({
       return;
     }
     if (activeTabSessionId && activeTabSessionId !== sessionId) {
-      await archiveSession(activeTabSessionId as SessionId);
+      await archiveSession(activeTabSessionId as SessionId).catch((error: unknown) =>
+        toast.error(error instanceof Error ? error.message : String(error))
+      );
     } else {
       // Archiving the parent
-      await archiveSession(activeSession.id);
-      handleBackToList();
+      try {
+        if ((await archiveSession(activeSession.id)) === 'archived') handleBackToList();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+      }
     }
   }, [
     activeDraftTab,
@@ -2963,12 +2971,6 @@ const SessionDetail = ({
 
   // Confirmation state for permanently deleting the current archived session
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-
-  // Confirmation state for archiving the current chat via the keyboard shortcut. The
-  // shortcut is easy to fire by accident, so it asks before archiving (Enter confirms,
-  // Esc cancels). Menu/button archive actions stay immediate.
-  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
-  const archiveConfirmButtonRef = useRef<HTMLButtonElement>(null);
 
   // Rename dialog target for the mobile header more menu
   const [renameDialogTarget, setRenameDialogTarget] = useState<RenameSessionDialogTarget | null>(
@@ -4649,7 +4651,7 @@ const SessionDetail = ({
     when: () =>
       Boolean(activeTabSession) && !isEmptyConversation && activeSession?.isArchived !== true,
     run: () => {
-      setArchiveConfirmOpen(true);
+      void handleArchiveActiveTab();
     },
   });
 
@@ -5521,42 +5523,6 @@ const SessionDetail = ({
             }}
           >
             {t('archive.delete', 'Delete permanently')}
-          </Button>
-        </Dialog.Footer>
-      </Dialog.Content>
-    </Dialog.Root>
-  );
-
-  const archiveConfirmDialog = (
-    <Dialog.Root open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
-      <Dialog.Content
-        className={cn(isMobile ? '' : 'max-w-sm')}
-        // Focus the confirm button on open so Enter archives; Esc still cancels (Radix
-        // default close-on-escape). Rejected onKeyDown-on-content: it double-fires when a
-        // button already has focus.
-        initialFocus={() => archiveConfirmButtonRef.current}
-      >
-        <Dialog.Header>
-          <Dialog.Title>{t('sessions.archiveConfirm.title', 'Archive chat?')}</Dialog.Title>
-          <Dialog.Description>
-            {t(
-              'sessions.archiveConfirm.description',
-              'This chat will move to the archive. You can restore it later.'
-            )}
-          </Dialog.Description>
-        </Dialog.Header>
-        <Dialog.Footer>
-          <Button variant="secondary" onClick={() => setArchiveConfirmOpen(false)}>
-            {t('common.cancel', 'Cancel')}
-          </Button>
-          <Button
-            ref={archiveConfirmButtonRef}
-            onClick={() => {
-              setArchiveConfirmOpen(false);
-              void handleArchiveActiveTab();
-            }}
-          >
-            {t('sessions.archiveConfirm.confirm', 'Archive')}
           </Button>
         </Dialog.Footer>
       </Dialog.Content>
@@ -6518,7 +6484,6 @@ const SessionDetail = ({
         </Drawer>
         {fileQuickOpenDialog}
         {deleteConfirmDialog}
-        {archiveConfirmDialog}
         {dirtyForkDialog}
         {worktreeForkObservers}
         <SessionShareDialog
@@ -7063,7 +7028,6 @@ const SessionDetail = ({
           copies) so the `session.renameCurrent` / `session.archiveCurrent` keyboard
           shortcuts have a mounted target on desktop. They portal out, so tree position
           doesn't matter. */}
-      {archiveConfirmDialog}
       {dirtyForkDialog}
       {worktreeForkObservers}
       <SessionShareDialog

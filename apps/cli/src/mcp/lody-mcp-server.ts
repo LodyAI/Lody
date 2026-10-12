@@ -774,7 +774,12 @@ const SessionChatManyToolInputSchema = z
 const OperationGetToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
 const OperationCancelToolInputSchema = z.object({ operationId: LodyOperationIdSchema }).strict();
 
-const SessionArchiveToolInputSchema = z.object({ sessionId: z.string().trim().min(1) }).strict();
+const SessionArchiveToolInputSchema = z
+  .object({
+    sessionId: z.string().trim().min(1),
+    mode: z.enum(['wait', 'immediate', 'cancel']).optional(),
+  })
+  .strict();
 
 const SessionTitleToolInputSchema = z
   .string()
@@ -4449,7 +4454,7 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
     {
       title: 'Archive a Lody session',
       description:
-        'Idempotently archive a Session. Archiving a parent cascades to child Sessions; pending Operation Deliveries remain pending until a human restores the Session.',
+        'Request archive of a Session and its descendants. Default wait mode returns pending promptly and waits for all running work and queued messages to finish. immediate interrupts work and archives now; cancel cancels pending archive. Never poll for your own turn to finish.',
       inputSchema: SessionArchiveToolInputSchema,
     },
     async (args: SessionArchiveToolInput) => {
@@ -4461,6 +4466,11 @@ export function buildSessionToolServer(handlers?: SessionToolHandlers): McpServe
           await runLodyCliJson([
             'session',
             'archive',
+            ...(args.mode === 'immediate'
+              ? ['--immediate']
+              : args.mode === 'cancel'
+                ? ['--cancel-pending']
+                : []),
             '--workspace',
             getMcpWorkspaceId(ctx),
             '--json',

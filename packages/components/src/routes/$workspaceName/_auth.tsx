@@ -1,3 +1,4 @@
+import { SessionArchiveDialog } from '@/components/session-archive-dialog';
 import { createFileRoute, Outlet } from '@tanstack/react-router';
 import { BootNavigate } from '@/components/boot-navigate';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -476,6 +477,7 @@ function AuthenticatedWorkspaceContent({
       <AppCommands />
       <CommandPalette />
       <AutoArchivePrWatcher />
+      <SessionArchiveDialog />
       {showWorkspaceCheckout && <WorkspaceCheckoutPendingDialog />}
     </>
   );

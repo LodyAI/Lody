@@ -2,18 +2,15 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Module map and contracts: [README.md](README.md).
-Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
+[Module contracts](README.md); [worktree rules](worktree/AGENTS.md).
 
 ## Authorization and identity
 
 - Authorize the target machine through the injected access capability with the source CLI token;
   MCP delegation verifies the frozen Turn requester; Operation-side rules are in
   [../mcp/AGENTS.md](../mcp/AGENTS.md).
-- Never send an untrusted requester through workspace Machine RPC: it authenticates no member
-  identity.
-- Live status is a target-daemon Machine RPC read; durable metadata is not a live-presence
-  substitute.
+- Workspace Machine RPC authenticates no member identity; never send untrusted requesters.
+- Read live status from target-daemon Machine RPC, never durable metadata.
 - Derive the human identity from the active dispatch/execution runtime and fail closed when none
   exists; retries and recovery never reread mutable history.
 - Machine/Provider credentials stay host-scoped. Attribution, authorization and commits
@@ -24,7 +21,7 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Dispatch
 
-- Queue promotion preserves frozen fields; remove its row only after history and activation succeed.
+- Queue promotion preserves frozen fields; remove rows only after history and activation succeed.
 - Absent session meta is "unknown", not foreign: hold the TTL-bounded RPC stash until meta lands;
   drop it only on a definitive verdict.
 - Subscribe to RPC offers BEFORE awaiting Doc Room join/sync and never dispatch from the RPC
@@ -38,8 +35,7 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
   pointers in a consumer.
 - Never inspect historical Session documents to infer work, or publish or clear active presence
   here (`../lib/loro/session-active-presence.ts`).
-- Keep bootstrap and live reconciliation bounded as README describes; add no per-trigger scan or
-  extra throttle.
+- Keep reconciliation bounded per README; add no per-trigger scan or throttle.
 
 ## Turn execution
 
@@ -73,7 +69,10 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
 
 ## Lifecycle
 
-- For Roost reads and writes, follow [paging rules](README.md#roost-history-paging).
+- Deferred archive waits for group execution, persistence, Goals and all queued/held input,
+  never `idle`; immediate archive may interrupt. [Contract](README.md#deferred-archive).
+
+- Roost follows [paging rules](README.md#roost-history-paging).
 
 - `Session.createAgent` gates each ACP spawn; failed spawns reject JSON-RPC. Terminals spawn
   protocol argv (`sh -c` only for unsplit commands). Managed Codex reused-refresh startup
@@ -82,8 +81,8 @@ Worktree rules: [worktree/AGENTS.md](worktree/AGENTS.md).
   the machine publishes `['dotlodyPath']` for frontends to derive them.
 - INVARIANT: any `sandbox.spawn` whose OUTPUT is the result must pass `captureOutput: true` (ACP
   stdio deliberately does not), and the capture buffer stays capped at 4 MiB.
-- Shutdown is two-phase: `cleanUp({ keepWorkspaceDocumentOpen: true })`, then plain `cleanUp()`
-  after MessageHandler's final flush. Never tear the document down first.
+- Shutdown: `cleanUp({ keepWorkspaceDocumentOpen: true })`, then `cleanUp()` after
+  MessageHandler's final flush. Never tear the document down first.
 
 ## Sagas
 

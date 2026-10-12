@@ -1,4 +1,8 @@
 import {
+  SessionArchiveCoordinator,
+  isSessionArchiveBusy,
+} from '../session/session-archive-coordinator';
+import {
   SessionAttachmentTransfer,
   type UploadableImageFile,
   type UploadedSessionImage,
@@ -693,6 +697,8 @@ export class MessageHandler {
   private readonly archiveInFlight = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
   private readonly worktreeGc: WorktreeGarbageCollector;
+  private readonly archiveCoordinator: SessionArchiveCoordinator;
+  private archiveRetryTimer: NodeJS.Timeout | null = null;
   private worktreeGcTimer: NodeJS.Timeout | null = null;
   private detachWorktreeGcSyncListener: (() => void) | null = null;
   private readonly deleteLocalProjectInFlight = new Set<LocalProjectId>();
@@ -3391,6 +3397,9 @@ export class MessageHandler {
       this.userId
     );
     this.sessionDispatchWatcher = new SessionDispatchWatcher({
+      onSessionCheckComplete: () => {
+        if (this.archiveCoordinator?.hasPendingRequests) void this.archiveCoordinator.schedule();
+      },
       logger: this.logger,
       machineId: this.machineId,
       workspaceId: this.workspaceId,
@@ -3427,6 +3436,63 @@ export class MessageHandler {
         });
       },
       onFatalAuthFailure: (error) => this.onFatalAuthFailure?.(error),
+    });
+    this.archiveCoordinator = new SessionArchiveCoordinator({
+      machineId: this.machineId,
+      list: async () => {
+        if (
+          this.cloudPort.kind !== 'local' &&
+          !this.workspaceDocument.hasCompletedInitialMetaSync()
+        )
+          return [];
+        return (await listAliveSessionMetas(this.workspaceDocument)).map(({ meta }) => meta);
+      },
+      read: async (id) =>
+        (await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(id)))?.meta as
+          | SessionMeta
+          | undefined,
+      write: async (id, patch) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(id), patch);
+        await this.workspaceDocument.repo.flush();
+      },
+      isBusy: async (session) => {
+        const hasRuntimeWork = () => {
+          const snapshot = this.executionService.getExecutionSnapshot(session.id);
+          return (
+            snapshot.hasActiveTurn ||
+            snapshot.hasBlockingPendingCreate ||
+            Boolean(this.sessionManager.getPendingSession(session.id)) ||
+            this.sessionDispatchWatcher.hasPendingDispatch(session.id) ||
+            this.store.hasPendingTurnWork(session.id) ||
+            (this.store.has(session.id) && this.store.get(session.id).pendingUsageHandlers.size > 0)
+          );
+        };
+        if (hasRuntimeWork()) return true;
+        const doc = await this.workspaceDocument.getOrCreateSessionDoc(session.id);
+        if (this.cloudPort.kind !== 'local') {
+          await doc.ensureDocRoomJoined();
+          if (!(await doc.waitUntilSynced())) return true;
+        }
+        const backend = await this.getSessionBackend(doc);
+        return isSessionArchiveBusy({
+          hasRuntimeWork,
+          readQueue: () => backend.getMessageQueue(),
+          hasActiveGoal: () => this.hasActiveGoal(session.id),
+          readMeta: () => doc.getMetaState(),
+        });
+      },
+      acquireFence: (id) => this.executionService.tryAcquireSessionRewriteBarrier(id),
+      watch: async (id, changed) => {
+        const doc = await this.workspaceDocument.getOrCreateSessionDoc(id);
+        return subscribeSessionChanges(doc, changed);
+      },
+      wake: (id) => {
+        void this.sessionDispatchWatcher.enqueueSessionCheck(id);
+      },
+      onError: (error) =>
+        this.logger.warn(
+          `[archive] Deferred archive reconciliation failed: ${formatErrorMessage(error)}`
+        ),
     });
     this.sessionForkService = new SessionForkService({
       workspaceDocument: this.workspaceDocument,
@@ -3843,6 +3909,29 @@ export class MessageHandler {
     }
     const { repo } = this.workspaceDocument;
     this.sessionLifecycleWatchHandles = [
+      repo.watch(
+        (event) => {
+          if (
+            event.kind === 'doc-metadata' &&
+            ('archiveRequest' in event.patch || this.archiveCoordinator.hasPendingRequests)
+          )
+            void this.archiveCoordinator.schedule();
+        },
+        {
+          kinds: ['doc-metadata'],
+          metadataFields: [
+            'archiveRequest',
+            'archiveCancelledRequestId',
+            'archivePending',
+            'archiveReadiness',
+            'parentSessionId',
+            'openedBySessionId',
+            'isArchived',
+            'latestUserMsgId',
+            'pullRequests',
+          ],
+        }
+      ),
       repo.watch(
         (event) => {
           if (event.kind !== 'doc-metadata') return;
@@ -9133,7 +9222,12 @@ export class MessageHandler {
   }
 
   async startSessionDispatchWatcher(): Promise<void> {
+    await this.archiveCoordinator.schedule();
     await this.sessionDispatchWatcher.start();
+    this.archiveRetryTimer ??= setInterval(() => {
+      if (this.archiveCoordinator.hasPendingRequests) void this.archiveCoordinator.schedule();
+    }, 5_000);
+    this.archiveRetryTimer.unref?.();
     this.operationCoordinator.start();
   }
 
@@ -9719,6 +9813,9 @@ export class MessageHandler {
     this.machineRpcServer?.stop();
     this.operationCoordinator.stop();
     this.sessionDispatchWatcher.stop();
+    if (this.archiveRetryTimer) clearInterval(this.archiveRetryTimer);
+    this.archiveRetryTimer = null;
+    await this.archiveCoordinator.stop();
     this.codeCollabV2Service.dispose();
     for (const handle of this.sessionLifecycleWatchHandles) handle.unsubscribe();
     this.sessionLifecycleWatchHandles = [];

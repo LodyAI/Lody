@@ -3010,7 +3010,7 @@
   "settings.inlineMath.label": "Render inline math",
   "settings.extendedCodeLanguages.helper": "Adds syntax grammars for more code languages. Each grammar loads when first used and can slow that render.",
   "settings.extendedCodeLanguages.label": "Extended code languages",
-  "settings.autoArchive.description": "Archive keeps chats and local branches, but the owning machine may remove the worktree. Files ignored by Git or changed/deleted by cleanup scripts may be lost. Save important files outside the worktree first. These rules run only here, for your sessions.",
+  "settings.autoArchive.description": "Auto-archive waits for the conversation group and all queued messages to finish. Archive keeps chats and local branches, but the owning machine may remove the worktree. Files ignored by Git or changed/deleted by cleanup scripts may be lost. Save important files outside the worktree first. These rules run only here, for your sessions.",
   "settings.autoArchive.onPrClosed": "When the PR is closed",
   "settings.autoArchive.onPrMerged": "When the PR is merged",
   "settings.autoArchive.title": "Auto-archive sessions",
@@ -4872,5 +4872,11 @@
   "sessions.messageAuthor.source": "Open source conversation",
   "sessions.messageAuthor.on": "On",
   "sessions.messageAuthor.off": "Off",
-  "settings.memory.rolePromptHint": "Memory providers may inject role definitions into the prompt. Check for duplication or conflicts with your Lody configuration."
+  "settings.memory.rolePromptHint": "Memory providers may inject role definitions into the prompt. Check for duplication or conflicts with your Lody configuration.",
+  "sessions.deferredArchive.title": "Archive this conversation group?",
+  "sessions.deferredArchive.description": "{{count}} conversations are included. Wait for running work and queued messages to finish, or archive immediately and interrupt unfinished work.",
+  "sessions.deferredArchive.immediate": "Archive immediately",
+  "sessions.deferredArchive.wait": "Archive when finished",
+  "sessions.deferredArchive.pending": "Pending archive: waiting for work and queued messages to finish",
+  "sessions.deferredArchive.cancel": "Cancel pending archive"
 }

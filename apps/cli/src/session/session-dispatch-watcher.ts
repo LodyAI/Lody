@@ -115,6 +115,7 @@ type SessionDispatchWatcherDeps = {
   // This hook lets callers keep post-bootstrap cleanup/recovery out of the
   // workspace startup await chain.
   onStartupBootstrapComplete?: () => void;
+  onSessionCheckComplete?: () => void;
   // Optional machine-level escalation. Invoked once when access verification
   // keeps failing with an auth-looking error (likely an invalid/revoked token),
   // so a sustained problem is surfaced rather than silently retried forever.
@@ -669,6 +670,7 @@ export class SessionDispatchWatcher {
         if (this.sessionCheckChains.get(sessionId) === next) {
           this.sessionCheckChains.delete(sessionId);
         }
+        this.deps.onSessionCheckComplete?.();
       });
     probeRecord.chain = next;
     this.sessionCheckChains.set(sessionId, next);

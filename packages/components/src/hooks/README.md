@@ -17,7 +17,16 @@ pending turns from synchronized history. A send whose attachments are still
 preparing, or one queued behind such a send in the same conversation, is held
 only in the runtime's in-memory `pendingSends` and written when ready. Nothing
 persists it: closing the page mid-upload loses it, and the page asks first.
-Archive and delete cancel held sends of their targets and join in-flight writes.
+Immediate archive and delete cancel held sends of their targets and join in-flight writes.
+Deferred archive instead retains known held-send IDs as durable blockers until their
+accepting renderer observes delivery or explicit cancellation. Losing that renderer
+leaves an unresolved blocker; cancel the archive to recover.
+
+Manual archive entry points use `requestArchiveSession(s)` and one shared dialog with
+Cancel, Archive immediately, and Archive when finished. A pending result keeps the route
+open; the pending icon exposes cancellation and immediate override. Project archive
+uses a single group request. PR auto-archive passes wait mode without opening a dialog,
+retaining startup/restore baselines and retrying failed request writes with backoff.
 `use-session-preparation` holds an owned warmup lease; attachment takeover cancels
 and joins it. See the [attachment draft Spec](../../../../specs/session-files.md).
 

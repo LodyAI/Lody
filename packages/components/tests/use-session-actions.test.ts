@@ -1,3 +1,5 @@
+import { SessionArchiveDialog } from '../src/components/session-archive-dialog';
+import { sessionArchiveDialogAtom } from '../src/atoms/session-archive';
 import {
   createSessionSendResources,
   type SessionSendResources,
@@ -14,7 +16,7 @@ import { applyHistoryAction } from '../../shared/src/session-data/history-action
 import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
 // @vitest-environment jsdom
 
-import { act, createElement, useEffect } from 'react';
+import { act, createElement, useEffect, Fragment } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -522,6 +524,7 @@ describe('useSessionActions', () => {
       docMetaCacheReady?: boolean;
       sessionMetaCache?: Record<string, SessionMeta>;
       store?: ReturnType<typeof createStore>;
+      withArchiveDialog?: boolean;
     } = {}
   ): Promise<SessionActions> => {
     const jotaiStore = options.store ?? createStore();
@@ -544,11 +547,16 @@ describe('useSessionActions', () => {
           createElement(
             Provider,
             { store: jotaiStore },
-            createElement(ActionsProbe, {
-              onReady: (nextActions) => {
-                actions = nextActions;
-              },
-            })
+            createElement(
+              Fragment,
+              null,
+              createElement(ActionsProbe, {
+                onReady: (nextActions) => {
+                  actions = nextActions;
+                },
+              }),
+              options.withArchiveDialog ? createElement(SessionArchiveDialog) : null
+            )
           )
         )
       );
@@ -1761,6 +1769,112 @@ describe('useSessionActions', () => {
       expect(sendIpcMock).not.toHaveBeenCalled();
     }
   );
+
+  it.each([
+    ['Cancel', null],
+    ['Archive immediately', 'immediate'],
+    ['Archive when finished', 'wait'],
+  ] as const)('archive dialog resolves %s and closes', async (label, expected) => {
+    const store = createStore();
+    await renderActions(createRuntime({}), { store, withArchiveDialog: true });
+    let result: string | null | undefined;
+    await act(async () => {
+      store.set(sessionArchiveDialogAtom, {
+        count: 3,
+        resolve: (mode) => {
+          result = mode;
+        },
+      });
+    });
+    const button = [...document.querySelectorAll('button')].find(
+      (node) => node.textContent === label
+    );
+    expect(button).toBeDefined();
+    await act(async () => button!.click());
+    expect(result).toBe(expected);
+    expect(store.get(sessionArchiveDialogAtom)).toBeNull();
+  });
+
+  it('manual archive waits for a shared choice and cancellation changes no metadata', async () => {
+    const tree = createContainmentSessions('confirmation', false);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    const store = createStore();
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), { store });
+    const opened = createDeferred();
+    const unsubscribe = store.sub(sessionArchiveDialogAtom, () => {
+      if (store.get(sessionArchiveDialogAtom)) opened.resolve();
+    });
+    const result = actions.requestArchiveSession(tree.rootSession.id);
+    await opened.promise;
+    expect(store.get(sessionArchiveDialogAtom)?.count).toBe(tree.sessions.length);
+    expect(tree.sessions.map((row) => metaRepo.getSession(row.id))).toEqual(tree.sessions);
+    store.get(sessionArchiveDialogAtom)!.resolve(null);
+    expect(await result).toBe('cancelled');
+    expect(tree.sessions.map((row) => metaRepo.getSession(row.id))).toEqual(tree.sessions);
+    unsubscribe();
+  });
+
+  it('manual confirmation retains immediate archive for the complete group', async () => {
+    const tree = createContainmentSessions('confirmation-immediate', false);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    const store = createStore();
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), { store });
+    const opened = createDeferred();
+    const unsubscribe = store.sub(sessionArchiveDialogAtom, () => {
+      if (store.get(sessionArchiveDialogAtom)) opened.resolve();
+    });
+    const result = actions.requestArchiveSession(tree.rootSession.id);
+    await opened.promise;
+    store.get(sessionArchiveDialogAtom)!.resolve('immediate');
+    expect(await result).toBe('archived');
+    expect(tree.sessions.every((row) => metaRepo.getSession(row.id)?.isArchived)).toBe(true);
+    unsubscribe();
+  });
+
+  it('waiting writes durable intent without archiving any group member', async () => {
+    const tree = createContainmentSessions('waiting', false);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    for (const row of tree.sessions)
+      metaRepo.setMeta(getMachineRoomId(row.machineId), {
+        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      } as SessionMeta);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
+    expect(await actions.requestArchiveSession(tree.rootSession.id, { mode: 'wait' })).toBe(
+      'pending'
+    );
+    const pending = metaRepo.getSession(tree.rootSession.id)?.archiveRequest;
+    expect(pending?.targets).toEqual(tree.sessions.map((row) => row.id));
+    expect(pending?.phase).toBe('waiting');
+    expect(tree.sessions.every((row) => !metaRepo.getSession(row.id)?.isArchived)).toBe(true);
+    await actions.cancelPendingArchive(tree.rootSession.id);
+    expect(metaRepo.getSession(tree.rootSession.id)?.archiveCancelledRequestId).toBe(pending?.id);
+  });
+
+  it('restore retires a partially applied archive instead of allowing replay', async () => {
+    const tree = createContainmentSessions('restore-pending', true);
+    const request = {
+      id: 'partial-archive',
+      roots: [tree.rootSession.id],
+      targets: tree.sessions.map((row) => row.id),
+      source: 'manual' as const,
+      phase: 'committed' as const,
+      generation: 1,
+      heldSendIds: [],
+    };
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    metaRepo.setMeta(getSessionRoomId(tree.rootSession.id), {
+      ...tree.rootSession,
+      archiveRequest: request,
+      archivePending: { rootId: tree.rootSession.id, requestId: request.id },
+    });
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
+    await actions.restoreSession(tree.rootSession.id);
+    expect(metaRepo.getSession(tree.rootSession.id)).toMatchObject({
+      isArchived: false,
+      archiveCancelledRequestId: request.id,
+      archivePending: null,
+    });
+  });
 
   it('finishes the captured snapshot on its original runtime after the first write', async () => {
     const tree = createContainmentSessions('pinned', false);
