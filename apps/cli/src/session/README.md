@@ -33,6 +33,8 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   atomically activates them, fencing writes through superseded handles.
 - `roost-history-diagnostics.ts` — correlates local Worker causes and runtime details
   with the safe error reference returned by history RPC.
+- `session-history-owner.ts` — native Effect readiness barrier for history RPC; waits
+  for this session's owner/backend metadata and releases its observer on every exit.
 - `roost-rpc-session.ts` — one-shot Cloud CLI history services backed by owner RPC;
   `lib/command-runtime.ts` supplies the same composition for sessions, export and MCP.
 - `turn-history-gate.ts` — ordering barrier for RPC fast-path turns. Created in
@@ -369,6 +371,17 @@ owns a short-lived SQLite handle; its deprecated `loadRoostOwnerSeedLegacy` faca
 remains until the Promise owner pool receives the service from the daemon runtime.
 
 ### Paging and observations
+
+History RPC requires matching session ID, owning machine and persisted Roost backend
+before opening a cold store. Local creation commits do not establish arrival at the
+target daemon: metadata and RPC use independent streams. The scoped, session-specific
+readiness barrier waits at most ten seconds; confirmed foreign/deleted identities
+still refuse access, and a readiness deadline never starts a history operation.
+Server stop/MessageHandler cleanup cancel the wait without stopping shared sync.
+Pending/ready diagnostics record ownership/backend state and elapsed wait time;
+RPC rejections correlate that context with the request ID. Transport failures retain
+client-side provenance and do not establish an owner storage fault or authorize replay.
+Compose the readiness Effect directly; only the MessageHandler entry executes it.
 
 Initialization, Worker exit and failed writes retain their original error and outcome
 classification. The owner's local log records causes, exit status and runtime/build

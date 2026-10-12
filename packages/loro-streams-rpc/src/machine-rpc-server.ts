@@ -93,6 +93,7 @@ import {
   type LoroJsonStreamState,
   type LoroStreamsJsonStreamClient,
   LoroStreamsGatewayError,
+  LoroStreamsRpcHandlerError,
   LORO_STREAMS_RPC_ERROR_CODES,
   LORO_STREAMS_RPC_RETENTION_SECONDS,
   LORO_STREAMS_RPC_VERSION,
@@ -428,7 +429,10 @@ type RpcServerDeps = {
     operation: SessionHistoryWriteOperation;
     payload: Record<string, unknown>;
   }) => Promise<SessionHistoryWriteResponse>;
-  resolveSessionHistoryOwnerSessionId?: (sessionId: SessionId) => Promise<SessionId>;
+  resolveSessionHistoryOwnerSessionId?: (
+    sessionId: SessionId,
+    options: { signal: AbortSignal }
+  ) => Promise<SessionId>;
   openCodeCollabText?: (args: CodeCollabV2OpenTextRequest) => Promise<CodeCollabV2OpenTextOk>;
   resolveCodeCollabOwnerSessionId?: (sessionId: SessionId) => Promise<SessionId>;
   /** File Preview v3 — a plain read; must not activate Code Collab. */
@@ -1702,7 +1706,22 @@ export class LoroStreamsMachineRpcServer {
         }
       }
     } catch (error) {
+      if (
+        this.stopController.signal.aborted &&
+        (request.method === 'session/history-read' || request.method === 'session/history-write')
+      )
+        return;
       const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof LoroStreamsRpcHandlerError) {
+        this.deps.logger.warn(
+          `[rpc-server:${this.deps.machineId}] request rejected ${JSON.stringify({
+            rpcRequestId: request.id,
+            method: request.method,
+            code: error.code,
+            ...error.context,
+          })}`
+        );
+      }
       const codeCollabError = request.method.startsWith('code-collab/')
         ? toCodeCollabRpcError(error)
         : request.method === 'file/preview'
@@ -1713,7 +1732,11 @@ export class LoroStreamsMachineRpcServer {
         request.id,
         request.method,
         {
-          code: codeCollabError?.code ?? LORO_STREAMS_RPC_ERROR_CODES.internalError,
+          code:
+            codeCollabError?.code ??
+            (error instanceof LoroStreamsRpcHandlerError
+              ? error.code
+              : LORO_STREAMS_RPC_ERROR_CODES.internalError),
           message: codeCollabError?.message ?? message,
           ...(codeCollabError?.data === undefined ? {} : { data: codeCollabError.data }),
         },
@@ -1792,7 +1815,9 @@ export class LoroStreamsMachineRpcServer {
   ): Promise<void> {
     const resolveOwnerSessionId = this.deps.resolveSessionHistoryOwnerSessionId;
     const expectedOwnerSessionId = resolveOwnerSessionId
-      ? await resolveOwnerSessionId(businessSessionId as SessionId)
+      ? await resolveOwnerSessionId(businessSessionId as SessionId, {
+          signal: this.stopController.signal,
+        })
       : businessSessionId;
     if (expectedOwnerSessionId !== envelopeOwnerSessionId) {
       throw new Error('Session history RPC owner session mismatch.');

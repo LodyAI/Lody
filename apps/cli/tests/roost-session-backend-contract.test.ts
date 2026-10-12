@@ -3,6 +3,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LoroRepo } from 'loro-repo';
+import { Cause, Effect, Exit, Fiber } from 'effect';
+import { TestClock } from 'effect/testing';
+import { it as effectIt } from '@effect/vitest';
+import {
+  awaitSessionHistoryOwner,
+  SESSION_HISTORY_METADATA_TIMEOUT_MS,
+} from '../src/session/session-history-owner';
 import { SessionDocument } from '../src/lib/loro/doc';
 import { installRoostNodeSessionBackend } from '../src/session/roost-node-session';
 import { createSessionBackend, type SessionBackendFactory } from '../src/session/session-backend';
@@ -40,7 +47,7 @@ import { defineSessionBackendContract } from './session-backend-contract';
 let nativeDirectory: string;
 let ordinal = 0;
 const nativeFixtures = new Set<{ close(): Promise<void> }>();
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 beforeAll(async () => {
   nativeDirectory = await mkdtemp(join(tmpdir(), 'lody-production-roost-'));
   installRoostNodeSessionBackend({
@@ -177,6 +184,110 @@ const nativeContractFixture: SessionBackendContractFixtureFactory = async (optio
 defineSessionBackendContract('Production Roost SQLite', nativeContractFixture);
 
 describe('Production Roost history semantics', () => {
+  it.each(['absent', 'existence-only', 'owner-pending', 'backend-pending'] as const)(
+    'accepts the first cold write after %s metadata arrives without opening Loro history',
+    async (phase) => {
+      const repo = await LoroRepo.create({});
+      const sessionId = `metadata-${phase}-${ordinal++}` as SessionId;
+      const roomId = getSessionRoomId(sessionId);
+      if (phase !== 'absent') {
+        await repo.upsertDocMeta(roomId, phase === 'existence-only' ? {} : {
+          id: sessionId,
+          ...(phase === 'owner-pending' ? { historyBackend: 'roost' } : { machineId: 'test-machine' }),
+        });
+      }
+      const doc = new SessionDocument(repo, sessionId, (room) => repo.unloadDoc(room));
+      let observed!: () => void;
+      const observing = new Promise<void>((resolve) => { observed = resolve; });
+      const observe = repo.observeDocs.bind(repo);
+      const observers = new Set<object>();
+      vi.spyOn(repo, 'observeDocs').mockImplementation((listener, options) => {
+        const subscription = observe(listener, options);
+        observers.add(subscription);
+        observed();
+        return { ...subscription, unsubscribe: () => {
+          subscription.unsubscribe(); observers.delete(subscription);
+        } };
+      });
+      const noop = () => undefined;
+      const handler = new MessageHandler(
+        { on: noop, setRequestPermissionHandler: noop, getSession: () => undefined, cleanUp: async () => undefined } as never,
+        {
+          repo,
+          getOrCreateSessionDoc: async () => {
+            if (!doc.handle) {
+              doc.handle = await repo.openPersistedDoc(roomId);
+              // Resolve from metadata, like a cold production SessionDocument.
+              doc.composeSessionData(doc.handle.doc, undefined, await doc.getMetaState());
+            }
+            return doc;
+          },
+          isTransportConnected: () => false, markMachineFlockDocDirty: noop,
+          publishSessionPresence: noop, clearSessionPresence: noop,
+          sendMachineHeartbeat: async () => undefined,
+        } as never,
+        getDefaultLogger(),
+        { machineId: 'test-machine', workspaceId: 'test-workspace' as never,
+          token: 'synthetic-token', userId: 'test-user', machineName: 'synthetic',
+          cliVersion: '0.0.0', cloudPort: createTestCloudPort() }
+      );
+      const rpc = handler as unknown as {
+        writeSessionHistoryForRpc(id: SessionId, operation: 'append', payload: Record<string, unknown>): Promise<SessionHistoryWriteResponse>;
+      };
+      try {
+        const write = rpc.writeSessionHistoryForRpc(sessionId, 'append', { entry: nativeUser('first-turn') });
+        await Promise.race([observing, write.then(() => { throw new Error('History request completed before metadata was ready'); })]);
+        expect(doc.handle).toBeNull();
+        await repo.upsertDocMeta(roomId, {
+          id: sessionId, machineId: 'test-machine', historyBackend: 'roost',
+          userId: 'test-user', status: SessionStatusFactory.idle(),
+        });
+        const response = SessionHistoryWriteResponseSchema.parse(await write);
+        expect(response.success).toBe(true);
+        const backend = await createSessionBackend(doc);
+        expect(backend.kind).toBe('roost');
+        expect((await backend.readHistory()).map((entry) => entry.id)).toEqual(['first-turn']);
+        expect(doc.handle?.doc.getList('history').length).toBe(0);
+        expect(observers.size).toBe(0);
+      } finally {
+        await handler.cleanup();
+        if (doc.handle) await doc.destroy({ preserveStatus: true });
+        await repo.destroy();
+      }
+    }
+  );
+
+  effectIt.effect.each(['foreign', 'deleted', 'backend', 'timeout', 'cancelled'] as const)(
+    'refuses %s metadata without leaving a live observer', (scenario) => Effect.gen(function* () {
+      const repo = yield* Effect.promise(() => LoroRepo.create({}));
+      yield* Effect.addFinalizer(() => Effect.promise(() => repo.destroy()));
+      const sessionId = `metadata-refusal-${scenario}` as SessionId;
+      const roomId = getSessionRoomId(sessionId);
+      yield* Effect.promise(() => repo.upsertDocMeta(roomId, { id: sessionId, historyBackend: 'roost' }));
+      let subscribed!: () => void;
+      const observing = new Promise<void>(resolve => { subscribed = resolve; });
+      const observe = repo.observeDocs.bind(repo);
+      const observers = new Set<object>();
+      vi.spyOn(repo, 'observeDocs').mockImplementation((listener, options) => {
+        const subscription = observe(listener, options); observers.add(subscription); subscribed();
+        return { ...subscription, unsubscribe: () => { subscription.unsubscribe(); observers.delete(subscription); } };
+      });
+      const request = yield* Effect.forkChild(awaitSessionHistoryOwner(repo, sessionId, 'test-machine'));
+      yield* Effect.promise(() => observing);
+      if (scenario === 'foreign') yield* Effect.promise(() => repo.upsertDocMeta(roomId, { machineId: 'foreign-machine' }));
+      if (scenario === 'deleted') yield* Effect.promise(() => repo.deleteDoc(roomId));
+      if (scenario === 'backend') yield* Effect.promise(() => repo.upsertDocMeta(roomId, { machineId: 'test-machine', historyBackend: 'loro' }));
+      if (scenario === 'timeout') yield* TestClock.adjust(SESSION_HISTORY_METADATA_TIMEOUT_MS);
+      if (scenario === 'cancelled') yield* Fiber.interrupt(request);
+      const outcome = yield* Fiber.await(request);
+      expect(Exit.isFailure(outcome)).toBe(true);
+      const code = { foreign: 'session_owner_mismatch', deleted: 'session_unavailable', backend: 'session_backend_mismatch', timeout: 'session_metadata_pending' };
+      if (scenario !== 'cancelled' && Exit.isFailure(outcome)) expect(Cause.squash(outcome.cause)).toMatchObject({ code: code[scenario] });
+      expect(observers.size).toBe(0);
+      expect((yield* Effect.promise(() => repo.openPersistedDoc(roomId))).doc.getList('history').length).toBe(0);
+    })
+  );
+
   it('distinguishes history initialization failure without changing the selected backend', async () => {
     const workerFailure = new RoostHostError('workerFailed');
     workerFailure.cause = new Error('synthetic bootstrap Worker failure');

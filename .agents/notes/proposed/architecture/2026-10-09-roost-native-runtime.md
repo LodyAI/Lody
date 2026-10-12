@@ -64,19 +64,115 @@ that release directly, without a pnpm SDK patch. Request outcome codes and retry
 policy remain SDK-owned. The owner correlates initialization,
 write, RPC and exit evidence with one diagnostic ID and records CLI, Node,
 Electron and compiled desktop provenance through the existing local logger.
-Internal callers still receive their original errors; RPC sends only the safe
-stage/code/ID string, and the renderer supplies localized context. Raw Worker causes
+Internal callers still receive their original errors; owner-generated RPC errors
+send only the safe stage/code/ID string, and the renderer supplies localized context. Raw Worker causes
 never enter history or the remote error envelope. This is a repair of lost
 evidence; it does not identify the cause of a previously reported Nightly failure
 or authorize a fallback, replay, telemetry upload or storage migration.
+
+Client transport failures are a separate boundary. Previously, Machine RPC
+synthesized unsuccessful history responses when appending to the machine's
+request stream failed, and the remote Roost bridge wrapped every unsuccessful response
+as `RoostHistoryError`, including `request_failed`. A synthetic ten-second timeout
+through the real Streams Client, JSON/RPC client and renderer bridge reproduces
+the Roost storage wording and owner-local-log instruction without an owner
+handler or history write. Those messages do not establish a Worker fault or an
+owner-generated diagnostic reference. The client now retains typed transport,
+remote-handler or protocol provenance, request ID and target machine on its local
+history response projection. Append failures and response deadlines produce transport
+errors; owner metadata refusals retain their stable code. These fields are not added
+to encrypted wire history results, preserving older strict response parsers. The
+renderer reserves Roost storage wording and owner-local-log instructions for owner
+storage responses. An unconfirmed POST never authorizes automatic history replay.
+
+### History owner readiness
+
+Windows UI and WSL daemon identities are distinct, supported targets. Paired
+Nightly logs show first-start `internal_error` ownership rejections followed by
+successful owner-side assistant writes for the same sessions; a later request-stream
+append timeout targets the WSL machine. These are different failure boundaries.
+The RPC server performs its ownership check before the history handler, so a
+rejection there bypasses that handler's failure diagnostics. A separate local
+wrong-owner probe does not establish that the UI request was misrouted.
+
+The old owner resolver treated an existing metadata record without `machineId`
+as foreign. Renderer creation awaits its local metadata write, not arrival at the
+target daemon; metadata and RPC travel on independent streams. A deterministic
+probe with two real Repos captures the existence-only revision during one complete
+metadata upsert, controls its delivery to the owner, and runs the real encrypted
+RPC client/server with the production owner resolver. The first request is rejected
+with the reported ownership error before the injected history handler can accept
+it; delivering the remaining metadata makes a second request succeed. A genuine
+foreign owner remains rejected. This establishes a reproducible readiness gap,
+not the production delivery order: the logs lack the rejected request's target
+and observed metadata owner, and the probe deliberately stages partial delivery.
+The repaired resolver observes that session and snapshots it at one SDK boundary,
+then waits at most ten seconds for matching session ID, machine ID and persisted
+Roost backend. Owner identity alone is insufficient: opening while `historyBackend`
+is absent could bind a cold document to the legacy Loro reader. Confirmed foreign,
+deleted, invalid and non-Roost identities still fail before storage is opened. A
+deadline returns `session_metadata_pending`, explicitly before a history operation
+starts. Pending/ready local diagnostics capture observed ownership/backend state
+and wait duration; server rejection logs correlate the RPC request ID with this
+content-free context. This does not diagnose the independent network timeout.
+
+The readiness kernel is native Effect over the third-party Repo's `observeDocs`:
+one scoped subscription per request, no document-body open or shared transport
+flush. MessageHandler is its Promise execution entry. Success/rejection/timeout
+release the subscription; server stop and MessageHandler cleanup interrupt the
+wait. Cancellation does not stop the shared metadata producer, and storage starts
+only after the readiness handoff. Existing storage owners retain dispatched writes
+with unknown outcomes. This completes the small readiness unit, not the Repo,
+document or MessageHandler lifecycle migrations.
+
+Behavioral coverage uses real Repo metadata and cold SQLite-backed history for
+absent, existence-only, owner-pending and backend-pending creation. Each accepts
+the original first turn once, without Loro history. Foreign/deleted/backend refusals,
+TestClock deadlines and cancellation release their observers. Restoring the original
+resolver makes all four cold-write regressions fail. Real encrypted RPC tests keep
+rejection codes/request correlation and strict success wire results; real Streams
+append-timeout and RPC response-deadline tests distinguish transport failures in
+both languages without replay.
+
+A macOS arm64 Cloud Nightly correctness app passed packaging, embedded CLI/native
+probes and ad-hoc signature verification, then reused the existing Nightly profile
+and authenticated workspace. Its first UI send received an assistant reply and
+read back two Roost entries, with no Loro history. Separate cold local history
+requests deliberately withheld the machine ID or backend field: the owner logged
+pending metadata, the original request stayed pending, and publishing the missing
+field accepted that first entry once. Reading each back returned the original turn
+and no Loro history; the synthetic fixtures were archived. This validates the
+packaged local path, not Windows/WSL delivery order or the independent request-stream
+connection timeout.
+
+With Roost enabled, a first UI send to a separate Linux daemon that did not
+advertise `sessionHistory` completed with an assistant reply. Persisted metadata
+selected `loro`, retained that target machine as owner, and the Loro document
+contained both user and assistant turns. No unsupported-target warning appeared.
+The setting supplies a preferred backend, which existing creation negotiation
+silently downgrades; only an explicitly requested Roost backend rejects an
+unsupported target. This exercises remote Loro, not remote Roost or the readiness
+repair.
+
+After upgrading that Linux daemon with the same CLI JavaScript as the packaged
+app and matching Linux runtime dependencies, its existing identity and login
+remained valid and it advertised `sessionHistory: 2`. A new UI conversation's
+first send completed with an assistant reply and persisted Roost ownership.
+Without injected delay, the owner observed existence-only metadata: two history
+requests waited 1,164 ms and 759 ms for matching owner/backend before proceeding.
+The production remote history reader returned exactly the user and assistant
+turns, with no Loro history and no error toast or manual resend. This validates
+the repaired readiness handoff on a real remote Linux daemon; it does not prove
+the original Windows/WSL arrival order or resolve the independent connection
+timeout.
 
 Verification injects failures into real Node Workers at startup, binding load and
 request execution, including an explicit abnormal exit. It checks original causes,
 correlated IDs and dispatched/queued outcome semantics. The owning SQLite/RPC suite
 checks safe responses and retained Roost history; renderer tests cover local and
 remote bridges in English and Chinese. The existing toast Storybook story verifies
-the error presentation in both languages and light/dark themes. These checks do
-not reproduce the reported Nightly failure or execute a packaged Nightly app.
+the error presentation in both languages and light/dark themes. These injected-fault
+checks do not by themselves reproduce the originally reported Nightly failure.
 
 The published 0.1.2 package passes frozen installation, the complete repository
 check, the 2 GiB public CLI build and the OSS desktop build. All six actual npm

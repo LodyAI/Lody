@@ -1,4 +1,6 @@
 import { fileLocksLegacy } from '@/utils/file-lock';
+import { Effect } from 'effect';
+import { awaitSessionHistoryOwner } from '@/session/session-history-owner';
 import {
   SessionAttachmentTransfer,
   type UploadableImageFile,
@@ -686,6 +688,7 @@ export class MessageHandler {
   private readonly machineLifecycleCapability: MachineLifecycleCapability;
   private pendingProcessLifecycleAction: MachineProcessLifecycleAction | null = null;
   private readonly store = new SessionTransientStore();
+  private readonly historyOwnerAbort = new AbortController();
   private sessionActivePresence!: SessionActivePresenceController;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
   // Note: titleGenerationInFlight, archiveInFlight are self-cleaning
@@ -6808,17 +6811,16 @@ export class MessageHandler {
   }
 
   private readonly resolveSessionHistoryOwnerSessionId = async (
-    sessionId: SessionId
+    sessionId: SessionId,
+    options?: { signal?: AbortSignal }
   ): Promise<SessionId> => {
-    const metaRecord = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
-    if (!metaRecord?.meta || isLoroRepoDocDeleted(metaRecord)) {
-      throw new Error(`Session ${sessionId} is not available on this machine.`);
-    }
-    const meta = metaRecord.meta as SessionMeta;
-    if (meta.machineId !== this.machineId) {
-      throw new Error(`Session ${sessionId} is owned by another machine.`);
-    }
-    return sessionId;
+    const signal = options?.signal
+      ? AbortSignal.any([options.signal, this.historyOwnerAbort.signal])
+      : this.historyOwnerAbort.signal;
+    return await Effect.runPromise(
+      awaitSessionHistoryOwner(this.workspaceDocument.repo, sessionId, this.machineId, this.logger),
+      { signal }
+    );
   };
 
   private async readSessionHistoryForRpc(
@@ -9728,6 +9730,7 @@ export class MessageHandler {
    * Flush pending ACP updates and tear down session resources.
    */
   async cleanup(): Promise<void> {
+    this.historyOwnerAbort.abort();
     await this.iosSimulatorService.closeAll();
     this.logger.debug('Cleaning up message handler resources');
     this.cleanedUp = true;

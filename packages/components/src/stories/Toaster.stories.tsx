@@ -3,7 +3,7 @@ import { toast } from '@/lib/toast';
 import { Toast } from '@lody/ui';
 import { toastManager } from '@/lib/toast';
 import { Button } from '@lody/ui/button';
-import { RoostHistoryError } from '@/lib/roost-history-error';
+import { RoostHistoryError, SessionHistoryRequestError } from '@/lib/roost-history-error';
 import { useTranslation } from 'react-i18next';
 
 /**
@@ -88,3 +88,38 @@ export const RoostWriteFailure: Story = {
     );
   },
 };
+
+const historyRequestFailureStory = (metadataPending: boolean): Story => ({
+  render: function HistoryRequestFailureStory(args) {
+    const { t } = useTranslation();
+    return (
+      <>
+        <Toast.Provider manager={toastManager} {...args} />
+        <Button
+          onClick={() =>
+            toast.error(t('sessions.sendError'), {
+              description: new SessionHistoryRequestError(
+                'write',
+                {
+                  source: metadataPending ? 'remote' : 'transport',
+                  code: metadataPending ? 'session_metadata_pending' : 'request_failed',
+                  requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                  machineId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                },
+                metadataPending
+                  ? 'Session history metadata did not reach the target machine in time.'
+                  : 'History RPC request append exceeded 10000ms.'
+              ).message,
+              duration: 0,
+            })
+          }
+        >
+          {t('sessions.sendError')}
+        </Button>
+      </>
+    );
+  },
+});
+
+export const HistoryRequestTransportFailure = historyRequestFailureStory(false);
+export const HistoryMetadataPending = historyRequestFailureStory(true);

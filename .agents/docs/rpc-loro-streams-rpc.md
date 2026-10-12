@@ -20,6 +20,22 @@ been removed.
   handlers.
 - `README.md` — package smoke-test notes.
 
+## History readiness and error provenance
+
+History RPC verifies session identity, owning machine and the persisted Roost backend
+before opening storage. Its CLI readiness kernel subscribes and snapshots at one Repo
+boundary; missing/partial metadata waits for that session only, with a ten-second
+deadline and cancellation on shutdown. Confirmed foreign/deleted owners fail immediately.
+This handles metadata and request streams arriving independently without a Repo-wide flush.
+
+History failures projected by the client retain `rpcFailure` provenance, code, request
+ID and target machine. It is a client-only field, never part of an encrypted history
+result. Request append failures and response timeouts are transport failures with
+potentially unknown write outcomes; the renderer does not send users to owner-local
+storage logs for them. Owner storage errors keep their existing safe diagnostic string.
+Server metadata refusals keep a stable RPC error code and log request-correlated,
+content-free ownership context. No failure authorizes replay or backend fallback.
+
 ## Remote lifecycle acknowledgements
 
 For accepted restart/upgrade responses, `settleMachineLifecycleResponse` attempts
