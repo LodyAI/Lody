@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -74,6 +74,25 @@ beforeEach(() => {
 afterEach(() => presenceApplication.closeLegacy());
 
 import type { Logger } from '../src/utils/logger';
+import * as logging from '../src/utils/logger';
+import { CliMachineMonitorRuntime } from '../src/lib/loro/machine-monitor';
+
+// The production interceptors install once for the whole module lifetime. Keep
+// these underlying delegates stable across tests, regardless of which test first
+// attaches Streams, and restore the real globals only when the suite finishes.
+const originalConsoleError = console.error;
+const originalFetch = globalThis.fetch;
+let diagnosticConsoleSink: typeof console.error | undefined;
+let diagnosticFetch: typeof fetch | undefined;
+beforeAll(() => {
+  console.error = (...args: unknown[]) =>
+    (diagnosticConsoleSink ?? originalConsoleError).apply(console, args);
+  globalThis.fetch = (input, init) => (diagnosticFetch ?? originalFetch)(input, init);
+});
+afterAll(() => {
+  console.error = originalConsoleError;
+  globalThis.fetch = originalFetch;
+});
 
 const mocks = vi.hoisted(() => ({
   repoCreate: vi.fn(),
@@ -457,6 +476,115 @@ describe('LoroDocumentManager.create degraded startup behavior', () => {
     });
 
     await manager.cleanUp({ fast: true });
+  });
+
+  it('keeps process-wide Streams diagnostics out of workspace loggers and follows the root sink', async () => {
+    const records: Array<{ sink: string; level: string; message: unknown }> = [];
+    const captureLogger = (sink: string): Logger => ({
+      ...createSilentLogger(),
+      debug: (message) => records.push({ sink, level: 'debug', message }),
+      child: () => captureLogger(sink),
+    });
+    let root = captureLogger('process-before');
+    const rootGetter = vi.spyOn(logging, 'getLogger').mockImplementation(() => root);
+    // This case exercises diagnostics, not the independent live monitor room.
+    const monitorAttach = vi
+      .spyOn(CliMachineMonitorRuntime.prototype, 'attachStreams')
+      .mockResolvedValue(undefined);
+    const managers: LoroDocumentManager[] = [];
+    const consoleOutput: unknown[][] = [];
+    diagnosticConsoleSink = (...args) => consoleOutput.push(args);
+    const response = new Response('missing', { status: 404 });
+    const fetchInputs: Array<[Parameters<typeof fetch>[0], RequestInit | undefined]> = [];
+    diagnosticFetch = async (input, init) => {
+      fetchInputs.push([input, init]);
+      return response;
+    };
+    let installedConsole: typeof console.error | undefined;
+    let installedFetch: typeof fetch | undefined;
+
+    try {
+      for (const workspaceId of ['workspace-a', 'workspace-b']) {
+        mocks.repoCreate.mockResolvedValueOnce({
+          joinMetaRoom: vi.fn(async () => createMetaSubscription()),
+          destroy: vi.fn(async () => {}),
+          addTransport: mocks.repoAddTransport,
+          removeTransport: mocks.repoRemoveTransport,
+          transportRooms: mocks.repoTransportRooms,
+        });
+        managers.push(
+          await LoroDocumentManager.create(
+            workspaceId as WorkspaceId,
+            'user-1',
+            captureLogger(workspaceId),
+            { attachRemoteOnCreate: true, streamsTokens: testStreamsTokens }
+          )
+        );
+        installedConsole ??= console.error;
+        installedFetch ??= globalThis.fetch;
+        expect(console.error).toBe(installedConsole);
+        expect(globalThis.fetch).toBe(installedFetch);
+        // Both records concern A, including the one emitted after B attaches.
+        console.error('[streams-crdt] local append failed', {
+          streamUrl: 'https://streams.example.test/ds/workspace-a%3As%3Asession-1',
+        });
+      }
+
+      root = captureLogger('process-after');
+      console.error('[loro-repo] synthetic failure', 'detail');
+      const url = new URL(
+        'https://synthetic-user:synthetic-password@streams.example.test/ds/workspace-a?token=synthetic-secret'
+      );
+      const init = { method: 'POST' };
+      expect(await fetch(url, init)).toBe(response);
+      expect(fetchInputs).toEqual([[url, init]]);
+      expect(await response.text()).toBe('missing');
+
+      expect(
+        records.filter(
+          ({ message }) => typeof message === 'string' && message.startsWith('[loro-streams-diag]')
+        )
+      ).toEqual([
+        ...['process-before', 'process-before'].map((sink) => ({
+          sink,
+          level: 'debug',
+          message:
+            '[loro-streams-diag] [streams-crdt] local append failed {"streamUrl":"https://streams.example.test/ds/workspace-a%3As%3Asession-1"}',
+        })),
+        {
+          sink: 'process-after',
+          level: 'debug',
+          message: '[loro-streams-diag] [loro-repo] synthetic failure detail',
+        },
+        {
+          sink: 'process-after',
+          level: 'debug',
+          message:
+            '[loro-streams-diag] HTTP 404 from Streams API: POST https://streams.example.test/ds/workspace-a?token=REDACTED',
+        },
+      ]);
+
+      const count = records.length;
+      expect(await fetch('https://other.example.test/missing')).toBe(response);
+      const success = new Response('ok');
+      diagnosticFetch = async () => success;
+      expect(await fetch(url)).toBe(success);
+      const failure = new Error('synthetic fetch failure');
+      diagnosticFetch = async () => {
+        throw failure;
+      };
+      await expect(fetch(url)).rejects.toBe(failure);
+      expect(records).toHaveLength(count);
+      const unrelated = { message: 'ordinary error' };
+      console.error('other library', unrelated);
+      expect(consoleOutput).toEqual([['other library', unrelated]]);
+    } finally {
+      for (const manager of managers) await manager.cleanUp({ fast: true });
+      diagnosticConsoleSink = undefined;
+      diagnosticFetch = undefined;
+      monitorAttach.mockRestore();
+      rootGetter.mockRestore();
+    }
   });
 
   it('installs the CLI HTTP global dispatcher at create without attaching Streams', async () => {
