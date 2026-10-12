@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+拉取请求：[#1517](https://github.com/LodyAI/Lody/pull/1517)
 
 [English](2026-10-12-xdg-git-identity.md)
 
