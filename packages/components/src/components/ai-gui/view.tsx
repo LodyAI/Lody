@@ -276,7 +276,7 @@ import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import {
   buildChatFailedErrorReport,
-  extractReadableChatFailedMessage,
+  buildChatFailedNoticeDetail,
 } from './chat-failed-error-report';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import {
@@ -3400,15 +3400,6 @@ const ChatFailedNoticeView = ({
     ? t(diagnosticCopy.actionKey, diagnosticCopy.action)
     : undefined;
   const rawMessage = meta?.message?.trim() ? meta.message : undefined;
-  const detailMessage = (() => {
-    if (!rawMessage) return undefined;
-    const extracted = extractReadableChatFailedMessage(rawMessage);
-    return extracted !== reasonMessage ? extracted : undefined;
-  })();
-  // Unfold whenever there is a raw message at all: even one whose readable
-  // extract equals the title, the full payload (stack, upstream JSON) is worth
-  // reading.
-  const hasDetail = Boolean(rawMessage && rawMessage.trim() !== reasonMessage);
   const isProviderOverloaded = meta?.reason === 'acp_provider_overloaded';
 
   const retryInSeconds = capacityRetry?.retryInSeconds ?? null;
@@ -3487,12 +3478,11 @@ const ChatFailedNoticeView = ({
     <AgentNoticeBanner
       tone={isProviderOverloaded ? 'muted' : 'error'}
       label={reasonMessage}
-      // The readable extract first, then the untouched payload behind it.
-      detail={
-        [actionMessage, detailMessage, hasDetail ? rawMessage : null]
-          .filter((part, index, all) => Boolean(part) && all.indexOf(part) === index)
-          .join('\n\n') || undefined
-      }
+      detail={buildChatFailedNoticeDetail({
+        title: reasonMessage,
+        action: actionMessage,
+        message: rawMessage,
+      })}
       action={retryAction}
       footer={
         <Button variant="ghost" size="medium" onClick={() => void handleCopyError()}>
