@@ -232,9 +232,15 @@ No `searchBlockId` is passed: search indexes the conversation, not a dialog.
 `subagent-task-panel.tsx` owns rows and the selected task;
 `subagent-task-detail.tsx` owns the dialog body and cancellation. Panel, detail and
 run-history styles each live in their adjacent `.stylex.ts` file and use shared
-conversation spacing and UI text tokens. Background command briefs use the same
-`ToolCommandSection` and `ToolDetailSheet` as tool steps, including shell highlighting
-and conversation font sizing. The brief and activity share one vertical scroller.
+conversation spacing and UI text tokens. Claude `local_bash` tasks display as `Bash`,
+including Core metadata that carries the type in `actor`. Aggregation joins their
+`toolUseId` to an execute tool's `toolCallId` within the same turn and derives the
+command from its stored `terminal_command` block. The dialog retains the description
+as Brief and shows a resolved command separately using `ToolCommandSection` and
+`ToolDetailSheet`, including shell highlighting and conversation font sizing.
+Missing tool evidence leaves only the Brief; descriptions are never guessed to be
+commands. This is a render-time association and does not rewrite stored history.
+The brief and activity share one vertical scroller.
 
 State comes from `run.snapshot.state` when present; the legacy `status` cannot
 say cancelled or unknown. `unknown` means Lody lost sight of the run, so the

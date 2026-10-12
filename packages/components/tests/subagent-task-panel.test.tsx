@@ -3,7 +3,11 @@
 import { act, createElement, useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
-import { SubagentTaskPanel, type SubagentTask } from '../src/components/ai-gui/subagent-task-panel';
+import {
+  SubagentTaskPanel,
+  collectSubagentTasks,
+  type SubagentTask,
+} from '../src/components/ai-gui/subagent-task-panel';
 import { SubagentRunMessageList } from '../src/components/ai-gui/subagent-run-history';
 import { SubagentRunHistory } from '../src/components/ai-gui/view';
 import { initI18n } from '../src/i18n';
@@ -130,30 +134,101 @@ describe('SubagentTaskPanel', () => {
     expect(container.textContent).toContain('2 tasks · 1 in background');
   });
 
-  it('peeks at the full multi-line command of a background task from its row', async () => {
+  it('links a Core background task to its full command while retaining its brief', async () => {
     const command = 'pnpm install\npnpm run build --filter @lody/components 2>&1';
-    render([
-      task({
-        taskId: 'bash',
-        actor: undefined,
-        taskType: 'local_bash',
-        isBackgrounded: true,
+    const background = task({
+      taskId: 'bash',
+      actor: 'local_bash',
+      taskKind: 'background',
+      toolUseId: 'bash-tool',
+      isBackgrounded: true,
+      description: 'Build the components',
+    });
+    // The task may precede the tool in retained history. Match ids, not labels.
+    const tasks = collectSubagentTasks([
+      background,
+      {
+        type: 'tool_call',
+        toolCallId: 'unrelated',
+        kind: 'execute',
         status: 'completed',
-        description: command,
-        summary: command,
-      }),
+        content: [{ type: 'terminal_command', command: 'echo wrong-command' }],
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'bash-tool',
+        kind: 'execute',
+        status: 'completed',
+        content: [{ type: 'terminal_command', command }],
+      },
     ]);
-    // The settled group folds; open it to reach the row.
+    render(tasks);
     act(() => container.querySelector<HTMLButtonElement>('[aria-expanded]')?.click());
-    expect(peek()).toBeNull();
+    expect(container.textContent).not.toContain('local_bash');
+    await act(async () => rowNamed('Bash · Build the components')?.click());
 
-    // The group's summary is the first button, the task's row the second.
-    await act(async () => container.querySelectorAll<HTMLButtonElement>('button')[1]?.click());
-
-    expect(peek()?.querySelector('pre')?.textContent).toBe(command);
+    expect(peek()?.querySelector('[aria-label="Brief"]')?.textContent).toContain(
+      'Build the components'
+    );
     expect(peek()?.querySelector('[aria-label="Command"] pre')?.textContent).toBe(command);
-    expect(peek()?.querySelector('[data-tool-detail-sheet] code')?.textContent).toBe(command);
-    expect(peek()?.textContent).toContain('Completed');
+    expect(peek()?.textContent).not.toContain('wrong-command');
+    expect(background).not.toHaveProperty('command');
+  });
+
+  it('keeps an unmatched Bash description as a brief and resolves a later tool update', async () => {
+    const background = task({
+      actor: 'local_bash',
+      toolUseId: 'bash-tool',
+      description: 'Build project',
+    });
+    render(
+      collectSubagentTasks([
+        background,
+        {
+          type: 'tool_call',
+          toolCallId: 'another-tool',
+          kind: 'execute',
+          status: 'completed',
+          content: [{ type: 'terminal_command', command: 'echo unrelated' }],
+        },
+      ])
+    );
+    act(() => container.querySelector<HTMLButtonElement>('[aria-expanded]')?.click());
+    await act(async () => rowNamed('Bash · Build project')?.click());
+    expect(peek()?.querySelector('[aria-label="Brief"]')?.textContent).toContain('Build project');
+    expect(peek()?.querySelector('[aria-label="Command"]')).toBeNull();
+
+    render(
+      collectSubagentTasks([
+        background,
+        {
+          type: 'tool_call',
+          toolCallId: 'bash-tool',
+          kind: 'execute',
+          status: 'completed',
+          content: [{ type: 'terminal_command', command: 'pnpm build' }],
+        },
+      ])
+    );
+    expect(peek()?.querySelector('[aria-label="Command"] pre')?.textContent).toBe('pnpm build');
+  });
+
+  it('links legacy Bash tasks without treating other task briefs as commands', () => {
+    const bash = task({ actor: undefined, taskType: 'local_bash', toolUseId: 'tool' });
+    const agent = task({ taskId: 'agent', actor: 'Explore', toolUseId: 'tool' });
+    const tasks = collectSubagentTasks([
+      bash,
+      agent,
+      {
+        type: 'tool_call',
+        toolCallId: 'tool',
+        kind: 'execute',
+        status: 'completed',
+        content: [{ type: 'terminal_command', command: '/bin/bash', args: ['-lc', 'pnpm test'] }],
+      },
+    ]);
+    expect(tasks[0]?.command).toBe('pnpm test');
+    expect(tasks[1]).not.toHaveProperty('command');
   });
 
   it("shows a failed task's error in its peek", async () => {
