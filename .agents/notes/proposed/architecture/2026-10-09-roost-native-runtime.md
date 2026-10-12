@@ -3,7 +3,7 @@
 Status: proposed
 Type: architecture
 Translation: current
-PR: [#1329](https://github.com/LodyAI/Lody/pull/1329)
+PR: [#1329](https://github.com/LodyAI/Lody/pull/1329), [#1509](https://github.com/LodyAI/Lody/pull/1509)
 
 [中文](2026-10-09-roost-native-runtime.zh.md)
 
