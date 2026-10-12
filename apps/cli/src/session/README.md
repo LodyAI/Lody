@@ -383,6 +383,16 @@ RPC rejections correlate that context with the request ID. Transport failures re
 client-side provenance and do not establish an owner storage fault or authorize replay.
 Compose the readiness Effect directly; only the MessageHandler entry executes it.
 
+An explicit history precondition refusal must remain terminal when the RPC stream
+replays an unexpired request after daemon restart. `session-history-rpc-rejections.ts`
+owns a separate SQLite file in the application data directory, with one scoped handle
+per operation and a FULL synchronous transaction before the refusal reply. It stores
+only the request namespace, fingerprint, expiry, code and safe message. It never stores
+history bodies or credentials. Expired records are removed on the next refusal write.
+The MessageHandler RPC callbacks execute these Effects; the transport requires this
+capability for history writes and refuses unavailable or conflicting request state.
+Storage handoff and uncertain write outcomes retain their existing owners.
+
 Initialization, Worker exit and failed writes retain their original error and outcome
 classification. The owner's local log records causes, exit status and runtime/build
 details under a diagnostic ID. For these failures, history RPC returns only the ID,

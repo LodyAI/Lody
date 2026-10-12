@@ -2,6 +2,10 @@ import { fileLocksLegacy } from '@/utils/file-lock';
 import { Effect } from 'effect';
 import { awaitSessionHistoryOwner } from '@/session/session-history-owner';
 import {
+  getSessionHistoryRpcRejection,
+  putSessionHistoryRpcRejection,
+} from '@/session/session-history-rpc-rejections';
+import {
   SessionAttachmentTransfer,
   type UploadableImageFile,
   type UploadedSessionImage,
@@ -3110,6 +3114,25 @@ export class MessageHandler {
         rpcVersion: LORO_STREAMS_RPC_VERSION,
         retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
         now: getServerNow,
+        historyRequestRejections: {
+          get: (request) =>
+            Effect.runPromise(
+              getSessionHistoryRpcRejection(
+                path.join(getLodyDataDir(), 'session-history-rpc-rejections.sqlite3'),
+                request,
+                getServerNow()
+              )
+            ),
+          put: (request, rejection) =>
+            Effect.runPromise(
+              putSessionHistoryRpcRejection(
+                path.join(getLodyDataDir(), 'session-history-rpc-rejections.sqlite3'),
+                request,
+                rejection,
+                getServerNow()
+              )
+            ),
+        },
         getMachineStatus: async () =>
           await this.executionService.getMachineStatus({
             type: 'machine/status',

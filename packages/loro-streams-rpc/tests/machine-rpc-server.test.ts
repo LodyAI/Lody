@@ -35,6 +35,8 @@ import {
   type LoroJsonLiveBatchHandler,
   type LoroJsonStreamBatch,
   type LoroStreamsJsonStreamClient,
+  type SessionHistoryRpcRejection,
+  type SessionHistoryRpcRejectionStore,
 } from '../src/index';
 
 const previewProof = {
@@ -52,6 +54,16 @@ const createSilentLogger = () => ({
   warn: () => {},
   error: () => {},
 });
+const createHistoryRejectionStore = (): SessionHistoryRpcRejectionStore => {
+  const rejections = new Map<string, SessionHistoryRpcRejection>();
+  return {
+    get: async (request) => rejections.get(request.id) ?? null,
+    put: async (request, rejection) => {
+      rejections.set(request.id, rejection);
+      return rejection;
+    },
+  };
+};
 
 const createFakeStreamClient = () => {
   const ensured: string[] = [];
@@ -119,6 +131,326 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcServer', () => {
+  it.each(['read', 'write'] as const)(
+    'does not start history %s when the RPC expires during metadata readiness',
+    async (kind) => {
+      const fake = createFakeStreamClient();
+      let now = 1;
+      let entered!: () => void;
+      const checking = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let ready!: () => void;
+      const metadata = new Promise<void>((resolve) => {
+        ready = resolve;
+      });
+      const operations: string[] = [];
+      const server = new LoroStreamsMachineRpcServer({
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        machineId: 'synthetic-machine' as MachineId,
+        now: () => now,
+        logger: createSilentLogger(),
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        historyRequestRejections: createHistoryRejectionStore(),
+        resolveSessionHistoryOwnerSessionId: async (id) => {
+          entered();
+          await metadata;
+          return id;
+        },
+        readSessionHistory: async ({ sessionId }) => {
+          operations.push('read');
+          return { type: 'session/history-read_response', sessionId, success: true, result: [] };
+        },
+        writeSessionHistory: async ({ sessionId, operation }) => {
+          operations.push('write');
+          return { type: 'session/history-write_response', sessionId, operation, success: true };
+        },
+      });
+      try {
+        await server.start();
+        fake.pushBatch({
+          messages: [
+            {
+              jsonrpc: '2.0',
+              id: 'synthetic-expiring-request',
+              rpcVersion: '1',
+              workspaceId: 'synthetic-workspace',
+              machineId: 'synthetic-machine',
+              replyTo: 'synthetic-reply',
+              method: kind === 'read' ? 'session/history-read' : 'session/history-write',
+              sentAt: 1,
+              expiresAt: 2,
+              params: await encryptCodeCollabV2RpcPayload(
+                'synthetic-session',
+                kind === 'read'
+                  ? { sessionId: 'synthetic-session', query: { kind: 'count' } }
+                  : { sessionId: 'synthetic-session', operation: 'append', payload: {} }
+              ),
+            },
+          ],
+          nextOffset: '1',
+          upToDate: true,
+        });
+        await checking;
+        now = 2;
+        ready();
+        await Promise.all(
+          (server as unknown as { inFlightRequests: Set<Promise<void>> }).inFlightRequests
+        );
+        expect(operations).toEqual([]);
+        expect(fake.appended).toEqual([]);
+      } finally {
+        ready();
+        server.stop();
+      }
+    }
+  );
+
+  it.each(['missing', 'lookup', 'save'] as const)(
+    'fails closed when history refusal persistence is %s',
+    async (phase) => {
+      const fake = createFakeStreamClient();
+      const stored: string[] = [];
+      const rejectionStore = createHistoryRejectionStore();
+      if (phase === 'lookup')
+        rejectionStore.get = async () => {
+          throw new Error('synthetic-private-driver-detail');
+        };
+      if (phase === 'save')
+        rejectionStore.put = async () => {
+          throw new Error('synthetic-private-driver-detail');
+        };
+      const server = new LoroStreamsMachineRpcServer({
+        workspaceId: 'synthetic-workspace' as WorkspaceId,
+        machineId: 'synthetic-machine' as MachineId,
+        now: () => 1,
+        logger: createSilentLogger(),
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        ...(phase === 'missing' ? {} : { historyRequestRejections: rejectionStore }),
+        resolveSessionHistoryOwnerSessionId: async () => {
+          throw new LoroStreamsRpcHandlerError(
+            'session_metadata_pending',
+            'Metadata is pending; history was not started.'
+          );
+        },
+        writeSessionHistory: async ({ sessionId, operation }) => {
+          stored.push(sessionId);
+          return { type: 'session/history-write_response', sessionId, operation, success: true };
+        },
+      });
+      try {
+        await server.start();
+        fake.pushBatch({
+          messages: [
+            {
+              jsonrpc: '2.0',
+              id: 'synthetic-refusal-failure',
+              rpcVersion: '1',
+              workspaceId: 'synthetic-workspace',
+              machineId: 'synthetic-machine',
+              replyTo: 'synthetic-reply',
+              method: 'session/history-write',
+              sentAt: 1,
+              expiresAt: 30_001,
+              params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+                sessionId: 'synthetic-session',
+                operation: 'append',
+                payload: {},
+              }),
+            },
+          ],
+          nextOffset: '1',
+          upToDate: true,
+        });
+        await fake.waitForAppendedCount(1);
+        expect(stored).toEqual([]);
+        expect(fake.appended[0]?.value).toMatchObject({
+          error: { code: 'session_history_request_state_unavailable' },
+        });
+        const reply = fake.appended[0];
+        if (!reply) throw new Error('Missing history RPC refusal response');
+        const message = (reply.value as { error: { message: string } }).error.message;
+        expect(message).not.toContain('synthetic-private-driver-detail');
+        expect(message).not.toContain('history was not started');
+      } finally {
+        server.stop();
+      }
+    }
+  );
+
+  it('joins identical concurrent history requests and rejects request ID reuse before history', async () => {
+    const fake = createFakeStreamClient();
+    const stored: string[] = [];
+    let entered!: () => void;
+    const checking = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let ready!: () => void;
+    const metadata = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const server = new LoroStreamsMachineRpcServer({
+      workspaceId: 'synthetic-workspace' as WorkspaceId,
+      machineId: 'synthetic-machine' as MachineId,
+      now: () => 1,
+      logger: createSilentLogger(),
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      historyRequestRejections: createHistoryRejectionStore(),
+      resolveSessionHistoryOwnerSessionId: async (id) => {
+        entered();
+        await metadata;
+        return id;
+      },
+      writeSessionHistory: async ({ sessionId, operation }) => {
+        stored.push(sessionId);
+        return { type: 'session/history-write_response', sessionId, operation, success: true };
+      },
+    });
+    const request = {
+      jsonrpc: '2.0',
+      id: 'synthetic-concurrent-request',
+      rpcVersion: '1',
+      workspaceId: 'synthetic-workspace',
+      machineId: 'synthetic-machine',
+      replyTo: 'synthetic-reply',
+      method: 'session/history-write',
+      sentAt: 1,
+      expiresAt: 30_001,
+      params: await encryptCodeCollabV2RpcPayload('synthetic-session', {
+        sessionId: 'synthetic-session',
+        operation: 'append',
+        payload: {},
+      }),
+    };
+    try {
+      await server.start();
+      fake.pushBatch({
+        messages: [request, request, { ...request, replyTo: 'different-client' }],
+        nextOffset: '3',
+        upToDate: true,
+      });
+      await checking;
+      await fake.waitForAppendedCount(1);
+      expect(stored).toEqual([]);
+      expect(fake.appended[0]?.value).toMatchObject({
+        error: { code: 'rpc_request_identity_mismatch' },
+      });
+      ready();
+      await fake.waitForAppendedCount(2);
+      await Promise.all(
+        (server as unknown as { inFlightRequests: Set<Promise<void>> }).inFlightRequests
+      );
+      expect(stored).toEqual(['synthetic-session']);
+      expect(fake.appended.map(({ streamId }) => streamId)).toEqual([
+        'different-client',
+        'synthetic-reply',
+      ]);
+    } finally {
+      ready();
+      server.stop();
+    }
+  });
+
+  it('keeps a history precondition refusal terminal when an unexpired request is replayed after restart', async () => {
+    const machineId = 'synthetic-wsl' as MachineId;
+    const sessionId = 'synthetic-session' as SessionId;
+    const workspaceId = 'synthetic-workspace' as WorkspaceId;
+    const request = {
+      jsonrpc: '2.0',
+      id: 'synthetic-refused-request',
+      rpcVersion: '1',
+      workspaceId,
+      machineId,
+      replyTo: 'synthetic-reply',
+      method: 'session/history-write',
+      sentAt: 1,
+      expiresAt: 30_001,
+      params: await encryptCodeCollabV2RpcPayload(sessionId, {
+        sessionId,
+        operation: 'append',
+        payload: { entry: { id: 'synthetic-turn' } },
+      }),
+    };
+    let ready = false;
+    const stored: string[] = [];
+    const historyRequestRejections = createHistoryRejectionStore();
+    const createServer = (fake: ReturnType<typeof createFakeStreamClient>) =>
+      new LoroStreamsMachineRpcServer({
+        workspaceId,
+        machineId,
+        now: () => 1,
+        logger: createSilentLogger(),
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        ...{ historyRequestRejections },
+        resolveSessionHistoryOwnerSessionId: async () => {
+          if (!ready)
+            throw new LoroStreamsRpcHandlerError(
+              'session_metadata_pending',
+              'Metadata is pending; history was not started.'
+            );
+          return sessionId;
+        },
+        writeSessionHistory: async ({ sessionId: id, operation }) => {
+          stored.push(id);
+          return {
+            type: 'session/history-write_response',
+            sessionId: id,
+            operation,
+            success: true,
+            historyRevision: 1,
+            historyCount: 1,
+            historyChange: null,
+          };
+        },
+      });
+    const firstTransport = createFakeStreamClient();
+    const first = createServer(firstTransport);
+    const secondTransport = createFakeStreamClient();
+    const second = createServer(secondTransport);
+    try {
+      await first.start();
+      firstTransport.pushBatch({ messages: [request], nextOffset: '1', upToDate: true });
+      await firstTransport.waitForAppendedCount(1);
+      expect(stored).toEqual([]);
+      expect(firstTransport.appended[0]?.value).toMatchObject({
+        id: request.id,
+        error: { code: 'session_metadata_pending' },
+      });
+      first.stop();
+      ready = true;
+      await second.start();
+      secondTransport.pushBatch({ messages: [request], nextOffset: '1', upToDate: true });
+      await secondTransport.waitForAppendedCount(1);
+      expect(stored).toEqual([]);
+      expect(secondTransport.appended[0]?.value).toMatchObject({
+        id: request.id,
+        error: { code: 'session_metadata_pending' },
+      });
+      secondTransport.pushBatch({
+        messages: [{ ...request, id: 'synthetic-fresh-request' }],
+        nextOffset: '2',
+        upToDate: true,
+      });
+      await secondTransport.waitForAppendedCount(2);
+      expect(stored).toEqual([sessionId]);
+      expect(secondTransport.appended[1]?.value).toMatchObject({
+        id: 'synthetic-fresh-request',
+        result: expect.any(Object),
+      });
+    } finally {
+      first.stop();
+      second.stop();
+    }
+  });
+
   it('cancels a pending history owner check on stop before any history operation starts', async () => {
     const fake = createFakeStreamClient();
     let entered!: () => void;
@@ -136,6 +468,7 @@ describe('LoroStreamsMachineRpcServer', () => {
       now: () => 1,
       logger: createSilentLogger(),
       streamClient: fake.streamClient,
+      historyRequestRejections: createHistoryRejectionStore(),
       getMachineStatus: vi.fn(),
       refreshMachineAcpCapabilities: vi.fn(),
       resolveSessionHistoryOwnerSessionId: (_id, { signal }) =>
@@ -230,6 +563,7 @@ describe('LoroStreamsMachineRpcServer', () => {
           return forward(responses)(id, value);
         },
       },
+      historyRequestRejections: createHistoryRejectionStore(),
       getMachineStatus: vi.fn(),
       refreshMachineAcpCapabilities: vi.fn(),
       resolveSessionHistoryOwnerSessionId: async (id) => {

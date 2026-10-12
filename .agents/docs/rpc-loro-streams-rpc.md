@@ -36,6 +36,16 @@ storage logs for them. Owner storage errors keep their existing safe diagnostic 
 Server metadata refusals keep a stable RPC error code and log request-correlated,
 content-free ownership context. No failure authorizes replay or backend fallback.
 
+The request stream can replay unexpired requests after server restart. The CLI saves
+history precondition refusals in a separate machine-local SQLite store before replying,
+then returns that saved refusal on replay even if metadata became ready. Records bind
+workspace, machine, request ID and a hash of the complete request; they contain no history
+payload or credentials and expire with the original request. A new request ID can retry.
+Writable history requires this injected store, and lookup/save failures fail closed.
+Identical concurrent history requests share one handler; conflicting reuse of an ID is
+rejected. Expiry and server stop are checked again after metadata readiness, before
+history handoff. Dispatched write outcomes retain their existing recovery policy.
+
 ## Remote lifecycle acknowledgements
 
 For accepted restart/upgrade responses, `settleMachineLifecycleResponse` attempts

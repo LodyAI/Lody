@@ -134,6 +134,50 @@ rejection codes/request correlation and strict success wire results; real Stream
 append-timeout and RPC response-deadline tests distinguish transport failures in
 both languages without replay.
 
+Extended testing corrected an earlier verification limit: a single refused request
+did not prove that refusal survived restart. A packaged Cloud client received
+`session_metadata_pending` before any write; metadata was then completed and the
+Linux daemon restarted while the original RPC was still valid. The request stream
+replayed it and SQLite contained the rejected turn, while the renderer's cached empty
+history hid the write. A deterministic encrypted-server regression reproduces this
+without networking or sleeps and fails against the previous implementation.
+
+Before returning an owner-readiness refusal, the CLI now commits it to a separate
+machine-local SQLite store with FULL synchronization. Replayed requests retain that
+original refusal until their original expiry, and a new request ID can retry. A hash
+binds the complete request to its workspace/machine/ID; neither history bodies nor
+credentials are stored. Identical concurrent requests share one handler; conflicting
+ID reuse and unavailable refusal storage fail closed. This kernel uses scoped Effect
+SQLite handles executed by MessageHandler callbacks; it has no background tasks or
+retained connection. The existing Promise RPC dispatcher remains outside the native
+unit. It does not record dispatched outcomes or change their existing recovery policy.
+The dispatcher checks expiry and stop again after readiness, before storage handoff;
+the regression covers metadata arriving only after the RPC expired.
+
+The expanded native suite checks real MessageHandler cleanup of six pending writes,
+isolated cancellation while two first writes succeed, live purge and invalid identity,
+and SQLite refusal reopen, expiry, namespace separation, conflicting payloads and
+unavailable storage. Encrypted-server tests cover restart replay, concurrent duplicates
+and failed lookup/save. Packaged remote testing also staggers three metadata waiters
+while a healthy write and ping complete, then appends 32 records across four sessions
+and checks content, unique IDs, paging and replacement, with no Loro history.
+
+With the repaired CLI on that Linux daemon, two original unexpired requests were
+captured and re-appended unchanged after their metadata-pending/foreign-owner refusals
+and after valid metadata arrived. Owner logs confirmed replay with the original codes;
+authoritative snapshot reads remained empty. Fresh requests then accepted one turn each,
+and another session accepted 16 concurrent turns. Paging and sealed-turn replacement
+preserved all identities and content. An independent SQLite backup, inspected through
+the native SDK with only the real writer's public owner, matched all 18 accepted turns
+and contained neither rejected original turn. Existing activity prevented another live
+restart; server recreation and real SQLite close/reopen provide that boundary coverage.
+
+The public CLI build passed at 2 GiB. This Cloud verification bundle reused the public
+CLI package-chunk strategy: its original unchunked composition exhausted 2 GiB on both
+the previous and repaired source. The local bundle validates the repaired runtime,
+not the unchanged Cloud composition's memory limit. No SDK version or runtime patch
+was introduced.
+
 A macOS arm64 Cloud Nightly correctness app passed packaging, embedded CLI/native
 probes and ad-hoc signature verification, then reused the existing Nightly profile
 and authenticated workspace. Its first UI send received an assistant reply and
