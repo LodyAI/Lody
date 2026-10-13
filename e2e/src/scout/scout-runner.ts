@@ -187,7 +187,7 @@ async function runWorkIteration(
   const resources = await work.captureResources();
   const active = captureActive ? await captureActive() : null;
   await work.archiveAndDeletePermanently(resources);
-  await work.expectResourcesReleased(resources, [prompt.pid]);
+  await work.expectResourcesReleased(resources, [prompt.pid], fixture.acpEventLogPath);
   return active;
 }
 

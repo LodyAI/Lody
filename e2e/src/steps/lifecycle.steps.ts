@@ -77,7 +77,11 @@ When('用户创建 worktree Session 并启动 Terminal', async function (this: L
 
 Then('永久删除后 Work 进程、终端和 worktree 被释放', async function (this: LodyWorld) {
   await this.workPage!.archiveAndDeletePermanently(this.workResources!);
-  await this.workPage!.expectResourcesReleased(this.workResources!, [this.activeAcpEvent!.pid]);
+  await this.workPage!.expectResourcesReleased(
+    this.workResources!,
+    [this.activeAcpEvent!.pid],
+    this.workFixture!.acpEventLogPath
+  );
   expect(this.workFixture!.readAcpEvents()).toContainEqual(
     expect.objectContaining({ event: 'prompt-end', stopReason: 'end_turn' })
   );
