@@ -42,8 +42,10 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   state; it creates the assistant entry when it opens.
 - `session-execution-service.ts` — runs one turn end-to-end: ACP prompt, turn ids,
   lifecycle/error handling, GitHub/local project setup, and post-turn diffStats.
-- `acp-session-config-applier.ts` — applies turn configuration and reports rejected
-  model selections through the GUI warning path, retaining the agent's actual model.
+- `acp-session-config-applier.ts` — resolves top-level and config-option selections,
+  then applies mode, model, and dependent options in that order. This prevents model switches
+  from resetting an already-applied effort. Reports rejected model selections through the GUI
+  warning path, retaining the agent's actual model.
 - `session-execution-helpers.ts` — composes first-task prompt context, with branch-naming
   guidance only after execution verifies this Session's temporary branch in an ordinary
   new independent GitHub/local worktree.

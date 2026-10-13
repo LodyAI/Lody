@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ACPSessionId, SessionId } from '@lody/shared';
 import type { AgentClient } from '@/agent/agent-client';
 import type { Logger } from '@/utils/logger';
-import { applyAcpSessionRunConfig } from './acp-session-config-applier';
+import { applyAcpSessionRunConfig, type AcpSessionRunConfig } from './acp-session-config-applier';
 
 function createLogger(): Logger {
   const logger = {
@@ -22,6 +22,91 @@ function createLogger(): Logger {
 }
 
 describe('applyAcpSessionRunConfig', () => {
+  it.each<AcpSessionRunConfig>([
+    { configOptionValues: { effort: 'max', model: 'provider/worker', mode: 'worker' } },
+    { configOptionValues: { mode: 'worker', effort: 'max', model: 'provider/worker' } },
+    { configOptionValues: { model: 'provider/worker', mode: 'worker', effort: 'max' } },
+    { modelId: 'provider/worker', configOptionValues: { effort: 'max', mode: 'worker' } },
+    { modeId: 'worker', configOptionValues: { effort: 'max', model: 'provider/worker' } },
+  ])('keeps model-dependent effort regardless of option order: %j', async (config) => {
+    const state = { mode: 'default', model: 'provider/default', effort: 'low' };
+    const agentClient = {
+      isCreated: () => true,
+      getConfigOptions: () => [
+        { id: 'mode', category: 'mode', type: 'select', currentValue: state.mode },
+        { id: 'model', category: 'model', type: 'select', currentValue: state.model },
+        { id: 'effort', category: 'thought_level', type: 'select', currentValue: state.effort },
+      ],
+      setSessionMode: async (_sessionId: string, value: string) => {
+        state.mode = value;
+        state.model = 'provider/default';
+        state.effort = 'low';
+      },
+      unstable_setSessionModel: async (_sessionId: string, value: string) => {
+        state.model = value;
+        state.effort = 'low';
+      },
+      setSessionConfigOption: async (_sessionId: string, configId: string, value: string) => {
+        if (configId !== 'effort') throw new Error('Unexpected option');
+        if (state.model !== 'provider/worker') throw new Error('Effort unavailable for this model');
+        state.effort = value;
+      },
+    } as unknown as AgentClient;
+
+    const result = await applyAcpSessionRunConfig({
+      session: {
+        sessionId: 'session-worker' as SessionId,
+        acpSessionId: 'acp-worker' as ACPSessionId,
+        agentClient,
+      },
+      config: { agentType: 'opencode', ...config },
+      logger: createLogger(),
+    });
+
+    expect(state).toEqual({ mode: 'worker', model: 'provider/worker', effort: 'max' });
+    expect(result).toEqual({
+      rejectedSelections: [],
+      warningSelections: [],
+      runtimeConfigPatch: {
+        acpSessionId: 'acp-worker',
+        modeId: 'worker',
+        modelId: 'provider/worker',
+        configOptionValues: state,
+      },
+    });
+  });
+
+  it('does not apply effort after cancellation during a model switch', async () => {
+    const controller = new AbortController();
+    const cancelled = new Error('Turn cancelled');
+    const state = { model: 'provider/default', effort: 'low' };
+    const agentClient = {
+      isCreated: () => true,
+      getConfigOptions: () => [],
+      unstable_setSessionModel: async (_sessionId: string, value: string) => {
+        state.model = value;
+        controller.abort(cancelled);
+      },
+      setSessionConfigOption: async (_sessionId: string, _configId: string, value: string) => {
+        state.effort = value;
+      },
+    } as unknown as AgentClient;
+
+    await expect(
+      applyAcpSessionRunConfig({
+        session: {
+          sessionId: 'session-cancelled' as SessionId,
+          acpSessionId: 'acp-cancelled' as ACPSessionId,
+          agentClient,
+        },
+        config: { configOptionValues: { effort: 'max', model: 'provider/worker' } },
+        logger: createLogger(),
+        signal: controller.signal,
+      })
+    ).rejects.toBe(cancelled);
+    expect(state).toEqual({ model: 'provider/worker', effort: 'low' });
+  });
+
   it('applies mode, model, and remaining options to an established ACP session', async () => {
     const options = [
       { id: 'permission-mode', category: 'mode', type: 'select', currentValue: 'default' },
