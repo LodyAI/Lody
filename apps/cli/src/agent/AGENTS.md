@@ -57,10 +57,10 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   permissions use Harness presets. `agent_preset` uses `AgentPresets.mount/recompose`
   only before the first prompt. Per-Agent ACP stdio/HTTP MCP belongs in the adapter.
   Never modify JSONL; mixed roots fail naming both paths.
-- `managed-agent-runtime.ts`: Codex/Claude/Grok/Devin pins come only from their
-  `<name>-runtime-manifest.json`; reject dependency/manifest version mismatches and never
-  duplicate pins beside the manager. Do not loosen the metadata
-  schema or accept unknown legacy fields. Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
+- `managed-agent-runtime.ts`: native pins live only in `<name>-runtime-manifest.json`.
+  Reject version mismatches and unknown legacy fields; do not duplicate pins or weaken the schema.
+  Read Claude metadata from the adapter's installed SDK; the CLI dev SDK may differ.
+  Definition drift is a miss; cleanup and update scans are best effort. Grok/Devin submodules never build official runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
   methods stay capability-gated. Inject the artifact base URL from
   `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.
   `LODY_RUNTIME_BASE_URL` is an explicit mirror override only.

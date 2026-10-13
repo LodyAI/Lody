@@ -10,7 +10,7 @@ import * as tar from 'tar';
 import { compressStream } from 'zstd-stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import claudePackageLock from '../../../../packages/acp-extension-claude/package-lock.json';
-import claudeSdkManifest from '../../node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
+import claudeSdkManifest from '../../../../packages/acp-extension-claude/node_modules/@anthropic-ai/claude-agent-sdk/manifest.json';
 import claudeRuntimeManifestJson from './claude-runtime-manifest.json';
 import kimiRuntimeManifestJson from './kimi-runtime-manifest.json';
 import piRuntimeManifestJson from './pi-runtime-manifest.json';
