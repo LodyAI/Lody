@@ -3509,3 +3509,57 @@ it('round trips typed simulator commands and isolates unavailable and denied con
     server.stop();
   }
 });
+
+it('delivers Provider quota refresh results for the exact persisted config', async () => {
+  const fake = createFakeStreamClient();
+  const workspaceId = 'quota-workspace' as WorkspaceId;
+  const machineId = 'quota-machine' as MachineId;
+  const result = {
+    type: 'machine/provider-rate-limits-refresh_response' as const,
+    machineId,
+    configId: 'quota-provider' as AgentConfigId,
+    success: true,
+  };
+  const server = new LoroStreamsMachineRpcServer({
+    logger: createSilentLogger(),
+    workspaceId,
+    machineId,
+    streamClient: fake.streamClient,
+    getMachineStatus: vi.fn(),
+    refreshMachineAcpCapabilities: vi.fn(),
+    refreshMachineProviderRateLimits: async (id) => ({
+      ...result,
+      success: id === result.configId,
+    }),
+  });
+  fake.pushBatch({
+    messages: [
+      {
+        jsonrpc: '2.0',
+        id: 'quota-request',
+        rpcVersion: '1',
+        method: 'machine/provider-rate-limits-refresh',
+        machineId,
+        workspaceId,
+        replyTo: `${workspaceId}:rpc:res:client`,
+        sentAt: Date.now(),
+        expiresAt: Date.now() + 60_000,
+        params: { configId: result.configId },
+      },
+    ],
+    nextOffset: '1',
+    cursor: '1',
+    upToDate: true,
+  });
+  await server.start();
+  try {
+    await fake.waitForAppendedCount(1);
+    expect(fake.appended[0]?.value).toMatchObject({
+      id: 'quota-request',
+      method: 'machine/provider-rate-limits-refresh',
+      result,
+    });
+  } finally {
+    server.stop();
+  }
+});

@@ -1,3 +1,4 @@
+import { useProviderQuotaRefresh } from '@/hooks/use-provider-quota-refresh';
 import { text as uiText } from '@lody/ui/tokens/scales.stylex';
 import { useMemo, useState } from 'react';
 import * as stylex from '@stylexjs/stylex';
@@ -132,7 +133,7 @@ export function ProviderRow({
   const { t } = useTranslation();
   const { cliType, agentType } = config;
   const envCount = Object.keys(config.env || {}).length;
-  // The cached capabilities the composer also reads; nothing is fetched here.
+  // The cached model capabilities shared with the composer. Quota refresh is separate.
   const selector = useAcpSelectorOptions({
     configId: config.id,
     cliType,
@@ -146,8 +147,24 @@ export function ProviderRow({
       ? (selector.modelOptions.find((option) => option.value === selector.defaultModelId)?.label ??
         null)
       : null;
+  useProviderQuotaRefresh(
+    machine?.id,
+    config.id,
+    machine?.acpCapabilities?.[config.id]?.rateLimits?.query === true &&
+      canShowSubscriptionRateLimits({
+        cliType,
+        agentType,
+        config,
+        capability: machine?.acpCapabilities?.[config.id]?.rateLimits,
+      })
+  );
   const showRateLimits =
-    canShowSubscriptionRateLimits({ cliType, agentType, config }) &&
+    canShowSubscriptionRateLimits({
+      cliType,
+      agentType,
+      config,
+      capability: machine?.acpCapabilities?.[config.id]?.rateLimits,
+    }) &&
     !!machine?.raceLimits &&
     Object.keys(machine.raceLimits).some((key) => {
       const parsed = parseRateLimitEntryKey(key);

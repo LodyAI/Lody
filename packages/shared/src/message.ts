@@ -336,6 +336,20 @@ export interface MachineUpgradeResponse {
   error?: string;
 }
 
+export interface MachineProviderRateLimitsRefreshRequest {
+  type: 'machine/provider-rate-limits-refresh';
+  machineId: MachineId;
+  workspaceId: WorkspaceId;
+  configId: AgentConfigId;
+}
+
+export interface MachineProviderRateLimitsRefreshResponse {
+  type: 'machine/provider-rate-limits-refresh_response';
+  machineId: MachineId;
+  configId: AgentConfigId;
+  success: boolean;
+}
+
 export interface MachineAcpCapabilitiesRefreshRequest {
   type: 'machine/acp-capabilities-refresh';
   machineId: MachineId;
@@ -838,6 +852,7 @@ export type LocalSessionControlRequest =
   | MachinePingRequest
   | MachineRestartRequest
   | MachineUpgradeRequest
+  | MachineProviderRateLimitsRefreshRequest
   | MachineAcpCapabilitiesRefreshRequest
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest
@@ -865,6 +880,7 @@ export type LocalSessionControlResponse =
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -1287,6 +1303,7 @@ export type ClientToServer =
   | MachinePingRequest
   | MachineRestartRequest
   | MachineUpgradeRequest
+  | MachineProviderRateLimitsRefreshRequest
   | MachineAcpCapabilitiesRefreshRequest
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest
@@ -1304,6 +1321,7 @@ export type ServerToClient =
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -1321,6 +1339,7 @@ export type MachineToServer =
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
+  | MachineProviderRateLimitsRefreshResponse
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
@@ -1338,6 +1357,7 @@ export type ServerToMachine =
   | MachinePingRequest
   | MachineRestartRequest
   | MachineUpgradeRequest
+  | MachineProviderRateLimitsRefreshRequest
   | MachineAcpCapabilitiesRefreshRequest
   | MachineAcpAuthenticateRequest
   | MachineAcpBinaryStatusRequest

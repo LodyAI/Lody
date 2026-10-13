@@ -1,3 +1,4 @@
+import type { LodyRateLimitsCapability } from 'acp-extension-core';
 import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
 import { createSessionBackend, disposeSessionBackend } from '@/session/session-backend';
 import type { SessionBackend, SessionBackendFactory } from '@/session/session-backend';
@@ -57,6 +58,8 @@ import {
   getMachineFlockDocId,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
+  getMachineFlockAgentConfigs,
+  isBuiltinAgentType,
   resolveSessionHistoryStatus,
   writeMachineFlockRowToFlock,
   type AcpConfigOptionSummary,
@@ -1648,14 +1651,22 @@ export class LoroDocumentManager {
   async updateRateLimits(
     machineId: MachineId,
     agentConfigId: AgentConfigId | undefined,
-    cliType: CliType,
-    limits: RateLimit
+    cliType: string,
+    limits: RateLimit,
+    shouldWrite: () => boolean = () => true,
+    expectedConfig?: AgentConfigMeta
   ): Promise<void> {
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
       await this.machine.init();
     }
-    await this.machine.updateRateLimits(agentConfigId, cliType, limits);
+    await this.machine.updateRateLimits(
+      agentConfigId,
+      cliType,
+      limits,
+      shouldWrite,
+      expectedConfig
+    );
   }
 
   async updateAcpCapabilities(
@@ -3365,6 +3376,7 @@ type MachineMetaPatch = Partial<MachineMeta> & Pick<MachineMeta, 'id'>;
 export type AcpCapabilityWriteOptions = {
   signal?: AbortSignal;
   sessionTitle?: boolean;
+  rateLimits?: LodyRateLimitsCapability;
   /**
    * Every model's controls from the adapter's `_meta.lody.modelCapabilities`,
    * stored in the config's own `acpModelCapability` row. Absent means this
@@ -3388,6 +3400,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
     sessionTitle: entry.sessionTitle,
+    rateLimits: entry.rateLimits,
     sessionForkWorktree: entry.sessionForkWorktree,
   });
 
@@ -3444,16 +3457,26 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
 
   async updateRateLimits(
     agentConfigId: AgentConfigId | undefined,
-    cliType: CliType,
-    limits: RateLimit
+    cliType: string,
+    limits: RateLimit,
+    shouldWrite: () => boolean = () => true,
+    expectedConfig?: AgentConfigMeta
   ): Promise<void> {
+    if (!agentConfigId && !isBuiltinAgentType(cliType)) return;
     return this.enqueueRateLimitsUpdate(async () => {
       const limitId = ((limits as { limitId?: string }).limitId ?? cliType).trim() || cliType;
       const handle = await this.openMachineFlockDoc();
+      if (!shouldWrite()) return;
+      if (expectedConfig) {
+        const current = getMachineFlockAgentConfigs(
+          readMachineFlockRowsFromFlock(handle.flock, { families: ['agentConfig'] })
+        )[expectedConfig.id];
+        if (!current || JSON.stringify(current) !== JSON.stringify(expectedConfig)) return;
+      }
       const changed = writeMachineFlockRowToFlock(handle.flock, {
         key: agentConfigId
           ? machineFlockKeys.rateLimit(agentConfigId, cliType, limitId)
-          : machineFlockKeys.legacyRateLimit(cliType, limitId),
+          : machineFlockKeys.legacyRateLimit(cliType as CliType, limitId),
         value: limits,
       });
       if (changed) {
@@ -3507,6 +3530,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       acknowledgedSteer,
       goalActions: goalActions?.length ? goalActions : undefined,
       sessionTitle: options.sessionTitle,
+      rateLimits: options.rateLimits,
       sessionForkWorktree: sessionFork,
       modelReasoningEfforts:
         modelReasoningEfforts && Object.keys(modelReasoningEfforts).length > 0

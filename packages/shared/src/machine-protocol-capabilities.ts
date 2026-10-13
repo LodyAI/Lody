@@ -31,6 +31,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   iosSimulatorExterior: 'iosSimulatorExterior',
   piExtensions: 'piExtensions',
   acpCapabilityRefreshCache: 'acpCapabilityRefreshCache',
+  providerRateLimitsRefresh: 'providerRateLimitsRefresh',
   sessionHistory: 'sessionHistory',
   sessionCollaborationControl: 'sessionCollaborationControl',
 } as const;
@@ -105,6 +106,7 @@ export function machineSupportsSubagentCancellation(
  * in the "supported" direction and there is no version fallback to catch it.
  */
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  providerRateLimitsRefresh: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.magpieImport]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.dshProviderIsolation]: 1,
   [MACHINE_PROTOCOL_CAPABILITIES.sessionCollaborationControl]: 1,

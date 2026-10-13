@@ -10,7 +10,6 @@ import {
   AgentType,
   AcpCapabilityCacheEntry,
   BuiltinRuntimeOverrides,
-  CliType,
   CustomAcpLaunchSpec,
   LocalProjectHistoryProvider,
   LocalProjectId,
@@ -42,7 +41,7 @@ const PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX = 'provider';
 export const CODEX_SPARK_LIMIT_ID = 'codex_bengalfox';
 
 export const getRateLimitEntryKey = (
-  cliType: CliType,
+  cliType: string,
   limitId: string | null | undefined,
   agentConfigId?: AgentConfigId | null
 ): string => {
@@ -51,7 +50,7 @@ export const getRateLimitEntryKey = (
     return [
       PROVIDER_RATE_LIMIT_ENTRY_KEY_PREFIX,
       encodeURIComponent(agentConfigId),
-      cliType,
+      encodeURIComponent(cliType),
       encodeURIComponent(id),
     ].join(RATE_LIMIT_ENTRY_KEY_SEPARATOR);
   }
@@ -76,7 +75,7 @@ export const parseRateLimitEntryKey = (
     try {
       return {
         agentConfigId: decodeURIComponent(parts[1]) as AgentConfigId,
-        cliType: parts[2],
+        cliType: decodeURIComponent(parts[2]),
         limitId: decodeURIComponent(parts[3]),
       };
     } catch {

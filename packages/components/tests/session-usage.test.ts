@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  CODEX_SPARK_LIMIT_ID,
-  getRateLimitEntryKey,
-  type AgentConfigId,
-} from '@lody/shared';
+import { CODEX_SPARK_LIMIT_ID, getRateLimitEntryKey, type AgentConfigId } from '@lody/shared';
 
 import {
   canShowSubscriptionRateLimits,
@@ -176,19 +172,13 @@ describe('session usage', () => {
     const personalConfigId = 'codex-personal' as AgentConfigId;
     const rateLimits: MachineRateLimits = {
       [getRateLimitEntryKey('codex', 'codex')]: usage({
-        windows: [
-          { usedPercent: 55, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null },
-        ],
+        windows: [{ usedPercent: 55, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null }],
       }),
       [getRateLimitEntryKey('codex', 'codex', workConfigId)]: usage({
-        windows: [
-          { usedPercent: 10, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null },
-        ],
+        windows: [{ usedPercent: 10, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null }],
       }),
       [getRateLimitEntryKey('codex', 'codex', personalConfigId)]: usage({
-        windows: [
-          { usedPercent: 80, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null },
-        ],
+        windows: [{ usedPercent: 80, windowDurationSeconds: 604_800, resetsAtEpochSeconds: null }],
       }),
     };
 
@@ -234,33 +224,31 @@ describe('session usage', () => {
     ).toBeNull();
   });
 
-  it('hides subscription limits for custom providers and configured endpoints', () => {
+  it('gates quota on the declaration for builtin and third-party providers', () => {
+    for (const target of [
+      { cliType: 'builtin', agentType: 'codex' },
+      { cliType: 'custom', agentType: 'example-agent' },
+    ] as const) {
+      expect(canShowSubscriptionRateLimits(target)).toBe(false);
+      expect(canShowSubscriptionRateLimits({ ...target, capability: { version: 1 } })).toBe(true);
+      expect(
+        canShowSubscriptionRateLimits({ ...target, capability: { version: 1, query: true } })
+      ).toBe(true);
+    }
+  });
+  it('keeps builtin account overrides isolated while trusting custom capability declarations', () => {
+    const capability = { version: 1, query: true } as const;
+    const config = { env: { API_KEY: 'synthetic' } };
     expect(
-      canShowSubscriptionRateLimits({
-        cliType: 'builtin',
-        agentType: 'codex',
-        config: { env: {} },
-      })
-    ).toBe(true);
-    expect(
-      canShowSubscriptionRateLimits({
-        cliType: 'builtin',
-        agentType: 'grok',
-        config: { env: {} },
-      })
-    ).toBe(true);
-    expect(
-      canShowSubscriptionRateLimits({
-        cliType: 'builtin',
-        agentType: 'claude',
-        config: { env: { ANTHROPIC_BASE_URL: 'https://example.com' } },
-      })
+      canShowSubscriptionRateLimits({ cliType: 'builtin', agentType: 'claude', config, capability })
     ).toBe(false);
     expect(
       canShowSubscriptionRateLimits({
         cliType: 'custom',
         agentType: 'custom-agent',
+        config,
+        capability,
       })
-    ).toBe(false);
+    ).toBe(true);
   });
 });

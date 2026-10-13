@@ -839,3 +839,36 @@ describe('local session control node validators', () => {
     expect(isLocalSessionControlResponseCjs({ ...progress, percent: 101 })).toBe(false);
   });
 });
+
+it('routes Provider quota refresh by persisted config only in both local validators', () => {
+  const request = {
+    type: 'machine/provider-rate-limits-refresh',
+    machineId: 'm',
+    workspaceId: 'w',
+    configId: 'c',
+  };
+  for (const validate of [isLocalSessionControlRequest, isLocalSessionControlRequestCjs]) {
+    expect(validate(request)).toBe(true);
+    expect(validate({ ...request, configId: '' })).toBe(false);
+    expect(validate({ ...request, env: { KEY: 'synthetic' } })).toBe(false);
+    expect(validate({ ...request, customAcp: { command: 'example' } })).toBe(false);
+  }
+  for (const validate of [isLocalSessionControlResponse, isLocalSessionControlResponseCjs]) {
+    expect(
+      validate({
+        type: 'machine/provider-rate-limits-refresh_response',
+        machineId: 'm',
+        configId: 'c',
+        success: true,
+      })
+    ).toBe(true);
+    expect(
+      validate({
+        type: 'machine/provider-rate-limits-refresh_response',
+        machineId: 'm',
+        configId: 'c',
+        success: 'yes',
+      })
+    ).toBe(false);
+  }
+});

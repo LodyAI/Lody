@@ -33,6 +33,7 @@ import type {
   MachineAcpAuthenticateResponse,
   MachineAcpAuthenticationProgressMessage,
   MachineAcpCapabilitiesRefreshResponse,
+  MachineProviderRateLimitsRefreshResponse,
   MachineBugReportResponse,
   MachineId,
   MachinePiExtensionsResponse,
@@ -362,6 +363,9 @@ type RpcServerDeps = {
       | { action: 'restart'; response: MachineRestartResponse }
       | { action: 'upgrade'; response: MachineUpgradeResponse }
   ) => void;
+  refreshMachineProviderRateLimits?: (
+    configId: AgentConfigId
+  ) => Promise<MachineProviderRateLimitsRefreshResponse>;
   refreshMachineAcpCapabilities: (args: {
     configId: AgentConfigId;
     force?: boolean;
@@ -956,6 +960,15 @@ export class LoroStreamsMachineRpcServer {
             action: 'upgrade',
             response,
           });
+          return;
+        }
+        case 'machine/provider-rate-limits-refresh': {
+          if (!this.deps.refreshMachineProviderRateLimits)
+            throw new Error('Quota refresh unsupported');
+          const response = await this.deps.refreshMachineProviderRateLimits(
+            request.params.configId as AgentConfigId
+          );
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
         case 'machine/acp-capabilities-refresh': {
@@ -1949,6 +1962,7 @@ export class LoroStreamsMachineRpcServer {
       | MachineStatusResponse
       | MachinePreviewControlResponse
       | MachinePingResponse
+      | MachineProviderRateLimitsRefreshResponse
       | MachineAcpCapabilitiesRefreshResponse
       | MachineAcpAuthenticateResponse
       | MachineAcpAuthenticationProgressMessage

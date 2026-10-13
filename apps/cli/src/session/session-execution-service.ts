@@ -1,3 +1,7 @@
+import type { LodyRateLimitsCapability } from 'acp-extension-core';
+import { queryLocalAcpRateLimits, AcpQuotaCleanupError } from '@/agent/acp-runner';
+import type { MachineProviderRateLimitsRefreshResponse } from '@lody/shared';
+import { ProviderQuotaRefreshCache } from './provider-quota-refresh-cache';
 import { isSessionCollaborationStopped } from '@lody/shared';
 import {
   acpOwnsSessionTitleGeneration,
@@ -645,6 +649,7 @@ export type SessionExecutionServiceDeps = {
     sessionFork: boolean;
     acknowledgedSteer: boolean;
     sessionTitle?: boolean;
+    rateLimits?: LodyRateLimitsCapability;
     goalActions?: SessionGoalAction[];
     modelReasoningEfforts?: Record<string, string[]>;
     modelCapabilities?: Record<string, AcpModelControls>;
@@ -829,6 +834,118 @@ export class SessionExecutionService {
   // inputs. Refreshes spawn
   // a fresh CLI subprocess and wait a few seconds; running it twice in parallel
   // doubles process cost and races the final `updateAcpCapabilities` write.
+  private readonly providerQuotaRefresh = new ProviderQuotaRefreshCache(
+    Date.now,
+    (error) => !(error instanceof AcpQuotaCleanupError)
+  );
+  private readonly providerQuotaUpdates = new Map<AgentConfigId, number>();
+
+  noteProviderRateLimitsUpdate(configId: AgentConfigId): void {
+    this.providerQuotaUpdates.set(configId, (this.providerQuotaUpdates.get(configId) ?? 0) + 1);
+  }
+
+  async refreshProviderRateLimits(
+    configId: AgentConfigId
+  ): Promise<MachineProviderRateLimitsRefreshResponse> {
+    const response = {
+      type: 'machine/provider-rate-limits-refresh_response' as const,
+      machineId: this.deps.machineId,
+      configId,
+      success: false,
+    };
+    const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+      configId,
+      this.deps.machineId
+    );
+    if (!config) return response;
+    if (
+      config.cliType === 'builtin' &&
+      (config.brandId ||
+        Object.keys(config.env ?? {}).length ||
+        config.codexAuth?.mode === 'api-key')
+    )
+      return response;
+    const capability = await this.deps.workspaceDocument.getAcpCapabilities(
+      this.deps.machineId,
+      configId
+    );
+    if (capability?.rateLimits?.query !== true) return response;
+    const fingerprint = JSON.stringify(config);
+    response.success = await this.providerQuotaRefresh.run(configId, fingerprint, async () => {
+      const revision = this.providerQuotaUpdates.get(configId) ?? 0;
+      const signal = AbortSignal.timeout(45_000);
+      let codexProfile: ResolvedCodexProfile | undefined;
+      if (config.codexAuth) {
+        // API-key profiles do not have a subscription quota.
+        codexProfile = await getCodexProfileStore().resolve(this.deps.workspaceId, config, true);
+        if (
+          !codexProfile ||
+          codexProfile.profile.mode !== 'chatgpt' ||
+          !(await getCodexProfileStore().isReady(codexProfile))
+        )
+          return false;
+      }
+      if (config.cliType === 'builtin' && !config.runtimeOverrides) {
+        const status = await this.getMachineAcpBinaryStatus({
+          type: 'machine/acp-binary-status',
+          machineId: this.deps.machineId,
+          workspaceId: this.deps.workspaceId,
+          agentType: config.agentType,
+        });
+        if (status.success && status.status !== 'installed') return false;
+      }
+      const snapshot = await queryLocalAcpRateLimits({
+        cliType: config.cliType,
+        agentType: config.agentType,
+        customAcp: config.customAcp,
+        runtimeOverrides: config.runtimeOverrides,
+        agentConfigId: config.id,
+        magpieGatewayUrl: config.magpieGatewayUrl,
+        codexProfile: codexProfile ? { profile: codexProfile } : undefined,
+        env: { ...process.env, ...config.env },
+        workdir: process.cwd(),
+        signal,
+        logger: this.deps.logger,
+        terminalEnabled: false,
+        terminalManager: {
+          createTerminal: async () => {
+            throw new Error('Quota query is read-only');
+          },
+          terminalOutput: async () => {
+            throw new Error('Quota query is read-only');
+          },
+          releaseTerminal: async () => {},
+          waitForTerminalExit: async () => ({ exitCode: null, signal: null }),
+          killTerminal: async () => {},
+        },
+        onUpdateMessage: () => {},
+        onRequestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      });
+      signal.throwIfAborted();
+      // v1 adapters conflate failed reads with empty snapshots. Never clear or mark fresh.
+      if (snapshot.rateLimits.length === 0) return false;
+      const latest = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+        configId,
+        this.deps.machineId
+      );
+      if (!latest || JSON.stringify(latest) !== fingerprint) return false;
+      const unchanged = () =>
+        (this.providerQuotaUpdates.get(configId) ?? 0) === revision && !signal.aborted;
+      for (const limit of snapshot.rateLimits) {
+        await this.deps.workspaceDocument.updateRateLimits(
+          this.deps.machineId,
+          configId,
+          config.agentType,
+          limit,
+          unchanged,
+          config
+        );
+      }
+      return unchanged();
+    });
+    return response;
+  }
+
   private readonly inFlightAcpRefresh = new Map<string, InFlightAcpRefreshEntry>();
   /**
    * Fingerprint of the launch inputs — env included — behind each capability
@@ -6438,6 +6555,7 @@ export class SessionExecutionService {
         capabilities.goalActions,
         {
           sessionTitle: capabilities.sessionTitle,
+          rateLimits: capabilities.rateLimits,
           modelCapabilities: capabilities.modelCapabilities,
         }
       );
@@ -6922,6 +7040,7 @@ export class SessionExecutionService {
         sessionFork,
         acknowledgedSteer,
         sessionTitle,
+        rateLimits,
         goalActions,
         modelReasoningEfforts,
         modelCapabilities,
@@ -6969,7 +7088,7 @@ export class SessionExecutionService {
         modelReasoningEfforts,
         acknowledgedSteer,
         goalActions,
-        { signal: options.signal, sessionTitle, modelCapabilities }
+        { signal: options.signal, sessionTitle, rateLimits, modelCapabilities }
       );
       this.acpCapabilityLaunchInputFingerprints.set(
         message.configId,

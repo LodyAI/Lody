@@ -2727,6 +2727,9 @@ export const SessionChatInterface = memo(
         cliType: session.cliType,
         agentType: session.agentType,
         config: sessionAgentConfig,
+        capability: session.agentConfigId
+          ? sessionMachine?.acpCapabilities?.[session.agentConfigId]?.rateLimits
+          : undefined,
       })
         ? sessionMachine?.raceLimits
         : undefined;
@@ -6936,6 +6939,7 @@ export const SessionChatInterface = memo(
                           modeOptions={modeOptions}
                           modelOptions={modelOptions}
                           rateLimits={sessionRateLimits}
+                          quotaConfig={sessionAgentConfig}
                           showCodexResetForecast={showCodexResetForecast}
                           isContextCompacting={isContextCompacting}
                           configOptionSelectors={configOptionSelectors}
