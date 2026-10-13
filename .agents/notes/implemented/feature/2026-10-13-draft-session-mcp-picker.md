@@ -43,6 +43,12 @@ under the [shared contract](../../../../packages/shared/AGENTS.md#workspace-mcp-
 
 ## Verification and limits
 
+- The branch is rebased onto upstream `cf1afac6a`, including the frozen-install
+  correction in PR #1548. `pnpm install --frozen-lockfile --lockfile-only
+--ignore-scripts` passes in an isolated fixture containing all 25 workspace
+  manifests from the pinned revisions, the root lockfile and workspace settings.
+  This validates lockfile consistency without installing binaries or running builds;
+  full CI remains authoritative. Local submodule checkouts are preserved.
 - A temporary draft-owner test verified first-turn selection, deselection and
   an empty catalog through a substituted input surface. It failed on the previous
   default-only behavior and passed with the menu prop, verifying the added
@@ -50,7 +56,8 @@ under the [shared contract](../../../../packages/shared/AGENTS.md#workspace-mcp-
   no automated draft-owner test remains for the new menu connection.
 - Retained draft-tab, input-submission, attachment-menu and session-action suites
   passed after deletion: four files, 150 tests. They exercise adjacent behavior;
-  full desktop end-to-end verification remains outstanding.
+  after rebasing, the first three suites passed again (73 tests). Full desktop
+  end-to-end verification remains outstanding.
 - `pnpm check` stops in shared-package type checking because the existing local
   DSH submodule does not export the required symbols:
   `DEEPSEEK_HARNESS_OFFICIAL_BASE_URL` and `isDeepSeekOfficialBaseUrl` are missing
